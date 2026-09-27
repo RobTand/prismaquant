@@ -3533,13 +3533,27 @@ Stage A campaign's served-quantiser binding and failure contract** (PQ #1481,
   - A8 and A16 rungs bind nothing and never import the serving extension.
   - A table that priced a served-contract rung stamps the bound record as
     `provenance.served_quantizer`. An A8 or A16 table's bytes are unchanged.
-- **Failure contract.** A rung that raises now fails the row. The row prints
-  `FAILED`, re-raises, exits nonzero and writes no `cost.pkl`, and PrismaBuild
-  records a retryable failure. Before this change the rung was printed and
-  skipped, and a row whose every rung failed published an empty table with rc 0.
+- **Failure contract.** A rung that fails to price now fails the row.
+  - The loop still prints `FAILED` and keeps pricing, so the round's successes
+    are journalled and a later adaptive round may still price the rung.
+  - After the loop, any rung whose last attempt failed raises. The row exits
+    nonzero, writes no `cost.pkl`, and PrismaBuild's retry encodes only the
+    missing anchors.
+  - A `ServedQuantizerUnboundError` stops the row at once, like the Hessian,
+    activation-scale and publication refusals, because it refuses every A4
+    rung of the row.
+  - Before this change the rung was printed and skipped. A row whose every rung
+    failed published an empty table with rc 0.
+  - A failed rung no longer reaches a cost table as a `no_successful_anchor`
+    unit in `population.unpriced`. The reason stays for a unit with a menu and
+    no anchor for any other cause, such as a deadline stop, and older tables
+    carry it. `tessera_expert_projection` still accepts it and retains such
+    units at BF16. `no_admitted_menu` is admission, not failure, and is
+    unchanged.
 
-No format, default, stage or ship gate changes. Gate:
-`tests/test_campaign_served_quantizer_binding.py`.
+No format, default, stage or ship gate changes. Gates:
+`tests/test_campaign_served_quantizer_binding.py` and
+`tests/test_tessera_campaign_packed.py::test_main_reports_unpriced_targets_without_claiming_coverage`.
 
 Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
 inputs over a several-format catalog** (PQ #1437). The Stage B control

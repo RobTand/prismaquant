@@ -125,7 +125,7 @@ def test_batch_scoring_keeps_each_units_static_activation_scale(monkeypatch, tmp
     acts = [torch.ones(2, 256), torch.full((2, 256), 3.0)]
     scales = {"a": 0.5, "b": 2.0}
     spec = SimpleNamespace(
-        static_activation_contract=SimpleNamespace(execution="fixture-static",
+        static_activation_contract=SimpleNamespace(execution="fixture-static", measured_as_served=False,
             quantize_dequantize=lambda x, scale: x * scale),
         bits_for_shape=lambda shape: 8 * shape[0] * shape[1],
         memory_bytes_for_shape=lambda shape: shape[0] * shape[1], act_dtype_name="a8")

@@ -144,3 +144,19 @@ def test_a_row_whose_rungs_all_price_still_writes_its_table(monkeypatch, tmp_pat
         payload = pickle.load(handle)
     assert sorted(payload["costs"][UNIT]) == ["TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R1536"]
     assert "served_quantizer" not in payload["provenance"]
+
+
+def test_an_unbindable_quantizer_stops_the_row_at_its_first_rung(monkeypatch, tmp_path):
+    """A missing operator refuses every A4 rung, so the row stops, not one anchor."""
+    campaign, argv = _two_rung_row(monkeypatch, tmp_path, set())
+    calls = []
+
+    def refuse(**kwargs):
+        calls.append(kwargs["format_name"])
+        raise contract.ServedQuantizerUnboundError("operator unavailable")
+
+    monkeypatch.setattr(campaign, "_measure_anchor", refuse)
+    with pytest.raises(contract.ServedQuantizerUnboundError, match="operator unavailable"):
+        campaign.main(argv)
+    assert len(calls) == 1
+    assert not (tmp_path / "cost.pkl").exists()

@@ -79,6 +79,7 @@ if TYPE_CHECKING:
 from . import tessera_hessian as th
 from .nvfp4_activation_contract import (
     ActivationScaleContractError as _OwnedActivationScaleContractError,
+    ServedQuantizerUnboundError,
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
@@ -5173,6 +5174,7 @@ def _main(argv, *, source_scope) -> int:
     from .production_weight_cache import ProductionWeightCache
     from .tessera_menu import MENU_MODES, PARALLEL_NONE, menu_mode
     from .tessera_rate_surface import leave_one_anchor_out
+    from .tessera_publication import PublicationError
     from .tessera_render import (
         HessianContractError, tessera_encoder_hessian_status,
     )
@@ -6553,6 +6555,11 @@ def _main(argv, *, source_scope) -> int:
     started = time.time()
     deadline = float(args.deadline_seconds)
     stopped_early = False
+    # Every (unit, format) whose last attempt failed to price, with its error.
+    # The loop keeps pricing past a failure, so the round's successes are
+    # journalled for the retry and a later round may still price the rung;
+    # whatever is left here fails the row before it writes a table (#1481).
+    anchor_failures = {}
 
     def out_of_time() -> bool:
         return deadline > 0 and (time.time() - started) > deadline
@@ -6804,18 +6811,34 @@ def _main(argv, *, source_scope) -> int:
                             weights=[weights[name].to(device) for name in names],
                             activations=[scoring_rows[name].to(device) for name in names],
                             static_input_scales=static_scales, **common)
+                except (HessianContractError, ActivationScaleContractError,
+                        PublicationError, ServedQuantizerUnboundError):
+                    # A staged artifact that did not reach its disk is not one
+                    # batch's bad luck: the writer has stopped and everything
+                    # behind it was dropped unwritten. Printing and continuing
+                    # here would advance the loop past files that do not exist.
+                    # A served quantiser that cannot bind refuses every A4 rung
+                    # of the row, not one anchor (#1481), so it stops the row too.
+                    raise
                 except Exception as exc:
-                    # A rung that fails to price fails the row (RobTand/prismaquant#1481).
-                    # Printing and continuing published a table without the rung,
-                    # and when every rung failed, an EMPTY table that exited 0 and
-                    # was counted as done. Nothing past this point writes cost.pkl,
-                    # so the row leaves no partial table, and PB records a failure
-                    # it can retry. Files a partial batch already handed the writer
-                    # are journalled by no one; a retry re-prices them over the same
-                    # paths, as the synchronous path always has.
+                    if selected_guard is not None and selected_guard.failure is not None:
+                        raise  # A physical memory refusal must stop the action.
+                    # A batch that raises part way through has already handed
+                    # the writer files for its early units. Nothing records
+                    # those units, so no receipt job follows and nothing is
+                    # staged; their file completions are ignored, the bytes
+                    # land, and the next round re-prices them over the same
+                    # paths. That is what the synchronous path already does
+                    # when a partial batch writes files and journals none of
+                    # them, so the failure semantics do not change here.
+                    #
+                    # The failure is kept, not forgotten: the row fails before
+                    # it writes a table (RobTand/prismaquant#1481).
                     print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
                           f"{exc}", flush=True)
-                    raise
+                    for name in names:
+                        anchor_failures[(name, fmt)] = f"{type(exc).__name__}: {exc}"
+                    continue
                 if selected_guard is not None:
                     # With publication staging on, this upper bracket includes the
                     # staged CPU bytes of any batch the writer has not finished.
@@ -6827,6 +6850,7 @@ def _main(argv, *, source_scope) -> int:
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
                 for anchor in anchors:
+                    anchor_failures.pop((anchor.qname, anchor.format_name), None)
                     if row_stream is not None:
                         # The reader's holder, over this entry's own source:
                         # a template copy on the encode thread, taken while
@@ -6879,6 +6903,20 @@ def _main(argv, *, source_scope) -> int:
             # then the shards the loop could not yet journal.
             finalize_row_stream()
             flush_checkpoint()
+
+        if anchor_failures:
+            # A rung that failed to price fails the row (RobTand/prismaquant#1481).
+            # Writing the table anyway published it without those rungs, and
+            # when every rung failed, an EMPTY table that exited 0 and was
+            # counted as done. The successes are journalled above, so PB's
+            # retry encodes only what is missing; no cost.pkl is written here.
+            failed = sorted(anchor_failures.items())
+            shown = "; ".join(f"{name} {fmt}: {error}" for (name, fmt), error in failed[:8])
+            more = len(failed) - 8
+            raise RuntimeError(
+                f"campaign row failed to price {len(failed)} anchor(s); "
+                f"successful anchors are journaled and no cost table "
+                f"was written: {shown}" + (f"; and {more} more" if more > 0 else ""))
 
         # Finalization is quiet on purpose -- the last drain, the leave-one-out
         # checks and the cost payload commit nothing the journal counts -- so
