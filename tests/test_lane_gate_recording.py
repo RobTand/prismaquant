@@ -274,7 +274,7 @@ def test_a_lane_can_add_a_requirement_and_can_never_subtract_one():
 
     tessera_card = {"lane": "tessera", "slots": {}}
     assert set(required_slots(tessera_card)) == set(REQUIRED_SLOTS) | {
-        "route.census", "route.trace"}
+        "route.census", "route.trace", "uniform_control"}
 
     legacy_card = {"slots": {}}
     assert required_slots(legacy_card) == tuple(REQUIRED_SLOTS)
@@ -745,6 +745,6 @@ def test_preflight_build_facts_use_the_same_constructor_without_mutation(
     report = cli.preflight_lane_shipcard(root, "tessera", build=facts)
     assert captured == [({"campaign_note": "fixture", "export_container": "tessera"}, "tessera")]
     assert facts == {"campaign_note": "fixture"}
-    assert report["slots_without_declared_runner"] == ["uniform_control"]
+    assert report["slots_without_declared_runner"] == []
     assert "uniform_control" in report["unfilled_slots"]
     assert not (root / "shipcard.json").exists()

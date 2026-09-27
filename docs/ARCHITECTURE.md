@@ -1,5 +1,51 @@
 # PrismaQuant Architecture
 
+## Offline release receipt ingestion (PQ #1487)
+
+The Tessera lane names its existing external `uniform_control.py verify` and
+`shipcard_cli fill-control` runner, closing the already required byte-matched
+control slot. The control family, integer-bit rule and byte slack are declared
+before measurement; uniform A4/A8 labels alone do not establish a byte match.
+
+`python -m prismaquant.release_receipts` is a dry-by-default, offline adapter.
+Producer slot records retain their exact artifact/provenance fields. U4's
+explicit full-config TP2 trace phase is replayed from both raw rank files by
+the existing trace constructor; body-only verdicts never substitute. All
+proposed records pass the unchanged verifier (including build/identity checks)
+before `--apply` uses the existing slot writer. Final verification still lists
+every missing slot. No serve, measurement, upload or manifest fabrication runs.
+Raw TR3 output is not gold-slot-shaped and lacks serialized shipcard identity
+and speculative-decoding observation; unsupported output remains a refusal,
+not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
+measurements must come from their existing producers. See
+`docs/operations/release_receipts.md` for inputs and failure semantics.
+
+SHA-256 lexical validation (2026-09-27, `astra/dedup-hex-1457`, PQ #1457):
+`digests.is_sha256hex` and its compiled `SHA256_HEX` pattern own the exact
+regex acceptance used by artifact collection, prepriced cost and PrismaSnap
+bindings. Callers retain their own errors, coercions and returned objects.
+`tests/test_digest_hex_1457.py` freezes the old wrappers and pattern behavior,
+including string subclasses. No digest bytes, schema, default or gate changes.
+Inventory: `docs/design/digest_hex_1457.md`.
+
+Canonical pickle identity (2026-09-27, `astra/pickle-protocol-1450`, PQ #1450):
+`digests.canonical_pickle_bytes` explicitly selects protocol 4, the historical
+Python 3.12 producer encoding, rather than the interpreter's default. Python
+3.14 must not silently select protocol 5 for the same value. The existing
+`9a7567…` golden is unchanged, and `tests/test_digest_profiles_1301.py` checks
+both the explicit argument and the wire protocol. This preserves the campaign
+`cost.pkl` identity; no migration, stage, serving lane or ship gate change.
+
+Roster digest consolidation (2026-09-26, `astra/dedup-digests-1301`, PQ #1446):
+`digests.py` owns the ordered and sorted LF-delimited UTF-8 roster encodings,
+with no added final newline. The layer-quantum roster keeps its existing
+validation; the head-walk roster and descriptor slices use the shared encoding.
+`tests/test_digest_rosters_1446.py` compares the exact hash input bytes and
+outcomes with the pre-change PB-recorded table. The domain-framed replay roster
+and JSON candidate roster are different identities and remain unchanged.
+No arithmetic, schema, pipeline default, serving lane or ship gate changes.
+Inventory and remaining scope: `docs/design/digest_rosters_1446.md`.
+
 Re-stamped 2026-09-27 for the approved PACT M3 TP2 report protocol
 (PQ #1463, Tessera #650). The pure-artifact reader in
 `prismaquant/full_engine_resource_report.py` accepts v1/v2 and the distinct
@@ -3578,6 +3624,12 @@ then rechecks before reporting success. Dry-run makes no Hub requests. LICENSE
 remains in artifact identity and must be staged before authoritative evidence;
 no existing cards or remote repositories are migrated. The shipcard verifier,
 serving pin, formats, pipeline graph and numerical gates are unchanged.
+
+Re-stamped (2026-09-27, `tooling/release-window-slots-20260927`) for the
+approved Tessera uniform-control runner declaration and offline receipt
+adapter (PQ #1487). Existing record constructors, artifact identity and
+`shipcard.verify` remain unchanged. No measurement, numerical default,
+serving runtime or publication override is introduced.
 
 Re-stamped (2026-09-27, `claude/dense-same-shape-batching`) for **same-shape
 dense anchor batches** (PQ #1479). `_anchor_batches` now keys every unit, dense

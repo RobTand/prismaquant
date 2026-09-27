@@ -31,10 +31,10 @@ opt-in (``head_walk_quantum=``) and the production prepare path is unchanged.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from .digests import newline_utf8_sha256, sorted_newline_utf8_sha256
 from .schemas import Contract
 
 
@@ -44,15 +44,9 @@ from .schemas import Contract
 QUANTUM_SCHEMA = "prismaquant.joint_head_walk_quanta.v1"
 
 
-def roster_digest(names) -> str:
-    """The digest that binds a descriptor to its exact roster.
-
-    The same construction the head-walk journal already uses for its
-    ``roster_sha256`` (``tessera_joint_aura.load_measured_anchor_input``), so
-    a descriptor built here and a journal banked there either agree or refuse.
-    """
-    roster = sorted(names)
-    return hashlib.sha256("\n".join(roster).encode("utf-8")).hexdigest()
+# The head-walk journal uses this same sorted, newline-delimited recipe.
+# Keep the public name so descriptor builders and journal collectors agree.
+roster_digest = sorted_newline_utf8_sha256
 
 
 _require = Contract(ValueError).require
@@ -96,7 +90,7 @@ def head_walk_quanta(names, *, max_units_per_quantum) -> list:
             "hi": high,
             "units": list(units),
             "roster_sha256": digest,
-            "slice_sha256": hashlib.sha256("\n".join(units).encode("utf-8")).hexdigest(),
+            "slice_sha256": newline_utf8_sha256(units),
             "quanta": quanta,
         })
     return descriptors
@@ -123,8 +117,7 @@ def check_quantum_for_roster(quantum, names) -> tuple:
              f"head-walk quantum slice [{low}:{high}) is outside the {len(roster)}-unit roster")
     _require(list(quantum.get("units") or []) == roster[low:high],
              "head-walk quantum units differ from the roster at its slice")
-    _require(quantum.get("slice_sha256") == hashlib.sha256(
-        "\n".join(roster[low:high]).encode("utf-8")).hexdigest(),
+    _require(quantum.get("slice_sha256") == newline_utf8_sha256(roster[low:high]),
         "head-walk quantum slice digest differs from the roster at its slice")
     _require(isinstance(quantum.get("quantum_id"), str) and quantum["quantum_id"],
              "head-walk quantum needs a non-empty quantum_id")
