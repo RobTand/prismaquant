@@ -1662,6 +1662,8 @@ class MeasuredRuntimeSweep:
     slos: ServeSLOs
     cost_path: str
     probe_path: str
+    # Replay is a checked re-solve, not a second layer-config serializer.
+    emit_replay: Callable[[float, float, dict, dict], None] | None = None
 
 
 def require_no_research_exact_member_scalar(cost_data: dict) -> None:
@@ -3916,6 +3918,452 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         outer_diag["reason"] = "exact_assignment_payload_filter_exhausted"
         return None, float("nan"), float("inf"), float("inf")
 
+    def _write_layer_config(assignment, achieved, total, mutable_total, *,
+                            selected_whole_artifact_budget_stamp=None, replay=None):
+        print(
+            f"[alloc] target_bits={args.target_bits}: "
+            f"achieved_bits={achieved:.3f}, Δloss={total:.3e}",
+            flush=True,
+        )
+
+        assignment_expanded = dict(assignment)
+
+        # Expand packed-serving-group super-items back to per-tensor entries.
+        if not args.no_packed_aggregation:
+            assignment_expanded = expand_packed_group_assignment(
+                assignment_expanded, stats)
+
+        # Expand fused-sibling super-Linears (qkv_proj / gate_up_proj).
+        if not args.no_fused_aggregation:
+            assignment_expanded = expand_fused_sibling_assignment(
+                assignment_expanded, stats)
+
+        assignment_expanded.update(fixed_format_assignment)
+        assignment_before_serving_promotion = dict(assignment_expanded)
+
+        # vLLM's FusedMoE requires all projections of the same expert to share
+        # one scheme. Packed groups are first-class DP units, so this promotion
+        # is a validated no-op (validate_final_serving_promotion_noop below);
+        # it stays as the serve-time coherence backstop for the un-aggregated
+        # paths (--no-packed-aggregation / --no-fused-aggregation). It is handed
+        # per-Linear legality so the shared format it lands on is runnable for
+        # every member, and it is still a no-op here by construction: an
+        # aggregated unit's format came from the intersection of its members'
+        # candidate sets, and the un-aggregated paths were already promoted
+        # against the same sets inside solve_with_promotion.
+        assignment_expanded = promote_serving_units(
+            assignment_expanded,
+            format_rank,
+            profile=model_profile,
+            legal_formats=per_linear_legal_formats,
+        )
+        validate_final_serving_promotion_noop(
+            assignment_before_serving_promotion,
+            assignment_expanded,
+        )
+
+        # Visual-encoder Linears are auxiliary to the language-model budget.
+        # Stamp them with --visual-format for export, but keep them out of the
+        # body DP frontier, default bpp, and default Δloss.
+        visual_format = visual_format_canonical
+        visual_sensitivity = args.visual_sensitivity
+
+        def _visual_fisher_available(stats_d: dict, costs_d: dict) -> bool:
+            """True when both the probe and cost pickles carry real visual
+            entries — the signal a multimodal calibration pass ran."""
+            any_visual_stats = any(_is_visual_linear(n) for n in stats_d)
+            any_visual_costs = any(_is_visual_linear(n) for n in costs_d)
+            return any_visual_stats and any_visual_costs
+
+        if visual_sensitivity == "fisher" and visual_names:
+            print(
+                "[alloc] --visual-sensitivity=fisher found visual Linears, "
+                "but visual assignments are auxiliary to the body budget; "
+                f"using --visual-format={visual_format} for the layer_config.",
+                flush=True,
+            )
+        elif visual_sensitivity == "fisher" and not _visual_fisher_available(stats, costs):
+            print("[alloc] --visual-sensitivity=fisher requested but probe / "
+                  "cost pickles have no visual Linear entries; falling back "
+                  f"to --visual-format={visual_format} (Phase 1 uniform).",
+                  flush=True)
+
+        visual_names_src = sorted(source_visual_stats)
+
+        if visual_names_src:
+            for vname in visual_names_src:
+                assignment_expanded[vname] = visual_format
+            print(f"[alloc] --visual-format={visual_format}: assigned "
+                  f"{len(visual_names_src)} visual Linears uniformly "
+                  f"(source={probe_model_path})", flush=True)
+        elif visual_format != "BF16":
+            print(f"[alloc] --visual-format={visual_format}: no visual "
+                  f"Linears found in source checkpoint — override is a "
+                  f"no-op", flush=True)
+
+        _validate_assignment_candidate_membership(
+            assignment_expanded,
+            candidates,
+            fixed_chosen_candidates=fixed_chosen_candidates,
+        )
+
+        mtp_count = sum(1 for n in assignment_expanded if n.startswith("mtp."))
+        if mtp_count:
+            mtp_fmts = {
+                assignment_expanded[n]
+                for n in assignment_expanded
+                if n.startswith("mtp.")
+            }
+            expected_mtp_fmts = {mtp_format_canonical}
+            if mtp_fmts != expected_mtp_fmts:
+                raise AssertionError(
+                    f"MTP assignment drifted after fixed-format accounting: "
+                    f"expected {sorted(expected_mtp_fmts)}, got "
+                    f"{sorted(mtp_fmts)}"
+                )
+            print(
+                f"[alloc] --mtp-format={mtp_format_canonical}: assigned "
+                f"{mtp_count} MTP Linears uniformly",
+                flush=True,
+            )
+
+        if fixed_lm_head_names:
+            head_fmts = {
+                assignment_expanded[name]
+                for name in fixed_lm_head_names
+                if name in assignment_expanded
+            }
+            if head_fmts != {lm_head_format_canonical}:
+                raise AssertionError(
+                    "lm_head assignment drifted after fixed-format accounting: "
+                    f"expected {[lm_head_format_canonical]}, got "
+                    f"{sorted(head_fmts)}"
+                )
+            print(
+                f"[alloc] --lm-head-format={lm_head_format_canonical}: assigned "
+                f"{len(fixed_lm_head_names)} lm_head Linear(s) uniformly",
+                flush=True,
+            )
+
+        # Passthrough-integrity belt-and-suspenders. The filter in
+        # build_candidates drops mismatched FP8_SOURCE / BF16 per-Linear
+        # candidate, but downstream aggregation + promotion (fused
+        # siblings, MoE expert-unity) can in principle push a format onto
+        # a group whose members have heterogeneous source dtypes. On
+        # modern checkpoints this doesn't happen (siblings share source
+        # dtype), but if it ever does we want a loud early failure rather
+        # than a broken export artifact.
+        if source_manifest:
+            violations: list[tuple[str, str, str]] = []
+            for name, fmt in assignment_expanded.items():
+                if not _is_passthrough_format(fmt):
+                    continue
+                kind = source_manifest.get(name)
+                if kind is None:
+                    # Visual and MTP assignments are stamped as auxiliary formats
+                    # outside the language-model source manifest by design.
+                    if _is_visual_linear(name) or _is_mtp_linear(name):
+                        continue
+                    kind = "unknown"
+                if not _passthrough_source_ok(fmt, kind):
+                    violations.append((name, fmt, kind))
+            if violations:
+                head = "\n  ".join(
+                    f"{n}: picked {f} but source is {k} "
+                    f"(requires {PASSTHROUGH_SOURCE_REQUIREMENTS[f]})"
+                    for n, f, k in violations[:10]
+                )
+                raise SystemExit(
+                    f"[alloc] passthrough-integrity violation: "
+                    f"{len(violations)} Linears have a passthrough format "
+                    f"picked over a mismatched source dtype. Sample:\n"
+                    f"  {head}\n"
+                    "The per-Linear filter should have excluded these — "
+                    "investigate fused-sibling / MoE-unity promotion. Note: "
+                    "fp16/fp32 sources have NO passthrough format by design "
+                    "(fp16→bf16 drops 3 mantissa bits — not lossless); allocate "
+                    "a quantized format for them or extend "
+                    "PASSTHROUGH_SOURCE_REQUIREMENTS deliberately."
+                )
+
+        final_body_assignment = {
+            name: fmt
+            for name, fmt in assignment_expanded.items()
+            if (
+                not _is_visual_linear(name)
+                and not _is_mtp_linear(name)
+                and name not in fixed_lm_head_names
+            )
+        }
+        final_body_payload = _assignment_payload_totals(
+            final_body_assignment,
+            require_all_stats=True,
+        )
+        final_body_achieved = float(final_body_payload["bits_per_param"])
+        if not math.isclose(
+            final_body_achieved,
+            float(achieved),
+            rel_tol=0.0,
+            abs_tol=1e-9,
+        ):
+            raise AssertionError(
+                "final expanded assignment payload does not reconcile with the "
+                f"exact-filtered solve: final={final_body_achieved}, "
+                f"solve={achieved}"
+            )
+        final_assignment_payload = _assignment_payload_totals(
+            assignment_expanded,
+            require_all_stats=False,
+        )
+
+        # ---- Hard serving constraints on the SHIPPED assignment (P5c) ----
+        # The byte-budget selector already filtered its probes; this is the check
+        # on the emit path, which the plain --target-bits mode reaches without any
+        # ratchet. Policy §1 makes an SLO miss INFEASIBLE, so a violation exits
+        # rather than shipping a layer_config that quietly does not meet the
+        # deployment constraint the operator stated. Inactive -> no evaluation, no
+        # stamp, no behaviour change.
+        final_serve_feasibility = None
+        if serving_constraints_active:
+            final_serve_feasibility = _serve_feasibility(
+                assignment_expanded if measured_runtime_table is not None else final_body_assignment,
+                resident_bytes=int(
+                    round(float(final_body_payload["bits_total"]) / 8.0)),
+            )
+            if not final_serve_feasibility.feasible:
+                violated = ", ".join(
+                    f"{c.name}: predicted={c.predicted} {c.direction} "
+                    f"{c.limit} {c.units}"
+                    + (f" (unpriced: {c.unpriced_reason})"
+                       if c.unpriced_reason else "")
+                    for c in final_serve_feasibility.violations
+                )
+                raise SystemExit(
+                    "[alloc] ERROR: the emitted assignment at "
+                    f"target_bits={args.target_bits} misses a hard serving "
+                    f"constraint — {violated}. Binding: "
+                    f"{final_serve_feasibility.binding_constraint}. Policy §1 "
+                    "(archive/gridbook_lane_2026-09-02/docs/lanes/nvfp4-cb/"
+                    "format-speed-policy.md) makes these "
+                    "hard constraints, not penalties: there is no λ that trades "
+                    "them against predicted Δloss. Raise the SLO, widen "
+                    "--formats, adjust --serve-workload-mix, or supply a dispatch "
+                    "table that prices this menu's format families."
+                )
+
+        layer_cfg = {}
+        for name, fmt in assignment_expanded.items():
+            if fmt in format_specs:
+                layer_cfg[name] = format_specs[fmt].autoround_config()
+            else:
+                # Visual format outside the body's format set (e.g., user
+                # passed --formats NVFP4,BF16 plus --visual-format MXFP8_E4M3).
+                # Resolve from the global registry.
+                layer_cfg[name] = fr.get_format(fmt).autoround_config()
+
+        # The resolved serving profile travels WITH the assignment (re-vet R11 /
+        # debt D4). Before this, it landed only in the side report
+        # format_applicability.json, which export never reads, so the exporter
+        # re-resolved the profile from the architecture spec and could legality-
+        # audit under a different one than the allocator solved with — measured
+        # 2026-07-11: 226 dense FP8 Linears silently coerced to BF16 on the Hy3
+        # compressed-tensors export. PRISMAQUANT_TARGET_PROFILE remains the
+        # override for direct exporter invocations.
+        layer_cfg[LAYER_CONFIG_META_KEY] = {
+            "schema": "prismaquant.layer_config_meta.v1",
+            "target_profile": target_profile,
+            **({"tessera_serving_scope": scope_provenance(
+                    tessera_serving_target, tessera_context_by_unit),
+                "serving_lane_provenance": selection_serving_lane_provenance(
+                    assignment_expanded, candidates, target_profile,
+                    context_by_unit=tessera_context_by_unit)}
+               if tessera_serving_target is not None else {}),
+            "target_profile_requested": args.target_profile,
+            "target_profile_default": str(args.target_profile_default or "research"),
+            "lm_head_format": lm_head_format_canonical,
+            "lm_head_mode": (
+                "dp" if lm_head_dp_unpinned
+                else "fixed" if fixed_lm_head_quantized
+                else "profile_pinned_bf16"
+            ),
+            "lm_head_cost_pricing": fixed_lm_head_cost_pricing,
+            "target_bits": float(args.target_bits),
+            "achieved_bits": final_body_achieved,
+            "achieved_bits_scope": (
+                "body_assignment_tensor_payload_including_deduplicated_cb_sidecars"
+            ),
+            "body_assignment_payload_bits_total": float(
+                final_body_payload["bits_total"]
+            ),
+            "body_assignment_quantizable_params": int(
+                final_body_payload["quantizable_params"]
+            ),
+            # Frozen at 0.0 for byte-identical layer-config metadata: the only
+            # shared sidecar it ever counted belonged to the retired codebook
+            # lane (archived 2026-09-25, #1304).
+            "body_shared_cb_sidecar_bits": 0.0,
+            "solver_contract": (
+                "additive_candidate_proposal_then_exact_assignment_filter"
+            ),
+            "global_optimality_claimed": False,
+            # Continuous-menu provenance, written on EVERY run rather than only on
+            # the byte-budget path: how wide the Tessera menu was before the DP saw
+            # it, which of the two exact reductions shrank it (per-Linear and, for
+            # aggregated super items, again after aggregation), and what the solve
+            # cost in wall time. On a menu of thousands of rungs those are the
+            # numbers that say whether a coarse-looking result is the allocator's
+            # answer or the menu's. Absent keys mean no Tessera rung was on the
+            # menu, so a stock run's metadata is unchanged.
+            **({"tessera_menu": {
+                    "per_linear": dict(tessera_menu_report),
+                    "aggregated": dict(tessera_menu_report_agg),
+                    **tessera_menu_widths,
+                    **({"selection_caveat": surrogate_selection_caveat()}
+                       if tessera_menu_widths else {}),
+                }} if (tessera_menu_report or tessera_menu_report_agg
+                       or tessera_menu_widths) else {}),
+            **({"tessera_group_knapsack": dict(tessera_group_menu_report)}
+               if tessera_group_menu_report else {}),
+            # Per selection: a content-equal second seal names only the selected
+            # units priced under it (``unit_capture_sha256``), never the whole
+            # table's row map (RobTand/prismaquant#1270).
+            **({"tessera_hessian": project_hessian_identity(
+                    tessera_hessian_identity, assignment_expanded)}
+               if (tessera_hessian_identity.get("stamped_rows")
+                   or tessera_hessian_identity.get("unstamped_rows")) else {}),
+            # The static A-side scale VALUE each selected Tessera unit was priced
+            # under, read from its own cost row (RobTand/prismaquant#204). The
+            # export gate compares the exporter's --input-scales file against
+            # this, value for value; until it existed the gate could only check
+            # that a key was present. Absent when no Tessera unit is selected, so
+            # a stock run's metadata is unchanged. Read from the unfiltered table
+            # (`cost_data["costs"]`): every selected unit's row is there whatever
+            # the lm_head / visual filters removed from the DP's view.
+            **({"tessera_activation_static_scales": priced_static_scales(
+                    {name: fmt for name, fmt in assignment_expanded.items()
+                     if str(fmt).startswith("TESSERA_")},
+                    cost_data["costs"],
+                    # The FORMULA those values came out of, read from the table
+                    # that priced them and never from this process's environment:
+                    # a legacy value under a full-E4M3 label is a scale nothing
+                    # served (RobTand/prismaquant#624).
+                    policy=(cost_data.get("provenance", {})
+                            .get("activation_static_scales", {})
+                            .get("policy")),
+                    served_activation_policy=cost_data.get("provenance", {}).get("served_activation_policy"))}
+               if any(str(fmt).startswith("TESSERA_")
+                      for fmt in assignment_expanded.values()) else {}),
+            **({"tessera_dev_pin": dict(tessera_dev_pin)} if tessera_dev_pin else {}),
+            **({"solve_diagnostics": {
+                    str(k): {
+                        "solver_seconds": v.get("solver_seconds"),
+                        "solver_calls": v.get("solver_calls"),
+                    }
+                    for k, v in _solve_diagnostics.items()
+                    if isinstance(v, dict) and "solver_seconds" in v
+                }} if any(
+                    isinstance(v, dict) and "solver_seconds" in v
+                    for v in _solve_diagnostics.values()) else {}),
+            **propagated_cost_provenance(research_cost_provenance),
+            "assignment_payload_bits_total": (
+                float(final_assignment_payload["bits_total"])
+                if not final_assignment_payload["missing_stats_names"]
+                else None
+            ),
+            "assignment_payload_bits_scope": (
+                "all_assignment_tensor_payload_including_deduplicated_cb_sidecars"
+            ),
+            "assignment_payload_missing_stats_names": final_assignment_payload[
+                "missing_stats_names"
+            ],
+            **({
+                "whole_artifact_budget": selected_whole_artifact_budget_stamp,
+            } if selected_whole_artifact_budget_stamp is not None else {}),
+            # Only when the constraint axis actually ran, so an unconstrained run
+            # writes byte-identical layer-config metadata (the "constraints were
+            # absent" stamp lives in selection.json, which every byte-budget run
+            # writes anyway).
+            **({
+                "serve_constraints": final_serve_feasibility.as_dict(),
+            } if final_serve_feasibility is not None else {}),
+            **({"measured_runtime_search": {
+                    "research_only": True,
+                    "promotion_status": "requires_fixed_teacher_and_end_to_end_validation",
+                    "target_diagnostics": _solve_diagnostics.get(round(float(args.target_bits), 9), {}),
+                }} if measured_runtime_table is not None else {}),
+        }
+        if replay is not None:
+            from .measured_runtime_prices import identity_sha256
+            if identity_sha256(assignment_expanded) != replay["assignment_sha256"]:
+                raise ValueError("prefill frontier replay: final writer changed the assignment")
+            layer_cfg[LAYER_CONFIG_META_KEY].update({
+                "research_only": True,
+                "certifies_placement": False,
+                "prefill_frontier_replay": replay,
+                "fixed_resource_scope": fixed_resource_scope_stamp,
+            })
+        # What this allocation carries about the priced expert population
+        # (PrismaQuant #183): the campaign's population statement (which units
+        # were priced, which omitted), the producer's projection they were priced
+        # under, and -- for every projected unit -- the receipt of exactly the rung
+        # selected here, so the export lane hands the exporter the priced bytes
+        # and nothing else.  A selected rung the campaign never priced as a wire,
+        # or a projected unit this allocation does not place, is refused by name
+        # before the layer config is written.  Additive: a stock cost table adds
+        # no keys, and a table carrying a population but no projection carries
+        # only the population.
+        if args.mtp_joint_cost:
+            _stamp_mtp_selection(args, layer_cfg, assignment_expanded,
+                                 serving_target=tessera_serving_target, profile=model_profile)
+        if args.tessera_materialization_plan:
+            from .tessera_materialization import write_selection_request
+            write_selection_request(args.tessera_materialization_plan,
+                layer_config=layer_cfg, assignment=assignment_expanded,
+                cost_path=args.costs, cost_payload=cost_data, output_path=args.layer_config)
+            print(f"[alloc] non-exportable selected-wire request → {args.tessera_materialization_plan}")
+            return
+        try:
+            layer_cfg[LAYER_CONFIG_META_KEY].update(
+                allocation_expert_projection_block(cost_data, assignment_expanded))
+        except ExpertProjectionError as exc:
+            raise SystemExit(f"[alloc] ERROR: expert projection: {exc}") from exc
+
+        out = Path(args.layer_config)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if replay is not None:
+            from .cost_stage_checkpoint import publish_new_bytes
+            if not publish_new_bytes(out, json.dumps(layer_cfg, indent=2).encode("utf-8")):
+                raise ValueError(f"prefill frontier replay: refusing to overwrite {out}")
+        else:
+            with open(out, "w") as f:
+                json.dump(layer_cfg, f, indent=2)
+
+        counts = defaultdict(int)
+        for fmt in assignment_expanded.values():
+            counts[fmt] += 1
+        print(
+            f"\n[alloc] target={args.target_bits} "
+            f"exact_assignment_payload_bpp={final_body_achieved:.3f}"
+        )
+        for fmt, n in sorted(counts.items(), key=lambda kv: -kv[1]):
+            print(f"  {fmt:>14}: {n:>5} layers")
+        print(f"\nLayer config → {out}")
+        print(f"Feed to AutoRound via --layer_config {out}")
+
+        # Optional read-only "where did the budget go?" attribution over the final
+        # resolved body assignment. Derived from already-resolved data; no re-probe.
+        _write_bit_attribution_reports(
+            args.bit_attribution_json,
+            args.bit_attribution_csv,
+            target_bits=args.target_bits,
+            achieved_bits=final_body_achieved,
+            assignment_expanded=assignment_expanded,
+            candidates=candidates,
+            stats_entry_for=_stats_entry_for_assignment_name,
+            format_specs=format_specs,
+        )
+
+
     pareto_seed_records: list[dict] = []
 
     if measured_runtime_sweep is not None:
@@ -3924,8 +4372,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # state, each at its own prefill budget. Every solve goes through the
         # same _solve_for_target path a single run takes; only the prefill
         # SLO differs between calls. Nothing below this point runs: the sweep
-        # writes its own document and no layer config or Pareto CSV exists
-        # for "the" solve, because there is no single one.
+        # writes its own document and no Pareto CSV exists for "the" solve.
+        # A replay callback may emit one checked point through the shared writer.
         from dataclasses import replace as _replace
         fixed = _measured_fixed_resources()
         unit_min_prefill = 0.0
@@ -3968,8 +4416,21 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             })
             return record
 
+        def _emit_replay(slo_ms, target_bits, expected_assignment, provenance):
+            if args.tessera_materialization_plan:
+                raise ValueError("prefill frontier replay requires materialized wires, not a selection request")
+            record = _solve_at_prefill_slo(slo_ms, target_bits)
+            if not record["feasible"] or record["assignment"] != expected_assignment:
+                raise ValueError("prefill frontier replay: re-solved assignment differs from the sweep point")
+            assign, achieved, total, mutable = _solve_for_target(float(target_bits))
+            args.target_bits = float(target_bits)
+            # Replay owns only its explicit output, never sweep-side attribution files.
+            args.bit_attribution_json = args.bit_attribution_csv = None
+            _write_layer_config(assign, achieved, total, mutable, replay=provenance)
+
         measured_runtime_sweep(MeasuredRuntimeSweep(
             solve=_solve_at_prefill_slo,
+            emit_replay=_emit_replay,
             table_identity=measured_runtime_table.identity(),
             runtime_context=measured_runtime_table.context.as_dict(),
             fixed_resources=fixed.as_dict(),
@@ -5222,433 +5683,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                else "")
             + ". Raise --target-bits above the achievable value above, or "
               "widen --formats so the floor drops.")
-    print(
-        f"[alloc] target_bits={args.target_bits}: "
-        f"achieved_bits={achieved:.3f}, Δloss={total:.3e}",
-        flush=True,
-    )
-
-    assignment_expanded = dict(assignment)
-
-    # Expand packed-serving-group super-items back to per-tensor entries.
-    if not args.no_packed_aggregation:
-        assignment_expanded = expand_packed_group_assignment(
-            assignment_expanded, stats)
-
-    # Expand fused-sibling super-Linears (qkv_proj / gate_up_proj).
-    if not args.no_fused_aggregation:
-        assignment_expanded = expand_fused_sibling_assignment(
-            assignment_expanded, stats)
-
-    assignment_expanded.update(fixed_format_assignment)
-    assignment_before_serving_promotion = dict(assignment_expanded)
-
-    # vLLM's FusedMoE requires all projections of the same expert to share
-    # one scheme. Packed groups are first-class DP units, so this promotion
-    # is a validated no-op (validate_final_serving_promotion_noop below);
-    # it stays as the serve-time coherence backstop for the un-aggregated
-    # paths (--no-packed-aggregation / --no-fused-aggregation). It is handed
-    # per-Linear legality so the shared format it lands on is runnable for
-    # every member, and it is still a no-op here by construction: an
-    # aggregated unit's format came from the intersection of its members'
-    # candidate sets, and the un-aggregated paths were already promoted
-    # against the same sets inside solve_with_promotion.
-    assignment_expanded = promote_serving_units(
-        assignment_expanded,
-        format_rank,
-        profile=model_profile,
-        legal_formats=per_linear_legal_formats,
-    )
-    validate_final_serving_promotion_noop(
-        assignment_before_serving_promotion,
-        assignment_expanded,
-    )
-
-    # Visual-encoder Linears are auxiliary to the language-model budget.
-    # Stamp them with --visual-format for export, but keep them out of the
-    # body DP frontier, default bpp, and default Δloss.
-    visual_format = visual_format_canonical
-    visual_sensitivity = args.visual_sensitivity
-
-    def _visual_fisher_available(stats_d: dict, costs_d: dict) -> bool:
-        """True when both the probe and cost pickles carry real visual
-        entries — the signal a multimodal calibration pass ran."""
-        any_visual_stats = any(_is_visual_linear(n) for n in stats_d)
-        any_visual_costs = any(_is_visual_linear(n) for n in costs_d)
-        return any_visual_stats and any_visual_costs
-
-    if visual_sensitivity == "fisher" and visual_names:
-        print(
-            "[alloc] --visual-sensitivity=fisher found visual Linears, "
-            "but visual assignments are auxiliary to the body budget; "
-            f"using --visual-format={visual_format} for the layer_config.",
-            flush=True,
-        )
-    elif visual_sensitivity == "fisher" and not _visual_fisher_available(stats, costs):
-        print("[alloc] --visual-sensitivity=fisher requested but probe / "
-              "cost pickles have no visual Linear entries; falling back "
-              f"to --visual-format={visual_format} (Phase 1 uniform).",
-              flush=True)
-
-    visual_names_src = sorted(source_visual_stats)
-
-    if visual_names_src:
-        for vname in visual_names_src:
-            assignment_expanded[vname] = visual_format
-        print(f"[alloc] --visual-format={visual_format}: assigned "
-              f"{len(visual_names_src)} visual Linears uniformly "
-              f"(source={probe_model_path})", flush=True)
-    elif visual_format != "BF16":
-        print(f"[alloc] --visual-format={visual_format}: no visual "
-              f"Linears found in source checkpoint — override is a "
-              f"no-op", flush=True)
-
-    _validate_assignment_candidate_membership(
-        assignment_expanded,
-        candidates,
-        fixed_chosen_candidates=fixed_chosen_candidates,
-    )
-
-    mtp_count = sum(1 for n in assignment_expanded if n.startswith("mtp."))
-    if mtp_count:
-        mtp_fmts = {
-            assignment_expanded[n]
-            for n in assignment_expanded
-            if n.startswith("mtp.")
-        }
-        expected_mtp_fmts = {mtp_format_canonical}
-        if mtp_fmts != expected_mtp_fmts:
-            raise AssertionError(
-                f"MTP assignment drifted after fixed-format accounting: "
-                f"expected {sorted(expected_mtp_fmts)}, got "
-                f"{sorted(mtp_fmts)}"
-            )
-        print(
-            f"[alloc] --mtp-format={mtp_format_canonical}: assigned "
-            f"{mtp_count} MTP Linears uniformly",
-            flush=True,
-        )
-
-    if fixed_lm_head_names:
-        head_fmts = {
-            assignment_expanded[name]
-            for name in fixed_lm_head_names
-            if name in assignment_expanded
-        }
-        if head_fmts != {lm_head_format_canonical}:
-            raise AssertionError(
-                "lm_head assignment drifted after fixed-format accounting: "
-                f"expected {[lm_head_format_canonical]}, got "
-                f"{sorted(head_fmts)}"
-            )
-        print(
-            f"[alloc] --lm-head-format={lm_head_format_canonical}: assigned "
-            f"{len(fixed_lm_head_names)} lm_head Linear(s) uniformly",
-            flush=True,
-        )
-
-    # Passthrough-integrity belt-and-suspenders. The filter in
-    # build_candidates drops mismatched FP8_SOURCE / BF16 per-Linear
-    # candidate, but downstream aggregation + promotion (fused
-    # siblings, MoE expert-unity) can in principle push a format onto
-    # a group whose members have heterogeneous source dtypes. On
-    # modern checkpoints this doesn't happen (siblings share source
-    # dtype), but if it ever does we want a loud early failure rather
-    # than a broken export artifact.
-    if source_manifest:
-        violations: list[tuple[str, str, str]] = []
-        for name, fmt in assignment_expanded.items():
-            if not _is_passthrough_format(fmt):
-                continue
-            kind = source_manifest.get(name)
-            if kind is None:
-                # Visual and MTP assignments are stamped as auxiliary formats
-                # outside the language-model source manifest by design.
-                if _is_visual_linear(name) or _is_mtp_linear(name):
-                    continue
-                kind = "unknown"
-            if not _passthrough_source_ok(fmt, kind):
-                violations.append((name, fmt, kind))
-        if violations:
-            head = "\n  ".join(
-                f"{n}: picked {f} but source is {k} "
-                f"(requires {PASSTHROUGH_SOURCE_REQUIREMENTS[f]})"
-                for n, f, k in violations[:10]
-            )
-            raise SystemExit(
-                f"[alloc] passthrough-integrity violation: "
-                f"{len(violations)} Linears have a passthrough format "
-                f"picked over a mismatched source dtype. Sample:\n"
-                f"  {head}\n"
-                "The per-Linear filter should have excluded these — "
-                "investigate fused-sibling / MoE-unity promotion. Note: "
-                "fp16/fp32 sources have NO passthrough format by design "
-                "(fp16→bf16 drops 3 mantissa bits — not lossless); allocate "
-                "a quantized format for them or extend "
-                "PASSTHROUGH_SOURCE_REQUIREMENTS deliberately."
-            )
-
-    final_body_assignment = {
-        name: fmt
-        for name, fmt in assignment_expanded.items()
-        if (
-            not _is_visual_linear(name)
-            and not _is_mtp_linear(name)
-            and name not in fixed_lm_head_names
-        )
-    }
-    final_body_payload = _assignment_payload_totals(
-        final_body_assignment,
-        require_all_stats=True,
-    )
-    final_body_achieved = float(final_body_payload["bits_per_param"])
-    if not math.isclose(
-        final_body_achieved,
-        float(achieved),
-        rel_tol=0.0,
-        abs_tol=1e-9,
-    ):
-        raise AssertionError(
-            "final expanded assignment payload does not reconcile with the "
-            f"exact-filtered solve: final={final_body_achieved}, "
-            f"solve={achieved}"
-        )
-    final_assignment_payload = _assignment_payload_totals(
-        assignment_expanded,
-        require_all_stats=False,
-    )
-
-    # ---- Hard serving constraints on the SHIPPED assignment (P5c) ----
-    # The byte-budget selector already filtered its probes; this is the check
-    # on the emit path, which the plain --target-bits mode reaches without any
-    # ratchet. Policy §1 makes an SLO miss INFEASIBLE, so a violation exits
-    # rather than shipping a layer_config that quietly does not meet the
-    # deployment constraint the operator stated. Inactive -> no evaluation, no
-    # stamp, no behaviour change.
-    final_serve_feasibility = None
-    if serving_constraints_active:
-        final_serve_feasibility = _serve_feasibility(
-            assignment_expanded if measured_runtime_table is not None else final_body_assignment,
-            resident_bytes=int(
-                round(float(final_body_payload["bits_total"]) / 8.0)),
-        )
-        if not final_serve_feasibility.feasible:
-            violated = ", ".join(
-                f"{c.name}: predicted={c.predicted} {c.direction} "
-                f"{c.limit} {c.units}"
-                + (f" (unpriced: {c.unpriced_reason})"
-                   if c.unpriced_reason else "")
-                for c in final_serve_feasibility.violations
-            )
-            raise SystemExit(
-                "[alloc] ERROR: the emitted assignment at "
-                f"target_bits={args.target_bits} misses a hard serving "
-                f"constraint — {violated}. Binding: "
-                f"{final_serve_feasibility.binding_constraint}. Policy §1 "
-                "(archive/gridbook_lane_2026-09-02/docs/lanes/nvfp4-cb/"
-                "format-speed-policy.md) makes these "
-                "hard constraints, not penalties: there is no λ that trades "
-                "them against predicted Δloss. Raise the SLO, widen "
-                "--formats, adjust --serve-workload-mix, or supply a dispatch "
-                "table that prices this menu's format families."
-            )
-
-    layer_cfg = {}
-    for name, fmt in assignment_expanded.items():
-        if fmt in format_specs:
-            layer_cfg[name] = format_specs[fmt].autoround_config()
-        else:
-            # Visual format outside the body's format set (e.g., user
-            # passed --formats NVFP4,BF16 plus --visual-format MXFP8_E4M3).
-            # Resolve from the global registry.
-            layer_cfg[name] = fr.get_format(fmt).autoround_config()
-
-    # The resolved serving profile travels WITH the assignment (re-vet R11 /
-    # debt D4). Before this, it landed only in the side report
-    # format_applicability.json, which export never reads, so the exporter
-    # re-resolved the profile from the architecture spec and could legality-
-    # audit under a different one than the allocator solved with — measured
-    # 2026-07-11: 226 dense FP8 Linears silently coerced to BF16 on the Hy3
-    # compressed-tensors export. PRISMAQUANT_TARGET_PROFILE remains the
-    # override for direct exporter invocations.
-    layer_cfg[LAYER_CONFIG_META_KEY] = {
-        "schema": "prismaquant.layer_config_meta.v1",
-        "target_profile": target_profile,
-        **({"tessera_serving_scope": scope_provenance(
-                tessera_serving_target, tessera_context_by_unit),
-            "serving_lane_provenance": selection_serving_lane_provenance(
-                assignment_expanded, candidates, target_profile,
-                context_by_unit=tessera_context_by_unit)}
-           if tessera_serving_target is not None else {}),
-        "target_profile_requested": args.target_profile,
-        "target_profile_default": str(args.target_profile_default or "research"),
-        "lm_head_format": lm_head_format_canonical,
-        "lm_head_mode": (
-            "dp" if lm_head_dp_unpinned
-            else "fixed" if fixed_lm_head_quantized
-            else "profile_pinned_bf16"
-        ),
-        "lm_head_cost_pricing": fixed_lm_head_cost_pricing,
-        "target_bits": float(args.target_bits),
-        "achieved_bits": final_body_achieved,
-        "achieved_bits_scope": (
-            "body_assignment_tensor_payload_including_deduplicated_cb_sidecars"
-        ),
-        "body_assignment_payload_bits_total": float(
-            final_body_payload["bits_total"]
-        ),
-        "body_assignment_quantizable_params": int(
-            final_body_payload["quantizable_params"]
-        ),
-        # Frozen at 0.0 for byte-identical layer-config metadata: the only
-        # shared sidecar it ever counted belonged to the retired codebook
-        # lane (archived 2026-09-25, #1304).
-        "body_shared_cb_sidecar_bits": 0.0,
-        "solver_contract": (
-            "additive_candidate_proposal_then_exact_assignment_filter"
-        ),
-        "global_optimality_claimed": False,
-        # Continuous-menu provenance, written on EVERY run rather than only on
-        # the byte-budget path: how wide the Tessera menu was before the DP saw
-        # it, which of the two exact reductions shrank it (per-Linear and, for
-        # aggregated super items, again after aggregation), and what the solve
-        # cost in wall time. On a menu of thousands of rungs those are the
-        # numbers that say whether a coarse-looking result is the allocator's
-        # answer or the menu's. Absent keys mean no Tessera rung was on the
-        # menu, so a stock run's metadata is unchanged.
-        **({"tessera_menu": {
-                "per_linear": dict(tessera_menu_report),
-                "aggregated": dict(tessera_menu_report_agg),
-                **tessera_menu_widths,
-                **({"selection_caveat": surrogate_selection_caveat()}
-                   if tessera_menu_widths else {}),
-            }} if (tessera_menu_report or tessera_menu_report_agg
-                   or tessera_menu_widths) else {}),
-        **({"tessera_group_knapsack": dict(tessera_group_menu_report)}
-           if tessera_group_menu_report else {}),
-        # Per selection: a content-equal second seal names only the selected
-        # units priced under it (``unit_capture_sha256``), never the whole
-        # table's row map (RobTand/prismaquant#1270).
-        **({"tessera_hessian": project_hessian_identity(
-                tessera_hessian_identity, assignment_expanded)}
-           if (tessera_hessian_identity.get("stamped_rows")
-               or tessera_hessian_identity.get("unstamped_rows")) else {}),
-        # The static A-side scale VALUE each selected Tessera unit was priced
-        # under, read from its own cost row (RobTand/prismaquant#204). The
-        # export gate compares the exporter's --input-scales file against
-        # this, value for value; until it existed the gate could only check
-        # that a key was present. Absent when no Tessera unit is selected, so
-        # a stock run's metadata is unchanged. Read from the unfiltered table
-        # (`cost_data["costs"]`): every selected unit's row is there whatever
-        # the lm_head / visual filters removed from the DP's view.
-        **({"tessera_activation_static_scales": priced_static_scales(
-                {name: fmt for name, fmt in assignment_expanded.items()
-                 if str(fmt).startswith("TESSERA_")},
-                cost_data["costs"],
-                # The FORMULA those values came out of, read from the table
-                # that priced them and never from this process's environment:
-                # a legacy value under a full-E4M3 label is a scale nothing
-                # served (RobTand/prismaquant#624).
-                policy=(cost_data.get("provenance", {})
-                        .get("activation_static_scales", {})
-                        .get("policy")),
-                served_activation_policy=cost_data.get("provenance", {}).get("served_activation_policy"))}
-           if any(str(fmt).startswith("TESSERA_")
-                  for fmt in assignment_expanded.values()) else {}),
-        **({"tessera_dev_pin": dict(tessera_dev_pin)} if tessera_dev_pin else {}),
-        **({"solve_diagnostics": {
-                str(k): {
-                    "solver_seconds": v.get("solver_seconds"),
-                    "solver_calls": v.get("solver_calls"),
-                }
-                for k, v in _solve_diagnostics.items()
-                if isinstance(v, dict) and "solver_seconds" in v
-            }} if any(
-                isinstance(v, dict) and "solver_seconds" in v
-                for v in _solve_diagnostics.values()) else {}),
-        **propagated_cost_provenance(research_cost_provenance),
-        "assignment_payload_bits_total": (
-            float(final_assignment_payload["bits_total"])
-            if not final_assignment_payload["missing_stats_names"]
-            else None
-        ),
-        "assignment_payload_bits_scope": (
-            "all_assignment_tensor_payload_including_deduplicated_cb_sidecars"
-        ),
-        "assignment_payload_missing_stats_names": final_assignment_payload[
-            "missing_stats_names"
-        ],
-        **({
-            "whole_artifact_budget": selected_whole_artifact_budget_stamp,
-        } if selected_whole_artifact_budget_stamp is not None else {}),
-        # Only when the constraint axis actually ran, so an unconstrained run
-        # writes byte-identical layer-config metadata (the "constraints were
-        # absent" stamp lives in selection.json, which every byte-budget run
-        # writes anyway).
-        **({
-            "serve_constraints": final_serve_feasibility.as_dict(),
-        } if final_serve_feasibility is not None else {}),
-        **({"measured_runtime_search": {
-                "research_only": True,
-                "promotion_status": "requires_fixed_teacher_and_end_to_end_validation",
-                "target_diagnostics": _solve_diagnostics.get(round(float(args.target_bits), 9), {}),
-            }} if measured_runtime_table is not None else {}),
-    }
-    # What this allocation carries about the priced expert population
-    # (PrismaQuant #183): the campaign's population statement (which units
-    # were priced, which omitted), the producer's projection they were priced
-    # under, and -- for every projected unit -- the receipt of exactly the rung
-    # selected here, so the export lane hands the exporter the priced bytes
-    # and nothing else.  A selected rung the campaign never priced as a wire,
-    # or a projected unit this allocation does not place, is refused by name
-    # before the layer config is written.  Additive: a stock cost table adds
-    # no keys, and a table carrying a population but no projection carries
-    # only the population.
-    if args.mtp_joint_cost:
-        _stamp_mtp_selection(args, layer_cfg, assignment_expanded,
-                             serving_target=tessera_serving_target, profile=model_profile)
-    if args.tessera_materialization_plan:
-        from .tessera_materialization import write_selection_request
-        write_selection_request(args.tessera_materialization_plan,
-            layer_config=layer_cfg, assignment=assignment_expanded,
-            cost_path=args.costs, cost_payload=cost_data, output_path=args.layer_config)
-        print(f"[alloc] non-exportable selected-wire request → {args.tessera_materialization_plan}")
-        return
-    try:
-        layer_cfg[LAYER_CONFIG_META_KEY].update(
-            allocation_expert_projection_block(cost_data, assignment_expanded))
-    except ExpertProjectionError as exc:
-        raise SystemExit(f"[alloc] ERROR: expert projection: {exc}") from exc
-
-    out = Path(args.layer_config)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with open(out, "w") as f:
-        json.dump(layer_cfg, f, indent=2)
-
-    counts = defaultdict(int)
-    for fmt in assignment_expanded.values():
-        counts[fmt] += 1
-    print(
-        f"\n[alloc] target={args.target_bits} "
-        f"exact_assignment_payload_bpp={final_body_achieved:.3f}"
-    )
-    for fmt, n in sorted(counts.items(), key=lambda kv: -kv[1]):
-        print(f"  {fmt:>14}: {n:>5} layers")
-    print(f"\nLayer config → {out}")
-    print(f"Feed to AutoRound via --layer_config {out}")
-
-    # Optional read-only "where did the budget go?" attribution over the final
-    # resolved body assignment. Derived from already-resolved data; no re-probe.
-    _write_bit_attribution_reports(
-        args.bit_attribution_json,
-        args.bit_attribution_csv,
-        target_bits=args.target_bits,
-        achieved_bits=final_body_achieved,
-        assignment_expanded=assignment_expanded,
-        candidates=candidates,
-        stats_entry_for=_stats_entry_for_assignment_name,
-        format_specs=format_specs,
-    )
+    _write_layer_config(assignment, achieved, total, mutable_total,
+                        selected_whole_artifact_budget_stamp=selected_whole_artifact_budget_stamp)
 
 
 if __name__ == "__main__":

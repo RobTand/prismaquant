@@ -1987,14 +1987,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     argv = ["python3", "-m", "tools.tessera_campaign_container",
             "--spec", json.dumps(spec, sort_keys=True),
             "--", *payload]
-    default_admission = admission_image_reference(spec)
-    admission = spec.get("container_admission_reference")
-    if admission is not None:
-        if (not isinstance(admission, str) or not admission.startswith("content:sha256:")
-                or not _is_hex64(admission.removeprefix("content:sha256:"))
-                or not _is_hex64(spec.get("container", {}).get("content_sha256"))):
-            raise DispatchRefused("explicit portable image admission requires content SHA and inspected scientific image identity")
-    return argv, admission or default_admission
+    return argv, admission_image_reference(spec, portable_refusal=DispatchRefused)
 
 #: A checkpoint's shard index, by model directory. A band publishes many rows
 #: of one model; the dispatcher reads the index once.

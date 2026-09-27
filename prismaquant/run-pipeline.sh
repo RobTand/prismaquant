@@ -174,6 +174,10 @@ fi
 # without them would build an artifact that is not the artifact priced.
 : "${TESSERA_HESSIAN:=}"
 : "${TESSERA_INPUT_SCALES:=}"
+# A completed original-cohort bundle for a selected MTP scope. The preflight
+# verifies its exact child receipts; Tessera authenticates each cached blob.
+: "${TESSERA_CACHED_UNITS:=}"
+: "${TESSERA_SOURCE_DIGEST_CACHE:=}"
 # `as-allocated` plans exactly the units the allocation names and spells every
 # other body Linear BF16 explicitly. `broadcast-by-role` EXTRAPOLATES a
 # single-layer allocation to every depth and stamps itself as an
@@ -2386,11 +2390,15 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   if [[ -n "${TESSERA_INPUT_SCALES:-}" ]]; then
     TESSERA_PRICED_INPUT_ARGS+=(--input-scales "$TESSERA_INPUT_SCALES")
   fi
+  TESSERA_PREFLIGHT_CACHE_ARGS=(--write-cached-expert-units)
+  if [[ -n "${TESSERA_CACHED_UNITS:-}" ]]; then
+    TESSERA_PREFLIGHT_CACHE_ARGS=(--cached-units "$TESSERA_CACHED_UNITS")
+  fi
   if ! TESSERA_BUILD_SHA256=$(python3 -m prismaquant.tessera_export_lane --model "$MODEL_PATH" \
       --assignment "${WORK_DIR}/artifacts/layer_config.json" \
       --write-build-json "$TESSERA_BUILD_JSON" \
       --print-build-sha256 \
-      --write-cached-expert-units \
+      "${TESSERA_PREFLIGHT_CACHE_ARGS[@]}" \
       --target-profile "$TARGET_PROFILE_RESOLVED" "${TESSERA_SCOPE_ARGS[@]}" \
       "${TESSERA_PRICED_INPUT_ARGS[@]}"); then
     exit 2
@@ -2458,9 +2466,15 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   # stays empty, so the encode is byte-identical to one built before this
   # existed (PrismaQuant #183).
   TESSERA_CACHED_UNIT_ARGS=()
+  TESSERA_CACHED_UNITS=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("cached_units", ""))' "$TESSERA_BUILD_JSON")
   TESSERA_CACHED_EXPERT_UNITS=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("cached_expert_units", ""))' "$TESSERA_BUILD_JSON")
-  if [[ -n "$TESSERA_CACHED_EXPERT_UNITS" ]]; then
+  if [[ -n "$TESSERA_CACHED_UNITS" ]]; then
+    TESSERA_CACHED_UNIT_ARGS+=(--cached-units "$TESSERA_CACHED_UNITS")
+  elif [[ -n "$TESSERA_CACHED_EXPERT_UNITS" ]]; then
     TESSERA_CACHED_UNIT_ARGS+=(--cached-expert-units "$TESSERA_CACHED_EXPERT_UNITS")
+  fi
+  if [[ -n "${TESSERA_SOURCE_DIGEST_CACHE:-}" ]]; then
+    TESSERA_CACHED_UNIT_ARGS+=(--source-digest-cache "$TESSERA_SOURCE_DIGEST_CACHE")
   fi
 
   echo "[pipeline] [4/4] exporting to the Tessera wire ..."
