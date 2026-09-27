@@ -29,6 +29,7 @@ which is the failure mode #1516 filed.
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -49,15 +50,40 @@ SHARD_PATTERN = "model-*-of-*.safetensors"
 def declared_phases(environ=None) -> tuple[str, ...] | None:
     """The phases this action's submission sealed, or ``None`` if unset.
 
-    Same reading as :func:`prismaquant.joint_run_progress.declared_phases`;
-    repeated here so the watcher keeps no import on the joint-run module.
+    Same reading as :func:`prismaquant.joint_run_progress.declared_phases`:
+    the worker publishes the list as a JSON array
+    (``prismabuild.pool`` mints ``json.dumps([phase.name, ...])``), so a
+    bare comma list is unknown rather than a guess.  A8 r6 (PB action
+    ``0a8bdf67``, 2026-09-27) was killed by a comma parse that read
+    ``'["export"]'`` as one bogus phase name, refused the real one, and
+    turned a declared stall contract into a wall clock (#1516).
     """
 
     environ = os.environ if environ is None else environ
     raw = environ.get("PRISMABUILD_ACTION_PROGRESS_PHASES", "")
     if not raw:
         return None
-    return tuple(name for name in raw.split(",") if name)
+    try:
+        names = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(names, list) or not names:
+        return None
+    if not all(isinstance(name, str) and name for name in names):
+        return None
+    return tuple(names)
+
+
+def _default_log(message):
+    """Print a diagnostic so it survives a killed parent (#1516).
+
+    Under the pool transport the action's stdout is a pipe, and a buffered
+    line is discarded when the watchdog SIGKILLs the process: the phase
+    refusal that explained the r6 kill never reached the attempt log.  The
+    module's own log always flushes; a caller-supplied ``log`` must too.
+    """
+
+    print(message, flush=True)
 
 
 def stall_allowance(seconds_per_shard: float, *, minimum: float = 300.0,
@@ -97,7 +123,7 @@ class ShardCommitProgress:
         if self.interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive")
         self.environ = os.environ if environ is None else environ
-        self._log = log
+        self._log = log if log is not None else _default_log
         self._phases = declared_phases(self.environ)
         self._committed: dict[str, tuple[int, int]] = {}
         self._pending: dict[str, tuple[int, int]] = {}
@@ -108,8 +134,9 @@ class ShardCommitProgress:
             self._phase_refused = True
 
     def _emit(self, message):
-        if self._log is not None:
-            self._log(message)
+        # Flushing is the point: a refusal nobody can read is a stall nobody
+        # can diagnose (#1516).
+        self._log(message)
 
     def _scan(self):
         observed = {}

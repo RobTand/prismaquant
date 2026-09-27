@@ -31,7 +31,12 @@ class Channel:
         self.environ = {
             "PRISMABUILD_ACTION_PROGRESS_PATH": str(self.record_path),
             "PRISMABUILD_ACTION_PROGRESS_TOKEN": "tok-1516",
-            "PRISMABUILD_ACTION_PROGRESS_PHASES": ",".join(phases),
+            # The worker publishes the phase list as a JSON array
+            # (prismabuild pool.py mints json.dumps([phase.name, ...])), never
+            # as a bare comma list: the incident this file grew from was a
+            # comma parse reading '["export"]' as one bogus phase name and
+            # silently refusing every commit (PB #1516, action 0a8bdf67).
+            "PRISMABUILD_ACTION_PROGRESS_PHASES": json.dumps(list(phases)),
         }
 
     def records(self):
@@ -186,3 +191,48 @@ def test_stall_allowance_derives_from_measured_rate():
                                minimum=200.0) == pytest.approx(10 * 3241.0 / 120)
     with pytest.raises(ValueError):
         scp.stall_allowance(0)
+
+
+def test_declared_phases_reads_the_worker_json_list():
+    # The pool launcher publishes the phase list as a JSON array
+    # (prismabuild pool.py: json.dumps([phase.name for phase in policy])).
+    # A8 r6 (PB 0a8bdf67, 2026-09-27) died because a comma parse read
+    # '["export"]' as one bogus phase name, refused the real one, and
+    # turned the contract into a wall clock.
+    assert scp.declared_phases(
+        {"PRISMABUILD_ACTION_PROGRESS_PHASES": '["export", "publish"]'}
+    ) == ("export", "publish")
+    assert scp.declared_phases(
+        {"PRISMABUILD_ACTION_PROGRESS_PHASES": '["export"]'}
+    ) == ("export",)
+    # A bare comma list is not the worker's spelling: unknown, not guessed.
+    assert scp.declared_phases(
+        {"PRISMABUILD_ACTION_PROGRESS_PHASES": "export,publish"}) is None
+    assert scp.declared_phases(
+        {"PRISMABUILD_ACTION_PROGRESS_PHASES": "[]"}) is None
+    assert scp.declared_phases({}) is None
+
+
+def test_worker_json_phase_list_commits_records(out, channel, monkeypatch):
+    # The incident regression: with the channel's phases published exactly as
+    # the worker publishes them, a watcher for a legitimately declared phase
+    # must commit progress records, not refuse the phase.
+    monkeypatch.setattr(scp.os, "environ", channel.environ, raising=False)
+    write_shard(out, "model-00001-of-00002.safetensors", b"one")
+    watcher = scp.ShardCommitProgress(out, phase="export",
+                                      interval_seconds=0.01)
+    assert not watcher._phase_refused, (
+        "a phase the worker declared must not be refused")
+    watcher.poll()
+    watcher.poll()
+    assert channel.records(), "a declared phase must commit records"
+    assert channel.last()["phase"] == "export"
+    assert channel.last()["units_completed"] == 1
+
+
+def test_default_log_prints_flushed_diagnostics(capsys):
+    # The refusal that hid the r6 failure reached the attempt log only when
+    # the process exited cleanly: the parent's block-buffered stdout was
+    # discarded on SIGKILL.  The module's own log must flush.
+    scp._default_log("diagnostic line")
+    assert "diagnostic line" in capsys.readouterr().out
