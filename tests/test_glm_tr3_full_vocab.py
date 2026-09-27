@@ -697,7 +697,12 @@ class _FakeLLM:
         name = getattr(fn, "func", fn).__name__
         keywords = getattr(fn, "keywords", {})
         if name == "install_capture":
-            return [{"rank": 1, "world_size": 2}, {"rank": 0, "world_size": 2}]
+            attention = [{"module": "layers.0.self_attn.indexer",
+                          "backend": "vllm.v1.attention.backends.mla.indexer.DeepseekV32IndexerBackend",
+                          "allocated_kv_cache": {"dtype": "torch.uint8", "shape": [7, 64, 132],
+                                                 "device": "cuda:0"}}]
+            return [{"rank": rank, "world_size": 2, "attention_runtime": copy.deepcopy(attention)}
+                    for rank in (1, 0)]
         if name == "route_diagnostics":
             return [{"rank": 0, "exl3": None}, {"rank": 1, "exl3": None}]
         if name == "arm_capture":
