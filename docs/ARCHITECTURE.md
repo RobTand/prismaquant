@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Canonical pickle identity (2026-09-27, `astra/pickle-protocol-1450`, PQ #1450):
+`digests.canonical_pickle_bytes` explicitly selects protocol 4, the historical
+Python 3.12 producer encoding, rather than the interpreter's default. Python
+3.14 must not silently select protocol 5 for the same value. The existing
+`9a7567…` golden is unchanged, and `tests/test_digest_profiles_1301.py` checks
+both the explicit argument and the wire protocol. This preserves the campaign
+`cost.pkl` identity; no migration, stage, serving lane or ship gate change.
+
 Tessera's exact pin advances again on 2026-09-26 from `d2a6455025…` to
 `09d6559d7…` (Tessera #633, PQ #1413). The new serving mapper and route-census
 implementation address GLM MTP layer 45's runtime `mtp_block` module names.
