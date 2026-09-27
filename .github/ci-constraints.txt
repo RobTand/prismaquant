@@ -1,0 +1,8 @@
+# Constraints for CI's pip installs (`pip install -c .github/ci-constraints.txt`).
+# pyproject.toml keeps its ranges; these pins make CI test what the campaign runs.
+#
+# transformers: the campaign venvs run 5.16.1, and the GLM source derivative
+# (prismaquant/glm_source_derivative.py) binds the modeling_glm5_next.py that
+# 5.16.1 ships. transformers 5.17.0 ships another file, so tests of the
+# derivative cannot run on it (#1419).
+transformers==5.16.1

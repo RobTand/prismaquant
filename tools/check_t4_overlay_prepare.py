@@ -92,7 +92,7 @@ def main():
     args = parser.parse_args()
     out = Path(args.out)
     assert not out.exists(), out
-    from prismaquant.joint_catalog_extension import ADDED_FORMAT, verify_catalog_pair
+    from prismaquant.joint_catalog_extension import catalog_view, verify_catalog_pair
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.tessera_joint_aura import load_measured_anchor_input
 
@@ -104,7 +104,14 @@ def main():
     print(json.dumps({'step': 'verify_catalog_pair', 's': round(time.monotonic() - started, 1)}), flush=True)
     data = load_measured_anchor_input(plan['inputs'], verify_payloads=False, require_existing_renders=True,
                                       historical_encoder_reuse=plan.get('historical_encoder_reuse'))
-    added = sum(1 for (_name, fmt) in data.cells if fmt == ADDED_FORMAT)
+    catalog = bound_json(plan['inputs']['candidate_overlay'])
+    added_formats = catalog_view(catalog)['formats']
+    catalog_pairs = {(cell['qname'], cell['format']) for cell in catalog['cells']}
+    added_by_format = {fmt: 0 for fmt in added_formats}
+    for pair in data.cells:
+        if pair in catalog_pairs:
+            added_by_format[pair[1]] += 1
+    added = sum(added_by_format.values())
     print(json.dumps({'step': 'load_measured_anchor_input', 'cells': len(data.cells), 'added': added,
                       's': round(time.monotonic() - started, 1)}), flush=True)
     completion = bound_json(inputs['extended_prepared'])
@@ -116,7 +123,8 @@ def main():
     check_completion(completion, plan_sha256=inputs['extended_plan']['sha256'], data=data, cache=cache)
     result = {'status': 'passed', 'inputs': {'path': args.inputs, 'sha256': args.inputs_sha256},
               'evidence': evidence, 'loader_cells': len(data.cells), 'loader_units': len(data.formats_by_qname),
-              'loader_added_cells': added, 'added_format': ADDED_FORMAT,
+              'loader_added_cells': added, 'added_formats': list(added_formats),
+              'loader_added_cells_by_format': added_by_format,
               'scope': 'verify_catalog_pair + load_measured_anchor_input(verify_payloads=False) + '
                        'model-free prepared-completion checks; opens under the source model refused',
               'seconds': round(time.monotonic() - started, 1)}
