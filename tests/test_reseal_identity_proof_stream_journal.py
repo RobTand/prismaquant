@@ -244,3 +244,94 @@ def test_the_prefix_helper_reads_the_row_head_from_the_files_written_before_the_
     # The load-all head writes its execution record before encoding; the stream head only at finalize.
     (run/'cache'/'row-head-execution.json').write_text('{}')
     assert helper.row_head(_Campaign(), command) == ('load-all', None)
+
+
+# ---------------------------------------------------------------------------
+# Produced-only settings: a flag newer than the stored row (PQ #1520)
+# ---------------------------------------------------------------------------
+#
+# tessera_campaign builds its identity settings from vars(args), so a flag
+# added after a row was stored lands in every produced identity, set or not.
+# ``--produced-only-setting`` sets exactly the declared names aside before the
+# identity is compared.  Each refusal below differs from the passing run in
+# one named way.
+
+PQ_1520 = ('source_identity_cache', 'source_identity_cache_sha256')
+
+
+def produced_run_binding(root, extra):
+    """``produced_run`` whose identity settings also bind ``extra``."""
+    states = {u: _state(root, u, fmts, NEW['encoder_source_sha256'], seconds=1.9, stream=True)
+              for u, fmts in PREFIX.items()}
+    identity = _identity(NEW, deferred=True)
+    identity['settings'].update(extra)
+    _journal(root, 'cost.anchors.json.stream', STREAM_STAGE, identity, states)
+    (root/'cache').mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def compare_normalized(produced, stored, names=PQ_1520):
+    return _proof().compare_rows(produced, stored, old=OLD, new=NEW, expected_cells=PREFIX_CELLS,
+                                 prefix=True, produced_only_settings=names)
+
+
+@pytest.fixture
+def pq1520_rows(tmp_path):
+    produced = produced_run_binding(tmp_path/'produced', {name: None for name in PQ_1520})
+    return produced, stored_row(tmp_path/'stored')
+
+
+def test_the_pq1520_settings_alone_fail_the_identity_without_normalization(pq1520_rows):
+    produced, stored = pq1520_rows
+    result = compare(produced, stored)
+    assert failure_names(result) == {'identity', 'identity_sha256'}
+    assert [f['field'] for f in result['failures'] if f['what'] == 'identity'] == ['settings.source_identity_cache']
+    assert all(cell['ok'] for cell in result['cells'])
+
+
+def test_setting_the_pq1520_settings_aside_restores_the_exact_expected_digest(pq1520_rows):
+    produced, stored = pq1520_rows
+    result = compare_normalized(produced, stored)
+    assert result['failures'] == []
+    assert result['ok'] is True
+    assert result['identity_matches_with_pins_substituted'] is False
+    assert result['identity_matches_after_normalization'] is True
+    assert result['normalized_produced_identity_sha256'] == result['expected_identity_sha256']
+    assert result['produced_identity_sha256'] != result['expected_identity_sha256']
+    proof = _proof()
+    assert result['produced_only_settings'] == {
+        name: dict(reason=proof.PRODUCED_ONLY_SETTINGS[name], produced_value=None) for name in PQ_1520}
+
+
+def test_another_flipped_setting_still_refuses_after_normalization(tmp_path):
+    extra = {name: None for name in PQ_1520}
+    extra['nsamples'] = 513
+    produced = produced_run_binding(tmp_path/'produced', extra)
+    result = compare_normalized(produced, stored_row(tmp_path/'stored'))
+    assert result['ok'] is False
+    assert failure_names(result) == {'identity', 'identity_sha256'}
+    assert [f['field'] for f in result['failures'] if f['what'] == 'identity'] == ['settings.nsamples']
+    assert result['identity_matches_after_normalization'] is False
+
+
+def test_a_setting_the_stored_row_binds_cannot_be_set_aside(tmp_path):
+    produced = produced_run_binding(tmp_path/'produced', {name: None for name in PQ_1520})
+    stored = tmp_path/'stored'
+    stream = {u: _state(stored, u, FORMATS, OLD['encoder_source_sha256'], seconds=2.5, stream=True) for u in UNITS}
+    identity = _identity(OLD, deferred=True)
+    identity['settings']['source_identity_cache'] = None
+    _journal(stored, 'cost.anchors.json.stream', STREAM_STAGE, identity, stream)
+    with pytest.raises(ValueError, match=r"stored identity binds setting\(s\) \['source_identity_cache'\]"):
+        compare_normalized(produced, stored)
+
+
+def test_an_undeclared_setting_cannot_be_set_aside(pq1520_rows):
+    produced, stored = pq1520_rows
+    with pytest.raises(ValueError, match=r"\['nsamples'\] are not declared produced-only settings"):
+        compare_normalized(produced, stored, names=PQ_1520 + ('nsamples',))
+
+
+def test_a_declared_setting_the_produced_run_lacks_is_refused(tmp_path):
+    produced = produced_run_binding(tmp_path/'produced', {'source_identity_cache': None})
+    with pytest.raises(ValueError, match=r"produced identity binds no setting\(s\) \['source_identity_cache_sha256'\]"):
+        compare_normalized(produced, stored_row(tmp_path/'stored'))

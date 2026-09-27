@@ -48,6 +48,16 @@ ANCHOR_VOLATILE = ('seconds', 'encoding_batch_size')
 # not scores, and never equal across two runs of the same encode.
 COST_VOLATILE = ('encode_seconds', 'encode_seconds_accounting', 'encoding_batch_size')
 STRIPPED_FLAGS = ('--seed-checkpoint', '--seed-wire-dir')
+# Settings a produced checkpoint binds and a stored row cannot, each with the
+# reason a comparison may set it aside.  Closed: a name not listed here is
+# refused, so no other setting can be excused by a flag.
+_PQ_1520_REASON = ('I/O-authentication knob bound by PQ #1520: tessera_campaign builds its '
+                   'identity settings from vars(args), so the flag lands there even when unset; '
+                   'stored rows predate the flag')
+PRODUCED_ONLY_SETTINGS = {
+    'source_identity_cache': _PQ_1520_REASON,
+    'source_identity_cache_sha256': _PQ_1520_REASON,
+}
 # The driver checkout: the tree this file was loaded from, which PB snapshots
 # and the container mounts at the working directory. Its ``experiments``
 # helpers drive the arm; the PrismaQuant tree under test is --prismaquant-root.
@@ -515,6 +525,39 @@ def substitute_pins(identity, *, old, new, drop=()):
     return identity
 
 
+def normalize_produced(identity, stored_identity, names=()):
+    """The produced identity with its declared produced-only settings set aside.
+
+    The mirror of ``substitute_pins``'s ``drop``: that removes stored-side
+    settings the migration no longer binds; this removes produced-side
+    settings the stored row could not bind, because the flag that creates
+    them postdates it.  Only ``PRODUCED_ONLY_SETTINGS`` may be named, and each
+    name refuses unless the stored identity lacks it and the produced one
+    binds it, so the normalization can neither excuse a setting both sides
+    carry nor quietly skip a typo.  Returns the normalized identity and the
+    removed values.
+    """
+    names = tuple(names)
+    if len(set(names)) != len(names):
+        raise ValueError(f'produced-only settings named twice: {sorted(names)}')
+    unknown = sorted(name for name in names if name not in PRODUCED_ONLY_SETTINGS)
+    if unknown:
+        raise ValueError(f'{unknown} are not declared produced-only settings '
+                         f'({sorted(PRODUCED_ONLY_SETTINGS)}); refusing to set them aside')
+    stored_settings = stored_identity.get('settings') or {}
+    bound = sorted(name for name in names if name in stored_settings)
+    if bound:
+        raise ValueError(f'stored identity binds setting(s) {bound}; a produced-only setting '
+                         'must be absent from the stored row')
+    identity = json.loads(json.dumps(identity))
+    settings = identity.get('settings') or {}
+    missing = sorted(name for name in names if name not in settings)
+    if missing:
+        raise ValueError(f'produced identity binds no setting(s) {missing}, so there is nothing to set aside')
+    removed = {name: settings.pop(name) for name in names}
+    return identity, removed
+
+
 def deep_equal(a, b, where='', diffs=None):
     """Exact structural equality; NaN equals NaN; arrays compared by bytes."""
     diffs = [] if diffs is None else diffs
@@ -621,7 +664,7 @@ def _compare_stream_journal(stored, produced_names, p_units, s_units, fail):
 
 
 def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cost=False,
-                 drop_settings=(), prefix=False):
+                 drop_settings=(), prefix=False, produced_only_settings=()):
     """Compare a produced run against the stored row it re-encodes.
 
     Returns a result dict with ``ok`` and the cell table.  Nothing here is
@@ -650,17 +693,34 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
     result['journal'] = journal
     pm, sm = load_manifest(produced, journal), load_manifest(stored, journal)
     expected_identity = substitute_pins(sm['identity'], old=old, new=new, drop=drop_settings)
-    difference = first_identity_difference(pm['identity'], canonical_json(expected_identity, where='expected identity'))
+    produced_only = tuple(produced_only_settings)
+    produced_identity, set_aside = normalize_produced(pm['identity'], sm['identity'], produced_only)
+    difference = first_identity_difference(produced_identity, canonical_json(expected_identity, where='expected identity'))
     if difference is not None:
         fail(dict(what='identity', field=difference[0], produced=str(difference[1])[:300], expected=str(difference[2])[:300]))
     for key in PIN_KEYS:
-        if pm['identity'].get(key) != new[key]:
-            fail(dict(what='identity_pin', field=key, produced=pm['identity'].get(key), expected=new[key]))
+        if produced_identity.get(key) != new[key]:
+            fail(dict(what='identity_pin', field=key, produced=produced_identity.get(key), expected=new[key]))
     expected_sha = canonical_json_sha256(canonical_json(expected_identity, where='expected identity'), where='expected identity')
+    produced_sha = pm['identity_sha256']
+    if produced_only:
+        # Normalize the identity the manifest actually sealed: its recorded
+        # digest must be its own, and the digest compared is recomputed from
+        # the normalized identity, never read from a field.
+        sealed_sha = canonical_json_sha256(canonical_json(pm['identity'], where='produced identity'),
+                                           where='produced identity')
+        if sealed_sha != pm['identity_sha256']:
+            fail(dict(what='produced_identity_seal', recomputed=sealed_sha, recorded=pm['identity_sha256']))
+        produced_sha = canonical_json_sha256(canonical_json(produced_identity, where='normalized produced identity'),
+                                             where='normalized produced identity')
+        result.update(produced_only_settings={name: dict(reason=PRODUCED_ONLY_SETTINGS[name], produced_value=value)
+                                              for name, value in set_aside.items()},
+                      normalized_produced_identity_sha256=produced_sha,
+                      identity_matches_after_normalization=(produced_sha == expected_sha))
     result.update(stored_identity_sha256=sm['identity_sha256'], produced_identity_sha256=pm['identity_sha256'],
                   expected_identity_sha256=expected_sha, identity_matches_with_pins_substituted=(pm['identity_sha256'] == expected_sha))
-    if pm['identity_sha256'] != expected_sha:
-        fail(dict(what='identity_sha256', produced=pm['identity_sha256'], expected=expected_sha))
+    if produced_sha != expected_sha:
+        fail(dict(what='identity_sha256', produced=produced_sha, expected=expected_sha, normalized=bool(produced_only)))
     if pm['stage'] != sm['stage'] or pm['schema'] != sm['schema']:
         fail(dict(what='manifest', produced=[pm['schema'], pm['stage']], stored=[sm['schema'], sm['stage']]))
 
@@ -1015,7 +1075,8 @@ def run_compare(args):
     bind_prismaquant(args.prismaquant_root)
     old, new = _pins(args)
     result = compare_rows(args.produced, args.stored_row, old=old, new=new, expected_cells=args.expected_cells,
-                          require_cost=args.require_cost, drop_settings=args.drop_setting, prefix=args.prefix)
+                          require_cost=args.require_cost, drop_settings=args.drop_setting, prefix=args.prefix,
+                          produced_only_settings=args.produced_only_setting)
     write_json(args.out, result)
     print(json.dumps(dict(ok=result['ok'], cells=len(result['cells']), strata=result['strata'], failures=result['failures'][:4])), flush=True)
     return 0 if result['ok'] else 1
@@ -1063,6 +1124,10 @@ def main(argv=None):
     p.add_argument('--require-cost', action='store_true')
     p.add_argument('--prefix', action='store_true',
                    help='the produced run is a prefix: a cost table it wrote compares on its own units only')
+    p.add_argument('--produced-only-setting', action='append', default=[], metavar='NAME',
+                   help='a produced-side setting the stored row cannot bind (PRODUCED_ONLY_SETTINGS names '
+                        'each allowed one and its reason); repeatable. The produced identity has it '
+                        'removed before the identity and its recomputed digest are compared')
     _add_pins(p)
     args = parser.parse_args(argv)
     if args.arm == 'prefix':
