@@ -1,0 +1,4 @@
+{
+  "fixture_provenance": "synthetic CPU-only; not a runtime installation",
+  "schema": "tessera.synthetic_installer_fixture.v1"
+}

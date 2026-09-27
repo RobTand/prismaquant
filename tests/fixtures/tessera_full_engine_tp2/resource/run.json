@@ -1,0 +1,73 @@
+{
+  "fixture_provenance": "synthetic_cpu_protocol_fixture",
+  "plan_sha256": "d764a4b7d7bd99cdb3da98af6957747b3009e5fb7fb293f3716d08d077b5dea3",
+  "schema": "tessera.stock_engine_raw_resource_run.v1",
+  "workers": [
+    {
+      "device_id": 0,
+      "device_uuid": "GPU-rank-0",
+      "directory": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/resource/rank-0-worker-4242",
+      "host": {
+        "interface": "eth0",
+        "ip": "192.168.1.107",
+        "source": "synthetic CPU fixture; no actual interface observed"
+      },
+      "pid": 4242,
+      "rank": 0,
+      "receipt": {
+        "artifacts": {
+          "capture.json": {
+            "sha256": "26cf87fcaee8cc18fd838032ba0cd318c9538b710706ff26fc4e9a52e702a7a0"
+          }
+        }
+      },
+      "world_size": 2
+    },
+    {
+      "device_id": 0,
+      "device_uuid": "GPU-rank-1",
+      "directory": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/resource/rank-1-worker-4243",
+      "host": {
+        "interface": "eth0",
+        "ip": "192.168.1.108",
+        "source": "synthetic CPU fixture; no actual interface observed"
+      },
+      "pid": 4243,
+      "rank": 1,
+      "receipt": {
+        "artifacts": {
+          "capture.json": {
+            "sha256": "54cbbf82d27e26b962e2c07a669cbcb3a8da27f2ff0bc010562c54d472db60bc"
+          }
+        }
+      },
+      "world_size": 2
+    }
+  ],
+  "workload_arm": [
+    {
+      "device_id": 0,
+      "device_uuid": "GPU-rank-0",
+      "host": {
+        "interface": "eth0",
+        "ip": "192.168.1.107",
+        "source": "synthetic CPU fixture; no actual interface observed"
+      },
+      "pid": 4242,
+      "rank": 0,
+      "world_size": 2
+    },
+    {
+      "device_id": 0,
+      "device_uuid": "GPU-rank-1",
+      "host": {
+        "interface": "eth0",
+        "ip": "192.168.1.108",
+        "source": "synthetic CPU fixture; no actual interface observed"
+      },
+      "pid": 4243,
+      "rank": 1,
+      "world_size": 2
+    }
+  ]
+}
