@@ -39,6 +39,7 @@ from prismaquant.tessera_expert_projection import (
 )
 
 IMAGE = "example/runtime@sha256:" + "a" * 64
+OTHER_IMAGE = "example/other@sha256:" + "b" * 64
 STACK = "model.layers.2.feed_forward.experts"
 ROUTER = "model.layers.2.feed_forward.gate"
 DENSE = "model.layers.0.self_attn.out_proj"
@@ -247,6 +248,89 @@ def test_scope_binds_selected_routed_units_to_the_carried_projection(case):
     assert set(projection["units"]) == set(_units())
     for name, record in projection["units"].items():
         assert record == case.receipts[name]
+
+
+def test_second_priced_projection_keeps_per_unit_roots_and_refuses_gaps(case):
+    """A second producer can carry exact wires without changing body keys."""
+    names = _units()
+    meta = {
+        "mtp_expert_projection": _carried(),
+        "mtp_expert_wires": dict(case.receipts),
+        "mtp_expert_stack_formats": {STACK: FMT},
+        "mtp_expert_wire_dir": str(case.wire_dir),
+        "mtp_expert_wire_roots": {name: str(case.wire_dir) for name in names},
+    }
+    keys = dict(projection="mtp_expert_projection", wires="mtp_expert_wires",
+                stack_formats="mtp_expert_stack_formats", wire_dir="mtp_expert_wire_dir",
+                wire_roots="mtp_expert_wire_roots")
+    selected = {name: FMT for name in names}
+    shards = {name + ".weight": SHARD for name in names}
+    status, projection = export._carried_expert_projection(
+        meta, selected, shards, carried_keys=keys)
+    assert status == export.ROUTED_EXPERT_BYTES_PRICED_WIRES
+    assert projection["units"] == case.receipts
+    assert projection["wire_roots_by_unit"] == meta["mtp_expert_wire_roots"]
+
+    meta["mtp_expert_wire_roots"].pop(names[0])
+    with pytest.raises(export.TesseraExportLaneError, match="roots.*cover"):
+        export._carried_expert_projection(meta, selected, shards, carried_keys=keys)
+
+
+def _mtp_scoped_case(case, monkeypatch, *, disjoint):
+    """Emulate a declared out-of-body profile scope over this tiny source."""
+    from prismaquant import model_profiles
+    real = model_profiles.detect_profile(str(case.model))
+
+    class Profile:
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+        def source_scope(self, name, _model):
+            assert name == "mtp"
+            return SimpleNamespace(live_name=lambda tensor:
+                tensor if tensor.removesuffix(".weight") in _units() else None)
+
+        def checkpoint_to_live_name(self, tensor, *, multimodal=False):
+            if disjoint and tensor.removesuffix(".weight") in _units():
+                return None
+            return real.checkpoint_to_live_name(tensor, multimodal=multimodal)
+
+    monkeypatch.setattr(model_profiles, "detect_profile", lambda *_args: Profile())
+    _meta(case)["mtp_selection"] = {
+        "mtp_expert_projection": _carried(),
+        "mtp_expert_wires": dict(case.receipts),
+        "mtp_expert_wire_roots": {name: str(case.wire_dir) for name in _units()},
+    }
+    _save(case)
+
+
+def test_mtp_receipt_cannot_relabel_a_body_mapped_unit(case, monkeypatch):
+    _mtp_scoped_case(case, monkeypatch, disjoint=False)
+    with pytest.raises(export.TesseraExportLaneError, match="disjoint profile MTP source scope"):
+        _scope(case)
+
+
+def test_mtp_scoped_unit_refuses_wrong_recorded_context(case, monkeypatch):
+    _mtp_scoped_case(case, monkeypatch, disjoint=True)
+    report = _scope(case)
+    assert set(report["mtp_expert_projection"]["units"]) == set(_units())
+    name = _units()[0]
+    _meta(case)["tessera_serving_scope"]["by_unit"][name]["runtime_image"] = OTHER_IMAGE
+    _save(case)
+    with pytest.raises(export.TesseraExportLaneError, match="allocation context disagrees"):
+        _scope(case)
+
+
+def test_producer_plan_view_retains_declared_mtp_source_units(case, monkeypatch):
+    from prismaquant import model_profiles
+    _mtp_scoped_case(case, monkeypatch, disjoint=True)
+    original = case.assignment.read_bytes()
+    result = export._write_plan_assignment(
+        case.assignment, expected_sha256=hashlib.sha256(original).hexdigest(),
+        profile=model_profiles.detect_profile(str(case.model)), model_path=case.model)
+    projected = json.loads(Path(result["plan_assignment"]).read_text())
+    assert set(_units()) <= set(projected)
+    assert projected[DENSE] == case.payload[DENSE]
 
 
 def test_scope_attests_a_predicated_cell_on_the_producers_geometry(case):
@@ -605,8 +689,11 @@ def test_shell_hands_the_exporter_the_bundle_the_preflight_wrote():
     translator = driver.index('python3 "${TESSERA_REPO%/}/experiments/plan_from_layer_config.py"')
     gate = driver.rfind("python3 -m prismaquant.tessera_export_lane", 0, translator)
     invocation = driver[gate:driver.index("; then", gate)]
-    assert "--write-cached-expert-units" in invocation
+    assert '"${TESSERA_PREFLIGHT_CACHE_ARGS[@]}"' in invocation
+    assert 'TESSERA_PREFLIGHT_CACHE_ARGS=(--write-cached-expert-units)' in driver
+    assert 'TESSERA_PREFLIGHT_CACHE_ARGS=(--cached-units "$TESSERA_CACHED_UNITS")' in driver
     exporter = driver.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')
     encode = driver[exporter:driver.index("tee", exporter)]
     assert '"${TESSERA_CACHED_UNIT_ARGS[@]}"' in encode
     assert "--cached-expert-units" in driver[translator:exporter]
+    assert 'TESSERA_CACHED_UNIT_ARGS+=(--cached-units "$TESSERA_CACHED_UNITS")' in driver

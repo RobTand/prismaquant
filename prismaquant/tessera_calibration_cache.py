@@ -1034,9 +1034,29 @@ def open_hessian_reference(path):
         from tessera.hessian_capture import ReferenceHessians
     except ImportError as error:
         raise RuntimeError('canonical Hessian references require the reviewed Tessera reference reader') from error
-    owner = ReferenceHessians(path)
+    collection = str(path).endswith('.collection.references.json')
+    if collection:
+        try:
+            from tessera.hessian_capture import ReferenceHessianCollection
+        except ImportError as error:
+            raise RuntimeError('Hessian reference collections require the reviewed Tessera collection reader') from error
+        owner = ReferenceHessianCollection(path)
+    else:
+        owner = ReferenceHessians(path)
     try:
-        validate_capture_contract(owner.canonical_manifest())
+        if collection:
+            # The collection reader proves each disjoint v1 child and holds
+            # their descriptors. Retain PrismaQuant's stronger source/runtime
+            # capture gate on every child's canonical metadata as well.
+            for child in owner.binding()['references']:
+                with ReferenceHessians(child['path']) as reference:
+                    if (reference.document_sha256 != child['sha256'] or
+                            reference.binding() != child['binding']):
+                        raise RuntimeError('Hessian collection child changed during capture validation')
+                    validate_capture_contract(reference.canonical_manifest())
+            owner.require_current()
+        else:
+            validate_capture_contract(owner.canonical_manifest())
         return owner
     except BaseException:
         owner.close()
