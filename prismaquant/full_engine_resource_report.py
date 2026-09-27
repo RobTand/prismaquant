@@ -959,6 +959,9 @@ def _resolved_evidence(domains: Mapping, observations: Mapping, where: str) -> N
 def _partition(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
     partition = _object(value, _PARTITION_FIELDS_V2 if schema in _EXTENDED_REPORT_SCHEMAS
                         else _PARTITION_FIELDS, where)
+    # Validate shape before reading counters: malformed scopes must be a
+    # structured refusal, not an AttributeError escaping the artifact gate.
+    _scope(partition["scope"], where + " scope", schema=schema)
     if schema in _EXTENDED_REPORT_SCHEMAS:
         observer = _list(partition["observer_allocations"], where + " observer allocations")
         if observer and schema == REPORT_SCHEMA_V2:
@@ -993,7 +996,6 @@ def _partition(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mappin
             f"domains are {ADMITTED_DOMAINS_SOURCE!r}, because supplied domains close on a "
             f"caller's word rather than on evidence")
     _terms(partition["terms"], where + " terms")
-    _scope(partition["scope"], where + " scope", schema=schema)
     _string_list(partition["units"], where + " units")
     rows = []
     for item in _list(partition["membership"], where + " membership"):

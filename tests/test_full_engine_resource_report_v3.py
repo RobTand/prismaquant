@@ -170,6 +170,14 @@ def test_whole_peak_requires_complete_step_coverage():
     assert consumer._whole_off_step_peak(observations) is None
 
 
+@pytest.mark.parametrize("scope", [None, [], "not-an-object"])
+def test_malformed_partition_scope_is_a_structured_refusal(tmp_path, scope):
+    document = report()
+    document["partition"]["scope"] = scope
+    with pytest.raises(RuntimePriceError, match="scope"):
+        consumer.read_full_engine_resource_report(seal(tmp_path, document), root=tmp_path)
+
+
 def test_world_rosters_cannot_mix_different_configurations(tmp_path):
     documents = [report(rank) for rank in range(2)]
     for identity in (documents[1]["identity"]["run"], documents[1]["partition"]["identity"],
