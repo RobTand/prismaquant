@@ -72,6 +72,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .cost_stage_checkpoint import atomic_write_bytes, publish_new_bytes
+from .digests import file_sha256hex
 from .layer_config import LAYER_CONFIG_META_KEY
 from .measured_runtime_prices import identity_sha256
 
@@ -281,8 +282,8 @@ def _assignment_payload(assignment: dict, digest: str, provenance_stub: dict) ->
     return {**assignment, LAYER_CONFIG_META_KEY: {
         "schema": ASSIGNMENT_SCHEMA, "assignment_sha256": digest,
         "research_only": True,
-        "note": ("prefill frontier sweep point; re-run the allocator at "
-                 "this SLO for a shippable layer config with full metadata"),
+        "note": ("prefill frontier sweep point; use prefill_frontier replay "
+                 "for a research-only layer config with full allocator metadata"),
         **provenance_stub}}
 
 
@@ -566,6 +567,8 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
         "fixed_resources": dict(ctx.fixed_resources),
         "cost_path": str(cost_path), "cost_sha256": cost_sha256,
         "probe_path": str(ctx.probe_path),
+        "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
+        "allocator_cwd": str(Path.cwd()),
         "target_bits": float(ctx.target_bits),
         "serve_slos_other_axes": {key: value for key, value in ctx.slos.as_dict().items()
                                   if key != "p95_ttft_ms"},
@@ -643,8 +646,100 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def replay(frontier: Path, digest: str, output: Path) -> None:
+    """Re-solve a digest-bound point and use the allocator's only config writer.
+
+    Recorded argv is replayed without input overrides. Paths must resolve to
+    the bound inputs, but cwd is audit-only: PB may materialize a new checkout
+    for each action. Old v1 sweeps have no probe digest; they still bind cost,
+    table, context, scope and the exact re-solved assignment. New sweeps also
+    bind probe bytes. No placement/latency certification follows from replay.
+    """
+    raw = frontier.read_bytes()
+    document = json.loads(raw)
+    if document.get("schema") != SCHEMA or document.get("certifies_placement") is not False:
+        raise PrefillFrontierError("replay requires a non-placement-certified prefill frontier")
+    provenance = document["provenance"]
+    points = [p for p in document["points"]
+              if p.get("assignment_sha256") == digest and p.get("feasible") is True]
+    if not points:
+        raise PrefillFrontierError(f"no feasible sweep point for assignment {digest}")
+    # A digest can occur at many SLOs. The tightest recorded one is deterministic.
+    point = min(points, key=lambda p: float(p["slo_ms"]))
+    assignment_path = Path(point["assignment_path"])
+    payload = json.loads(assignment_path.read_bytes())
+    expected = {k: v for k, v in payload.items() if k != LAYER_CONFIG_META_KEY}
+    _verify_reusable_assignment(
+        assignment_path, assignment=expected, digest=digest,
+        provenance_stub={k: provenance["table_identity"][v]
+                         for k, v in (("table_id", "table_id"), ("table_sha256", "sha256"))})
+    for key in ("cost", "probe"):
+        checksum = provenance.get(f"{key}_sha256")
+        if key == "cost" and not checksum:
+            raise PrefillFrontierError("replay requires cost_sha256")
+        if checksum and file_sha256hex(Path(provenance[f"{key}_path"])) != checksum:
+            raise PrefillFrontierError(f"replay {key}_sha256 mismatch")
+    allocator_argv = provenance["allocator_argv"]
+    if not isinstance(allocator_argv, list) or not all(isinstance(a, str) for a in allocator_argv):
+        raise PrefillFrontierError("replay requires recorded allocator_argv")
+    if output.exists() or output.is_symlink():
+        raise PrefillFrontierError(f"replay refuses to overwrite {output}")
+    from . import allocator
+
+    emitted = False
+
+    def emit(ctx):
+        nonlocal emitted
+        for key, actual in (("table_identity", ctx.table_identity),
+                            ("runtime_context", ctx.runtime_context),
+                            ("fixed_resources", ctx.fixed_resources),
+                            ("target_bits", ctx.target_bits),
+                            ("cost_path", ctx.cost_path), ("probe_path", ctx.probe_path)):
+            if provenance[key] != actual:
+                raise PrefillFrontierError(f"replay {key} differs from sweep provenance")
+        if ctx.fixed_resource_scope != document["fixed_resource_scope"]:
+            raise PrefillFrontierError("replay fixed_resource_scope differs from sweep")
+        axes = {k: v for k, v in ctx.slos.as_dict().items() if k != "p95_ttft_ms"}
+        if axes != provenance["serve_slos_other_axes"]:
+            raise PrefillFrontierError("replay serve_slos_other_axes differs from sweep")
+        if point["target_bits"] != ctx.target_bits:
+            raise PrefillFrontierError("replay point target_bits differs from sweep")
+        stamp = {
+            "schema": "prismaquant.prefill_frontier.replay.v1",
+            "frontier_sha256": hashlib.sha256(raw).hexdigest(),
+            "assignment_sha256": digest,
+            "slo_ms": point["slo_ms"], "target_bits": point["target_bits"],
+            "table_identity": ctx.table_identity,
+            "cost_sha256": file_sha256hex(Path(ctx.cost_path)),
+            "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
+            "probe_bound_by_sweep": "probe_sha256" in provenance,
+        }
+        ctx.emit_replay(point["slo_ms"], point["target_bits"], expected, stamp)
+        emitted = True
+
+    allocator.main([*allocator_argv, "--layer-config", str(output)], measured_runtime_sweep=emit)
+    if not emitted:
+        raise PrefillFrontierError("allocator returned without emitting replay")
+
+
+def replay_main(argv: Sequence[str]) -> int:
+    ap = argparse.ArgumentParser(prog="python -m prismaquant.prefill_frontier replay")
+    ap.add_argument("--frontier", type=Path, required=True)
+    ap.add_argument("--assignment-sha256", required=True)
+    ap.add_argument("--layer-config", type=Path, required=True)
+    args = ap.parse_args(argv)
+    try:
+        replay(args.frontier, args.assignment_sha256, args.layer_config)
+    except (ValueError, KeyError, TypeError, OSError) as exc:
+        ap.error(str(exc))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    own, allocator_argv = _split_argv(sys.argv[1:] if argv is None else argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["replay"]:
+        return replay_main(argv[1:])
+    own, allocator_argv = _split_argv(argv)
     ap = build_parser()
     args = ap.parse_args(own)
     try:

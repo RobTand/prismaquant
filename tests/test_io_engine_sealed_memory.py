@@ -26,7 +26,9 @@ memfd pages live, and not out of ``anon``: the committed reading counts
 A take alone frees nothing, which is why the stream charges a taken group to
 its budget until the consumer releases it. It must run where it can read its
 cgroup; a missing cgroup fails it rather than skipping it, because a skipped
-probe certifies nothing.
+probe certifies nothing. It must also be the only test process in that cgroup
+(``own_cgroup``): beside other pytest-xdist workers it skips, since their
+allocations land in the same reading.
 """
 from __future__ import annotations
 
@@ -37,6 +39,8 @@ from prismaquant import io_engine
 from cgroup_readings import READING_GRAIN, own_cgroup as _own_cgroup
 from cgroup_readings import committed as _committed, pages as _pages
 from cgroup_readings import quiet as _quiet, renders
+
+pytestmark = pytest.mark.own_cgroup
 
 # A Stage B render file: 16 MiB of storage, as the GLM layer's renders are.
 RENDER_SHAPE = (2048, 4096)

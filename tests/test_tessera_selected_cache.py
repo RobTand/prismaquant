@@ -182,7 +182,7 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
         if name == DENSE: continue
         reference = copy.deepcopy(record['identity'])
         candidate = copy.deepcopy(record)
-        candidate['identity'].update(encoder_source_sha256='8'*64, recipe=copy.deepcopy(bridge.ADDED_RECIPE))
+        candidate['identity'].update(encoder_source_sha256='8'*64, recipe=bridge.added_format_recipe(bridge.R13_ADDED_FORMAT))
         blob = (tmp_path / record['file']).read_bytes()
         path = added / record['file']; path.write_bytes(blob)
         render = added / (record['file'] + '.pt'); render.write_bytes(b'render')
@@ -191,22 +191,22 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
                     'encoder_source_proof': proof}
         qualified = {'act_bits': 4, 'static_contract': {'measured_as_served': True},
                      'activation_max_abs': 12.0, 'input_global_scale': 0.5}
-        row = {'qname': name, 'format': bridge.ADDED_FORMAT, 'record': candidate,
+        row = {'qname': name, 'format': bridge.R13_ADDED_FORMAT, 'record': candidate,
                'wire': str(path), 'render': str(render), 'catalog_source_adoption': adoption,
                'activation': qualified}
         for key in ('wire', 'render'):
             stat = Path(row[key]).stat()
             row[key+'_stat'] = {'inode': stat.st_ino, 'bytes': stat.st_size,
                 'mtime_ns': stat.st_mtime_ns, 'ctime_ns': stat.st_ctime_ns}
-        rows.append(row); data.cells[name, bridge.ADDED_FORMAT] = copy.deepcopy(row)
-        data.payload['costs'][name][bridge.ADDED_FORMAT] = copy.deepcopy(data.payload['costs'][name][FMT])
+        rows.append(row); data.cells[name, bridge.R13_ADDED_FORMAT] = copy.deepcopy(row)
+        data.payload['costs'][name][bridge.R13_ADDED_FORMAT] = copy.deepcopy(data.payload['costs'][name][FMT])
         metadata[tep.EXPERT_WIRES_KEY][name] = candidate
-        assignment[name] = bridge.ADDED_FORMAT
+        assignment[name] = bridge.R13_ADDED_FORMAT
         groups[name] = {'members': [name], 'max_abs': 24.0, 'input_global_scale': 0.25}
     catalog = _write(tmp_path, 'selected-overlay.json', {'schema': 'prismaquant.t4_adopted_catalog.v1', 'cells': rows})
     data.inputs = {'candidate_overlay': catalog}
     data.payload['provenance']['candidate_overlay'] = catalog
-    policy = {'schema': served.SCHEMA, 'format': bridge.ADDED_FORMAT,
+    policy = {'schema': served.SCHEMA, 'format': bridge.R13_ADDED_FORMAT,
               'effective_max_abs': {name: 24.0 for name in groups},
               'qualification_max_abs': {name: 12.0 for name in groups},
               'executed_grouping': {'groups': groups},
@@ -216,8 +216,8 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
         name = row['qname']; qualification = row['activation']
         operator = {'source_weight': {'shape': [2, 2]},
             'activation': {**qualification, 'activation_max_abs': 24.0, 'input_global_scale': 0.25},
-            'served_activation_policy': served.operator_policy_record(policy_bound, policy, name, bridge.ADDED_FORMAT, qualification)}
-        handoff['costs'][name][bridge.ADDED_FORMAT] = {'joint_operator_identity': operator, 'input_global_scale': 0.25}
+            'served_activation_policy': served.operator_policy_record(policy_bound, policy, name, bridge.R13_ADDED_FORMAT, qualification)}
+        handoff['costs'][name][bridge.R13_ADDED_FORMAT] = {'joint_operator_identity': operator, 'input_global_scale': 0.25}
     old_plan = _write(tmp_path, 'accepted-old-plan.json', {'inputs': {}})
     old_pwc = _write(tmp_path, 'accepted-old-pwc.json', {})
     old_prepared = _write(tmp_path, 'accepted-old-prepared.json', {'production_cache': old_pwc})
@@ -258,7 +258,7 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     if change == 'missing_extension': extension = None
     elif change == 'missing_proof': Path(proof['path']).write_text('{}')
     elif change == 'changed_wire': Path(rows[0]['wire']).write_bytes(b'changed')
-    elif change == 'wrong_scale': handoff['costs'][rows[0]['qname']][bridge.ADDED_FORMAT]['input_global_scale'] = 0.5
+    elif change == 'wrong_scale': handoff['costs'][rows[0]['qname']][bridge.R13_ADDED_FORMAT]['input_global_scale'] = 0.5
     def build():
         return selected_cached_units_manifest(assignment, metadata, handoff, data,
             schema='tessera.cached_units.v2', catalog_extension=extension, producer_packages=packages)

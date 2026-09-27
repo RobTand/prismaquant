@@ -53,8 +53,6 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
     """Run a source layer only until the real packed-expert call is reached."""
     from . import pretrained_initialization_contract
     from .cost_streaming import StreamedForwardBoundaries
-    from .joint_aura import source_execution_identity
-    from .production_weight_cache import _cb_cache_tensor_identity
     from .tessera_expert_projection import _require_source_identity
 
     if runner.profile.name != "glm5_next" or not (3 <= layer < runner.num_layers):
@@ -97,6 +95,19 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
         handle.remove()
     if not captured:
         raise RuntimeError("source layer did not reach its packed MoE boundary")
+    return glm_route_record(runner, module, router, captured, layer=layer,
+        calibration=calibration, producer_source=source, epsilon=epsilon,
+        model_load_contract=pretrained_initialization_contract(runner.model),
+        replay_source="fresh_isolated_bf16_layer_replay", parent_boundary=parent_boundary)
+
+
+def glm_route_record(runner, module, router, captured, *, layer, calibration,
+                     producer_source, epsilon, model_load_contract, replay_source,
+                     parent_boundary=None, shape=None):
+    """Describe the original hook arguments for replay and streamed captures."""
+    from .joint_aura import source_execution_identity
+    from .production_weight_cache import _cb_cache_tensor_identity
+
     bias = router.e_score_correction_bias
     if bias.dtype != torch.float32 or list(bias.shape) != [module.num_experts] or not torch.isfinite(bias).all():
         raise ValueError("GLM routing capture requires the original finite FP32 correction bias")
@@ -115,21 +126,23 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
             correction_bias={k: tensor_identity["expert_bias"][k] for k in ("content_sha256", "dtype")},
             expert_bias_affects="selection_only", norm_topk_prob=router.norm_topk_prob))
     return {"tensors": captured, "metadata": {
-        "schema": "prismaquant.native_moe_raw_boundary.v1", "unit": unit,
-        "shape": {"experts": module.num_experts, "hidden_size": module.hidden_dim,
-                  "intermediate_size": module.intermediate_dim, "top_k": router.top_k},
+        "schema": "prismaquant.native_moe_raw_boundary.v1",
+        "unit": f"model.language_model.layers.{layer}.mlp.experts",
+        "shape": shape if shape is not None else {
+            "experts": module.num_experts, "hidden_size": module.hidden_dim,
+            "intermediate_size": module.intermediate_dim, "top_k": router.top_k},
         "routing": routing, "profile_role_order": ["w1", "w3", "w2"],
         "scope": "first calibration sequence; decode uses its first row, not autoregressive generation",
         "calibration_sha256": calibration["calibration_sha256"],
         "calibration_shape": calibration["shape"], "calibration_dtype": calibration["dtype"],
-        "producer_source": source, "runtime_config": runner.model.config.to_dict(),
+        "producer_source": producer_source, "runtime_config": runner.model.config.to_dict(),
         "source_execution": source_execution_identity(runner.model),
-        "model_load_contract": pretrained_initialization_contract(runner.model),
+        "model_load_contract": model_load_contract,
         "attention_implementation": "eager",
         "capture_runtime": {"torch": str(torch.__version__), "cuda": torch.version.cuda,
                             "transformers": __import__("transformers").__version__},
         "capture_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "replay": {"schema": "prismaquant.glm_routing_boundary_replay.v1", "layer": layer,
-                   "parent_boundary": parent_boundary, "source": "fresh_isolated_bf16_layer_replay",
+                   "parent_boundary": parent_boundary, "source": replay_source,
                    "sample": 0, "stop": "before_original_packed_experts_forward"},
         "tensors": tensor_identity}}

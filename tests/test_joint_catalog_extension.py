@@ -11,8 +11,8 @@ import pytest
 
 from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 from prismaquant.joint_catalog_extension import (
-    ADDED_FORMAT, ADDED_RECIPE, ADOPTION_SCHEMA, create_extension,
-    require_extension, verify_catalog_pair,
+    ADOPTION_SCHEMA, CATALOG_SCHEMA_V1, CATALOG_SCHEMA_V2, R13_ADDED_FORMAT as ADDED_FORMAT,
+    added_format_recipe, create_extension, extended_roster, require_extension, verify_catalog_pair,
 )
 from prismaquant.joint_adjoint_slices import (
     adjoint_slice_sha256, stage_a_run_header, stage_a_run_header_sha256, write_adjoint_slice,
@@ -84,40 +84,52 @@ def _receipt(inputs, campaign, probe, *, scope, identity=None):
                   **(identity or {})})
 
 
-def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None):
+def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None, added=None, proof=True):
     """``(inputs, receipt, capture)`` of a synthetic catalog pair.
 
     With ``scoped``, the original plan binds real scope artifacts
     (:func:`_scope_bindings`) and the receipt seals ``campaign_scope: None``,
     the way R13 sealed it (PQ #1126): the run declared no scope, and only the
     plan it ran can say which campaign it answers for. ``identity`` overrides
-    run-identity fields of the receipt.
+    run-identity fields of the receipt. ``added`` maps each added format to
+    the qnames it covers (default: the R13 format on every unit); the
+    extended plan binds a catalog declaring exactly those cells. Without
+    ``proof`` the added cells name no reseal proof.
     """
     tmp_path.mkdir(parents=True, exist_ok=True)
     qnames = campaign['roster']
+    added = {ADDED_FORMAT: list(qnames)} if added is None else added
     oldfmt = 'TESSERA_E4M3_K1_R1024'
     source = {'content_sha256': '1'*64, 'shape': [4, 4], 'dtype': 'torch.bfloat16', 'logical_bytes': 32}
-    proof = _encoder_proof(tmp_path)
+    proof = _encoder_proof(tmp_path) if proof else None
     old_weights, old_cells, new_weights, new_cells = {}, {}, {}, {}
+    declared, rosters = [], {}
     for name in qnames:
         identity = {'unit': name, 'source': {'sha256': '2'*64, 'shape': [4, 4]},
             'projection': {'kind': 'synthetic'}, 'calibration': {'hessian_sha256': '3'*64},
             'encoder_fixture_id': 'f'*64, 'encoder_source_sha256': '4'*64,
-            'recipe': {**ADDED_RECIPE, 'grid': 'E4M3', 'q256': 1024, 'span': 1}}
+            'recipe': {**added_format_recipe(ADDED_FORMAT), 'grid': 'E4M3', 'q256': 1024, 'span': 1}}
         oldcell = {'source_weight': source, 'rendered_weight': {**source, 'content_sha256': '5'*64},
             'activation': {'input_global_scale': None}, 'encoding_identity_sha256': canonical_json_sha256(identity, where="synthetic identity"),
             'wire_sha256': '6'*64, 'render_file_sha256': '7'*64,
             'render_origin': 'encoded', 'render_comparison': 'independent_render_vs_wire'}
         old_weights[name, oldfmt] = '/fixture/' + name + '.old.pt'
         old_cells[name, oldfmt] = oldcell
-        candidate = {**copy.deepcopy(identity), 'recipe': copy.deepcopy(ADDED_RECIPE), 'encoder_source_sha256': '8'*64}
-        newcell = {**copy.deepcopy(oldcell), 'activation': {'input_global_scale': 0.5},
-            'encoding_identity_sha256': canonical_json_sha256(candidate, where="synthetic candidate"),
-            'catalog_source_adoption': {'schema': ADOPTION_SCHEMA,
-                'reference_pair': [name, oldfmt], 'reference_encoding_identity': identity,
-                'candidate_encoding_identity': candidate, 'encoder_source_proof': proof}}
-        new_weights[name, ADDED_FORMAT] = '/fixture/' + name + '.a4.pt'
-        new_cells[name, ADDED_FORMAT] = newcell
+        unit_added = []
+        for fmt, names in sorted(added.items()):
+            if name not in names:
+                continue
+            candidate = {**copy.deepcopy(identity), 'recipe': added_format_recipe(fmt), 'encoder_source_sha256': '8'*64}
+            newcell = {**copy.deepcopy(oldcell), 'activation': {'input_global_scale': 0.5},
+                'encoding_identity_sha256': canonical_json_sha256(candidate, where="synthetic candidate"),
+                'catalog_source_adoption': {'schema': ADOPTION_SCHEMA,
+                    'reference_pair': [name, oldfmt], 'reference_encoding_identity': identity,
+                    'candidate_encoding_identity': candidate, 'encoder_source_proof': proof}}
+            new_weights[name, fmt] = '/fixture/' + name + '.' + fmt + '.pt'
+            new_cells[name, fmt] = newcell
+            declared.append({'qname': name, 'format': fmt})
+            unit_added.append(fmt)
+        rosters[name] = list(extended_roster([oldfmt, 'BF16'], unit_added))
     new_weights.update(old_weights)
     new_cells.update(old_cells)
     common = {'source_model_identity': probe['source_model'],
@@ -140,7 +152,11 @@ def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None):
                              'required_source_units': len(qnames), 'required_campaign_groups': 1}
         oldplan['execution'].update(calib_seqlen=512, n_calib_samples=512)
         common['calibration_input']['artifact_sha256'] = bindings['calibration_input']['sha256']
-    newplan = {**copy.deepcopy(oldplan), 'inputs': {'fixture': 'new'},
+    catalog = {'schema': CATALOG_SCHEMA_V2, 'formats': sorted({cell['format'] for cell in declared}),
+               'sources': [{'cost': {'path': '/fixture/cost.pkl', 'sha256': 'c'*64}, 'reseal_proof': proof}],
+               'cell_sources': [0] * len(declared), 'cells': declared}
+    newplan = {**copy.deepcopy(oldplan),
+               'inputs': {'fixture': 'new', 'candidate_overlay': _write(tmp_path, 'pair-catalog.json', catalog)},
                'output_root': str(tmp_path / 'new-output')}
     inputs = {'original_plan': _write(tmp_path, 'old-plan.json', oldplan),
               'extended_plan': _write(tmp_path, 'new-plan.json', newplan)}
@@ -152,7 +168,7 @@ def _pair(tmp_path, campaign, probe, *, scoped=False, identity=None):
         prepared = {**common, 'schema': PREPARED_SCHEMA, 'status': 'complete',
             'plan_sha256': inputs[label+'_plan']['sha256'],
             'production_cache': _write(tmp_path, label+'.pkl', cache, binary=True),
-            'formats_by_qname': {name: [oldfmt] + ([ADDED_FORMAT] if label == 'extended' else []) + ['BF16']
+            'formats_by_qname': {name: (rosters[name] if label == 'extended' else [oldfmt, 'BF16'])
                                  for name in qnames}, 'measured_cells': len(cells)}
         inputs[label+'_prepared'] = _write(tmp_path, label+'-prepared.json', prepared)
     receipt = _receipt(inputs, campaign, probe, scope=None if scoped else campaign['scope'],
@@ -670,37 +686,41 @@ _SYNTHETIC_HESSIAN = {'supplied': True, 'capture_sha256': 'f'*64, 'text_sha256':
 
 
 def _overlay_case(tmp_path, campaign, probe, *, row_hessian=_SYNTHETIC_HESSIAN,
-                  panel_hessian=_SYNTHETIC_HESSIAN, overlay_hessian=None):
+                  panel_hessian=_SYNTHETIC_HESSIAN, overlay_hessian=None, added=None, proof=True,
+                  schema=CATALOG_SCHEMA_V1):
     """A bound candidate overlay over the synthetic pair, and the base it attaches to.
 
     ``row_hessian`` is what every overlay scalar row carries,
     ``panel_hessian`` the base payload's ``provenance.hessian`` and
     ``overlay_hessian`` the overlay cost payload's own ``provenance.hessian``.
+    ``added`` and ``proof`` pass to :func:`_pair`; ``schema`` is the catalog's
+    (a v1 catalog names the one R13 format).
     """
     from types import SimpleNamespace
     tmp_path.mkdir(parents=True, exist_ok=True)
-    inputs, _, _ = _pair(tmp_path, campaign, probe)
+    inputs, _, _ = _pair(tmp_path, campaign, probe, added=added, proof=proof)
     original = json.loads(Path(inputs['original_prepared']['path']).read_bytes())
     extended = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
     cache = pickle.loads(Path(extended['production_cache']['path']).read_bytes())
     base_cells, rows, scalar_costs = {}, [], {}
     for (name, fmt), verified in sorted(cache.metadata['verified_cells'].items()):
-        if fmt != ADDED_FORMAT:
+        if fmt in original['formats_by_qname'][name]:
             continue
         adoption = verified['catalog_source_adoption']
         reference_pair = tuple(adoption['reference_pair'])
         base_cells[reference_pair] = {'record': {'identity': adoption['reference_encoding_identity']}}
-        anchor = {'dloss': 1.0, 'family': 'TESSERA_E2M1_K2', 'body_rate_q256': 896,
+        family, _, rate = fmt.rpartition('_R')
+        anchor = {'dloss': 1.0, 'family': family, 'body_rate_q256': int(rate),
                   'input_global_scale': 0.5, 'wire_bytes': 4,
                   'activation_contract': 'fp4_e2m1', 'activation_quantized': True}
-        scalar_costs[name] = {fmt: {'output_mse_measured': True, 'cost_source': 'tessera_campaign_measured',
+        scalar_costs.setdefault(name, {})[fmt] = {'output_mse_measured': True, 'cost_source': 'tessera_campaign_measured',
             'tessera_provenance': 'measured', 'currency': 'output_mse_under_route_activation_contract',
-            'output_mse': 1.0, 'tessera_family': anchor['family'], 'tessera_body_rate_q256': 896,
+            'output_mse': 1.0, 'tessera_family': anchor['family'], 'tessera_body_rate_q256': int(rate),
             'input_global_scale': 0.5, 'wire_bytes': 4, 'activation_contract': anchor['activation_contract'],
-            'activation_quantized': True, 'hessian_identity': copy.deepcopy(row_hessian)}}
+            'activation_quantized': True, 'hessian_identity': copy.deepcopy(row_hessian)}
         paths = {}
         for field in ('wire', 'render'):
-            path = tmp_path/(name+'.'+field)
+            path = tmp_path/(name+'.'+fmt+'.'+field)
             path.write_bytes(field.encode())
             s = path.stat()
             paths[field] = str(path)
@@ -717,12 +737,17 @@ def _overlay_case(tmp_path, campaign, probe, *, row_hessian=_SYNTHETIC_HESSIAN,
         cost = {'costs': scalar_costs}
         if overlay_hessian is not None:
             cost['provenance'] = {'hessian': overlay_hessian}
-        catalog = {'schema': 'prismaquant.t4_adopted_catalog.v1', 'format': ADDED_FORMAT,
-            'old_prepared': inputs['original_prepared'], 'old_pwc': original['production_cache'],
-            'cost': _write(tmp_path, 'scalar.pkl', cost, binary=True),
-            'reseal_proof': rows[0]['catalog_source_adoption']['encoder_source_proof'], 'cells': rows,
+        cost_bound = _write(tmp_path, 'scalar.pkl', cost, binary=True)
+        proof_bound = rows[0]['catalog_source_adoption']['encoder_source_proof']
+        catalog = {'schema': schema, 'old_prepared': inputs['original_prepared'],
+            'old_pwc': original['production_cache'], 'cells': rows,
             **{key: original[key] for key in ('source_model_identity', 'source_execution', 'calibration_input',
                                              'reader_identity', 'projection_backend')}}
+        if schema == CATALOG_SCHEMA_V1:
+            catalog.update(format=ADDED_FORMAT, cost=cost_bound, reseal_proof=proof_bound)
+        else:
+            catalog.update(formats=sorted({row['format'] for row in rows}), cell_sources=[0] * len(rows),
+                           sources=[{'cost': cost_bound, 'reseal_proof': proof_bound}], carried_from=[])
         bound = _write(tmp_path, 'catalog.json', catalog)
         data = SimpleNamespace(inputs={'fixture': 'old', 'candidate_overlay': bound},
             cells=copy.deepcopy(base_cells), formats_by_qname=copy.deepcopy(original['formats_by_qname']),
@@ -936,3 +961,197 @@ def test_overlay_assembly_inserts_before_terminal_bf16():
     for name in rosters:
         assemble.add_overlay_format(rosters, name, ADDED_FORMAT)
     assert rosters == {name: unit['extended'] for name, unit in _extended_units().items()}
+
+
+# -- N added formats (PQ #1432) -------------------------------------------------
+
+_WIRE = {'body': 'tcq', 'span': 2, 'plane': 'lut16', 'window_bits': 0, 'seed': 0, 'sigma': None,
+         'channel_sigma': None}
+_K1_WIRE = {'body': 'window', 'span': 1, 'plane': 'channel', 'window_bits': 14, 'seed': 0, 'sigma': None,
+            'channel_sigma': None}
+
+
+def _contract(**e2m1_changes):
+    """A two-family ``runtime_contract.json`` ``formats`` table, shaped as the pinned one."""
+    e2m1 = {'kind': 'tessera_wire', 'family': 'TESSERA_E2M1_K2', 'grid': 'E2M1x2',
+            'name_pattern': 'TESSERA_E2M1_K2_R{k}', 'reader_rate_range_q256': [128, 896],
+            'reader_rate_step_q256': 128,
+            'attested_wire': [{'q256': q, **_WIRE} for q in (128, 512, 896)]}
+    e2m1.update(e2m1_changes)
+    e4m3 = {'kind': 'tessera_wire', 'family': 'TESSERA_E4M3_K1', 'grid': 'E4M3',
+            'name_pattern': 'TESSERA_E4M3_K1_R{k}', 'reader_rate_range_q256': [256, 2048],
+            'reader_rate_step_q256': 1, 'attested_wire': [{'q256': q, **_K1_WIRE} for q in (832, 1088)]}
+    return {'formats': [e2m1, e4m3]}
+
+
+def test_an_added_recipe_is_the_attested_template_with_its_q256():
+    """The recipe comes from the contract's ``attested_wire`` table, the rung substituted."""
+    assert added_format_recipe('TESSERA_E2M1_K2_R640', contract=_contract()) == {
+        **_WIRE, 'grid': 'E2M1x2', 'q256': 640}
+    # A K1 family's rungs are any q256 on its step, attested or not.
+    assert added_format_recipe('TESSERA_E4M3_K1_R1152', contract=_contract()) == {
+        **_K1_WIRE, 'grid': 'E4M3', 'q256': 1152}
+    # The pinned contract derives the recipe the R13 catalog carried as a literal.
+    assert added_format_recipe(ADDED_FORMAT) == {
+        'body': 'tcq', 'channel_sigma': None, 'grid': 'E2M1x2', 'plane': 'lut16', 'q256': 896,
+        'seed': 0, 'sigma': None, 'span': 2, 'window_bits': 0}
+
+
+@pytest.mark.parametrize('fmt,changes,match', [
+    ('TESSERA_E2M1_K2_R640', {'attested_wire': [{'q256': 128, **_WIRE}, {'q256': 896, **_WIRE, 'span': 1}]},
+     'disagree'),
+    ('TESSERA_E2M1_K2_R1024', {}, 'outside the reader range'),
+    ('TESSERA_E4M3_K1_R2049', {}, 'outside the reader range'),
+    ('TESSERA_E4M3_K1_R255', {}, 'outside the reader range'),
+    ('TESSERA_E2M1_K2_R700', {}, 'off the reader step'),
+    ('TESSERA_BF16_K1_R1024', {}, '0 format rows'),
+    ('TESSERA_E2M1_K2', {}, 'FAMILY_R<q256>'),
+    ('TESSERA_E2M1_K2_R640', {'attested_wire': []}, 'no attested_wire'),
+])
+def test_an_added_recipe_refuses_a_disagreeing_table_or_an_unreadable_rung(fmt, changes, match):
+    with pytest.raises(ValueError, match=match):
+        added_format_recipe(fmt, contract=_contract(**changes))
+
+
+def test_several_added_formats_go_sorted_before_the_terminal_bf16():
+    """One order for the loader, the assembler and the pair check."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+    import assemble_t4_overlay as assemble
+    base = ['TESSERA_BF16_K1_R1024', 'TESSERA_E4M3_K1_R1024', 'TESSERA_E4M3_K1_R832', 'BF16']
+    added = ['TESSERA_E4M3_K1_R1152', 'TESSERA_E2M1_K2_R768', 'TESSERA_BF16_K1_R960']
+    expected = ('TESSERA_BF16_K1_R1024', 'TESSERA_E4M3_K1_R1024', 'TESSERA_E4M3_K1_R832',
+                'TESSERA_BF16_K1_R960', 'TESSERA_E2M1_K2_R768', 'TESSERA_E4M3_K1_R1152', 'BF16')
+    assert extended_roster(base, added) == expected
+    assert extended_roster(base, list(reversed(added))) == expected
+    # One format is the R13 case.
+    assert extended_roster(base, ADDED_FORMAT) == (*base[:-1], ADDED_FORMAT, 'BF16')
+    # The assembler inserts per unit, whatever order the catalog lists its cells in.
+    for cells in ([{'qname': 'u', 'format': f} for f in added],
+                  [{'qname': 'u', 'format': f} for f in reversed(added)]):
+        rosters = {'u': list(base)}
+        assemble.add_overlay_formats(rosters, cells)
+        assert rosters == {'u': list(expected)}
+    with pytest.raises(ValueError, match='already in the base roster'):
+        extended_roster(base, ['TESSERA_E4M3_K1_R832'])
+    with pytest.raises(ValueError, match='terminal BF16'):
+        extended_roster(base[:-1], added)
+
+
+def _multi_format(campaign):
+    """Three added formats with different coverage: one on every unit, two on halves."""
+    names = sorted(campaign['roster'])
+    return {ADDED_FORMAT: names, 'TESSERA_E2M1_K2_R768': names[::2], 'TESSERA_E4M3_K1_R1152': names[1::2]}
+
+
+def test_a_multi_format_catalog_pair_verifies_and_attaches_in_one_order(tmp_path, campaign, probe):
+    """A v2 catalog adds several formats with per-format coverage; the pair
+    check verifies exactly the declared cells and the loader extends each
+    unit's roster in the pair's order."""
+    from prismaquant.joint_catalog_extension import attach_candidate_overlay
+    added = _multi_format(campaign)
+    inputs, _, _ = _pair(tmp_path/'pair', campaign, probe, added=added)
+    evidence = verify_catalog_pair(inputs)
+    assert evidence['added_cells'] == sum(len(names) for names in added.values())
+    extended = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())['formats_by_qname']
+    for name, roster in extended.items():
+        unit = [fmt for fmt, names in added.items() if name in names]
+        assert roster == list(extended_roster(['TESSERA_E4M3_K1_R1024', 'BF16'], unit))
+    case = _overlay_case(tmp_path/'overlay', campaign, probe, added=added, schema=CATALOG_SCHEMA_V2)
+    data, bound = case.bind()
+    result = attach_candidate_overlay(data, bound, verify_payloads=True)
+    assert {name: list(roster) for name, roster in result.formats_by_qname.items()} == extended
+    assert result.payload['costs'] == case.scalar_costs
+    assert len(result.cells) == len(case.base_cells) + evidence['added_cells']
+
+
+@pytest.mark.parametrize('change', ['undeclared_cell', 'wrong_recipe', 'unsorted_formats'])
+def test_a_multi_format_pair_refuses_an_undeclared_or_misrecipied_cell(tmp_path, campaign, probe, change):
+    added = _multi_format(campaign)
+    inputs, _, _ = _pair(tmp_path, campaign, probe, added=added)
+    plan = json.loads(Path(inputs['extended_plan']['path']).read_bytes())
+    catalog = json.loads(Path(plan['inputs']['candidate_overlay']['path']).read_bytes())
+    if change == 'undeclared_cell':
+        index = next(i for i, cell in enumerate(catalog['cells']) if cell['format'] == 'TESSERA_E2M1_K2_R768')
+        del catalog['cells'][index], catalog['cell_sources'][index]
+    elif change == 'unsorted_formats':
+        catalog['formats'] = list(reversed(catalog['formats']))
+    if change != 'wrong_recipe':
+        plan['inputs']['candidate_overlay'] = _write(tmp_path, 'changed-catalog.json', catalog)
+        inputs['extended_plan'] = _write(tmp_path, 'changed-plan.json', plan)
+        prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
+        prepared['plan_sha256'] = inputs['extended_plan']['sha256']
+        cache = pickle.loads(Path(prepared['production_cache']['path']).read_bytes())
+        cache.metadata['inputs'] = plan['inputs']
+        prepared['production_cache'] = _write(tmp_path, 'changed.pkl', cache, binary=True)
+        inputs['extended_prepared'] = _write(tmp_path, 'changed-prepared.json', prepared)
+        match = {'undeclared_cell': 'catalog-declared added cells', 'unsorted_formats': 'sorted unique'}[change]
+    else:
+        prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
+        cache = pickle.loads(Path(prepared['production_cache']['path']).read_bytes())
+        pair = next(p for p in cache.weights if p[1] == 'TESSERA_E4M3_K1_R1152')
+        cell = cache.metadata['verified_cells'][pair]
+        identity = cell['catalog_source_adoption']['candidate_encoding_identity']
+        identity['recipe'] = added_format_recipe('TESSERA_E4M3_K1_R1088')
+        cell['encoding_identity_sha256'] = canonical_json_sha256(identity, where='synthetic identity')
+        prepared['production_cache'] = _write(tmp_path, 'changed.pkl', cache, binary=True)
+        inputs['extended_prepared'] = _write(tmp_path, 'changed-prepared.json', prepared)
+        match = 'added candidate recipe for TESSERA_E4M3_K1_R1152'
+    with pytest.raises(ValueError, match=match):
+        verify_catalog_pair(inputs)
+
+
+def test_a_cell_with_no_reseal_proof_is_admitted_in_dev_mode_only(tmp_path, campaign, probe, monkeypatch, capsys):
+    """New wires are encoded at the current pin, whose encoder source no reseal
+    proof covers. Sealing is off (PQ #1147): the pair check and the loader
+    admit such a cell with one [DEV-MODE] line per stratum, and certified mode
+    refuses it. The source/H and fixture walls hold in both modes."""
+    from prismaquant.joint_catalog_extension import attach_candidate_overlay
+    added = {'TESSERA_E4M3_K1_R1152': sorted(campaign['roster'])}
+    inputs, _, _ = _pair(tmp_path/'pair', campaign, probe, added=added, proof=False)
+    case = _overlay_case(tmp_path/'overlay', campaign, probe, added=added, proof=False,
+                         schema=CATALOG_SCHEMA_V2)
+    # Certified first: the pair memo would otherwise answer from the dev pass.
+    with pytest.raises(ValueError, match='names no encoder source proof'):
+        verify_catalog_pair(inputs)
+    data, bound = case.bind()
+    with pytest.raises(ValueError, match='names no encoder source proof'):
+        attach_candidate_overlay(data, bound, verify_payloads=True)
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    capsys.readouterr()
+    assert verify_catalog_pair(inputs)['added_cells'] == len(campaign['roster'])
+    stamps = [line for line in capsys.readouterr().out.splitlines() if '[DEV-MODE]' in line]
+    assert len(stamps) == 1 and 'dense:TESSERA_E4M3_K1' in stamps[0]
+    data, bound = case.bind()
+    result = attach_candidate_overlay(data, bound, verify_payloads=True)
+    assert all('TESSERA_E4M3_K1_R1152' in roster for roster in result.formats_by_qname.values())
+    # A source/H wall still refuses in dev mode.
+    def drift(rows, _costs):
+        rows[0]['record']['identity']['calibration']['hessian_sha256'] = '0'*64
+    data, bound = case.bind(drift)
+    with pytest.raises(ValueError):
+        attach_candidate_overlay(data, bound, verify_payloads=True)
+
+
+def test_a_proof_that_does_not_cover_the_candidate_stratum_is_a_seal(tmp_path, campaign, probe, monkeypatch):
+    """The fixture proof covers routed E4M3 and E2M1 but no routed BF16: a
+    routed BF16 candidate is uncovered. Certified mode refuses; dev mode admits
+    it unproven, with no producer package."""
+    from prismaquant.joint_catalog_extension import validated_encoder_adoption
+    inputs, _, _ = _pair(tmp_path, campaign, probe)
+    prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
+    cache = pickle.loads(Path(prepared['production_cache']['path']).read_bytes())
+    pair = next(p for p in cache.weights if p[1] == ADDED_FORMAT)
+    adoption = copy.deepcopy(cache.metadata['verified_cells'][pair]['catalog_source_adoption'])
+    assert validated_encoder_adoption(adoption, fmt=ADDED_FORMAT)['encoder_source_proof_covered'] is True
+    adoption['candidate_encoding_identity']['unit'] = 'model.layers.0.mlp.experts.0.down_proj'
+    with pytest.raises(ValueError, match='does not cover the added candidate stratum'):
+        validated_encoder_adoption(adoption, fmt='TESSERA_BF16_K1_R1152')
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    result = validated_encoder_adoption(adoption, fmt='TESSERA_BF16_K1_R1152')
+    assert result['encoder_source_proof_covered'] is False
+    assert result['proof'] is None and result['producer_package'] is None
+    # The fixture wall is not a seal.
+    adoption['candidate_encoding_identity']['encoder_fixture_id'] = 'e'*64
+    with pytest.raises(ValueError, match='adopted encoder fixture'):
+        validated_encoder_adoption(adoption, fmt='TESSERA_BF16_K1_R1152')
