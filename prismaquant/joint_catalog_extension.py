@@ -77,6 +77,37 @@ def _same(a, b, message):
     _require(a == b, message + " differs")
 
 
+#: Files whose stat fence drifted but whose content re-hashed to the recorded
+#: digest, by fence message. Read it for the run's report; it never admits
+#: anything by itself.
+FENCE_REHASHED = {}
+
+
+def _artifact_fence(path, stat, recorded, content_sha256, message):
+    """Admit a catalog artifact by its stat fence, or by its content when only metadata moved.
+
+    The stat fence (inode, bytes, mtime_ns, ctime_ns) is the cheap proof that
+    the bytes did not change since the catalog was sealed. It is not the
+    identity: ctime moves under metadata-only operations (link/unlink of a
+    hard link, chmod, an atime-restoring utime, an NFS delegation recall)
+    that no unprivileged tool can undo (PQ #1495: 4,320 of 36,288 overlay
+    wires, every one ctime-only, every one byte-identical to its recorded
+    blob_sha256). So a stat mismatch is "unproven", not "changed": re-hash
+    the file and admit it only if the digest equals the recorded one. A size
+    change is a content change and still refuses without hashing, and an
+    artifact with no recorded digest keeps the strict fence.
+    """
+    current = {"inode": stat.st_ino, "bytes": stat.st_size,
+               "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns}
+    if current == recorded:
+        return
+    _require(content_sha256 is not None and current["bytes"] == recorded.get("bytes"), message + " differs")
+    with open(path, "rb") as handle:
+        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+    _same(digest, content_sha256, message + " (content re-hash after stat drift)")
+    FENCE_REHASHED[message] = FENCE_REHASHED.get(message, 0) + 1
+
+
 def _seal(expected, actual, message, *, same=None):
     """A run-gate seal (PQ #1147): certified mode refuses exactly as ``_same``
     or ``_require`` would; dev mode prints both values and continues."""
@@ -400,10 +431,9 @@ def require_selected_catalog_cell(data, name, fmt, *, validation=None):
     for field in ("wire", "render"):
         path = Path(row[field])
         _require(path.is_absolute() and not path.is_symlink() and path.is_file(), "selected artifact is not regular")
-        observed = path.stat()
-        _same({"inode": observed.st_ino, "bytes": observed.st_size,
-               "mtime_ns": observed.st_mtime_ns, "ctime_ns": observed.st_ctime_ns},
-              row[field + "_stat"], "selected current " + field + " fence")
+        _artifact_fence(path, path.stat(), row[field + "_stat"],
+                        cell["record"]["blob_sha256"] if field == "wire" else None,
+                        "selected current " + field + " fence")
     return {"qualification_activation": copy.deepcopy(row["activation"]),
             "adoption": copy.deepcopy(adoption), "wire_root": str(Path(row["wire"]).resolve().parent),
             "catalog": dict(bound), **proof}
@@ -1060,9 +1090,9 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
                 _require(path.is_absolute() and not path.is_symlink(), "overlay path must be an existing regular artifact")
                 stat = path.stat()
                 _require(stat_module.S_ISREG(stat.st_mode), "overlay artifact is not a regular file")
-                _same({"inode": stat.st_ino, "bytes": stat.st_size,
-                       "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns},
-                      row[field + "_stat"], "overlay current " + field + " fence")
+                _artifact_fence(path, stat, row[field + "_stat"],
+                                row["record"]["blob_sha256"] if field == "wire" else None,
+                                "overlay current " + field + " fence")
             cell = {key: copy.deepcopy(row[key]) for key in
                     ("anchor", "record", "wire", "render", "render_origin", "render_comparison",
                      "catalog_source_adoption", "adopted_source_hessian")}
