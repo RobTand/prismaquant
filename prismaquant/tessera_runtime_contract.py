@@ -360,7 +360,7 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: the existing v38 BF16 routed R1024 cell; MTP serving qualification is still
 #: pending. The packaged
 #: contract bytes and the admission answer below remain unchanged.
-TESSERA_DEV_PIN_COMMIT = "09d6559d7f386c94d69cf61f080cc7fac5bf0eb0"
+TESSERA_DEV_PIN_COMMIT = "3cf3dcf1bf441f038c45958307157e79d2a9352a"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and

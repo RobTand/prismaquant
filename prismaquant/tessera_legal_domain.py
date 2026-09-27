@@ -488,11 +488,11 @@ def live_pins() -> DomainPins:
 #: ``test_legal_rate_count_is_the_audited_count`` re-derived the frozen
 #: counts through the installed 09d bytes (PrismaBuild ``f12448eff0e5``).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+    reader_dev_pin_commit="3cf3dcf1bf441f038c45958307157e79d2a9352a",
     reader_dev_pin_contract_sha256=(
         "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
     ),
-    serving_runtime_pinned_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+    serving_runtime_pinned_commit="3cf3dcf1bf441f038c45958307157e79d2a9352a",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
         "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
