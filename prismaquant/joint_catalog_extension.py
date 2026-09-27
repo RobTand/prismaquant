@@ -10,8 +10,12 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import pickle
 import stat as stat_module
+from collections import deque
+from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
@@ -83,29 +87,110 @@ def _same(a, b, message):
 FENCE_REHASHED = {}
 
 
-def _artifact_fence(path, stat, recorded, content_sha256, message):
-    """Admit a catalog artifact by its stat fence, or by its content when only metadata moved.
+def _stat_fence(stat):
+    return {"inode": stat.st_ino, "bytes": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns}
+
+
+def _fence_drift(stat, recorded, content_sha256, message):
+    """Return ``None`` when the stat fence holds, else the stat a content re-hash must hold.
 
     The stat fence (inode, bytes, mtime_ns, ctime_ns) is the cheap proof that
     the bytes did not change since the catalog was sealed. It is not the
-    identity: ctime moves under metadata-only operations (link/unlink of a
-    hard link, chmod, an atime-restoring utime, an NFS delegation recall)
-    that no unprivileged tool can undo (PQ #1495: 4,320 of 36,288 overlay
+    identity: ctime moves under metadata-only operations that no
+    unprivileged tool can undo. A hard link added to or dropped from the
+    same inode is the measured case (PQ #1495: 4,320 of 36,288 overlay
     wires, every one ctime-only, every one byte-identical to its recorded
-    blob_sha256). So a stat mismatch is "unproven", not "changed": re-hash
-    the file and admit it only if the digest equals the recorded one. A size
-    change is a content change and still refuses without hashing, and an
-    artifact with no recorded digest keeps the strict fence.
+    blob_sha256; PQ #1519: the links were Tessera stub and prep wire
+    directories built from the same union campaign). So a stat mismatch is
+    "unproven", not "changed". A size change is a content change and
+    refuses here, without hashing, and so does an artifact with no recorded
+    digest: it keeps the strict fence.
     """
-    current = {"inode": stat.st_ino, "bytes": stat.st_size,
-               "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns}
+    current = _stat_fence(stat)
     if current == recorded:
-        return
+        return None
     _require(content_sha256 is not None and current["bytes"] == recorded.get("bytes"), message + " differs")
+    return current
+
+
+def _rehash_drifted(path, before, content_sha256, message):
+    """Admit a stat-drifted artifact only by its recorded digest, hashed while its stat held still."""
     with open(path, "rb") as handle:
         digest = hashlib.file_digest(handle, "sha256").hexdigest()
-    _same(digest, content_sha256, message + " (content re-hash after stat drift)")
+    _same(_stat_fence(Path(path).stat()), before, f"{message} of {path} (stat while re-hashing)")
+    _same(digest, content_sha256, f"{message} (content re-hash after stat drift) of {path}")
+    return digest
+
+
+def _artifact_fence(path, stat, recorded, content_sha256, message):
+    """Admit a catalog artifact by its stat fence, or by its content when only metadata moved.
+
+    The serial form of the overlay intake's pooled fence: ``_fence_drift``
+    decides, ``_rehash_drifted`` proves.
+    """
+    drift = _fence_drift(stat, recorded, content_sha256, message)
+    if drift is None:
+        return
+    _rehash_drifted(path, drift, content_sha256, message)
     FENCE_REHASHED[message] = FENCE_REHASHED.get(message, 0) + 1
+
+
+def _fence_hash_workers(requested=None):
+    """The overlay fence's hash pool: the CPU set PrismaBuild assigned this action.
+
+    ``hashlib`` releases the GIL while it digests and reads release it in the
+    syscall, so a thread per assigned CPU overlaps both the digest and the
+    storage streams. An explicit count may not exceed that assignment.
+    """
+    try:
+        assigned = max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        assigned = 1
+    if requested is None:
+        return assigned
+    _require(type(requested) is int and 0 < requested <= assigned,
+             f"fence hash workers {requested!r} exceed the assigned CPU affinity ({assigned})")
+    return requested
+
+
+@contextmanager
+def _bounded_hash_pool(workers):
+    """A hash pool that, on a refusal, drops its queued reads instead of finishing them."""
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="overlay-fence-hash")
+    try:
+        yield pool
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+
+
+def _verify_overlay_payload(observed, blob_sha256, *, rehash, hash_render):
+    """One overlay cell's hash job; returns the render digest when it hashed the render.
+
+    ``observed`` maps ``wire``/``render`` to ``(path, drift, stat)``, where
+    ``stat`` is the fence the intake saw: the recorded one when it held, the
+    drifted one otherwise. A digest is accepted only while that stat still
+    holds after the read. The wire is read once, whether it is here for its
+    drifted fence, for ``verify_payloads`` or for both, because both compare
+    the same digest with the same recorded blob_sha256.
+    """
+    wire, drift, _ = observed["wire"]
+    if rehash:
+        _rehash_drifted(wire, drift, blob_sha256, "overlay current wire fence")
+    else:
+        with open(wire, "rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        _same(_stat_fence(wire.stat()), observed["wire"][2], f"overlay wire {wire} (stat while hashing)")
+        _same(digest, blob_sha256, f"overlay wire bytes of {wire}")
+    if not hash_render:
+        return None
+    render, _, before = observed["render"]
+    with open(render, "rb") as handle:
+        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+    _same(_stat_fence(render.stat()), before, f"overlay render {render} (stat while hashing)")
+    return digest
 
 
 def _seal(expected, actual, message, *, same=None):
@@ -977,13 +1062,30 @@ def hessian_references(payload):
             "captures": captures}
 
 
-def attach_candidate_overlay(data, bound, *, verify_payloads=False):
+def attach_candidate_overlay(data, bound, *, verify_payloads=False, defer_render_hashes=False,
+                             hash_workers=None, progress=None):
     """Attach an authenticated historical catalog without rewriting its base.
 
     This is intake, not qualification. The new PWC must separately carry the
     actual per-cell decoder comparison and render digests checked above.
     Historical scalar scores remain scalar scores; Stage B measures every
     added joint cost using the unchanged source adjoints.
+
+    Every byte this intake reads is hashed on a bounded thread pool
+    (``hash_workers``; by default the CPU set PrismaBuild assigned, see
+    ``_fence_hash_workers``), streamed as the rows are walked (PQ #1519).
+    The pool hashes a wire whose stat fence drifted, and with
+    ``verify_payloads`` every wire and, unless ``defer_render_hashes``, every
+    render. A file is hashed once, for every check it answers. At most twice
+    the pool's size of files are in flight. Cells are admitted in catalog
+    order, each only after its digests are verified, so a refusal leaves
+    no unverified cell behind and names the file that failed. The refusal
+    rules are ``_fence_drift``'s: a size change and an undigested drift
+    refuse before anything is hashed.
+
+    ``progress`` is called as ``progress(admitted, unit)`` after each
+    admission, with the cumulative count of overlay cells admitted. The
+    loader uses it to keep this phase's progress on its cadence (#1518).
     """
     from .tessera_expert_projection import EXPERT_WIRES_KEY
     catalog = _json(bound, "candidate overlay")
@@ -1021,7 +1123,32 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
     # Each source's measured costs are read once, when its first selected
     # cell is met, and only for sources that answer a selected unit.
     source_costs, reference_units, added = {}, {}, {}
-    with EncoderAdoptionValidation() as proof_checks:
+    workers = _fence_hash_workers(hash_workers)
+    window = 2 * workers
+    pending, inflight, admitted = deque(), 0, 0
+
+    def admit(entry):
+        # The one place a cell enters ``data``: in catalog order, on this
+        # thread, and only after its hash job (if any) has proven it.
+        nonlocal inflight, admitted
+        name, fmt, cell, scalar, job, rehashed = entry
+        if job is not None:
+            inflight -= 1
+            render_digest = job.result()
+            if render_digest is not None:
+                cell["render_file_sha256"] = render_digest
+        if rehashed:
+            FENCE_REHASHED["overlay current wire fence"] = FENCE_REHASHED.get("overlay current wire fence", 0) + 1
+        data.cells[name, fmt] = cell
+        added.setdefault(name, []).append(fmt)
+        data.payload["costs"][name][fmt] = copy.deepcopy(scalar)
+        if name in data.payload.get(EXPERT_WIRES_KEY, {}):
+            data.payload[EXPERT_WIRES_KEY][name][fmt] = copy.deepcopy(cell["record"])
+        admitted += 1
+        if progress is not None:
+            progress(admitted, f"{name}@{fmt}")
+
+    with EncoderAdoptionValidation() as proof_checks, _bounded_hash_pool(workers) as pool:
         for row, index in zip(rows, view["cell_sources"]):
             name, fmt = row["qname"], row["format"]
             if name not in selected_names:
@@ -1085,26 +1212,35 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
                 _same(overlay_units[name], panel_units[name], "overlay measured unit Hessian " + name)
             _same(row["activation"].get("input_global_scale"), anchor.get("input_global_scale"),
                   "overlay activation scale")
+            observed = {}
             for field in ("wire", "render"):
                 path = Path(row[field])
                 _require(path.is_absolute() and not path.is_symlink(), "overlay path must be an existing regular artifact")
                 stat = path.stat()
                 _require(stat_module.S_ISREG(stat.st_mode), "overlay artifact is not a regular file")
-                _artifact_fence(path, stat, row[field + "_stat"],
-                                row["record"]["blob_sha256"] if field == "wire" else None,
-                                "overlay current " + field + " fence")
+                drift = _fence_drift(stat, row[field + "_stat"],
+                                     row["record"]["blob_sha256"] if field == "wire" else None,
+                                     "overlay current " + field + " fence")
+                observed[field] = (path, drift, row[field + "_stat"] if drift is None else drift)
             cell = {key: copy.deepcopy(row[key]) for key in
                     ("anchor", "record", "wire", "render", "render_origin", "render_comparison",
                      "catalog_source_adoption", "adopted_source_hessian")}
-            if verify_payloads:
-                _same(hashlib.sha256(Path(cell["wire"]).read_bytes()).hexdigest(),
-                      cell["record"]["blob_sha256"], "overlay wire bytes")
-                cell["render_file_sha256"] = hashlib.sha256(Path(cell["render"]).read_bytes()).hexdigest()
-            data.cells[name, fmt] = cell
-            added.setdefault(name, []).append(fmt)
-            data.payload["costs"][name][fmt] = copy.deepcopy(scalar)
-            if name in data.payload.get(EXPERT_WIRES_KEY, {}):
-                data.payload[EXPERT_WIRES_KEY][name][fmt] = copy.deepcopy(cell["record"])
+            rehash = observed["wire"][1] is not None
+            hash_render = verify_payloads and not defer_render_hashes
+            job = None
+            if rehash or verify_payloads:
+                job = pool.submit(_verify_overlay_payload, observed, cell["record"]["blob_sha256"],
+                                  rehash=rehash, hash_render=hash_render)
+                inflight += 1
+            pending.append((name, fmt, cell, scalar, job, rehash))
+            # Admit the verified head of the stream, then hold the read-ahead
+            # window: never more than ``window`` files hashed ahead of it.
+            while pending and (pending[0][4] is None or pending[0][4].done()):
+                admit(pending.popleft())
+            while inflight >= window:
+                admit(pending.popleft())
+        while pending:
+            admit(pending.popleft())
     # One insertion per unit, so several added formats land in the one
     # deterministic order the assembler and the pair check use.
     for name, formats in added.items():
