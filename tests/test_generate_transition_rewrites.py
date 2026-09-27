@@ -1,7 +1,7 @@
 """The generator that writes a closed transition's literal source-rewrite table."""
 from __future__ import annotations
 
-from pathlib import Path
+import hashlib
 
 import pytest
 
@@ -11,6 +11,7 @@ from tools.generate_transition_rewrites import _hunks, _package_digest, main
 def _tree(root, files):
     root.mkdir(parents=True, exist_ok=True)
     for name, text in files.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_text(text)
     return root
 
@@ -70,6 +71,32 @@ def test_a_stated_sealed_digest_is_required_to_hold(trees):
         main(["--sealed-dir", str(trees["root"] / "sealed"),
               "--executing-dir", str(trees["root"] / "executing"), "--new-file", "new.py",
               "--expect-sealed-sha256", "0" * 64])
+
+
+@pytest.mark.parametrize("names", [("a.py", "b.py"), ("a/b.py", "a.py")])
+def test_package_digest_matches_source_proof_path_order(tmp_path, monkeypatch, names):
+    from prismaquant import joint_aura_source_transition as transition
+
+    # Explicit source_proof order: a directory component precedes a.py, even
+    # though the POSIX string a.py sorts before a/b.py.
+    files = {name: f"payload for {name}\n" for name in names}
+    digest = hashlib.sha256()
+    for name in names:
+        encoded, payload = name.encode(), files[name].encode()
+        digest.update(len(encoded).to_bytes(4, "big") + encoded)
+        digest.update(len(payload).to_bytes(8, "big") + payload)
+    expected = digest.hexdigest()
+    sealed = _tree(tmp_path / "sealed", files)
+    module = "joint_aura_source_transition.py"
+    executing = _tree(tmp_path / "executing", {**files, module: "verifier\n"})
+    monkeypatch.setattr(transition, "_SOURCE_REWRITES", {})
+    monkeypatch.setattr(transition, "_CONTRACT", {"source_sha256": expected})
+    assert transition.source_proof(executing)["reconstructed_source_sha256"] == expected
+    # Insertion order, including Git's string-sorted listing, cannot decide it.
+    for ordered in (files, dict(reversed(list(files.items())))):
+        assert _package_digest({name: text.encode() for name, text in ordered.items()}) == expected
+    assert main(["--sealed-dir", str(sealed), "--executing-dir", str(executing),
+                 "--new-file", module, "--expect-sealed-sha256", expected]) == 0
 
 
 def test_each_hunk_is_unique_in_both_files():

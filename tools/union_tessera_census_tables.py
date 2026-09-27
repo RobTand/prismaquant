@@ -234,6 +234,7 @@ from prismaquant.cost_stage_checkpoint import (  # noqa: E402
     MANIFEST_SCHEMA, _load_unit, merge_identity_migrations, unique_temp_suffix, unit_path,
     write_unit,
 )
+from prismaquant.digests import _require_normalized_json  # noqa: E402
 from prismaquant.tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY  # noqa: E402
 from prismaquant.tessera_joint_aura import STAGE  # noqa: E402
 
@@ -410,7 +411,14 @@ class MenuInterner:
 
 
 def identity_sha256(identity: Mapping[str, Any], memo: _Memo | None = None) -> str:
-    """``cost_stage_checkpoint.canonical_json_sha256`` of a JSON-shaped identity, streamed."""
+    """Canonical digest of an already-normalized JSON identity, streamed."""
+    # The streaming encoder must not stringify keys or re-sort them under a
+    # different type. Reuse the canonical owner's shape check, including the
+    # nested values delegated to _CANON, without materializing encoded JSON.
+    try:
+        _require_normalized_json(identity, where="census identity")
+    except ValueError as exc:
+        raise UnionRefused(str(exc)) from exc
     memo = memo or _Memo()
     digest = hashlib.sha256()
     digest.update(b"{")

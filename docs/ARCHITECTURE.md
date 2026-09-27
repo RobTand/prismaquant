@@ -25273,6 +25273,17 @@ A spec may explicitly bind `container_admission_reference` to PB's portable
 content identity while keeping the distinct scientifically inspected Docker
 content identity; both checks must succeed before execution.
 
+Re-stamped 2026-09-26 for PQ #1342: the shared
+`tools.tessera_campaign_container.admission_image_reference` owner validates
+this existing spelling for joint dispatch, campaign manifest rows and direct
+submission alike. Generated rows retain it in the same serialized spec they
+execute. A class inherits the reference with its container; replacing that
+container also replaces its admission identity. An explicit reference preserves
+the joint dispatcher's override precedence, including beside an archive; an
+archive without an override still declares no locally required image. No new
+schema field, default, serving lane or ship gate is introduced. Gate:
+`tests/test_container_image_admission.py`.
+
 ### Stage B head slice (#1010)
 
 A layer quantum's head used to be the whole campaign's intake. The metadata
