@@ -1,5 +1,31 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-27 for the approved PACT M3 TP2 report protocol
+(PQ #1463, Tessera #650). The pure-artifact reader in
+`prismaquant/full_engine_resource_report.py` accepts v1/v2 and the distinct
+`tessera.full_engine_resource_report.v3`: v3 requires world size two, each
+rank's actual host/device identity, a shared `observations.rank_world` roster,
+and content-addressed raw-reference descriptors. It does not import Tessera.
+`consume_full_engine_rank_reports` checks each rank's recomputed captured Torch
+peak against **that rank's own** supplied device ceiling, never an average or
+redistribution of the world's capacity. Being below that ceiling is not a
+complete memory bound: unobserved allocations remain owed. V3's null
+`cuda_argument_domains` means that observer did not run; the reader preserves
+it and reports the missing observation as an admission blocker.
+
+The whole off-step Torch peak is independently swept from allocation lifetimes
+and carried observer views for the reference assignment. It is observation
+only, never an invariant fixed charge or a candidate placement certificate.
+V3 requires null `placement_obligation`, permits only false
+`certifies_placement`, and always returns a placement refusal. All existing
+fixed-observation, ownership, runtime-world equality and served-family gates
+remain; shape-only table emission still exits 3. Raw references are validated
+as descriptors here, not promoted to an admitted runtime closure. V1/v2 retain
+their separate schema rules; unknown schemas still refuse. Producer-path CPU
+fixtures demonstrate protocol compatibility, not a GPU capture or resource
+qualification. No runtime pin, contract cell, format menu or serving default
+changes.
+
 Re-stamped 2026-09-27 for dense TP2 panel freezing (PQ #1429, Tessera #639).
 Both the joint-cost and pre-cost execution freezers share one bytes-only
 execution binding in `native_operator_panel.require_native_execution`. Legacy
@@ -16,12 +42,12 @@ menu, runtime pin or serving admission changes. Table world equality, native
 numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
 
-Tessera contract v39 (2026-09-27, Tessera #641, merge `52bc86ea1…`, closing
-tessera#604) is on Tessera master. It is **not** on PrismaQuant's pin. The pin
-stays at `09d6559d7…` with packaged contract v38 (SHA-256 `04d5a20a…9d22e4`),
-so admission does not change until a separate pin bump moves it. The v39
-packaged contract has SHA-256 `f2f90948…81c0bb`, and its lane schema is still
-v10. When the pin moves, admission changes as follows:
+Re-stamped 2026-09-27 (PQ #1456): the exact Tessera pin is
+`4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253`, master after Tessera #646.
+It adopts contract v39 from #641 (merge `52bc86ea1…`, closing tessera#604),
+SHA-256 `f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb`,
+with lane schema v10. Relative to the previous `09d6559d7…`/v38 pin,
+admission changes as follows:
 
 - **Withdrawn:** the routed `TESSERA_E2M1_K2` cells on
   `spark-vllm-nccl230@sha256:a5424378…` (q256 128..896, which named the
@@ -36,18 +62,42 @@ v10. When the pin moves, admission changes as follows:
   (832 through 1088). Routed BF16 stays at q1024.
 
 The "one image carries E2M1, the other carries every v38 cell" split described
-below is what v39 resolves: after the bump, `f8dbe1a0…` carries all of them.
+below is what v39 resolves: `f8dbe1a0…` carries every GLM-image cell.
+The vanilla image separately retains the dense E4M3 q1024 pair.
 `TESSERA_E2M1_K2` keeps `max_world_size: 2`. A TP2 route census of the all-E2M1
 stub on `f8dbe1a0…` served every module on both ranks through the native
 span-2 route (Tessera
 `experiments/results/glm53_u1_stub_d_tp2_eager_census.json`). That census is
 a route receipt, not a `world_size_receipts` entry, and it carries no KL. The
-pin bump is separate work, because the pin file, the per-commit test venvs,
-the reviewed admission answer, the legal-domain inventory and
-`tests/test_tessera_pin_v38_scope.py` all move with it. This entry changes no
-format, default, stage or ship gate (PQ #1448).
+pin move includes the exact pin file, per-commit test venvs, reviewed admission
+answer, frozen legal-domain inventory and `tests/test_tessera_pin_v38_scope.py`.
+Wire grammar and `export.py` bytes are unchanged from `09d6559d7…`; no legal
+rate count moves and the inventory reuses that existing unique byte-state.
+This changes admitted scopes, not cell definitions, kernel identities or
+serving gate predicates. No new served KL is claimed.
 
-Tessera's exact pin advances again on 2026-09-26 from `d2a6455025…` to
+Cached intake now passes Tessera's explicit `encoder_source_proof_mode`:
+`permissive` only when `dev_mode_enabled()` is true, otherwise `strict`.
+The driver forwards the preflight's stamped mode via
+`--cached-encoder-source-proof-mode`. Direct composed/selected-cache readers
+use the same owner; warnings are printed to stderr and retained in their
+handoff or build receipts. Tessera's exported cached-unit receipt also retains
+them. Only absent or non-covering encoder-source proof authorization is
+softened: identity, bound-document digest, blob byte/digest and shape checks
+remain hard failures. Tessera receives data, not this producer's environment.
+Its v1 activation policy behavior stays unchanged; v2 consumes the policy's
+format list for every adopted `E2M1x2` rung in that list without a fixed rung
+roster. Reader admission is not export or serving qualification.
+
+The PB interpreters for this pin are
+`/home/rob/venvs/pq-pb461728e4-tessera-4c4ff1c2/bin/python` on dl380g10,
+sparky and sparklina, plus
+`/home/rob/venvs/pq-pb461728e4-tessera-4c4ff1c2-tf516/bin/python` on both
+Sparks. They are distinct copies of the old venvs; rollout of the pin and new
+`--python` paths is coordinated before merging, never by overwriting a live
+interpreter (`prismaquant/tessera_runtime/README.md`).
+
+Earlier pin review (2026-09-26): Tessera's exact pin advanced from `d2a6455025…` to
 `09d6559d7…` (Tessera #633, PQ #1413). The new serving mapper and route-census
 implementation address GLM MTP layer 45's runtime `mtp_block` module names.
 The packaged v38 contract, SHA-256 `04d5a20a…9d22e4`, and the reviewed
@@ -113,9 +163,9 @@ and the exporter checks whole-plan coverage, original producer packages,
 source/H/recipe identities and actual blob bytes. `run-pipeline.sh` passes the
 bundle via `TESSERA_CACHED_UNITS`; `TESSERA_SOURCE_DIGEST_CACHE` can supply the
 existing stat-bound source-digest cache for a standard cached export. The
-export scope still requires device-qualified cells: routed E4M3 R1024
-currently refuses under the v38 runtime contract. This preflight does not
-authorize re-encoding or a serving qualification.
+export scope still requires device-qualified cells: routed E4M3 R1024 refused
+under v38 and is admitted only within its v39 GLM-image scope at the new pin.
+This preflight does not authorize re-encoding or establish served quality.
 
 Research frontier replay provenance (2026-09-26, branch
 `astra/prefill-frontier-replay-1428`, PQ #1428): the replay/shipcard contract
@@ -3515,7 +3565,7 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/pact-gamut-stageb-multiformat`.
+As of: 2026-09-27 · `astra/pq-pin-tessera-644` (PQ #1456), including the Stage B multiformat retake.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
@@ -24610,9 +24660,10 @@ top-1024 intersection bound, because no instrument in either repository
 produces a full-vocab KL.
 
 **Admission is pinned to an exact commit and contract digest.** The pin names
-Tessera `09d6559d7f386c94d69cf61f080cc7fac5bf0eb0` (master after #633,
-re-pinned 2026-09-26; version `0.1.0`, contract v38, lane schema v10, which
-v35-v38 keep). `d2a6455025…` introduced the composed cached reader without
+Tessera `4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253` (master after #646,
+re-pinned 2026-09-27; version `0.1.0`, contract v39, lane schema v10).
+This adopts #641's GLM-image scopes and #646's explicit cached-reader mode.
+The previous `09d6559d7…` pin carried v38. `d2a6455025…` introduced the composed cached reader without
 moving the contract; the prior `af7a86d43d…` pin introduced v38.
 v35-v38 are not additive: v37 withdraws the dense BF16 q1792 pair and v38 reuses
 the two routed E4M3 cell ids for q896 on a different image. v34 was pinned at
@@ -24623,7 +24674,7 @@ the two routed E4M3 cell ids for q896 on a different image. v34 was pinned at
 in Tessera #313 and the release `e78959ed…` carried v20; first pinned
 2026-09-04 at `5acc2a6f…`, contract v17)
 and the SHA-256 of the `runtime_contract.json` it packages
-(`04d5a20a…9d22e4`);
+(`f2f90948…81c0bb`);
 `require_pinned_tessera_runtime` refuses unless the pin equals the reader's
 three constants AND the installed contract hashes to that digest, and
 `tessera_lane_attested` ANDs that in (§5.7), as does the container arm's

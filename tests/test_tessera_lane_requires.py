@@ -65,8 +65,8 @@ BF16_RATE = 1792
 #: E4M3 decode cell claiming the window lane at rate 4) and a claimer whose
 #: plan refuses (the dense E2M1 decode cell claiming it at rate 7).
 GATED_CARRIER = "tessera_e4m3_k1_routed_moe_sm121_decode_resident"
-CLAIMING = "tessera_e2m1_k2_dense_sm121_decode"
-CLAIMING_BATCH = "tessera_e2m1_k2_dense_sm121_batch"
+CLAIMING = "tessera_e2m1_k2_dense_sm121_decode_resident"
+CLAIMING_BATCH = "tessera_e2m1_k2_dense_sm121_batch_resident"
 CLAIMING_FAMILY = "TESSERA_E2M1_K2"
 CLAIMING_NAME = "TESSERA_E2M1_K2_R896"
 CLAIMING_RATE = 896
@@ -445,11 +445,12 @@ def test_the_shipped_routed_e4m3_q896_cells_are_not_lane_gated(payload):
     table = _table(payload)
     for cell_id in (GATED_CARRIER, GATED_CARRIER.replace("_decode_", "_batch_")):
         cell = _parsed_cell(table, cell_id)
-        assert tuple(cell.rungs_q256) == (896,)
+        assert 896 in cell.rungs_q256
         assert {decoder for _symbol, decoder in cell.executes} == {
             "native_window_moe_compact"}
         assert lane.lane_claim_for_cell(cell, table.lanes) is None
-        assert lane.cell_lane_admits(cell, 896, table.lanes) == (True, "")
+        for rung in cell.rungs_q256:
+            assert lane.cell_lane_admits(cell, rung, table.lanes) == (True, "")
     gated_decoders = {claim.decoder for claim in table.lanes
                       if claim.requires is not None}
     assert gated_decoders == {"window_gemv"}, gated_decoders

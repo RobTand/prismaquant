@@ -1,0 +1,26 @@
+{
+  "raw_resource_plan": {
+    "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/resource/observer-plan.json",
+    "sha256": "d764a4b7d7bd99cdb3da98af6957747b3009e5fb7fb293f3716d08d077b5dea3"
+  },
+  "raw_resource_run": {
+    "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/resource/run.json",
+    "sha256": "7e25d6e72298b7292981a1b4c3dd74257b3bbd7deb98435ae0bc9542049aea2c"
+  },
+  "reports": [
+    {
+      "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/report-rank0.json",
+      "sha256": "f6b2dd4ee6d3f50d0306161b2159c1561e842ce52db9b4d255597d73fdac6555"
+    },
+    {
+      "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/report-rank1.json",
+      "sha256": "71652eaa295aa6cf597ff2eefa6c46642ca2d62cb35188c199b3f698ac433d3c"
+    }
+  ],
+  "schema": "tessera.synthetic_tp2_protocol_fixture.v1",
+  "scope": "CPU parser fixture only; no GPU measurement or admission",
+  "timing_observation": {
+    "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing-observation.json",
+    "sha256": "04920907cabb05247f6b0c80f13be4dfb1a008e4c0f05e91d12000dfef540312"
+  }
+}

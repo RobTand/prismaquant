@@ -84,7 +84,7 @@ python3() {
       previous="$argument"
     done
     # A preflight handed a composed bundle names it back in the anchor.
-    "$PYTEST_PYTHON" -c 'import json, os, sys; d = {}; p = os.environ.get("TEST_PLAN_ASSIGNMENT"); d.update(plan_assignment=p, plan_assignment_sha256=os.environ["TEST_PLAN_DIGEST"]) if p else None; d.update(cached_units=sys.argv[2]) if sys.argv[2] else None; open(sys.argv[1], "w").write(json.dumps(d))' "$build" "$cached"
+    "$PYTEST_PYTHON" -c 'import json, os, sys; from prismaquant.dev_mode import dev_mode_enabled; d = {"cached_encoder_source_proof_mode": "permissive" if dev_mode_enabled() else "strict"}; p = os.environ.get("TEST_PLAN_ASSIGNMENT"); d.update(plan_assignment=p, plan_assignment_sha256=os.environ["TEST_PLAN_DIGEST"]) if p else None; d.update(cached_units=sys.argv[2]) if sys.argv[2] else None; open(sys.argv[1], "w").write(json.dumps(d))' "$build" "$cached"
     return 0
   elif [[ "$1" == */plan_from_layer_config.py ]]; then
     echo "TEST_TRANSLATOR_REACHED:$2" >&2
@@ -209,6 +209,16 @@ def test_a_composed_cached_bundle_reaches_preflight_and_export(tmp_path):
     assert f"--cached-units {bundle}" in export
     assert "--cached-expert-units" not in export
     assert "--source-digest-cache" not in export
+
+
+@pytest.mark.parametrize("value,expected", [("0", "strict"), ("1", "permissive")])
+def test_cached_driver_forwards_the_producers_explicit_mode(tmp_path, value, expected):
+    result = _run(tmp_path, extra_env={"PRISMAQUANT_DEV_MODE": value,
+        "TESSERA_CACHED_UNITS": str(tmp_path / "cached.json")})
+    assert result.returncode == 0, result.stdout + result.stderr
+    line = next(line for line in result.stdout.splitlines()
+                if line.startswith("TEST_EXPORT_ARGS:"))
+    assert f"--cached-encoder-source-proof-mode {expected}" in line
 
 
 def test_without_a_bundle_the_preflight_writes_expert_units(tmp_path):
