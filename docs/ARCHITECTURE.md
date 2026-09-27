@@ -3362,7 +3362,13 @@ silently grows to complete the capture. No scientific plan is rewritten.
 
 An explicit `joint_served_activation_policy.v1` permits newly added routed
 E2M1-K2 q896 candidates to be priced at the fused MoE runtime's executed-stage
-scale. Its bound original full-512 preparation and census independently derive
+scale. A `joint_served_activation_policy.v2` (PQ #1437) names several added
+routed A4 formats in `formats` (`joint_served_activation.policy_formats`;
+`--format`, repeatable, on its CLI). Each must quantize its input to 4 bits,
+and no group member may already offer one. The group maximum belongs to the
+routed unit, not to the weight format, so every policy format of a member is
+priced at the same executed-group scale, and activation requires every member
+to carry every policy format. Its bound original full-512 preparation and census independently derive
 the complete w13/w2 maxima through `routed_executed_max_abs`. The old PWC maxima,
 candidate qualification activations, renders, wires and source/H identities stay
 unchanged. Only a transient A4-specific pricing view applies the grouped maxima;
@@ -3437,7 +3443,13 @@ dev mode stamps `[DEV-MODE]` and admits the cell, and
 `PRISMAQUANT_DEV_MODE=0` refuses it. Unit, source, projection, calibration and
 `encoder_fixture_id` equality with the reference cell, the byte and stat
 fences, the wire and render digests and rendered-shape equality stay hard
-walls in both modes.
+walls in both modes. At export, `tessera_export_lane.selected_cached_units_manifest`
+records such a cell's adoption with no proof and compares no proof-bound
+producer package for it (PQ #1438); the seal's producer package is still
+required. The pinned Tessera reader (`tessera/cached_unit.py` at af7a86d4)
+does not yet read that shape: it requires a covering reseal proof for every
+adoption and reads only the v1 R896 served activation policy, so a rooted
+selection with an unproven or non-R896 added cell refuses there.
 
 A catalog extension is priced by a **full re-price**, not a merge (PQ #1432).
 The join (`joint_quanta_join.py`, the `coverage` check) requires every unit's
@@ -3511,8 +3523,31 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `astra/pq-pin-tessera-644` (PQ #1456).
+As of: 2026-09-27 · `astra/pq-pin-tessera-644` (PQ #1456), including the Stage B multiformat retake.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
+inputs over a several-format catalog** (PQ #1437). The Stage B control
+closure (`tools/prepare_extended_joint_quanta.control_digests`) reads a v1 or
+v2 overlay catalog through `joint_catalog_extension.catalog_control_bindings`:
+each source's cost run, and each reseal proof with its fixture and arm
+results, where a source has one. The served activation policy gains a v2 that
+prices several added routed A4 formats. The resource derivation
+(`joint_stageb_resources.derive_policy`) takes the priced formats from that
+policy; a v1 catalog keeps its full-roster rule, and a v2 catalog's cells must
+each add a format its unit does not offer, with every executed-group member
+gaining exactly the policy's formats among its added A4 formats. Rosters
+extend by `extended_roster`, which for a v1 catalog is the order the
+derivation used before. No default, stage, format, lane or ship gate changes.
+
+Re-stamped (2026-09-27, `claude/pact-gamut-export-optional-proof`) for **an
+unproven adopted cell at export** (PQ #1438). The rooted selected-cache
+manifest reads an accepted adoption's reseal proof as optional, as
+`validated_encoder_adoption` returns it: a dev-mode unproven cell adds no
+proof binding and no proof-bound producer-package comparison. Recorded with
+it: the pinned Tessera cached-unit reader still requires a proof per adoption
+and the v1 R896 served activation policy (Tessera #644). No default, stage, format, lane or
+ship gate changes.
 
 Re-stamped (2026-09-27, `claude/1448-arch-tessera-v39`) for the Tessera
 contract v39 entry at the top (PQ #1448). It records what v39 changes for
