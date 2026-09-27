@@ -815,11 +815,11 @@ def test_overlay_fence_rehashes_a_wire_whose_stat_drifted(tmp_path, campaign, pr
         after = wire.stat()
         assert after.st_ctime_ns != before.st_ctime_ns
         assert (after.st_ino, after.st_size, after.st_mtime_ns) == (before.st_ino, before.st_size, before.st_mtime_ns)
-    jce.FENCE_REHASHED.clear()
+    getattr(jce, 'FENCE_REHASHED', {}).clear()
     if drift == 'wire_ctime_only':
         result = jce.attach_candidate_overlay(data, bound, verify_payloads=False)
         assert len(result.cells) == 12
-        assert jce.FENCE_REHASHED == {'overlay current wire fence': 1}
+        assert getattr(jce, 'FENCE_REHASHED', None) == {'overlay current wire fence': 1}
     else:
         with pytest.raises(ValueError, match='fence'):
             jce.attach_candidate_overlay(data, bound, verify_payloads=False)
