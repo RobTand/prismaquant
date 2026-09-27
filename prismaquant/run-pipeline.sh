@@ -2473,6 +2473,11 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   elif [[ -n "$TESSERA_CACHED_EXPERT_UNITS" ]]; then
     TESSERA_CACHED_UNIT_ARGS+=(--cached-expert-units "$TESSERA_CACHED_EXPERT_UNITS")
   fi
+  if [[ -n "$TESSERA_CACHED_UNITS" || -n "$TESSERA_CACHED_EXPERT_UNITS" ]]; then
+    # Preflight owns the producer's mode; the reader never reads our environment.
+    TESSERA_CACHED_PROOF_MODE=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("cached_encoder_source_proof_mode", "strict"))' "$TESSERA_BUILD_JSON")
+    TESSERA_CACHED_UNIT_ARGS+=(--cached-encoder-source-proof-mode "$TESSERA_CACHED_PROOF_MODE")
+  fi
   if [[ -n "${TESSERA_SOURCE_DIGEST_CACHE:-}" ]]; then
     TESSERA_CACHED_UNIT_ARGS+=(--source-digest-cache "$TESSERA_SOURCE_DIGEST_CACHE")
   fi

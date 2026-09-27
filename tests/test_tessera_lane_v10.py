@@ -104,8 +104,8 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v38_at_the_pinned_digest():
-    """v24 through v38 are additive for a v10 reader, so the schema string does not move.
+def test_the_packaged_contract_is_v39_at_the_pinned_digest():
+    """v24 through v39 fit the v10 grammar, despite changed admission scopes.
 
     The contract version and the lane schema are two different clocks, and
     v24 was the bump that separated them: it added cells and filled a
@@ -127,7 +127,7 @@ def test_the_packaged_contract_is_v38_at_the_pinned_digest():
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 38
+    assert payload["contract_version"] == 39
     assert (payload["lane_eligibility"]["schema"]
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10)
 
@@ -161,20 +161,12 @@ def test_the_v10_table_parses_and_publishes_the_three_platforms():
     assert not [c for c in table.cells if c.platform != "sm_121"]
 
 
-def test_the_withdrawn_dense_roster_is_gone_and_the_routed_roster_is_v38s():
-    """What the v30-v38 withdrawals and mints change, and what they leave alone.
+def test_the_cell_roster_matches_the_reviewed_v39_answer():
+    """Read the scope roster from its one reviewed owner, not a second list.
 
-    ``cell_evidence_admits`` is status-only, and every cell in the v38 table
-    publishes ``smoke.status: not_recorded`` on ``route_only`` evidence, so
-    all fourteen are admitted.  The routed roster is six ids: the E2M1 pair
-    (full reader domain [128..896], the 0afec8d4-tagged GLM image), and on the
-    f8dbe1a0 GLM image the BF16 pair at q1024 plus the E4M3 pair at q896.  The
-    E4M3 pair RE-USES the ids v37 published for q1024 on the eugr image with
-    a recorded smoke; v38 withdrew that claim (Tessera #604) and minted this
-    one under the same ids, which ``test_tessera_pin_v38_scope`` pins.  The
-    dense roster is eight: the E2M1 and E4M3 pairs on the stock image (v34's
-    BF16 R1792 pair was withdrawn at v37), and the E4M3 and BF16 resident
-    pairs at {832, 1024, 1088} on the GLM image.  ``gfx1201`` stays empty.
+    The unchanged status-only gate permits each route-only/not-recorded cell.
+    This is not a served-KL claim. The v39 image/structure decision is pinned
+    independently by test_tessera_pin_v38_scope.py.
     """
     table = _packaged_table()
     routed = [c for c in table.cells if c.structure == "routed_moe"]
@@ -193,25 +185,9 @@ def test_the_withdrawn_dense_roster_is_gone_and_the_routed_roster_is_v38s():
     for cell in routed:
         assert cell.qualification == lane.QUALIFICATION_DEVICE_QUALIFIED
         assert cell.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
-    routed_rungs = {"TESSERA_E2M1_K2": (128, 256, 384, 512, 640, 768, 896),
-                    "TESSERA_E4M3_K1": (896,), "TESSERA_BF16_K1": (1024,)}
-    for cell in routed:
-        assert tuple(cell.rungs_q256) == routed_rungs[cell.family], cell.id
-    dense = [c for c in table.cells if c.structure == "dense"]
-    assert sorted(c.id for c in dense) == [
-        "tessera_bf16_k1_dense_sm121_batch_resident",
-        "tessera_bf16_k1_dense_sm121_decode_resident",
-        "tessera_e2m1_k2_dense_sm121_batch", "tessera_e2m1_k2_dense_sm121_decode",
-        "tessera_e4m3_k1_dense_sm121_batch",
-        "tessera_e4m3_k1_dense_sm121_batch_resident",
-        "tessera_e4m3_k1_dense_sm121_decode",
-        "tessera_e4m3_k1_dense_sm121_decode_resident"]
-    rungs = {"tessera_e2m1_k2_dense_sm121_batch": (896,),
-             "tessera_e2m1_k2_dense_sm121_decode": (896,),
-             "tessera_e4m3_k1_dense_sm121_batch": (1024,),
-             "tessera_e4m3_k1_dense_sm121_decode": (1024,)}
-    for cell in dense:
-        assert tuple(cell.rungs_q256) == rungs.get(cell.id, (832, 1024, 1088)), cell.id
+    expected = {row[0]: tuple(row[5])
+                for row in contract.TESSERA_DEV_PIN_ANSWER['cells']}
+    assert {cell.id: tuple(cell.rungs_q256) for cell in table.cells} == expected
 
 
 def test_a_declared_platform_with_no_cell_is_still_a_refusal_to_claim():
