@@ -785,41 +785,29 @@ CACHED_EXPERT_UNITS_PREFIX = "cached_expert_units"
 
 
 def _priced_content_wire_root(record: Mapping[str, Any], *, name: str, fmt: str,
-                               home: Path, loader: Path | None) -> Path:
-    """Resolve a selected wire's read root by content identity (#1513).
+                               home: Path) -> Path:
+    """Resolve a selected wire's read root, gating presence and size (#1513).
 
     The joint handoff names the wire directory the selected-cache manifest is
     written into, and the exporter reads every blob from the manifest's own
-    directory.  The loader's measured-anchor walk has already bound each
-    priced receipt to its file under the payload root (presence and size, with
-    the exporter hashing every blob at intake), so when the manifest root is
-    that same root the receipt is the identity.  When the two roots differ,
-    the bytes the export will read are hashed here against the priced
-    receipt: an identical copy in the handoff root passes, a divergent or
-    missing copy refuses by unit.  Path equality between the roots is
-    recorded as context, never the gate.
+    directory.  For each selected unit the priced receipt names the file and
+    its exact blob_bytes; this gate checks, identically for every root, that
+    the priced file is present there, is a regular non-symlink file that sits
+    directly in the manifest root, and has the receipt's size.  Content
+    identity -- the receipt's sha256 against the bytes actually read -- is
+    enforced by verify_cached_unit at intake, against this same priced
+    receipt.
     """
-    import hashlib
-
-    if loader is not None and loader == home:
-        return home
     path = home / record["file"]
     if path.is_symlink() or not path.is_file() or path.resolve().parent != home.resolve():
-        searched = [str(home)] + ([str(loader)] if loader is not None else [])
         raise TesseraExportLaneError(
             f"{name}@{fmt}: priced wire {record['file']} is missing from the handoff wire "
-            f"root {home}; the export reads the manifest's own directory "
-            f"(roots searched: {', '.join(searched)})")
+            f"root {home}; the export reads the manifest's own directory")
     size = path.stat().st_size
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    if size != record["blob_bytes"] or digest.hexdigest() != record["blob_sha256"]:
+    if size != record["blob_bytes"]:
         raise TesseraExportLaneError(
-            f"{name}@{fmt}: selected wire content at the handoff wire root differs from the "
-            f"priced receipt (size {size} vs {record['blob_bytes']}, sha256 "
-            f"{digest.hexdigest()} vs {record['blob_sha256']})")
+            f"{name}@{fmt}: priced wire {record['file']} has size {size} under the handoff "
+            f"wire root {home} but the priced receipt records {record['blob_bytes']}")
     return home
 
 
@@ -884,9 +872,15 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
     from .tessera_census_cache import census_roster_selection
     selected = census_roster_selection(selected, data.census["unit_shapes"], TesseraExportLaneError)
     wire_dir = Path(provenance["wire_dir"]).resolve()
-    payload_wire = data.payload.get("provenance", {}).get("wire_dir")
-    payload_wire_dir = (Path(payload_wire).resolve()
-                        if isinstance(payload_wire, str) and payload_wire else None)
+    # The allocator's recorded root must still name the handoff root: both
+    # sides describe WHICH root the selection was priced against.  The
+    # loader payload's provenance wire_dir names the root the receipts were
+    # measured under and may legitimately differ as a string; the per-unit
+    # content identity against those receipts is carried by the priced
+    # records and enforced at intake, so it is recorded by callers rather
+    # than gated here by path equality.
+    if metadata.get(WIRE_DIR_KEY) != str(wire_dir):
+        raise TesseraExportLaneError("selected cache wire directory differs from the joint handoff")
     selected_expert_receipts = metadata.get(EXPERT_WIRES_KEY, {})
     if not isinstance(selected_expert_receipts, Mapping):
         raise TesseraExportLaneError("selected cache expert receipts are missing")
@@ -938,8 +932,7 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             sealed_unit = data.manifest["identity"]["units"][name]
             if record["identity"].get("source") != sealed_unit["weight"]:
                 raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
-            cell_wire_dir = _priced_content_wire_root(
-                record, name=name, fmt=fmt, home=wire_dir, loader=payload_wire_dir)
+            cell_wire_dir = _priced_content_wire_root(record, name=name, fmt=fmt, home=wire_dir)
             if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
                 if not rooted:
                     raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")
