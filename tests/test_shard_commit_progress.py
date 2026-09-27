@@ -242,3 +242,55 @@ def test_default_log_prints_flushed_diagnostics(capsys):
     # discarded on SIGKILL.  The module's own log must flush.
     scp._default_log("diagnostic line")
     assert "diagnostic line" in capsys.readouterr().out
+
+
+def test_entry_whose_stat_raises_is_skipped_and_picked_up_later(
+        out, channel, monkeypatch):
+    monkeypatch.setattr(scp.os, "environ", channel.environ, raising=False)
+    write_shard(out, "model-00001-of-00002.safetensors", b"payload")
+    watcher = scp.ShardCommitProgress(out, phase="export",
+                                      poll_seconds=0.01)
+    # An ESTALE hiccup on one entry must not escape poll(): the entry is
+    # skipped this scan and picked up on a later one (review r2 -- the
+    # output root is on NFS; stat/is_file can raise OSError).
+    real_stat = os.stat
+
+    def estale(path, *args, **kwargs):
+        if "model-00001" in str(path):
+            raise OSError("NFSv4 server %s not responding", "ESTALE")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(scp.os, "stat", estale)
+    assert watcher.poll() == 0, "an entry whose stat raises must be skipped"
+    # Restore only os.stat (undo() would also drop the channel-environ patch
+    # and silence the reports).
+    monkeypatch.setattr(scp.os, "stat", real_stat)
+    assert watcher.poll() == 1, "the same entry counts once the hiccup ends"
+    assert channel.last()["units_completed"] == 1
+
+
+def test_glob_error_is_logged_once_and_reports_nothing_new(
+        out, channel, monkeypatch):
+    monkeypatch.setattr(scp.os, "environ", channel.environ, raising=False)
+    write_shard(out, "model-00001-of-00002.safetensors", b"payload")
+    watcher = scp.ShardCommitProgress(out, phase="export",
+                                      poll_seconds=0.01)
+    assert watcher.poll() == 1
+
+    class broken_glob:
+        def __init__(self, real):
+            self._real = real
+
+        def glob(self, pattern):
+            raise OSError("NFSv4 directory has been unmounted")
+
+    watcher.out_dir = broken_glob(watcher.out_dir)
+    logged = []
+    watcher._log = logged.append
+    # A glob that raises must not escape poll(): the poll reports nothing
+    # new, the committed set stands, and the error is logged once, flushed.
+    assert watcher.poll() == 1, "a glob error must not change the count"
+    assert len(logged) == 1
+    assert "unmounted" in logged[0]
+    assert watcher.poll() == 1
+    assert len(logged) == 2, "each occurrence is logged once"

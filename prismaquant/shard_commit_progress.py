@@ -130,11 +130,29 @@ class ShardCommitProgress:
         self._log(message)
 
     def _scan(self):
+        try:
+            entries = list(self.out_dir.glob(self.pattern))
+        except OSError as exc:
+            # The output root is on NFS: an ESTALE or EIO hiccup on the
+            # directory itself must not escape poll() and kill watch()
+            # while the exporter child keeps running (#1516 through another
+            # door).  This poll reports nothing new; the next one retries.
+            self._emit(f"shard progress: scan of {self.out_dir} failed "
+                       f"({exc}); reporting nothing new this poll")
+            return set()
         published = set()
-        for path in self.out_dir.glob(self.pattern):
-            if path.is_symlink() or not path.is_file():
-                continue
-            if path.stat().st_size <= 0:
+        for path in entries:
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                if path.stat().st_size <= 0:
+                    continue
+            except OSError as exc:
+                # An entry that vanishes or goes stale between the glob and
+                # the stat is skipped, not fatal: it is picked up on a later
+                # poll if it comes back (review r2).
+                self._emit(f"shard progress: skipped {path.name} this poll "
+                           f"({exc})")
                 continue
             published.add(path.name)
         return published
