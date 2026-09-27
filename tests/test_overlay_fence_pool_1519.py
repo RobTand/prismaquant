@@ -19,9 +19,14 @@ from tests.test_joint_quanta_join import campaign, probe  # noqa: F401 - fixture
 
 
 class _DigestProbe:
-    """Wrap ``hashlib.file_digest``: count calls per path and the peak concurrency."""
+    """Wrap ``hashlib.file_digest``: count calls per overlay artifact and the peak concurrency.
 
-    def __init__(self, monkeypatch, delay_s=0.05):
+    Only the case's own wires and renders are counted: adoption proofs hash
+    their result files through the same function.
+    """
+
+    def __init__(self, monkeypatch, case, delay_s=0.05):
+        watch = {str(row[field]) for row in case.rows for field in ('wire', 'render')}
         self.lock = threading.Lock()
         self.active = self.peak = 0
         self.paths = []
@@ -29,6 +34,8 @@ class _DigestProbe:
         real = hashlib.file_digest
 
         def probe_digest(handle, digest):
+            if str(handle.name) not in watch:
+                return real(handle, digest)
             with self.lock:
                 self.active += 1
                 self.peak = max(self.peak, self.active)
@@ -65,7 +72,7 @@ def test_drifted_wires_are_hashed_concurrently_and_admitted_in_order(tmp_path, c
     data, bound = case.bind(lambda rows, scalar_costs: None)
     wires = _drift_every_wire(case)
     assert len(wires) >= 4
-    digests = _DigestProbe(monkeypatch)
+    digests = _DigestProbe(monkeypatch, case)
     jce.FENCE_REHASHED.clear()
     seen = []
     result = jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=_pool(),
@@ -91,7 +98,7 @@ def test_a_mismatched_rehash_refuses_and_names_the_file(tmp_path, campaign, prob
     bad.write_bytes(bytes(body))
     import os
     os.utime(bad, ns=(before.st_atime_ns, before.st_mtime_ns))
-    digests = _DigestProbe(monkeypatch)
+    digests = _DigestProbe(monkeypatch, case)
     with pytest.raises(ValueError, match=re.escape(str(bad))) as refused:
         jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=_pool())
     assert 'content re-hash after stat drift' in str(refused.value)
@@ -106,7 +113,7 @@ def test_a_size_change_refuses_without_hashing(tmp_path, campaign, probe, monkey
     wires = _drift_every_wire(case)
     with open(wires[0], 'ab') as handle:
         handle.write(b'grown')
-    digests = _DigestProbe(monkeypatch)
+    digests = _DigestProbe(monkeypatch, case)
     with pytest.raises(ValueError, match='overlay current wire fence differs'):
         jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=_pool())
     assert str(wires[0]) not in digests.paths, 'a size change must refuse before any hash'
@@ -118,7 +125,7 @@ def test_an_undigested_render_drift_keeps_the_strict_fence(tmp_path, campaign, p
     time.sleep(0.01)
     render = Path(case.rows[0]['render'])
     _touch_ctime(render)
-    digests = _DigestProbe(monkeypatch)
+    digests = _DigestProbe(monkeypatch, case)
     with pytest.raises(ValueError, match='overlay current render fence differs'):
         jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=_pool())
     assert str(render) not in digests.paths
@@ -129,7 +136,7 @@ def test_verify_payloads_hashes_each_drifted_file_once(tmp_path, campaign, probe
     data, bound = case.bind(lambda rows, scalar_costs: None)
     wires = _drift_every_wire(case)
     renders = [Path(row['render']) for row in case.rows]
-    digests = _DigestProbe(monkeypatch, delay_s=0)
+    digests = _DigestProbe(monkeypatch, case, delay_s=0)
     jce.FENCE_REHASHED.clear()
     result = jce.attach_candidate_overlay(data, bound, verify_payloads=True, hash_workers=_pool())
     assert sorted(digests.paths) == sorted(str(p) for p in wires + renders), \
@@ -143,7 +150,7 @@ def test_verify_payloads_hashes_each_drifted_file_once(tmp_path, campaign, probe
 def test_deferred_render_hashes_are_not_read(tmp_path, campaign, probe, monkeypatch):
     case = _overlay_case(tmp_path, campaign, probe)
     data, bound = case.bind(lambda rows, scalar_costs: None)
-    digests = _DigestProbe(monkeypatch, delay_s=0)
+    digests = _DigestProbe(monkeypatch, case, delay_s=0)
     result = jce.attach_candidate_overlay(data, bound, verify_payloads=True, defer_render_hashes=True,
                                           hash_workers=2)
     assert sorted(digests.paths) == sorted(row['wire'] for row in case.rows)
