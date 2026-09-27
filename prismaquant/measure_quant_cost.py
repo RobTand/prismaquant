@@ -32,6 +32,8 @@ import signal
 import stat
 import time
 from collections.abc import Container, Mapping
+from contextlib import ExitStack
+from functools import partial
 from pathlib import Path
 
 import torch
@@ -751,6 +753,23 @@ class ActivationIndex:
         if not isinstance(row_indices, torch.Tensor):
             row_indices = None
         return blob["inputs"], row_indices
+
+    def prefetch_bytes(self, name: str) -> int:
+        """Price the selected file without changing its loader or identity checks."""
+        fp = self._path_for_name(name)
+        if fp is None:
+            raise KeyError(name)
+        if self._verified_dir_fd is None:
+            size = fp.stat().st_size
+        else:
+            # The verified loader uses this pinned directory, not a potentially
+            # replaced cache_dir pathname. Price that same file.
+            size = os.stat(
+                fp.name, dir_fd=self._verified_dir_fd, follow_symlinks=False,
+            ).st_size
+        if size <= 0:
+            raise ValueError(f"{name}: activation prefetch needs a nonempty file")
+        return size
 
     def names(self):
         return self._paths.keys()
@@ -1862,12 +1881,83 @@ def _cb_col_weights_lookup(name: str):
     return _CB_CW_CACHE.get(name)
 
 
+class _ActivationPrefetchBudget:
+    """One active chunk plus its successor, priced from the actual input files.
+
+    This is a byte ceiling, not a depth or worker count. The shared engine can
+    fit more small groups within it and owns concurrency and read-ahead. The
+    largest adjacent pair covers every consumer/prefetch transition; there is
+    no model-wide byte constant. GPU workspace remains the caller's reservation.
+    """
+
+    def __init__(self, chunk_bytes: list[int]):
+        self.buffer_bytes = max(chunk_bytes)
+        self.capacity_bytes = max(
+            size + (chunk_bytes[i + 1] if i + 1 < len(chunk_bytes) else 0)
+            for i, size in enumerate(chunk_bytes)
+        )
+
+    def headroom_bytes(self, held_bytes: int) -> int:
+        return max(0, self.capacity_bytes - held_bytes)
+
+
+def _read_activation_chunk(act_cache, names):
+    # Keep ActivationIndex.load_blob, including the legacy no-verification
+    # weights_only=False arm, untouched. This adapter changes scheduling only;
+    # it neither invents a file digest nor upgrades an unverified input.
+    return [act_cache.load_with_row_indices(name) for name in names], ()
+
+
+def _activation_chunk_bytes(items) -> int:
+    storages = {}
+    for inputs, row_indices in items:
+        for tensor in (inputs, row_indices):
+            if isinstance(tensor, torch.Tensor):
+                storage = tensor.untyped_storage()
+                storages[storage.data_ptr()] = storage.nbytes()
+    return sum(storages.values())
+
+
+def _activation_chunk_stream(act_cache, chunks):
+    from .io_engine import ReadEntry, read_stream
+
+    names = [tuple(name for name, _ in chunk) for chunk in chunks]
+    sizes = [sum(act_cache.prefetch_bytes(name) for name in group) for group in names]
+    entries = [
+        ReadEntry(
+            key=i, group=i, path=None, decoder=None, expected_sha256=None,
+            size=size, limit=size, held_bytes=size,
+            reader=partial(_read_activation_chunk, act_cache, group),
+            measure=_activation_chunk_bytes,
+        )
+        for i, (group, size) in enumerate(zip(names, sizes, strict=True))
+    ]
+    # Range-reader entries retain the existing loader's descriptor/stat and
+    # logical-tensor checks. IOEngine refuses delivery if retained storage
+    # exceeds its priced bound. This is not a bound on arbitrary allocations
+    # during legacy pickle deserialization; that arm's trust contract is unchanged.
+    return read_stream(entries, budget=_ActivationPrefetchBudget(sizes))
+
+
 def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                        target_names: set[str], specs: list[fr.FormatSpec],
                        device: str, dtype: torch.dtype,
                        chunk_size: int = 256,
                        h_detail: "HDetailIndex | None" = None,
                        profile=None) -> dict:
+    """Measure batched costs, closing all read-ahead streams on every exit."""
+    with ExitStack() as streams:
+        return _measure_batched_gpu(
+            model, act_cache, target_names, specs, device, dtype,
+            chunk_size, h_detail, profile, streams=streams,
+        )
+
+
+def _measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
+                        target_names: set[str], specs: list[fr.FormatSpec],
+                        device: str, dtype: torch.dtype,
+                        chunk_size: int, h_detail: "HDetailIndex | None",
+                        profile, *, streams: ExitStack) -> dict:
     """Batched GPU measurement.
 
     Groups Linears by shape, then within each group processes `chunk_size`
@@ -1903,28 +1993,14 @@ def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
     # thin calibration is visible in the log instead of silently averaged in.
     chunk_rows_used: list[int] = []
 
-    # v24: async activation prefetch. The previous synchronous path
-    # spent ~30-40% of the cost step's wall in the per-Linear file
-    # reads at chunk-start (e.g. chunk_size=256 × ~5 ms/file = ~1.3 s
-    # of disk I/O blocking the GPU after every chunk). Overlap by
-    # loading chunk N+1's activations on a small thread pool while
-    # chunk N's measurements run on the GPU. Default off — opt-in via
-    # PRISMAQUANT_COST_PREFETCH_ACT=1 — until we've validated the win
-    # at production scale.
-    import os as _os
-    from concurrent.futures import ThreadPoolExecutor as _Pool
-    # v26: default ON. PRISMAQUANT_COST_PREFETCH_ACT=0 reverts to the
-    # synchronous per-chunk activation read path.
-    _raw_prefetch = _os.environ.get("PRISMAQUANT_COST_PREFETCH_ACT")
+    # Default remains ON. The shared IO engine, not a private fixed-width
+    # executor, overlaps activation loads within the measured chunk-byte cap.
+    # PRISMAQUANT_COST_PREFETCH_ACT=0 retains the synchronous path.
+    _raw_prefetch = os.environ.get("PRISMAQUANT_COST_PREFETCH_ACT")
     _prefetch_enabled = (
         True if _raw_prefetch is None
         else _raw_prefetch not in ("0", "", "false", "False", "FALSE", "no", "NO")
     )
-    _prefetch_pool = _Pool(max_workers=2) if _prefetch_enabled else None
-
-    def _load_chunk_acts(_names):
-        return [act_cache.load_with_row_indices(n) for n in _names]
-
     _unrouted_declared = _load_unrouted_expert_declaration()
     _unrouted_emitted: list[str] = []
 
@@ -1950,14 +2026,9 @@ def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
             continue
 
         chunks_list = list(_chunked(entries_with_acts, chunk_size))
-        # Kick off the first chunk's load so the loop can pull from the
-        # future immediately on entry. Subsequent iterations submit the
-        # next chunk's load before processing the current one.
-        next_acts_fut = (
-            _prefetch_pool.submit(
-                _load_chunk_acts, [n for n, _ in chunks_list[0]])
-            if _prefetch_enabled and chunks_list
-            else None
+        act_stream = (
+            streams.enter_context(_activation_chunk_stream(act_cache, chunks_list))
+            if _prefetch_enabled else None
         )
 
         for chunk_i, chunk in enumerate(chunks_list):
@@ -1973,19 +2044,8 @@ def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
             grouped_flags = [
                 grouped_linear_groups(m, profile) is not None for _, m in chunk
             ]
-            # Lazy load activations for this chunk only. With prefetch
-            # enabled, the future is already in flight from the prior
-            # iteration (or kicked off above for the first chunk).
-            if _prefetch_enabled:
-                act_items_cpu = next_acts_fut.result()
-                # Submit the NEXT chunk's load before we touch the GPU
-                # so the disk reads overlap with the upcoming bmm.
-                if chunk_i + 1 < len(chunks_list):
-                    nxt_names = [n for n, _ in chunks_list[chunk_i + 1]]
-                    next_acts_fut = _prefetch_pool.submit(
-                        _load_chunk_acts, nxt_names)
-                else:
-                    next_acts_fut = None
+            if act_stream is not None:
+                act_items_cpu = act_stream.take(chunk_i)[0].value
             else:
                 act_items_cpu = [act_cache.load_with_row_indices(n) for n in names]
             acts_cpu = [item[0] for item in act_items_cpu]
@@ -2233,6 +2293,9 @@ def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                 del h_stacked
             if gq_per_item is not None:
                 del gq_per_item
+            del row_indices_cpu
+            if act_stream is not None:
+                act_stream.release()
             chunk_rows_used.extend(rows_used)
             processed += N
             if processed % (chunk_size * 4) == 0 or processed == total_linears:
@@ -2241,8 +2304,8 @@ def measure_batched_gpu(model: nn.Module, act_cache: "ActivationIndex",
                 print(f"[cost] {processed}/{total_linears} "
                       f"eta={eta:.0f}s  ({N} per chunk × {len(specs)} formats)",
                       flush=True)
-    if _prefetch_pool is not None:
-        _prefetch_pool.shutdown(wait=False)
+        if act_stream is not None:
+            act_stream.close()
     if chunk_rows_used:
         rs = sorted(chunk_rows_used)
         n = len(rs)

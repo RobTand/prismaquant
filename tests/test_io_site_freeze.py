@@ -11,8 +11,11 @@ Byte movement belongs to one engine, ``prismaquant/io_engine.py`` (#1294).
 This test is the mechanical half of that rule. It scans every module with
 ``ast`` and finds each call to ``ThreadPoolExecutor``,
 ``ProcessPoolExecutor``, ``Thread``, ``multiprocessing.Pool`` or
-``multiprocessing.Process``, plus every ``Thread`` subclass. It then
-requires the result to equal ``ALLOWED`` exactly:
+``multiprocessing.Process``, plus their subclasses. Explicit import and
+simple assignment aliases, including multiprocessing contexts, retain their
+constructor identity. Bindings stay lexical; possible branch/rebinding targets
+are conservative unions. This is a static guard, not execution of arbitrary
+factory functions or reflection. It requires ``ALLOWED`` to match exactly:
 
 - a new site, or one more site under an existing key, fails, so new code
   goes through the engine;
@@ -75,33 +78,94 @@ ALLOWED: dict[str, tuple[int, str]] = {
 }
 
 
-def _callee(node: ast.expr) -> tuple[str | None, str | None]:
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _qualified(node: ast.expr, aliases: dict[str, set[str]]) -> set[str]:
     if isinstance(node, ast.Name):
-        return node.id, None
+        return aliases.get(node.id, {node.id})
     if isinstance(node, ast.Attribute):
-        base = node.value.id if isinstance(node.value, ast.Name) else None
-        return node.attr, base
-    return None, None
+        return {f"{base}.{node.attr}" for base in _qualified(node.value, aliases)}
+    if isinstance(node, ast.Call) and "multiprocessing.get_context" in _qualified(
+            node.func, aliases):
+        return {"multiprocessing.context"}
+    return set()
+
+
+def _scope_nodes(node: ast.AST):
+    """Inspect a lexical scope, not the bodies of its nested definitions."""
+    for child in ast.iter_child_nodes(node):
+        yield child
+        if not isinstance(child, _SCOPES):
+            yield from _scope_nodes(child)
+
+
+def _scope_aliases(node: ast.AST, inherited: dict[str, set[str]]) -> dict[str, set[str]]:
+    nodes = list(_scope_nodes(node))
+    imports, assignments, local = [], [], set()
+    for child in nodes:
+        if isinstance(child, (ast.Import, ast.ImportFrom)):
+            imports.append(child)
+            local.update(a.asname or a.name.split(".")[0] for a in child.names)
+        elif isinstance(child, (ast.Assign, ast.AnnAssign)):
+            targets = child.targets if isinstance(child, ast.Assign) else [child.target]
+            names = [t.id for t in targets if isinstance(t, ast.Name)]
+            local.update(names)
+            if child.value is not None:
+                assignments.append((names, child.value))
+        elif isinstance(child, ast.arg):
+            local.add(child.arg)
+    aliases = {k: set(v) for k, v in inherited.items() if k not in local}
+    # Collect imports before uses: a function may use a module import written
+    # below its definition. Keep all possibilities on rebinding/branches, so
+    # a later non-pool import cannot erase an earlier constructor call.
+    for child in imports:
+        for alias in child.names:
+            if isinstance(child, ast.Import):
+                name = alias.asname or alias.name.split(".")[0]
+                target = alias.name if alias.asname else name
+            else:
+                name = alias.asname or alias.name
+                target = f"{child.module}.{alias.name}"
+                if alias.name == "*" and child.module == "multiprocessing":
+                    for member in _MP_CALLEES:
+                        aliases.setdefault(member, set()).add(f"multiprocessing.{member}")
+            aliases.setdefault(name, set()).add(target)
+    # Fixed-point resolution follows simple constructor/context aliases without
+    # executing source. Lexical locals do not leak into sibling functions.
+    for _ in range(len(assignments)):
+        for names, value in assignments:
+            for name in names:
+                aliases.setdefault(name, set()).update(_qualified(value, aliases))
+    return aliases
+
+
+def _construction(node: ast.expr, aliases: dict[str, set[str]]) -> bool:
+    for qualified in _qualified(node, aliases):
+        base, _, name = qualified.rpartition(".")
+        if name in _CALLEES or (name in _MP_CALLEES and (
+                base in _MP_BASES or base.startswith("multiprocessing."))):
+            return True
+    return False
 
 
 def _sites(source: str) -> list[str]:
     found: list[str] = []
 
-    def walk(node: ast.AST, scope: list[str]) -> None:
+    def walk(node: ast.AST, scope: list[str], aliases: dict[str, set[str]]) -> None:
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if isinstance(child, _SCOPES):
                 if isinstance(child, ast.ClassDef) and any(
-                        _callee(base)[0] == "Thread" for base in child.bases):
+                        _construction(base, aliases) for base in child.bases):
                     found.append(".".join(scope + [child.name]) + " (subclass)")
-                walk(child, scope + [child.name])
+                walk(child, scope + [child.name], _scope_aliases(child, aliases))
                 continue
-            if isinstance(child, ast.Call):
-                name, base = _callee(child.func)
-                if name in _CALLEES or (name in _MP_CALLEES and base in _MP_BASES):
-                    found.append(".".join(scope) or "<module>")
-            walk(child, scope)
+            if isinstance(child, ast.Call) and _construction(child.func, aliases):
+                found.append(".".join(scope) or "<module>")
+            walk(child, scope, aliases)
 
-    walk(ast.parse(source), [])
+    tree = ast.parse(source)
+    walk(tree, [], _scope_aliases(tree, {}))
     return found
 
 
