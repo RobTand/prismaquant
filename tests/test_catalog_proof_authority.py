@@ -7,22 +7,22 @@ from pathlib import Path
 import pytest
 from tests.test_joint_catalog_extension import _pair, _write
 from tests.test_joint_quanta_join import campaign, probe
-from prismaquant.joint_catalog_extension import verify_catalog_pair, validated_encoder_adoption
+from prismaquant.joint_catalog_extension import (
+    R13_ADDED_FORMAT as ADDED_FORMAT, verify_catalog_pair, validated_encoder_adoption)
 
 
 def _adoption(inputs):
     prepared = json.loads(Path(inputs['extended_prepared']['path']).read_text())
     cache = pickle.loads(Path(prepared['production_cache']['path']).read_bytes())
-    return next((c['catalog_source_adoption'], fmt)
-                for (_unit, fmt), c in cache.metadata['verified_cells'].items()
+    return next(c['catalog_source_adoption'] for c in cache.metadata['verified_cells'].values()
                 if 'catalog_source_adoption' in c)
 
 
 @pytest.mark.parametrize('mutation', ['nonproof', 'wrong_pair', 'wrong_fixture', 'changed_arm'])
 def test_digest_bound_but_unproven_encoder_adoption_refuses(tmp_path, campaign, probe, mutation):
     inputs, _, _ = _pair(tmp_path, campaign, probe)
-    adoption, fmt = _adoption(inputs)
-    validated_encoder_adoption(adoption, fmt=fmt)
+    adoption = _adoption(inputs)
+    validated_encoder_adoption(adoption, fmt=ADDED_FORMAT)
     if mutation == 'nonproof':
         adoption['encoder_source_proof'] = _write(tmp_path, 'nonproof.json', {'accepted': True})
     elif mutation == 'wrong_pair':
@@ -32,7 +32,7 @@ def test_digest_bound_but_unproven_encoder_adoption_refuses(tmp_path, campaign, 
     else:
         (tmp_path/'source-proof-arm.json').write_text('{}')
     with pytest.raises((ValueError, RuntimeError), match='encoder|proof|fixture'):
-        validated_encoder_adoption(adoption, fmt=fmt)
+        validated_encoder_adoption(adoption, fmt=ADDED_FORMAT)
 
 
 def test_cached_catalog_pair_rechecks_changed_proof_arm(tmp_path, campaign, probe):
@@ -46,7 +46,7 @@ def test_cached_catalog_pair_rechecks_changed_proof_arm(tmp_path, campaign, prob
 def test_operation_reuses_proof_without_per_cell_filesystem_checks(tmp_path, campaign, probe, monkeypatch):
     import prismaquant.joint_catalog_extension as bridge
     inputs, _, _ = _pair(tmp_path, campaign, probe)
-    adoption, fmt = _adoption(inputs)
+    adoption = _adoption(inputs)
     calls = []
     original = bridge._bound_stat_fence
     def fence(path):
@@ -54,21 +54,20 @@ def test_operation_reuses_proof_without_per_cell_filesystem_checks(tmp_path, cam
         return original(path)
     monkeypatch.setattr(bridge, '_bound_stat_fence', fence)
     with bridge.EncoderAdoptionValidation() as operation:
-        first = operation.verify(adoption, fmt=fmt)
+        first = operation.verify(adoption, fmt=ADDED_FORMAT)
         initial = len(calls)
         for _ in range(100):
-            assert operation.verify(adoption, fmt=fmt) is first
+            assert operation.verify(adoption, fmt=ADDED_FORMAT) is first
         assert len(calls) == initial
     assert len(calls) > initial, 'completion must recheck dependency fences'
     with pytest.raises(ValueError, match='outside'):
-        operation.verify(adoption, fmt=fmt)
+        operation.verify(adoption, fmt=ADDED_FORMAT)
 
 
 def test_operation_refuses_dependency_change_before_return(tmp_path, campaign, probe):
     from prismaquant.joint_catalog_extension import EncoderAdoptionValidation
     inputs, _, _ = _pair(tmp_path, campaign, probe)
-    adoption, fmt = _adoption(inputs)
     with pytest.raises(ValueError, match='changed during operation'):
         with EncoderAdoptionValidation() as operation:
-            operation.verify(adoption, fmt=fmt)
+            operation.verify(_adoption(inputs), fmt=ADDED_FORMAT)
             (tmp_path/'source-proof-arm.json').write_text('{}')

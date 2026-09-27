@@ -29,17 +29,18 @@ from __future__ import annotations
 import argparse
 import difflib
 import hashlib
-from pathlib import Path
 import pprint
 import subprocess
 import sys
-import tempfile
+from pathlib import Path
 
 
 def _package_digest(files):
     """The complete-package hash every transition's ``source_proof`` computes."""
     digest = hashlib.sha256()
-    for name, payload in sorted(files.items()):
+    # source_proof sorts Path objects component-wise, not POSIX strings:
+    # a/b.py precedes a.py. Preserve that order for directory and Git inputs.
+    for name, payload in sorted(files.items(), key=lambda item: Path(item[0])):
         encoded = name.encode()
         digest.update(len(encoded).to_bytes(4, "big"))
         digest.update(encoded)
@@ -79,7 +80,7 @@ def _hunks(old_text, new_text):
     for group in matcher.get_grouped_opcodes(0):
         old_start, old_stop = group[0][1], group[-1][2]
         new_start, new_stop = group[0][3], group[-1][4]
-        for context in range(0, max(len(old_lines), len(new_lines)) + 1):
+        for context in range(max(len(old_lines), len(new_lines)) + 1):
             a0, a1 = max(0, old_start - context), min(len(old_lines), old_stop + context)
             b0, b1 = max(0, new_start - context), min(len(new_lines), new_stop + context)
             old_snippet, new_snippet = "".join(old_lines[a0:a1]), "".join(new_lines[b0:b1])
