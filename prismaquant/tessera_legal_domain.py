@@ -487,18 +487,23 @@ def live_pins() -> DomainPins:
 #: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves:
 #: ``test_legal_rate_count_is_the_audited_count`` re-derived the frozen
 #: counts through the installed 09d bytes (PrismaBuild ``f12448eff0e5``).
+#: **Re-taken 2026-09-27 for ``4c4ff1c2e`` (contract v39).** Admission
+#: scopes move, not wire grammar. ``export.py`` remains ``96fefc6a…`` and
+#: ``grammar.py`` remains ``9ae1f824…``: reuse the uniquely identified
+#: ``reader-pin-09d6559d`` byte-state, not a duplicate digest entry. Legal
+#: rate counts are unchanged; the reviewed admission answer is separate.
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+    reader_dev_pin_commit="4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253",
     reader_dev_pin_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
     ),
-    serving_runtime_pinned_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+    serving_runtime_pinned_commit="4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
     ),
     producer_installed_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
     ),
 )
 

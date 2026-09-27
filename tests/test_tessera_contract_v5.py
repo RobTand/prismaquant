@@ -25,19 +25,17 @@ def _payload():
     not change (families, rungs, route statuses) honest and real, and drops
     exactly the newer fields, so the test exercises v5 and nothing else.
     """
-    # One real image's roster (``lane_cells_on_one_image``): the cells are
-    # flattened onto DENSE_IMAGE below, and since contract v38 the stock and
-    # GLM images publish the same dense E4M3 scopes.
+    # This grammar fixture asks about A4: select its uniquely published image,
+    # not the v39 default image, before flattening onto DENSE_IMAGE.
     payload = down_convert_lane_table(
         lane_cells_on_one_image(
-            json.loads(contract.contract_path().read_text(encoding="utf-8"))),
+            json.loads(contract.contract_path().read_text(encoding="utf-8")),
+            family="TESSERA_E2M1_K2"),
         "tessera.lane-eligibility.v5")
     # Dense-only, decided here rather than inherited: v6 publishes routed_moe
     # cells too, and this file's scope tests ask what a routed_moe CONTEXT gets
-    # from a table that covers only dense.  Since the v31 withdrawals the only
-    # dense cells the installed table carries are the E2M1_K2 pair, so the
-    # asks below name that family at rung 896 -- the dense E4M3 roster they
-    # named before is withdrawn and would make every assert here vacuous.
+    # from a table that covers only dense. The asks name E2M1_K2 rung896;
+    # the explicit family selection above keeps that positive witness.
     block = payload["lane_eligibility"]
     block["cells"] = [c for c in block["cells"] if c["structure"] == "dense"]
     block["structures"] = [s for s in block["structures"] if s == "dense"]
