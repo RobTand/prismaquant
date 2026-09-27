@@ -65,6 +65,12 @@
       "runner": "python tools/measure_vllm_wikitext_ppl.py --model <artifact> --output <ppl.json> --wikitext-inputs <gold-inputs.json> --serve-image <image>",
       "shipcard_slot": "gold.ppl",
       "description": "Run inside the plugin serving container through vLLM's offline LLM API. Direct WikiText PPL on the Tessera artifact uses the exact CPU-materialized, value-closed offline token payload."
+    },
+    {
+      "id": "uniform_control",
+      "runner": "python ${TESSERA_REPO}/experiments/uniform_control.py verify <artifact> <matched-byte-uniform-artifact> --params <quantizable-parameters> --candidate-kl <same-protocol-candidate-kl> --control-kl <same-protocol-control-kl> --metric <declared-metric> --max-relative-slack <predeclared-byte-slack> --report <control-block.json> && python -m prismaquant.shipcard_cli fill-control <shipcard.json> --control-block <control-block.json> --control-record <served-control-kl.json> --control-model-dir <matched-byte-uniform-artifact> --gold-metric-key kl_mean",
+      "shipcard_slot": "uniform_control",
+      "description": "Expose the existing Tessera accountant and shipcard fill path for the conditional matched-byte control requirement. Choose the control family, integer-bit matching rule and byte slack before measurement; add --require-no-larger if that is the predeclared rule. Quantizable parameters exclude allocator-pinned regions. A4/A8 labels or pairwise KL alone do not establish byte matching. The control must be exported and served under the candidate's exact teacher/calibration/runtime protocol. Preserve the producer block and control's own served KL; the unchanged verifier replays both. An unserved block, missing control evidence or a failed comparison remains a refusal. This declaration launches nothing and supplies no override."
     }
   ],
   "producer_tools": [
