@@ -36,7 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prismaquant.joint_catalog_extension import extended_roster
+from prismaquant.joint_catalog_extension import _artifact_fence, extended_roster
 from prismaquant.tessera_joint_aura import render_origin_census
 from rebind_t4_qualified_results import SCHEMA as REBINDING_SCHEMA, cell_sha256, require_rebound
 from prismaquant.digests import bytes_sha256hex
@@ -150,11 +150,16 @@ def bind_stage_b_resources(plan, prepared, policy_binding, resources):
 
 
 def fence_cell_artifacts(cell):
-    """Hold a catalog cell's wire and render to the stat recorded at catalog build."""
+    """Hold a catalog cell's wire and render to the stat recorded at catalog build.
+
+    The catalog's own fence: a wire whose stat drifted at the same size (a later
+    hardlink moves ctime) is re-hashed against its recorded blob, not refused.
+    """
     for key in ('wire', 'render'):
-        s = Path(cell[key]).stat()
-        assert cell[key + '_stat'] == dict(inode=s.st_ino, bytes=s.st_size, mtime_ns=s.st_mtime_ns,
-                                           ctime_ns=s.st_ctime_ns)
+        path = Path(cell[key])
+        _artifact_fence(path, path.stat(), cell[key + '_stat'],
+                        cell['record']['blob_sha256'] if key == 'wire' else None,
+                        'assemble catalog ' + key + ' fence')
 
 
 def qualified_result(cell, raw, rebinding_rows):
