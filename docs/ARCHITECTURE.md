@@ -110,6 +110,22 @@ menu, runtime pin or serving admission changes. Table world equality, native
 numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
 
+Re-stamped 2026-09-27 (PQ #1527): the exact Tessera pin is
+`20bf53464f9113f3115f454f8fa80453e71c0308`, master after Tessera #669 (closing
+tessera#668). At a mixed-rate window rung, the batched LDLQ encode now runs a
+window span's rate calls on per-rate CUDA streams. Every blob and
+`EncodedUnit` field matches `a3e83875d`, and a 16-unit batch of the G2 w01b
+expert shapes encodes 18.5-22.4 % faster on GB10 (Tessera
+`docs/measurements/tessera668-window-rate-streams-2026-09-27.md`). Only
+`encode.py` and Tessera's docs move: the packaged contract (v39, `f2f90948…`),
+the reviewed admission answer, `grammar.py` and `export.py` are byte-identical
+to `a3e83875d`, so the legal inventory keeps the `reader-pin-f94929de`
+byte-state and no legal rate count moves. This pin supersedes the PQ #1524 pin
+below. Its PB interpreters are `/home/rob/venvs/pq-pb461728e4-tessera-20bf5346`
+on dl380g10 (PB build `68bdb80acd8d`), sparky and sparklina, with a `-tf516`
+sibling on each Spark (PB builds sparky `6940c8f1c592`, sparklina
+`062be8b71f67`); the `a3e83875` interpreters stay in place.
+
 Re-stamped 2026-09-27 (PQ #1524): the exact Tessera pin is
 `a3e83875d20f54c685307da13a34992d70256f02`, master after Tessera #671 (closing
 tessera#670). The rooted cached-unit reader now accepts
