@@ -44,6 +44,14 @@ class _DigestProbe:
         monkeypatch.setattr(jce.hashlib, 'file_digest', probe_digest)
 
 
+def _pool():
+    # The pool is sized from the assigned CPU set; concurrency needs two.
+    import os
+    assigned = len(os.sched_getaffinity(0))
+    assert assigned >= 2, f'this test needs at least 2 assigned CPUs, got {assigned}'
+    return min(4, assigned)
+
+
 def _drift_every_wire(case):
     time.sleep(0.01)
     wires = [Path(row['wire']) for row in case.rows]
@@ -60,7 +68,7 @@ def test_drifted_wires_are_hashed_concurrently_and_admitted_in_order(tmp_path, c
     digests = _DigestProbe(monkeypatch)
     jce.FENCE_REHASHED.clear()
     seen = []
-    result = jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=4,
+    result = jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=_pool(),
                                           progress=lambda admitted, unit: seen.append((admitted, unit)))
     assert digests.peak >= 2, f'peak concurrent re-hashes {digests.peak}: the pool is not used'
     assert all(name.startswith('overlay-fence-hash') for name in digests.threads)
@@ -85,7 +93,7 @@ def test_a_mismatched_rehash_refuses_and_names_the_file(tmp_path, campaign, prob
     os.utime(bad, ns=(before.st_atime_ns, before.st_mtime_ns))
     digests = _DigestProbe(monkeypatch)
     with pytest.raises(ValueError, match=re.escape(str(bad))) as refused:
-        jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=4)
+        jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=_pool())
     assert 'content re-hash after stat drift' in str(refused.value)
     assert digests.peak >= 2
     bad_row = next(row for row in case.rows if Path(row['wire']) == bad)
@@ -100,7 +108,7 @@ def test_a_size_change_refuses_without_hashing(tmp_path, campaign, probe, monkey
         handle.write(b'grown')
     digests = _DigestProbe(monkeypatch)
     with pytest.raises(ValueError, match='overlay current wire fence differs'):
-        jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=4)
+        jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=_pool())
     assert str(wires[0]) not in digests.paths, 'a size change must refuse before any hash'
 
 
@@ -112,7 +120,7 @@ def test_an_undigested_render_drift_keeps_the_strict_fence(tmp_path, campaign, p
     _touch_ctime(render)
     digests = _DigestProbe(monkeypatch)
     with pytest.raises(ValueError, match='overlay current render fence differs'):
-        jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=4)
+        jce.attach_candidate_overlay(data, bound, verify_payloads=False, hash_workers=_pool())
     assert str(render) not in digests.paths
 
 
@@ -123,7 +131,7 @@ def test_verify_payloads_hashes_each_drifted_file_once(tmp_path, campaign, probe
     renders = [Path(row['render']) for row in case.rows]
     digests = _DigestProbe(monkeypatch, delay_s=0)
     jce.FENCE_REHASHED.clear()
-    result = jce.attach_candidate_overlay(data, bound, verify_payloads=True, hash_workers=4)
+    result = jce.attach_candidate_overlay(data, bound, verify_payloads=True, hash_workers=_pool())
     assert sorted(digests.paths) == sorted(str(p) for p in wires + renders), \
         'the drifted fence and payload verification share one wire hash'
     assert jce.FENCE_REHASHED == {'overlay current wire fence': len(wires)}
