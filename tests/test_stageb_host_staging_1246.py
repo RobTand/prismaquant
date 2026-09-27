@@ -51,7 +51,7 @@ from prismaquant.joint_retained_window_plan import RetainedWindowBudget
 
 import test_joint_cost_quantum_runtime as rt
 import test_stageb_one_pass_spill as spill_tests
-from test_stageb_cotangent_scratch import _direct_io_supported
+from test_stageb_cotangent_scratch import _direct_io_supported, require_direct_io
 from test_stageb_one_pass_spill import (
     FORMATS,
     N_PROBES,
@@ -188,9 +188,7 @@ def staging_campaign(tmp_path_factory):
 def _scratch_root(tmp_path):
     root = tmp_path / "cotangent-scratch"
     root.mkdir()
-    assert _direct_io_supported(root), (
-        f"{root} has no direct I/O on an 8 KiB grid: the campaign's cotangent scratch "
-        "reads with O_DIRECT, and this test measures that path")
+    require_direct_io(root)
     return root
 
 
