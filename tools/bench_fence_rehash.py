@@ -174,7 +174,7 @@ def main(argv=None):
                    "distinct_hash_threads": len(spy.threads), "peak_concurrent_hashes": spy.peak}
             if engine_counters:
                 c = engine_counters[-1]
-                run["engine"] = {k: c.get(k) for k in ("pool_width", "peak_workers", "entries_read",
+                run["engine"] = {k: c.get(k) for k in ("pool_width", "peak_workers", "peak_workers_consumer_busy", "entries_read",
                                                          "consumer_wait_s", "per_stream_bytes_per_s")}
             report["runs"].append(run)
     except BaseException:
@@ -223,7 +223,7 @@ def _busy_consumer(report, wires, total, args):
         c = stream.counters
         report["runs"].append({"repeat": repeat, "wall_s": wall, "bytes_per_s": total / wall,
                                "engine": {k: c.get(k) for k in (
-                                   "pool_width", "peak_workers", "consumer_busy_s",
+                                   "pool_width", "peak_workers", "peak_workers_consumer_busy", "consumer_busy_s",
                                    "consumer_wait_s", "per_stream_bytes_per_s")}})
 
 

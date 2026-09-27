@@ -50,9 +50,12 @@ states a depth or a worker count:
 * **Workers** follow the measured rates. Each read's own seconds give the
   per-stream rate; the consumer's seconds per group give the time the next
   group has. The engine runs as many reads at once as it needs to land the
-  next group within the consumer's shortest measured group, and all of its
-  pool while the consumer waits or before it has measured anything. The pool
-  is sized by the CPU affinity less the consumer's own thread.
+  next group within the consumer's shortest measured group, and its whole
+  width while the consumer waits or before it has measured anything. The pool
+  is sized by the CPU affinity. A stream holds one core back for its
+  consumer only while the consumer needs it: never while the consumer is
+  blocked in ``take``, and otherwise only while the consumer's measured busy
+  time exceeds its measured wait time (``ReadStream._width``, PQ #1533).
 * **Order and verification.** A group is delivered only when every one of its
   entries is read, hashed, held to its digest and decoded; entries come back
   in stream order. The first failure in a taken group raises
@@ -734,7 +737,7 @@ class ReadStream:
             "entries_read": 0, "bytes_read": 0, "read_s": 0.0,
             "rereads": 0, "evictions": 0, "evicted_bytes": 0,
             "ahead_deferrals": 0, "ahead_failures": 0,
-            "peak_held_bytes": 0, "peak_workers": 0,
+            "peak_held_bytes": 0, "peak_workers": 0, "peak_workers_consumer_busy": 0,
             "consumer_wait_s": 0.0, "consumed_bytes": 0, "consumer_busy_s": 0.0,
             "groups_taken": [],
         }
@@ -967,9 +970,30 @@ class ReadStream:
         seconds = self.counters["read_s"]
         return self.counters["bytes_read"] / seconds if seconds > 0 else None
 
+    def _width(self) -> int:
+        """The reads this stream may run at once: the pool, less the consumer's core when it works.
+
+        The consumer runs on a core of the same affinity the pool is sized
+        by. While it is blocked in :meth:`take` it uses none, so every core
+        reads. Otherwise the core is held back when the consumer has spent
+        more of its measured time working than waiting: a held core then
+        idles for the consumer's wait share, and a shared one costs the
+        consumer its busy share in contention, so the core goes to whichever
+        share is larger. Before the consumer has measured either, the core is
+        held back, as it always was (PQ #1533).
+        """
+        pool = self._engine.width
+        if self._consumer_waiting:
+            return pool
+        busy = self.counters["consumer_busy_s"]
+        wait = self.counters["consumer_wait_s"]
+        if busy + wait > 0 and busy <= wait:
+            return pool
+        return max(1, pool - 1)
+
     def _workers(self) -> int:
         """Reads to run at once, from the measured rates (module docstring)."""
-        width = self._engine.width
+        width = self._width()
         rate = self._stream_rate()
         if (self._consumer_waiting or rate is None or self._busy_min_s is None
                 or self._took_at is None or self._cursor >= len(self._entries)):
@@ -1023,6 +1047,12 @@ class ReadStream:
             self._state[index] = _READING
             self._active += 1
             self.counters["peak_workers"] = max(self.counters["peak_workers"], self._active)
+            if not self._consumer_waiting:
+                # Reads started while the consumer works, which _width holds
+                # to the pool less the consumer's core when its busy share
+                # leads (PQ #1533).
+                self.counters["peak_workers_consumer_busy"] = max(
+                    self.counters["peak_workers_consumer_busy"], self._active)
             self._inflight_raw += raw
             self._inflight_charge += raw + entry.held_bytes
             self._outstanding[group] += 1
@@ -1202,7 +1232,9 @@ class IOEngine:
     def __init__(self):
         self._lock = threading.Lock()
         self._pool: ThreadPoolExecutor | None = None
-        self.width = max(1, len(os.sched_getaffinity(0)) - 1)
+        # The whole CPU set: a stream holds its consumer's core back itself,
+        # and only while the consumer works (``ReadStream._width``, PQ #1533).
+        self.width = max(1, len(os.sched_getaffinity(0)))
 
     def submit(self, fn, *args):
         with self._lock:
