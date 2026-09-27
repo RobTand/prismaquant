@@ -88,6 +88,40 @@ menu, runtime pin or serving admission changes. Table world equality, native
 numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
 
+Re-stamped 2026-09-27 (PQ #1502): the exact Tessera pin is
+`f94929defd9fa00b8726160a2cd436f02733b6dc`, master after Tessera #663 (closing tessera#662). The packaged
+contract is unchanged: v39, SHA-256
+`f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb`. The
+reviewed admission answer does not move. `tessera.export` gains
+`served_recipe(grid, q256, structure)`, and the cached-unit identities take the
+structure. `wire_recipe`, `_window_bits_for` and the WINDOW constants are
+byte-identical, so the new `export.py` bytes join the legal inventory as the
+additive byte-state `reader-pin-f94929de`, and no legal rate count moves.
+This pin supersedes the PQ #1456 pin described below. Its PB interpreter is
+`/home/rob/venvs/pq-pb461728e4-tessera-f94929de/bin/python` on dl380g10
+(PB build `b150ef6bd55d`). The Spark copies and their `-tf516` siblings follow
+the same recipe once their GPU fence lifts.
+
+The Tessera campaign now encodes the served wire per (family, rung,
+structure). A routed `TESSERA_E2M1_K2` stack below the cap is encoded, priced
+and stamped on span-2 TCQ, the wire the contract's `attested_wire` states. Its
+research WINDOW recipe was a wire the routed decoder cannot read. The
+structure comes from `--family-restriction`'s map, else the serving context.
+Every projected expert unit is `routed_moe`. A run that declares no structure
+keeps the research recipe for its dense units. K1 rungs and E2M1 q896 encode
+the same bytes as before. Planning reads two contract facts. First, a rung
+whose served wire for the member's structure differs from the attested
+template, with no cell of that structure attesting the rung. Dense E2M1 below
+the cap is that case. Second, a routed unit with no producer projection, where
+the routed wire differs. That rung stays in the menu, isn't measured, and is
+recorded under cost-table `provenance.route_refused` with the contract's
+reason. `provenance.encode_structure` counts the structures used. A model whose
+routed experts are separate Linear modules with no projection loses its E2M1
+sub-cap anchors this way. A resumed row stamped on a wire its structure isn't
+served on goes to `provenance.unservable` with a reason, and is re-priced. The
+byte accountants still price the research wire for routed sub-cap units
+(PQ #1504).
+
 Re-stamped 2026-09-27 (PQ #1456): the exact Tessera pin is
 `4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253`, master after Tessera #646.
 It adopts contract v39 from #641 (merge `52bc86ea1…`, closing tessera#604),
@@ -21015,7 +21049,10 @@ fallback:
   subtraction); the rate axis is continuous at a 1/256-bpp quantum and
   `validate_body_rate_q256` (`:850`) / `realisable_rungs` (`:866`) say which
   rungs encode; `tessera_wire_recipe` (`:197`) is the one source of body and
-  scale plane per grid and rung; `artifact_bpp` (`:883`) and
+  scale plane per grid and rung for the research table, and
+  `tessera_served_wire_recipe` resolves the wire a unit of a given serving
+  structure is served on (`tessera.export.served_recipe`; PQ #1502), refusing
+  a structure the pinned contract attests no wire for; `artifact_bpp` (`:883`) and
   `wire_overhead_q256` (`:376`) are the byte accountant, and **both require a
   shape** (below); `tessera_serving_route` (`:1049`) is the fifth axis.
 - `tessera_render.py` — the render adapter. `render_tessera_weight` (`:408`)
