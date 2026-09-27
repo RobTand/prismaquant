@@ -35,6 +35,16 @@ def test_real_producer_v3_is_readable_but_does_not_certify_placement(tmp_path, r
     assert verdict.refusals
     assert any("fixture provenance" in message for message in verdict.refusals)
     assert any("placement" in message for message in verdict.refusals)
+    assert document["observations"]["cuda_argument_domains"] is None
+    assert "CUDA allocation argument domains were not observed" in verdict.blocking
+
+
+@pytest.mark.parametrize("domains", [[], {}, "unobserved", False])
+def test_missing_argument_observer_is_null_not_an_arbitrary_value(tmp_path, domains):
+    document = report()
+    document["observations"]["cuda_argument_domains"] = domains
+    with pytest.raises(RuntimePriceError, match="argument domains"):
+        consumer.read_full_engine_resource_report(seal(tmp_path, document), root=tmp_path)
 
 
 @pytest.mark.parametrize("mutation", ["schema", "topology", "world", "duplicate_rank", "own_device",

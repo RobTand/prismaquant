@@ -9,7 +9,9 @@ and content-addressed raw-reference descriptors. It does not import Tessera.
 `consume_full_engine_rank_reports` checks each rank's recomputed captured Torch
 peak against **that rank's own** supplied device ceiling, never an average or
 redistribution of the world's capacity. Being below that ceiling is not a
-complete memory bound: unobserved allocations remain owed.
+complete memory bound: unobserved allocations remain owed. V3's null
+`cuda_argument_domains` means that observer did not run; the reader preserves
+it and reports the missing observation as an admission blocker.
 
 The whole off-step Torch peak is independently swept from allocation lifetimes
 and carried observer views for the reference assignment. It is observation

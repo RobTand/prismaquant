@@ -858,13 +858,16 @@ def _observations(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Map
     _optional_index(observations["external_native_peak_bytes"], where + " external native peak bytes")
     _index(observations["torch_observed_live_peak_bytes"], where + " observed live peak bytes")
     _string(observations["torch_observed_live_peak_scope"], where + " observed live peak scope")
-    domains = _object(observations["cuda_argument_domains"], _ARGUMENT_DOMAIN_FIELDS,
-                      where + " argument domains")
-    _enum(domains["status"], SUPPORTED_ARGUMENT_DOMAIN_STATUS, where + " argument domain status")
-    _string(domains["scope"], where + " argument domain scope")
-    _string_list(domains["handled_api_keys"], where + " handled API keys")
-    for key in ("host_allocations", "host_mappings", "issues", "null_device_frees"):
-        _list(domains[key], where + " argument domain " + key)
+    domains = observations["cuda_argument_domains"]
+    # The TP2 producer carries null when this observer did not run. Preserve
+    # that absence on the wire; consumption records an unfulfilled obligation.
+    if domains is not None or schema != REPORT_SCHEMA_V3:
+        domains = _object(domains, _ARGUMENT_DOMAIN_FIELDS, where + " argument domains")
+        _enum(domains["status"], SUPPORTED_ARGUMENT_DOMAIN_STATUS, where + " argument domain status")
+        _string(domains["scope"], where + " argument domain scope")
+        _string_list(domains["handled_api_keys"], where + " handled API keys")
+        for key in ("host_allocations", "host_mappings", "issues", "null_device_frees"):
+            _list(domains[key], where + " argument domain " + key)
     allocations = [_allocation(item, where + " allocation")
                    for item in _list(observations["torch_allocations"], where + " allocations")]
     if len({item["allocation_id"] for item in allocations}) != len(allocations):
@@ -1856,10 +1859,13 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
             disagree(f"checkpoint {checkpoint['label']!r} leaves storage observations unmatched")
     if observations["torch_observed_live_peak_bytes"] != _simultaneous_peak(list(allocations.values())):
         disagree("the observed live peak is not the maximum simultaneous sum of the observed allocations")
-    if observations["issues"] or observations["cuda_argument_domains"]["issues"]:
+    argument_domains = observations["cuda_argument_domains"]
+    if argument_domains is None:
+        blocking.append("CUDA allocation argument domains were not observed")
+    if observations["issues"] or (argument_domains is not None and argument_domains["issues"]):
         disagree("the ledger carries unresolved issues")
-    if (observations["cuda_argument_domains"]["status"] == "unavailable"
-            and observations["cuda_argument_domains"]["handled_api_keys"]):
+    if (argument_domains is not None and argument_domains["status"] == "unavailable"
+            and argument_domains["handled_api_keys"]):
         disagree("allocation APIs are handled by an argument domain that declares itself unavailable")
 
     # A unit interval that crosses a declared step boundary contradicts both
