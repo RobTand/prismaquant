@@ -1,0 +1,1734 @@
+{
+  "fixture_provenance": "synthetic_cpu_protocol_fixture",
+  "partition": {
+    "established": false,
+    "reason": "failed qualification: rank0.profiler_collection_health, rank1.profiler_collection_health",
+    "terms": null
+  },
+  "plan_sha256": "70d748644f4ff224a7b1b945a6ce1bcfc78291de22707ba5cf3761b0149fb592",
+  "qualification": {
+    "complete_world": {
+      "errors": [],
+      "passed": true,
+      "reason": null
+    },
+    "distinct_devices": {
+      "passed": true,
+      "reason": null
+    },
+    "distinct_hosts": {
+      "passed": true,
+      "reason": null
+    },
+    "identical_tokens": {
+      "passed": true,
+      "reason": null
+    },
+    "plan_binding": {
+      "passed": true,
+      "reason": null
+    },
+    "positive_warmup": {
+      "passed": true,
+      "reason": null
+    }
+  },
+  "ranks": [
+    {
+      "arms": [
+        {
+          "arm": "control",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-0-control/capture.json",
+              "sha256": "d53016333279916c434b7855a5ef868c272b71bb3696c10f32cec83e788273fe"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-0-control/partition.json",
+              "sha256": "911c9050bed022679120b66eaf2b735e6fea0e2fa94ed3af193f5605e843e20d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-0-control/profile.json",
+              "sha256": "9baa8e2117bbb43928bb12f2f227b8d3eff8f52c02bcfb8de4aed9db4b7e2ea2"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 0
+        },
+        {
+          "arm": "partition",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-0-partition/capture.json",
+              "sha256": "7cb6c3ae05d40720c9324a6387adcf14eb5edd318b93b3367f51196e1c2a2a1a"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-0-partition/partition.json",
+              "sha256": "0a944b699e24562671349891f15d105176003a9289dc9e51ffc96090ee170c9d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-0-partition/profile.json",
+              "sha256": "3832a1926c75fcb671447726bb16978c77476c3ae4d9c4b1c704f11626eaa95d"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 0
+        },
+        {
+          "arm": "control",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-1-control/capture.json",
+              "sha256": "d53016333279916c434b7855a5ef868c272b71bb3696c10f32cec83e788273fe"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-1-control/partition.json",
+              "sha256": "911c9050bed022679120b66eaf2b735e6fea0e2fa94ed3af193f5605e843e20d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-1-control/profile.json",
+              "sha256": "9baa8e2117bbb43928bb12f2f227b8d3eff8f52c02bcfb8de4aed9db4b7e2ea2"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 1
+        },
+        {
+          "arm": "partition",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-1-partition/capture.json",
+              "sha256": "7cb6c3ae05d40720c9324a6387adcf14eb5edd318b93b3367f51196e1c2a2a1a"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-1-partition/partition.json",
+              "sha256": "0a944b699e24562671349891f15d105176003a9289dc9e51ffc96090ee170c9d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-1-partition/profile.json",
+              "sha256": "3832a1926c75fcb671447726bb16978c77476c3ae4d9c4b1c704f11626eaa95d"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 1
+        },
+        {
+          "arm": "control",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-2-control/capture.json",
+              "sha256": "d53016333279916c434b7855a5ef868c272b71bb3696c10f32cec83e788273fe"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-2-control/partition.json",
+              "sha256": "911c9050bed022679120b66eaf2b735e6fea0e2fa94ed3af193f5605e843e20d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-2-control/profile.json",
+              "sha256": "9baa8e2117bbb43928bb12f2f227b8d3eff8f52c02bcfb8de4aed9db4b7e2ea2"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 2
+        },
+        {
+          "arm": "partition",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-2-partition/capture.json",
+              "sha256": "7cb6c3ae05d40720c9324a6387adcf14eb5edd318b93b3367f51196e1c2a2a1a"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-2-partition/partition.json",
+              "sha256": "0a944b699e24562671349891f15d105176003a9289dc9e51ffc96090ee170c9d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-0-2-partition/profile.json",
+              "sha256": "3832a1926c75fcb671447726bb16978c77476c3ae4d9c4b1c704f11626eaa95d"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 2
+        }
+      ],
+      "device_id": 0,
+      "device_uuid": "GPU-rank-0",
+      "host": {
+        "interface": "eth0",
+        "ip": "192.168.1.107",
+        "source": "synthetic CPU fixture; no actual interface observed"
+      },
+      "host_vitals": {
+        "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/launch/rank-0/host-vitals.log",
+        "sha256": "1e6e2d7b3c6de51b6b5a69966b5781a7558db3c9beeda757caf4a79b01b00bea"
+      },
+      "observer_overhead": {
+        "decode": [
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 0
+          },
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 1
+          },
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 2
+          }
+        ],
+        "prefill": [
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 0
+          },
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 1
+          },
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 2
+          }
+        ]
+      },
+      "process_id": 4242,
+      "qualification": {
+        "device_exclusivity": {
+          "host": {
+            "cadence_s": 5.0,
+            "compute_app_counts": [
+              1
+            ],
+            "compute_apps": [
+              "4242"
+            ],
+            "passed": true,
+            "samples": 6,
+            "scope": "host nvidia-smi compute-process census at the launcher's cadence over the arms' spans widened by one cadence; a foreign process alive only between samples is not seen"
+          },
+          "passed": true,
+          "reason": null,
+          "worker": {
+            "passed": true,
+            "pids": [
+              4242
+            ],
+            "process_counts": [
+              1
+            ],
+            "scope": "NVML compute-process census in the worker at arm and at finish of every arm; the pid namespace is the driver's, so count and constancy are the witness"
+          }
+        },
+        "host_log_identity": {
+          "passed": true,
+          "reason": null,
+          "samples": 1
+        },
+        "observed_operation_agreement": {
+          "by_sample": {
+            "0": {
+              "control": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              },
+              "partition": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              }
+            },
+            "1": {
+              "control": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              },
+              "partition": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              }
+            },
+            "2": {
+              "control": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              },
+              "partition": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              }
+            }
+          },
+          "passed": true,
+          "reason": null
+        },
+        "observer_impact": {
+          "overhead": {
+            "decode": [
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 0
+              },
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 1
+              },
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 2
+              }
+            ],
+            "prefill": [
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 0
+              },
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 1
+              },
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 2
+              }
+            ]
+          },
+          "passed": true,
+          "policy": {
+            "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/policy.json",
+            "sha256": "aa0c151c312910e16fc568b3d64f79d4bb01a02caa4e4b9d5b68d877df1f51a0"
+          },
+          "reason": null
+        },
+        "profiler_collection_health": {
+          "passed": false,
+          "reason": "no owned cumulative CUPTI loss witness covers Kineto reads, global and NCCL queues",
+          "witnesses": [
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            }
+          ]
+        },
+        "rank_identity": {
+          "passed": true,
+          "reason": null
+        },
+        "raw_evidence": {
+          "errors": [],
+          "passed": true,
+          "reason": null
+        },
+        "sample_terms": {
+          "passed": true,
+          "reason": null
+        },
+        "stream_coverage": {
+          "passed": true,
+          "reason": null
+        }
+      },
+      "rank": 0,
+      "raw_terms": {
+        "decode": {
+          "candidate_ms": {
+            "s:moe": [
+              3.0,
+              3.0,
+              3.0
+            ]
+          },
+          "fixed_gap_sum_ms": [
+            2.5,
+            2.5,
+            2.5
+          ],
+          "fixed_gaps_ms": [
+            [
+              1.0,
+              0.5,
+              1.0
+            ],
+            [
+              1.0,
+              0.5,
+              1.0
+            ],
+            [
+              1.0,
+              0.5,
+              1.0
+            ]
+          ],
+          "samples": [
+            0,
+            1,
+            2
+          ],
+          "segments": [
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.1",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.1",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ],
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.1",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.1",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ],
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.1",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.1",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ]
+          ],
+          "unit_order": [
+            "s:moe"
+          ],
+          "whole_step_ms": [
+            5.5,
+            5.5,
+            5.5
+          ]
+        },
+        "prefill": {
+          "candidate_ms": {
+            "s:moe": [
+              3.0,
+              3.0,
+              3.0
+            ]
+          },
+          "fixed_gap_sum_ms": [
+            2.5,
+            2.5,
+            2.5
+          ],
+          "fixed_gaps_ms": [
+            [
+              1.0,
+              0.5,
+              1.0
+            ],
+            [
+              1.0,
+              0.5,
+              1.0
+            ],
+            [
+              1.0,
+              0.5,
+              1.0
+            ]
+          ],
+          "samples": [
+            0,
+            1,
+            2
+          ],
+          "segments": [
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.0",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.0",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ],
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.0",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.0",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ],
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.0",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.0",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ]
+          ],
+          "unit_order": [
+            "s:moe"
+          ],
+          "whole_step_ms": [
+            5.5,
+            5.5,
+            5.5
+          ]
+        }
+      }
+    },
+    {
+      "arms": [
+        {
+          "arm": "control",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-0-control/capture.json",
+              "sha256": "dc8f238dcfe41bb80c17cfb66114e220423ec44684823e6076c130664ff92c28"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-0-control/partition.json",
+              "sha256": "911c9050bed022679120b66eaf2b735e6fea0e2fa94ed3af193f5605e843e20d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-0-control/profile.json",
+              "sha256": "eb16641d776d6ff1a8867236775530c7ae8bc81bc7d3391b22a39319914a97f4"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 0
+        },
+        {
+          "arm": "partition",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-0-partition/capture.json",
+              "sha256": "b18ec17724c9cddc2e3acf9769b11456900e41f1a737a1ce1c2ff6a820f81d74"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-0-partition/partition.json",
+              "sha256": "88bf71d2e1d3fa87ed3ac4b0f50a6677cedf3df431c0d8869814932af7a5d074"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-0-partition/profile.json",
+              "sha256": "d2f78e80fa2e0559e523b85bd0c4574f7e6b24b08ab1b8aad227fef963d29401"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 0
+        },
+        {
+          "arm": "control",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-1-control/capture.json",
+              "sha256": "dc8f238dcfe41bb80c17cfb66114e220423ec44684823e6076c130664ff92c28"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-1-control/partition.json",
+              "sha256": "911c9050bed022679120b66eaf2b735e6fea0e2fa94ed3af193f5605e843e20d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-1-control/profile.json",
+              "sha256": "eb16641d776d6ff1a8867236775530c7ae8bc81bc7d3391b22a39319914a97f4"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 1
+        },
+        {
+          "arm": "partition",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-1-partition/capture.json",
+              "sha256": "b18ec17724c9cddc2e3acf9769b11456900e41f1a737a1ce1c2ff6a820f81d74"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-1-partition/partition.json",
+              "sha256": "88bf71d2e1d3fa87ed3ac4b0f50a6677cedf3df431c0d8869814932af7a5d074"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-1-partition/profile.json",
+              "sha256": "d2f78e80fa2e0559e523b85bd0c4574f7e6b24b08ab1b8aad227fef963d29401"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 1
+        },
+        {
+          "arm": "control",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-2-control/capture.json",
+              "sha256": "dc8f238dcfe41bb80c17cfb66114e220423ec44684823e6076c130664ff92c28"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-2-control/partition.json",
+              "sha256": "911c9050bed022679120b66eaf2b735e6fea0e2fa94ed3af193f5605e843e20d"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-2-control/profile.json",
+              "sha256": "eb16641d776d6ff1a8867236775530c7ae8bc81bc7d3391b22a39319914a97f4"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 2
+        },
+        {
+          "arm": "partition",
+          "error": null,
+          "files": {
+            "capture": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-2-partition/capture.json",
+              "sha256": "b18ec17724c9cddc2e3acf9769b11456900e41f1a737a1ce1c2ff6a820f81d74"
+            },
+            "partition": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-2-partition/partition.json",
+              "sha256": "88bf71d2e1d3fa87ed3ac4b0f50a6677cedf3df431c0d8869814932af7a5d074"
+            },
+            "profile": {
+              "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/rank-1-2-partition/profile.json",
+              "sha256": "d2f78e80fa2e0559e523b85bd0c4574f7e6b24b08ab1b8aad227fef963d29401"
+            }
+          },
+          "gpu_operations": {
+            "by_step": {
+              "0": 3,
+              "1": 3
+            },
+            "outside_steps": 0,
+            "total": 6
+          },
+          "sample": 2
+        }
+      ],
+      "device_id": 0,
+      "device_uuid": "GPU-rank-1",
+      "host": {
+        "interface": "eth0",
+        "ip": "192.168.1.108",
+        "source": "synthetic CPU fixture; no actual interface observed"
+      },
+      "host_vitals": {
+        "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/launch/rank-1/host-vitals.log",
+        "sha256": "c21bbabbd9c503c1290b52b8ca62893272b688b5a15f4cc1b8a0eba85ca46d7f"
+      },
+      "observer_overhead": {
+        "decode": [
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 0
+          },
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 1
+          },
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 2
+          }
+        ],
+        "prefill": [
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 0
+          },
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 1
+          },
+          {
+            "control_whole_step_ms": 4.0,
+            "difference_ms": 1.5,
+            "partition_whole_step_ms": 5.5,
+            "sample": 2
+          }
+        ]
+      },
+      "process_id": 4243,
+      "qualification": {
+        "device_exclusivity": {
+          "host": {
+            "cadence_s": 5.0,
+            "compute_app_counts": [
+              1
+            ],
+            "compute_apps": [
+              "4243"
+            ],
+            "passed": true,
+            "samples": 6,
+            "scope": "host nvidia-smi compute-process census at the launcher's cadence over the arms' spans widened by one cadence; a foreign process alive only between samples is not seen"
+          },
+          "passed": true,
+          "reason": null,
+          "worker": {
+            "passed": true,
+            "pids": [
+              4243
+            ],
+            "process_counts": [
+              1
+            ],
+            "scope": "NVML compute-process census in the worker at arm and at finish of every arm; the pid namespace is the driver's, so count and constancy are the witness"
+          }
+        },
+        "host_log_identity": {
+          "passed": true,
+          "reason": null,
+          "samples": 1
+        },
+        "observed_operation_agreement": {
+          "by_sample": {
+            "0": {
+              "control": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              },
+              "partition": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              }
+            },
+            "1": {
+              "control": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              },
+              "partition": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              }
+            },
+            "2": {
+              "control": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              },
+              "partition": {
+                "by_step": {
+                  "0": 3,
+                  "1": 3
+                },
+                "outside_steps": 0,
+                "total": 6
+              }
+            }
+          },
+          "passed": true,
+          "reason": null
+        },
+        "observer_impact": {
+          "overhead": {
+            "decode": [
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 0
+              },
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 1
+              },
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 2
+              }
+            ],
+            "prefill": [
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 0
+              },
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 1
+              },
+              {
+                "control_whole_step_ms": 4.0,
+                "difference_ms": 1.5,
+                "partition_whole_step_ms": 5.5,
+                "sample": 2
+              }
+            ]
+          },
+          "passed": true,
+          "policy": {
+            "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/policy.json",
+            "sha256": "aa0c151c312910e16fc568b3d64f79d4bb01a02caa4e4b9d5b68d877df1f51a0"
+          },
+          "reason": null
+        },
+        "profiler_collection_health": {
+          "passed": false,
+          "reason": "no owned cumulative CUPTI loss witness covers Kineto reads, global and NCCL queues",
+          "witnesses": [
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            },
+            {
+              "available": true,
+              "streams": [
+                {
+                  "dropped_records": 0,
+                  "stream_id": 7
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 8
+                },
+                {
+                  "dropped_records": 0,
+                  "stream_id": 9
+                }
+              ]
+            }
+          ]
+        },
+        "rank_identity": {
+          "passed": true,
+          "reason": null
+        },
+        "raw_evidence": {
+          "errors": [],
+          "passed": true,
+          "reason": null
+        },
+        "sample_terms": {
+          "passed": true,
+          "reason": null
+        },
+        "stream_coverage": {
+          "passed": true,
+          "reason": null
+        }
+      },
+      "rank": 1,
+      "raw_terms": {
+        "decode": {
+          "candidate_ms": {
+            "s:moe": [
+              3.0,
+              3.0,
+              3.0
+            ]
+          },
+          "fixed_gap_sum_ms": [
+            2.5,
+            2.5,
+            2.5
+          ],
+          "fixed_gaps_ms": [
+            [
+              1.0,
+              0.5,
+              1.0
+            ],
+            [
+              1.0,
+              0.5,
+              1.0
+            ],
+            [
+              1.0,
+              0.5,
+              1.0
+            ]
+          ],
+          "samples": [
+            0,
+            1,
+            2
+          ],
+          "segments": [
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.1",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.1",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ],
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.1",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.1",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ],
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.1",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.1",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ]
+          ],
+          "unit_order": [
+            "s:moe"
+          ],
+          "whole_step_ms": [
+            5.5,
+            5.5,
+            5.5
+          ]
+        },
+        "prefill": {
+          "candidate_ms": {
+            "s:moe": [
+              3.0,
+              3.0,
+              3.0
+            ]
+          },
+          "fixed_gap_sum_ms": [
+            2.5,
+            2.5,
+            2.5
+          ],
+          "fixed_gaps_ms": [
+            [
+              1.0,
+              0.5,
+              1.0
+            ],
+            [
+              1.0,
+              0.5,
+              1.0
+            ],
+            [
+              1.0,
+              0.5,
+              1.0
+            ]
+          ],
+          "samples": [
+            0,
+            1,
+            2
+          ],
+          "segments": [
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.0",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.0",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ],
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.0",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.0",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ],
+            [
+              {
+                "elapsed_ms": 2.0,
+                "range_name": "apply.0",
+                "role": "apply",
+                "unit_id": "s:moe"
+              },
+              {
+                "elapsed_ms": 1.0,
+                "range_name": "reduce.0",
+                "reduction": {
+                  "collective_calls": [
+                    {
+                      "input_dtype": "torch.bfloat16",
+                      "input_shape": [
+                        512,
+                        2048
+                      ]
+                    }
+                  ],
+                  "collective_site": "vllm.model_executor.layers.fused_moe.runner.moe_runner.tensor_model_parallel_all_reduce",
+                  "effective_output_is_reduced": false,
+                  "input_dtype": "torch.bfloat16",
+                  "input_shape": [
+                    512,
+                    2048
+                  ],
+                  "is_sequence_parallel": false,
+                  "output_dtype": "torch.bfloat16",
+                  "output_is_reduced": false,
+                  "output_shape": [
+                    512,
+                    2048
+                  ],
+                  "skip_final_all_reduce": false,
+                  "tp_size": 2,
+                  "trunc_size": null
+                },
+                "role": "final_reduce",
+                "unit_id": "s:moe"
+              }
+            ]
+          ],
+          "unit_order": [
+            "s:moe"
+          ],
+          "whole_step_ms": [
+            5.5,
+            5.5,
+            5.5
+          ]
+        }
+      }
+    }
+  ],
+  "raw_inputs": {
+    "observer_impact_policy": {
+      "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/policy.json",
+      "sha256": "aa0c151c312910e16fc568b3d64f79d4bb01a02caa4e4b9d5b68d877df1f51a0"
+    },
+    "plan": {
+      "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/observer-plan.json",
+      "sha256": "70d748644f4ff224a7b1b945a6ce1bcfc78291de22707ba5cf3761b0149fb592"
+    },
+    "run": {
+      "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/timing/capture/run.json",
+      "sha256": "7cbbd8a1c9a0274afbb830472c120a2e9d08332876bb8e65258c94ae90b3246f"
+    }
+  },
+  "run_identity": {
+    "assignment_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "canonical_units_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_sha256": "20923a282d7c88e7e6d767c7f2126a198ae05e113ed880a18ff0075f9ec9e35d",
+    "runtime_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "workload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "schema": "tessera.full_engine_timing_observation.v2",
+  "scope": "TP2 eager/resident/batch-one observations; no fixed timing admission from producer labels",
+  "timing_samples": 3,
+  "world_size": 2
+}
