@@ -316,6 +316,70 @@ def prepare_native_inputs(cache, source_weight, activation_rows, *, unit, format
     }, tensors
 
 
+def require_native_execution(inputs, preflight):
+    """Bind independently declared execution to Tessera's observed preflight.
+
+    This is the bytes-only consumer of Tessera #639's execution/rendezvous
+    grammar, not an import of its serving runtime. Both dense freezers use it.
+    Legacy inputs lacking execution mean TP1, never the preflight's world.
+    TP2 references/identities must already be rank-local; freezing cannot
+    derive them from native output or relabel a whole-weight quality row.
+    """
+    execution = inputs.get("execution", EXECUTION)
+    if not isinstance(execution, dict):
+        raise ValueError("native execution must be an object")
+    world = execution.get("tensor_parallel")
+    if type(world) is not int or world not in (1, 2):
+        raise ValueError("native execution.tensor_parallel must be integer 1 or 2")
+    expected = dict(EXECUTION)
+    if world == 2:
+        axis = execution.get("tensor_parallel_cut_axis")
+        if axis not in ("input", "output"):
+            raise ValueError("native execution.tensor_parallel_cut_axis must be input or output")
+        expected.update(tensor_parallel=world, tensor_parallel_cut_axis=axis)
+    _equal(execution, expected, "execution grammar")
+    runtime = preflight["runtime"]
+    _equal(runtime["execution"], execution, "native execution")
+    distributed = inputs.get("distributed")
+    if distributed is None:
+        if world != 1:
+            raise ValueError("native TP2 requires an independent distributed block")
+    else:
+        fields = {"world_size", "rank", "init_method", "timeout_seconds"}
+        if not isinstance(distributed, dict) or set(distributed) != fields:
+            raise ValueError("native distributed block has missing or unknown fields")
+        if type(distributed["world_size"]) is not int or distributed["world_size"] != world:
+            raise ValueError("native distributed.world_size differs from execution")
+        if type(distributed["rank"]) is not int or not 0 <= distributed["rank"] < world:
+            raise ValueError("native distributed.rank is outside the declared world")
+        if not isinstance(distributed["init_method"], str) or not distributed["init_method"].startswith("tcp://"):
+            raise ValueError("native distributed.init_method must be an explicit tcp:// rendezvous")
+        if type(distributed["timeout_seconds"]) is not int or distributed["timeout_seconds"] < 1:
+            raise ValueError("native distributed.timeout_seconds must be a positive integer")
+    _equal(runtime.get("distributed"), distributed, "native distributed rank/rendezvous")
+    if world == 2:
+        shape = inputs["shape"]
+        if (not isinstance(shape, list) or len(shape) != 2
+                or any(type(value) is not int or value < 1 for value in shape)):
+            raise ValueError("native TP2 shape must be rank-local positive integer [N,K]")
+        for key in ("source_weight", "rendered_weight"):
+            _equal(inputs[key]["shape"], shape, f"rank-local {key} shape")
+        whole = list(shape)
+        whole[0 if execution["tensor_parallel_cut_axis"] == "output" else 1] *= world
+        _equal(inputs["wire"]["record"]["identity"]["source"]["shape"], whole, "whole wire shape")
+        scheme = preflight["operator"]["scheme"]
+        _equal([scheme["rows"], scheme["columns"]], whole, "whole native scheme shape")
+        _equal(scheme["roles"], [["weight", whole[0]]], "whole native scheme role")
+        for phase in PHASES:
+            item = inputs["phases"][phase]
+            if type(item["m"]) is not int or item["m"] < 1:
+                raise ValueError(f"native {phase}.m must be a positive integer")
+            for key, width in (("input", shape[1]), ("reference_qdq", shape[1]),
+                               ("reference_output", shape[0])):
+                _equal(item[key]["shape"], [item["m"], width], f"{phase} {key} shape")
+    return dict(execution)
+
+
 def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
     """Join independently frozen PWC references to untimed native facts and cost.
 
@@ -359,7 +423,7 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
     _equal(preflight["runtime_sha256"], identity_sha256(preflight["runtime"]), "runtime digest")
     _equal(preflight["native_tensors_sha256"], identity_sha256(operator["native_tensors"]), "native tensors")
     _equal(preflight["scheme_sha256"], identity_sha256(operator["scheme"]), "native scheme")
-    _equal(preflight["runtime"]["execution"], EXECUTION, "native execution")
+    execution = require_native_execution(inputs, preflight)
     _equal(preflight["runtime"]["image"], inputs["runtime_image"], "native image reference")
     route = operator["declared_route"]
     _equal(route["contract"], operator["activation_contract"], "activation route")
@@ -371,7 +435,7 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
         "calibration_sha256": probe["calibration_sha256"], "cost_sha256": cost_sha256,
         "probe_identity_sha256": cost_row["probe_identity_sha256"],
         "joint_operator_identity_sha256": cost_row["joint_operator_identity_sha256"],
-        "joint_operator_identity": joint, "wire": inputs["wire"], "execution": dict(EXECUTION),
+        "joint_operator_identity": joint, "wire": inputs["wire"], "execution": execution,
         "runtime": preflight["runtime"], "native_tensors_sha256": preflight["native_tensors_sha256"],
         "scheme_sha256": preflight["scheme_sha256"], "numerics": inputs["numerics"],
         "numerics_derivation": inputs["numerics_derivation"],

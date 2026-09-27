@@ -193,3 +193,77 @@ def test_alternate_reader_is_hash_bound_and_used_for_every_dependency(policy_fix
         return raw + b' ' if binding['path'] == policy['census']['path'] else raw
     with pytest.raises(ValueError, match='alternate pinned reader changed bound content'):
         owner.verify_policy(bound, read_bound=drifting_read)
+
+
+# -- several added routed A4 formats (PQ #1437) --------------------------------
+
+R768 = 'TESSERA_E2M1_K2_R768'
+
+
+def _prepared_binding(policy):
+    return policy['original_prepared']
+
+
+def test_an_unset_format_list_derives_the_v1_policy(policy_fixture):
+    from prismaquant.joint_served_activation import SCHEMA, policy_formats
+    bound, policy, cache, names = policy_fixture
+    assert policy['schema'] == SCHEMA and policy['format'] == FORMAT and 'formats' not in policy
+    assert policy_formats(policy) == (FORMAT,)
+    assert derive_policy(_prepared_binding(policy)) == policy
+
+
+def test_a_v2_policy_prices_every_listed_a4_format_at_the_group_scale(policy_fixture, tmp_path, monkeypatch):
+    from prismaquant.joint_served_activation import SCHEMA_V2, policy_formats
+    _bound, v1, cache, names = policy_fixture
+    monkeypatch.setenv('PRISMAQUANT_PROD_ACT_SCALES', '0')
+    policy = derive_policy(_prepared_binding(v1), formats=[R768, FORMAT])
+    assert policy['schema'] == SCHEMA_V2 and policy['formats'] == [R768, FORMAT] and 'format' not in policy
+    assert policy_formats(policy) == (R768, FORMAT)
+    # The group maxima are the unit's, so they are the v1 policy's.
+    assert policy['effective_max_abs'] == v1['effective_max_abs']
+    bound = write(tmp_path/'policy-v2.json', policy)
+    assert verify_policy(bound) == policy
+    for fmt in (R768, FORMAT):
+        assert policy_group(policy, names[0], fmt) == policy_group(v1, names[0], FORMAT)
+    assert policy_group(policy, names[0], 'TESSERA_E4M3_K1_R1024') is None
+    cache.weights = {(n, fmt): '/synthetic' for n in names for fmt in (R768, FORMAT)}
+    activate_policy(cache, bound)
+    view = joint_activation_maxima(cache)
+    expected = policy_group(policy, names[0], R768)[1]['input_global_scale']
+    for fmt in (R768, FORMAT):
+        a4 = activation_identity(format_registry.get_format(fmt), view, names[0])
+        assert a4['activation_max_abs'] == 5.0 and a4['input_global_scale'] == expected
+
+
+def test_a_v2_policy_needs_every_format_for_every_member(policy_fixture, tmp_path):
+    _bound, v1, cache, names = policy_fixture
+    policy = derive_policy(_prepared_binding(v1), formats=[R768, FORMAT])
+    bound = write(tmp_path/'policy-v2.json', policy)
+    cache.weights = {(n, fmt): '/synthetic' for n in names for fmt in (R768, FORMAT)}
+    del cache.weights[names[1], R768]
+    with pytest.raises(ValueError, match=f'candidate missing for .*: {R768}'):
+        activate_policy(cache, bound)
+
+
+@pytest.mark.parametrize('formats, match', [
+    ([FORMAT, R768], 'sorted unique'),
+    ([R768, R768], 'sorted unique'),
+    (['TESSERA_E4M3_K1_R1152'], 'not A4'),
+    (['TESSERA_E4M3_K1_R1024'], 'not A4'),
+])
+def test_a_v2_policy_refuses_an_unsorted_or_non_a4_format_list(policy_fixture, formats, match):
+    _bound, v1, _cache, _names = policy_fixture
+    with pytest.raises(ValueError, match=match):
+        derive_policy(_prepared_binding(v1), formats=formats)
+
+
+def test_a_v2_policy_refuses_a_format_a_member_already_offers(policy_fixture, tmp_path):
+    from pathlib import Path
+    _bound, v1, _cache, _names = policy_fixture
+    prepared = json.loads(Path(v1['original_prepared']['path']).read_bytes())
+    prepared['formats_by_qname'] = {n: ['TESSERA_E4M3_K1_R1024', R768, 'BF16']
+                                    for n in prepared['formats_by_qname']}
+    offered = write(tmp_path/'prepared-offers-r768.json', prepared)
+    with pytest.raises(ValueError, match='only price newly added'):
+        derive_policy(offered, formats=[R768, FORMAT])
+    assert derive_policy(offered, formats=[FORMAT])['formats'] == [FORMAT]
