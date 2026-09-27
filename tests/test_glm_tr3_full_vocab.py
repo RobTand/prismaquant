@@ -870,7 +870,8 @@ def test_teacher_window_single_read_matches_np_load_bitwise(tmp_path, order):
     base = got
     while isinstance(base, np.ndarray) and base.base is not None:
         base = base.base
-    assert isinstance(base, bytearray) and len(base) == descriptor["bytes"]
+    owner = base.obj if isinstance(base, memoryview) else base
+    assert isinstance(owner, bytearray) and len(owner) == descriptor["bytes"]
     assert got.flags.writeable  # torch.from_numpy takes it without a copy or warning
 
 
