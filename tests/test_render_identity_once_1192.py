@@ -21,6 +21,7 @@ quantum writes are byte-identical with and without each change.
 """
 from __future__ import annotations
 
+import os
 import pickle
 import shutil
 import threading
@@ -326,7 +327,14 @@ def test_the_quantum_main_thread_neither_hashes_a_render_nor_scans_an_archive(
     assert not [source for source, main in calls["scan"] if main], calls["scan"]
 
 
-def test_the_loaders_hash_only_when_the_window_asks(tmp_path, monkeypatch):
+@pytest.fixture
+def two_assigned_cpus():
+    if hasattr(os, "sched_getaffinity") and len(os.sched_getaffinity(0)) < 2:
+        pytest.skip("two-worker PWC window requires two assigned CPUs; "
+                    "route through PB with --cpus-per-shard 2")
+
+
+def test_the_loaders_hash_only_when_the_window_asks(tmp_path, monkeypatch, two_assigned_cpus):
     cache, paths = _file_cache(tmp_path, count=3)
     unpatched = pwc._cb_cache_tensor_identity
     calls = _threaded_counts(monkeypatch)
@@ -349,7 +357,7 @@ def test_the_loaders_hash_only_when_the_window_asks(tmp_path, monkeypatch):
             pass
 
 
-def test_the_loader_hash_equals_the_main_thread_hash(tmp_path):
+def test_the_loader_hash_equals_the_main_thread_hash(tmp_path, two_assigned_cpus):
     cache, paths = _file_cache(tmp_path, count=2)
     with cache.retained_window(list(paths), max_resident_bytes=1 << 20,
                                max_workers=2, max_load_buffer_bytes=1 << 20,
@@ -361,7 +369,7 @@ def test_the_loader_hash_equals_the_main_thread_hash(tmp_path):
         tensor = None
 
 
-def test_the_archive_scans_run_off_the_main_thread_once_per_file(tmp_path, monkeypatch):
+def test_the_archive_scans_run_off_the_main_thread_once_per_file(tmp_path, monkeypatch, two_assigned_cpus):
     cache, paths = _file_cache(tmp_path, count=4)
     calls = _threaded_counts(monkeypatch)
     with cache.retained_window(list(paths), max_resident_bytes=1 << 20,

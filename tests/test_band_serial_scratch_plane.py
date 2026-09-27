@@ -37,12 +37,22 @@ from test_joint_cost_quantum_runtime import _offline_tier_policy  # noqa: E402,F
 
 
 @pytest.fixture(autouse=True)
-def cotangent_scratch_plane(tmp_path, monkeypatch):
+def cotangent_scratch_plane(tmp_path, monkeypatch, request):
     from prismaquant.joint_quantum_handoff import HandoffStream
     from prismaquant.perturbed_x_cache import ExactCotangentScratch
 
+    from test_stageb_cotangent_scratch import require_direct_io
+
     root = tmp_path / "cotangent-scratch"
     root.mkdir()
+    # Only the imported spill-backed cases require DIO. The windowed
+    # chain-rebuild cases also exercise the legitimate buffered scratch path.
+    spill_cases = (test_a_band_serial_producer_runs_the_campaign_regime,
+                   test_the_batched_capture_plane_is_the_batched_chain_plane,
+                   test_the_control_at_batch_one_still_holds,
+                   test_band_serial_under_the_spill_equals_the_chain_rebuild)
+    if request.function in spill_cases:
+        require_direct_io(root)  # before instrumentation/yield, not teardown
     monkeypatch.setenv("PRISMAQUANT_STAGE_B_COTANGENT_ROOT", str(root))
     monkeypatch.setenv("PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES", str(1 << 30))
     built, streams = [], []
