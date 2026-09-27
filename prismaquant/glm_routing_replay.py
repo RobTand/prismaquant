@@ -117,7 +117,13 @@ def glm_route_record(runner, module, router, captured, *, layer, calibration,
         routed_scaling_factor=router.routed_scaling_factor, apply_router_weight_on_input=False,
         expert_map=None, input_dtype=str(captured["inputs"].dtype),
         topk_weights_dtype=str(captured["top_k_weights"].dtype),
-        topk_ids_dtype=str(captured["top_k_index"].dtype), device=str(runner.device),
+        topk_ids_dtype=str(captured["top_k_index"].dtype),
+        # The OBSERVED device of the boundary tensors (indexed, e.g. 'cuda:0'),
+        # not the runner's declared device: joint_cost_quantum builds the
+        # streamed runner with torch.device("cuda"), whose str() is the
+        # unindexed 'cuda', and validate_glm_routing requires the indexed
+        # device that actually produced the tensors (#1536).
+        device=str(captured["inputs"].device),
         weights_contract="post_renormalization_and_routed_scaling", topk_method="noaux_tc",
         n_group=router.num_group, topk_group=router.topk_group, swiglu_limit=module.swiglu_limit,
         source_protocol=dict(router_class=f"{type(router).__module__}.{type(router).__qualname__}",
