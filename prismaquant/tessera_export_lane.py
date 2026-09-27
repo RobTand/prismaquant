@@ -2287,6 +2287,27 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
 # ---------------------------------------------------------------------------
 # The driver's entry point
 # ---------------------------------------------------------------------------
+def cached_unit_encoder_source_proof_mode() -> str:
+    """Translate this producer's dev switch into the reader's explicit input."""
+    from .dev_mode import dev_mode_enabled
+
+    return 'permissive' if dev_mode_enabled() else 'strict'
+
+
+def read_cached_unit_bundle(manifest, directory, expected_units, source):
+    """Read with the producer's mode, retaining and surfacing every warning."""
+    import sys
+    from tessera.cached_unit import CachedUnitBundle
+
+    bundle = CachedUnitBundle(
+        manifest, directory, expected_units, source,
+        encoder_source_proof_mode=cached_unit_encoder_source_proof_mode())
+    for warning in bundle.warnings:
+        print('[cached-unit warning] ' + json.dumps(warning, sort_keys=True),
+              file=sys.stderr)
+    return bundle
+
+
 def require_composed_cached_units(path: str | Path, *, scope: Mapping,
                                   metadata: Mapping) -> dict:
     """Bind an original-cohort bundle to this selection before export intake.
@@ -2297,8 +2318,7 @@ def require_composed_cached_units(path: str | Path, *, scope: Mapping,
     and derives their source/H/recipe identities at intake.
     """
     import hashlib
-    from tessera.cached_unit import (COMPOSED_CACHE_SCHEMA, CachedUnitBundle,
-                                     read_manifest)
+    from tessera.cached_unit import COMPOSED_CACHE_SCHEMA, read_manifest
 
     path = Path(path)
     if not path.is_absolute() or path.is_symlink() or path.resolve() != path:
@@ -2314,7 +2334,7 @@ def require_composed_cached_units(path: str | Path, *, scope: Mapping,
     if body.get('source') != mtp.get('source'):
         raise TesseraExportLaneError('body and MTP producer checkpoint sources differ')
     expected = set(scope['by_unit'])
-    bundle = CachedUnitBundle(manifest, path.parent, expected, body['source'])
+    bundle = read_cached_unit_bundle(manifest, path.parent, expected, body['source'])
     selection = metadata.get('mtp_selection', {})
     priced_mtp = selection.get('mtp_expert_wires') if isinstance(selection, Mapping) else None
     priced_body = body.get('units')
@@ -2328,7 +2348,9 @@ def require_composed_cached_units(path: str | Path, *, scope: Mapping,
                 raise TesseraExportLaneError(
                     f'{name}: composed cached {cohort} receipt differs from selected price')
     return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
-            'units': len(bundle.units), 'children': bundle.child_manifests}
+            'units': len(bundle.units), 'children': bundle.child_manifests,
+            'encoder_source_proof_mode': bundle.encoder_source_proof_mode,
+            'warnings': bundle.warnings}
 
 
 def preflight(model_path: str | Path, *, target=None,
@@ -2395,6 +2417,7 @@ def preflight(model_path: str | Path, *, target=None,
         build = {
             "source_model": str(model_path), "layer_config": str(assignment_path),
             "layer_config_sha": assignment_sha,
+            "cached_encoder_source_proof_mode": cached_unit_encoder_source_proof_mode(),
             **prefill_frontier_replay_claim(read_layer_config_metadata(assignment_path)),
             "priced_inputs": {
                 "schema": ('tessera.priced_export_inputs.v2'
@@ -2450,7 +2473,9 @@ def preflight(model_path: str | Path, *, target=None,
                 build['cached_units_sha256'] = composed_cache['sha256']
                 build['cached_units_selected'] = {
                     'units': composed_cache['units'],
-                    'children': composed_cache['children']}
+                    'children': composed_cache['children'],
+                    'encoder_source_proof_mode': composed_cache['encoder_source_proof_mode'],
+                    'warnings': composed_cache['warnings']}
             # Copied from the scope receipt, never recomputed: the anchor is
             # the only machine-readable thing this CLI writes, and
             # `lane_shipcard open --build-json` stamps it whole onto the
