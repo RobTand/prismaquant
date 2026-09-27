@@ -129,6 +129,9 @@ HEAD_WALK_MAX_WORKERS = 16
 # unit: a crash loses at most one interval of verified work, and the cadence
 # matches the progress contract's own clock (#741).
 HEAD_WALK_BANK_INTERVAL_S = 60.0
+#: How many progress commits a replay phase makes per stall allowance. The
+#: derivation is in ``_ProgressCadence``.
+PROGRESS_CADENCE_SAFETY_FACTOR = 4
 #: Freed-but-cached decode blocks a cuda head walk tolerates before the
 #: retained pool is returned to the driver. Synthesis keeps no decoded
 #: tensor by reference (the shard is written to the render file), but the
@@ -600,6 +603,74 @@ def _pb_commit(units, phase, unit=None):
     return True
 
 
+class _ProgressCadence:
+    """Commit a cumulative count on a clock derived from the phase's stall allowance.
+
+    Replaying banked work establishes no new durable unit, so #822 dropped
+    the per-unit commit: 36,423 serial NFS writes bought nothing. One commit
+    at the end, though, leaves the whole replay silent. The PrismaBuild
+    watchdog then reads a healthy 900 s replay as a stall and kills it (A4
+    r5 and r6, #1518). A cadence keeps #822's substance, O(1) writes per
+    window and none per unit, and still keeps the watchdog fed.
+
+    The watchdog accepts a report only when its count passes the highest
+    count accepted so far. It reads the progress file once per poll interval
+    ``P``; PrismaBuild's worker polls every ``HEARTBEAT_S = 30`` s. Commits
+    land on unit boundaries, so the quiet the watchdog observes between two
+    accepted reports is at most ``cadence + L + P``, where ``L`` is the
+    latency of the unit in flight when the window expires. With
+    ``cadence = A / PROGRESS_CADENCE_SAFETY_FACTOR`` and a factor of 4, the
+    remaining ``3A / 4`` covers ``L + P`` and also a second full window of
+    delay. That second window is the margin for one commit write held up on
+    the shared mount. For the A4 ``synthesize`` phase (``A = 600`` s) the
+    cadence is 150 s: 4 writes per allowance where #822 removed 36,423.
+
+    PrismaBuild does not export the allowance to the action.
+    ``PRISMABUILD_ACTION_PROGRESS_PHASES`` carries the phase names only
+    (``pool.py``, the launch environment). The caller therefore passes the
+    allowance it declared for ``phase``. Without it the cadence is off, and
+    the caller gets exactly the #822 behaviour: nothing until its final
+    commit. That keeps every caller that does not opt in byte-identical.
+
+    The first eligible unit commits at once. That enters the phase as soon
+    as the replay proves anything, so the preceding phase's grace only has
+    to cover parsing.
+    """
+
+    def __init__(self, phase, allowance_s, *, clock=time.monotonic):
+        _require(allowance_s is None or (type(allowance_s) in (int, float)
+                                         and math.isfinite(allowance_s) and allowance_s > 0),
+                 "progress_allowance_s must be the positive stall allowance declared "
+                 "for the progress phase, or None")
+        self.phase = phase
+        self.cadence_s = (None if phase is None or allowance_s is None
+                          else float(allowance_s) / PROGRESS_CADENCE_SAFETY_FACTOR)
+        self._clock = clock
+        self._last = None
+        self.committed = None
+
+    @property
+    def active(self):
+        return self.cadence_s is not None
+
+    def maybe_commit(self, units, unit=None):
+        """Commit ``units`` when this cadence window has run out; return whether it did."""
+        if not self.active:
+            return False
+        if self._last is not None and self._clock() - self._last < self.cadence_s:
+            return False
+        return self.commit(units, unit)
+
+    def commit(self, units, unit=None):
+        """Commit ``units`` now, unless this cadence already reported that count."""
+        if not self.active or units == self.committed:
+            return False
+        _pb_commit(units, self.phase, unit=unit)
+        self._last = self._clock()
+        self.committed = units
+        return True
+
+
 def _head_walk_worker_count(requested=None, environ=None):
     """Resolve the head walk's worker count from PrismaBuild's own placement.
 
@@ -792,7 +863,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                historical_encoder_reuse=None,
                                progress_phase=SYNTHESIS_PHASE,
                                head_checkpoint=None, head_resume=False,
-                               head_walk_workers=None, head_walk_quantum=None):
+                               head_walk_workers=None, head_walk_quantum=None,
+                               progress_allowance_s=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -860,6 +932,21 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     this census reports 36,423 times rather than 197,990. The caller names the
     phase because only it knows what its submission declared: a name outside
     the declared set grants no continuation.
+
+    ``progress_allowance_s`` is the stall allowance the submission declared
+    for ``progress_phase``. PrismaBuild exports phase names to the action but
+    not their allowances, so only the caller knows it. When it is given, the
+    two phases that establish no new durable unit report on a cadence
+    derived from it (``_ProgressCadence``, #1518):
+
+    - A ``head_resume`` replay commits its cumulative verified prefix.
+    - A candidate overlay's fence commits the walk's count plus the overlay
+      cells admitted so far, then its final cumulative count.
+
+    ``progress_committed`` then carries that final count, so later stages
+    keep counting upward. Without the allowance both phases stay as #822
+    left them: the replay commits once at the end and the overlay commits
+    nothing.
 
     ``historical_encoder_reuse`` is the plan's explicit allowance for a
     recorded encoder source seal the installed package cannot re-derive. The
@@ -935,6 +1022,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _require(type(log_every) is int and log_every >= 0, "non-negative log_every required")
     _require(progress_phase is None or (type(progress_phase) is str and progress_phase),
              "progress_phase must be a declared phase name or None")
+    cadence = _ProgressCadence(progress_phase, progress_allowance_s)
     _require(type(require_existing_renders) is bool, "require_existing_renders must be boolean")
     _require(head_checkpoint is None or isinstance(head_checkpoint, (str, Path)),
              "head_checkpoint must be a directory path or None")
@@ -1167,6 +1255,9 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             if state is None:
                 raise _PrefixEnded
             banked.append((name, state))
+            # Only a verified roster prefix reaches this line, so the count
+            # is cumulative and never names an unverified suffix (#1518).
+            cadence.maybe_commit(len(banked), unit=name)
 
         # Independent read-only authentication may finish out of order, but
         # only the roster prefix is reusable. The existing bounded driver
@@ -1184,12 +1275,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         # every replayed unit paid 36,423 serial NFS writes in the GLM head
         # without establishing any additional durable work (#822). Nothing
         # it synthesized counts as written now -- a resume writes nothing.
+        # With a declared allowance the drive also committed its verified
+        # prefix on the cadence above; this is still its final count.
         for name, state in banked:
             for fmt, row in state["cells"].items():
                 cells[name, fmt] = row
             formats[name] = tuple(state["formats"])
             resolved += 1
-        if banked and progress_phase is not None:
+        if banked and progress_phase is not None and cadence.committed != resolved:
             _pb_commit(resolved, progress_phase, unit=banked[-1][0])
 
     def walk_one(name):

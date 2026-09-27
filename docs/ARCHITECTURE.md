@@ -3645,8 +3645,28 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/planner-charge-1491`.
+Head-resume progress cadence (2026-09-27, PQ #1518): a caller that passes
+`progress_allowance_s` gets progress from the replay itself. The value is the
+stall allowance its submission declared for `progress_phase`. PrismaBuild
+exports phase names to the action (`PRISMABUILD_ACTION_PROGRESS_PHASES`) but
+not their allowances, so only the caller knows it. The replay commits its
+cumulative verified prefix on the first verified unit, then at most once per
+`allowance / PROGRESS_CADENCE_SAFETY_FACTOR` (factor 4). The derivation is in
+`tessera_joint_aura._ProgressCadence`: the watchdog sees at most `cadence` plus
+one unit's latency plus one 30 s poll of quiet. The final cumulative record is
+unchanged. Writes stay O(1) per window and never happen per unit. Without an
+allowance the replay behaves exactly as #822 left it.
+
+As of: 2026-09-27 · `claude/a4-silent-phases`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/a4-silent-phases`) for **replay progress on a
+derived cadence** (PQ #1518). `load_measured_anchor_input` takes an optional
+`progress_allowance_s`. With it, a `--head-resume` replay reports its verified
+prefix during the drive. Without it, the progress stream is byte-identical to
+before.
+
+Gates: `tests/test_head_resume_progress_822.py`.
 
 Re-stamped (2026-09-27, `claude/planner-charge-1491`) for **the selected-row
 source-validation charge** (PQ #1491). The Stage A planner
