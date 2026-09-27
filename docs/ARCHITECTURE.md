@@ -1,5 +1,36 @@
 # PrismaQuant Architecture
 
+Tessera contract v39 (2026-09-27, Tessera #641, merge `52bc86ea1…`, closing
+tessera#604) is on Tessera master. It is **not** on PrismaQuant's pin. The pin
+stays at `09d6559d7…` with packaged contract v38 (SHA-256 `04d5a20a…9d22e4`),
+so admission does not change until a separate pin bump moves it. The v39
+packaged contract has SHA-256 `f2f90948…81c0bb`, and its lane schema is still
+v10. When the pin moves, admission changes as follows:
+
+- **Withdrawn:** the routed `TESSERA_E2M1_K2` cells on
+  `spark-vllm-nccl230@sha256:a5424378…` (q256 128..896, which named the
+  materialising launch that `nvfp4_moe_route` never makes), and the dense
+  `TESSERA_E2M1_K2` pair on the serve-image pin. Routed E2M1 at q256 128..768
+  loses its attestation everywhere. So do E2M1 dense on the pin image, at
+  streamed residency and in compiled mode.
+- **Minted on `f8dbe1a0…`:** `TESSERA_E2M1_K2` dense and routed cells at q896,
+  eager and resident, on the native A4 launches. These cells rest on eight TP1
+  route censuses of eight-layer GLM-5.3-Flash stubs, with no new encode.
+- **Widened on `f8dbe1a0…`:** dense E4M3 and BF16 and routed E4M3 rungs
+  (832 through 1088). Routed BF16 stays at q1024.
+
+The "one image carries E2M1, the other carries every v38 cell" split described
+below is what v39 resolves: after the bump, `f8dbe1a0…` carries all of them.
+`TESSERA_E2M1_K2` keeps `max_world_size: 2`. A TP2 route census of the all-E2M1
+stub on `f8dbe1a0…` served every module on both ranks through the native
+span-2 route (Tessera
+`experiments/results/glm53_u1_stub_d_tp2_eager_census.json`). That census is
+a route receipt, not a `world_size_receipts` entry, and it carries no KL. The
+pin bump is separate work, because the pin file, the per-commit test venvs,
+the reviewed admission answer, the legal-domain inventory and
+`tests/test_tessera_pin_v38_scope.py` all move with it. This entry changes no
+format, default, stage or ship gate (PQ #1448).
+
 Tessera's exact pin advances again on 2026-09-26 from `d2a6455025…` to
 `09d6559d7…` (Tessera #633, PQ #1413). The new serving mapper and route-census
 implementation address GLM MTP layer 45's runtime `mtp_block` module names.
@@ -3462,10 +3493,10 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-26 · `claude/pact-gamut-export-optional-proof`.
+As of: 2026-09-27 · `claude/pact-gamut-export-optional-proof`.
 Stamps follow, newest first, each recording its own branch and date.
 
-Re-stamped (2026-09-26, `claude/pact-gamut-export-optional-proof`) for **an
+Re-stamped (2026-09-27, `claude/pact-gamut-export-optional-proof`) for **an
 unproven adopted cell at export** (PQ #1438). The rooted selected-cache
 manifest reads an accepted adoption's reseal proof as optional, as
 `validated_encoder_adoption` returns it: a dev-mode unproven cell adds no
@@ -3473,6 +3504,11 @@ proof binding and no proof-bound producer-package comparison. Recorded with
 it: the pinned Tessera cached-unit reader still requires a proof per adoption
 and the v1 R896 served activation policy (Tessera #644). No default, stage, format, lane or
 ship gate changes.
+
+Re-stamped (2026-09-27, `claude/1448-arch-tessera-v39`) for the Tessera
+contract v39 entry at the top (PQ #1448). It records what v39 changes for
+admission when the pin moves. It moves no pin, format, default, numerical
+choice or serving gate.
 
 Re-stamped (2026-09-26, `astra/mtp-wire-compat-proof-1413`) for the
 selected MTP Hessian collection, source-scope plan, and composed cached-unit
