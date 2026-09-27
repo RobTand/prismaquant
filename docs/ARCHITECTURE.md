@@ -1,5 +1,31 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-27 for the approved PACT M3 TP2 report protocol
+(PQ #1463, Tessera #650). The pure-artifact reader in
+`prismaquant/full_engine_resource_report.py` accepts v1/v2 and the distinct
+`tessera.full_engine_resource_report.v3`: v3 requires world size two, each
+rank's actual host/device identity, a shared `observations.rank_world` roster,
+and content-addressed raw-reference descriptors. It does not import Tessera.
+`consume_full_engine_rank_reports` checks each rank's recomputed captured Torch
+peak against **that rank's own** supplied device ceiling, never an average or
+redistribution of the world's capacity. Being below that ceiling is not a
+complete memory bound: unobserved allocations remain owed. V3's null
+`cuda_argument_domains` means that observer did not run; the reader preserves
+it and reports the missing observation as an admission blocker.
+
+The whole off-step Torch peak is independently swept from allocation lifetimes
+and carried observer views for the reference assignment. It is observation
+only, never an invariant fixed charge or a candidate placement certificate.
+V3 requires null `placement_obligation`, permits only false
+`certifies_placement`, and always returns a placement refusal. All existing
+fixed-observation, ownership, runtime-world equality and served-family gates
+remain; shape-only table emission still exits 3. Raw references are validated
+as descriptors here, not promoted to an admitted runtime closure. V1/v2 retain
+their separate schema rules; unknown schemas still refuse. Producer-path CPU
+fixtures demonstrate protocol compatibility, not a GPU capture or resource
+qualification. No runtime pin, contract cell, format menu or serving default
+changes.
+
 Re-stamped 2026-09-27 for dense TP2 panel freezing (PQ #1429, Tessera #639).
 Both the joint-cost and pre-cost execution freezers share one bytes-only
 execution binding in `native_operator_panel.require_native_execution`. Legacy
@@ -3552,6 +3578,18 @@ then rechecks before reporting success. Dry-run makes no Hub requests. LICENSE
 remains in artifact identity and must be staged before authoritative evidence;
 no existing cards or remote repositories are migrated. The shipcard verifier,
 serving pin, formats, pipeline graph and numerical gates are unchanged.
+
+Re-stamped (2026-09-27, `claude/dense-same-shape-batching`) for **same-shape
+dense anchor batches** (PQ #1479). `_anchor_batches` now keys every unit, dense
+or projected expert, by `(family, rung, shape, dtype, device)`. Dense units were
+keyed by `(unit, family, rung)`, so every dense anchor encoded at batch one, even
+in a row that merges several dense groups. The measured result was about 25 W of
+the 140 W envelope. The wire recipe and Hessian requirement derive from
+`(family, rung)` alone, so the batches are uniform, and `_measure_anchor_batch`
+refuses a batch whose prepared recipes differ. The resource plan already charges
+`--anchor-batch-size` times the widest unit. No format, default, stage or ship
+gate changes. `--anchor-batch-size` still defaults to 1, and batch width is still
+excluded from input identity. Gate: `tests/test_tessera_campaign_batch.py`.
 
 Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
 inputs over a several-format catalog** (PQ #1437). The Stage B control
@@ -10204,7 +10242,7 @@ every run. The 864-unit row now fits a 256 MiB reservation.
 
 Anchor batches are emitted unit-major (`_anchor_batches`): the chunks of one
 `(family, shape, dtype, device)` key are ordered by chunk position first and
-rung second, so consecutive batches encode the same expert units at successive
+rung second, so consecutive batches encode the same units at successive
 rungs and the encoder memo -- sized to the batch width by the plan -- reuses
 each unit's block-LDL factorization across its rungs instead of refactorizing
 once per (unit, rung) with every other unit's batches in between
