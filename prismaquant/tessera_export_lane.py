@@ -842,8 +842,8 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             costs=handoff.get("costs"))
     except ExpertProjectionError as exc:
         raise TesseraExportLaneError(f"selected cache projection: {exc}") from exc
-    if set(selected) != set(data.census["unit_shapes"]):
-        raise TesseraExportLaneError("selected cache assignment does not cover the full source roster")
+    from .tessera_census_cache import census_roster_selection
+    selected = census_roster_selection(selected, data.census["unit_shapes"], TesseraExportLaneError)
     wire_dir = Path(provenance["wire_dir"]).resolve()
     if (metadata.get(WIRE_DIR_KEY) != str(wire_dir) or
             data.payload.get("provenance", {}).get("wire_dir") != str(wire_dir)):
