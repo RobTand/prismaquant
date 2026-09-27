@@ -23,7 +23,8 @@ A16 = "TESSERA_BF16_K1_R1024"
 def unbound_process(monkeypatch):
     """Every test starts in a process that has bound nothing, as production does."""
     contract._reset_served_quantizer_identity_for_tests()
-    monkeypatch.setattr(tessera_campaign, "_SERVED_QUANTIZER_RECORD", None)
+    monkeypatch.setattr(tessera_campaign, "_SERVED_QUANTIZER_RECORD", None,
+                        raising=False)  # absent before the fix; the RED run still reaches its test
     yield
     contract._reset_served_quantizer_identity_for_tests()
 
