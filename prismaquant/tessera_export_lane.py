@@ -784,33 +784,6 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
 CACHED_EXPERT_UNITS_PREFIX = "cached_expert_units"
 
 
-def _priced_content_wire_root(record: Mapping[str, Any], *, name: str, fmt: str,
-                               home: Path) -> Path:
-    """Resolve a selected wire's read root, gating presence and size (#1513).
-
-    The joint handoff names the wire directory the selected-cache manifest is
-    written into, and the exporter reads every blob from the manifest's own
-    directory.  For each selected unit the priced receipt names the file and
-    its exact blob_bytes; this gate checks, identically for every root, that
-    the priced file is present there, is a regular non-symlink file that sits
-    directly in the manifest root, and has the receipt's size.  Content
-    identity -- the receipt's sha256 against the bytes actually read -- is
-    enforced by verify_cached_unit at intake, against this same priced
-    receipt.
-    """
-    path = home / record["file"]
-    if path.is_symlink() or not path.is_file() or path.resolve().parent != home.resolve():
-        raise TesseraExportLaneError(
-            f"{name}@{fmt}: priced wire {record['file']} is missing from the handoff wire "
-            f"root {home}; the export reads the manifest's own directory")
-    size = path.stat().st_size
-    if size != record["blob_bytes"]:
-        raise TesseraExportLaneError(
-            f"{name}@{fmt}: priced wire {record['file']} has size {size} under the handoff "
-            f"wire root {home} but the priced receipt records {record['blob_bytes']}")
-    return home
-
-
 def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapping[str, Any],
                                    handoff: Mapping[str, Any], data: Any, *, schema: str,
                                    research_proposal: Mapping[str, Any] | None = None,
@@ -936,7 +909,14 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             sealed_unit = data.manifest["identity"]["units"][name]
             if record["identity"].get("source") != sealed_unit["weight"]:
                 raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
-            cell_wire_dir = _priced_content_wire_root(record, name=name, fmt=fmt, home=wire_dir)
+            # The root this cell's bytes are read from: the handoff root, or,
+            # for a catalog-adopted cell, its catalog row's own directory
+            # (chosen below). ``locate_expert_wire`` gates that final root once
+            # (present, regular, non-symlink, directly in the root, receipted
+            # size) against ``record``, which ``require_selected_catalog_cell``
+            # holds equal to the catalog row's record. Content identity is
+            # enforced at intake by ``verify_cached_unit`` (#1513, #641/#643).
+            cell_wire_dir = wire_dir
             if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
                 if not rooted:
                     raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")

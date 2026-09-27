@@ -138,10 +138,7 @@ def test_manifest_builder_reads_no_wire_bytes(tmp_path, monkeypatch):
     ("source", "source differs from checkpoint seal"),
     ("hessian", "Hessian differs from checkpoint seal"),
     ("encoder", "encoder differs from checkpoint seal"),
-    # A different-size overwrite is caught at manifest time by the stat gate
-    # (#1513 rework): priced wire has size N under the handoff wire root ...
-    ("wire", "does not match its receipt|escapes the campaign directory"
-             "|under the handoff wire root .* but the priced receipt records"),
+    ("wire", "does not match its receipt|escapes the campaign directory"),
     ("coverage", "does not cover the full source roster"),
 ])
 def test_missing_or_changed_selected_evidence_refuses(tmp_path, change, match):
@@ -426,7 +423,7 @@ def test_handoff_root_copy_of_the_wrong_size_refuses_at_manifest_time(tmp_path):
     path = home / records[DENSE]["file"]
     path.write_bytes(path.read_bytes() + b"\x00")
     with pytest.raises(TesseraExportLaneError,
-                       match="under the handoff wire root .* but the priced receipt records"):
+                       match="does not match its receipt"):
         selected_cached_units_manifest(
             {name: FMT for name in names}, metadata, handoff, data,
             schema="tessera.cached_units.v1")
@@ -435,7 +432,7 @@ def test_handoff_root_copy_of_the_wrong_size_refuses_at_manifest_time(tmp_path):
 def test_handoff_root_missing_the_priced_wire_refuses(tmp_path):
     source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
     (home / records[DENSE]["file"]).unlink()
-    with pytest.raises(TesseraExportLaneError, match="missing from the handoff wire root"):
+    with pytest.raises(TesseraExportLaneError, match="is not in the wire directory"):
         selected_cached_units_manifest(
             {name: FMT for name in names}, metadata, handoff, data,
             schema="tessera.cached_units.v1")
