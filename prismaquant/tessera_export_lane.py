@@ -2348,9 +2348,14 @@ def preflight(model_path: str | Path, *, target=None,
     in BF16, which is a decision the allocator emits and this gate refused
     until #229.
     """
+    from .layer_config import prefill_frontier_replay_claim, read_layer_config_metadata
+
     if assignment_path is not None:
-        from .layer_config import read_layer_config_metadata
         allocation_meta = read_layer_config_metadata(assignment_path)
+        try:
+            prefill_frontier_replay_claim(allocation_meta)
+        except ValueError as exc:
+            raise TesseraExportLaneError(str(exc)) from exc
         if 'sampled_joint_proposal' in allocation_meta:
             raise TesseraExportLaneError(
                 'sampled joint research assignment is pending independent '
@@ -2390,6 +2395,7 @@ def preflight(model_path: str | Path, *, target=None,
         build = {
             "source_model": str(model_path), "layer_config": str(assignment_path),
             "layer_config_sha": assignment_sha,
+            **prefill_frontier_replay_claim(read_layer_config_metadata(assignment_path)),
             "priced_inputs": {
                 "schema": ('tessera.priced_export_inputs.v2'
                            if priced_inputs.get('hessian_reference_binding') is not None

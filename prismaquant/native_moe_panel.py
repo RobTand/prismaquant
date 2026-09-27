@@ -736,23 +736,47 @@ def _member_roster(unit, members, shape):
                                  pattern=None, where="native MoE members")
 
 
+def _streamed_routing_capture(capture):
+    contract = capture.get('model_load_contract')
+    return isinstance(contract, dict) and contract.get('schema') in {
+        'prismaquant.streaming_prefix_initialization.v1',
+        'prismaquant.streaming_initialization.v1',
+    }
+
+
 def _validate_prefix_capture(capture, source_model_identity=None):
-    """A fresh source prefix is explicit evidence, never a full-load stamp."""
-    from .streaming_model import validate_streaming_prefix_initialization_contract
-    contract=validate_streaming_prefix_initialization_contract(capture['model_load_contract'])
-    if (capture['unit']!='model.language_model.layers.3.mlp.experts'
-            or geometry_family(capture['shape'])!='glm53_next_routed_stack_v1'
-            or contract['total_model_layers']!=45 or contract['observed_layers']!=[0,1,2,3]
-            or contract['dtype']!='torch.bfloat16'):
-        raise ValueError('fresh routing prefix scope differs from GLM source layers0..3')
-    if (contract['layers_prefix']!='model.language_model.layers.' or
+    """Bind a routed layer to exactly its observed source traversal.
+
+    Layers 3..43 need a proper prefix. Layer 44 uses the existing completed
+    text-forward witness, never a weakened proper-prefix or HF-load contract.
+    """
+    from .streaming_model import (validate_streaming_initialization_contract,
+                                  validate_streaming_prefix_initialization_contract)
+    unit = capture.get('unit')
+    if not isinstance(unit, str) or _GLM_UNIT.fullmatch(unit) is None:
+        raise ValueError('fresh routing capture requires an exact GLM source unit')
+    layer = int(unit.split('.')[3])
+    contract = capture['model_load_contract']
+    full = contract.get('schema') == 'prismaquant.streaming_initialization.v1'
+    if full:
+        contract = validate_streaming_initialization_contract(contract)
+        scope_matches = layer == 44 and contract['num_layers'] == 45
+    else:
+        contract = validate_streaming_prefix_initialization_contract(contract)
+        scope_matches = (3 <= layer < 44 and contract['total_model_layers'] == 45
+                         and contract['observed_layers'] == list(range(layer + 1)))
+    if (not scope_matches or geometry_family(capture['shape']) != 'glm53_next_routed_stack_v1'
+            or contract['dtype'] != 'torch.bfloat16'):
+        raise ValueError('fresh routing prefix scope differs from the routed GLM layer')
+    if (contract['layers_prefix'] != 'model.language_model.layers.' or
             not contract['model_class'].endswith('.Glm5NextForConditionalGeneration') or
-            not {'lm_head.weight','model.language_model.embed_tokens.weight',
-                 'model.language_model.norm.weight'} <= set(contract['head_state_names'])):
+            (not full and not {'lm_head.weight', 'model.language_model.embed_tokens.weight',
+                               'model.language_model.norm.weight'} <= set(contract['head_state_names']))):
         raise ValueError('fresh prefix lacks the actual GLM head/model initialization coverage')
     replay=capture.get('replay',{})
     if (replay.get('schema')!='prismaquant.glm_routing_boundary_replay.v1'
-            or replay.get('layer')!=3 or replay.get('sample')!=0
+            or type(replay.get('layer')) is not int or replay['layer'] != layer
+            or type(replay.get('sample')) is not int or replay['sample'] != 0
             or replay.get('stop')!='before_original_packed_experts_forward'):
         raise ValueError('fresh routing prefix lacks its exact original replay coordinates')
     provenance=capture.get('source_acquisition',capture)
@@ -797,7 +821,7 @@ def _calibration_and_capture(calibration, capture, *, unit, shape, routing):
         raise ValueError("native MoE capture needs its full producer source and actual runtime config")
     _sha(capture["capture_source_sha256"], "capture producer")
     from . import validate_pretrained_initialization_contract
-    if isinstance(capture['model_load_contract'],dict) and capture['model_load_contract'].get('schema')=='prismaquant.streaming_prefix_initialization.v1':
+    if _streamed_routing_capture(capture):
         _validate_prefix_capture(capture)
     else:
         validate_pretrained_initialization_contract(capture["model_load_contract"])
@@ -1611,7 +1635,7 @@ def routed_boundary_inputs(payload, *, calibration_receipt, capture_manifest, de
     validate_routing(metadata["routing"])
     _equal(metadata["profile_role_order"], list(ROLES), "captured profile role order")
     identity = capture_manifest["identity"]
-    prefix=isinstance(metadata['model_load_contract'],dict) and metadata['model_load_contract'].get('schema')=='prismaquant.streaming_prefix_initialization.v1'
+    prefix = _streamed_routing_capture(metadata)
     if prefix:
         if source_model_identity is None:
             raise ValueError('fresh prefix intake requires independently bound original source identity')
