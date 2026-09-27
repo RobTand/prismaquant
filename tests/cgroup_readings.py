@@ -5,12 +5,22 @@ things the guard reads (``CaptureMemoryGuard._observe``): the cgroup's
 committed bytes, the CUDA caching allocator's reservation and the host's
 MemAvailable. It must run where it can read its own cgroup; a missing cgroup
 fails it rather than skipping it, because a skipped probe certifies nothing.
+
+The cgroup's readings are the whole cgroup's, not this process's. Under
+pytest-xdist every worker of a session is a child of the same controller and
+shares its cgroup, and the other workers allocate and free while a test takes
+its two readings. On CI's runner that moved ``anon`` by up to 22 MB between
+the two readings of one check, far past the reading's grain. So a test
+that shares its cgroup with another worker of its session skips, with the
+pids in the reason: the reading is not the test's to hold. These tests carry
+the ``own_cgroup`` mark, and CI runs them in a systemd scope of their own.
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
+import pytest
 import torch
 
 import prismaquant.production_weight_cache as pwc
@@ -30,7 +40,38 @@ def own_cgroup() -> Path:
     assert unified, f"no cgroup v2 membership in /proc/self/cgroup: {lines}"
     scope = Path("/sys/fs/cgroup") / unified[0].lstrip("/")
     assert (scope / "memory.stat").is_file(), f"cannot read {scope}/memory.stat"
+    workers = _session_workers_in(scope)
+    if workers:
+        pytest.skip(
+            f"{scope} is shared with {len(workers)} other pytest-xdist workers of "
+            f"this session (pids {workers}): what they allocate lands in the same "
+            "reading, so it is not this test's. Run it without xdist, in a cgroup "
+            "of its own (the own_cgroup mark)")
     return scope
+
+
+def _session_workers_in(scope: Path) -> list[int]:
+    """The other pytest-xdist workers of this session in the cgroup ``scope``.
+
+    xdist starts every worker as a child of the session's controller, so the
+    other workers are the processes in ``scope`` with this worker's parent.
+    Outside an xdist worker there are none.
+    """
+    if not os.environ.get("PYTEST_XDIST_WORKER"):
+        return []
+    workers = []
+    for pid in map(int, (scope / "cgroup.procs").read_text().split()):
+        if pid == os.getpid():
+            continue
+        try:
+            status = Path(f"/proc/{pid}/status").read_text()
+        except OSError:  # exited since cgroup.procs was read
+            continue
+        parent = next(int(line.split()[1]) for line in status.splitlines()
+                      if line.startswith("PPid:"))
+        if parent == os.getppid():
+            workers.append(pid)
+    return workers
 
 
 def committed(scope: Path) -> dict:

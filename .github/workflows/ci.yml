@@ -143,7 +143,27 @@ jobs:
           )"
           echo "pytest workers=$workers (CPU affinity and available-memory bound)"
           python -m pytest -c pytest.ini tests/ -q --timeout=300 \
+            -m "not own_cgroup" \
             -n "$workers" --dist worksteal --durations=30 -ra -p no:cacheprovider
+
+      # Tests with the own_cgroup mark hold this process's cgroup readings to
+      # the bytes they free (tests/cgroup_readings.py). Every process of this
+      # job shares the runner's cgroup (hosted-compute-agent.service), and the
+      # other xdist workers moved its anon reading by up to 22 MB inside one
+      # check (#1424). So these tests run after the suite, without xdist, in a
+      # transient systemd scope that holds only this pytest. sudo is needed to
+      # start the scope; setpriv drops back to the runner user and its groups
+      # before pytest starts, and env passes the job's settings through.
+      - name: Run cgroup-reading tests in a scope of their own
+        if: ${{ !cancelled() }}
+        run: |
+          sudo -n systemd-run --scope --quiet -- \
+            setpriv --reuid="$(id -u)" --regid="$(id -g)" --init-groups \
+            env HOME="$HOME" PATH="$PATH" PYTHONPATH=. CUDA_VISIBLE_DEVICES= \
+              OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
+              NUMEXPR_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=1 MAX_JOBS=1 \
+            "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
+              -q --timeout=300 -ra -p no:cacheprovider
 
   # Import hygiene: catches a module that only imports because the reference box
   # happens to have vLLM, a CUDA extension, or a stray sys.path entry. Cheap, and

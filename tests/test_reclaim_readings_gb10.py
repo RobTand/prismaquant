@@ -65,6 +65,8 @@ from prismaquant import memory_management as mm
 
 from cgroup_readings import PAGE, READING_GRAIN, committed, own_cgroup, pages, quiet, renders
 
+pytestmark = pytest.mark.own_cgroup
+
 #: A 32 MiB BF16 render; 32 of them are the gigabyte each reclaimer holds.
 SHAPE = (4096, 4096)
 COUNT = 32
