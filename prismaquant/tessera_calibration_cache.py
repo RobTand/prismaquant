@@ -364,7 +364,9 @@ class CaptureSourceAuthentication:
         try:
             adopted = self.adopt_streamed_identity_cache(
                 cache_path, expected_sha256=expected_sha256)
-        except (OSError, RuntimeError, ValueError) as exc:
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+            # KeyError/TypeError: a proof whose shard rows lack the fields
+            # adoption reads is malformed, and refuses like any other.
             self._identity_proof_refusal = dict(
                 path=str(cache_path), declared_sha256=expected_sha256,
                 reason=f'{type(exc).__name__}: {exc}')

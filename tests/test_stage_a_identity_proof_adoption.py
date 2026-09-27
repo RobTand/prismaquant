@@ -113,6 +113,26 @@ def test_a_proof_file_that_differs_from_its_declared_digest_is_not_adopted(
         'head.safetensors', 'selected.safetensors']
 
 
+def test_a_malformed_proof_is_refused_and_the_row_hashes_fresh(monkeypatch, tmp_path, capsys):
+    """A proof whose shard rows lack ``path`` refuses; it never stops the row."""
+    from prismaquant import cost_streaming
+
+    campaign, argv, state = selected_source_fixture(monkeypatch, tmp_path)
+    proof, _ = _write_proof(state['source'], tmp_path / 'source-identity.json')
+    record = json.loads(proof.read_text())
+    malformed = {**record['identity'], 'shards': [
+        {key: value for key, value in row.items() if key != 'path'}
+        for row in record['identity']['shards']]}
+    monkeypatch.setattr(cost_streaming, '_read_streamed_model_identity_cache',
+                        lambda *_a, **_k: (record, malformed))
+    digest = hashlib.sha256(proof.read_bytes()).hexdigest()
+    state['hashed'].clear()
+    assert campaign.main(_proof_argv(argv, proof, digest)) == campaign.EXIT_EMPTY_MENU
+    assert 'hashes its shard fresh' in capsys.readouterr().out
+    assert sorted(name for name, _ in state['hashed']) == [
+        'head.safetensors', 'selected.safetensors']
+
+
 def test_a_content_edit_behind_a_restored_mtime_still_refuses_the_row(monkeypatch, tmp_path):
     """Integrity is kept: the refused proof falls back to a fresh hash, and the
     fresh hash does not match the canonical capture."""
