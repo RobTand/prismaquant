@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Roster digest consolidation (2026-09-26, `astra/dedup-digests-1301`, PQ #1446):
+`digests.py` owns the ordered and sorted LF-delimited UTF-8 roster encodings,
+with no added final newline. The layer-quantum roster keeps its existing
+validation; the head-walk roster and descriptor slices use the shared encoding.
+`tests/test_digest_rosters_1446.py` compares the exact hash input bytes and
+outcomes with the pre-change PB-recorded table. The domain-framed replay roster
+and JSON candidate roster are different identities and remain unchanged.
+No arithmetic, schema, pipeline default, serving lane or ship gate changes.
+Inventory and remaining scope: `docs/design/digest_rosters_1446.md`.
+
 Re-stamped 2026-09-27 for the approved PACT M3 TP2 report protocol
 (PQ #1463, Tessera #650). The pure-artifact reader in
 `prismaquant/full_engine_resource_report.py` accepts v1/v2 and the distinct
