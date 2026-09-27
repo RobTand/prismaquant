@@ -893,11 +893,16 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
                     "group": row["joint_operator_identity"]["served_activation_policy"]["group"],
                     "input_global_scale": scale}
                 cell_wire_dir = Path(accepted["wire_root"])
-                seal = record["identity"]["encoder_source_sha256"]
-                if producer_packages.get(seal) != accepted["producer_package"]:
-                    raise TesseraExportLaneError(f"{name}: producer package differs from accepted migration proof")
+                # A cell no reseal proof covers was admitted unproven, in dev
+                # mode only (``validated_encoder_adoption``, PQ #1147): it has
+                # no proof and no proof-bound producer package to compare. The
+                # exporter still needs this seal's producer package below.
                 proof = accepted["proof"]
-                proofs[proof["sha256"]] = proof
+                if proof is not None:
+                    seal = record["identity"]["encoder_source_sha256"]
+                    if producer_packages.get(seal) != accepted["producer_package"]:
+                        raise TesseraExportLaneError(f"{name}: producer package differs from accepted migration proof")
+                    proofs[proof["sha256"]] = proof
             expected_hessian = (sealed_unit.get("hessian") if
                                 measured_row.get("hessian_identity", {}).get("applied") is True else None)
             if (record["identity"].get("calibration") or {}).get("hessian") != expected_hessian:
