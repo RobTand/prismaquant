@@ -345,3 +345,49 @@ def test_export_lane_refuses_a_census_unit_the_assignment_omits(tmp_path):
         selected_cached_units_manifest(
             {name: FMT for name in names if name != DENSE}, metadata, handoff, data,
             schema="tessera.cached_units.v1")
+
+
+def _two_roots(tmp_path: Path):
+    """The #1513 shape: receipts were priced under the loader payload root,
+    the joint handoff names a second wire directory holding copies."""
+    import shutil
+    source, names, records, handoff, metadata, data = fixture(tmp_path)
+    home = tmp_path.parent / (tmp_path.name + "-handoff")
+    home.mkdir()
+    for record in records.values():
+        shutil.copy2(tmp_path / record["file"], home / record["file"])
+    handoff["provenance"]["wire_dir"] = str(home)
+    return source, names, records, handoff, metadata, data, home
+
+
+def test_two_wire_roots_holding_identical_bytes_build_the_selected_cache(tmp_path):
+    # Path equality between the manifest root and the loader's payload root is
+    # context, never the gate: content identity decides (PrismaQuant #1513).
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    manifest = selected_cached_units_manifest(
+        {name: FMT for name in names}, metadata, handoff, data,
+        schema="tessera.cached_units.v1")
+    assert set(manifest["units"]) == names
+    from tessera.cached_unit import CachedUnitBundle
+    bundle = CachedUnitBundle(manifest, home, set(names), source)
+    assert set(bundle.units) == names
+
+
+def test_handoff_root_copy_that_diverges_from_the_priced_receipt_refuses(tmp_path):
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    path = home / records[DENSE]["file"]
+    raw = path.read_bytes()
+    path.write_bytes(bytes([raw[0] ^ 1]) + raw[1:])
+    with pytest.raises(TesseraExportLaneError, match="content at the handoff wire root differs"):
+        selected_cached_units_manifest(
+            {name: FMT for name in names}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
+
+
+def test_handoff_root_missing_the_priced_wire_refuses(tmp_path):
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    (home / records[DENSE]["file"]).unlink()
+    with pytest.raises(TesseraExportLaneError, match="missing from the handoff wire root"):
+        selected_cached_units_manifest(
+            {name: FMT for name in names}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
