@@ -3711,11 +3711,12 @@ allowance the replay behaves exactly as #822 left it.
 Overlay fence pool (2026-09-27, PQ #1519): `attach_candidate_overlay` no longer
 re-hashes stat-drifted overlay wires serially inside its admission loop.
 `_fence_drift` still refuses a size change, and a drift with no recorded digest,
-before anything is hashed. Every other drift is hashed on a bounded pool
-(`_bounded_hash_pool`, sized by `_fence_hash_workers` to the PrismaBuild-assigned
-CPU set, which the loader passes as its walk worker count). Work streams in row
-order with at most twice the pool size of files in flight. A digest is accepted
-only while the file's stat holds through the read. The refusal names the file.
+before anything is hashed. Every other drift is hashed through the process's
+IO engine (`_fence_hashes`: one `io_engine.read_stream` whose range entries are
+the hash jobs, PQ #1531), so how many files are read at once is the engine's,
+from its measured rates and its one pool, not a count the fence carries. The
+rows are walked and fenced by stat first; the hash jobs then stream in row
+order. A digest is accepted only while the file's stat holds through the read. The refusal names the file.
 Cells enter `data` in catalog order and only after their job resolves. With
 `verify_payloads`, the same job also verifies every wire and, unless
 `defer_render_hashes`, every render, so each file is read once. The loader
@@ -3733,14 +3734,26 @@ with `require_selected_catalog_cell`, and A4 selects every drifted overlay
 wire. `selected_cached_units_manifest` now opens one `streamed_fences()` for
 the walk and passes it in. The stat check stays on the walking thread, so a
 size change or an undigested drift refuses before anything is hashed. A drifted
-wire's `_rehash_drifted` goes to the same `_bounded_hash_pool`, sized by
-`_fence_hash_workers`, with at most twice the pool size of files in flight.
-Every re-hash resolves before the block exits, so the manifest is never built
+wire's `_rehash_drifted` is queued, and the block's exit runs every queued
+re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
+resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
-As of: 2026-09-27 · `claude/selected-fence-pool`.
+As of: 2026-09-27 · `claude/pq-1531-fence-hash-engine`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/pq-1531-fence-hash-engine`) for **the fence
+re-hash on the IO engine** (PQ #1531): the overlay intake and the selected-cache
+fence stream hash through `io_engine.read_stream` instead of a pool of their
+own, and `hash_workers` leaves `attach_candidate_overlay`. `_bounded_hash_pool`
+and `_fence_hash_workers` are gone, so `tests/test_io_site_freeze.py` passes by
+removal. A hash job's refusal travels as its value and is raised by the
+admitting thread, so a refused file is hashed once and never retried as a
+read-ahead failure.
+
+Gates: `tests/test_io_site_freeze.py`, `tests/test_overlay_fence_pool_1519.py`,
+`tests/test_selected_fence_pool_1522.py`.
 
 Re-stamped (2026-09-27, `claude/selected-fence-pool`) for **the selected-cache
 fence stream** (PQ #1522): the rooted selected cache re-hashes drifted overlay

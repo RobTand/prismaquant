@@ -1453,13 +1453,13 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             # continue the walk's cumulative count on the same cadence.
             cadence.maybe_commit(resolved + admitted, unit=unit)
 
-        # The overlay hashes each of its files once, on the walk's pool
-        # size (the PB-assigned CPU set), for every check the file answers:
-        # its drifted fence and this load's payload verification (#1519).
+        # The overlay hashes each of its files once, through the process's
+        # IO engine, for every check the file answers: its drifted fence and
+        # this load's payload verification (#1519, #1531).
         attach_candidate_overlay(result, inputs["candidate_overlay"],
                                  verify_payloads=verify_payloads,
                                  defer_render_hashes=defer_render_hashes,
-                                 hash_workers=walk_workers, progress=overlay_admitted)
+                                 progress=overlay_admitted)
         overlay_cells = len(cells) - len(base_pairs)
         if cadence.active and overlay_cells:
             cadence.commit(resolved + overlay_cells, unit=f"candidate_overlay:{overlay_cells}")
