@@ -4590,6 +4590,12 @@ def _checked_projected_units(bound, *, weights, model_path, source,
                 resource_check(f'before_source_projection_check:{name}')
             try:
                 if release_source_pages:
+                    # The declared shard, stat and advice alike, as the layer
+                    # gather does (layer_streaming ``source_stats``): under a
+                    # residency map the read goes through the same staged
+                    # opener, the declared file supplies the header and any
+                    # span no staged range covers, and advising a payload
+                    # span the stage served drops nothing (PQ #1529).
                     path = Path(model_path)/source['tensors'][unit['source_tensor']]
                     source_stats.setdefault(str(path), path.stat() if source_authentication is None
                                             else source_authentication.file_stat(path))
