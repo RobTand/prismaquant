@@ -166,6 +166,49 @@ def _bounded_hash_pool(workers):
     pool.shutdown(wait=True)
 
 
+class _StreamedFences:
+    """Stat fences checked inline, drifted re-hashes streamed onto the bounded pool (PQ #1522).
+
+    ``check`` is ``_artifact_fence`` with the proof deferred: ``_fence_drift``
+    decides on the calling thread, so a size change and an undigested drift
+    refuse before anything is hashed, and a drifted artifact's
+    ``_rehash_drifted`` goes to the pool. At most ``window`` re-hashes are in
+    flight; they resolve in submission order. ``streamed_fences`` resolves
+    every one before its block exits, so a caller that returns after the
+    block never returns an unproven artifact.
+    """
+
+    def __init__(self, pool, window):
+        self._pool, self._window, self._inflight = pool, window, deque()
+
+    def check(self, path, stat, recorded, content_sha256, message):
+        drift = _fence_drift(stat, recorded, content_sha256, message)
+        if drift is None:
+            return
+        while len(self._inflight) >= self._window:
+            self._resolve()
+        self._inflight.append((message, self._pool.submit(_rehash_drifted, path, drift, content_sha256, message)))
+
+    def _resolve(self):
+        message, job = self._inflight.popleft()
+        job.result()
+        FENCE_REHASHED[message] = FENCE_REHASHED.get(message, 0) + 1
+
+    def drain(self):
+        while self._inflight:
+            self._resolve()
+
+
+@contextmanager
+def streamed_fences(hash_workers=None):
+    """A ``_StreamedFences`` on the assigned-CPU hash pool, every re-hash proven on exit."""
+    workers = _fence_hash_workers(hash_workers)
+    with _bounded_hash_pool(workers) as pool:
+        fences = _StreamedFences(pool, 2 * workers)
+        yield fences
+        fences.drain()
+
+
 def _verify_overlay_payload(observed, blob_sha256, *, rehash, hash_render):
     """One overlay cell's hash job; returns the render digest when it hashed the render.
 
@@ -480,8 +523,13 @@ def validated_encoder_adoption(adoption, *, fmt):
     return copy.deepcopy(result)
 
 
-def require_selected_catalog_cell(data, name, fmt, *, validation=None):
-    """Rebind an added selected cell to its exact catalog row and current files."""
+def require_selected_catalog_cell(data, name, fmt, *, validation=None, fences=None):
+    """Rebind an added selected cell to its exact catalog row and current files.
+
+    ``fences`` is the caller's ``streamed_fences``: a drifted wire's re-hash
+    then runs on its pool and is proven when that block exits (PQ #1522).
+    Without it the fence is checked, and re-hashed, here.
+    """
     bound = data.inputs.get("candidate_overlay")
     _same(data.payload.get("provenance", {}).get("candidate_overlay"), bound, "selected overlay provenance")
     _require(isinstance(bound, dict), "selected candidate has no explicit catalog overlay")
@@ -513,10 +561,11 @@ def require_selected_catalog_cell(data, name, fmt, *, validation=None):
     for field in ("unit", "source", "projection", "calibration", "encoder_fixture_id"):
         _same(reference.get(field), adoption["reference_encoding_identity"].get(field), "selected reference " + field)
         _same(reference.get(field), cell["record"]["identity"].get(field), "selected candidate " + field)
+    fence = _artifact_fence if fences is None else fences.check
     for field in ("wire", "render"):
         path = Path(row[field])
         _require(path.is_absolute() and not path.is_symlink() and path.is_file(), "selected artifact is not regular")
-        _artifact_fence(path, path.stat(), row[field + "_stat"],
+        fence(path, path.stat(), row[field + "_stat"],
                         cell["record"]["blob_sha256"] if field == "wire" else None,
                         "selected current " + field + " fence")
     return {"qualification_activation": copy.deepcopy(row["activation"]),
