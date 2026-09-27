@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+SHA-256 lexical validation (2026-09-27, `astra/dedup-hex-1457`, PQ #1457):
+`digests.is_sha256hex` and its compiled `SHA256_HEX` pattern own the exact
+regex acceptance used by artifact collection, prepriced cost and PrismaSnap
+bindings. Callers retain their own errors, coercions and returned objects.
+`tests/test_digest_hex_1457.py` freezes the old wrappers and pattern behavior,
+including string subclasses. No digest bytes, schema, default or gate changes.
+Inventory: `docs/design/digest_hex_1457.md`.
+
 Tessera contract v39 (2026-09-27, Tessera #641, merge `52bc86ea1…`, closing
 tessera#604) is on Tessera master. It is **not** on PrismaQuant's pin. The pin
 stays at `09d6559d7…` with packaged contract v38 (SHA-256 `04d5a20a…9d22e4`),
