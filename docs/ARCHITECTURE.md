@@ -3019,9 +3019,10 @@ authentication at dispatch, the outer PB scratch declaration, and the dev-mode
 post-intake prepared digest check (`tessera_joint_aura.require_prepared_digests`).
 Main keeps its own bounded cotangent scratch (#956) and its overlay Hessian
 identity by content (#986); the union's copies of both are dropped.
-Candidate order is now one rule, `joint_catalog_extension.extended_roster`: an
-added format goes before the terminal BF16 that every sealed prepared roster
-ends in. The loader (`attach_candidate_overlay`), the overlay assembler
+Candidate order is now one rule, `joint_catalog_extension.extended_roster`:
+the added formats a unit does not already offer go, sorted by name, before the
+terminal BF16 that every sealed prepared roster ends in (PQ #1432 widened this
+from one added format to several). The loader (`attach_candidate_overlay`), the overlay assembler
 (`tools/assemble_t4_overlay.py`) and the pair check (`verify_catalog_pair`) all
 use it, and the pair check now compares order, not only sets, because Stage B
 compares the prepared roster with the loaded one in order. The assembler also
@@ -3254,9 +3255,12 @@ digest are retained in the joint probe arithmetic and run identity, so rows and
 resumed checkpoints cannot silently change quantizer implementations. Dynamic
 or A16-only rosters do not require the serving extension.
 
-An explicit `joint_catalog_extension.v1` may add qualified E2M1-K2 q896
-candidates across the original qname roster while retaining the original
-completed BF16 Stage A capture. It binds the old/new plans and prepared PWCs,
+An explicit `joint_catalog_extension.v1` may add qualified Tessera candidates
+in one or more formats while retaining the original completed BF16 Stage A
+capture. The first extension (R13 A4) added routed `TESSERA_E2M1_K2_R896`
+across the whole original roster; since PQ #1432 an overlay catalog may carry
+any number of added `TESSERA_<FAMILY>_R<q256>` formats, with per-format
+coverage declared by its cells. It binds the old/new plans and prepared PWCs,
 checks identical source, calibration, derivative and execution policy, and
 requires every old candidate, render path, qualification record, lever and
 activation scale to remain unchanged. New cells carry actual render/file
@@ -3268,14 +3272,64 @@ the separate extension binding is sealed into each new record and retained
 through the joined handoff. Generator `--catalog-extension` and its SHA256
 require an actual completed capture. Validation of a proposed catalog pair
 alone grants no capture-reuse authority. Each extended roster is the original
-roster with the added format inserted before its terminal BF16
-(`joint_catalog_extension.extended_roster`); the pair check refuses any other
-order, and a unit that already offers the added format keeps its roster.
+roster with the unit's added formats inserted, sorted by name, before its
+terminal BF16 (`joint_catalog_extension.extended_roster`); the pair check
+refuses any other order, and a unit that already offers an added format keeps
+its roster position for it.
+
+An added candidate's recipe is not written by hand. `added_format_recipe`
+derives it from the pinned Tessera contract (`runtime_contract.json`, read
+through `tessera_legal_domain.packaged_contract_payload`): the one `formats[]`
+row for the family, its `attested_wire` template with the rung's `q256`
+substituted and the row's `grid`. It refuses a family whose attested entries
+disagree on any field other than `q256`, a rung outside
+`reader_rate_range_q256`, and a rung off `reader_rate_step_q256`. The pair
+check and the loader compare every added candidate's recipe with it.
+
+The overlay catalog is `prismaquant.t4_adopted_catalog.v1` (one `format`, one
+cost run and reseal proof, full coverage of the original roster) or `.v2`
+(`formats`, a list of `sources` each naming its cost run, anchor journal and
+reseal proof, `cell_sources` mapping each cell to its source, and
+`carried_from` naming catalogs whose cells it carries byte-identical).
+`joint_catalog_extension.catalog_view` validates either shape. The pair check
+requires the extended PWC's added cells to be exactly the catalog's declared
+cells and still refuses any removed or changed original cell.
+`tools/build_t4_overlay_catalog.py` builds a v2 catalog from `--carry` catalogs
+(R13's R896 cells, carried unchanged so the existing
+`qualified-rebinding.r13.json` still admits them) and `--workspace` merged
+campaign workspaces; with neither it rebuilds the R13 v1 catalog.
+`tools/assemble_t4_overlay.py` derives its cell count (original PWC cells plus
+catalog cells), reads each format's qualification results from
+`--qualified-dir` or `--format-qualified-dir FORMAT=DIR`, and admits a
+rebinding that binds the catalog or one it declares in `carried_from`.
+
+Encoder-source adoption is a seal, not a wall, since sealing went off
+(PQ #1147). An added cell encoded under a Tessera pin that no reseal proof
+covers carries `encoder_source_proof: null`. `validated_encoder_adoption`
+routes the proof's presence, its old/new source pins and its coverage of the
+candidate's `(unit kind, format family)` stratum through `dev_mode.seal_check`:
+dev mode stamps `[DEV-MODE]` and admits the cell, and
+`PRISMAQUANT_DEV_MODE=0` refuses it. Unit, source, projection, calibration and
+`encoder_fixture_id` equality with the reference cell, the byte and stat
+fences, the wire and render digests and rendered-shape equality stay hard
+walls in both modes.
+
+A catalog extension is priced by a **full re-price**, not a merge (PQ #1432).
+The join (`joint_quanta_join.py`, the `coverage` check) requires every unit's
+candidate set to equal its prepared roster, and the pair check requires the
+extended roster to be a strict superset of the original, so a second Stage B
+pass over an extended catalog prices every candidate and cannot be merged onto
+the first pass's joined rows. A merge would need a Stage B mode that skips
+already-priced candidates plus a merge tool, to save about 11 of about
+41 GPU-hours: the per-layer replay window (about 1,275 s over 45 layers) is
+paid either way. It would also put two code versions' arithmetic in one table.
+`tests/test_joint_quanta_join.py::test_a_new_only_second_stage_b_pass_refuses`
+pins the refusal of a pass that prices only the added formats.
 
 The optional digest-bound `inputs.candidate_overlay` augments the complete
 historical anchor intake without rewriting the original merged journal or
-inventing historical fanout receipts. Its rows must cover exactly the missing
-E2M1 candidates and match an authenticated original cell's source, projection,
+inventing historical fanout receipts. Its rows must cover exactly the
+catalog's declared added cells and match an authenticated original cell's source, projection,
 calibration/H and fixture commitments. A measured row's Hessian identity is
 its content: the draw triple, then either an equal capture seal or, when the
 overlay's cost run and the panel reference one canonical capture under
@@ -3332,8 +3386,20 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-26 · `claude/tensor-digests-1384`.
+As of: 2026-09-26 · `claude/pact-gamut-catalog-n-formats`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-26, `claude/pact-gamut-catalog-n-formats`) for **a joint
+catalog extension over several Tessera formats** (PQ #1432, full-gamut PACT).
+`joint_catalog_extension` drops the single `ADDED_FORMAT`/`ADDED_RECIPE`: an
+added format's recipe comes from the pinned contract (`added_format_recipe`),
+several added formats go sorted before the terminal BF16 (`extended_roster`),
+a v2 overlay catalog declares its formats and per-cell sources
+(`catalog_view`, `catalog_sources`), and encoder-source adoption without a
+covering proof goes through `dev_mode.seal_check`. The catalog builder and
+overlay assembler take N formats; the assembler's cell count is derived. The
+join decision is a full re-price, pinned by one join test. No default, stage,
+serving lane or ship gate changes; the format menu is unchanged.
 
 Re-stamped (2026-09-26, `claude/tensor-digests-1384`) for **one owner for
 tensor digests** (PQ #1384, P2, part of epic #1295). The new

@@ -56,10 +56,18 @@ _VERIFIED_PAIR = {}
 _VERIFIED_ENCODER_PROOFS = {}
 _SELECTED_CATALOG = {}
 ADOPTION_SCHEMA = "prismaquant.joint_catalog_source_adoption.v1"
-ADDED_FORMAT = "TESSERA_E2M1_K2_R896"
-ADDED_RECIPE = {"body": "tcq", "channel_sigma": None, "grid": "E2M1x2",
-                "plane": "lut16", "q256": 896, "seed": 0, "sigma": None,
-                "span": 2, "window_bits": 0}
+#: The adopted candidate catalog (the overlay). v1 names one added ``format``
+#: and one ``cost``/``reseal_proof``. v2 (PQ #1432) names a sorted list of
+#: added ``formats`` and a list of ``sources`` (each a measured ``cost``, its
+#: ``anchor_journal`` and a ``reseal_proof`` or null); ``cell_sources`` maps
+#: each cell, by position, to its source, so a cell carried from a v1 catalog
+#: keeps its exact bytes. ``carried_from`` names the catalogs whose cells were
+#: carried. Both schemas stay readable.
+CATALOG_SCHEMA_V1 = "prismaquant.t4_adopted_catalog.v1"
+CATALOG_SCHEMA_V2 = "prismaquant.t4_adopted_catalog.v2"
+CATALOG_SCHEMAS = (CATALOG_SCHEMA_V1, CATALOG_SCHEMA_V2)
+#: The one added format of every catalog before PQ #1432 (the R13 A4 build).
+R13_ADDED_FORMAT = "TESSERA_E2M1_K2_R896"
 
 
 _require = Contract(ValueError, "joint catalog extension: ").require
@@ -81,6 +89,138 @@ def _json(bound, label):
     return json.loads(_read_bound(bound, label))
 
 
+def added_format_recipe(fmt, *, contract=None):
+    """The wire recipe an added ``TESSERA_<FAMILY>_R<q256>`` candidate must carry.
+
+    Derived from the pinned Tessera contract (principle 14), never restated
+    here: the family's ``formats[]`` row in the packaged
+    ``runtime_contract.json`` (read through
+    ``tessera_legal_domain.packaged_contract_payload``, the one reader of that
+    table) publishes an ``attested_wire`` entry per attested rung. Every entry
+    must agree on every field but ``q256``; that shared template, the row's
+    ``grid`` and the requested ``q256`` are the recipe. A ``q256`` outside the
+    row's ``reader_rate_range_q256``, or off its ``reader_rate_step_q256``
+    from the range's low end, refuses. ``contract`` is the parsed payload, for
+    a caller that has already read it.
+    """
+    family, sep, rate = str(fmt).rpartition("_R")
+    _require(bool(sep and family and rate.isdigit()), f"added format {fmt!r} is not spelled FAMILY_R<q256>")
+    q256 = int(rate)
+    if contract is None:
+        from .tessera_legal_domain import packaged_contract_payload
+        contract = packaged_contract_payload()
+    rows = [row for row in contract.get("formats") or () if isinstance(row, dict) and row.get("family") == family]
+    _require(len(rows) == 1, f"the pinned Tessera contract publishes {len(rows)} format rows for {family}")
+    row = rows[0]
+    _require(row.get("kind") == "tessera_wire", f"{family} is not a Tessera wire family")
+    pattern = row.get("name_pattern")
+    if pattern is not None:
+        _same(pattern.format(k=q256), fmt, f"{fmt}: the contract's name pattern")
+    span = row.get("reader_rate_range_q256")
+    step = row.get("reader_rate_step_q256")
+    _require(isinstance(span, list) and len(span) == 2 and all(type(v) is int for v in span),
+             f"{family} publishes no reader_rate_range_q256")
+    _require(type(step) is int and step > 0, f"{family} publishes no reader_rate_step_q256")
+    low, high = span
+    _require(low <= q256 <= high, f"{fmt}: q256 {q256} is outside the reader range [{low}, {high}]")
+    _require((q256 - low) % step == 0, f"{fmt}: q256 {q256} is off the reader step {step} from {low}")
+    entries = row.get("attested_wire")
+    _require(isinstance(entries, list) and entries and all(isinstance(e, dict) for e in entries),
+             f"{family} publishes no attested_wire entries")
+    templates = [{key: value for key, value in entry.items() if key != "q256"} for entry in entries]
+    _require(all(template == templates[0] for template in templates),
+             f"{family}: attested_wire entries disagree on a field other than q256")
+    grid = row.get("grid")
+    _require(isinstance(grid, str) and templates[0].get("grid", grid) == grid,
+             f"{family}: attested_wire grid differs from the format row")
+    return {**templates[0], "grid": grid, "q256": q256}
+
+
+def added_format_recipes(contract=None):
+    """A memoized ``fmt -> recipe`` lookup over one read of the pinned contract.
+
+    A catalog pair or overlay names a few formats over many cells; the table
+    is read once and each format's recipe derived once.
+    """
+    if contract is None:
+        from .tessera_legal_domain import packaged_contract_payload
+        contract = packaged_contract_payload()
+    memo = {}
+
+    def recipe(fmt):
+        if fmt not in memo:
+            memo[fmt] = added_format_recipe(fmt, contract=contract)
+        return memo[fmt]
+    return recipe
+
+
+def catalog_sources(catalog):
+    """The measured sources a v1 or v2 catalog names, tolerant of partial documents.
+
+    A v1 catalog's one ``cost`` and ``reseal_proof`` form its one source.
+    """
+    if catalog.get("schema") == CATALOG_SCHEMA_V2:
+        return list(catalog.get("sources") or ())
+    return [{"cost": catalog.get("cost"), "anchor_journal": catalog.get("anchor_journal"),
+             "reseal_proof": catalog.get("reseal_proof")}]
+
+
+def catalog_view(catalog):
+    """Check a v1 or v2 catalog's structure and return what intake reads.
+
+    Returns ``{"formats", "sources", "cell_sources", "carried_from"}``:
+    the sorted added formats, the measured sources, each cell's source index
+    (by position) and the catalogs whose cells were carried. The cells
+    declare the coverage: every cell names its own ``format``, and the
+    declared formats are exactly the formats the cells name. No file is read.
+    """
+    _require(isinstance(catalog, dict), "candidate catalog is not a mapping")
+    schema = catalog.get("schema")
+    _require(schema in CATALOG_SCHEMAS, f"candidate overlay schema {schema!r} is not a known catalog schema")
+    cells = catalog.get("cells")
+    _require(isinstance(cells, list) and cells, "overlay cells are missing")
+    if schema == CATALOG_SCHEMA_V1:
+        _require(isinstance(catalog.get("format"), str), "v1 catalog names no added format")
+        formats = (catalog["format"],)
+        cell_sources = [0] * len(cells)
+    else:
+        formats = catalog.get("formats")
+        _require(isinstance(formats, list) and formats and all(isinstance(f, str) for f in formats)
+                 and formats == sorted(set(formats)), "v2 catalog formats must be a sorted unique list")
+        formats = tuple(formats)
+        cell_sources = catalog.get("cell_sources")
+        _require(isinstance(cell_sources, list) and len(cell_sources) == len(cells),
+                 "v2 catalog cell_sources must name one source per cell")
+    sources = catalog_sources(catalog)
+    _require(bool(sources) and all(isinstance(source, dict) and isinstance(source.get("cost"), dict)
+                                   for source in sources), "catalog names no measured cost source")
+    _require(all(type(index) is int and 0 <= index < len(sources) for index in cell_sources),
+             "catalog cell names no declared source")
+    for cell in cells:
+        _require(isinstance(cell, dict) and cell.get("format") in formats,
+                 "catalog cell format is not a declared added format")
+    _same(sorted({cell["format"] for cell in cells}), list(formats), "catalog declared formats")
+    carried = catalog.get("carried_from", [])
+    _require(isinstance(carried, list) and all(isinstance(b, dict) and set(b) == {"path", "sha256"}
+                                               for b in carried), "catalog carried_from must be bindings")
+    return {"formats": formats, "sources": sources, "cell_sources": cell_sources, "carried_from": carried}
+
+
+def catalog_control_bindings(catalog):
+    """Every file a catalog binds for intake: original prepared and PWC, each cost, each proof.
+
+    Proofs are deduplicated by digest; a source with no proof names none.
+    """
+    bindings = [catalog[key] for key in ("old_prepared", "old_pwc") if catalog.get(key) is not None]
+    proofs = {}
+    for source in catalog_sources(catalog):
+        if source.get("cost") is not None:
+            bindings.append(source["cost"])
+        if source.get("reseal_proof") is not None:
+            proofs.setdefault(source["reseal_proof"]["sha256"], source["reseal_proof"])
+    return bindings + [proofs[key] for key in sorted(proofs)]
+
+
 class EncoderAdoptionValidation:
     """One operation's retained proof bytes, fenced on entry and completion.
 
@@ -97,17 +237,20 @@ class EncoderAdoptionValidation:
         self._active = True
         return self
 
-    def verify(self, adoption):
+    def verify(self, adoption, *, fmt):
         _require(self._active, "adoption validation is outside its operation")
-        from tools.reseal_campaign_identity import unit_kind
+        from tools.reseal_campaign_identity import unit_kind, format_family
         _same(adoption.get("schema"), ADOPTION_SCHEMA, "encoder adoption schema")
         reference, candidate = adoption["reference_encoding_identity"], adoption["candidate_encoding_identity"]
-        bound = adoption["encoder_source_proof"]
-        key = (bound["path"], bound["sha256"], reference.get("encoder_source_sha256"),
+        bound = adoption.get("encoder_source_proof")
+        # A cell with no proof keys on None, so a stratum's dev-mode stamp is
+        # printed once per operation, not once per cell.
+        key = (None if bound is None else bound["path"], None if bound is None else bound["sha256"],
+               reference.get("encoder_source_sha256"),
                candidate.get("encoder_source_sha256"), reference.get("encoder_fixture_id"),
-               candidate.get("encoder_fixture_id"), unit_kind(candidate.get("unit", '')))
+               candidate.get("encoder_fixture_id"), unit_kind(candidate.get("unit", '')), format_family(fmt))
         if key not in self._proofs:
-            result = validated_encoder_adoption(adoption)
+            result = validated_encoder_adoption(adoption, fmt=fmt)
             self._proofs[key] = result
             for path, digest, fence in result["fences"]:
                 self._fences[path, digest] = fence
@@ -131,7 +274,13 @@ class EncoderAdoptionValidation:
         return False
 
 
-def validated_encoder_adoption(adoption):
+def _unproven_adoption(stratum):
+    """The result of an adoption no reseal proof covers, admitted in dev mode only."""
+    return {"proof": None, "producer_package": None, "dependencies": [], "fences": (),
+            "encoder_source_proof_covered": False, "stratum": list(stratum)}
+
+
+def validated_encoder_adoption(adoption, *, fmt):
     """Authenticate the existing migration's semantics and all proof dependencies.
 
     This never substitutes an encoder seal. It binds the exact old/new source
@@ -139,6 +288,17 @@ def validated_encoder_adoption(adoption):
     inode/size/mtime/ctime fences for every dependency before memoized reuse.
     The producer package is a declaration; Tessera independently hashes that
     complete package before using its historical identity factory.
+
+    ``fmt`` is the added candidate's format; the proof must cover its
+    ``(unit kind, format family)`` stratum. Whether a proof covers the
+    candidate's encoder-source migration is a seal (PQ #1147, PQ #1432): no
+    proof, a proof for another source pair and a proof that does not cover
+    the stratum each go through ``seal_check``. Certified mode refuses; dev
+    mode prints one ``[DEV-MODE]`` line and admits the cell with
+    ``encoder_source_proof_covered: False`` and no producer package. The exact
+    source-seal and fixture shapes, the fixture equality with the reference
+    cell, and a named proof's bytes and internal consistency stay walls in
+    both modes.
     """
     from tools.reseal_campaign_identity import load_bundle, unit_kind, format_family, Refused
 
@@ -152,25 +312,33 @@ def validated_encoder_adoption(adoption):
     _require(isinstance(fixture, str) and len(fixture) == 64
              and all(c in '0123456789abcdef' for c in fixture), "encoder adoption needs an exact fixture identity")
     _same(fixture, candidate.get("encoder_fixture_id"), "adopted encoder fixture")
-    proof = adoption["encoder_source_proof"]
-    stratum = (unit_kind(candidate["unit"]), format_family(ADDED_FORMAT))
+    proof = adoption.get("encoder_source_proof")
+    stratum = (unit_kind(candidate["unit"]), format_family(fmt))
+    migration = f"{stratum[0]}:{stratum[1]} encoder source {old} -> {new}"
+    if proof is None:
+        _seal("a reseal proof covering " + migration, None,
+              "added candidate names no encoder source proof for " + migration, same=False)
+        return _unproven_adoption(stratum)
     key = (proof["path"], proof["sha256"], _bound_stat_fence(Path(proof["path"])), old, new, fixture, stratum)
     cached = _VERIFIED_ENCODER_PROOFS.get(key)
     if cached is not None and cached["fences"] == tuple(
             (b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in cached["dependencies"]):
         return copy.deepcopy(cached)
     document = _json(proof, "encoder source proof")
-    _same(document.get("pins", {}).get("old", {}).get("encoder_source_sha256"), old,
-          "encoder proof old source")
-    _same(document.get("pins", {}).get("new", {}).get("encoder_source_sha256"), new,
-          "encoder proof new source")
+    if not (_seal(old, document.get("pins", {}).get("old", {}).get("encoder_source_sha256"),
+                  "encoder proof old source")
+            and _seal(new, document.get("pins", {}).get("new", {}).get("encoder_source_sha256"),
+                      "encoder proof new source")):
+        return _unproven_adoption(stratum)
     _require(document.get("arms"), "encoder proof has no measured comparison arms")
     try:
         checked = load_bundle(proof["path"], document["pins"])
     except Refused as error:
         raise ValueError("joint catalog extension: encoder proof refused: " + str(error)) from error
-    _require(stratum in checked["covered"],
-             "encoder proof does not cover the added candidate stratum")
+    covered = stratum in checked["covered"]
+    if not _seal(list(stratum), sorted(list(s) for s in checked["covered"]),
+                 "encoder proof does not cover the added candidate stratum", same=covered):
+        return _unproven_adoption(stratum)
     fixture_record = document.get("fixture_id", {})
     fixture_bound = {"path": fixture_record.get("result"), "sha256": fixture_record.get("result_sha256")}
     observed = _json(fixture_bound, "encoder fixture proof")
@@ -189,7 +357,8 @@ def validated_encoder_adoption(adoption):
              "encoder proof has no bound candidate producer package")
     result = {"proof": dict(proof), "producer_package": {"path": source["tree"], "sha256": new},
               "dependencies": dependencies,
-              "fences": tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies)}
+              "fences": tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies),
+              "encoder_source_proof_covered": True, "stratum": list(stratum)}
     _VERIFIED_ENCODER_PROOFS.clear()
     _VERIFIED_ENCODER_PROOFS[key] = result
     return copy.deepcopy(result)
@@ -208,7 +377,7 @@ def require_selected_catalog_cell(data, name, fmt, *, validation=None):
         catalog = None
     if key not in _SELECTED_CATALOG:
         catalog = catalog if catalog is not None else _json(bound, "selected candidate catalog")
-        _same(catalog.get("schema"), "prismaquant.t4_adopted_catalog.v1", "selected candidate catalog schema")
+        _require(catalog.get("schema") in CATALOG_SCHEMAS, "selected candidate catalog schema differs")
         rows = {(row["qname"], row["format"]): row for row in catalog["cells"]}
         _same(len(rows), len(catalog["cells"]), "selected catalog unique cells")
         _SELECTED_CATALOG.clear()
@@ -219,8 +388,8 @@ def require_selected_catalog_cell(data, name, fmt, *, validation=None):
     for field in ("record", "wire", "render", "catalog_source_adoption"):
         _same(cell.get(field), row.get(field), "selected catalog " + field)
     adoption = row["catalog_source_adoption"]
-    proof = (validation.verify(adoption) if validation is not None
-             else validated_encoder_adoption(adoption))
+    proof = (validation.verify(adoption, fmt=fmt) if validation is not None
+             else validated_encoder_adoption(adoption, fmt=fmt))
     _same(adoption["candidate_encoding_identity"], cell["record"]["identity"], "selected candidate identity")
     reference_pair = tuple(adoption["reference_pair"])
     _require(reference_pair in data.cells and reference_pair[0] == name, "selected adoption reference absent")
@@ -240,19 +409,24 @@ def require_selected_catalog_cell(data, name, fmt, *, validation=None):
             "catalog": dict(bound), **proof}
 
 
-def extended_roster(formats, fmt):
-    """One unit's candidate roster with ``fmt`` added before the terminal BF16.
+def extended_roster(formats, added):
+    """One unit's candidate roster with the ``added`` formats inserted before the terminal BF16.
 
-    Every sealed prepared roster is its sorted formats with BF16 appended, and
-    the T4 overlay was assembled by inserting the added format before that
-    BF16. The loader, the overlay assembler and the pair check all use this
-    one order, because Stage B compares the prepared roster with the loaded
-    roster in order (RobTand/prismaquant#990).
+    Every sealed prepared roster is its sorted formats with BF16 appended.
+    The added formats a unit does not already offer go, sorted, between the
+    base formats (which keep their order) and that BF16:
+    ``(*base[:-1], *sorted(added), "BF16")``. ``added`` is one format or an
+    iterable of them; with the single R13 format this is the order the T4
+    overlay was assembled in. The loader, the overlay assembler and the pair
+    check all use this one order, because Stage B compares the prepared
+    roster with the loaded roster in order (RobTand/prismaquant#990).
     """
     formats = tuple(formats)
+    added = (added,) if isinstance(added, str) else tuple(added)
     _require(bool(formats) and formats[-1] == "BF16", "base candidate roster must retain terminal BF16")
-    _require(fmt not in formats, "added candidate is already in the base roster")
-    return (*formats[:-1], fmt, "BF16")
+    _require(len(set(added)) == len(added) and "BF16" not in added, "added candidates must be distinct Tessera formats")
+    _require(not set(added) & set(formats), "added candidate is already in the base roster")
+    return (*formats[:-1], *sorted(added), "BF16")
 
 
 def _pairs(prepared):
@@ -279,6 +453,12 @@ def verify_catalog_pair(inputs):
     old_plan, new_plan = documents["original_plan"], documents["extended_plan"]
     old, new = documents["original_prepared"], documents["extended_prepared"]
     bindings = list(inputs.values()) + [old["production_cache"], new["production_cache"]]
+    # The catalog declares the added coverage (PQ #1432): every added cell of
+    # the extended PWC is exactly one of its cells, whatever its format.
+    overlay = (new_plan.get("inputs") or {}).get("candidate_overlay")
+    _require(isinstance(overlay, dict) and set(overlay) == {"path", "sha256"},
+             "extended plan binds no candidate overlay catalog")
+    bindings.append(overlay)
     from .joint_stageb_resources import require_plan_resources
     resources = require_plan_resources(old_plan, new_plan, inputs["original_plan"], inputs["original_prepared"])
     _same(new.get("stage_b_resource_policy"), new_plan.get("stage_b_resource_policy"), "extended resource policy")
@@ -313,13 +493,18 @@ def verify_catalog_pair(inputs):
     _same(set(old["formats_by_qname"]), set(new["formats_by_qname"]), "source qname roster")
     old_pairs, new_pairs = _pairs(old), _pairs(new)
     _require(old_pairs < new_pairs, "catalog must strictly add candidates without removing any")
-    _require(all(ADDED_FORMAT in formats for formats in new["formats_by_qname"].values()),
-             "extended E2M1 candidate must cover the complete original qname roster")
+    catalog = _json(overlay, "candidate overlay catalog")
+    catalog_view(catalog)
+    declared = [(cell.get("qname"), cell.get("format")) for cell in catalog["cells"]]
+    _same(len(set(declared)), len(declared), "unique catalog-declared added cells")
+    _same(sorted(new_pairs - old_pairs), sorted(declared), "catalog-declared added cells")
     for name, formats in old["formats_by_qname"].items():
-        _require(set(formats) <= set(new["formats_by_qname"][name]), "original candidate removed for " + name)
-        expected = tuple(formats) if ADDED_FORMAT in formats else extended_roster(formats, ADDED_FORMAT)
-        _same(tuple(new["formats_by_qname"][name]), expected,
-              "extended candidate order (added format before terminal BF16) for " + name)
+        extended = new["formats_by_qname"][name]
+        _require(set(formats) <= set(extended), "original candidate removed for " + name)
+        added = [fmt for fmt in extended if fmt not in formats]
+        expected = tuple(formats) if not added else extended_roster(formats, added)
+        _same(tuple(extended), expected,
+              "extended candidate order (added formats, sorted, before terminal BF16) for " + name)
 
     caches = {}
     for name, prepared, plan, pairs in (("original", old, old_plan, old_pairs),
@@ -354,9 +539,9 @@ def verify_catalog_pair(inputs):
         source_by_name[name] = source
     additions = sorted(new_pairs - old_pairs)
     proof_fences = set()
+    recipe = added_format_recipes()
     with EncoderAdoptionValidation() as proof_checks:
         for pair in additions:
-            _same(pair[1], ADDED_FORMAT, "this extension's added candidate format")
             cell = new_verified[pair]
             _require(isinstance(cell, dict) and all(k in cell for k in QUALIFIED_CELL_FIELDS),
                      "added candidate lacks actual render qualification " + repr(pair))
@@ -392,11 +577,10 @@ def verify_catalog_pair(inputs):
                 _require(field in reference and field in candidate, "adoption identity lacks " + field)
                 _same(reference[field], candidate[field], "adopted source/H " + field)
             _same(candidate["unit"], pair[0], "adopted unit")
-            _same(candidate.get("recipe"), ADDED_RECIPE, "added E2M1 recipe")
+            _same(candidate.get("recipe"), recipe(pair[1]), "added candidate recipe for " + pair[1])
             # Hash the existing source-migration proof once; do not manufacture a
             # new proof or silently normalize another encoding field here.
-            proof = adoption.get("encoder_source_proof")
-            verified_proof = proof_checks.verify(adoption)
+            verified_proof = proof_checks.verify(adoption, fmt=pair[1])
             proof_fences.update(verified_proof["fences"])
     science = {"plan": {k: v for k, v in old_plan.items() if k not in CANDIDATE_PLAN_FIELDS},
                "original_execution": old_plan["execution"], "original_max_gpu_bytes": old_plan.get("max_gpu_bytes"),
@@ -756,8 +940,9 @@ def hessian_references(payload):
         if bound is None:
             continue
         catalog = _json(bound, "candidate overlay")
-        costs = pickle.loads(_read_bound(catalog["cost"], "overlay measured scalar costs"))
-        add((costs.get("provenance") or {}).get("hessian"))
+        for source in catalog_sources(catalog):
+            costs = pickle.loads(_read_bound(source["cost"], "overlay measured scalar costs"))
+            add((costs.get("provenance") or {}).get("hessian"))
     return {"primary": primary.get("capture_sha256") if isinstance(primary, dict) else None,
             "captures": captures}
 
@@ -772,8 +957,7 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
     """
     from .tessera_expert_projection import EXPERT_WIRES_KEY
     catalog = _json(bound, "candidate overlay")
-    _same(catalog.get("schema"), "prismaquant.t4_adopted_catalog.v1", "candidate overlay schema")
-    _same(catalog.get("format"), ADDED_FORMAT, "candidate overlay format")
+    view = catalog_view(catalog)
     original = _json(catalog["old_prepared"], "overlay original prepared")
     _same(catalog.get("old_pwc"), original["production_cache"], "overlay original PWC")
     for key in PREPARED_SCIENCE:
@@ -784,29 +968,44 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
     # to those exact base artifacts, rather than merely to matching names.
     old_cache = pickle.loads(_read_bound(original["production_cache"], "overlay original PWC"))
     _same(old_cache.metadata.get("inputs"), base_inputs, "overlay base catalog")
-    costs = pickle.loads(_read_bound(catalog["cost"], "overlay measured scalar costs"))
-    _read_bound(catalog["reseal_proof"], "overlay encoder source proof")
-    expected = {(name, ADDED_FORMAT) for name in original["formats_by_qname"]
-                if ADDED_FORMAT not in original["formats_by_qname"][name]}
-    rows = catalog.get("cells")
-    _require(isinstance(rows, list), "overlay cells are missing")
+    sources = view["sources"]
+    for source in sources:
+        if source.get("reseal_proof") is not None:
+            _read_bound(source["reseal_proof"], "overlay encoder source proof")
+    # The cells declare the coverage (PQ #1432): each names an original unit
+    # and a format that unit does not already offer, once.
+    rows = catalog["cells"]
     pairs = [(row.get("qname"), row.get("format")) for row in rows]
-    _same(set(pairs), expected, "complete added candidate roster")
-    _same(len(pairs), len(expected), "unique added candidate roster")
+    _same(len(set(pairs)), len(pairs), "unique added candidate roster")
+    for name, fmt in pairs:
+        _require(name in original["formats_by_qname"], "overlay unit is not in the original roster")
+        _require(fmt not in original["formats_by_qname"][name], "overlay re-adds an original candidate of " + name)
+    if catalog["schema"] == CATALOG_SCHEMA_V1:
+        # A v1 catalog's one format covers every original unit that lacks it.
+        (fmt,) = view["formats"]
+        _same(set(pairs), {(name, fmt) for name, formats in original["formats_by_qname"].items()
+                           if fmt not in formats}, "complete added candidate roster")
     selected_names = set(data.formats_by_qname)
     panel_hessian = data.payload["provenance"]["hessian"]
-    overlay_hessian = (costs.get("provenance") or {}).get("hessian")
-    reference_units = None
+    recipe = added_format_recipes()
+    # Each source's measured costs are read once, when its first selected
+    # cell is met, and only for sources that answer a selected unit.
+    source_costs, reference_units, added = {}, {}, {}
     with EncoderAdoptionValidation() as proof_checks:
-        for row in rows:
+        for row, index in zip(rows, view["cell_sources"]):
             name, fmt = row["qname"], row["format"]
             if name not in selected_names:
                 continue
             _require((name, fmt) not in data.cells, "overlay attempts to replace an original cell")
+            source = sources[index]
+            if index not in source_costs:
+                source_costs[index] = pickle.loads(_read_bound(source["cost"], "overlay measured scalar costs"))
+            costs = source_costs[index]
+            overlay_hessian = (costs.get("provenance") or {}).get("hessian")
             adoption = row["catalog_source_adoption"]
             _same(adoption.get("schema"), ADOPTION_SCHEMA, "overlay adoption schema")
-            _same(adoption.get("encoder_source_proof"), catalog["reseal_proof"], "overlay encoder source proof")
-            proof_checks.verify(adoption)
+            _same(adoption.get("encoder_source_proof"), source.get("reseal_proof"), "overlay encoder source proof")
+            proof_checks.verify(adoption, fmt=fmt)
             reference_pair = tuple(adoption["reference_pair"])
             _require(reference_pair in data.cells and reference_pair[0] == name,
                      "overlay reference candidate is absent from the base catalog")
@@ -824,7 +1023,7 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
                 _same(candidate.get(key), adoption["reference_encoding_identity"].get(key),
                       "overlay adopted source/H " + key)
             _same(candidate.get("unit"), name, "overlay candidate unit")
-            _same(candidate.get("recipe"), ADDED_RECIPE, "overlay candidate recipe")
+            _same(candidate.get("recipe"), recipe(fmt), "overlay candidate recipe")
             _same(canonical_json_sha256(candidate, where="overlay candidate encoding"),
                   row["encoding_identity_sha256"], "overlay candidate encoding digest")
             anchor = row["anchor"]
@@ -844,9 +1043,9 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
             for key in ("supplied", "text_sha256", "fit_ids_sha256", "fit_tokens"):
                 _same(row_hessian.get(key), panel_hessian.get(key), "overlay measured H " + key)
             if row_hessian.get("capture_sha256") != panel_hessian.get("capture_sha256"):
-                if reference_units is None:
-                    reference_units = _overlay_hessian_commitments(overlay_hessian, panel_hessian)
-                overlay_units, panel_units = reference_units
+                if index not in reference_units:
+                    reference_units[index] = _overlay_hessian_commitments(overlay_hessian, panel_hessian)
+                overlay_units, panel_units = reference_units[index]
                 _same(row_hessian.get("capture_sha256"), overlay_hessian.get("capture_sha256"),
                       "overlay measured H capture seal")
                 _same(row_hessian.get("reference_binding"), overlay_hessian.get("reference_binding"),
@@ -872,10 +1071,14 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False):
                       cell["record"]["blob_sha256"], "overlay wire bytes")
                 cell["render_file_sha256"] = hashlib.sha256(Path(cell["render"]).read_bytes()).hexdigest()
             data.cells[name, fmt] = cell
-            data.formats_by_qname[name] = extended_roster(data.formats_by_qname[name], fmt)
+            added.setdefault(name, []).append(fmt)
             data.payload["costs"][name][fmt] = copy.deepcopy(scalar)
             if name in data.payload.get(EXPERT_WIRES_KEY, {}):
                 data.payload[EXPERT_WIRES_KEY][name][fmt] = copy.deepcopy(cell["record"])
+    # One insertion per unit, so several added formats land in the one
+    # deterministic order the assembler and the pair check use.
+    for name, formats in added.items():
+        data.formats_by_qname[name] = extended_roster(data.formats_by_qname[name], formats)
     data.payload["provenance"]["candidate_overlay"] = dict(bound)
     return data
 
@@ -959,11 +1162,12 @@ def selected_cache_read_paths(manifest):
         elif kind == 'prepared':
             add(document['production_cache'])
         elif kind == 'catalog':
-            for name in ('cost', 'old_pwc'):
-                if name in document: add(document[name])
+            if 'old_pwc' in document: add(document['old_pwc'])
+            for source in catalog_sources(document):
+                if source.get('cost') is not None: add(source['cost'])
+                if source.get('reseal_proof') is not None:
+                    proof_bindings[source['reseal_proof']['sha256']] = source['reseal_proof']
             if 'old_prepared' in document: control(document['old_prepared'], 'prepared')
-            if 'reseal_proof' in document:
-                proof_bindings[document['reseal_proof']['sha256']] = document['reseal_proof']
         elif kind == 'activation':
             for name in ('original_prepared', 'original_cache', 'census'): add(document[name])
         elif kind == 'resources':
