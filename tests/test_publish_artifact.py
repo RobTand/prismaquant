@@ -50,9 +50,22 @@ from prismaquant.validate_quantized_model import (
 )
 
 
+def _license_card(model_dir):
+    template = (pathlib.Path(__file__).resolve().parents[1] / "licenses"
+                / "PRISMAQUANT-WEIGHTS-LICENSE-1.0.md").read_text()
+    (model_dir / "LICENSE").write_text(template.replace("<repository>", "test-artifact"))
+    tldr = template[template.index("> **TL;DR.**"):].split("\n\n", 1)[0]
+    (model_dir / "README.md").write_text(
+        "---\nlicense: other\nlicense_name: prismaquant-weights-license-1.0\n"
+        "license_link: https://huggingface.co/rdtand/test-artifact/blob/main/LICENSE\n"
+        f"---\n\n# Test artifact\n\n{tldr}\n"
+    )
+
+
 def _artifact(tmp_path, name="exported"):
     model_dir = tmp_path / name
     model_dir.mkdir()
+    _license_card(model_dir)
     (model_dir / "config.json").write_text('{"model_type": "qwen3"}')
     (model_dir / "model-00001-of-00001.safetensors").write_bytes(b"weights")
     card = build_shipcard(model_dir, build={"achieved_bpp": {"value": 4.75}})
@@ -285,6 +298,12 @@ class _FakeHubState:
     preupload_calls: list[dict] = dataclasses.field(default_factory=list)
     create_calls: list[dict] = dataclasses.field(default_factory=list)
     uploaded_lfs: dict[str, bytes] = dataclasses.field(default_factory=dict)
+    gated: object = False
+    accept_gate_setting: bool = True
+    gate_error: Exception | None = None
+    gate_read_error: Exception | None = None
+    gate_updates: list[dict] = dataclasses.field(default_factory=list)
+    events: list[str] = dataclasses.field(default_factory=list)
 
 
 def _read_all(handle):
@@ -301,11 +320,22 @@ def _install_fake_hub(monkeypatch, state: _FakeHubState):
     class FakeApi:
         def repo_info(self, **kwargs):
             state.repo_info_calls += 1
+            state.events.append("repo_info")
+            if state.gate_updates and state.gate_read_error is not None:
+                raise state.gate_read_error
             if state.mutate_after_freeze is not None:
                 callback = state.mutate_after_freeze
                 state.mutate_after_freeze = None
                 callback()
-            return types.SimpleNamespace(sha=state.parent, private=False)
+            return types.SimpleNamespace(sha=state.parent, private=False, gated=state.gated)
+
+        def update_repo_settings(self, **kwargs):
+            state.events.append("gate")
+            state.gate_updates.append(dict(kwargs))
+            if state.gate_error is not None:
+                raise state.gate_error
+            if state.accept_gate_setting:
+                state.gated = kwargs["gated"]
 
         def list_repo_files(self, **kwargs):
             revision = kwargs["revision"]
@@ -314,6 +344,7 @@ def _install_fake_hub(monkeypatch, state: _FakeHubState):
             return sorted(state.remote)
 
         def preupload_lfs_files(self, **kwargs):
+            state.events.append("preupload")
             state.preupload_calls.append(dict(kwargs))
             assert kwargs["revision"] == state.parent
             assert kwargs["gitignore_content"] == ""
@@ -337,6 +368,7 @@ def _install_fake_hub(monkeypatch, state: _FakeHubState):
                 operation._is_uploaded = True
 
         def create_commit(self, **kwargs):
+            state.events.append("commit")
             state.create_calls.append(dict(kwargs))
             assert kwargs["revision"] == "main"
             assert kwargs["parent_commit"] == state.parent
@@ -652,6 +684,8 @@ def test_frozen_snapshot_survives_original_path_and_symlink_swaps(
         "config.json",
         "model-00001-of-00001.safetensors",
         "shipcard.json",
+        "LICENSE",
+        "README.md",
     }
     assert state.create_calls[0]["parent_commit"] == state.parent
     assert state.create_calls[0]["revision"] == "main"
@@ -740,7 +774,7 @@ def test_remote_head_conflict_refuses_without_retrying_or_leaving_stale_success(
     captured = capsys.readouterr()
     assert "parent_commit CAS" in captured.err
     assert "Rerun this publisher from the beginning" in captured.err
-    assert state.repo_info_calls == 1
+    assert state.repo_info_calls == 2  # parent resolution plus gate read-back
     assert state.parent_list_calls == 1
     assert len(state.preupload_calls) == 1
     assert len(state.create_calls) == 1
@@ -755,11 +789,7 @@ def test_identical_additions_still_force_one_parent_cas_commit(
     _close_all_slots(model_dir)
     state = _FakeHubState(remote={
         ".gitattributes": b"hub-managed",
-        "config.json": (model_dir / "config.json").read_bytes(),
-        "model-00001-of-00001.safetensors": (
-            model_dir / "model-00001-of-00001.safetensors"
-        ).read_bytes(),
-        "shipcard.json": (model_dir / "shipcard.json").read_bytes(),
+        **{path.name: path.read_bytes() for path in model_dir.iterdir()},
     })
     _install_fake_hub(monkeypatch, state)
 
