@@ -49,6 +49,30 @@ def read_layer_config_metadata(path: str | Path) -> dict:
     return layer_config_metadata(payload) if isinstance(payload, Mapping) else {}
 
 
+def prefill_frontier_replay_claim(metadata: Mapping) -> dict:
+    """Validate and carry a replay's research standing into the build record.
+
+    The marker survives on the shipcard, whose verifier cannot read the
+    build-machine recipe. Missing/false stamps are errors, never defaults.
+    A sweep's shorthand stub is not an exportable allocator config.
+    """
+    if metadata.get("schema") == "prismaquant.prefill_frontier.assignment.v1":
+        raise ValueError("prefill frontier assignment stub requires replay before export")
+    scope = metadata.get("fixed_resource_scope")
+    replay = metadata.get("prefill_frontier_replay")
+    if "prefill_frontier_replay" not in metadata:
+        if isinstance(scope, Mapping) and scope.get("scope") == "shape-only":
+            raise ValueError("shape-only config requires prefill_frontier_replay provenance")
+        return {}
+    if not isinstance(replay, Mapping) or replay.get("schema") != "prismaquant.prefill_frontier.replay.v1":
+        raise ValueError("prefill_frontier_replay requires replay.v1 provenance")
+    for key, required in (("research_only", True), ("certifies_placement", False)):
+        if metadata.get(key) is not required:
+            raise ValueError(f"prefill frontier replay requires {key}={required}")
+    return {"prefill_frontier_replay": dict(replay), "research_only": True,
+            "certifies_placement": False}
+
+
 # GGUF k-quant + IQ lane (llama.cpp / vLLM-GGUF serving). Kept as an explicit
 # literal so this module stays torch-free; pinned to gguf_formats.GGUF_BLOCK_BYTES
 # by test_gguf_formats.test_layer_config_gguf_names_stay_in_sync.
