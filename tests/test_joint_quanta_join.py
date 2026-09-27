@@ -680,6 +680,42 @@ def test_complete_quantum_dropping_rows_refuses(tmp_path, campaign, probe):
                           output_dir=tmp_path / "joined", input_root=root)
 
 
+def test_a_new_only_second_stage_b_pass_refuses(tmp_path, campaign, probe):
+    """A catalog extension is priced by a full re-price (PQ #1432).
+
+    The extended roster offers each unit its original candidates plus the
+    added formats. A second Stage B pass that prices only the added formats,
+    meant to be merged onto the first pass's joined rows, does not answer the
+    prepared roster, so the join refuses it. The same campaign priced over
+    every candidate joins.
+    """
+    added = "TESSERA_E2M1_K2_R768"
+    extended = [*FORMATS, added]
+    for qname in campaign["roster"]:
+        campaign["formats_by_qname"][qname] = list(extended)
+    new_only = tmp_path / "new-only"
+    _seal_inputs(new_only, campaign)
+    for layer in range(N_LAYERS):
+        _write_quantum(new_only, campaign, probe, layer, costs={
+            qname: {added: _row(qname, added, probe)}
+            for qname in _units_of_layer(campaign, layer)})
+    with pytest.raises(JoinRefused, match="is not the prepared"):
+        join_joint_quanta(receipts=None, campaign=campaign,
+                          output_dir=tmp_path / "joined-new-only",
+                          input_root=new_only)
+
+    full = tmp_path / "full"
+    _seal_inputs(full, campaign)
+    for layer in range(N_LAYERS):
+        _write_quantum(full, campaign, probe, layer, costs={
+            qname: {fmt: _row(qname, fmt, probe) for fmt in extended}
+            for qname in _units_of_layer(campaign, layer)})
+    cost_path, _ = _run_cli(full, tmp_path / "joined-full", campaign)
+    payload = pickle.loads(cost_path.read_bytes())
+    assert all(sorted(row) == sorted(extended)
+               for row in payload["costs"].values())
+
+
 # -- the bridge: real producer records join synthetic runtime outputs ---------
 
 
