@@ -1,15 +1,5 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-09-26 for PQ #1342: campaign rows and direct submissions now
-carry the existing portable container-admission reference through the shared
-`tools.tessera_campaign_container.admission_image_reference` owner, as joint
-rows already did. The same parsed spec supplies both the launcher and PB's
-admission declaration. A row class inherits the reference with its container;
-replacing the container also replaces its admission identity, so it cannot
-advertise another class's image. No new schema field, default, serving lane or
-ship gate is introduced; specs without the explicit override keep their prior
-behavior. Gate: `tests/test_container_image_admission.py`.
-
 Research frontier replay provenance (2026-09-26, branch
 `astra/prefill-frontier-replay-1428`, PQ #1428): the replay/shipcard contract
 below is derived from `prefill_frontier.py`, the allocator's shared writer,
@@ -25142,12 +25132,18 @@ new candidate reads must be completed by the executable prepared-input producer.
 It emits a coordinator launch recipe without submitting nested PB work.
 A spec may explicitly bind `container_admission_reference` to PB's portable
 content identity while keeping the distinct scientifically inspected Docker
-content identity; both checks must succeed before execution. The shared
-container helper validates this existing spelling for joint dispatch, campaign
-manifest rows and direct submission alike (PQ #1342). Generated rows retain it
-in the same serialized spec they execute. An explicit reference preserves the
-joint dispatcher's override precedence, including beside an archive; an archive
-without an override still declares no locally required image.
+content identity; both checks must succeed before execution.
+
+Re-stamped 2026-09-26 for PQ #1342: the shared
+`tools.tessera_campaign_container.admission_image_reference` owner validates
+this existing spelling for joint dispatch, campaign manifest rows and direct
+submission alike. Generated rows retain it in the same serialized spec they
+execute. A class inherits the reference with its container; replacing that
+container also replaces its admission identity. An explicit reference preserves
+the joint dispatcher's override precedence, including beside an archive; an
+archive without an override still declares no locally required image. No new
+schema field, default, serving lane or ship gate is introduced. Gate:
+`tests/test_container_image_admission.py`.
 
 ### Stage B head slice (#1010)
 
