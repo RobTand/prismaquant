@@ -52,7 +52,7 @@ def execution_panel_from_joint(panel):
 
 
 def freeze_execution_panel(inputs, preflight, *, source_sha256):
-    from .native_operator_panel import EXECUTION, INPUT_SCHEMA, PHASES, _equal, _sha
+    from .native_operator_panel import INPUT_SCHEMA, PHASES, _equal, _sha, require_native_execution
     _sha(source_sha256, 'source model')
     if inputs.get('schema') != INPUT_SCHEMA:
         raise ValueError('execution panel needs independently prepared PWC inputs')
@@ -70,7 +70,7 @@ def freeze_execution_panel(inputs, preflight, *, source_sha256):
     _equal(preflight['runtime_sha256'], identity_sha256(preflight['runtime']), 'runtime digest')
     _equal(preflight['native_tensors_sha256'], identity_sha256(operator['native_tensors']), 'native tensors')
     _equal(preflight['scheme_sha256'], identity_sha256(operator['scheme']), 'native scheme')
-    _equal(preflight['runtime']['execution'], EXECUTION, 'execution')
+    execution = require_native_execution(inputs, preflight)
     _equal(preflight['runtime']['image'], inputs['runtime_image'], 'runtime image')
     route = operator['declared_route']
     _equal(route['contract'], operator['activation_contract'], 'activation route')
@@ -81,7 +81,7 @@ def freeze_execution_panel(inputs, preflight, *, source_sha256):
         'shape': inputs['shape'], 'source_sha256': source_sha256,
         'calibration_sha256': inputs['calibration']['calibration_sha256'],
         'operator_identity': identity, 'operator_identity_sha256': identity_sha256(identity),
-        'wire': inputs['wire'], 'execution': dict(EXECUTION), 'runtime': preflight['runtime'],
+        'wire': inputs['wire'], 'execution': execution, 'runtime': preflight['runtime'],
         'native_tensors_sha256': preflight['native_tensors_sha256'],
         'scheme_sha256': preflight['scheme_sha256'], 'numerics': inputs['numerics'],
         'numerics_derivation': inputs['numerics_derivation'],
