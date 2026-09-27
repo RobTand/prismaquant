@@ -119,7 +119,8 @@ def down_convert_lane_table(payload: dict, schema: str) -> dict:
     return payload
 
 
-def lane_cells_on_one_image(payload: dict, image: str | None = None) -> dict:
+def lane_cells_on_one_image(payload: dict, image: str | None = None, *,
+                            family: str | None = None) -> dict:
     """The installed table's cells measured on ONE runtime image.
 
     Several fixtures flatten every cell's ``runtime`` onto one fixture image
@@ -132,11 +133,18 @@ def lane_cells_on_one_image(payload: dict, image: str | None = None) -> dict:
     which the reader correctly refuses. A fixture therefore keeps one real
     image's roster and never relabels a union.
 
-    ``image`` defaults to ``versions.default_serve_image``, whose roster
-    (the dense E2M1 and E4M3 pairs) is what these fixtures were written
-    against. A FIXTURE, never an attestation.
+    ``image`` defaults to ``versions.default_serve_image`` (dense E4M3 at
+    v39). A fixture needing a specific family can instead name ``family``;
+    its published cells must select exactly one image, never an arbitrary
+    first image. A FIXTURE, never an attestation.
     """
     payload = copy.deepcopy(payload)
+    if family is not None:
+        assert image is None, 'fixture must select image or family, not both'
+        images = {c['runtime']['image'] for c in payload['lane_eligibility']['cells']
+                  if c['family'] == family}
+        assert len(images) == 1, f'{family}: fixture needs exactly one image, got {images}'
+        image = images.pop()
     if image is None:
         image = payload["versions"]["default_serve_image"]
     lane = payload["lane_eligibility"]

@@ -162,7 +162,7 @@ def test_missing_or_changed_selected_evidence_refuses(tmp_path, change, match):
 
 @pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale',
                                     'v2_extension', 'no_proof', 'no_proof_dev'])
-def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, change):
+def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, capsys, change):
     # Capture-reuse and full512 policy derivation have independent artifact-level
     # tests. This bridge supplies their accepted boundary, then runs the real
     # per-cell migration proof checker, builder and Tessera mixed-root reader.
@@ -273,15 +273,26 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
         with pytest.raises((ValueError, RuntimeError)): build()
         return
     manifest = build()
+    for package in packages.values():
+        directory = Path(package['path']); directory.mkdir()
+        (directory/'__init__.py').write_text('# source fixture')
     if change == 'no_proof_dev':
         assert manifest['reuse_authority']['encoder_source_proofs'] == []
         assert all(adoption['encoder_source_proof'] is None for adoption in manifest['encoder_adoptions'].values())
         assert manifest['producer_packages'] == packages
+        # The #1441 producer's actual proof-less manifest crosses the #644
+        # reader boundary only through the producer's explicit dev opt-in.
+        from prismaquant.tessera_export_lane import read_cached_unit_bundle
+        bundle = read_cached_unit_bundle(manifest, tmp_path, set(names), source)
+        assert bundle.encoder_source_proof_mode == 'permissive'
+        assert {stamp['unit'] for stamp in bundle.warnings} == set(manifest['encoder_adoptions'])
+        assert '[cached-unit warning]' in capsys.readouterr().err
+        bundle.require_served_scales({name+'.input_global_scale': 0.25 for name in groups})
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+        with pytest.raises(ValueError, match='encoder source proof'):
+            read_cached_unit_bundle(manifest, tmp_path, set(names), source)
         return
     assert len(seen) == 1 and seen[0][1]['run_header'] == header
-    for package in packages.values():
-        directory = Path(package['path']); directory.mkdir()
-        (directory/'__init__.py').write_text('# source fixture')
     reads = set(bridge.selected_cache_read_paths(manifest))
     assert {item['path'] for item in (old_plan, plan, old_prepared, new_prepared, old_pwc, new_pwc, resource)} <= reads
     assert (capture['path'] in reads) == (change != 'v2_extension')
