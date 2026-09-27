@@ -110,6 +110,19 @@ menu, runtime pin or serving admission changes. Table world equality, native
 numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
 
+Re-stamped 2026-09-27 (PQ #1524): the exact Tessera pin is
+`a3e83875d20f54c685307da13a34992d70256f02`, master after Tessera #671 (closing
+tessera#670). The rooted cached-unit reader now accepts
+`prismaquant.joint_catalog_extension.v3`, the schema the real Stage B catalog
+extension carries; at `f94929def` it refused that extension in
+`read_cached_unit_bundle`. The packaged contract (v39, `f2f90948…`), the
+reviewed admission answer, `grammar.py` and `export.py` are byte-identical to
+`f94929def`, so the legal inventory keeps the `reader-pin-f94929de` byte-state
+and no legal rate count moves. This pin supersedes the PQ #1502 pin described
+below. Its PB interpreters are `/home/rob/venvs/pq-pb461728e4-tessera-a3e83875`
+on dl380g10 (PB build `0b441d56627a`), sparky and sparklina, with a `-tf516`
+sibling on each Spark (PB builds sparky `1020e04f6516`, sparklina `03baf1e3adbc`).
+
 Re-stamped 2026-09-27 (PQ #1502): the exact Tessera pin is
 `f94929defd9fa00b8726160a2cd436f02733b6dc`, master after Tessera #663 (closing tessera#662). The packaged
 contract is unchanged: v39, SHA-256

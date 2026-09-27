@@ -287,8 +287,11 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: Re-pinned 2026-09-27 to f94929def after Tessera #663: the served recipe
 #: per structure reaches the cached-unit receipts (PQ #1502). Contract v39 and
 #: this reviewed answer do not move.
+#: Re-pinned 2026-09-27 to a3e83875d after Tessera #671: rooted cached units
+#: read the v3 catalog extension (PQ #1524). Contract v39 and this reviewed
+#: answer do not move.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "f94929defd9fa00b8726160a2cd436f02733b6dc"
+    "a3e83875d20f54c685307da13a34992d70256f02"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
