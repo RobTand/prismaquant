@@ -1700,3 +1700,43 @@ def test_verified_activation_index_refuses_post_validation_replace(tmp_path):
             index.load_blob(qname)
     finally:
         index.close()
+
+
+def test_prefetched_verified_activation_keeps_directory_and_identity_fences(tmp_path):
+    from prismaquant.io_engine import EntryError
+    from prismaquant.measure_quant_cost import ActivationIndex, _activation_chunk_stream
+
+    cover, bundle = _publish_valid_activation_bundle(tmp_path)
+    validated = producer.validate_sample_parallel_merge_bundle(
+        bundle, expected_cover=cover, capture_consumables=True,
+    )
+    qname = BODY_QNAMES[0]
+    activation_dir = bundle / producer.MERGE_BUNDLE_ACTIVATIONS
+    verification_contract = validated["_validated_activation_manifest"]
+    assert isinstance(verification_contract, dict)
+    index = ActivationIndex(
+        activation_dir, {qname: {}},
+        verification_contract=verification_contract,
+    )
+    try:
+        expected = index.load(qname)
+        fname = ActivationIndex._FNAME_SUB.sub("__", qname) + ".pt"
+        moved = tmp_path / "moved-verified-cache"
+        activation_dir.rename(moved)
+        activation_dir.mkdir()
+        (activation_dir / fname).write_bytes(b"x")
+        assert index.prefetch_bytes(qname) == (moved / fname).stat().st_size
+        chunks = [[(qname, None)]]
+        with _activation_chunk_stream(index, chunks) as stream:
+            got = stream.take(0)[0].value[0][0]
+            assert torch.equal(got, expected)
+            del got
+            stream.release()
+        payload = torch.load(moved / fname, map_location="cpu", weights_only=False)
+        payload["inputs"][0, 0] += 1
+        torch.save(payload, moved / fname)
+        with _activation_chunk_stream(index, chunks) as stream:
+            with pytest.raises(EntryError, match="differs from commit"):
+                stream.take(0)
+    finally:
+        index.close()

@@ -42,6 +42,10 @@ class _FakeActIndex:
     def load(self, name):
         return self._acts[name]
 
+    def prefetch_bytes(self, name):
+        a = self._acts[name]
+        return a.numel() * a.element_size() + a.shape[0] * 8
+
     def load_with_row_indices(self, name):
         a = self._acts[name]
         return a, torch.arange(a.shape[0])
