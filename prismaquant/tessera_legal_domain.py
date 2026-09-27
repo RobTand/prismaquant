@@ -514,12 +514,17 @@ def live_pins() -> DomainPins:
 #: ``4e2e8487…`` and ``grammar.py`` remains ``9ae1f824…``: reuse the
 #: uniquely identified ``reader-pin-f94929de`` byte-state, not a duplicate
 #: digest entry.  No count moves (PQ #1524).
+#: **Re-taken 2026-09-27 for ``20bf5346`` (contract v39, unchanged), a
+#: re-transcription.**  Tessera #669 (tessera#668) changes ``encode.py`` and
+#: docs only.  ``export.py`` remains ``4e2e8487…`` and ``grammar.py`` remains
+#: ``9ae1f824…``: the ``reader-pin-f94929de`` byte-state still applies, and no
+#: count moves (PQ #1527).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="a3e83875d20f54c685307da13a34992d70256f02",
+    reader_dev_pin_commit="20bf53464f9113f3115f454f8fa80453e71c0308",
     reader_dev_pin_contract_sha256=(
         "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
     ),
-    serving_runtime_pinned_commit="a3e83875d20f54c685307da13a34992d70256f02",
+    serving_runtime_pinned_commit="20bf53464f9113f3115f454f8fa80453e71c0308",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
         "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
