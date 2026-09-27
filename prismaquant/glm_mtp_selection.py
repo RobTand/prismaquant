@@ -23,6 +23,7 @@ at zero cost and two bytes per parameter (principle 11: never synthesized).
 from __future__ import annotations
 
 import json
+import hashlib
 import pickle
 from pathlib import Path
 from typing import Mapping
@@ -42,6 +43,7 @@ def load_mtp_cost(path) -> dict:
 
 
 MERGE_SCHEMA = "prismaquant.glm_mtp_cost.merge.v1"
+WIRE_BINDING_SCHEMA = "prismaquant.glm_mtp_priced_wires.v1"
 
 
 def merge_mtp_costs(payloads, *, sources=()) -> dict:
@@ -106,30 +108,152 @@ def merge_mtp_costs(payloads, *, sources=()) -> dict:
     }
 
 
+def _bound_payload(reference: Mapping, *, label: str) -> dict:
+    """Read an already published cost artifact only under its exact byte anchor."""
+    from .tessera_joint_allocation import _read_bound
+
+    if (not isinstance(reference, Mapping) or set(reference) != {"path", "sha256"}
+            or not isinstance(reference["path"], str)
+            or not isinstance(reference["sha256"], str)
+            or len(reference["sha256"]) != 64):
+        raise ValueError(f"{label} needs an exact path and SHA-256 source")
+    payload = pickle.loads(_read_bound(dict(reference), label))
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{label} is not a cost payload")
+    return dict(payload)
+
+
+def enrich_mtp_cost_wires(payload: Mapping) -> dict:
+    """Join measured M3 wires through exact M4 anchors into an M6 cost copy.
+
+    This is offline metadata work. The historical M3/M4/M6 files and blob
+    directories stay unchanged. Every source is checked before its receipt is
+    used; the export intake remains responsible for hashing each selected blob.
+    """
+    from . import tessera_expert_projection as tep
+    from .tessera_formats import parse_tessera_format_name
+
+    if payload.get("schema") != SCHEMA:
+        raise ValueError(f"MTP cost payload must be {SCHEMA}")
+    provenance = payload.get("provenance", {})
+    if provenance.get("schema") != MERGE_SCHEMA or not isinstance(provenance.get("parts"), list):
+        raise ValueError("MTP priced-wire join needs the bound merged cost provenance")
+    parts = provenance["parts"]
+    if len(parts) < 2:
+        raise ValueError("MTP priced-wire join needs at least two bound parts")
+    receipts = {name: {} for name in payload["costs"]}
+    wire_roots = {name: {} for name in payload["costs"]}
+    bindings = {name: {} for name in payload["costs"]}
+    projection = None
+    seen = set()
+    for index, part in enumerate(parts):
+        m4_ref = part.get("source")
+        m4 = _bound_payload(m4_ref, label=f"MTP M4 part {index}")
+        if (m4.get("schema") != SCHEMA or m4.get("mtp_layer") != payload["mtp_layer"]
+                or m4.get("groups") != payload["groups"]
+                or m4.get("params") != payload["params"]
+                or m4.get("source_dtype") != payload["source_dtype"]
+                or m4.get("provenance") != part.get("provenance")
+                or set(m4.get("costs", {})) != set(payload["costs"])):
+            raise ValueError(f"MTP M4 part {index} differs from merged cost provenance")
+        rungs = sorted({fmt for by_fmt in m4["costs"].values() for fmt in by_fmt})
+        if rungs != part.get("rungs"):
+            raise ValueError(f"MTP M4 part {index} rung roster differs from merged cost")
+        anchors = m4["provenance"].get("tessera_joint_anchors", {})
+        m3 = _bound_payload(anchors.get("inputs", {}).get("merged_cost"),
+                            label=f"MTP M3 price {index}")
+        if m3.get("schema") != "prismaquant.tessera_campaign_cost.v1":
+            raise ValueError(f"MTP M3 price {index} has no campaign cost schema")
+        m3_projection = m3.get("provenance", {}).get(tep.PROJECTION_KEY)
+        try:
+            _source, units, _stacks = tep.carried_units(m3_projection)
+        except tep.ExpertProjectionError as exc:
+            raise ValueError(f"MTP M3 price {index} has no valid expert projection: {exc}") from exc
+        if projection is None:
+            projection = m3_projection
+        elif m3_projection != projection:
+            raise ValueError(f"MTP M3 price {index} changes the producer projection")
+        root = m3.get("provenance", {}).get("wire_dir")
+        if not isinstance(root, str) or not root:
+            raise ValueError(f"MTP M3 price {index} has no wire directory")
+        for name, by_fmt in m4["costs"].items():
+            for fmt, row in by_fmt.items():
+                cell = (name, fmt)
+                if cell in seen:
+                    raise ValueError(f"MTP {name}@{fmt} is priced by multiple parts")
+                seen.add(cell)
+                if (payload["costs"].get(name, {}).get(fmt) != row
+                        or payload["wire_bytes"].get(name, {}).get(fmt) !=
+                        m4.get("wire_bytes", {}).get(name, {}).get(fmt)):
+                    raise ValueError(f"MTP {name}@{fmt} differs from bound M4 price")
+                if (m3.get("costs", {}).get(name, {}).get(fmt, {}).get("wire_bytes") !=
+                        m4["wire_bytes"][name][fmt]):
+                    raise ValueError(f"MTP {name}@{fmt} wire bytes differ from the M3 price")
+                if name not in units:
+                    # Dense/shared rows are priced by the same M3 source but
+                    # are not members of its routed expert projection. Their
+                    # selected BF16 passthrough needs no producer wire.
+                    continue
+                parsed = parse_tessera_format_name(fmt)
+                if parsed is None:
+                    raise ValueError(f"MTP {name}@{fmt} has no projected Tessera wire")
+                family, q256 = parsed
+                record = m3.get(tep.EXPERT_WIRES_KEY, {}).get(name, {}).get(fmt)
+                try:
+                    checked = tep.check_expert_wire_receipt(
+                        record, name=name, unit=units[name], q256=int(q256),
+                        grid=family.payload_grid().name)
+                    tep.locate_expert_wire(checked, name=name, wire_dir=Path(root))
+                except tep.ExpertProjectionError as exc:
+                    raise ValueError(f"MTP {name}@{fmt} lacks its priced wire: {exc}") from exc
+                if (m4["wire_bytes"][name][fmt] !=
+                        checked["blob_bytes"]):
+                    raise ValueError(f"MTP {name}@{fmt} wire bytes differ from the M3 price")
+                receipts[name][fmt] = checked
+                wire_roots[name][fmt] = root
+                bindings[name][fmt] = {"m4": dict(m4_ref),
+                                       "m3": dict(anchors["inputs"]["merged_cost"])}
+    if seen != {(name, fmt) for name, by_fmt in payload["costs"].items()
+                for fmt in by_fmt}:
+        raise ValueError("MTP bound parts do not cover the merged priced cells")
+    return {**payload, "mtp_expert_projection": projection,
+            "mtp_expert_wires": receipts, "mtp_expert_wire_roots": wire_roots,
+            "mtp_expert_source_bindings": bindings,
+            "mtp_expert_wire_binding_schema": WIRE_BINDING_SCHEMA}
+
+
 def _mtp_probe(payload) -> tuple[str, dict]:
     """The one MTP probe identity every row carries, validated."""
     from .glm_mtp import MTP_OBJECTIVE, MTP_OBJECTIVE_SCHEMA
-    from .joint_aura import validate_joint_aura_entry
+    from .joint_aura import (prepare_joint_aura_identities, release_joint_aura_identities,
+                             validate_joint_aura_entry)
 
-    digests, probe = set(), None
-    for unit, by_rung in payload["costs"].items():
-        for rung, row in by_rung.items():
-            if not validate_joint_aura_entry(row):
-                raise ValueError(f"MTP row {unit} @ {rung} is not a joint-AURA entry")
-            operator = row["joint_operator_identity"]
-            if operator["qname"] != unit or operator["format"] != rung:
-                raise ValueError(f"MTP row {unit} @ {rung} names {operator['qname']} @ {operator['format']}")
-            objective = row["probe_identity"].get("objective")
-            if (not isinstance(objective, Mapping) or objective.get("schema") != MTP_OBJECTIVE_SCHEMA
-                    or objective.get("objective") != MTP_OBJECTIVE):
-                raise ValueError(f"MTP row {unit} @ {rung} was not priced on the MTP objective")
-            if objective.get("mtp_layer") != payload["mtp_layer"]:
-                raise ValueError(f"MTP row {unit} @ {rung} names MTP layer {objective.get('mtp_layer')}")
-            digests.add(row["probe_identity_sha256"])
-            probe = row["probe_identity"]
+    digests, last_row = set(), None
+    try:
+        # Pickle retains shared probe objects. The joint validator already
+        # owns a content-bound immutable wrapper that validates each distinct
+        # source model once while continuing to validate every row/operator.
+        prepare_joint_aura_identities(payload)
+        for unit, by_rung in payload["costs"].items():
+            for rung, row in by_rung.items():
+                if not validate_joint_aura_entry(row):
+                    raise ValueError(f"MTP row {unit} @ {rung} is not a joint-AURA entry")
+                operator = row["joint_operator_identity"]
+                if operator["qname"] != unit or operator["format"] != rung:
+                    raise ValueError(f"MTP row {unit} @ {rung} names {operator['qname']} @ {operator['format']}")
+                objective = row["probe_identity"].get("objective")
+                if (not isinstance(objective, Mapping) or objective.get("schema") != MTP_OBJECTIVE_SCHEMA
+                        or objective.get("objective") != MTP_OBJECTIVE):
+                    raise ValueError(f"MTP row {unit} @ {rung} was not priced on the MTP objective")
+                if objective.get("mtp_layer") != payload["mtp_layer"]:
+                    raise ValueError(f"MTP row {unit} @ {rung} names MTP layer {objective.get('mtp_layer')}")
+                digests.add(row["probe_identity_sha256"])
+                last_row = row
+    finally:
+        release_joint_aura_identities(payload)
     if len(digests) != 1:
         raise ValueError(f"MTP rows must share one probe identity, got {len(digests)}")
-    return digests.pop(), probe
+    return digests.pop(), last_row["probe_identity"]
 
 
 def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
@@ -162,7 +286,8 @@ def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
 
 
 def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
-                     acceptance_points=(), k: int = 1, eligible=None) -> dict:
+                     acceptance_points=(), k: int = 1, eligible=None,
+                     fixed_formats: Mapping[str, str] | None = None) -> dict:
     """The MTP assignment and its selection record under ``byte_budget``.
 
     ``constants`` are the caller's declared serve constants
@@ -171,6 +296,8 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     the selector is degenerate and returns the lowest-E rung within the budget.
     ``eligible(unit, rung)``, when given, is the pinned runtime's attestation
     (principle 14); a priced rung it refuses is left off the menu and recorded.
+    ``fixed_formats`` restricts named whole groups to one format, intersected
+    with that same eligible menu. A missing or unpriced group format refuses.
     """
     from . import mtp_rung_selection as canon
 
@@ -180,6 +307,22 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     probe_sha256, probe = _mtp_probe(payload)
     rows, unattested = _unit_rows(payload, eligible)
     groups = {name: tuple(members) for name, members in payload["groups"].items()}
+    if fixed_formats is not None:
+        if not isinstance(fixed_formats, Mapping) or any(
+                not isinstance(name, str) or not isinstance(fmt, str) or not fmt
+                for name, fmt in fixed_formats.items()):
+            raise ValueError("MTP fixed_formats must map group names to format names")
+        unknown = set(fixed_formats) - set(groups)
+        if unknown:
+            raise ValueError(f"MTP fixed_formats name unknown groups: {sorted(unknown)}")
+        for group, fmt in fixed_formats.items():
+            absent = [unit for unit in groups[group] if fmt not in rows[unit]]
+            if absent:
+                raise ValueError(
+                    f"MTP fixed {group}={fmt} is missing or ineligible for "
+                    f"{len(absent)} member(s): {absent[:3]}")
+            for unit in groups[group]:
+                rows[unit] = {fmt: rows[unit][fmt]}
     menu, incomplete = canon.group_product_menu(groups, rows, params=payload["params"])
     serve = canon.ServeConstants(t_ms=float(constants["t_ms"]), d0_ms=float(constants["d0_ms"]),
                                  c_ms_per_bit=float(constants["c_ms_per_bit"]))
@@ -188,6 +331,26 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
                                h_source="joint_aura_mtp_head_self_kl")
     chosen = dict(part.split("=", 1) for part in result.rung.name.split("|"))
     assignment = {unit: chosen[group] for group, members in groups.items() for unit in members}
+    selected_wires = {}
+    parts = payload.get("provenance", {}).get("parts", [])
+    if any(isinstance(part.get("source"), Mapping) and
+           "sha256" in part["source"] for part in parts):
+        # The original cost remains a valid historical input. For bound M4
+        # parts, however, a selected Tessera cell must retain its exact M3
+        # receipt and root or export would have to encode unpriced bytes.
+        payload = enrich_mtp_cost_wires(payload)
+        priced = {key: {} for key in ("mtp_expert_wires", "mtp_expert_wire_roots",
+                                      "mtp_expert_source_bindings")}
+        for name, fmt in assignment.items():
+            if fmt == _BF16:
+                continue
+            for key in priced:
+                try:
+                    priced[key][name] = payload[key][name][fmt]
+                except KeyError as exc:
+                    raise ValueError(f"MTP {name}@{fmt} has no {key}") from exc
+        selected_wires = {"mtp_expert_projection": payload["mtp_expert_projection"],
+                          **priced, "mtp_expert_wire_binding_schema": WIRE_BINDING_SCHEMA}
     return {
         "schema": RECORD_SCHEMA,
         "objective": probe["objective"]["objective"],
@@ -203,9 +366,105 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         "incomplete_rungs": incomplete,
         "unattested_rungs": {rung: len(units) for rung, units in unattested.items()},
         "selection": result.provenance,
+        **({"fixed_formats": dict(sorted(fixed_formats.items()))}
+           if fixed_formats is not None else {}),
         "assignment": assignment,
+        **selected_wires,
     }
 
 
-__all__ = ["SCHEMA", "RECORD_SCHEMA", "MERGE_SCHEMA", "load_mtp_cost", "merge_mtp_costs",
-           "select_mtp_rungs"]
+def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
+    """Return a new allocation config with bound wires for its existing MTP choice.
+
+    This checks the recorded choice against the measured cost and every unit's
+    config. It does not invoke an allocator or change a body/MTP assignment.
+    """
+    from . import format_registry as fr
+    from . import mtp_rung_selection as canon
+
+    cost_raw = Path(cost_path).read_bytes()
+    cost_sha256 = hashlib.sha256(cost_raw).hexdigest()
+    cost = pickle.loads(cost_raw) if not str(cost_path).endswith(".json") else json.loads(cost_raw)
+    payload = enrich_mtp_cost_wires(cost)
+    meta = layer_config.get("__prismaquant__", {})
+    record = meta.get("mtp_selection", {})
+    if (record.get("schema") != RECORD_SCHEMA or
+            record.get("cost_path") != str(cost_path) or
+            record.get("mtp_layer") != payload["mtp_layer"] or
+            record.get("units") != len(payload["costs"])):
+        raise ValueError("MTP selection does not name the bound cost and unit roster")
+    probe_sha256, probe = _mtp_probe(payload)
+    if (record.get("probe_identity_sha256") != probe_sha256 or
+            record.get("objective") != probe["objective"]["objective"]):
+        raise ValueError("MTP selection probe differs from the bound cost")
+    chosen = record.get("rung_by_group")
+    if (not isinstance(chosen, Mapping) or set(chosen) != set(payload["groups"]) or
+            record.get("rung") != "|".join(f"{group}={chosen[group]}"
+                                            for group in sorted(chosen))):
+        raise ValueError("MTP selection rung differs from the bound groups")
+    fixed = record.get("fixed_formats")
+    if fixed is not None:
+        if (not isinstance(fixed, Mapping) or not set(fixed) <= set(chosen)
+                or any(chosen[group] != fmt for group, fmt in fixed.items())):
+            raise ValueError("MTP selected rung differs from fixed group formats")
+    assignment = {unit: chosen[group] for group, members in payload["groups"].items()
+                  for unit in members}
+    if len(assignment) != len(payload["costs"]) or set(assignment) != set(payload["costs"]):
+        raise ValueError("MTP selection groups do not partition the bound cost")
+    rows, _unattested = _unit_rows(payload)
+    menu, _incomplete = canon.group_product_menu(
+        {group: tuple(members) for group, members in payload["groups"].items()},
+        rows, params=payload["params"])
+    priced = next((entry for entry in menu if entry.name == record["rung"]), None)
+    if (priced is None or priced.resident_bytes != record.get("resident_bytes") or
+            priced.bits != record.get("bits") or priced.E != record.get("E") or
+            priced.resident_bytes > record.get("byte_budget", -1)):
+        raise ValueError("MTP selection price differs from the bound measured menu")
+    for name, fmt in assignment.items():
+        if layer_config.get(name) != fr.get_format(fmt).autoround_config():
+            raise ValueError(f"MTP {name} config differs from its recorded selection")
+    selected = {key: {} for key in ("mtp_expert_wires", "mtp_expert_wire_roots",
+                                    "mtp_expert_source_bindings")}
+    for name, fmt in assignment.items():
+        if fmt == _BF16:
+            continue
+        for key in selected:
+            try:
+                selected[key][name] = payload[key][name][fmt]
+            except KeyError as exc:
+                raise ValueError(f"MTP {name}@{fmt} has no bound {key}") from exc
+    enriched_record = {**record, "mtp_joint_cost_sha256": cost_sha256,
+                       "mtp_expert_projection": payload["mtp_expert_projection"],
+                       **selected, "mtp_expert_wire_binding_schema": WIRE_BINDING_SCHEMA}
+    return {**layer_config, "__prismaquant__": {**meta, "mtp_selection": enriched_record}}
+
+
+def _main() -> None:
+    """Backfill a completed allocation to a new path without rerunning M6."""
+    import argparse
+    from .cost_stage_checkpoint import publish_new_bytes
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--layer-config", required=True)
+    parser.add_argument("--mtp-joint-cost", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    if Path(args.output).resolve() == Path(args.layer_config).resolve():
+        parser.error("output must be a new path, not the historical layer config")
+    source = json.loads(Path(args.layer_config).read_text())
+    result = backfill_mtp_selection_wires(source, args.mtp_joint_cost)
+    raw = (json.dumps(result, separators=(",", ":"), allow_nan=False) + "\n").encode()
+    if not publish_new_bytes(Path(args.output), raw):
+        parser.error("output already exists; refusing overwrite")
+    print(json.dumps({"output": args.output, "sha256": hashlib.sha256(raw).hexdigest(),
+                      "selected_expert_wires": len(result["__prismaquant__"]["mtp_selection"][
+                          "mtp_expert_wires"])}))
+
+
+if __name__ == "__main__":
+    _main()
+
+
+__all__ = ["SCHEMA", "RECORD_SCHEMA", "MERGE_SCHEMA", "WIRE_BINDING_SCHEMA",
+           "load_mtp_cost", "merge_mtp_costs", "enrich_mtp_cost_wires", "select_mtp_rungs",
+           "backfill_mtp_selection_wires"]
