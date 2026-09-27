@@ -284,8 +284,11 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: reader proof mode and v2 multi-rung activation policy. This also adopts
 #: #641's v39 scopes; the reviewed admission answer and scope tests move
 #: with this pin, not the serving gates or kernel identities.
+#: Re-pinned 2026-09-27 to f94929def after Tessera #663: the served recipe
+#: per structure reaches the cached-unit receipts (PQ #1502). Contract v39 and
+#: this reviewed answer do not move.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253"
+    "f94929defd9fa00b8726160a2cd436f02733b6dc"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (

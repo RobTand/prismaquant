@@ -1447,6 +1447,11 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         weights={name: source_weight}, menus={name: [SimpleNamespace(format_name=fmt)]},
         calibration_source=calibration_source, static_scales=static_scales,
         projected_units={} if projected_unit is None else {name: projected_unit},
+        # A projected unit is a routed stack member, which is the rule Tessera's
+        # export intake reads its structure by (tessera#662); its receipt
+        # stamps the wire a routed stack is served on (#1502). An unprojected
+        # unit keeps the unstructured spelling, which is the dense one.
+        structure=None if projected_unit is None else "routed_moe",
         **({} if bound_unit is None else {"bound_unit": bound_unit}))
     reuse = require_encoder_source_reuse_record(
         encoder_source_reuse, where=f"{name}@{fmt} encoder reuse")

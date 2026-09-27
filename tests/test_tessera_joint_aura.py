@@ -254,7 +254,10 @@ def test_wire_verification_rederives_source_before_accepting_render(tmp_path, mo
     cell = {"anchor": anchor, "record": receipt, "wire": str(wire),
             "render_file_sha256": "a" * 64, "render_origin": "encoded"}
     seen = []
-    def derive(value, *, weights, menus, calibration_source, static_scales, projected_units):
+    def derive(value, *, weights, menus, calibration_source, static_scales, projected_units,
+               structure):
+        # A projected unit is verified on the routed served wire (#1502).
+        assert structure == "routed_moe"
         assert value.qname == anchor["qname"]
         assert torch.equal(weights[value.qname], expected_inputs["source"])
         assert calibration_source is expected_inputs["calibration"]

@@ -742,6 +742,9 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
         # The 2026-09-26 v38 re-pin for the MTP cached cohort: export.py
         # moved by the Hessian collection owner only (ActivationSource).
         "09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+        # The 2026-09-27 re-pin for tessera#662: export.py gained the served
+        # recipe per structure; wire_recipe and the WINDOW constants did not move.
+        "f94929defd9fa00b8726160a2cd436f02733b6dc",
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -797,7 +800,7 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
     """
     assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
         "reader-pin-387eda36", "study-producer-d403cc5a",
-        "reader-pin-cc739a55", "reader-pin-09d6559d",
+        "reader-pin-cc739a55", "reader-pin-09d6559d", "reader-pin-f94929de",
     }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)
