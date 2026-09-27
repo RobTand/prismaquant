@@ -603,7 +603,7 @@ def test_whole_scope_table_b_duplicate_cells_agree_when_price_and_bytes_agree(tm
     assert cost["provenance"]["unit_selection"]["selected"] is False
     manifest = json.loads((out / "cost.anchors.json").read_bytes())
     roster = seal_roster(manifest)
-    assignment = {name: FMT_B for name in all_units}
+    assignment = dict.fromkeys(all_units, FMT_B)
     config = census_layer_config(
         cost, assignment, target_profile="glm_packed_research_sm121",
         entry_for=lambda fmt: {"data_type": "tessera", "tessera_format": fmt})
