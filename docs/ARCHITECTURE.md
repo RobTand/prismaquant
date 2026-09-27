@@ -8,6 +8,16 @@ Python 3.12 producer encoding, rather than the interpreter's default. Python
 both the explicit argument and the wire protocol. This preserves the campaign
 `cost.pkl` identity; no migration, stage, serving lane or ship gate change.
 
+Roster digest consolidation (2026-09-26, `astra/dedup-digests-1301`, PQ #1446):
+`digests.py` owns the ordered and sorted LF-delimited UTF-8 roster encodings,
+with no added final newline. The layer-quantum roster keeps its existing
+validation; the head-walk roster and descriptor slices use the shared encoding.
+`tests/test_digest_rosters_1446.py` compares the exact hash input bytes and
+outcomes with the pre-change PB-recorded table. The domain-framed replay roster
+and JSON candidate roster are different identities and remain unchanged.
+No arithmetic, schema, pipeline default, serving lane or ship gate changes.
+Inventory and remaining scope: `docs/design/digest_rosters_1446.md`.
+
 Tessera contract v39 (2026-09-27, Tessera #641, merge `52bc86ea1…`, closing
 tessera#604) is on Tessera master. It is **not** on PrismaQuant's pin. The pin
 stays at `09d6559d7…` with packaged contract v38 (SHA-256 `04d5a20a…9d22e4`),

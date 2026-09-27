@@ -28,6 +28,10 @@ Byte profiles, all lowercase-hex SHA-256:
   ``memoryview``).
 - ``text_sha256hex``: the text encoded as strict UTF-8, so a lone surrogate
   raises ``UnicodeEncodeError``.
+- ``newline_utf8_bytes`` / ``newline_utf8_sha256``: strings in caller order,
+  joined with LF, strict UTF-8, with no added final LF. Embedded newlines are
+  not escaped. ``sorted_newline_utf8_sha256`` sorts the input first. Neither
+  profile validates names or removes duplicates.
 - ``file_sha256hex``: a file's bytes, read in ``block_size`` pieces
   (``FILE_BLOCK_BYTES`` unless the site keeps its own). The block size changes
   only how the file is read, never the digest. The path may be a ``str`` or a
@@ -55,7 +59,7 @@ so a light tool can import it without pulling in torch.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import hashlib
 import json
@@ -258,6 +262,20 @@ def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
 
 def text_sha256hex(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def newline_utf8_bytes(lines: Iterable[str]) -> bytes:
+    """Caller order, LF separators, strict UTF-8, no added trailing LF."""
+    return "\n".join(lines).encode("utf-8")
+
+
+def newline_utf8_sha256(lines: Iterable[str]) -> str:
+    return bytes_sha256hex(newline_utf8_bytes(lines))
+
+
+def sorted_newline_utf8_sha256(names: Iterable[str]) -> str:
+    """The sorted-name roster recipe; validation stays with the caller."""
+    return newline_utf8_sha256(sorted(names))
 
 
 def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTES) -> str:
