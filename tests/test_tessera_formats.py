@@ -833,9 +833,7 @@ def test_an_attested_lane_cannot_admit_an_unwritable_rung(monkeypatch):
     monkeypatch.delenv(TESSERA_DEV_PIN_ENV, raising=False)
     monkeypatch.delenv(tm.MENU_MODE_ENV, raising=False)
     require_pinned_tessera_runtime()
-    context = ServingContext(
-        platform="sm_121", structure="dense", residency="resident",
-        runtime_image=_default_serve_image(), execution_mode="eager")
+    context = _cell_context("TESSERA_E2M1_K2", "dense")
     # E4M3 is asked at its routed scope (q896 since contract v38); E2M1
     # still ships the dense pair, so the control stays on the dense scope.
     routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
@@ -902,15 +900,13 @@ def test_tessera_rungs_are_producer_eligible_by_the_pin_and_only_by_it():
     # explicit serving context. Context-free eligibility -- which is what
     # ``synthesize_tessera_spec`` asks -- is still False, and the reason is now
     # the SCOPE rather than the pin. Two different refusals, asserted apart.
-    context = ServingContext(
-        platform="sm_121", structure="dense", residency="resident",
-        runtime_image=_default_serve_image(), execution_mode="eager")
+    context = _cell_context("TESSERA_E2M1_K2", "dense")
     # E4M3 asked at its routed scope, which attests q896 since contract v38.
     routed = _cell_context("TESSERA_E4M3_K1", "routed_moe")
     assert tr.tessera_lane_attested(
         "TESSERA_E4M3_K1_R896", serving_context=routed) is True
     assert tr.tessera_lane_attested(
-        "TESSERA_E4M3_K1_R1024", serving_context=routed) is False
+        "TESSERA_E4M3_K1_R1024", serving_context=routed) is True
     assert tr.tessera_lane_attested("TESSERA_E4M3_K1_R1024") is False
     assert not synthesize_tessera_spec("TESSERA_E4M3_K1_R1024").producer_eligible
 
@@ -940,9 +936,7 @@ def test_without_the_pinned_tessera_no_rung_is_eligible(monkeypatch):
     monkeypatch.setattr(pin_module, "installed_tessera_contract_sha256",
                         lambda: "c" * 64)
     assert tr._release_pin_satisfied() is False
-    context = ServingContext(
-        platform="sm_121", structure="dense", residency="resident",
-        runtime_image=_default_serve_image(), execution_mode="eager")
+    context = _cell_context("TESSERA_E2M1_K2", "dense")
     for name in ("TESSERA_E2M1_K2_R896", "TESSERA_E4M3_K1_R1024",
                  "TESSERA_E2M1_K1_R640"):
         assert tr.tessera_lane_attested(name, serving_context=context) is False

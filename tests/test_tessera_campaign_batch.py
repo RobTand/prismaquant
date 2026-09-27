@@ -20,15 +20,61 @@ def test_pending_batches_keep_each_anchor_once_and_split_incompatible_units():
     pending = [("a", "family", 100), ("a", "family", 200),
                ("b", "family", 100), ("c", "family", 100),
                ("dense", "family", 100), ("d", "family", 100)]
-    batches = campaign._anchor_batches(
-        pending, weights=weights, expert_members={"a", "b", "c", "d"},
-        batch_size=2)
+    batches = campaign._anchor_batches(pending, weights=weights, batch_size=2)
     assert sorted(item for batch in batches for item in batch) == sorted(pending)
     assert [("a", "family", 100), ("b", "family", 100)] in batches
-    assert [("dense", "family", 100)] in batches
+    assert [("dense", "family", 100), ("d", "family", 100)] in batches
+    assert [("c", "family", 100)] in batches
     assert max(map(len, batches)) == 2
+    for batch in batches:
+        assert len({(family, rung, tuple(weights[name].shape))
+                    for name, family, rung in batch}) == 1
     assert campaign._anchor_batches(pending, weights=weights,
-        expert_members=set(weights), batch_size=1) == [[item] for item in pending]
+        batch_size=1) == [[item] for item in pending]
+
+
+def test_same_shape_dense_units_of_different_groups_share_a_batch():
+    """#1479: a dense unit used to be its own batch, whatever its shape.
+
+    Same-shape dense Linears from different layers (the shared-expert
+    projections of a merged dense row) join one producer call per
+    ``(family, rung)``; a different shape or family still splits, and the
+    emission stays unit-major across rungs.
+    """
+    gate_up = [f"model.layers.{i}.mlp.shared_experts.{p}_proj"
+               for i in range(3, 8) for p in ("gate", "up")]
+    down = [f"model.layers.{i}.mlp.shared_experts.down_proj" for i in range(3, 8)]
+    weights = {name: torch.empty((2048, 4096)) for name in gate_up}
+    weights.update({name: torch.empty((4096, 2048)) for name in down})
+    pending = [(name, fam, rung) for name in gate_up + down
+               for fam in ("TESSERA_BF16_K1", "TESSERA_E4M3_K1") for rung in (1408, 1536)]
+    batches = campaign._anchor_batches(pending, weights=weights, batch_size=8)
+    assert sorted(item for batch in batches for item in batch) == sorted(pending)
+    for batch in batches:
+        assert len(batch) <= 8
+        assert len({(fam, rung, tuple(weights[name].shape))
+                    for name, fam, rung in batch}) == 1
+    # 10 gate/up units -> chunks of 8 and 2 per (family, rung); 5 down -> one.
+    sizes = sorted(len(b) for b in batches)
+    assert sizes == sorted([8, 2] * 4 + [5] * 4)
+    first = batches[0]
+    assert [name for name, _f, _r in first] == gate_up[:8]
+    assert batches[1] == [(n, first[0][1], 1536) for n in gate_up[:8]]
+
+
+def test_batch_refuses_units_that_prepare_different_recipes(monkeypatch):
+    calls = []
+    monkeypatch.setattr(campaign, "_prepare_anchor", lambda **kw: {
+        "wire": "recipe-" + kw["qname"], "hessian_required": False,
+        "activation_kwargs": None})
+    monkeypatch.setattr(render, "encode_tessera_units",
+                        lambda *a, **k: calls.append(a) or [])
+    with pytest.raises(ValueError, match="different wire recipe"):
+        campaign._measure_anchor_batch(
+            qnames=["a", "b"], weights=[torch.zeros(16, 256)] * 2,
+            activations=[torch.zeros(4, 256)] * 2, format_name=FMT,
+            cache=None, wire_dir=Path("."), hessian_required=False)
+    assert calls == []
 
 
 def test_batch_adapter_calls_producer_once_with_separate_activation_inputs(monkeypatch):
@@ -179,7 +225,7 @@ def test_batches_are_unit_major_so_a_batch_wide_memo_reuses_each_factorization()
     pending += [("dense", "TESSERA_E4M3_K1", 832), ("dense", "TESSERA_E4M3_K1", 1088)]
     batch_size = 8
     batches = campaign._anchor_batches(
-        pending, weights=weights, expert_members=set(units), batch_size=batch_size)
+        pending, weights=weights, batch_size=batch_size)
     assert sorted(item for batch in batches for item in batch) == sorted(pending)
     for batch in batches:
         assert len({(family, rung, tuple(weights[name].shape)) for name, family, rung in batch}) == 1

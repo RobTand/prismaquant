@@ -698,6 +698,17 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
         activation_kwargs_for=activation_kwargs_for,
         hessian_required=hessian_required,
         static_input_scale=(static_input_scales or {}).get(name)) for name in qnames]
+    # The producer call takes ONE recipe and ONE Hessian requirement for the
+    # whole batch, from its first entry.  Both derive from (family, rung) only,
+    # so a batch built by ``_anchor_batches`` agrees by construction; a batch
+    # that does not would encode some unit under another unit's recipe, and is
+    # refused rather than priced.
+    for name, entry in zip(qnames[1:], prepared[1:]):
+        if (entry["wire"] != prepared[0]["wire"]
+                or entry["hessian_required"] != prepared[0]["hessian_required"]):
+            raise ValueError(
+                f"anchor batch {format_name}: {name} prepares a different wire "
+                f"recipe or Hessian requirement than {qnames[0]}")
     started = time.time()
     encoded = encode_tessera_units(
         weights, format_name, recipe=prepared[0]["wire"],
@@ -714,11 +725,17 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
             qnames, weights, activations, prepared, encoded)]
 
 
-def _anchor_batches(pending, *, weights, expert_members, batch_size):
-    """Bound compatible expert encodes inside this action; never assign hosts.
+def _anchor_batches(pending, *, weights, batch_size):
+    """Bound compatible encodes inside this action; never assign hosts.
 
-    Membership is by ``(family, rung, shape, dtype, device)`` for expert
-    units and by ``(unit, family, rung)`` otherwise, as before.  The ORDER of
+    Membership is by ``(family, rung, shape, dtype, device)`` for every unit,
+    dense or projected expert.  A unit's wire recipe and Hessian requirement
+    are functions of ``(family, rung)`` alone (``_prepare_anchor``), and the
+    joined producer call is column-independent, so a dense unit joins
+    same-shape units of other groups exactly as an expert joins its stack.
+    Dense units used to be keyed by ``(unit, family, rung)``, which kept every
+    dense encode at batch one: a long serial chain of narrow Viterbi calls at
+    about 25 W of the 140 W envelope (RobTand/prismaquant#1479).  The ORDER of
     the batches is unit-major: the batches of one compatible key differ only
     by rung, and the chunk at one position holds the same members at every
     rung when the round pended every member at every rate (round one does,
@@ -739,11 +756,8 @@ def _anchor_batches(pending, *, weights, expert_members, batch_size):
     for item in pending:
         name, family, rung = item
         weight = weights[name]
-        if name in expert_members:
-            base = (family, tuple(weight.shape), weight.dtype, weight.device)
-            key = (family, rung, *base[1:])
-        else:
-            base = key = (name, family, rung)
+        base = (family, tuple(weight.shape), weight.dtype, weight.device)
+        key = (family, rung, *base[1:])
         groups.setdefault(key, (base, []))[1].append(item)
     # Sort key: the base (the key minus its rung) in first-appearance order,
     # then the chunk position, then the rung in first-appearance order -- so
@@ -6694,8 +6708,7 @@ def _main(argv, *, source_scope) -> int:
             batches = _anchor_batches(
                 [item for item in pending
                  if row_stream is not None or acts.get(item[0]) is not None],
-                weights=weights, expert_members=expert_members,
-                batch_size=args.anchor_batch_size)
+                weights=weights, batch_size=args.anchor_batch_size)
             if row_stream is not None:
                 row_stream.plan([[item[0] for item in batch] for batch in batches])
             completed = 0
