@@ -124,18 +124,50 @@ def install_capture(model, *, tile_rows, logits_layout="legacy_single"):
                              "gpu_model_runner": sha256(inspect.getfile(gpu_runner))}}
 
 
+def load_teacher_window(path, descriptor):
+    """One read of a sealed ``.npy`` window: hash the buffer, then view it.
+
+    ``np.load(io.BytesIO(path.read_bytes()))`` holds the window twice on the
+    host; on unified memory that second 1.18 GiB copy counts against the GPU.
+    The array returned here is a view into the single buffer that was hashed.
+    """
+    size = descriptor["bytes"]
+    buffer = bytearray(size)
+    with open(path, "rb") as handle:
+        view = memoryview(buffer)
+        filled = 0
+        while filled < size:
+            count = handle.readinto(view[filled:])
+            if not count:
+                break
+            filled += count
+        if filled != size or handle.read(1):
+            raise ValueError("teacher window bytes changed before GPU preload")
+    if hashlib.sha256(buffer).hexdigest() != descriptor["sha256"]:
+        raise ValueError("teacher window bytes changed before GPU preload")
+    header = io.BytesIO(memoryview(buffer)[:65536])  # header bytes only; small copy
+    version = np.lib.format.read_magic(header)
+    readers = {(1, 0): np.lib.format.read_array_header_1_0, (2, 0): np.lib.format.read_array_header_2_0}
+    if version not in readers:
+        raise ValueError("teacher array has an unsupported .npy version")
+    shape, fortran_order, dtype = readers[version](header)
+    offset = header.tell()
+    count = int(np.prod(shape, dtype=np.int64))
+    if dtype.hasobject or offset + count * dtype.itemsize != size:
+        raise ValueError("teacher array geometry/dtype mismatch")
+    array = np.frombuffer(buffer, dtype=dtype, count=count, offset=offset)
+    return array.reshape(shape[::-1]).transpose() if fortran_order else array.reshape(shape)
+
+
 def arm_capture(model, *, index, window_id, descriptor, teacher_root, target_ids):
     state = model._tr3_capture
     teacher = targets = None
     if state.rank == 0:
-        path = Path(teacher_root) / descriptor["path"]
-        raw = path.read_bytes()
-        if len(raw) != descriptor["bytes"] or hashlib.sha256(raw).hexdigest() != descriptor["sha256"]:
-            raise ValueError("teacher window bytes changed before GPU preload")
-        a = np.load(io.BytesIO(raw), allow_pickle=False)
+        a = load_teacher_window(Path(teacher_root) / descriptor["path"], descriptor)
         if a.dtype != np.float32 or list(a.shape) != descriptor["shape"]:
             raise ValueError("teacher array geometry/dtype mismatch")
         teacher = torch.from_numpy(a).to("cuda")
+        del a
         targets = torch.tensor(target_ids, dtype=torch.long, device="cuda")
         torch.cuda.synchronize()
     state.arm(index, window_id, teacher, targets)
