@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Roster digest consolidation (2026-09-26, `astra/dedup-digests-1301`, PQ #1446):
+`digests.py` owns the ordered and sorted LF-delimited UTF-8 roster encodings,
+with no added final newline. The layer-quantum roster keeps its existing
+validation; the head-walk roster and descriptor slices use the shared encoding.
+`tests/test_digest_rosters_1446.py` compares the exact hash input bytes and
+outcomes with the pre-change PB-recorded table. The domain-framed replay roster
+and JSON candidate roster are different identities and remain unchanged.
+No arithmetic, schema, pipeline default, serving lane or ship gate changes.
+Inventory and remaining scope: `docs/design/digest_rosters_1446.md`.
+
 Research frontier replay provenance (2026-09-26, branch
 `astra/prefill-frontier-replay-1428`, PQ #1428): the replay/shipcard contract
 below is derived from `prefill_frontier.py`, the allocator's shared writer,
