@@ -545,10 +545,14 @@ if mode == "run":
         q.finish(key, status="executed" if rc == 0 else "failed")
         report(mover=key, rc=rc, stderr=(outcome.get("stderr") or "")[-800:])
 else:
-    # mode "dead:<pid>:<rc>": the fleet process died. Conclude every mover
-    # it would have run -- and every claim it left without an owner, once
-    # that claim's launcher is gone -- as failed, so a read sees a terminal
-    # record instead of polling a row no fleet will ever run.
+    # mode "dead:<pid>:<rc>": the fleet process died, and nothing will run
+    # what it would have run. A failed attempt is not terminal -- a mover
+    # has attempts to spare and PrismaBuild requeues it to ready -- so
+    # this WITHDRAWS every mover still queued for the fleet's tag, the
+    # terminal record a read fails fast on, naming the dead fleet. A claim
+    # the dead fleet left behind is first concluded as a failed attempt,
+    # once its launcher is gone, which puts it back in ready for the same
+    # withdrawal.
     dead, rc = mode.split(":")[1:]
     reason = f"fixture fleet pid {dead} exited rc {rc} while the read waited"
     while running():
@@ -560,14 +564,18 @@ else:
             if str(lease.get("pid") or dead) != dead or alive(lease.get("child_pid")):
                 continue
             q.finish(path.stem, status="failed", detail={"termination_reason": reason})
-            report(mover=path.stem, rc=None, stderr=reason)
-        claimed = q.claim(owner="w-fleet-dead", tags=[tag], capacity=capacity)
-        if claimed is None:
-            time.sleep(0.05)
-            continue
-        key = str(claimed["action_key"])
-        q.finish(key, status="failed", detail={"termination_reason": reason})
-        report(mover=key, rc=None, stderr=reason)
+            report(mover=path.stem, rc=None, concluded="failed", stderr=reason)
+        for path in sorted(q.dir(pool.READY).glob("*.json")):
+            record = pool._read_json(path)
+            if not isinstance(record, dict) or tag not in (record.get("tags") or ()):
+                continue
+            try:
+                q.withdraw(path.stem, reason=reason, by="fixture-fleet-responder",
+                           signal_child=False)
+            except pool.PoolContractError:
+                continue  # it left the queue between the listing and here
+            report(mover=path.stem, rc=None, concluded="withdrawn", stderr=reason)
+        time.sleep(0.05)
 """
 
 
@@ -596,9 +604,12 @@ class _Fleet:
     the moment it exits; if that happens before the context asked it to
     stop, a second process -- never a thread, because PrismaBuild's record
     locks are per process -- files every mover the dead fleet would have
-    run, and every claim it left without a live launcher, as ``failed``.
-    The read then sees a terminal mover and fails fast, which is the
-    outcome a production worker that loses a mover files. Output goes to
+    run as ``withdrawn`` -- first concluding any claim it left, once that
+    claim's launcher is gone. A ``failed`` attempt would not do: a mover
+    has attempts to spare and PrismaBuild requeues it to ``ready``
+    (measured: the first version of this responder did exactly that, and
+    the read waited out its budget on the requeued row). The read then
+    sees a terminal mover and fails fast. Output goes to
     files, not pipes: a long-lived fleet that fills a 64 KiB pipe blocks
     on its next line.
     """
