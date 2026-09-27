@@ -20,6 +20,28 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Stage A rows adopt the campaign's source proof (2026-09-27,
+`claude/pq-1497-stage-a-adopt-identity`, PQ #1497): a selected-source
+`tessera_campaign` row hashed every source shard it read, whole, through its
+held descriptor before its first encode, on its GPU reservation (41% of a
+dense row in the #1479 A/B). A row may now take `--source-identity-cache`
+with `--source-identity-cache-sha256`, a
+`prismaquant.streamed_model.identity_cache.v1` proof bound by digest, and
+`dispatch_tessera_campaign.py plan --source-identity-cache` binds one into
+every row and into `plan.json`. The row hands it to the capture owner's
+existing `adopt_streamed_identity_cache` (the #1374 joint-pass check: the
+proof's own digest, full checkpoint index and shard coverage, every shard's
+SHA against the hash-bound canonical capture, and the one six-field stat
+predicate against the held descriptor) before the runner is built.
+`adopt_identity_proof_or_hash` differs from the joint pass in one way: a
+proof that refuses changes no held state and the row continues, hashing each
+shard it reads as before, with the refusal in the
+`selected_source_authentication.v1` receipt
+(`streamed_identity_cache_refused`). Byte integrity is unchanged either way.
+A plan without a proof prints a warning; producing a proof for a source
+that has none is not automated here. No default, stage, stored format or
+ship gate changes. Tests: `tests/test_stage_a_identity_proof_adoption.py`.
+
 SHA-256 lexical validation (2026-09-27, `astra/dedup-hex-1457`, PQ #1457):
 `digests.is_sha256hex` and its compiled `SHA256_HEX` pattern own the exact
 regex acceptance used by artifact collection, prepriced cost and PrismaSnap
@@ -10541,7 +10563,8 @@ Forward installation and full source-initialization attestation are refused.
 The selected source keys are compared with the admitted plan before reading
 and recorded in the source receipt. Source shard SHA256 authentication and
 held-descriptor mutation fences remain unchanged: consuming one tensor still
-authenticates its entire shard once per row. The initial policy supports
+authenticates its entire shard once per row, unless the row adopted a planned
+source proof (PQ #1497; see that stamp). The initial policy supports
 unscaled floating checkpoints; scaled FP8/FP4 sources fail closed.
 
 Admission excludes unconsumed source tensors and nonbody materialization,
