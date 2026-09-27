@@ -39,10 +39,11 @@ Byte profiles, all lowercase-hex SHA-256:
 
 Pickle profile:
 
-- ``canonical_pickle_bytes``: ``pickle.dumps`` at the default protocol of a
-  rebuilt copy. In the copy, every plain ``dict``, ``list`` and ``tuple`` is a
-  fresh object, and every equal ``str`` or ``bytes`` is one shared object. A
-  pickle writes a shared object once and refers back to it, so its bytes
+- ``canonical_pickle_bytes``: ``pickle.dumps`` at explicit protocol 4 of a
+  rebuilt copy, preserving the historical Python 3.12 encoding (PQ #1450).
+  In the copy, every plain ``dict``, ``list`` and ``tuple`` is a fresh object,
+  and every equal ``str`` or ``bytes`` is one shared object. A pickle writes
+  a shared object once and refers back to it, so its bytes
   depend on which objects the caller happened to share. This profile makes
   that a function of the value: the same plain-typed value, in the same key
   order, gives the same bytes whichever path built it (PQ #1403). Other types
@@ -248,7 +249,7 @@ def canonical_pickle_bytes(value: object) -> bytes:
                 open_containers.discard(id(item))
         return item
 
-    return pickle.dumps(rebuild(value))
+    return pickle.dumps(rebuild(value), protocol=4)
 
 
 #: The read size ``file_sha256hex`` uses when a site does not keep its own.

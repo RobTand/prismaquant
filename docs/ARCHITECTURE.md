@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Canonical pickle identity (2026-09-27, `astra/pickle-protocol-1450`, PQ #1450):
+`digests.canonical_pickle_bytes` explicitly selects protocol 4, the historical
+Python 3.12 producer encoding, rather than the interpreter's default. Python
+3.14 must not silently select protocol 5 for the same value. The existing
+`9a7567…` golden is unchanged, and `tests/test_digest_profiles_1301.py` checks
+both the explicit argument and the wire protocol. This preserves the campaign
+`cost.pkl` identity; no migration, stage, serving lane or ship gate change.
+
 Roster digest consolidation (2026-09-26, `astra/dedup-digests-1301`, PQ #1446):
 `digests.py` owns the ordered and sorted LF-delimited UTF-8 roster encodings,
 with no added final newline. The layer-quantum roster keeps its existing
