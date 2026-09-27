@@ -789,8 +789,8 @@ def _report(name, value):
         (Path(path) / f"{name}.json").write_text(text)
 
 
-def _spill_root(tmp_path):
-    """The declared local root: the environment's, else pytest's tmp_path."""
+def _spill_root(tmp_path, *, needs_direct_io=True):
+    """Declare DIO only for tests that reach spill acquisition, not refusals."""
     from prismaquant.perturbed_x_cache import StageBSpillScratch
     from test_stageb_cotangent_scratch import require_direct_io
 
@@ -798,7 +798,8 @@ def _spill_root(tmp_path):
     root = base / f"spill-{os.getpid()}-{tmp_path.name}"
     root.mkdir(parents=True, exist_ok=True)
     StageBSpillScratch.require_local_root(root)  # wrong declared roots still refuse
-    require_direct_io(root)
+    if needs_direct_io:
+        require_direct_io(root)
     return root
 
 
@@ -1389,7 +1390,7 @@ def test_spill_keeps_the_executable_readset_phase_order(tmp_path, monkeypatch):
 def test_spill_ceiling_refuses_before_any_gpu_work(campaign, monkeypatch, tmp_path,
                                                    ceiling, message):
     layer = 0
-    spill_root = _spill_root(tmp_path)
+    spill_root = _spill_root(tmp_path, needs_direct_io=False)
     _clear_output(campaign, layer)
     payload, state = _quantum(campaign, monkeypatch, layer=layer, spill_root=spill_root,
                               ceiling=ceiling)
@@ -1623,8 +1624,8 @@ def test_capture_batch_that_splits_a_read_window_refuses_before_any_gpu_work(
         campaign, monkeypatch, tmp_path):
     _clear_output(campaign, 0)
     payload, state = _quantum(campaign, monkeypatch, layer=0,
-                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
-                              regime="capture_batch=4")
+                              spill_root=_spill_root(tmp_path, needs_direct_io=False),
+                              ceiling=1 << 30, regime="capture_batch=4")
     assert payload is None
     assert "does not divide the sealed read window of 2" in _chain(state.error)
     assert state.context.install_calls == 0
@@ -1671,8 +1672,9 @@ def test_a_band_serial_producer_captures_at_the_chains_batch_size(campaign, monk
     """
     from prismaquant.joint_replay_regime import normalize_replay_regime
 
-    spill_root = _spill_root(tmp_path)
-    if normalize_replay_regime(regime)["capture_batch"] > 1:
+    capture_batch = normalize_replay_regime(regime)["capture_batch"]
+    spill_root = _spill_root(tmp_path, needs_direct_io=capture_batch == 1)
+    if capture_batch > 1:
         _clear_output(campaign, 1)
         payload, state = _quantum(campaign, monkeypatch, layer=1, spill_root=spill_root,
                                   ceiling=1 << 30, regime=regime, emit_handoff=True)
