@@ -598,3 +598,153 @@ def test_a_fourth_lane_slot_with_a_verifier_needs_no_roster_edit(monkeypatch):
     assert any("route.entropy" in p for p in problems), (
         "verify passed a route.entropy record whose evidence refuses: "
         f"problems={problems!r}")
+
+
+# #1467: inspect all existing refusals without writing a provisional card.
+def test_preflight_without_card_reports_every_slot_without_writes(
+    tmp_path, monkeypatch, capsys,
+):
+    from prismaquant import lane_shipcard as cli
+
+    root = _artifact(tmp_path)
+    before = {p.name: p.read_bytes() for p in root.iterdir()}
+
+    def no_write(*args, **kwargs):
+        pytest.fail("preflight attempted to write a shipcard")
+
+    monkeypatch.setattr(cli, "write_shipcard", no_write)
+    assert cli.main(["preflight", "--lane", "tessera", "--artifact", str(root)]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "refused"
+    assert report["scope"] == "shipcard_evidence_only"
+    assert report["provisional"] is True
+    assert report["publication_checked"] is False
+    assert set(report["required_slots"]) == set(REQUIRED_SLOTS) | {
+        "route.census", "route.trace", "uniform_control"}
+    assert report["unfilled_slots"] == report["required_slots"]
+    assert any("missing" in p and "shipcard.json" in p for p in report["problems"])
+    assert "route.trace: UNFILLED" in report["problems"]
+    assert any("build.route_histogram" in p for p in report["problems"])
+    trace = next(g for g in report["gates"] if g["gate"] == "route.trace")
+    assert trace["runner"] and not trace["filled"]
+    assert {p.name: p.read_bytes() for p in root.iterdir()} == before
+
+
+def test_preflight_replays_existing_bad_evidence_without_reopening(
+    tmp_path, capsys,
+):
+    from prismaquant import lane_shipcard as cli
+    from prismaquant.shipcard import write_shipcard
+
+    root = _artifact(tmp_path)
+    path = open_lane_shipcard(root, "tessera")
+    card = load_shipcard(path)
+    card["slots"]["route.census"] = {"passed": True}
+    write_shipcard(path, card)
+    before = path.read_bytes()
+    expected = verify(card, model_dir=root)
+    assert cli.main(["preflight", "--lane", "tessera", "--artifact", str(root)]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["provisional"] is False
+    assert report["problems"] == expected
+    assert "route.census" not in report["unfilled_slots"]
+    assert any("route.census" in p for p in report["problems"])
+    assert path.read_bytes() == before
+
+
+def test_preflight_can_inspect_an_explicit_external_card(tmp_path, capsys):
+    from prismaquant import lane_shipcard as cli
+
+    root = _artifact(tmp_path)
+    path = open_lane_shipcard(root, "tessera", shipcard_path=tmp_path / "card.json")
+    assert cli.main(["preflight", "--lane", "tessera", "--artifact", str(root),
+                     "--shipcard", str(path)]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["shipcard_path"] == str(path)
+    assert not report["provisional"] and not report["publication_checked"]
+    assert not (root / "shipcard.json").exists()
+
+
+@pytest.mark.parametrize("case", [
+    "missing_artifact", "missing_explicit_card", "invalid_card_json",
+    "invalid_slots", "wrong_lane", "invalid_build", "existing_build_override",
+    "dangling_card",
+])
+def test_preflight_input_errors_fail_closed(tmp_path, capsys, case):
+    from prismaquant import lane_shipcard as cli
+
+    root = _artifact(tmp_path)
+    args = ["preflight", "--lane", "tessera", "--artifact", str(root)]
+    card = root / "shipcard.json"
+    if case == "missing_artifact":
+        args[-1] = str(tmp_path / "absent")
+    elif case == "missing_explicit_card":
+        args += ["--shipcard", str(tmp_path / "absent.json")]
+    elif case == "invalid_card_json":
+        card.write_text("{")
+    elif case == "invalid_slots":
+        card.write_text(json.dumps({"lane": "tessera", "slots": []}))
+    elif case == "wrong_lane":
+        open_lane_shipcard(root, "compressed-tensors")
+    elif case == "dangling_card":
+        card.symlink_to(tmp_path / "absent.json")
+    else:
+        build = tmp_path / "build.json"
+        build.write_text("[]" if case == "invalid_build" else "{}")
+        args += ["--build-json", str(build)]
+        if case == "existing_build_override":
+            open_lane_shipcard(root, "tessera")
+    assert cli.main(args) == 2
+    assert "[lane-shipcard] ERROR:" in capsys.readouterr().err
+
+
+def test_preflight_zero_means_only_shared_verifier_passed(
+    tmp_path, monkeypatch, capsys,
+):
+    from prismaquant import lane_shipcard as cli
+
+    root = _artifact(tmp_path)
+    open_lane_shipcard(root, "tessera")
+    calls = []
+
+    def verified(card, *, model_dir):
+        calls.append((card, model_dir))
+        return []
+
+    # Orchestration-only test: real refusal replay is exercised above.
+    monkeypatch.setattr(cli, "verify", verified)
+    assert cli.main(["preflight", "--lane", "tessera", "--artifact", str(root)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert len(calls) == 1 and calls[0][1] == root
+    assert report["status"] == "verified"
+    assert report["publication_checked"] is False
+
+    # A provisional card cannot pass even if the verifier has no complaints.
+    (root / "shipcard.json").unlink()
+    assert cli.main(["preflight", "--lane", "tessera", "--artifact", str(root)]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["provisional"] and len(report["problems"]) == 1
+    assert "shipcard is missing" in report["problems"][0]
+
+
+def test_preflight_build_facts_use_the_same_constructor_without_mutation(
+    tmp_path, monkeypatch,
+):
+    from prismaquant import lane_shipcard as cli
+
+    root = _artifact(tmp_path)
+    facts = {"campaign_note": "fixture"}
+    captured = []
+    real = cli.build_shipcard
+
+    def build(root, *, build, lane):
+        captured.append((dict(build), lane))
+        return real(root, build=build, lane=lane)
+
+    monkeypatch.setattr(cli, "build_shipcard", build)
+    report = cli.preflight_lane_shipcard(root, "tessera", build=facts)
+    assert captured == [({"campaign_note": "fixture", "export_container": "tessera"}, "tessera")]
+    assert facts == {"campaign_note": "fixture"}
+    assert report["slots_without_declared_runner"] == ["uniform_control"]
+    assert "uniform_control" in report["unfilled_slots"]
+    assert not (root / "shipcard.json").exists()
