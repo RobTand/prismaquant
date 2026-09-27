@@ -558,19 +558,66 @@ def _plain(value):
     return value.item() if hasattr(value, 'item') else value
 
 
-def load_manifest(root):
-    manifest = json.loads((Path(root)/'cost.anchors.json').read_text())
+# Where each journal keeps its manifest and its unit shards, relative to a row.
+# ``parts`` is the finalized checkpoint.  ``stream`` is the stream row head's
+# journal (PQ #640, #1403): until finalize it is the only journal a stream-head
+# row has, and a prefix run stops before finalize.
+JOURNALS = {
+    'parts': ('cost.anchors.json', 'cost.anchors.json.parts'),
+    'stream': ('cost.anchors.json.stream/manifest.json', 'cost.anchors.json.stream'),
+}
+
+
+def journal_kind(root):
+    """The journal a produced run left: its finalized checkpoint, else its stream journal."""
+    root = Path(root)
+    if (root/JOURNALS['parts'][0]).is_file():
+        return 'parts'
+    if (root/JOURNALS['stream'][0]).is_file():
+        return 'stream'
+    raise ValueError(f'{root}: no checkpoint manifest and no stream journal')
+
+
+def load_manifest(root, journal='parts'):
+    manifest = json.loads((Path(root)/JOURNALS[journal][0]).read_text())
     for key in ('identity', 'identity_sha256', 'schema', 'stage', 'units'):
         if key not in manifest:
-            raise ValueError(f'{root}: manifest lacks {key}')
+            raise ValueError(f'{root}: {journal} manifest lacks {key}')
     return manifest
 
 
-def load_units(root, manifest, qnames):
+def load_units(root, manifest, qnames, journal='parts'):
     from prismaquant.cost_stage_checkpoint import _load_unit, unit_path
-    parts = Path(root)/'cost.anchors.json.parts'
+    parts = Path(root)/JOURNALS[journal][1]
     return {name: _load_unit(unit_path(parts, name), stage=manifest['stage'], qname=name,
                              identity_sha256=manifest['identity_sha256']) for name in qnames}
+
+
+def _compare_stream_journal(stored, produced_names, p_units, s_units, fail):
+    """What a stream-journal comparison adds: the inputs, and a reference check.
+
+    The stored row's stream journal is the reference only where it agrees
+    with the same row's finalized shards; a stale journal must not be able to
+    make a produced run pass.  And the load-all head's "one complete prefetch
+    of the selected scope" has no stream analog, so each unit's reader
+    receipts (the W, X and H the encoder was given) must equal the stored
+    reader's exactly.
+    """
+    finalized = load_manifest(stored, 'parts')
+    f_units = load_units(stored, finalized, produced_names, 'parts')
+    for name in produced_names:
+        for key in ('anchors', 'wire_records', 'unservable'):
+            diffs = deep_equal(s_units[name].get(key), f_units[name].get(key), key)
+            if diffs:
+                fail(dict(what='stored_stream_vs_parts', unit=name, field=key, diffs=diffs[:4]))
+        p_receipts, s_receipts = p_units[name].get('stream_receipts'), s_units[name].get('stream_receipts')
+        if not p_receipts or not s_receipts:
+            fail(dict(what='stream_receipts', unit=name,
+                      detail='missing on ' + ('produced' if not p_receipts else 'stored') + ' side'))
+            continue
+        diffs = deep_equal(p_receipts, s_receipts, 'stream_receipts')
+        if diffs:
+            fail(dict(what='stream_receipts', unit=name, diffs=diffs[:4]))
 
 
 def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cost=False,
@@ -584,6 +631,12 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
     ``prefix`` says the produced run measured only the units it journaled, so
     a cost table it wrote compares on exactly those units
     (``compare_cost_tables``).
+
+    A produced run with no finalized checkpoint is a stream-head run stopped
+    before finalize; it compares stream journal to stream journal, never to
+    the stored ``.parts``, because the two journals' identities differ in
+    their deferred receipts.  ``_compare_stream_journal`` adds the checks that
+    pairing needs.
     """
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256, canonical_json
     from prismaquant.production_weight_cache import first_identity_difference
@@ -593,7 +646,9 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
                   old_pins=dict(old), new_pins=dict(new), dropped_settings=list(drop_settings),
                   failures=[], cells=[])
     fail = result['failures'].append
-    pm, sm = load_manifest(produced), load_manifest(stored)
+    journal = journal_kind(produced)
+    result['journal'] = journal
+    pm, sm = load_manifest(produced, journal), load_manifest(stored, journal)
     expected_identity = substitute_pins(sm['identity'], old=old, new=new, drop=drop_settings)
     difference = first_identity_difference(pm['identity'], canonical_json(expected_identity, where='expected identity'))
     if difference is not None:
@@ -609,12 +664,14 @@ def compare_rows(produced, stored, *, old, new, expected_cells=None, require_cos
     if pm['stage'] != sm['stage'] or pm['schema'] != sm['schema']:
         fail(dict(what='manifest', produced=[pm['schema'], pm['stage']], stored=[sm['schema'], sm['stage']]))
 
-    parts = produced/'cost.anchors.json.parts'/'units'
+    parts = produced/JOURNALS[journal][1]/'units'
     produced_names = [u['qname'] for u in pm['units'] if (parts/Path(u['file']).name).is_file()]
     if not produced_names:
         fail(dict(what='units', detail='produced run journaled no unit'))
-    p_units = load_units(produced, pm, produced_names)
-    s_units = load_units(stored, sm, produced_names)
+    p_units = load_units(produced, pm, produced_names, journal)
+    s_units = load_units(stored, sm, produced_names, journal)
+    if journal == 'stream':
+        _compare_stream_journal(stored, produced_names, p_units, s_units, fail)
     seen = set()
     for name in produced_names:
         p_state, s_state = p_units[name], s_units[name]

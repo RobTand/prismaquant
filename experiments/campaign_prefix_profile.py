@@ -2,11 +2,19 @@
 
 This is a PB benchmark, not a completed pricing action. It uses the existing
 campaign, observer and checkpoint writer and stops before the next encode.
+
+Under the stream row head (PQ #640) there is no resident prefetch: each
+batch's entries are read, verified and made resident before its encode call,
+so the timed call is still encode-only.  The head is read from the files the
+campaign wrote before its first encode, and the stream head's precondition is
+its stream journal over the complete selected scope instead.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import time
+from pathlib import Path
 
 import torch
 
@@ -25,6 +33,31 @@ def _resident_bytes(tensors):
     return sum(t.numel()*t.element_size() for t in tensors.values())
 
 
+ROW_HEAD_EXECUTION = 'row-head-execution.json'
+
+
+def row_head(campaign, command):
+    """``(head, stream manifest path)`` for a campaign that is about to encode.
+
+    The load-all head writes its execution record before the first encode;
+    the stream head writes its journal manifest before the first encode and
+    its execution record only at finalize.  A tree without the stream head
+    (no ``STREAM_JOURNAL_SUFFIX``) is load-all.
+    """
+    def value(flag):
+        return command[command.index(flag)+1] if flag in command else None
+    suffix = getattr(campaign, 'STREAM_JOURNAL_SUFFIX', None)
+    cache_dir = value('--cache-dir')
+    checkpoint = value('--checkpoint') or (str(Path(value('--out')).with_suffix('.anchors.json'))
+                                            if value('--out') else None)
+    if suffix is None or checkpoint is None or cache_dir is None:
+        return 'load-all', None
+    manifest = Path(checkpoint + suffix)/'manifest.json'
+    if manifest.is_file() and not (Path(cache_dir)/ROW_HEAD_EXECUTION).exists():
+        return 'stream', manifest
+    return 'load-all', None
+
+
 def run_prefix(campaign, command, observer, *, limit, expected_source_units):
     if type(limit) is not int or not 0 < limit <= 1024:
         raise ValueError('prefix limit must be in [1, 1024]')
@@ -36,6 +69,7 @@ def run_prefix(campaign, command, observer, *, limit, expected_source_units):
     prefetch_count = 0
     calls = []
     stopped = False
+    head = None
     observer.result.update(work_scope='fixed anchor prefix after complete selected resident prefetch',
         campaign_completed=False, requested_anchor_units=limit, expected_source_units=expected_source_units,
         prefix_calls=calls)
@@ -59,13 +93,24 @@ def run_prefix(campaign, command, observer, *, limit, expected_source_units):
     def wrap(original):
         observed = observer.wrap_anchor(original)
         def measure(*args, **kwargs):
-            nonlocal completed
+            nonlocal completed, head
             names = list(kwargs['qnames']) if 'qnames' in kwargs else [kwargs['qname']]
             if completed == limit:
                 raise PrefixComplete()
             if completed+len(names) > limit:
                 raise PrefixEncodingFailed('prefix limit cuts across a producer batch')
-            if prefetch_count != 1:
+            if head is None:
+                head, manifest = row_head(campaign, command)
+                observer.result['row_head'] = head
+                if head == 'stream':
+                    units = len(json.loads(manifest.read_text())['units'])
+                    observer.result['stream_journal'] = dict(manifest=str(manifest), units=units)
+                    if units != expected_source_units:
+                        raise PrefixEncodingFailed(f'stream journal covers {units} units, '
+                                                   f'not the complete selected scope of {expected_source_units}')
+            if head == 'stream' and prefetch_count != 0:
+                raise PrefixEncodingFailed('a stream-head encode followed a resident prefetch')
+            if head != 'stream' and prefetch_count != 1:
                 raise PrefixEncodingFailed('encode did not follow exactly one complete prefetch')
             record = dict(qnames=names, format_name=kwargs['format_name'], started_unix=time.time())
             try:
@@ -90,7 +135,7 @@ def run_prefix(campaign, command, observer, *, limit, expected_source_units):
         for method, original in originals.items():
             setattr(campaign, method, original)
         observer.result.update(completed_anchor_units=completed, prefix_boundary_reached=stopped)
-    if not stopped or completed != limit or prefetch_count != 1:
+    if not stopped or completed != limit or prefetch_count != (0 if head == 'stream' else 1):
         raise RuntimeError('campaign did not reach the requested measured-prefix boundary')
     identities = [(name, call['format_name']) for call in calls for name in call['qnames']]
     if len(set(identities)) != limit:
@@ -119,7 +164,8 @@ def main():
     with observer:
         run_prefix(campaign, command, observer, limit=args.limit_anchors,
                    expected_source_units=args.expected_source_units)
-        if observer.result['resident_prefetch']['devices'] != ['cuda:0']:
+        if (observer.result.get('row_head') != 'stream'
+                and observer.result['resident_prefetch']['devices'] != ['cuda:0']):
             raise RuntimeError('native prefix inputs were not all resident on the selected GPU')
 
 
