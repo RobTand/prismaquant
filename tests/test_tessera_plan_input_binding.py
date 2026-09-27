@@ -17,7 +17,7 @@ IMAGE = "example/runtime@sha256:" + "a" * 64
 
 
 def _run(tmp_path, *, changed=False, manifest="bound", mode="compiled",
-         derived=False, translate=False, corrupt_derived=False):
+         derived=False, translate=False, corrupt_derived=False, extra_env=None):
     work = tmp_path / "work with spaces"
     for sub in ("artifacts", "logs", "exported"):
         (work / sub).mkdir(parents=True)
@@ -73,19 +73,25 @@ python3() {
     # now reads the priced expert wires' manifest path back out of it
     # (PrismaQuant #183). A stub that returns 0 without producing the anchor
     # models a preflight that did not do its job.
-    local previous=""
+    echo "TEST_PREFLIGHT_ARGS:$*" >&2
+    local previous="" build="" cached=""
     for argument in "$@"; do
       if [[ "$previous" == "--write-build-json" ]]; then
-        "$PYTEST_PYTHON" -c 'import json, os, sys; d = {}; p = os.environ.get("TEST_PLAN_ASSIGNMENT"); d.update(plan_assignment=p, plan_assignment_sha256=os.environ["TEST_PLAN_DIGEST"]) if p else None; open(sys.argv[1], "w").write(json.dumps(d))' "$argument"
+        build="$argument"
+      elif [[ "$previous" == "--cached-units" ]]; then
+        cached="$argument"
       fi
       previous="$argument"
     done
+    # A preflight handed a composed bundle names it back in the anchor.
+    "$PYTEST_PYTHON" -c 'import json, os, sys; d = {}; p = os.environ.get("TEST_PLAN_ASSIGNMENT"); d.update(plan_assignment=p, plan_assignment_sha256=os.environ["TEST_PLAN_DIGEST"]) if p else None; d.update(cached_units=sys.argv[2]) if sys.argv[2] else None; open(sys.argv[1], "w").write(json.dumps(d))' "$build" "$cached"
     return 0
   elif [[ "$1" == */plan_from_layer_config.py ]]; then
     echo "TEST_TRANSLATOR_REACHED:$2" >&2
     return 81
   elif [[ "$1" == */export_tessera_serving.py ]]; then
     echo "TEST_EXPORT_REACHED"
+    echo "TEST_EXPORT_ARGS:$*" >&2
     return 0
   else
     echo "unexpected worker: $*" >&2
@@ -103,6 +109,7 @@ python3() {
                STAGE_SETTINGS_PATH=str(stage_path), PYTEST_PYTHON=sys.executable,
                TEST_PLAN_ASSIGNMENT=str(derived_path) if derived else "",
                TEST_PLAN_DIGEST=derived_digest)
+    env.update(extra_env or {})
     return subprocess.run(["bash", "-c", preamble + helper + block], env=env,
                           cwd=ROOT, capture_output=True, text=True, timeout=30)
 
@@ -180,3 +187,34 @@ def test_actual_driver_refuses_a_cached_plan_unbound_to_derived_assignment(tmp_p
     assert result.returncode == 2, result.stdout + result.stderr
     assert "PLAN_ASSIGNMENT_DIGEST" in result.stdout + result.stderr
     assert "TEST_EXPORT_REACHED" not in result.stdout
+
+
+def test_a_composed_cached_bundle_reaches_preflight_and_export(tmp_path):
+    """A ``TESSERA_CACHED_UNITS`` bundle replaces the expert-units write (#1413).
+
+    The arm runs under ``set -u`` without the script's top-of-file defaults,
+    so an unset optional input must read as empty, not abort the driver.
+    """
+    bundle = str(tmp_path / "cached units.v3.json")
+    result = _run(tmp_path, extra_env={"TESSERA_CACHED_UNITS": bundle,
+                                       "TESSERA_SOURCE_DIGEST_CACHE": ""})
+    assert result.returncode == 0, result.stdout + result.stderr
+    preflight = next(line for line in result.stderr.splitlines()
+                     if line.startswith("TEST_PREFLIGHT_ARGS:"))
+    assert f"--cached-units {bundle}" in preflight
+    assert "--write-cached-expert-units" not in preflight
+    # The export's stderr is folded into its tee'd log, so read stdout.
+    export = next(line for line in result.stdout.splitlines()
+                  if line.startswith("TEST_EXPORT_ARGS:"))
+    assert f"--cached-units {bundle}" in export
+    assert "--cached-expert-units" not in export
+    assert "--source-digest-cache" not in export
+
+
+def test_without_a_bundle_the_preflight_writes_expert_units(tmp_path):
+    result = _run(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    preflight = next(line for line in result.stderr.splitlines()
+                     if line.startswith("TEST_PREFLIGHT_ARGS:"))
+    assert "--write-cached-expert-units" in preflight
+    assert "--cached-units" not in preflight
