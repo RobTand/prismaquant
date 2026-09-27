@@ -792,11 +792,13 @@ def _report(name, value):
 def _spill_root(tmp_path):
     """The declared local root: the environment's, else pytest's tmp_path."""
     from prismaquant.perturbed_x_cache import StageBSpillScratch
+    from test_stageb_cotangent_scratch import require_direct_io
 
     base = Path(os.environ.get("PQ_STAGE_B_SPILL_TEST_ROOT") or tmp_path)
     root = base / f"spill-{os.getpid()}-{tmp_path.name}"
     root.mkdir(parents=True, exist_ok=True)
-    StageBSpillScratch.require_local_root(root)  # fail loudly, never skip
+    StageBSpillScratch.require_local_root(root)  # wrong declared roots still refuse
+    require_direct_io(root)
     return root
 
 

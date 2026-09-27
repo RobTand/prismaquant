@@ -41,8 +41,11 @@ def cotangent_scratch_plane(tmp_path, monkeypatch):
     from prismaquant.joint_quantum_handoff import HandoffStream
     from prismaquant.perturbed_x_cache import ExactCotangentScratch
 
+    from test_stageb_cotangent_scratch import require_direct_io
+
     root = tmp_path / "cotangent-scratch"
     root.mkdir()
+    require_direct_io(root)  # before instrumentation/yield, not in teardown
     monkeypatch.setenv("PRISMAQUANT_STAGE_B_COTANGENT_ROOT", str(root))
     monkeypatch.setenv("PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES", str(1 << 30))
     built, streams = [], []
