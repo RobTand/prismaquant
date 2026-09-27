@@ -20,6 +20,28 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Stage A rows adopt the campaign's source proof (2026-09-27,
+`claude/pq-1497-stage-a-adopt-identity`, PQ #1497): a selected-source
+`tessera_campaign` row hashed every source shard it read, whole, through its
+held descriptor before its first encode, on its GPU reservation (41% of a
+dense row in the #1479 A/B). A row may now take `--source-identity-cache`
+with `--source-identity-cache-sha256`, a
+`prismaquant.streamed_model.identity_cache.v1` proof bound by digest, and
+`dispatch_tessera_campaign.py plan --source-identity-cache` binds one into
+every row and into `plan.json`. The row hands it to the capture owner's
+existing `adopt_streamed_identity_cache` (the #1374 joint-pass check: the
+proof's own digest, full checkpoint index and shard coverage, every shard's
+SHA against the hash-bound canonical capture, and the one six-field stat
+predicate against the held descriptor) before the runner is built.
+`adopt_identity_proof_or_hash` differs from the joint pass in one way: a
+proof that refuses changes no held state and the row continues, hashing each
+shard it reads as before, with the refusal in the
+`selected_source_authentication.v1` receipt
+(`streamed_identity_cache_refused`). Byte integrity is unchanged either way.
+A plan without a proof prints a warning; producing a proof for a source
+that has none is not automated here. No default, stage, stored format or
+ship gate changes. Tests: `tests/test_stage_a_identity_proof_adoption.py`.
+
 SHA-256 lexical validation (2026-09-27, `astra/dedup-hex-1457`, PQ #1457):
 `digests.is_sha256hex` and its compiled `SHA256_HEX` pattern own the exact
 regex acceptance used by artifact collection, prepriced cost and PrismaSnap
@@ -3645,8 +3667,71 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/planner-charge-1491`.
+Head-resume progress cadence (2026-09-27, PQ #1518): a caller that passes
+`progress_allowance_s` gets progress from the replay itself. The value is the
+stall allowance its submission declared for `progress_phase`. PrismaBuild
+exports phase names to the action (`PRISMABUILD_ACTION_PROGRESS_PHASES`) but
+not their allowances, so only the caller knows it. The replay commits its
+cumulative verified prefix on the first verified unit, then at most once per
+`allowance / PROGRESS_CADENCE_SAFETY_FACTOR` (factor 4). The derivation is in
+`tessera_joint_aura._ProgressCadence`: the watchdog sees at most `cadence` plus
+one unit's latency plus one 30 s poll of quiet. The final cumulative record is
+unchanged. Writes stay O(1) per window and never happen per unit. Without an
+allowance the replay behaves exactly as #822 left it.
+
+Overlay fence pool (2026-09-27, PQ #1519): `attach_candidate_overlay` no longer
+re-hashes stat-drifted overlay wires serially inside its admission loop.
+`_fence_drift` still refuses a size change, and a drift with no recorded digest,
+before anything is hashed. Every other drift is hashed on a bounded pool
+(`_bounded_hash_pool`, sized by `_fence_hash_workers` to the PrismaBuild-assigned
+CPU set, which the loader passes as its walk worker count). Work streams in row
+order with at most twice the pool size of files in flight. A digest is accepted
+only while the file's stat holds through the read. The refusal names the file.
+Cells enter `data` in catalog order and only after their job resolves. With
+`verify_payloads`, the same job also verifies every wire and, unless
+`defer_render_hashes`, every render, so each file is read once. The loader
+passes its own `verify_payloads` and `defer_render_hashes` through, and its
+`verify_files` pass covers only the walk's base cells. Admitted overlay cells
+continue the loader's cumulative progress count on the #1518 cadence. The
+synchronous `_artifact_fence` keeps its serial form for
+`tools/assemble_t4_overlay.py` and for a `require_selected_catalog_cell` call
+without a fence stream, and gains the same stat check around the read and the
+file's name in the refusal.
+
+Selected-cache fence stream (2026-09-27, PQ #1522): the rooted
+(`tessera.cached_units.v2`) selected cache rebinds every selected overlay cell
+with `require_selected_catalog_cell`, and A4 selects every drifted overlay
+wire. `selected_cached_units_manifest` now opens one `streamed_fences()` for
+the walk and passes it in. The stat check stays on the walking thread, so a
+size change or an undigested drift refuses before anything is hashed. A drifted
+wire's `_rehash_drifted` goes to the same `_bounded_hash_pool`, sized by
+`_fence_hash_workers`, with at most twice the pool size of files in flight.
+Every re-hash resolves before the block exits, so the manifest is never built
+over an unproven wire. The v1 selected cache never calls the rebind and is
+unchanged.
+
+As of: 2026-09-27 · `claude/selected-fence-pool`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/selected-fence-pool`) for **the selected-cache
+fence stream** (PQ #1522): the rooted selected cache re-hashes drifted overlay
+wires on the #1519 pool instead of the walking thread.
+
+Gates: `tests/test_selected_fence_pool_1522.py`,
+`tests/test_tessera_selected_cache.py`.
+
+Re-stamped (2026-09-27, `claude/a4-silent-phases`) for **replay progress on a
+derived cadence** (PQ #1518). `load_measured_anchor_input` takes an optional
+`progress_allowance_s`. With it, a `--head-resume` replay reports its verified
+prefix during the drive. Without it, the progress stream is byte-identical to
+before.
+
+Also for **the overlay fence pool** (PQ #1519): drifted overlay wires are
+re-hashed on a PB-sized bounded pool and streamed with admission in catalog
+order. Each file is hashed once per load, and the fence reports progress.
+
+Gates: `tests/test_head_resume_progress_822.py`,
+`tests/test_overlay_fence_pool_1519.py`, `tests/test_joint_catalog_extension.py`.
 
 Re-stamped (2026-09-27, `claude/planner-charge-1491`) for **the selected-row
 source-validation charge** (PQ #1491). The Stage A planner
@@ -10478,7 +10563,8 @@ Forward installation and full source-initialization attestation are refused.
 The selected source keys are compared with the admitted plan before reading
 and recorded in the source receipt. Source shard SHA256 authentication and
 held-descriptor mutation fences remain unchanged: consuming one tensor still
-authenticates its entire shard once per row. The initial policy supports
+authenticates its entire shard once per row, unless the row adopted a planned
+source proof (PQ #1497; see that stamp). The initial policy supports
 unscaled floating checkpoints; scaled FP8/FP4 sources fail closed.
 
 Admission excludes unconsumed source tensors and nonbody materialization,
