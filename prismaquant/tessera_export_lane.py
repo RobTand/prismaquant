@@ -852,7 +852,7 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
     if not isinstance(selected_expert_receipts, Mapping):
         raise TesseraExportLaneError("selected cache expert receipts are missing")
     from contextlib import nullcontext
-    from .joint_catalog_extension import (EncoderAdoptionValidation,
+    from .joint_catalog_extension import (EncoderAdoptionValidation, streamed_fences,
         require_selected_catalog_cell, require_extension, extension_run_header, _json)
     rooted = schema == "tessera.cached_units.v2"
     if rooted:
@@ -879,7 +879,11 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
         policy = verify_policy(policy_bound, original_prepared=extension["inputs"]["original_prepared"])
     records, wire_roots, unit_roots, adoptions, proofs = {}, {}, {}, {}, {}
     served_activations = {}
-    with EncoderAdoptionValidation() if rooted else nullcontext() as validation:
+    # A selected overlay wire whose stat fence drifted is re-hashed on the
+    # assigned-CPU pool while the walk continues; every re-hash is proven
+    # when this block exits, before the manifest is built (PQ #1522).
+    with (EncoderAdoptionValidation() if rooted else nullcontext()) as validation, \
+            (streamed_fences() if rooted else nullcontext()) as fences:
         for name, fmt in sorted(selected.items()):
             if fmt == "BF16":
                 continue
@@ -903,7 +907,8 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
                 if not rooted:
                     raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")
-                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation)
+                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation,
+                                                         fences=fences)
                 adoptions[name] = accepted["adoption"]
                 if policy is None:
                     raise TesseraExportLaneError(f"{name}: added A4 selection needs the accepted served activation policy")

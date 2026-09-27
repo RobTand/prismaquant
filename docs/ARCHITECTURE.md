@@ -3693,12 +3693,32 @@ Cells enter `data` in catalog order and only after their job resolves. With
 passes its own `verify_payloads` and `defer_render_hashes` through, and its
 `verify_files` pass covers only the walk's base cells. Admitted overlay cells
 continue the loader's cumulative progress count on the #1518 cadence. The
-synchronous `_artifact_fence` used by `verify_catalog_pair` and
-`assemble_t4_overlay` keeps its serial form, and gains the same stat check
-around the read and the file's name in the refusal.
+synchronous `_artifact_fence` keeps its serial form for
+`tools/assemble_t4_overlay.py` and for a `require_selected_catalog_cell` call
+without a fence stream, and gains the same stat check around the read and the
+file's name in the refusal.
 
-As of: 2026-09-27 · `claude/a4-silent-phases`.
+Selected-cache fence stream (2026-09-27, PQ #1522): the rooted
+(`tessera.cached_units.v2`) selected cache rebinds every selected overlay cell
+with `require_selected_catalog_cell`, and A4 selects every drifted overlay
+wire. `selected_cached_units_manifest` now opens one `streamed_fences()` for
+the walk and passes it in. The stat check stays on the walking thread, so a
+size change or an undigested drift refuses before anything is hashed. A drifted
+wire's `_rehash_drifted` goes to the same `_bounded_hash_pool`, sized by
+`_fence_hash_workers`, with at most twice the pool size of files in flight.
+Every re-hash resolves before the block exits, so the manifest is never built
+over an unproven wire. The v1 selected cache never calls the rebind and is
+unchanged.
+
+As of: 2026-09-27 · `claude/selected-fence-pool`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/selected-fence-pool`) for **the selected-cache
+fence stream** (PQ #1522): the rooted selected cache re-hashes drifted overlay
+wires on the #1519 pool instead of the walking thread.
+
+Gates: `tests/test_selected_fence_pool_1522.py`,
+`tests/test_tessera_selected_cache.py`.
 
 Re-stamped (2026-09-27, `claude/a4-silent-phases`) for **replay progress on a
 derived cadence** (PQ #1518). `load_measured_anchor_input` takes an optional

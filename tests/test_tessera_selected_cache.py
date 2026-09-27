@@ -160,16 +160,17 @@ def test_missing_or_changed_selected_evidence_refuses(tmp_path, change, match):
                                        schema="tessera.cached_units.v1")
 
 
-@pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale',
-                                    'v2_extension', 'no_proof', 'no_proof_dev'])
-def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, capsys, change):
+def _rooted_case(tmp_path, monkeypatch, change=None):
+    """The rooted (v2) selected-cache case: two seals, an adopted overlay and a served policy.
+
+    ``change`` applies one of the bridge test's refusal edits. Returns every
+    name the case builds; ``build()`` runs the manifest builder on it.
+    """
     # Capture-reuse and full512 policy derivation have independent artifact-level
     # tests. This bridge supplies their accepted boundary, then runs the real
     # per-cell migration proof checker, builder and Tessera mixed-root reader.
-    import hashlib
     from prismaquant import joint_catalog_extension as bridge, joint_served_activation as served
     from test_joint_catalog_extension import _encoder_proof, _write
-    from tessera.cached_unit import CachedUnitBundle
     source, names, records, handoff, metadata, data = fixture(tmp_path)
     proof = _encoder_proof(tmp_path)
     added = tmp_path / 'added'; added.mkdir()
@@ -266,6 +267,21 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     def build():
         return selected_cached_units_manifest(assignment, metadata, handoff, data,
             schema='tessera.cached_units.v2', catalog_extension=extension, producer_packages=packages)
+    return SimpleNamespace(**locals())
+
+
+@pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale',
+                                    'v2_extension', 'no_proof', 'no_proof_dev'])
+def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, capsys, change):
+    import hashlib
+    from operator import attrgetter
+    from prismaquant import joint_catalog_extension as bridge
+    from tessera.cached_unit import CachedUnitBundle
+    names_ = ('build packages names source groups seen header old_plan plan old_prepared new_prepared '
+              'old_pwc new_pwc resource capture rows records proof policy_bound policy').split()
+    (build, packages, names, source, groups, seen, header, old_plan, plan, old_prepared, new_prepared,
+     old_pwc, new_pwc, resource, capture, rows, records, proof, policy_bound, policy) = attrgetter(*names_)(
+        _rooted_case(tmp_path, monkeypatch, change))
     if change == 'no_proof':
         with pytest.raises(ValueError, match='no encoder source proof'): build()
         return
