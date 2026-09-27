@@ -3499,8 +3499,20 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/pact-gamut-stageb-multiformat`.
+As of: 2026-09-27 · `claude/dense-same-shape-batching`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/dense-same-shape-batching`) for **same-shape
+dense anchor batches** (PQ #1479). `_anchor_batches` now keys every unit, dense
+or projected expert, by `(family, rung, shape, dtype, device)`. Dense units were
+keyed by `(unit, family, rung)`, so every dense anchor encoded at batch one, even
+in a row that merges several dense groups. The measured result was about 25 W of
+the 140 W envelope. The wire recipe and Hessian requirement derive from
+`(family, rung)` alone, so the batches are uniform, and `_measure_anchor_batch`
+refuses a batch whose prepared recipes differ. The resource plan already charges
+`--anchor-batch-size` times the widest unit. No format, default, stage or ship
+gate changes. `--anchor-batch-size` still defaults to 1, and batch width is still
+excluded from input identity. Gate: `tests/test_tessera_campaign_batch.py`.
 
 Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
 inputs over a several-format catalog** (PQ #1437). The Stage B control
@@ -10153,7 +10165,7 @@ every run. The 864-unit row now fits a 256 MiB reservation.
 
 Anchor batches are emitted unit-major (`_anchor_batches`): the chunks of one
 `(family, shape, dtype, device)` key are ordered by chunk position first and
-rung second, so consecutive batches encode the same expert units at successive
+rung second, so consecutive batches encode the same units at successive
 rungs and the encoder memo -- sized to the batch width by the plan -- reuses
 each unit's block-LDL factorization across its rungs instead of refactorizing
 once per (unit, rung) with every other unit's batches in between
