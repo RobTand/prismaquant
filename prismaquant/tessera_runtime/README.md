@@ -110,12 +110,13 @@ from it and skip with it: `test_glm_campaign_streaming`,
 `test_collector_source_release` and `test_streamed_capture_admission`. Until
 2026-09-23 none of the six had run in a PrismaBuild test run.
 
-The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-4c4ff1c2-tf516`
+The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-a3e83875-tf516`
 is the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
 safetensors 0.8.0, the versions in the campaign's `prismaquant-tf516` venv.
 Tessera, PrismaBuild, torch and every other package are the same, so
-`pbtest` checks the same exact pin. Both siblings were copied from the old
-`09d6559d-tf516` venvs by the two Spark build actions above. The original
+`pbtest` checks the same exact pin. Each pin move copies the previous pin's
+`-tf516` sibling in the Spark build actions above; the `a3e83875` siblings
+descend from `f94929de-tf516`, and the `4c4ff1c2` ones from `09d6559d-tf516`. The original
 transformers installations came from actions `fa510fbf5a02` (sparky) and
 `29ec7048687b` (sparklina, 2026-09-25). dl380g10's interpreter of the base name is a
 different base (`pq881`, Python 3.14, CPU torch), so pin a run that uses it
@@ -144,7 +145,7 @@ A PR that touches those six modules, or what they test, runs them there:
 ```bash
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
   --checkout <this worktree> --tag gb10 --priority -10 \
-  --python /home/rob/venvs/pq-pb461728e4-tessera-4c4ff1c2-tf516/bin/python \
+  --python /home/rob/venvs/pq-pb461728e4-tessera-a3e83875-tf516/bin/python \
   --threads-per-shard 1 --workers-per-shard 2 --cpus-per-shard 2 --mem-gb 8 \
   --timeout-s 1800 \
   tests/test_glm5_next_streamed_forward_parity.py \
