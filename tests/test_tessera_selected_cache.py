@@ -190,6 +190,10 @@ def _rooted_case(tmp_path, monkeypatch, change=None):
         candidate['identity'].update(encoder_source_sha256='8'*64, recipe=bridge.added_format_recipe(bridge.R13_ADDED_FORMAT))
         blob = (tmp_path / record['file']).read_bytes()
         path = added / record['file']; path.write_bytes(blob)
+        if change == 'accepted_wrong_size':
+            # Sealed into the catalog as written, so its stat fence holds and
+            # only the receipt's blob_bytes disagrees with the file.
+            path.write_bytes(blob + b'\x00')
         render = added / (record['file'] + '.pt'); render.write_bytes(b'render')
         adoption = {'schema': bridge.ADOPTION_SCHEMA, 'reference_pair': [name, FMT],
                     'reference_encoding_identity': reference, 'candidate_encoding_identity': candidate['identity'],
@@ -435,3 +439,25 @@ def test_handoff_root_missing_the_priced_wire_refuses(tmp_path):
         selected_cached_units_manifest(
             {name: FMT for name in names}, metadata, handoff, data,
             schema="tessera.cached_units.v1")
+
+
+def test_a_catalog_adopted_wire_only_under_its_accepted_root_builds(tmp_path, monkeypatch):
+    # PR #1515 r2: a catalog-adopted cell is read from its catalog row's own
+    # directory, so the handoff root need not hold a copy of its wire.
+    case = _rooted_case(tmp_path, monkeypatch)
+    for row in case.rows:
+        (tmp_path / row['record']['file']).unlink()
+    manifest = case.build()
+    for row in case.rows:
+        root = manifest['wire_roots'][manifest['unit_roots'][row['qname']]]
+        assert root == str(Path(row['wire']).resolve().parent)
+
+
+def test_a_catalog_adopted_wire_of_the_wrong_size_refuses_at_manifest_time(tmp_path, monkeypatch):
+    # The size gate runs on the root the export reads: the accepted catalog
+    # root, against the receipt its bytes are priced by (PR #1515 r2).
+    case = _rooted_case(tmp_path, monkeypatch, 'accepted_wrong_size')
+    import re
+    bad = Path(case.rows[0]['wire']).resolve()
+    with pytest.raises(TesseraExportLaneError, match=re.escape(f'{bad} does not match its receipt')):
+        case.build()
