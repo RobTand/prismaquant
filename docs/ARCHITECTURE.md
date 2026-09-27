@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-26 for PQ #1342: campaign rows and direct submissions now
+carry the existing portable container-admission reference through the shared
+`tools.tessera_campaign_container.admission_image_reference` owner, as joint
+rows already did. The same parsed spec supplies both the launcher and PB's
+admission declaration. A row class inherits the reference with its container;
+replacing the container also replaces its admission identity, so it cannot
+advertise another class's image. No new schema field, default, serving lane or
+ship gate is introduced; specs without the explicit override keep their prior
+behavior. Gate: `tests/test_container_image_admission.py`.
+
 The Tessera export preflight joins a GLM allocation in the source namespace
 (2026-09-26, `ws-serve/glm-source-unit-shapes`, PQ #1388). The allocation,
 Tessera's `plan_from_layer_config.py` and its exporter all name units by
@@ -25012,7 +25022,12 @@ new candidate reads must be completed by the executable prepared-input producer.
 It emits a coordinator launch recipe without submitting nested PB work.
 A spec may explicitly bind `container_admission_reference` to PB's portable
 content identity while keeping the distinct scientifically inspected Docker
-content identity; both checks must succeed before execution.
+content identity; both checks must succeed before execution. The shared
+container helper validates this existing spelling for joint dispatch, campaign
+manifest rows and direct submission alike (PQ #1342). Generated rows retain it
+in the same serialized spec they execute. An explicit reference preserves the
+joint dispatcher's override precedence, including beside an archive; an archive
+without an override still declares no locally required image.
 
 ### Stage B head slice (#1010)
 
