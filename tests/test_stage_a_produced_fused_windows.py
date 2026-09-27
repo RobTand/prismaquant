@@ -10,6 +10,9 @@ exits so a group is staged once, not once per window.
 """
 from __future__ import annotations
 
+import os
+import signal
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -29,11 +32,11 @@ GROUP_SIZE = chain.GROUP_SIZE
 PROBES = 2
 
 
-def _fused_owner(tmp_path, *, window_gib=8):
+def _fused_owner(tmp_path, *, window_gib=8, **kwargs):
     return chain._bound_owner(
         tmp_path, n_batches=GROUP_SIZE, window_gib=window_gib,
         gib=max(2 * window_gib, 4), payload_max_bytes=1 << 22,
-        n_probes=PROBES, read_order="sample_major")
+        n_probes=PROBES, read_order="sample_major", **kwargs)
 
 
 def _value(boundary, probe, batch):
@@ -117,3 +120,79 @@ def test_without_retention_every_window_stages_its_groups_again(tmp_path, monkey
         storage.settle_produced_releases()
     assert storage.telemetry["produced_groups_rematerialized"] == 1 + PROBES
     assert storage.produced_release_debt() == chain._NO_DEBT
+
+
+# -- a fleet that dies under the read (RobTand/prismaquant#1466) -----------
+
+#: The read's staging budget in the dead-fleet tests. Small enough that the
+#: unfixed harness shows its hang as a slow failure rather than as a
+#: 15-minute stall, and three times the bound the prompt failure must meet.
+DEAD_FLEET_STAGING_TIMEOUT_S = 150.0
+DEAD_FLEET_PROMPT_S = DEAD_FLEET_STAGING_TIMEOUT_S / 3
+
+
+def _fleet_claim_in_flight(q):
+    """The fleet's claimed mover once its launcher is running, else None."""
+
+    from prismabuild import pool
+    for path in sorted(q.dir(pool.CLAIMED).glob("*.json")):
+        record = pool._read_json(path)
+        if not isinstance(record, dict) or record.get("claimed_by") != "w-fleet":
+            continue
+        lease = pool._read_json(q.lease_path(path.stem))
+        if isinstance(lease, dict) and lease.get("child_pid"):
+            return path.stem, lease
+    return None
+
+
+def _read_after_the_fleet_dies(tmp_path, monkeypatch, *, mid_stage):
+    from prismaquant.stage_a_produced_output import BoundaryStagingTimeout
+
+    storage, _publication, q, env, pb_repo = _fused_owner(
+        tmp_path, staging_timeout_s=DEAD_FLEET_STAGING_TIMEOUT_S)
+    batches, incoming = _write_planes(storage)
+    killed_at = None
+    with pytest.raises(BoundaryStagingTimeout) as refused:
+        with chain._fleet(q, tmp_path) as fleet:
+            if mid_stage:
+                chain._until(lambda: _fleet_claim_in_flight(q) is not None, 120.0,
+                             "the fleet never started a mover")
+                _key, lease = _fleet_claim_in_flight(q)
+                # The launcher leads its own session (Pool.execute starts it
+                # with start_new_session=True), so killing the fleet leaves
+                # it running; kill both, as a box that loses the worker does.
+                os.killpg(int(lease["child_pid"]), signal.SIGKILL)
+            os.kill(fleet._proc.pid, signal.SIGKILL)
+            fleet._proc.wait()
+            killed_at = time.monotonic()
+            chain._strict(monkeypatch, env, pb_repo, q)
+            _fused_read(storage, batches, incoming, window_batches=2)
+    elapsed = time.monotonic() - killed_at
+    assert elapsed < DEAD_FLEET_PROMPT_S, (
+        f"the read waited {elapsed:.1f}s on a fleet that was already dead; "
+        f"its staging budget is {DEAD_FLEET_STAGING_TIMEOUT_S}s", str(refused.value))
+    return str(refused.value)
+
+
+def test_a_read_whose_fleet_died_idle_fails_fast_not_at_its_budget(
+        tmp_path, monkeypatch):
+    """The observed hang: the fleet process ended with movers still queued.
+
+    On dl380g10 the fixture fleet ended while the read still had a mover in
+    ``ready``, left unreaped beside the pytest, and the read polled that
+    ``ready`` row for its whole staging budget. Killing the fleet before it
+    claims anything leaves the same state: every mover queued, no fleet.
+    """
+
+    message = _read_after_the_fleet_dies(tmp_path, monkeypatch, mid_stage=False)
+    assert "will not stage" in message, message
+
+
+def test_a_read_whose_fleet_died_mid_stage_fails_fast_not_at_its_budget(
+        tmp_path, monkeypatch):
+    """The fleet and the launcher it started both die while a mover is
+    claimed: the claim has no owner left, and the read must not wait out its
+    budget on it."""
+
+    message = _read_after_the_fleet_dies(tmp_path, monkeypatch, mid_stage=True)
+    assert "will not stage" in message, message

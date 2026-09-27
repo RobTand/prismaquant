@@ -508,24 +508,74 @@ def _write_group(storage, *, boundary_index=0, count=GROUP_SIZE, first=0):
 _FLEET_DRIVER = """
 import json, os, sys, time
 from pathlib import Path
-root, tag, stop, budget = sys.argv[1], sys.argv[2], Path(sys.argv[3]), float(sys.argv[4])
+root, tag, stop, parent = sys.argv[1], sys.argv[2], Path(sys.argv[3]), int(sys.argv[4])
+capacity = json.loads(sys.argv[5])
+mode = sys.argv[6]
 from prismabuild import pool
 q = pool.PoolQueue(Path(root))
-capacity = json.loads(sys.argv[5]) if len(sys.argv) > 5 else None
-end = time.monotonic() + budget
-while time.monotonic() < end and not stop.exists():
-    claimed = q.claim(owner="w-fleet", tags=[tag], capacity=capacity)
-    if claimed is None:
+
+def running():
+    # The fixture's lifetime, and nothing else: the stop file, or the pytest
+    # that started this process going away (the orphan guard).
+    return not stop.exists() and os.getppid() == parent
+
+def alive(pid):
+    # A zombie is not alive: an exited launcher nobody reaped still answers
+    # signal 0, so read the state letter instead.
+    try:
+        with open(f"/proc/{int(pid)}/stat", encoding="utf-8") as handle:
+            state = handle.read().rsplit(") ", 1)[-1].split()
+    except (OSError, ValueError, TypeError):
+        return False
+    return bool(state) and state[0] != "Z"
+
+def report(**fields):
+    print(json.dumps(fields), flush=True)
+
+if mode == "run":
+    while running():
+        claimed = q.claim(owner="w-fleet", tags=[tag], capacity=capacity)
+        if claimed is None:
+            time.sleep(0.05)
+            continue
+        key = str(claimed["action_key"])
+        row = pool._read_json(q.item_path(pool.CLAIMED, key))
+        outcome = q.execute(row, timeout_s=240)
+        rc = outcome.get("returncode")
+        q.finish(key, status="executed" if rc == 0 else "failed")
+        report(mover=key, rc=rc, stderr=(outcome.get("stderr") or "")[-800:])
+else:
+    # mode "dead:<pid>:<rc>": the fleet process died, and nothing will run
+    # what it would have run. A failed attempt is not terminal -- a mover
+    # has attempts to spare and PrismaBuild requeues it to ready -- so
+    # this WITHDRAWS every mover still queued for the fleet's tag, the
+    # terminal record a read fails fast on, naming the dead fleet. A claim
+    # the dead fleet left behind is first concluded as a failed attempt,
+    # once its launcher is gone, which puts it back in ready for the same
+    # withdrawal.
+    dead, rc = mode.split(":")[1:]
+    reason = f"fixture fleet pid {dead} exited rc {rc} while the read waited"
+    while running():
+        for path in sorted(q.dir(pool.CLAIMED).glob("*.json")):
+            record = pool._read_json(path)
+            if not isinstance(record, dict) or record.get("claimed_by") != "w-fleet":
+                continue
+            lease = pool._read_json(q.lease_path(path.stem)) or {}
+            if str(lease.get("pid") or dead) != dead or alive(lease.get("child_pid")):
+                continue
+            q.finish(path.stem, status="failed", detail={"termination_reason": reason})
+            report(mover=path.stem, rc=None, concluded="failed", stderr=reason)
+        for path in sorted(q.dir(pool.READY).glob("*.json")):
+            record = pool._read_json(path)
+            if not isinstance(record, dict) or tag not in (record.get("tags") or ()):
+                continue
+            try:
+                q.withdraw(path.stem, reason=reason, by="fixture-fleet-responder",
+                           signal_child=False)
+            except pool.PoolContractError:
+                continue  # it left the queue between the listing and here
+            report(mover=path.stem, rc=None, concluded="withdrawn", stderr=reason)
         time.sleep(0.05)
-        continue
-    key = str(claimed["action_key"])
-    row = pool._read_json(q.item_path(pool.CLAIMED, key))
-    outcome = q.execute(row, timeout_s=240)
-    rc = outcome.get("returncode")
-    q.finish(key, status="executed" if rc == 0 else "failed")
-    print(json.dumps({"mover": key, "rc": rc,
-                      "stderr": (outcome.get("stderr") or "")[-800:]}),
-          flush=True)
 """
 
 
@@ -544,36 +594,106 @@ class _Fleet:
     identity from half of one" when an owner's launch tuple is present. A
     thread shares ``os.environ`` with the reader, which needs that tuple;
     a child process gets its own copy with the tuple removed.
+
+    Its lifetime is the context's (RobTand/prismaquant#1466). It used to end
+    on a fixed 240 s budget; on a loaded x86 worker, where one mover took
+    132 s, a test outlived that budget, the fleet exited with a mover still
+    ``ready``, and the read polled it for its whole 900 s staging budget
+    beside an unreaped ``<defunct>`` fleet. Now it runs until the stop file
+    or until the pytest that started it is gone. A watcher thread reaps it
+    the moment it exits; if that happens before the context asked it to
+    stop, a second process -- never a thread, because PrismaBuild's record
+    locks are per process -- files every mover the dead fleet would have
+    run as ``withdrawn`` -- first concluding any claim it left, once that
+    claim's launcher is gone. A ``failed`` attempt would not do: a mover
+    has attempts to spare and PrismaBuild requeues it to ``ready``
+    (measured: the first version of this responder did exactly that, and
+    the read waited out its budget on the requeued row). The read then
+    sees a terminal mover and fails fast. Output goes to
+    files, not pipes: a long-lived fleet that fills a 64 KiB pipe blocks
+    on its next line.
     """
 
-    def __init__(self, q, tag: str, tmp_path: Path, *, budget_s: float = 240.0, capacity=None):
+    _serial = 0
+
+    def __init__(self, q, tag: str, tmp_path: Path, *, capacity=None):
+        _Fleet._serial += 1
+        name = f"fleet-{os.getpid()}-{_Fleet._serial}"
         self._q = q
         self._tag = tag
-        self._stop = tmp_path / "fleet.stop"
-        self._budget = budget_s
+        self._stop = tmp_path / f"{name}.stop"
+        self._logs = tmp_path / name
         self._capacity = capacity
+        self._stopping = threading.Event()
         self._proc = None
+        self._responder = None
+        self._watcher = None
+        self.returncode = None
+        self.died = False
+
+    def _spawn(self, mode: str, label: str):
+        self._logs.mkdir(parents=True, exist_ok=True)
+        with open(self._logs / f"{label}.out", "w") as out, \
+                open(self._logs / f"{label}.err", "w") as err:
+            return subprocess.Popen(
+                [sys.executable, "-c", _FLEET_DRIVER, str(self._q.root),
+                 self._tag, str(self._stop), str(os.getpid()),
+                 json.dumps(self._capacity), mode],
+                env=self._env, stdout=out, stderr=err, text=True)
+
+    def _watch(self):
+        rc = self._proc.wait()
+        self.returncode = rc
+        if self._stopping.is_set() and rc == 0:
+            return
+        self.died = True
+        self._responder = self._spawn(f"dead:{self._proc.pid}:{rc}", "dead")
 
     def __enter__(self):
-        env = {k: v for k, v in os.environ.items()
-               if k not in ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
-                            "PRISMABUILD_ACTION_SCOPE", "PRISMABUILD_RESIDENCY_MAP",
-                            "PRISMABUILD_READER_HELPER_ROOT")}
-        self._proc = subprocess.Popen(
-            [sys.executable, "-c", _FLEET_DRIVER, str(self._q.root), self._tag,
-             str(self._stop), str(self._budget), json.dumps(self._capacity)],
-            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Captured once, here: the reader exports its own launch tuple after
+        # this (``_strict``), and the responder a dead fleet needs must not
+        # inherit it any more than the fleet did.
+        self._env = {k: v for k, v in os.environ.items()
+                     if k not in ("PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
+                                  "PRISMABUILD_ACTION_SCOPE", "PRISMABUILD_RESIDENCY_MAP",
+                                  "PRISMABUILD_READER_HELPER_ROOT")}
+        self._proc = self._spawn("run", "fleet")
+        self._watcher = threading.Thread(
+            target=self._watch, name="fixture-fleet-watcher", daemon=True)
+        self._watcher.start()
         return self
 
-    def __exit__(self, exc_type, exc, tb):
-        self._stop.write_text("stop")
+    def _stop_process(self, proc):
+        if proc is None:
+            return
         try:
-            out, err = self._proc.communicate(timeout=60)
+            proc.wait(timeout=60)
         except subprocess.TimeoutExpired:
-            self._proc.kill()
-            out, err = self._proc.communicate()
-        self.stdout, self.stderr = out, err
-        return False
+            proc.kill()
+            proc.wait()
+
+    def __exit__(self, exc_type, exc, tb):
+        self._stopping.set()
+        self._stop.write_text("stop")
+        self._stop_process(self._proc)
+        self._watcher.join(timeout=60)
+        self._stop_process(self._responder)
+        read = lambda label, stream: (  # noqa: E731
+            (self._logs / f"{label}.{stream}").read_text()
+            if (self._logs / f"{label}.{stream}").exists() else "")
+        self.stdout = read("fleet", "out") + read("dead", "out")
+        self.stderr = read("fleet", "err") + read("dead", "err")
+        if not self.died:
+            return False
+        death = (f"the fixture fleet (pid {self._proc.pid}) exited rc "
+                 f"{self.returncode} before its context asked it to stop; "
+                 f"stderr tail: {read('fleet', 'err')[-1500:]!r}")
+        if exc is not None:
+            # The read's own failure stands -- it is what the test asserts --
+            # and carries the fleet's death with it.
+            exc.add_note(death)
+            return False
+        raise AssertionError(death)
 
 
 def _fleet(q, tmp_path: Path, *, capacity=None):
