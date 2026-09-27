@@ -845,8 +845,14 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
     from .tessera_census_cache import census_roster_selection
     selected = census_roster_selection(selected, data.census["unit_shapes"], TesseraExportLaneError)
     wire_dir = Path(provenance["wire_dir"]).resolve()
-    if (metadata.get(WIRE_DIR_KEY) != str(wire_dir) or
-            data.payload.get("provenance", {}).get("wire_dir") != str(wire_dir)):
+    # The allocator's recorded root must still name the handoff root: both
+    # sides describe WHICH root the selection was priced against.  The
+    # loader payload's provenance wire_dir names the root the receipts were
+    # measured under and may legitimately differ as a string; the per-unit
+    # content identity against those receipts is carried by the priced
+    # records and enforced at intake, so it is recorded by callers rather
+    # than gated here by path equality.
+    if metadata.get(WIRE_DIR_KEY) != str(wire_dir):
         raise TesseraExportLaneError("selected cache wire directory differs from the joint handoff")
     selected_expert_receipts = metadata.get(EXPERT_WIRES_KEY, {})
     if not isinstance(selected_expert_receipts, Mapping):
@@ -903,6 +909,13 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             sealed_unit = data.manifest["identity"]["units"][name]
             if record["identity"].get("source") != sealed_unit["weight"]:
                 raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
+            # The root this cell's bytes are read from: the handoff root, or,
+            # for a catalog-adopted cell, its catalog row's own directory
+            # (chosen below). ``locate_expert_wire`` gates that final root once
+            # (present, regular, non-symlink, directly in the root, receipted
+            # size) against ``record``, which ``require_selected_catalog_cell``
+            # holds equal to the catalog row's record. Content identity is
+            # enforced at intake by ``verify_cached_unit`` (#1513, #641/#643).
             cell_wire_dir = wire_dir
             if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
                 if not rooted:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -186,6 +187,10 @@ def _rooted_case(tmp_path, monkeypatch, change=None):
         candidate['identity'].update(encoder_source_sha256='8'*64, recipe=bridge.added_format_recipe(bridge.R13_ADDED_FORMAT))
         blob = (tmp_path / record['file']).read_bytes()
         path = added / record['file']; path.write_bytes(blob)
+        if change == 'accepted_wrong_size':
+            # Sealed into the catalog as written, so its stat fence holds and
+            # only the receipt's blob_bytes disagrees with the file.
+            path.write_bytes(blob + b'\x00')
         render = added / (record['file'] + '.pt'); render.write_bytes(b'render')
         adoption = {'schema': bridge.ADOPTION_SCHEMA, 'reference_pair': [name, FMT],
                     'reference_encoding_identity': reference, 'candidate_encoding_identity': candidate['identity'],
@@ -361,3 +366,95 @@ def test_export_lane_refuses_a_census_unit_the_assignment_omits(tmp_path):
         selected_cached_units_manifest(
             {name: FMT for name in names if name != DENSE}, metadata, handoff, data,
             schema="tessera.cached_units.v1")
+
+
+def _two_roots(tmp_path: Path):
+    """The #1513 shape: receipts were priced under the loader payload root,
+    the joint handoff (and the allocator's recorded root) name a second wire
+    directory holding copies."""
+    import shutil
+    from prismaquant import tessera_expert_projection as tep
+    source, names, records, handoff, metadata, data = fixture(tmp_path)
+    home = tmp_path.parent / (tmp_path.name + "-handoff")
+    home.mkdir()
+    for record in records.values():
+        shutil.copy2(tmp_path / record["file"], home / record["file"])
+    handoff["provenance"]["wire_dir"] = str(home)
+    metadata[tep.WIRE_DIR_KEY] = str(home)
+    return source, names, records, handoff, metadata, data, home
+
+
+def test_two_wire_roots_holding_identical_bytes_build_the_selected_cache(tmp_path):
+    # Path equality between the manifest root and the loader's payload root is
+    # context, never the gate: presence, placement and receipted size decide
+    # at manifest time, content identity at intake (PrismaQuant #1513).
+    from tessera.cached_unit import CachedUnitBundle
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    manifest = selected_cached_units_manifest(
+        {name: FMT for name in names}, metadata, handoff, data,
+        schema="tessera.cached_units.v1")
+    assert set(manifest["units"]) == names
+    bundle = CachedUnitBundle(manifest, home, set(names), source)
+    assert set(bundle.units) == names
+    blob, record = bundle.read(DENSE)
+    assert hashlib.sha256(blob).hexdigest() == record["blob_sha256"]
+
+
+def test_handoff_root_copy_that_diverges_from_the_priced_receipt_refuses(tmp_path):
+    # A same-size content change passes the manifest-time gate and refuses at
+    # intake, where the bytes the export reads are hashed against the priced
+    # receipt (PrismaQuant #1513, #641/#643).
+    from tessera.cached_unit import CachedUnitBundle, verify_cached_unit
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    path = home / records[DENSE]["file"]
+    raw = path.read_bytes()
+    path.write_bytes(bytes([raw[0] ^ 1]) + raw[1:])
+    manifest = selected_cached_units_manifest(
+        {name: FMT for name in names}, metadata, handoff, data,
+        schema="tessera.cached_units.v1")
+    bundle = CachedUnitBundle(manifest, home, set(names), source)
+    blob, record = bundle.read(DENSE)
+    with pytest.raises(ValueError, match="blob size/sha256 mismatch"):
+        verify_cached_unit(blob, record, record["identity"])
+
+
+def test_handoff_root_copy_of_the_wrong_size_refuses_at_manifest_time(tmp_path):
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    path = home / records[DENSE]["file"]
+    path.write_bytes(path.read_bytes() + b"\x00")
+    with pytest.raises(TesseraExportLaneError,
+                       match="does not match its receipt"):
+        selected_cached_units_manifest(
+            {name: FMT for name in names}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
+
+
+def test_handoff_root_missing_the_priced_wire_refuses(tmp_path):
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    (home / records[DENSE]["file"]).unlink()
+    with pytest.raises(TesseraExportLaneError, match="is not in the wire directory"):
+        selected_cached_units_manifest(
+            {name: FMT for name in names}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
+
+
+def test_a_catalog_adopted_wire_only_under_its_accepted_root_builds(tmp_path, monkeypatch):
+    # PR #1515 r2: a catalog-adopted cell is read from its catalog row's own
+    # directory, so the handoff root need not hold a copy of its wire.
+    case = _rooted_case(tmp_path, monkeypatch)
+    for row in case.rows:
+        (tmp_path / row['record']['file']).unlink()
+    manifest = case.build()
+    for row in case.rows:
+        root = manifest['wire_roots'][manifest['unit_roots'][row['qname']]]
+        assert root == str(Path(row['wire']).resolve().parent)
+
+
+def test_a_catalog_adopted_wire_of_the_wrong_size_refuses_at_manifest_time(tmp_path, monkeypatch):
+    # The size gate runs on the root the export reads: the accepted catalog
+    # root, against the receipt its bytes are priced by (PR #1515 r2).
+    case = _rooted_case(tmp_path, monkeypatch, 'accepted_wrong_size')
+    import re
+    bad = Path(case.rows[0]['wire']).resolve()
+    with pytest.raises(TesseraExportLaneError, match=re.escape(f'{bad} does not match its receipt')):
+        case.build()
