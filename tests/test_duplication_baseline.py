@@ -8,6 +8,11 @@ A new near-duplicate pair, a new same-name group, or a module joining an
 existing group fails. So does a baseline entry that no longer exists: each
 consolidation shrinks the baseline in the same change, by running
 ``python tools/duplication_inventory.py --write-baseline``.
+
+The baseline also ratchets primitive digest sites (PQ #1508): a new raw
+``hashlib`` constructor or literal ``sort_keys=True`` JSON encoding outside
+``prismaquant/digests.py`` and ``prismaquant/tensor_digests.py`` fails, and
+consolidating a site onto an owner lowers the baseline the same way.
 """
 from __future__ import annotations
 
@@ -86,3 +91,50 @@ def test_must_differ_pairs_are_live_and_give_a_reason():
         assert pair not in seen, f"must_differ repeats {pair}"
         seen.add(pair)
         assert len(row["reason"].split()) >= 8, f"{pair} needs a real reason"
+
+
+def test_primitive_digest_sites_only_shrink():
+    """Raw digest sites outside the owners may only disappear (#1508)."""
+    live = set(inventory.scan()["primitive_digest_sites"])
+    base = set(_baseline()["primitive_digest_sites"])
+    assert not live - base, (
+        f"new primitive digest sites outside {sorted(inventory.DIGEST_OWNERS)}: "
+        f"{sorted(live - base)} -- use the digest owners' named profiles instead "
+        "of a new raw hashlib or sorted-JSON call (PQ #1508)")
+    assert not base - live, (
+        f"baseline digest sites gone {sorted(base - live)}: shrink the baseline "
+        "with tools/duplication_inventory.py --write-baseline")
+
+
+def test_the_digest_site_ratchet_fails_on_a_new_raw_site_and_passes_the_owner(tmp_path):
+    """RED/GREEN for the gate itself: one raw site outside the owners fails.
+
+    A fixture module with a fresh ``hashlib.sha256(json.dumps(...,
+    sort_keys=True))`` site is an offender against an empty baseline (the RED
+    side: this is exactly the new-code pattern the ratchet exists to stop),
+    while the same raw recipe inside ``prismaquant/digests.py`` is not
+    ratcheted at all because that is where consolidation moves sites to.
+    """
+    raw = (
+        "import hashlib\nimport json\n"
+        "def _digest(value):\n"
+        "    return hashlib.sha256(\n"
+        "        json.dumps(value, sort_keys=True).encode()).hexdigest()\n"
+    )
+    (tmp_path / "prismaquant").mkdir()
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "prismaquant" / "digests.py").write_text(raw)
+    (tmp_path / "tools" / "fresh_site.py").write_text(raw)
+    live = set(inventory.scan(tmp_path)["primitive_digest_sites"])
+    # The owner's own raw site is not ratcheted.
+    assert not any("prismaquant/digests.py" in site for site in live)
+    # Against an empty baseline the fresh raw site is a violation (RED).
+    assert sorted(live - set()) == [
+        "hashlib:tools/fresh_site.py::_digest",
+        "sorted-json:tools/fresh_site.py::_digest",
+    ]
+    # With the site recorded, the same set arithmetic the shrink test uses
+    # reports no violation (GREEN).
+    baseline = {"hashlib:tools/fresh_site.py::_digest",
+                "sorted-json:tools/fresh_site.py::_digest"}
+    assert not live - baseline and not baseline - live
