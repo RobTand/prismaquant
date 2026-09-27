@@ -315,3 +315,33 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     bundle.require_served_scales({name+'.input_global_scale': 0.25 for name in groups})
     with pytest.raises(ValueError, match='served policy'):
         bundle.require_served_scales({name+'.input_global_scale': 0.5 for name in groups})
+
+
+VISUAL = "model.visual.blocks.0.attn.qkv"
+
+
+def test_export_lane_passes_a_bf16_sidecar_outside_the_census(tmp_path):
+    """GLM-5.3 Flash's allocator config also names the 124 visual-tower
+    Linears it keeps at BF16. The census holds no wire for them, so the
+    export lane passes them through, as the census cache does (#1510)."""
+    source, names, _, handoff, metadata, data = fixture(tmp_path)
+    manifest = selected_cached_units_manifest(
+        {**{name: FMT for name in names}, VISUAL: "BF16"}, metadata, handoff, data,
+        schema="tessera.cached_units.v1")
+    assert set(manifest["units"]) == names
+
+
+def test_export_lane_refuses_a_wired_sidecar_outside_the_census(tmp_path):
+    source, names, _, handoff, metadata, data = fixture(tmp_path)
+    with pytest.raises(TesseraExportLaneError, match="outside the census roster are not BF16"):
+        selected_cached_units_manifest(
+            {**{name: FMT for name in names}, VISUAL: FMT}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
+
+
+def test_export_lane_refuses_a_census_unit_the_assignment_omits(tmp_path):
+    source, names, _, handoff, metadata, data = fixture(tmp_path)
+    with pytest.raises(TesseraExportLaneError, match="does not cover the full source roster"):
+        selected_cached_units_manifest(
+            {name: FMT for name in names if name != DENSE}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
