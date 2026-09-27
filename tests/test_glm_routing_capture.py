@@ -242,3 +242,51 @@ def test_cold_fallback_is_not_allowed(source):
     runner.require_prefetched_residency = False
     with pytest.raises(ValueError, match='prefetched'):
         visit_routed_boundaries(runner, torch.zeros(1, 512, dtype=torch.int64), lambda *_: None)
+
+
+def test_route_record_records_the_observed_tensor_device():
+    """The routing record must carry the device the boundary tensors were
+    observed on, not the runner's declared device (#1536).
+
+    ``joint_cost_quantum.build_quantum_source_runner`` builds the streamed
+    runner with ``torch.device("cuda")``, so ``str(runner.device)`` is the
+    unindexed ``"cuda"``, while ``validate_glm_routing`` requires the indexed
+    ``"cuda:0"`` a real tensor reports.  The first real GPU capture refused at
+    its first published boundary on exactly that string.  CPU fixtures never
+    see it because both spellings are ``"cpu"`` for CPU tensors, which is why
+    the round-trip fixture hardcoded the device and missed the defect.
+    """
+    from prismaquant.glm_routing_replay import glm_route_record
+
+    model = Glm5NextForConditionalGeneration()
+    mlp = model.model.language_model.layers[3].mlp
+    inputs = torch.zeros(512, 4096, dtype=torch.bfloat16)
+    captured = {
+        'inputs': inputs,
+        'top_k_weights': torch.zeros(512, 8, dtype=torch.float32),
+        'top_k_index': torch.zeros(512, 8, dtype=torch.int64),
+        'coordinates': torch.zeros(512, 2, dtype=torch.int64),
+    }
+    runner = SimpleNamespace(device=torch.device('cuda'), model=model)
+    record = glm_route_record(runner, mlp.experts, mlp.gate, captured, layer=3,
+        calibration={'calibration_sha256': '0' * 64, 'shape': [1, 512],
+                     'dtype': 'torch.int64'},
+        producer_source={'tensors': {}, 'files': []},
+        epsilon=1e-20, model_load_contract={'fixture': True},
+        replay_source='fresh_streamed_bf16_source_pass')
+    routing = record['metadata']['routing']
+    assert routing['device'] == str(inputs.device)
+    assert routing['input_dtype'] == 'torch.bfloat16'
+    assert routing['topk_weights_dtype'] == 'torch.float32'
+    assert routing['topk_ids_dtype'] == 'torch.int64'
+
+
+def test_validate_glm_routing_names_the_failing_field():
+    """An anonymous protocol refusal cost a 408 s GPU slot (#1536); the
+    message must name the field that failed, with its observed value."""
+    from prismaquant.native_moe_panel import validate_glm_routing
+    from test_native_moe_glm_geometry import glm_routing
+
+    with pytest.raises(ValueError,
+                       match=r"protocol: device='cuda' \(expected 'cuda:0'\)"):
+        validate_glm_routing(glm_routing(device='cuda'))
