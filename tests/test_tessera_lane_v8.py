@@ -72,8 +72,8 @@ MOE_BATCH = "tessera_e4m3_k1_routed_moe_sm121_batch_resident"
 #: contract at the 2026-09-15 pin (``4c384e604``, v29), where it was a REAL
 #: published fact -- onto the surviving dense E2M1 decode cell.
 RETIRED_DENSE_DECODE = "tessera_e4m3_k1_dense_sm121_decode_resident"
-DENSE_DECODE = "tessera_e2m1_k2_dense_sm121_decode"
-E2M1_DECODE = "tessera_e2m1_k2_dense_sm121_decode"
+DENSE_DECODE = "tessera_e2m1_k2_dense_sm121_decode_resident"
+E2M1_DECODE = DENSE_DECODE
 V29_ARTIFACT = {
     "id": "gbfam/qwen3-0.6b-tessera-e4m3-reach-gridbook",
     "encoder_commit": "8070ec6c4e0448826cda3f3f8d9401a125444e3b",
