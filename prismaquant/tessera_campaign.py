@@ -79,6 +79,7 @@ if TYPE_CHECKING:
 from . import tessera_hessian as th
 from .nvfp4_activation_contract import (
     ActivationScaleContractError as _OwnedActivationScaleContractError,
+    ServedQuantizerUnboundError,
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
@@ -489,9 +490,55 @@ def _measure_anchor(
         publisher=publisher)
 
 
+#: The context the campaign's pricing seam names when it binds the served
+#: activation quantiser (RobTand/prismaquant#1481).
+SERVED_QUANTIZER_CONTEXT = "Stage A Tessera campaign activation pricing"
+
+#: The identity record this process bound through the owner, or ``None`` when
+#: the campaign bound nothing itself. Stamped into the cost table's provenance.
+_SERVED_QUANTIZER_RECORD = None
+
+
+def _bind_served_quantizer(qname, format_name):
+    """Bind the served activation arithmetic before this rung is scored.
+
+    A rung whose route executes the static NVFP4 activation contract is priced
+    by vLLM's registered ``scaled_fp4_quant``, and the contract refuses to price
+    it unbound (RobTand/prismaquant#567). Until #1481 nothing on the campaign
+    path bound it, so every A4 rung raised ``ServedQuantizerUnboundError``.
+
+    The rule has one owner, ``joint_cost_quantum.bind_joint_served_quantizer``,
+    which Stage B already calls; this seam calls it too. It requires the
+    registered operator for a served contract, never falls back to the Torch
+    model, and binds nothing for A8/A16 rungs, so those rosters never import the
+    serving extension.
+
+    A process that already holds a binding keeps it. Either an earlier rung of
+    this run bound it, or a CPU screen declared the model on purpose
+    (``tests/priced_model_screen.py``). The owner would refuse a second,
+    different binding anyway, so re-asking could only turn a declared choice
+    into a refusal.
+    """
+    global _SERVED_QUANTIZER_RECORD
+    from .nvfp4_activation_contract import active_served_quantizer_identity
+    from .joint_cost_quantum import bind_joint_served_quantizer
+
+    if active_served_quantizer_identity() is not None:
+        return
+    record = bind_joint_served_quantizer(
+        {qname: (format_name,)}, context=SERVED_QUANTIZER_CONTEXT)
+    if record is not None:
+        _SERVED_QUANTIZER_RECORD = dict(record)
+        print(f"[campaign] served quantizer bound for {format_name}: backend "
+              f"{record.get('backend')} op {record.get('op')} image "
+              f"{record.get('image_content_sha256')} dequant "
+              f"{record.get('dequant_kernel')}", flush=True)
+
+
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                     hessian_required, static_input_scale):
     """Admit each unit's Hessian and served activation contract before encode."""
+    _bind_served_quantizer(qname, format_name)
     from . import format_registry as fr
     from .tessera_formats import (
         parse_tessera_format_name, tessera_serving_route, tessera_wire_recipe,
@@ -6522,6 +6569,11 @@ def _main(argv, *, source_scope) -> int:
     started = time.time()
     deadline = float(args.deadline_seconds)
     stopped_early = False
+    # Every (unit, format) whose last attempt failed to price, with its error.
+    # The loop keeps pricing past a failure, so the round's successes are
+    # journalled for the retry and a later round may still price the rung;
+    # whatever is left here fails the row before it writes a table (#1481).
+    anchor_failures = {}
 
     def out_of_time() -> bool:
         return deadline > 0 and (time.time() - started) > deadline
@@ -6773,11 +6825,13 @@ def _main(argv, *, source_scope) -> int:
                             activations=[scoring_rows[name].to(device) for name in names],
                             static_input_scales=static_scales, **common)
                 except (HessianContractError, ActivationScaleContractError,
-                        PublicationError):
+                        PublicationError, ServedQuantizerUnboundError):
                     # A staged artifact that did not reach its disk is not one
                     # batch's bad luck: the writer has stopped and everything
                     # behind it was dropped unwritten. Printing and continuing
                     # here would advance the loop past files that do not exist.
+                    # A served quantiser that cannot bind refuses every A4 rung
+                    # of the row, not one anchor (#1481), so it stops the row too.
                     raise
                 except Exception as exc:
                     if selected_guard is not None and selected_guard.failure is not None:
@@ -6790,8 +6844,13 @@ def _main(argv, *, source_scope) -> int:
                     # paths. That is what the synchronous path already does
                     # when a partial batch writes files and journals none of
                     # them, so the failure semantics do not change here.
+                    #
+                    # The failure is kept, not forgotten: the row fails before
+                    # it writes a table (RobTand/prismaquant#1481).
                     print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
                           f"{exc}", flush=True)
+                    for name in names:
+                        anchor_failures[(name, fmt)] = f"{type(exc).__name__}: {exc}"
                     continue
                 if selected_guard is not None:
                     # With publication staging on, this upper bracket includes the
@@ -6804,6 +6863,7 @@ def _main(argv, *, source_scope) -> int:
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
                 for anchor in anchors:
+                    anchor_failures.pop((anchor.qname, anchor.format_name), None)
                     if row_stream is not None:
                         # The reader's holder, over this entry's own source:
                         # a template copy on the encode thread, taken while
@@ -6856,6 +6916,20 @@ def _main(argv, *, source_scope) -> int:
             # then the shards the loop could not yet journal.
             finalize_row_stream()
             flush_checkpoint()
+
+        if anchor_failures:
+            # A rung that failed to price fails the row (RobTand/prismaquant#1481).
+            # Writing the table anyway published it without those rungs, and
+            # when every rung failed, an EMPTY table that exited 0 and was
+            # counted as done. The successes are journalled above, so PB's
+            # retry encodes only what is missing; no cost.pkl is written here.
+            failed = sorted(anchor_failures.items())
+            shown = "; ".join(f"{name} {fmt}: {error}" for (name, fmt), error in failed[:8])
+            more = len(failed) - 8
+            raise RuntimeError(
+                f"campaign row failed to price {len(failed)} anchor(s); "
+                f"successful anchors are journaled and no cost table "
+                f"was written: {shown}" + (f"; and {more} more" if more > 0 else ""))
 
         # Finalization is quiet on purpose -- the last drain, the leave-one-out
         # checks and the cost payload commit nothing the journal counts -- so
@@ -7144,6 +7218,11 @@ def _main(argv, *, source_scope) -> int:
             name: {fmt: dict(record) for fmt, record in sorted(wire_records[name].items())}
             for name in sorted(projected_units) if wire_records.get(name)
         }
+    if _SERVED_QUANTIZER_RECORD is not None:
+        # Which build of the served activation quantiser priced this table's
+        # served-contract rungs (RobTand/prismaquant#1481). Absent when the run
+        # priced none, so an A8/A16 table's bytes are unchanged.
+        payload["provenance"]["served_quantizer"] = dict(_SERVED_QUANTIZER_RECORD)
     payload["menu_sizes"] = {n: len(m) for n, m in menus.items()}
     payload["anchor_counts"] = {
         n: {f: len(a) for f, a in by_f.items()} for n, by_f in measured.items()
