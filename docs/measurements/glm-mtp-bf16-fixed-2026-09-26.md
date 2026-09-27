@@ -134,3 +134,36 @@ file.
 | All files | 175,643,087,583 B | 175,790,111,275 B | 147,023,692 B smaller |
 
 This is a size comparison only. It makes no quality, speed or serving claim.
+
+## TP2 MTP draft census: not run
+
+The planned census was an eager TP2 vLLM serve with a one-step GLM MTP
+speculative config. It used image
+`localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a0…e1b7f5` and Tessera
+`09d6559d7`, with rank 0 on sparklina and rank 1 on sparky. It did **not run**:
+the derived per-rank footprint does not fit sparky. Nothing was served, and
+this document makes no generation, draft-route, acceptance or memory-fit claim
+for the artifact.
+
+The derivation uses this artifact's manifest totals and the measured x-picks
+routed retention: 72.87 GiB per rank at TP2 from a 153.3 GB wire, which is
+51.04% of the wire per rank (PB `ac0ff9cbfe14`).
+
+| Term | Per rank |
+| --- | ---: |
+| Routed and MTP wire, 156,973,875,200 B × 0.5104 | 74.6 GiB |
+| Passthrough, 18,567,773,048 B (sharded … replicated; unmeasured) | 8.6 … 17.3 GiB |
+| KV cache (`--kv-cache-memory-bytes 268435456`) | 0.25 GiB |
+| Runtime and activation peak (eager, `max-model-len 512`) | ~6.5 GiB |
+| **Footprint** | **89.9 … 98.6 GiB** |
+| + 16 GiB watchdog floor | 105.9 … 114.6 GiB |
+| + 24 GiB launcher READY floor instead | 113.9 … 122.6 GiB |
+
+With the GPU idle and PB drained, sparky's MemAvailable was 105.9 GiB at
+2026-09-27 00:20Z, and sparklina's was about 116 GiB. The most optimistic
+bound leaves sparky exactly at the 16 GiB watchdog floor, and no bound clears
+the launcher's 24 GiB READY floor. A census on the two Sparks needs either a
+smaller per-rank footprint or about 8 to 17 GiB more free memory on sparky.
+
+The runtime-plus-activation term and passthrough sharding are estimates, not
+measurements. A real TP2 load is still the only per-rank measurement.
