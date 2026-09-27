@@ -491,7 +491,8 @@ def test_a_capture_off_the_chains_batch_size_refuses_before_any_gpu_work(
         patch.setattr(core, "run_layer_quantum_core", with_emitter)
         _clear_output(campaign4, 1)
         payload, state = spill_tests._quantum(
-            campaign4, monkeypatch, layer=1, spill_root=_spill_root(tmp_path),
+            campaign4, monkeypatch, layer=1,
+            spill_root=_spill_root(tmp_path, needs_direct_io=False),
             ceiling=1 << 30, regime="capture_batch=2")
     assert payload is None
     assert "capture_batch=2" in _chain(state.error)

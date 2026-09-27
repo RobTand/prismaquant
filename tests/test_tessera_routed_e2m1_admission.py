@@ -130,14 +130,14 @@ def test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap(monke
     by_name = {rung.format_name: rung for rung in readable}
     a4 = by_name[RUNG]
     a8 = by_name["TESSERA_E4M3_K1_R1024"]
-    a16 = by_name["TESSERA_BF16_K1_R1024"]
+    a16 = by_name["TESSERA_BF16_K1_R1023"]
     assert (a4.admission.act_bits, a8.admission.act_bits, a16.admission.act_bits) == (4, 8, 16)
     assert len({a4.admission.activation_contract, a8.admission.activation_contract,
                 a16.admission.activation_contract}) == 3
     # 3.5 bpp body plus the attested 0.5 bpp UE4M3 block-scale plane.
     assert float(a4.bits_per_param) == pytest.approx(4.0, abs=1e-2)
-    # Since contract v28 the routed E2M1 cell attests A4 at this scope; no
-    # routed BF16 cell exists, so A16 stays a stamped gap.
+    # v39 attests routed BF16 q1024 here; the readable neighbouring q1023
+    # still has no cell. Readability must not fill that attestation gap.
     assert a4.admission.attested
     assert a16.route_status == menu.ROUTE_STATUS_UNATTESTED
     assert a16.admission.readable
@@ -151,4 +151,5 @@ def test_readable_menu_spans_a4_a8_a16_on_a_routed_unit_and_stamps_the_gap(monke
                                         serving_context=routed_context)
     names = {rung.format_name for rung in attested}
     assert RUNG in names
-    assert "TESSERA_BF16_K1_R1024" not in names
+    assert "TESSERA_BF16_K1_R1024" in names
+    assert "TESSERA_BF16_K1_R1023" not in names
