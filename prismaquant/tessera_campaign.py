@@ -489,9 +489,55 @@ def _measure_anchor(
         publisher=publisher)
 
 
+#: The context the campaign's pricing seam names when it binds the served
+#: activation quantiser (RobTand/prismaquant#1481).
+SERVED_QUANTIZER_CONTEXT = "Stage A Tessera campaign activation pricing"
+
+#: The identity record this process bound through the owner, or ``None`` when
+#: the campaign bound nothing itself. Stamped into the cost table's provenance.
+_SERVED_QUANTIZER_RECORD = None
+
+
+def _bind_served_quantizer(qname, format_name):
+    """Bind the served activation arithmetic before this rung is scored.
+
+    A rung whose route executes the static NVFP4 activation contract is priced
+    by vLLM's registered ``scaled_fp4_quant``, and the contract refuses to price
+    it unbound (RobTand/prismaquant#567). Until #1481 nothing on the campaign
+    path bound it, so every A4 rung raised ``ServedQuantizerUnboundError``.
+
+    The rule has one owner, ``joint_cost_quantum.bind_joint_served_quantizer``,
+    which Stage B already calls; this seam calls it too. It requires the
+    registered operator for a served contract, never falls back to the Torch
+    model, and binds nothing for A8/A16 rungs, so those rosters never import the
+    serving extension.
+
+    A process that already holds a binding keeps it. Either an earlier rung of
+    this run bound it, or a CPU screen declared the model on purpose
+    (``tests/priced_model_screen.py``). The owner would refuse a second,
+    different binding anyway, so re-asking could only turn a declared choice
+    into a refusal.
+    """
+    global _SERVED_QUANTIZER_RECORD
+    from .nvfp4_activation_contract import active_served_quantizer_identity
+    from .joint_cost_quantum import bind_joint_served_quantizer
+
+    if active_served_quantizer_identity() is not None:
+        return
+    record = bind_joint_served_quantizer(
+        {qname: (format_name,)}, context=SERVED_QUANTIZER_CONTEXT)
+    if record is not None:
+        _SERVED_QUANTIZER_RECORD = dict(record)
+        print(f"[campaign] served quantizer bound for {format_name}: backend "
+              f"{record.get('backend')} op {record.get('op')} image "
+              f"{record.get('image_content_sha256')} dequant "
+              f"{record.get('dequant_kernel')}", flush=True)
+
+
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
                     hessian_required, static_input_scale):
     """Admit each unit's Hessian and served activation contract before encode."""
+    _bind_served_quantizer(qname, format_name)
     from . import format_registry as fr
     from .tessera_formats import (
         parse_tessera_format_name, tessera_serving_route, tessera_wire_recipe,
@@ -5127,7 +5173,6 @@ def _main(argv, *, source_scope) -> int:
     from .production_weight_cache import ProductionWeightCache
     from .tessera_menu import MENU_MODES, PARALLEL_NONE, menu_mode
     from .tessera_rate_surface import leave_one_anchor_out
-    from .tessera_publication import PublicationError
     from .tessera_render import (
         HessianContractError, tessera_encoder_hessian_status,
     )
@@ -6759,27 +6804,18 @@ def _main(argv, *, source_scope) -> int:
                             weights=[weights[name].to(device) for name in names],
                             activations=[scoring_rows[name].to(device) for name in names],
                             static_input_scales=static_scales, **common)
-                except (HessianContractError, ActivationScaleContractError,
-                        PublicationError):
-                    # A staged artifact that did not reach its disk is not one
-                    # batch's bad luck: the writer has stopped and everything
-                    # behind it was dropped unwritten. Printing and continuing
-                    # here would advance the loop past files that do not exist.
-                    raise
                 except Exception as exc:
-                    if selected_guard is not None and selected_guard.failure is not None:
-                        raise  # A physical memory refusal must stop the action.
-                    # A batch that raises part way through has already handed
-                    # the writer files for its early units. Nothing records
-                    # those units, so no receipt job follows and nothing is
-                    # staged; their file completions are ignored, the bytes
-                    # land, and the next round re-prices them over the same
-                    # paths. That is what the synchronous path already does
-                    # when a partial batch writes files and journals none of
-                    # them, so the failure semantics do not change here.
+                    # A rung that fails to price fails the row (RobTand/prismaquant#1481).
+                    # Printing and continuing published a table without the rung,
+                    # and when every rung failed, an EMPTY table that exited 0 and
+                    # was counted as done. Nothing past this point writes cost.pkl,
+                    # so the row leaves no partial table, and PB records a failure
+                    # it can retry. Files a partial batch already handed the writer
+                    # are journalled by no one; a retry re-prices them over the same
+                    # paths, as the synchronous path always has.
                     print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
                           f"{exc}", flush=True)
-                    continue
+                    raise
                 if selected_guard is not None:
                     # With publication staging on, this upper bracket includes the
                     # staged CPU bytes of any batch the writer has not finished.
@@ -7131,6 +7167,11 @@ def _main(argv, *, source_scope) -> int:
             name: {fmt: dict(record) for fmt, record in sorted(wire_records[name].items())}
             for name in sorted(projected_units) if wire_records.get(name)
         }
+    if _SERVED_QUANTIZER_RECORD is not None:
+        # Which build of the served activation quantiser priced this table's
+        # served-contract rungs (RobTand/prismaquant#1481). Absent when the run
+        # priced none, so an A8/A16 table's bytes are unchanged.
+        payload["provenance"]["served_quantizer"] = dict(_SERVED_QUANTIZER_RECORD)
     payload["menu_sizes"] = {n: len(m) for n, m in menus.items()}
     payload["anchor_counts"] = {
         n: {f: len(a) for f, a in by_f.items()} for n, by_f in measured.items()

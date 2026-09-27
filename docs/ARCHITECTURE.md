@@ -3515,8 +3515,31 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/pact-gamut-stageb-multiformat`.
+As of: 2026-09-27 · `claude/campaign-bind-served-quantizer-1481`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/campaign-bind-served-quantizer-1481`) for **the
+Stage A campaign's served-quantiser binding and failure contract** (PQ #1481,
+#1482). Two changes:
+
+- **Binding.** `tessera_campaign._prepare_anchor` is the per-unit gate that both
+  the campaign and `tessera_materialization` price through. It now binds the
+  served activation quantiser by calling the owner Stage B already uses,
+  `joint_cost_quantum.bind_joint_served_quantizer`, which gains a `context`
+  argument. Until now nothing on the Stage A path bound it, so every
+  `TESSERA_E2M1_K2` rung raised `ServedQuantizerUnboundError`.
+  - A process that already holds a binding keeps it. That binding comes from an
+    earlier rung of the same run, or from a CPU screen that declared the model.
+  - A8 and A16 rungs bind nothing and never import the serving extension.
+  - A table that priced a served-contract rung stamps the bound record as
+    `provenance.served_quantizer`. An A8 or A16 table's bytes are unchanged.
+- **Failure contract.** A rung that raises now fails the row. The row prints
+  `FAILED`, re-raises, exits nonzero and writes no `cost.pkl`, and PrismaBuild
+  records a retryable failure. Before this change the rung was printed and
+  skipped, and a row whose every rung failed published an empty table with rc 0.
+
+No format, default, stage or ship gate changes. Gate:
+`tests/test_campaign_served_quantizer_binding.py`.
 
 Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
 inputs over a several-format catalog** (PQ #1437). The Stage B control
