@@ -349,11 +349,9 @@ def test_the_live_seam_finds_no_attesting_cell_on_gfx1201_either():
 def test_the_live_seam_still_attests_a_sm121_rung():
     """The control for the live seam, so `()` above is about the platform.
 
-    The dense E2M1 pair still ships on ``sm_121`` under the release's default
-    image, so the attested answer is reachable through the same seam.  The
-    rung is read off the dense cell itself: the family's ``attested_rungs``
-    begin at 128 since the routed widen, and 128 is the ROUTED pair's rung,
-    not the dense one's.
+    The dense E2M1 pair ships on ``sm_121`` under its cell's GLM image, not
+    the release's default image. Both the rung and scope come from that cell;
+    backing alone cannot substitute a different runtime image.
     """
     from prismaquant.lane_eligibility import ServingContext
 
@@ -367,7 +365,7 @@ def test_the_live_seam_still_attests_a_sm121_rung():
                ).replace("{k}", str(rung))
     context = ServingContext(
         platform="sm_121", structure="dense", residency="resident",
-        runtime_image=str(_packaged()["versions"]["default_serve_image"]),
+        runtime_image=dense["runtime"]["image"],
         execution_mode="eager")
     assert tr.tessera_attesting_cells(name, serving_context=context) != ()
 
