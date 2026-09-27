@@ -72,6 +72,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .cost_stage_checkpoint import atomic_write_bytes, publish_new_bytes
+from .digests import file_sha256hex
 from .layer_config import LAYER_CONFIG_META_KEY
 from .measured_runtime_prices import identity_sha256
 
@@ -566,7 +567,7 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
         "fixed_resources": dict(ctx.fixed_resources),
         "cost_path": str(cost_path), "cost_sha256": cost_sha256,
         "probe_path": str(ctx.probe_path),
-        "probe_sha256": _file_sha256(Path(ctx.probe_path)),
+        "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
         "allocator_cwd": str(Path.cwd()),
         "target_bits": float(ctx.target_bits),
         "serve_slos_other_axes": {key: value for key, value in ctx.slos.as_dict().items()
@@ -645,11 +646,6 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _file_sha256(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
-
-
 def replay(frontier: Path, digest: str, output: Path) -> None:
     """Re-solve a digest-bound point and use the allocator's only config writer.
 
@@ -681,7 +677,7 @@ def replay(frontier: Path, digest: str, output: Path) -> None:
         checksum = provenance.get(f"{key}_sha256")
         if key == "cost" and not checksum:
             raise PrefillFrontierError("replay requires cost_sha256")
-        if checksum and _file_sha256(Path(provenance[f"{key}_path"])) != checksum:
+        if checksum and file_sha256hex(Path(provenance[f"{key}_path"])) != checksum:
             raise PrefillFrontierError(f"replay {key}_sha256 mismatch")
     allocator_argv = provenance["allocator_argv"]
     if not isinstance(allocator_argv, list) or not all(isinstance(a, str) for a in allocator_argv):
@@ -714,8 +710,8 @@ def replay(frontier: Path, digest: str, output: Path) -> None:
             "assignment_sha256": digest,
             "slo_ms": point["slo_ms"], "target_bits": point["target_bits"],
             "table_identity": ctx.table_identity,
-            "cost_sha256": _file_sha256(Path(ctx.cost_path)),
-            "probe_sha256": _file_sha256(Path(ctx.probe_path)),
+            "cost_sha256": file_sha256hex(Path(ctx.cost_path)),
+            "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
             "probe_bound_by_sweep": "probe_sha256" in provenance,
         }
         ctx.emit_replay(point["slo_ms"], point["target_bits"], expected, stamp)

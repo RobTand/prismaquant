@@ -246,7 +246,8 @@ def row_class(spec: dict, name: str = DEFAULT_ROW_CLASS) -> dict:
     A spec with no ``classes`` block has exactly one class, the default, and it
     IS the spec: same interpreter, same environment, same tags, same container.
     That is the property the action key depends on, so it is stated here rather
-    than left to the caller.
+    than left to the caller. A portable admission reference belongs to that
+    container: a class replacing the container does not inherit its reference.
     """
 
     base = {
@@ -260,6 +261,8 @@ def row_class(spec: dict, name: str = DEFAULT_ROW_CLASS) -> dict:
     }
     if "container" in spec:
         base["container"] = spec["container"]
+    if "container_admission_reference" in spec:
+        base["container_admission_reference"] = spec["container_admission_reference"]
     declared = spec.get("classes") or {}
     if name not in declared:
         if name != DEFAULT_ROW_CLASS:
@@ -276,6 +279,8 @@ def row_class(spec: dict, name: str = DEFAULT_ROW_CLASS) -> dict:
             f"row class {name!r} declares {sorted(unknown)}, which a class does "
             f"not own; a class may set {sorted(ROW_CLASS_FIELDS - {'_why'})}")
     resolved = {**base, **{k: v for k, v in override.items() if k != "_why"}}
+    if "container" in override:
+        resolved.pop("container_admission_reference", None)
     if "env" in override:
         if not isinstance(override["env"], dict):
             raise RowClassRefused(f"row class {name!r} env is not an object")
@@ -1583,14 +1588,16 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
     container_image = None
     if "container" in resolved:
         container_spec = {"container": resolved["container"], "env": env}
+        if resolved.get("container_admission_reference") is not None:
+            container_spec["container_admission_reference"] = resolved["container_admission_reference"]
         validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
                    json.dumps(container_spec, sort_keys=True), "--", *command]
         # The class owns the image: whatever container this row resolved runs
         # is what PrismaBuild must find on the claiming box before the claim
-        # (RobTand/prismabuild#714).  ``None`` for an archive-backed class --
-        # its loader establishes the image inside the action, so no
-        # local-presence prerequisite may gate placement.
+        # (RobTand/prismabuild#714). Without an explicit portable override,
+        # an archive-backed class declares nothing: its loader establishes
+        # the image inside the action rather than requiring local presence.
         container_image = admission_image_reference(container_spec)
     row = {
         "argv": command,
