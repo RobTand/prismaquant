@@ -508,12 +508,18 @@ def live_pins() -> DomainPins:
 #: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves.  The served
 #: recipe differs from ``wire_recipe`` only for a routed E2M1x2 stack below
 #: the cap, which no ``PRIMARY_FAMILIES`` rung reaches.
+#: **Re-taken 2026-09-27 for ``a3e83875d`` (contract v39, unchanged), a
+#: re-transcription.**  Tessera #671 (tessera#670) adds the v3 catalog
+#: extension to the rooted cached-unit reader only.  ``export.py`` remains
+#: ``4e2e8487…`` and ``grammar.py`` remains ``9ae1f824…``: reuse the
+#: uniquely identified ``reader-pin-f94929de`` byte-state, not a duplicate
+#: digest entry.  No count moves (PQ #1524).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="f94929defd9fa00b8726160a2cd436f02733b6dc",
+    reader_dev_pin_commit="a3e83875d20f54c685307da13a34992d70256f02",
     reader_dev_pin_contract_sha256=(
         "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
     ),
-    serving_runtime_pinned_commit="f94929defd9fa00b8726160a2cd436f02733b6dc",
+    serving_runtime_pinned_commit="a3e83875d20f54c685307da13a34992d70256f02",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
         "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
