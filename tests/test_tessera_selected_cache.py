@@ -161,7 +161,7 @@ def test_missing_or_changed_selected_evidence_refuses(tmp_path, change, match):
 
 
 @pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale',
-                                    'v2_extension'])
+                                    'v2_extension', 'no_proof', 'no_proof_dev'])
 def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, change):
     # Capture-reuse and full512 policy derivation have independent artifact-level
     # tests. This bridge supplies their accepted boundary, then runs the real
@@ -188,7 +188,7 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
         render = added / (record['file'] + '.pt'); render.write_bytes(b'render')
         adoption = {'schema': bridge.ADOPTION_SCHEMA, 'reference_pair': [name, FMT],
                     'reference_encoding_identity': reference, 'candidate_encoding_identity': candidate['identity'],
-                    'encoder_source_proof': proof}
+                    'encoder_source_proof': None if change in ('no_proof', 'no_proof_dev') else proof}
         qualified = {'act_bits': 4, 'static_contract': {'measured_as_served': True},
                      'activation_max_abs': 12.0, 'input_global_scale': 0.5}
         row = {'qname': name, 'format': bridge.R13_ADDED_FORMAT, 'record': candidate,
@@ -259,13 +259,25 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     elif change == 'missing_proof': Path(proof['path']).write_text('{}')
     elif change == 'changed_wire': Path(rows[0]['wire']).write_bytes(b'changed')
     elif change == 'wrong_scale': handoff['costs'][rows[0]['qname']][bridge.R13_ADDED_FORMAT]['input_global_scale'] = 0.5
+    elif change == 'no_proof_dev':
+        # A cell no reseal proof covers is admitted unproven in dev mode only
+        # (PQ #1147); certified mode ('no_proof') refuses it (PQ #1438).
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
     def build():
         return selected_cached_units_manifest(assignment, metadata, handoff, data,
             schema='tessera.cached_units.v2', catalog_extension=extension, producer_packages=packages)
-    if change and change != 'v2_extension':
+    if change == 'no_proof':
+        with pytest.raises(ValueError, match='no encoder source proof'): build()
+        return
+    if change and change not in ('v2_extension', 'no_proof_dev'):
         with pytest.raises((ValueError, RuntimeError)): build()
         return
     manifest = build()
+    if change == 'no_proof_dev':
+        assert manifest['reuse_authority']['encoder_source_proofs'] == []
+        assert all(adoption['encoder_source_proof'] is None for adoption in manifest['encoder_adoptions'].values())
+        assert manifest['producer_packages'] == packages
+        return
     assert len(seen) == 1 and seen[0][1]['run_header'] == header
     for package in packages.values():
         directory = Path(package['path']); directory.mkdir()

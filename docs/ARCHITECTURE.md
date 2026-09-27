@@ -8,6 +8,24 @@ bindings. Callers retain their own errors, coercions and returned objects.
 including string subclasses. No digest bytes, schema, default or gate changes.
 Inventory: `docs/design/digest_hex_1457.md`.
 
+Canonical pickle identity (2026-09-27, `astra/pickle-protocol-1450`, PQ #1450):
+`digests.canonical_pickle_bytes` explicitly selects protocol 4, the historical
+Python 3.12 producer encoding, rather than the interpreter's default. Python
+3.14 must not silently select protocol 5 for the same value. The existing
+`9a7567…` golden is unchanged, and `tests/test_digest_profiles_1301.py` checks
+both the explicit argument and the wire protocol. This preserves the campaign
+`cost.pkl` identity; no migration, stage, serving lane or ship gate change.
+
+Roster digest consolidation (2026-09-26, `astra/dedup-digests-1301`, PQ #1446):
+`digests.py` owns the ordered and sorted LF-delimited UTF-8 roster encodings,
+with no added final newline. The layer-quantum roster keeps its existing
+validation; the head-walk roster and descriptor slices use the shared encoding.
+`tests/test_digest_rosters_1446.py` compares the exact hash input bytes and
+outcomes with the pre-change PB-recorded table. The domain-framed replay roster
+and JSON candidate roster are different identities and remain unchanged.
+No arithmetic, schema, pipeline default, serving lane or ship gate changes.
+Inventory and remaining scope: `docs/design/digest_rosters_1446.md`.
+
 Tessera contract v39 (2026-09-27, Tessera #641, merge `52bc86ea1…`, closing
 tessera#604) is on Tessera master. It is **not** on PrismaQuant's pin. The pin
 stays at `09d6559d7…` with packaged contract v38 (SHA-256 `04d5a20a…9d22e4`),
@@ -3421,7 +3439,13 @@ dev mode stamps `[DEV-MODE]` and admits the cell, and
 `PRISMAQUANT_DEV_MODE=0` refuses it. Unit, source, projection, calibration and
 `encoder_fixture_id` equality with the reference cell, the byte and stat
 fences, the wire and render digests and rendered-shape equality stay hard
-walls in both modes.
+walls in both modes. At export, `tessera_export_lane.selected_cached_units_manifest`
+records such a cell's adoption with no proof and compares no proof-bound
+producer package for it (PQ #1438); the seal's producer package is still
+required. The pinned Tessera reader (`tessera/cached_unit.py` at af7a86d4)
+does not yet read that shape: it requires a covering reseal proof for every
+adoption and reads only the v1 R896 served activation policy, so a rooted
+selection with an unproven or non-R896 added cell refuses there.
 
 A catalog extension is priced by a **full re-price**, not a merge (PQ #1432).
 The join (`joint_quanta_join.py`, the `coverage` check) requires every unit's
@@ -3495,8 +3519,17 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `claude/1448-arch-tessera-v39`.
+As of: 2026-09-27 · `claude/pact-gamut-export-optional-proof`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/pact-gamut-export-optional-proof`) for **an
+unproven adopted cell at export** (PQ #1438). The rooted selected-cache
+manifest reads an accepted adoption's reseal proof as optional, as
+`validated_encoder_adoption` returns it: a dev-mode unproven cell adds no
+proof binding and no proof-bound producer-package comparison. Recorded with
+it: the pinned Tessera cached-unit reader still requires a proof per adoption
+and the v1 R896 served activation policy (Tessera #644). No default, stage, format, lane or
+ship gate changes.
 
 Re-stamped (2026-09-27, `claude/1448-arch-tessera-v39`) for the Tessera
 contract v39 entry at the top (PQ #1448). It records what v39 changes for
