@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import os
 import threading
 import time
 
@@ -238,8 +239,8 @@ def test_workers_follow_the_measured_rates():
     stream = io_engine.ReadStream(
         engine, entries, io_engine.FixedBudget(buffer_bytes=8000), None)
     with stream._cond:
-        # Nothing measured yet: the whole pool.
-        assert stream._workers() == 8
+        # Nothing measured yet: the pool less the consumer's core.
+        assert stream._workers() == 7
         stream.counters["bytes_read"], stream.counters["read_s"] = 100, 1.0
         stream._busy_min_s = 10.0
         stream._took_at = time.monotonic()
@@ -248,6 +249,44 @@ def test_workers_follow_the_measured_rates():
         assert stream._workers() == 4
         stream._consumer_waiting = True
         assert stream._workers() == 8
+
+
+def test_the_consumer_core_is_held_back_only_while_the_consumer_works():
+    """PQ #1533: a waiting consumer frees its core; a busy one keeps it.
+
+    The width is the engine's own accounting of the consumer's time in
+    ``take`` against its time working between takes, never a caller cap.
+    """
+    engine = io_engine.IOEngine()
+    engine.width = 8
+    entries = [io_engine.ReadEntry(key=i, path="unused", size=900, limit=900,
+                                   held_bytes=900, expected_sha256=None,
+                                   decoder=_decode, group=i)
+               for i in range(4)]
+    stream = io_engine.ReadStream(
+        engine, entries, io_engine.FixedBudget(buffer_bytes=8000), None)
+    with stream._cond:
+        # Unmeasured: the consumer's core is held back, as before #1533.
+        assert stream._width() == 7
+        # Blocked in take(): the consumer uses no core, so every core reads.
+        stream._consumer_waiting = True
+        assert stream._width() == 8
+        stream._consumer_waiting = False
+        # A consumer that mostly waits (the fence: sha256 in the pool, the
+        # consumer only admits) gives its core to the reads.
+        stream.counters["consumer_busy_s"] = 0.1
+        stream.counters["consumer_wait_s"] = 2.0
+        assert stream._width() == 8
+        # A CPU-heavy consumer keeps its core: affinity less one.
+        stream.counters["consumer_busy_s"] = 5.0
+        assert stream._width() == 7
+        # Even a busy consumer frees its core while it is blocked in take().
+        stream._consumer_waiting = True
+        assert stream._width() == 8
+
+
+def test_the_engine_pool_spans_the_whole_affinity():
+    assert io_engine.IOEngine().width == max(1, len(os.sched_getaffinity(0)))
 
 
 def test_a_closed_stream_refuses_and_holds_nothing(tmp_path):
