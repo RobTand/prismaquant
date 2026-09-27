@@ -31,15 +31,16 @@ SELECTED = [8, 16]  # shared-expert-like [out, in] BF16 weight, selected
 UNSELECTED = [64, 64]  # routed-expert-like BF16 weight, never selected
 
 
-def _checkpoint(tmp_path):
+def _checkpoint(tmp_path, unselected=UNSELECTED):
     """Four decoder layers over two shards, each layer a small selected
     weight beside a large unselected one, the shape of a GLM-5.3 MoE layer."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
     shards = {'model-00001-of-00002.safetensors': {}, 'model-00002-of-00002.safetensors': {}}
     names = sorted(shards)
     for layer in range(LAYERS):
         shard = shards[names[layer // 2]]
         shard[f'layers.{layer}.shared.weight'] = torch.ones(SELECTED, dtype=torch.bfloat16)
-        shard[f'layers.{layer}.routed.weight'] = torch.ones(UNSELECTED, dtype=torch.bfloat16)
+        shard[f'layers.{layer}.routed.weight'] = torch.ones(unselected, dtype=torch.bfloat16)
     weight_map = {}
     for name, tensors in shards.items():
         save_file(tensors, str(tmp_path / name))
@@ -67,16 +68,22 @@ def _plan(tmp_path, monkeypatch, policy):
 
 
 def test_selected_row_is_not_charged_whole_layers_it_never_reads(tmp_path, monkeypatch):
-    _checkpoint(tmp_path)
-    plan = _plan(tmp_path, monkeypatch, 'selected-tensors-v1')
+    small, large = tmp_path / 'small', tmp_path / 'large'
+    _checkpoint(small)
+    _checkpoint(large, [2 * UNSELECTED[0], 2 * UNSELECTED[1]])
+    plan = _plan(small, monkeypatch, 'selected-tensors-v1')
+    grown = _plan(large, monkeypatch, 'selected-tensors-v1')
     anchors = plan['phases']['resident_anchors']
     selected_bytes = LAYERS * SELECTED[0] * SELECTED[1] * 2
-    layer_bytes = LAYERS * (SELECTED[0] * SELECTED[1] + UNSELECTED[0] * UNSELECTED[1]) * 2
     widest_weight = SELECTED[0] * SELECTED[1] * 4
-    # The RED line on main: it charges every tensor of the four layers.
-    assert anchors['source_validation_bytes'] < layer_bytes + widest_weight, (
-        'selected row charged the whole-layer raw-page allowance '
-        f"({anchors['source_validation_bytes']} B for {selected_bytes} B selected)")
+    # The RED line on main: it charges every tensor of the four layers, so
+    # quadrupling tensors the row never reads raises the row's charge.
+    assert grown['phases']['resident_anchors']['source_validation_bytes'] == (
+        anchors['source_validation_bytes']), (
+        'selected row charged tensors it never reads '
+        f"({anchors['source_validation_bytes']} B, then "
+        f"{grown['phases']['resident_anchors']['source_validation_bytes']} B once "
+        f'only unselected tensors grew; {selected_bytes} B selected)')
 
     from prismaquant.tessera_calibration_cache import SOURCE_HASH_BLOCK_BYTES
     hash_window = 2 * SOURCE_HASH_BLOCK_BYTES
