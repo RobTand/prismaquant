@@ -11,6 +11,7 @@ receipt comes to disagree with the run it describes.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from typing import Any, Mapping
 
@@ -187,6 +188,16 @@ _PEER_FLAG_SPELLING = {
     "quantization": "--quantization",
     "gpu_memory_utilization": "--gpu-memory-utilization",
     "logprobs_mode": "--logprobs-mode",
+    # GLM-5.3 NoPE selects its plugin attention backend by name (PQ #1473).
+    "attention_backend": "--attention-backend",
+}
+
+#: Kwargs whose value is a JSON object on the stock command line. The value is
+#: written as compact, key-sorted JSON so one kwargs dict has exactly one
+#: spelling; vLLM parses the flag back into the same dict. GLM-5.3 NoPE needs
+#: `kernel_config={"enable_flashinfer_autotune": false}` on every rank (#1473).
+_PEER_JSON_SPELLING = {
+    "kernel_config": "--kernel-config",
 }
 
 #: Boolean kwargs whose stock spelling is a bare flag when true. `False` emits
@@ -246,6 +257,12 @@ def headless_peer_argv(
             elif off is not None:
                 argv.append(off)
             continue
+        if name in _PEER_JSON_SPELLING:
+            if not isinstance(value, dict):
+                raise ValueError(f"{name} must be a JSON object (dict), got {value!r}")
+            argv.extend([_PEER_JSON_SPELLING[name],
+                         json.dumps(value, separators=(",", ":"), sort_keys=True)])
+            continue
         flag = _PEER_FLAG_SPELLING.get(name)
         if flag is None:
             raise ValueError(
@@ -255,6 +272,44 @@ def headless_peer_argv(
             )
         argv.extend([flag, str(value)])
     return argv
+
+
+def parse_headless_peer_argv(argv: list[str]) -> tuple[str, int, dict[str, Any]]:
+    """Invert :func:`headless_peer_argv`: ``(model, node_rank, kwargs)``.
+
+    Values come back as the strings the stock CLI receives (JSON flags come
+    back parsed), so a caller compares them against ``str(value)`` of the
+    coordinator's kwargs. Any token outside the published spelling tables
+    refuses: this is the check that the peer argv says exactly what the
+    coordinator's engine says, and nothing else.
+    """
+    if len(argv) < 5 or argv[0] != "serve" or argv[2] != "--node-rank" or argv[4] != "--headless":
+        raise ValueError("not a headless peer argv: expected serve MODEL --node-rank N --headless ...")
+    model, node_rank = argv[1], int(argv[3])
+    flags = {flag: name for name, flag in _PEER_FLAG_SPELLING.items()}
+    json_flags = {flag: name for name, flag in _PEER_JSON_SPELLING.items()}
+    bool_on = {on: name for name, (on, _off) in _PEER_BOOLEAN_SPELLING.items()}
+    bool_off = {off: name for name, (_on, off) in _PEER_BOOLEAN_SPELLING.items() if off}
+    kwargs: dict[str, Any] = {}
+    rest, i = argv[5:], 0
+    while i < len(rest):
+        token = rest[i]
+        if token in bool_on or token in bool_off:
+            name = bool_on.get(token) or bool_off[token]
+            value: Any = token in bool_on
+            i += 1
+        elif token in flags or token in json_flags:
+            if i + 1 >= len(rest):
+                raise ValueError(f"{token} has no value")
+            name = flags.get(token) or json_flags[token]
+            value = json.loads(rest[i + 1]) if token in json_flags else rest[i + 1]
+            i += 2
+        else:
+            raise ValueError(f"peer argv token {token!r} has no published spelling")
+        if name in kwargs:
+            raise ValueError(f"peer argv states {name!r} twice")
+        kwargs[name] = value
+    return model, node_rank, kwargs
 
 
 def gold_provenance(tool: str, args: argparse.Namespace, *, engine_kwargs,
