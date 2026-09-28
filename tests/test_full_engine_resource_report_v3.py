@@ -78,7 +78,10 @@ def test_v3_malformed_identity_or_placement_claim_refuses(tmp_path, mutation):
     elif mutation == "placement":
         document["derived"]["certifies_placement"] = True
     else:
+        # Unmarked, an unregistered observation is skipped (#1548); the
+        # producer's must-understand mark still forces the refusal.
         document["observations"]["unregistered_v3_observation"] = {}
+        document["observations"]["must_understand"] = ["unregistered_v3_observation"]
     with pytest.raises(RuntimePriceError):
         consumer.read_full_engine_resource_report(seal(tmp_path, document), root=tmp_path)
 
