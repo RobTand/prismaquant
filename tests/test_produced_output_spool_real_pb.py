@@ -19,11 +19,16 @@ from test_stage_a_produced_boundary_chain import _isolated_launch_context  # noq
 # PQ #1008: one pinned prismabuild per process (tests/conftest.py).
 pytestmark = pytest.mark.own_process
 
+#: The shared published-generation pin (PQ #1084). The suite's own
+#: local-spool bundle predated ``prismabuild.client``, which PQ now binds
+#: (PQ #1545), and every file it pinned is in the shared pin's union.
+PIN_PATH = chain.PB_GENERATION_PIN
+
 
 def test_actual_export_ack_precedes_pq_publication_progress_and_strict_read(tmp_path, monkeypatch):
     from fleet_sdk import require_prismabuild_sdk
     require_prismabuild_sdk()
-    pin_path = Path(__file__).with_name("stagea_local_spool_pb_pin.json")
+    pin_path = PIN_PATH
     pin = json.loads(pin_path.read_text())
     root = Path(pin["bundle_root"])
     assert root.is_dir(), "the qualified PB source bundle must be provisioned"

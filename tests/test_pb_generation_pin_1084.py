@@ -59,6 +59,7 @@ def test_the_shared_pin_names_the_published_generation():
 CONSUMER_PIN_NAMES = {
     "test_band_serial_handoff_produced": "ORIGIN_PIN",
     "test_band_serial_handoff_spool_real_pb": "ORIGIN_PIN",
+    "test_produced_output_spool_real_pb": "PIN_PATH",
     "test_stage_a_retirement_pb_1073": "PIN_PATH",
     "test_stage_b_prep_produced_1070": "PIN_PATH",
 }
