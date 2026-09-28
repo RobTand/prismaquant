@@ -251,6 +251,11 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "e54f3f1b56d54fe2b6701ccadf3e74770e41385cff884a63118bf16f8590fedc",
     },
+    "reader-pin-a5f3b232": {
+        "commit": "a5f3b232cb3c424b537a06713c728c86153d55fb",
+        "export.py":
+            "427a8f973b5d41e65473eeb687bfe4b627021bc95a321fda4059b2c75b8a37c3",
+    },
     "unpinned-working-checkout-a9eb572e": {
         "commit": "a9eb572e1b90b17f716562192910681e65430fba",
         "export.py":
@@ -293,6 +298,7 @@ TESSERA_GRAMMAR_DIGESTS = frozenset({
 TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
     "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-38e96012",
+    "reader-pin-a5f3b232",
 )
 
 
@@ -541,18 +547,25 @@ def live_pins() -> DomainPins:
 #: verifier, docs) leave ``export.py`` at ``e54f3f1b…`` and ``grammar.py`` at
 #: ``9ae1f824…``, so ``reader-pin-db5b6e23`` is renamed
 #: ``reader-pin-38e96012`` and no count moves (PQ #1274).
+#: **Re-taken 2026-09-28 for ``a5f3b232cb`` (contract v44), a new entry.**
+#: Tessera #693 (v43, the fused dense second launch) and #691 (v44, the
+#: supported exporter move) move ``export.py`` by one docstring line only
+#: (``e54f3f1b…`` -> ``427a8f97…``); ``_window_bits_for``, ``wire_recipe``,
+#: the WINDOW constants and ``grammar.py`` (``9ae1f824…``) are byte-identical,
+#: so ``reader-pin-a5f3b232`` joins the equivalent states and no count moves
+#: (PQ #1616).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="38e960127478b651e42c14d52acf2274b54bca38",
+    reader_dev_pin_commit="a5f3b232cb3c424b537a06713c728c86153d55fb",
     reader_dev_pin_contract_sha256=(
-        "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
+        "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
     ),
-    serving_runtime_pinned_commit="38e960127478b651e42c14d52acf2274b54bca38",
+    serving_runtime_pinned_commit="a5f3b232cb3c424b537a06713c728c86153d55fb",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
+        "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
     ),
     producer_installed_contract_sha256=(
-        "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
+        "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
     ),
 )
 
