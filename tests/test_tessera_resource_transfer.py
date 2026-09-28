@@ -1086,3 +1086,57 @@ def test_run_legs_feeds_qualify_end_to_end_and_refuses_mutations(tmp_path):
         "--out", str(tmp_path / "qualification-mutated.json"))
     assert refused.returncode == 2
     assert "stratified sample" in refused.stderr
+def test_qualification_refuses_fresh_windows_from_the_persistent_trace(tmp_path):
+    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
+    rate = 257
+    report = _report([rate], pid=399, timings={rate: _timings(rates)[rate]},
+                     window_by_rate={rate: _window(rate, pid=399, trace_sha=TRACE_SHA)},
+                     trace_sha=TRACE_SHA)
+    entry = _persist(report, tmp_path, "same_trace.json")
+    fresh2 = dict(fresh)
+    fresh2[rate] = {"report": entry[0], "sha256": entry[1]}
+    stub, head = _stub_producer_checkout(tmp_path)
+    result = qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                       report_sha256=sha, fresh_reports=fresh2,
+                                       noise_band=band, producer={"checkout": stub, "commit": head})
+    assert any("one trace" in reason for reason in result["reasons"])
+
+
+def test_qualification_refuses_a_window_from_another_process(tmp_path):
+    rates, (path, sha), fresh, band, persistent = _qualification_inputs(tmp_path)
+    tampered = copy.deepcopy(persistent)
+    wire = "TESSERA_BF16_K1_R258"
+    tampered["pass_r"][wire]["window"] = dict(tampered["pass_r"][wire]["window"],
+                                              process_id=999)
+    p2, sha2 = _persist(tampered, tmp_path, "pid_drift.json")
+    stub, head = _stub_producer_checkout(tmp_path)
+    with pytest.raises(ValueError, match="another process"):
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=p2,
+                                  report_sha256=sha2, fresh_reports=fresh,
+                                  noise_band=band, producer={"checkout": stub, "commit": head})
+
+
+def test_qualification_refuses_a_pass_r_that_changed_process_mid_roster(tmp_path):
+    rates, (path, sha), fresh, band, persistent = _qualification_inputs(tmp_path)
+    tampered = copy.deepcopy(persistent)
+    wire = "TESSERA_BF16_K1_R260"
+    other = {"pid": 777, "boot_id": "CPU-fixture", "start_ticks": 777}
+    tampered["pass_r"][wire]["process"] = other
+    tampered["pass_r"][wire]["window"] = dict(tampered["pass_r"][wire]["window"], process_id=777)
+    tampered["pass_t"][wire]["binding"] = tampered["pass_r"][wire]["binding"]
+    p2, sha2 = _persist(tampered, tmp_path, "two_processes.json")
+    stub, head = _stub_producer_checkout(tmp_path)
+    result = qualify_resource_transfer(_identity(), rates=rates, persistent_report=p2,
+                                       report_sha256=sha2, fresh_reports=fresh,
+                                       noise_band=band, producer={"checkout": stub, "commit": head})
+    assert any("more than one process" in reason for reason in result["reasons"])
+
+
+def test_qualification_refuses_band_fresh_legs_sharing_a_report_process(tmp_path):
+    def collide(band):
+        collide_process = {"pid": 301, "boot_id": "CPU-fixture", "start_ticks": 301}
+        band["raw"]["phases"]["prefill"]["fresh"]["257"][0]["process"] = dict(collide_process)
+        band["raw"]["phases"]["decode"]["fresh"]["257"][0]["process"] = dict(collide_process)
+
+    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path, band_mutator=collide))
+    assert any("band fresh repeats share" in reason for reason in result["reasons"])
