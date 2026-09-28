@@ -1317,6 +1317,28 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {problem}", file=sys.stderr)
         return 2
 
+    # Issue #1586 (research half): research standing is not releasable
+    # standing.  ``prefill_frontier_replay_claim`` stamps
+    # ``build.research_only: True`` onto a prefill-frontier replay card's
+    # build anchor (``shipcard.build_shipcard``), and before this gate
+    # nothing that refused ever read it.  The refusal is forceable like any
+    # other evidence failure: ``--force-unverified`` re-types the basename
+    # and stamps the recorded override, so a research artifact reaches the
+    # Hub only as a declared UNVERIFIED publication.
+    build_block = card.get("build") or {}
+    if build_block.get("research_only") is True:
+        source = (
+            "prefill_frontier_replay_claim (prefill-frontier replay stamp)"
+            if "prefill_frontier_replay" in build_block
+            else "the card's build block"
+        )
+        problems.append(
+            f"build.research_only is True, stamped by {source}: a "
+            "research-standing artifact is not releasable; promote the "
+            "assignment out of research or re-run with --force-unverified "
+            "to publish it UNVERIFIED"
+        )
+
     _print_bpp_claim_with_control(card, artifact_dir)
 
     forced_override_confirmed = False

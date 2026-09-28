@@ -647,6 +647,7 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
             "finding_probe": {"index": probe.index, "weights": list(probe.weights)},
             "achieved_bits": record.get("achieved_bits"),
             "payload_bytes": record.get("payload_bytes"),
+            "whole_artifact_upper_bound_bytes": record.get("whole_artifact_upper_bound_bytes"),
             "assignment_sha256": None, "assignment_path": None,
         }
         if record["feasible"]:
@@ -687,6 +688,8 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
                         "the table are neither priced nor added to it"),
         },
         "max_memory_bytes": int(ctx.max_memory_bytes),
+        "whole_artifact_budget": (None if ctx.whole_artifact_budget is None
+                                  else dict(ctx.whole_artifact_budget)),
         "table_identity": dict(ctx.table_identity),
         "scope": dict(ctx.scope),
         "gap_report": ctx.pricing.gap_report(),

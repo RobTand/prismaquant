@@ -66,6 +66,7 @@ import json
 import math
 import os
 import re
+from typing import BinaryIO
 
 
 # A regex checks the underlying text, not a str subclass's Python length or
@@ -325,6 +326,18 @@ def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTE
         while block := handle.read(block_size):
             digest.update(block)
     return digest.hexdigest()
+
+
+def file_digest_sha256hex(handle: BinaryIO) -> str:
+    """Digest an already-open, stat-fenced file handle in one stream.
+
+    ``file_sha256hex`` opens the path itself; a site that fenced its read with
+    ``os.open`` + stat comparisons around the hash already holds the pinned
+    descriptor and must not reopen the path. This is the one spelling for that
+    shape: the stdlib streaming ``file_digest`` over the caller's handle,
+    reading it from its current position to EOF.
+    """
+    return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
 def indent2_json_file_bytes(value: object) -> bytes:

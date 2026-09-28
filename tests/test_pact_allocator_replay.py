@@ -16,6 +16,7 @@ evidence.
 from __future__ import annotations
 
 import json
+import math
 import sys
 from types import SimpleNamespace
 
@@ -133,7 +134,8 @@ def _replay(frontier, digest, output):
                                   "--assignment-sha256", digest, "--layer-config", str(output)])
 
 
-def test_hull_replay_and_export_intake_carry_the_research_standing(tmp_path, monkeypatch):
+def test_hull_replay_and_export_intake_carry_the_research_standing(tmp_path, monkeypatch,
+                                                                     capsys):
     case = _fixture(tmp_path, monkeypatch)
     frontier, doc = _hull(tmp_path, case.argv, "--bootstrap-draws", "200")
 
@@ -191,6 +193,22 @@ def test_hull_replay_and_export_intake_carry_the_research_standing(tmp_path, mon
         "lower_convex_hull_dichotomic"
     assert shipcard._verify_build_block(card) == []
 
+    # Publication refuses the research standing (PQ #1598); every slot is
+    # closed, so the research stamp is the only thing it can refuse on.
+    from test_publish_artifact import _argv, _artifact, _close_all_slots
+    from tools.publish_artifact import main as publish_cli
+
+    model_dir = _artifact(tmp_path, name="pact-exported")
+    card = shipcard.build_shipcard(model_dir, build={**report["build"],
+                                                     "achieved_bpp": {"value": 4.75}})
+    shipcard.write_shipcard(model_dir / "shipcard.json", card)
+    _close_all_slots(model_dir)
+    capsys.readouterr()
+    assert publish_cli(_argv(model_dir)) == 1
+    err = capsys.readouterr().err
+    assert "build.research_only is True" in err and "prefill_frontier_replay_claim" in err
+    assert "nothing was uploaded" in err
+
 
 def test_replay_refuses_a_moved_shape_table(tmp_path, monkeypatch):
     case = _fixture(tmp_path, monkeypatch)
@@ -206,13 +224,64 @@ def test_replay_refuses_a_moved_shape_table(tmp_path, monkeypatch):
 @pytest.mark.parametrize("extra,diagnostic", [
     (["--serve-device-budget-bytes", "1000000"], "tessera#624"),
     (["--slo-prefill-p95-ttft-ms", "5"], "mutually exclusive"),
-    (["--target-disk-gb", "1"], "not read in PACT mode"),
+    # The whole-artifact cap prices the bytes outside the units from the
+    # source checkpoint; this fixture's model directory holds none.
+    (["--target-disk-gb", "1", "--artifact-overhead-reserve-bytes", "1"],
+     "could not be priced"),
 ])
 def test_pact_refuses_budgets_it_cannot_price(tmp_path, monkeypatch, capsys, extra, diagnostic):
     case = _fixture(tmp_path, monkeypatch)
     with pytest.raises(SystemExit):
         prefill_frontier.main(["--output", str(tmp_path / "h.json"), "--", *case.argv, *extra])
     assert diagnostic in capsys.readouterr().err
+
+
+def test_a_whole_artifact_card_binds_the_hull_and_stamps_the_replay(tmp_path, monkeypatch):
+    """``--target-disk-gb`` is an on-disk cap (footprint.py), not a device budget."""
+    import struct
+
+    from prismaquant import footprint
+    from prismaquant import format_registry as fr
+
+    case = _fixture(tmp_path, monkeypatch)
+    tensors = {f"{case.dense}.weight": ("BF16", (256, 256)), "model.norm.weight": ("BF16", (64,))}
+    header, offset = {}, 0
+    for name, (dtype, shape) in tensors.items():
+        nbytes = footprint._ST_DTYPE_BYTES[dtype] * shape[0] * (shape[1] if len(shape) > 1 else 1)
+        header[name] = {"dtype": dtype, "shape": list(shape),
+                        "data_offsets": [offset, offset + nbytes]}
+        offset += nbytes
+    blob = json.dumps(header).encode()
+    (tmp_path / "model" / "model-00001.safetensors").write_bytes(
+        struct.pack("<Q", len(blob)) + blob + b"\x00" * offset)
+    floor = 64 * 2  # the norm ships verbatim
+    unit = {fmt: fr.get_format(fmt).memory_bytes_for_shape((256, 256)) for fmt in MENU}
+    reserve = 1000
+    # The card admits MID and FAST, never SLOW.
+    disk_gb = repr((floor + unit[MID] + reserve + 500) / footprint.GB)
+    card = math.floor(float(disk_gb) * footprint.GB)
+    assert floor + unit[MID] + reserve <= card < floor + unit[SLOW] + reserve
+    frontier, doc = _hull(tmp_path, [*case.argv, "--target-disk-gb", disk_gb,
+                                     "--artifact-overhead-reserve-bytes", str(reserve)],
+                          "--bootstrap-draws", "50")
+
+    assert doc["whole_artifact_budget"] == {
+        "budget_bytes": card, "reserve_bytes": reserve, "non_unit_payload_bytes": floor,
+        "unit_budget_bytes": card - reserve - floor}
+    assert doc["max_memory_bytes"] == card - reserve - floor
+    got = [load_assignment(v["assignment_path"])[case.dense] for v in doc["vertices"]]
+    assert got == [MID, FAST]
+    assert [v["whole_artifact_upper_bound_bytes"] for v in doc["vertices"]] == [
+        floor + unit[MID] + reserve, floor + unit[FAST] + reserve]
+    assert all(v["feasible"] for v in doc["vertices"])
+
+    output = tmp_path / "replayed.json"
+    assert _replay(frontier, doc["vertices"][0]["assignment_sha256"], output) == 0
+    assert load_assignment(output) == {case.dense: MID}
+    stamp = json.loads(output.read_text())[LAYER_CONFIG_META_KEY]["whole_artifact_budget"]
+    assert stamp["budget_bytes"] == card
+    assert stamp["selection_tensor_payload_bytes"] == floor + unit[MID]
+    assert stamp["selection_non_tensor_reserve_bytes"] == reserve
 
 
 def test_pact_refuses_a_grid_and_a_missing_regime(tmp_path, monkeypatch, capsys):

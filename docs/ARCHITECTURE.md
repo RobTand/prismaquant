@@ -10,6 +10,73 @@ layer config. `layer_config.prefill_frontier_replay_claim` also carries a
 measured-runtime single solve's research stamp to the build record. No
 default, stage, format, lane or ship gate changes. See §4.5, "PACT hull".
 
+Re-stamped 2026-09-28 (PQ #1586 research half, the `research_only`
+publication gate): `tools/publish_artifact.py` now refuses a card whose
+build block carries `research_only: true` — the stamp
+`prefill_frontier_replay_claim` puts on every prefill-frontier replay card
+(§4.5, research replay) — naming the field and its source, and the only
+path past it is the recorded `--force-unverified` override. Research
+standing was previously stamped and read by nothing that refuses. The
+`native_export.graph` half of #1586 is unchanged and still open.
+
+Re-stamped 2026-09-28 (PQ #1274, `claude/tessera-pin-v42-1274`): the exact
+Tessera pin is `38e960127478b651e42c14d52acf2274b54bca38`, Tessera master
+after #678 (contract v41), #685 (contract v42, tessera#640) and #686. The
+packaged contract is v42 (`4aeba5dc…`); `export.py` (`e54f3f1b…`) and
+`grammar.py` (`9ae1f824…`) did not move, so the legal inventory renames its
+`reader-pin-db5b6e23` byte-state `reader-pin-38e96012` and no rate count
+moves.
+
+- **What v42 adds.** Two lane-bearing native extensions built from
+  `csrc/routed_fused_window.cu`: `tessera_routed_fused_e4m3` (route
+  `TESSERA_FP8`, decoder `native_routed_fused_window`) and
+  `tessera_routed_fused_value` (route `TESSERA_BF16`, decoder
+  `native_routed_fused_window_folded`). Each lane reads rate-4, 14-bit
+  window/channel stacks with no decoration (the q256 1024 rung), and when the
+  library is absent the serve substitutes the compact adapter's decoder in
+  both residencies. The pin JSON's `serving_native_extensions` gains both
+  rows, and the four window routed cells
+  `tessera_{e4m3,bf16}_k1_routed_moe_sm121_{decode,batch}_resident` name the
+  fused pair beside the compact pair. The reviewed dev-pin answer moves in
+  exactly those two places.
+- **The lane gate now derives a cell's launches per rung** (§ lane
+  admission, item 5). v42 is the first pinned table in which a cell names a
+  lane launch beside a lane-free one. `lane_eligibility.cell_lane_admits`
+  refused the whole cell whenever its lane refused the plan, so v42 would have
+  refused routed E4M3 at q256 832-960 and 1088, where the fused lane does not
+  read the mixed-rate plan and the dispatch keeps the compact adapter.
+  `cell_rung_launches` drops only the launches through a refusing lane and
+  admits on what is left; a lane-only cell still refuses. `resolve_unit_route`
+  records the launches made at the unit's rung, not the cell's union: q256
+  1024 routed units record the fused and compact pairs, and q256 896 units
+  record the compact pair alone, as before the bump. The Tessera export scope
+  gate (`tessera_export_lane.require_assignment_scope`) reads through
+  `resolve_unit_route`, so a routed E4M3 R896 unit is attested on the compact
+  launch. Under the pre-fix reader the same test refuses it as "unattested"
+  (PB action `0ff4606a8e0a…`). The PACT shape-table tests (#1583) now read the
+  fused lanes from the pinned contract instead of grafting them.
+- **The pin stays schema v2.** v41 lets a cell stamp `runtime.tessera_commit`
+  and `runtime.serving_source_sha256`, and no v42 cell does, so a v3 pin would
+  admit no cell. `tessera.serving.source_identity.serving_source_sha256()` at
+  this commit is `445da73b1960f2de20fe248184f49f50c1b1d2f0809a6ab47d2057f43982244d`
+  on every interpreter below; a v3 pin carries it once cells are re-censused
+  with the code fields.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`, `17428eab…` to
+  `a1da10a1…`, PB actions `1576f329537c` before and `06effb8ed174` after)
+  differs only in the pin's commit, digest and extension rows, the answer's
+  new extensions and four cells' launches, and the four q256 1024 routed
+  units' recorded launches; no route status, qualification, activation
+  contract or refusal moves. The Tessera `layer.json` pin
+  (`tests/test_allocator_output_pin_1304.py`) moves only in
+  `tessera_dev_pin` provenance.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-38e96012`, copied
+  from the `db5b6e23` interpreters with only Tessera reinstalled, on dl380g10
+  (PB build `c94b89b4e2ac`), sparky (`d36bf663315b`) and sparklina
+  (`13d94ab22f4d`), with a `-tf516` sibling on each Spark (sparky
+  `07013de7488f`, sparklina `e8cb68eab74e`). The `db5b6e23` interpreters stay
+  in place.
+
 Re-stamped 2026-09-28 (PQ #1583, `claude/pact-shape-table`): PACT's
 shape-time price table, `prismaquant/shape_runtime_prices.py`
 (`prismaquant.shape_runtime_prices.v1`), lands as a library. Nothing in the
@@ -4039,8 +4106,12 @@ resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
-As of: 2026-09-27 · `claude/pq-1533-engine-consumer-core`.
+As of: 2026-09-28 · `claude/tessera-pin-v42-1274`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-28, `claude/tessera-pin-v42-1274`) for **the Tessera v42
+pin and the per-rung lane launch** (PQ #1274); see the stamp at the top of
+this document.
 
 Re-stamped (2026-09-27, `claude/pq-1533-engine-consumer-core`) for **the IO
 engine's consumer core** (PQ #1533): the engine's pool spans the whole CPU
@@ -18821,10 +18892,21 @@ document.
   pass the measured solve's checks: promotion identity, and exact payload bpp
   at or below `--target-bits`. The byte budget is
   `floor(target_bits × mutable_params / 8)`.
+- **Whole-artifact card.** `--target-disk-gb` (with its required
+  `--artifact-overhead-reserve-bytes`) replaces that budget with an on-disk
+  cap priced by `footprint.assignment_artifact_bytes`. The unit budget is the
+  card, less the reserve, less the payload outside the DP units. That last
+  term is read at the smallest and the largest unit assignment, and PACT
+  refuses when the two differ, because then no unit budget states the card
+  exactly. Each vertex is re-priced exactly, and it is feasible only when its
+  payload plus the reserve fits the card. A replay stamps
+  `whole_artifact_budget` for the exporter. The hull document records the
+  split under `whole_artifact_budget`.
 - **Refusals.** A lone allocator run refuses the flags. PACT also refuses the
-  measured table, dispatch table, workload mix, every `--slo-*`, and
-  `--target-disk-gb`. It refuses every device budget, because the table prices
-  no residency (tessera#624 owns that table).
+  measured table, dispatch table, workload mix and every `--slo-*`. It refuses
+  every device budget, because the table prices no residency (tessera#624 owns
+  that table). The card above is artifact bytes on disk, not device-resident
+  bytes, so that objection does not apply to it.
 - **Menu.** A family restriction, such as E4M3-only, is the declared
   `--formats` menu. It is not a ban applied after allocation.
 - **Time axis.** Fixed prefill is 0. Members with a fixed format, and every
@@ -21802,6 +21884,17 @@ alone:
    outside `column_rates [1,2,4]`, so a BF16 cell that ever claimed the
    window-GEMV launch would be refused here by name rather than exported to a
    kernel that cannot read it (`tests/test_tessera_lane_requires.py`).
+   **A lane launch is made only at a rung its lane admits** (contract v42, PQ
+   #1274). Tessera derives a cell's `executes` as the union, over the rungs it
+   lists, of the launches its route makes at each rung, and a launch through
+   a lane joins only at a rung the lane's predicate reaches. v42's four window
+   routed cells name the fused routed pair beside the lane-free compact pair.
+   `lane_eligibility.cell_rung_launches(cell, rung, lanes)` decides every lane
+   the cell launches through against this producer's plan, drops the
+   launches through lanes that refuse, and admits on what is left;
+   `cell_lane_admits` is its verdict, and `resolve_unit_route` records the
+   launches left as the regime route's `executes`. A cell whose only launch
+   is through a refusing lane still refuses, with the same reason.
 
 **It answers by the PIN, not by an edit and not by an absent table.** Until
 2026-09-04 the answer was False for every rung, because the pin carried PENDING
@@ -22833,7 +22926,12 @@ deliberately expensive: `--force-unverified` requires the
 operator to **re-type the artifact directory's basename** (interactively, or `--confirm-name`
 for scripts) and stamps `forced_unverified: true` plus the overridden problems into the
 shipcard, so the artifact itself carries the record that it shipped with an
-evidence override (never an access-gate or licensing bypass). Before reporting
+evidence override (never an access-gate or licensing bypass). The same
+ceremony is the only path past the research gate: a card whose build block
+carries `research_only: true` — stamped by `prefill_frontier_replay_claim`
+onto prefill-frontier replay assignments — is refused with the field and
+its source named (PQ #1586), so a research artifact reaches the Hub only as
+a declared UNVERIFIED publication. Before reporting
 success, the publisher reads the access setting back again; a missing/manual/
 false setting or API error refuses. A post-commit failure names the existing
 commit and requires inspection before announcement. Publication output records

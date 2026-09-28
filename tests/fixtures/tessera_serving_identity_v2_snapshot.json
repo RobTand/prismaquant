@@ -206,6 +206,10 @@
     {
      "decoder": "native_window_moe_compact",
      "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+    },
+    {
+     "decoder": "native_routed_fused_window",
+     "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
     }
    ],
    "family": "TESSERA_E4M3_K1",
@@ -242,6 +246,10 @@
     {
      "decoder": "native_window_moe_compact",
      "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+    },
+    {
+     "decoder": "native_routed_fused_window",
+     "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
     }
    ],
    "family": "TESSERA_E4M3_K1",
@@ -278,6 +286,10 @@
     {
      "decoder": "native_window_moe_compact_folded",
      "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+    },
+    {
+     "decoder": "native_routed_fused_window_folded",
+     "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
     }
    ],
    "family": "TESSERA_BF16_K1",
@@ -307,6 +319,10 @@
     {
      "decoder": "native_window_moe_compact_folded",
      "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+    },
+    {
+     "decoder": "native_routed_fused_window_folded",
+     "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
     }
    ],
    "family": "TESSERA_BF16_K1",
@@ -2472,6 +2488,10 @@
       [
        "tessera.native_window_moe.NativeWindowMoE.__call__",
        "native_window_moe_compact_folded"
+      ],
+      [
+       "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
+       "native_routed_fused_window_folded"
       ]
      ],
      [
@@ -2515,6 +2535,10 @@
       [
        "tessera.native_window_moe.NativeWindowMoE.__call__",
        "native_window_moe_compact_folded"
+      ],
+      [
+       "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
+       "native_routed_fused_window_folded"
       ]
      ],
      [
@@ -2923,6 +2947,10 @@
       [
        "tessera.native_window_moe.NativeWindowMoE.__call__",
        "native_window_moe_compact"
+      ],
+      [
+       "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
+       "native_routed_fused_window"
       ]
      ],
      [
@@ -2973,6 +3001,10 @@
       [
        "tessera.native_window_moe.NativeWindowMoE.__call__",
        "native_window_moe_compact"
+      ],
+      [
+       "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
+       "native_routed_fused_window"
       ]
      ],
      [
@@ -3073,6 +3105,84 @@
    },
    "lane_schema": "tessera.lane-eligibility.v10",
    "native_extensions": [
+    {
+     "filename_glob": "tessera_routed_fused_e4m3*.so",
+     "lane": {
+      "decoder": "native_routed_fused_window",
+      "requires": {
+       "body": "window",
+       "column_rates": [
+        4
+       ],
+       "diagonals": false,
+       "grid_arities": [
+        1
+       ],
+       "plane": "channel",
+       "release_overrides": false,
+       "rotation": [
+        "none"
+       ],
+       "window_bits": [
+        14
+       ]
+      }
+     },
+     "match": "basename_fnmatch",
+     "module_name_prefix": "tessera_routed_fused_e4m3",
+     "routes": [
+      "TESSERA_FP8"
+     ],
+     "when_unavailable": {
+      "resident": {
+       "decoder": "native_window_moe_compact",
+       "status": "substituted"
+      },
+      "streamed": {
+       "decoder": "native_window_moe_compact",
+       "status": "substituted"
+      }
+     }
+    },
+    {
+     "filename_glob": "tessera_routed_fused_value*.so",
+     "lane": {
+      "decoder": "native_routed_fused_window_folded",
+      "requires": {
+       "body": "window",
+       "column_rates": [
+        4
+       ],
+       "diagonals": false,
+       "grid_arities": [
+        1
+       ],
+       "plane": "channel",
+       "release_overrides": false,
+       "rotation": [
+        "none"
+       ],
+       "window_bits": [
+        14
+       ]
+      }
+     },
+     "match": "basename_fnmatch",
+     "module_name_prefix": "tessera_routed_fused_value",
+     "routes": [
+      "TESSERA_BF16"
+     ],
+     "when_unavailable": {
+      "resident": {
+       "decoder": "native_window_moe_compact_folded",
+       "status": "substituted"
+      },
+      "streamed": {
+       "decoder": "native_window_moe_compact_folded",
+       "status": "substituted"
+      }
+     }
+    },
     {
      "filename_glob": "tessera_window_gemv*.so",
      "lane": {
@@ -3688,8 +3798,8 @@
   ]
  },
  "pin": {
-  "commit": "db5b6e23a06869e87d778cb223c1ac5a5154aec5",
-  "contract_sha256": "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151",
+  "commit": "38e960127478b651e42c14d52acf2274b54bca38",
+  "contract_sha256": "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb",
   "live_gate": "admits",
   "native_extension_rows": [
    {
@@ -3703,6 +3813,36 @@
      },
      "streamed": {
       "decoder": "torch_window",
+      "status": "substituted"
+     }
+    }
+   },
+   {
+    "filename_glob": "tessera_routed_fused_e4m3*.so",
+    "match": "basename_fnmatch",
+    "module_name_prefix": "tessera_routed_fused_e4m3",
+    "when_unavailable": {
+     "resident": {
+      "decoder": "native_window_moe_compact",
+      "status": "substituted"
+     },
+     "streamed": {
+      "decoder": "native_window_moe_compact",
+      "status": "substituted"
+     }
+    }
+   },
+   {
+    "filename_glob": "tessera_routed_fused_value*.so",
+    "match": "basename_fnmatch",
+    "module_name_prefix": "tessera_routed_fused_value",
+    "when_unavailable": {
+     "resident": {
+      "decoder": "native_window_moe_compact_folded",
+      "status": "substituted"
+     },
+     "streamed": {
+      "decoder": "native_window_moe_compact_folded",
       "status": "substituted"
      }
     }
@@ -8381,6 +8521,10 @@
        {
         "decoder": "native_window_moe_compact",
         "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+       },
+       {
+        "decoder": "native_routed_fused_window",
+        "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
        }
       ],
       "execution_mode": "eager",
@@ -8408,6 +8552,10 @@
        {
         "decoder": "native_window_moe_compact",
         "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+       },
+       {
+        "decoder": "native_routed_fused_window",
+        "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
        }
       ],
       "execution_mode": "eager",
@@ -9093,6 +9241,10 @@
        {
         "decoder": "native_window_moe_compact",
         "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+       },
+       {
+        "decoder": "native_routed_fused_window",
+        "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
        }
       ],
       "execution_mode": "eager",
@@ -9120,6 +9272,10 @@
        {
         "decoder": "native_window_moe_compact",
         "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+       },
+       {
+        "decoder": "native_routed_fused_window",
+        "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
        }
       ],
       "execution_mode": "eager",
@@ -9271,6 +9427,10 @@
        {
         "decoder": "native_window_moe_compact_folded",
         "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+       },
+       {
+        "decoder": "native_routed_fused_window_folded",
+        "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
        }
       ],
       "execution_mode": "eager",
@@ -9298,6 +9458,10 @@
        {
         "decoder": "native_window_moe_compact_folded",
         "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+       },
+       {
+        "decoder": "native_routed_fused_window_folded",
+        "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
        }
       ],
       "execution_mode": "eager",
@@ -9360,6 +9524,10 @@
        {
         "decoder": "native_window_moe_compact_folded",
         "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+       },
+       {
+        "decoder": "native_routed_fused_window_folded",
+        "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
        }
       ],
       "execution_mode": "eager",
@@ -9387,6 +9555,10 @@
        {
         "decoder": "native_window_moe_compact_folded",
         "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__"
+       },
+       {
+        "decoder": "native_routed_fused_window_folded",
+        "symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__"
        }
       ],
       "execution_mode": "eager",
