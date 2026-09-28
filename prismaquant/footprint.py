@@ -72,7 +72,6 @@ import json
 import math
 import os
 import re
-import struct
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -84,6 +83,7 @@ from .name_projection import (
     packed_expert_alias,
     strip_weight_leaf,
 )
+from prismaquant.source_read_plan import read_safetensors_header
 
 # safetensors header dtype -> bytes per element (header carries the source
 # dtype string; we only need it to derive source-bytes-per-param when the
@@ -169,9 +169,8 @@ def plain_source_dtype_tensor_payload_breakdown(
 
 def _read_safetensors_header(path: str) -> dict:
     """Return the JSON header of a .safetensors file (no weight load)."""
-    with open(path, "rb") as fh:
-        n = struct.unpack("<Q", fh.read(8))[0]
-        return json.loads(fh.read(n))
+    header, _base, _size = read_safetensors_header(path)
+    return header
 
 
 def source_checkpoint_bytes(model_path: str) -> tuple[int, dict[str, int]]:

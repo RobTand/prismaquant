@@ -543,6 +543,53 @@ def test_force_unverified_stamps_the_frozen_card_and_proceeds(tmp_path, capsys):
     assert history[0]["model_sha"] == compute_model_sha(model_dir)
 
 
+def test_research_stamped_card_is_refused_and_only_force_overrides(
+    tmp_path, capsys,
+):
+    """Issue #1586 (research half): research standing is not releasable.
+
+    ``build_shipcard`` stamps ``build.research_only: True`` from
+    ``prefill_frontier_replay_claim`` (prefill-frontier replay assignments).
+    Every slot on the card below is closed and verified; publication must
+    still refuse until the assignment is promoted out of research, and the
+    only sanctioned path past the refusal is the recorded
+    ``--force-unverified`` override.
+    """
+    model_dir = _artifact(tmp_path, name="research-exported")
+    card = build_shipcard(model_dir, build={
+        "achieved_bpp": {"value": 4.75},
+        "research_only": True,
+        "certifies_placement": False,
+        "prefill_frontier_replay": {
+            "schema": "prismaquant.prefill_frontier.replay.v1",
+            "frontier_digest": "0" * 64,
+        },
+    })
+    write_shipcard(model_dir / "shipcard.json", card)
+    _close_all_slots(model_dir)
+
+    assert publish_cli(_argv(model_dir)) == 1
+    captured = capsys.readouterr()
+    assert "build.research_only" in captured.err
+    assert "prefill_frontier_replay_claim" in captured.err
+    assert "nothing was uploaded" in captured.err
+    assert "hf upload" not in captured.out + captured.err
+    assert "forced_unverified" not in load_shipcard(model_dir / "shipcard.json")
+
+    assert publish_cli(_argv(
+        model_dir,
+        "--force-unverified",
+        "--confirm-name",
+        "research-exported",
+    )) == 0
+    card = load_shipcard(model_dir / "shipcard.json")
+    assert card["forced_unverified"] is True
+    assert any(
+        "build.research_only" in problem
+        for problem in card["forced_unverified_history"][0]["problems"]
+    )
+
+
 def test_external_or_symlinked_shipcard_is_never_publication_authority(
     tmp_path, capsys,
 ):
