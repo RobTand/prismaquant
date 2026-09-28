@@ -461,19 +461,27 @@ def test_the_arm_invokes_exactly_the_declared_producer_tools():
             return None
         return path[len("src/"):-len(".py")].replace("/", ".")
 
-    invoked = {"${TESSERA_REPO%/}/" + PRODUCER_PLAN_TOOL}
+    # Bare declaration paths: the ${TESSERA_REPO%/}/ prefix is stripped by
+    # the findall below, and the module form maps back to its src/ path.
+    invoked = {PRODUCER_PLAN_TOOL}
     exporter_pythonpath = False
     for line in text.splitlines():
         stripped = line.strip()
         if "${TESSERA_REPO%/}/src" in line and "PYTHONPATH" in line:
             exporter_pythonpath = True
+        # The module-form exporter carries its PYTHONPATH on the same
+        # line (VAR=... prefix), so strip env assignments first.
+        stripped = re.sub(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+",
+                          "", stripped)
         if not (stripped.startswith("python3 ") or stripped.startswith("bash ")):
             continue
+        # Scripts only: the PYTHONPATH line names a directory, not a tool.
         invoked.update(
-            "${TESSERA_REPO%/}/" + path
-            for path in re.findall(r"\$\{TESSERA_REPO%/\}/([^\s\"]+)", line)
+            path for path in
+            re.findall(r"\$\{TESSERA_REPO%/\}/([^\s\"]+)", line)
+            if path.endswith(".py")
         )
-        run_module = re.findall(r"python3 -m ([\w.]+)", line)
+        run_module = re.findall(r"python3 -m ([\w.]+)", stripped)
         for name in run_module:
             candidate = f"src/{name.replace('.', '/')}.py"
             if candidate in declared:
