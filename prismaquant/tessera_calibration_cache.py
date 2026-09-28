@@ -16,6 +16,7 @@ import threading
 from types import MappingProxyType
 
 from .cost_stage_checkpoint import atomic_write_bytes, prepare_journal, write_unit
+from .digests import SOURCE_HASH_BLOCK_BYTES
 from .file_identity import file_stat_signature
 from .memory_management import reserve_allocation
 
@@ -29,12 +30,9 @@ MAX_CAPTURE_METADATA_BYTES = 16 * 1024**2
 MAX_CAPTURE_EXECUTION_POLICIES = 8
 
 
-#: The guarded source hash's read block. With ``release_read_pages`` it is
-#: also the page window: each block's pages are advised away right after the
-#: digest consumes it, so one hash holds at most this block and its pages.
-#: Admission charges exactly that (``autoscale.selected_anchor_resources``,
-#: RobTand/prismaquant#1491), so the two read the same number.
-SOURCE_HASH_BLOCK_BYTES = 16 * 1024**2
+#: The guarded source hash's read block is ``digests.SOURCE_HASH_BLOCK_BYTES``,
+#: imported above: admission (``autoscale.selected_anchor_resources``) reads the
+#: same number without importing this lane module.
 
 
 def sha256(path, *, resource_check=None, release_read_pages=False, file_descriptor=None):

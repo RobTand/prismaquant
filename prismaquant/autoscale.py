@@ -543,7 +543,7 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
     # ``digest.update(block)``: two blocks. GAP: kernel readahead past the
     # consumed offset is a property of the mount (its read_ahead_kb), not of
     # any allocation here, and is not charged.
-    from .tessera_calibration_cache import SOURCE_HASH_BLOCK_BYTES
+    from .digests import SOURCE_HASH_BLOCK_BYTES
     source_hash_window = 2*SOURCE_HASH_BLOCK_BYTES
     source_shards = sorted({shard for k in layers for shard in source['body_source_shards'][k]})
     common = dict(selected_source_weight_bytes=weights,

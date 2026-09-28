@@ -84,9 +84,12 @@ def _destination_metadata_for_assignment(
         return {}
     payload = _load_json(path)
     metadata = layer_config_metadata(payload)
+    from .lane_spec import layer_config_meta_prefixes
+
+    lane_prefixes = layer_config_meta_prefixes()
     coupled = sorted(
         key for key in metadata
-        if key.startswith("tessera_") or key in {
+        if key.startswith(lane_prefixes) or key in {
             "population", "serving_lane_provenance", "serve_constraints",
             "measured_runtime_search",
         }
@@ -211,16 +214,16 @@ ACKNOWLEDGE_OUTSTANDING_UNIFORM_CONTROL_ENV: str = (
 def rate_axis_rungs(assignment: Mapping[str, str]) -> list[str]:
     """Sorted unique rate-axis rung names in a selected assignment.
 
-    The axis is defined by the code that owns the name grammar
-    (``format_registry.is_tessera_format_name``), never by a list restated
-    here: today the only rate-axis container is Tessera, and a future
-    container adds itself by widening the definition this reads, in the commit
-    that declares its lane.
+    The axis is defined by the lane that owns the name grammar
+    (``format_registry.rate_axis_format``, read off the lane spec's
+    ``format_families``), never by a list restated here: today the only
+    rate-axis container is Tessera, and a future container adds itself by
+    declaring a ``rate_axis`` family in its lane spec.
     """
     return sorted({
         str(fmt)
         for fmt in assignment.values()
-        if fr.is_tessera_format_name(fmt)
+        if fr.rate_axis_format(fmt)
     })
 
 
