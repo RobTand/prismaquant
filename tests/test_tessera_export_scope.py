@@ -494,3 +494,154 @@ def test_fused_module_mixing_a_tessera_wire_with_bf16_is_refused(case):
     _with_qkv(case, [FORMAT, "BF16", FORMAT], receipt=True)
     with pytest.raises(export.TesseraExportLaneError, match="mix decoder families"):
         export.require_assignment_scope(case.model, case.assignment, target=Target())
+
+
+# ---------------------------------------------------------------------------
+# #1275: the GLM research route is admitted only by an explicit per-run override
+# ---------------------------------------------------------------------------
+RESEARCH_PROFILE = "glm_packed_research_sm121"
+RESEARCH_REASON = "GLM-5.3 research export on sm_121; graph-mode route not yet qualified"
+
+
+def _unqualified_contract(case, qualification="compile_only"):
+    payload = _payload()
+    for row in payload["lane_eligibility"]["cells"]:
+        row["qualification"] = qualification
+    case.contract.write_text(json.dumps(payload))
+
+
+def _research_provenance():
+    return {
+        "units_total": 2,
+        "route_status_counts": {"backed_with_serve_flag": 2},
+        "activation_contracts": {"fp8_per_token_dynamic": 2},
+        "by_unit": {DENSE: {"format": FORMAT}},
+    }
+
+
+def _research_argv(case, output, *extra):
+    return [
+        "--model", str(case.model), "--assignment", str(case.assignment),
+        "--tessera-platform", "sm_121", "--tessera-runtime-image", IMAGE,
+        "--tessera-execution-mode", "eager", "--tessera-residency", "resident",
+        "--target-profile", RESEARCH_PROFILE,
+        "--write-build-json", str(output), *extra,
+    ]
+
+
+def test_research_route_is_refused_without_the_override(case, tmp_path, monkeypatch, capsys):
+    _isolate_other_gates(monkeypatch)
+    _unqualified_contract(case)
+    case.payload["__prismaquant__"]["serving_lane_provenance"] = _research_provenance()
+    _save(case)
+    output = tmp_path / "tessera_build.json"
+    assert export.main(_research_argv(case, output)) == 2
+    assert not output.exists()
+    err = capsys.readouterr().err
+    assert "selected Tessera route is" in err and "device_qualified" in err
+
+
+def test_research_route_override_stamps_the_override_and_the_histogram(
+        case, tmp_path, monkeypatch):
+    from prismaquant import shipcard
+    from prismaquant.shipcard import route_histogram_claim
+
+    _isolate_other_gates(monkeypatch)
+    _unqualified_contract(case)
+    provenance = _research_provenance()
+    case.payload["__prismaquant__"]["serving_lane_provenance"] = provenance
+    _save(case)
+    output = tmp_path / "tessera_build.json"
+    assert export.main(_research_argv(
+        case, output, "--research-route-override", RESEARCH_REASON)) == 0
+    build = json.loads(output.read_text())
+    assert build["route_histogram"] == route_histogram_claim(provenance)
+    override = build["research_route_override"]
+    assert override["schema"] == "prismaquant.research_route_override/1"
+    assert override["profile"] == RESEARCH_PROFILE
+    assert override["reason"] == RESEARCH_REASON
+    assert override["target_platform"] == "sm_121"
+    admitted = override["admitted_units"]
+    assert set(admitted) == {DENSE, EXPERT}
+    assert all(row["qualifications"] == ["compile_only"] for row in admitted.values())
+    assert shipcard.verify_research_route_override(build) == []
+
+
+def test_research_override_needs_the_route_histogram(case, tmp_path, monkeypatch, capsys):
+    _isolate_other_gates(monkeypatch)
+    _unqualified_contract(case)
+    _save(case)
+    output = tmp_path / "tessera_build.json"
+    assert export.main(_research_argv(
+        case, output, "--research-route-override", RESEARCH_REASON)) == 2
+    assert not output.exists()
+    assert "route histogram" in capsys.readouterr().err
+
+
+def test_override_is_refused_on_a_non_research_profile(case, tmp_path, monkeypatch, capsys):
+    _isolate_other_gates(monkeypatch)
+    _unqualified_contract(case)
+    case.payload["__prismaquant__"]["serving_lane_provenance"] = _research_provenance()
+    _save(case)
+    output = tmp_path / "tessera_build.json"
+    argv = _research_argv(case, output, "--research-route-override", RESEARCH_REASON)
+    argv[argv.index(RESEARCH_PROFILE)] = "vllm_packed_moe"
+    assert export.main(argv) == 2
+    assert not output.exists()
+    assert "emulation_only" in capsys.readouterr().err
+
+
+def test_override_without_a_reason_is_refused(case, tmp_path, monkeypatch):
+    _isolate_other_gates(monkeypatch)
+    _unqualified_contract(case)
+    case.payload["__prismaquant__"]["serving_lane_provenance"] = _research_provenance()
+    _save(case)
+    output = tmp_path / "tessera_build.json"
+    assert export.main(_research_argv(
+        case, output, "--research-route-override", "  ")) == 2
+    assert not output.exists()
+
+
+def test_override_leaves_a_qualified_route_unstamped_and_the_gate_strict(
+        case, tmp_path, monkeypatch):
+    # A route that is already backed needs no admission; the override only
+    # ever records what it actually admitted.
+    _isolate_other_gates(monkeypatch)
+    case.payload["__prismaquant__"]["serving_lane_provenance"] = _research_provenance()
+    _save(case)
+    output = tmp_path / "tessera_build.json"
+    assert export.main(_research_argv(
+        case, output, "--research-route-override", RESEARCH_REASON)) == 0
+    build = json.loads(output.read_text())
+    assert build["research_route_override"]["admitted_units"] == {}
+
+
+def test_verify_refuses_a_malformed_research_override():
+    from prismaquant import shipcard
+
+    good = {
+        "schema": "prismaquant.research_route_override/1", "profile": RESEARCH_PROFILE,
+        "reason": RESEARCH_REASON, "target_platform": "sm_121", "admitted_units": {},
+    }
+    assert shipcard.verify_research_route_override({"research_route_override": good}) == []
+    assert shipcard.verify_research_route_override({}) == []
+    for mutation in ({"schema": "x"}, {"reason": ""}, {"profile": "vllm_packed_moe"},
+                     {"profile": "nope"}):
+        bad = {**good, **mutation}
+        assert shipcard.verify_research_route_override({"research_route_override": bad}), mutation
+
+
+def test_shell_admits_an_undeclared_lane_only_through_the_research_override():
+    driver = (Path(__file__).parents[1] / "prismaquant" / "run-pipeline.sh").read_text()
+    # the knob becomes the preflight flag, and only the allocation-bound
+    # preflight receives it (the early one has no allocation to admit)
+    assert '--research-route-override "$TESSERA_RESEARCH_ROUTE_OVERRIDE"' in driver
+    bound = driver[driver.index("--write-build-json \"$TESSERA_BUILD_JSON\""):]
+    assert '"${TESSERA_RESEARCH_OVERRIDE_ARGS[@]}"' in bound.split("; then", 1)[0]
+    # the lane-support refusal is skipped only for override + emulation_only
+    gate = driver[driver.index("research_override = bool("):]
+    gate = gate.split("print(resolved)", 1)[0]
+    assert "load_serving_profile(resolved).emulation_only" in gate
+    assert "require_lane_supported(profile" in gate
+    # the override is part of the settings hash
+    assert '"TESSERA_RESEARCH_ROUTE_OVERRIDE=$TESSERA_RESEARCH_ROUTE_OVERRIDE"' in driver

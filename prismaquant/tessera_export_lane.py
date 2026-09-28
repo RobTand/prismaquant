@@ -1119,8 +1119,15 @@ def require_fused_rung_coherence(assignment: Mapping[str, str], profile,
 
 
 def require_assignment_scope(model_path: str | Path, assignment_path: str | Path,
-                             *, target=None) -> dict | None:
+                             *, target=None, admit_research_routes: bool = False) -> dict | None:
     """Re-resolve selected Tessera units before the external translator runs.
+
+    ``admit_research_routes`` is the explicit per-run override (#1275): a unit
+    whose route is not backed, or whose regimes are not all device_qualified,
+    is RECORDED in ``report["research_route_admitted"]`` (route status and the
+    qualifications the gate saw) instead of refused.  Every other refusal --
+    shape, context, predicate, an unresolvable route -- stays strict, and the
+    default keeps the gate exactly as it was.
 
     The existing translator still owns serialization and expert aggregation.
     Packed allocation decisions resolve through their population member map
@@ -1237,6 +1244,7 @@ def require_assignment_scope(model_path: str | Path, assignment_path: str | Path
                     **(mtp_projection["geometry"] if mtp_projection is not None else {})}
         formats = load_published_formats(contract_path=path)
         routes = {}
+        admitted_research: dict[str, dict] = {}
         for name, fmt in sorted(selected.items()):
             geometry = attested.get(name)
             if geometry is None:
@@ -1287,9 +1295,14 @@ def require_assignment_scope(model_path: str | Path, assignment_path: str | Path
             route = resolve_unit_route(facts, table, **target.as_dict())
             if (route.route_status not in (ROUTE_STATUS_BACKED, ROUTE_STATUS_BACKED_WITH_SERVE_FLAG)
                     or any(row.qualification != QUALIFICATION_DEVICE_QUALIFIED for row in route.regimes)):
-                raise TesseraExportLaneError(
-                    f"{name}: selected Tessera route is {route.route_status}: "
-                    f"{route.unattested_reason or 'every regime must be device_qualified and native'}")
+                if not admit_research_routes:
+                    raise TesseraExportLaneError(
+                        f"{name}: selected Tessera route is {route.route_status}: "
+                        f"{route.unattested_reason or 'every regime must be device_qualified and native'}")
+                admitted_research[name] = {
+                    "route_status": route.route_status,
+                    "qualifications": sorted({row.qualification for row in route.regimes}),
+                }
             routes[name] = route.as_dict()
         report = {"target": target.as_dict(), "by_unit": routes,
                   "contract": table.provenance(),
@@ -1297,6 +1310,8 @@ def require_assignment_scope(model_path: str | Path, assignment_path: str | Path
                   # chose it answered -- never re-derived from what else is in
                   # this report (#222).
                   ROUTED_EXPERT_BYTES_KEY: routed_expert_bytes}
+        if admit_research_routes:
+            report["research_route_admitted"] = admitted_research
         if projection is not None:
             report["expert_projection"] = projection
         if mtp_projection is not None:
@@ -2393,8 +2408,18 @@ def preflight(model_path: str | Path, *, target=None,
               hessian_path: str | Path | None = None,
               input_scales_path: str | Path | None = None,
               cached_expert_units: bool = False,
-              cached_units_path: str | Path | None = None) -> dict:
+              cached_units_path: str | Path | None = None,
+              target_profile: str | None = None,
+              research_route_override: str | None = None) -> dict:
     """Every gate, in the order that puts the cheapest refusal first.
+
+    ``research_route_override`` (#1275) is the operator's stated reason for
+    admitting a research route: units whose route is not backed and
+    device_qualified pass the scope gate, and the override, its reason, the
+    profile and the units it admitted are stamped on the build anchor beside
+    the route histogram (which the override REQUIRES).  It is accepted only
+    for an ``emulation_only`` serving profile named by ``target_profile``; a
+    shipping profile's gate stays strict.
 
     ``cached_expert_units`` additionally writes the producer's cached-unit
     bundle for the priced expert wires this allocation selected, into the
@@ -2407,6 +2432,26 @@ def preflight(model_path: str | Path, *, target=None,
     """
     from .layer_config import prefill_frontier_replay_claim, read_layer_config_metadata
 
+    if research_route_override is not None:
+        if not str(research_route_override).strip():
+            raise TesseraExportLaneError(
+                "--research-route-override needs a non-empty reason: the override "
+                "is stamped on the shipcard and must say why the route is admitted")
+        if assignment_path is None:
+            raise TesseraExportLaneError(
+                "--research-route-override admits the routes an ALLOCATION selected; "
+                "pass --assignment")
+        if target_profile is None:
+            raise TesseraExportLaneError(
+                "--research-route-override requires --target-profile naming an "
+                "emulation_only research profile")
+        from .serving_profiles import load_serving_profile
+
+        if not load_serving_profile(target_profile).emulation_only:
+            raise TesseraExportLaneError(
+                f"--research-route-override is refused for profile {target_profile!r}: "
+                "it is not emulation_only, so its route gate admits nothing "
+                "unqualified (principle 9)")
     if assignment_path is not None:
         allocation_meta = read_layer_config_metadata(assignment_path)
         try:
@@ -2437,7 +2482,8 @@ def preflight(model_path: str | Path, *, target=None,
     priced_inputs = None
     if assignment_path is not None:
         from .layer_config import read_layer_config_metadata
-        from .shipcard import file_sha256, route_histogram_claim
+        from .shipcard import (
+            file_sha256, research_route_override_claim, route_histogram_claim)
 
         assignment_sha = file_sha256(assignment_path)
         if assignment_sha is None:
@@ -2445,7 +2491,9 @@ def preflight(model_path: str | Path, *, target=None,
         priced_inputs = require_priced_export_inputs(
             assignment_path, hessian_path=hessian_path,
             input_scales_path=input_scales_path)
-        scope = require_assignment_scope(model_path, assignment_path, target=target)
+        scope = require_assignment_scope(
+            model_path, assignment_path, target=target,
+            admit_research_routes=research_route_override is not None)
         composed_cache = (require_composed_cached_units(
             cached_units_path, scope=scope, metadata=allocation_meta)
             if cached_units_path is not None else None)
@@ -2471,6 +2519,16 @@ def preflight(model_path: str | Path, *, target=None,
             read_layer_config_metadata(assignment_path).get("serving_lane_provenance"))
         if route_histogram is not None:
             build["route_histogram"] = route_histogram
+        if research_route_override is not None:
+            if route_histogram is None:
+                raise TesseraExportLaneError(
+                    "--research-route-override requires the allocation's route "
+                    "histogram (serving_lane_provenance): an admitted research "
+                    "route is reported on the card beside its bpp (principle 12)")
+            build["research_route_override"] = research_route_override_claim(
+                profile=target_profile, reason=str(research_route_override).strip(),
+                target_platform=(target.platform if target is not None else None),
+                admitted_units=(scope or {}).get("research_route_admitted", {}))
         if priced_inputs.get("input_global_scale_policy") is not None:
             # The formula the artifact's own activation scalars came out of.
             # BESIDE priced_inputs for the same reason the grouping block is:
@@ -2609,6 +2667,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                              "executes a static activation contract")
     parser.add_argument("--target-profile", default=None,
                         help="serving profile supplying or cross-checking the exact platform")
+    parser.add_argument("--research-route-override", default=None, metavar="REASON",
+                        help="explicit per-run admission of a research route (#1275): "
+                             "units whose route is not backed and device_qualified "
+                             "pass the scope gate, and the override, REASON and the "
+                             "admitted units are stamped on the build anchor beside "
+                             "the route histogram. Refused unless --target-profile "
+                             "names an emulation_only profile")
     parser.add_argument("--write-build-json", default=None,
                         help="write validated allocation facts for lane_shipcard open --build-json")
     parser.add_argument("--print-build-sha256", action="store_true",
@@ -2655,6 +2720,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                                assignment_path=args.assignment,
                                cached_expert_units=args.write_cached_expert_units,
                                cached_units_path=args.cached_units,
+                               target_profile=args.target_profile,
+                               research_route_override=args.research_route_override,
                                **priced)
         if args.write_build_json is not None:
             destination = Path(args.write_build_json)

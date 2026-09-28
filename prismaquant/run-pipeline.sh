@@ -184,6 +184,20 @@ fi
 # extrapolation; it is never the default, because silence must not become a
 # 4-bit rung.
 : "${TESSERA_PLAN_COVER:=as-allocated}"
+# TESSERA_RESEARCH_ROUTE_OVERRIDE (#1275) is the explicit per-run admission of
+# a research route: its value is the operator's REASON, stamped on the shipcard
+# with the route histogram.  It is the ONLY way an emulation_only serving
+# profile (glm_packed_research_sm121) reaches the Tessera export lane; the
+# preflight below and tessera_export_lane refuse it for any other profile.
+: "${TESSERA_RESEARCH_ROUTE_OVERRIDE:=}"
+TESSERA_RESEARCH_OVERRIDE_ARGS=()
+if [[ -n "$TESSERA_RESEARCH_ROUTE_OVERRIDE" ]]; then
+  if [[ "$EXPORT_CONTAINER" != "tessera" ]]; then
+    echo "[pipeline] ERROR: TESSERA_RESEARCH_ROUTE_OVERRIDE applies only to EXPORT_CONTAINER=tessera." >&2
+    exit 2
+  fi
+  TESSERA_RESEARCH_OVERRIDE_ARGS=(--research-route-override "$TESSERA_RESEARCH_ROUTE_OVERRIDE")
+fi
 if [[ "$EXPORT_CONTAINER" == "gguf" ]]; then
   : "${ACTIVATION_ROWS_LIMIT:=1024}"
 else
@@ -255,27 +269,35 @@ if ! TARGET_PROFILE_RESOLVED="$(
   PQ_EXPORT_CONTAINER="$EXPORT_CONTAINER" \
   PQ_TARGET_PROFILE="$TARGET_PROFILE" \
   PQ_TARGET_PROFILE_DEFAULT="$TARGET_PROFILE_DEFAULT" \
+  PQ_RESEARCH_ROUTE_OVERRIDE="$TESSERA_RESEARCH_ROUTE_OVERRIDE" \
   python3 - <<'PY'
 import os
 import sys
 
 from prismaquant.model_profiles import detect_profile
 from prismaquant.serving_profiles import (
+    load_serving_profile,
     require_lane_supported,
     resolve_target_profile,
 )
 
 profile = detect_profile(os.environ["PQ_MODEL_PATH"])
-try:
-    require_lane_supported(profile, os.environ["PQ_EXPORT_CONTAINER"])
-except SystemExit as exc:
-    print(str(exc), file=sys.stderr)
-    raise SystemExit(2) from None
-print(resolve_target_profile(
+resolved = resolve_target_profile(
     profile,
     os.environ.get("PQ_TARGET_PROFILE") or None,
     default=os.environ["PQ_TARGET_PROFILE_DEFAULT"],
-))
+)
+# #1275: an explicit per-run research-route override is the ONLY admission of
+# an undeclared lane, and only for an emulation_only research profile.  Any
+# other profile keeps the declared-lane refusal exactly as it was.
+research_override = bool(os.environ.get("PQ_RESEARCH_ROUTE_OVERRIDE", "").strip())
+if not (research_override and load_serving_profile(resolved).emulation_only):
+    try:
+        require_lane_supported(profile, os.environ["PQ_EXPORT_CONTAINER"])
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from None
+print(resolved)
 PY
 )"; then
   echo "[pipeline] ERROR: preflight refused this run (export lane not declared for the architecture, or serving-profile resolution failed)." >&2
@@ -1205,6 +1227,7 @@ STAGE_SETTINGS_ENV=(
   "VALIDATED_FRONTIER_CALIB_SKIP_FIRST=$VALIDATED_FRONTIER_CALIB_SKIP_FIRST"
   "VALIDATED_FRONTIER_KL_SCOPE=$VALIDATED_FRONTIER_KL_SCOPE"
   "TESSERA_PLAN_COVER=$TESSERA_PLAN_COVER"
+  "TESSERA_RESEARCH_ROUTE_OVERRIDE=$TESSERA_RESEARCH_ROUTE_OVERRIDE"
   "TESSERA_PLATFORM=$TESSERA_RESOLVED_PLATFORM"
   "TESSERA_RUNTIME_IMAGE=${TESSERA_RUNTIME_IMAGE:-}"
   "TESSERA_EXECUTION_MODE=${TESSERA_EXECUTION_MODE:-}"
@@ -2401,7 +2424,8 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
       --print-build-sha256 \
       "${TESSERA_PREFLIGHT_CACHE_ARGS[@]}" \
       --target-profile "$TARGET_PROFILE_RESOLVED" "${TESSERA_SCOPE_ARGS[@]}" \
-      "${TESSERA_PRICED_INPUT_ARGS[@]}"); then
+      "${TESSERA_PRICED_INPUT_ARGS[@]}" \
+      "${TESSERA_RESEARCH_OVERRIDE_ARGS[@]}"); then
     exit 2
   fi
   TESSERA_PLAN="${WORK_DIR}/artifacts/tessera_plan.json"

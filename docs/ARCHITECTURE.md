@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1275, `sonnet/1275-research-override`): the
+Tessera export lane gains an explicit per-run research-route override.
+`tessera_export_lane.preflight --research-route-override REASON` (driver knob
+`TESSERA_RESEARCH_ROUTE_OVERRIDE`) admits units whose selected route fails the
+device-qualified-and-native gate, but only for a serving profile that is
+`emulation_only` (today `glm_packed_research_sm121`) and only with a non-empty
+reason, an allocation and a route histogram. The override, its reason, the
+target platform and the admitted units (route status and qualifications) are
+stamped on the card as `build.research_route_override`, which `shipcard.verify`
+replays. Without the flag the gate is unchanged and refuses. No default, stage,
+format or byte changes; `tessera_route_trace_gate` is untouched.
+
 Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
 TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
 opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
@@ -23193,6 +23205,28 @@ more. `no_declared_lane` units (the plain-BF16 picks no lane declares) are
 carried as counted. A native card owes no histogram yet, because a native
 allocation writes no `serving_lane_provenance` (#1387).
 
+**`build.research_route_override` (Tessera cards; PrismaQuant #1275).** The
+one admission for a route the pinned runtime does not back natively. Principle 9
+fails export closed when a selected unit's route is not device-qualified and
+native; a research profile (`emulation_only: true`, no export lane, e.g.
+`glm_packed_research_sm121`) may still be exported, but only through an
+explicit per-run override: `tessera_export_lane.preflight
+--research-route-override REASON`, reached from the driver as
+`EXPORT_CONTAINER=tessera TESSERA_RESEARCH_ROUTE_OVERRIDE=REASON`. It refuses
+when the reason is blank, when there is no `--assignment` or route histogram to
+stamp, or when the resolved profile is not `emulation_only`; a production
+profile has no override path. The driver skips its lane-support check only when
+the override is set and the profile is `emulation_only`. The admitted units
+(route status and their regime qualifications, read from `resolve_unit_route`,
+never prose) go through `shipcard.research_route_override_claim` into
+`build.research_route_override` beside `build.route_histogram`, and
+`shipcard.verify` replays it: the schema, a non-empty reason, a profile that
+loads and is `emulation_only`, and route status plus qualifications on every
+admitted row. A card without the key owes nothing. The serve-side comparison
+(`tessera_route_trace_gate`) is unchanged and a missing rank trace stays not
+verified. `TESSERA_RESEARCH_ROUTE_OVERRIDE` is part of the `tessera-plan`
+settings hash.
+
 **`route.sweep` (compressed-tensors-lane cards; PrismaQuant #631).** The
 serve-side leg of principle 14 on the default lane. The record carries every
 rank's `prismaquant.compressed_route_sweep/1` file, the artifact's exact
@@ -25747,6 +25781,13 @@ Beside these the arm also checks, in the same up-front block, that
 values — not left to the translator's own `argparse` `choices`, which does not
 run until stage 4, because the point of this block is to refuse before GPU
 hours rather than after them.
+
+**Research profiles need an explicit override (#1275).** A profile marked
+`emulation_only` with no declared Tessera export lane (`glm_packed_research_sm121`)
+is refused by the lane-support check. `TESSERA_RESEARCH_ROUTE_OVERRIDE=<reason>`
+is the only admission: it is refused for any other profile, and the override and
+the admitted-unit route rows are stamped on the card (§7,
+`build.research_route_override`).
 
 **The runtime is Tessera's.** Package `tessera.serving` in the Tessera
 repository: a `vllm.general_plugins` entry point
