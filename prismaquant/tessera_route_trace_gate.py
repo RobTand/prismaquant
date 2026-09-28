@@ -101,6 +101,22 @@ What this does not see
   module that fell back is ABSENT from the trace; the count comparison is
   what makes that absence a refusal.
 
+The serving code (#1561)
+========================
+
+Since Tessera contract v41 the header also stamps ``serving_source_sha256``:
+the ``tessera.package_source.v1`` digest of the Tessera tree the serve
+started on. It is the check of the serving image's code against the code the
+pin names, and an editable install cannot evade it. Under a v3 pin every
+rank must stamp exactly the pinned digest: a different digest is REFUSED
+naming both, an absent or null one is NOT VERIFIED, and a malformed one is
+REFUSED. The verdict then carries ``serving_source_sha256`` with the pinned
+and the served digests. Under a v2 pin the pin names no code, the key is
+never read, and the verdict is exactly what it was before v41. The header
+field is read beside :data:`_HEADER_FIELDS`, not in it, so a v2 verdict's
+``header`` block does not change for a trace that carries it. The check
+rides this gate, so it is eager-only like the rest of it.
+
 Three outcomes, never two. ``agree`` needs the exact grade AND every module
 match. ``refused`` is a conflict: the observation disagrees with the price,
 with its own header, or with itself. ``not_verified`` is no qualifying
@@ -633,6 +649,55 @@ def _module_difference(priced: Mapping[str, str], served: Mapping[str, str]) -> 
     return lines
 
 
+#: The header key Tessera v41 stamps with the serving tree's digest.
+SERVING_SOURCE_FIELD = "serving_source_sha256"
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+#: The default of :func:`compare_route_traces`' code check: the tracked pin.
+_TRACKED_PIN = object()
+
+
+def serving_source_refusal(
+    traces: Sequence[tuple[str, Any]], pinned: str, *, where: str = "trace",
+) -> tuple[str, str, dict[str, Any]] | None:
+    """Compare every rank's header digest with the pinned one (#1561).
+
+    Returns ``None`` when every rank stamps ``pinned``; otherwise ``(status,
+    detail, served)``. A malformed or different digest on any rank is a
+    conflict (REFUSED, both digests named); an absent or null one on any
+    rank, with no conflict elsewhere, is NOT VERIFIED. ``served`` maps each
+    rank label to what its header stamps (``None`` when absent).
+    """
+    served: dict[str, Any] = {}
+    conflicts: list[str] = []
+    absent: list[str] = []
+    for label, payload in traces:
+        document = _decode(payload, where=f"{where}[{label}]")
+        value = document.get(SERVING_SOURCE_FIELD)
+        served[label] = value
+        if value is None:
+            absent.append(label)
+        elif not isinstance(value, str) or _SHA256.match(value) is None:
+            conflicts.append(
+                f"rank {label} stamps a malformed {SERVING_SOURCE_FIELD} "
+                f"{value!r} (not 64 lowercase hex digits)")
+        elif value != pinned:
+            conflicts.append(
+                f"rank {label} served code {value}, and the pin names {pinned}")
+    if conflicts:
+        return REFUSED, (
+            "REFUSED: the serve ran other Tessera code than the pin names: "
+            + "; ".join(conflicts)
+            + "; a route observed on other code attests nothing about the "
+            "pinned code (#1561)"), served
+    if absent:
+        return NOT_VERIFIED, (
+            f"NOT VERIFIED: rank(s) {absent} stamp no {SERVING_SOURCE_FIELD}, "
+            f"so which Tessera code served is unknown; the pin names {pinned} "
+            "and an absent digest is never a match (#1561)"), served
+    return None
+
+
 def compare_route_traces(
     traces: Sequence[tuple[str, Any]],
     *,
@@ -641,6 +706,7 @@ def compare_route_traces(
     platform: str,
     executes_by_platform: Mapping[str, Mapping[str, "str | None"]],
     formats: Mapping[str, Mapping[str, Any]],
+    serving_source_sha256: Any = _TRACKED_PIN,
 ) -> dict[str, Any]:
     """The whole gate. Returns a verdict whose ``status`` is one of three.
 
@@ -648,7 +714,21 @@ def compare_route_traces(
     ``None`` payload is a rank whose trace file does not exist. The priced side
     is computed first, so a malformed or unbacked price raises
     :class:`TesseraRouteTraceError` whatever the traces say.
+
+    ``serving_source_sha256`` is the pinned serving code digest (#1561). The
+    default reads the tracked pin, so a caller that passes nothing is checked
+    against it. ``None`` (a v2 pin) skips the check and adds nothing to the
+    verdict.
     """
+    if serving_source_sha256 is _TRACKED_PIN:
+        from . import tessera_serving_runtime_pin
+
+        pinned = tessera_serving_runtime_pin.pinned_serving_source_sha256()
+    else:
+        pinned = serving_source_sha256
+    if pinned is not None and (not isinstance(pinned, str) or _SHA256.match(pinned) is None):
+        raise TesseraRouteTraceError(
+            f"the pinned serving_source_sha256 must be 64 lowercase hex digits, got {pinned!r}")
     if type(expected_ranks) is not int or expected_ranks < 1:
         raise TesseraRouteTraceError("expected_ranks must be a positive integer")
     priced = priced_histogram(
@@ -706,6 +786,17 @@ def compare_route_traces(
         return _finish(REFUSED, f"REFUSED: {exc}")
     verdict["header"] = headers
     verdict["served_by_rank"] = served_by_rank
+    if pinned is not None:
+        # Every trace has parsed, so a missing observation is already
+        # reported; what is left is whether each rank ran the pinned code.
+        code = serving_source_refusal(traces, pinned)
+        verdict[SERVING_SOURCE_FIELD] = {
+            "pinned": pinned,
+            "served": (code[2] if code is not None else
+                       {label: pinned for label in labels}),
+        }
+        if code is not None:
+            return _finish(code[0], code[1])
 
     grade = set(grades.values())
     if len(grade) > 1:

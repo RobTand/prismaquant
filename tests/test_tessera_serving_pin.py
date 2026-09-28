@@ -188,7 +188,7 @@ def test_the_pin_schema_moved_with_its_member_set():
 def test_the_development_pin_and_the_serving_pin_name_the_same_tessera():
     """Two of this repository's own spec files disagreed about one runtime once."""
     pin = load_tessera_serving_runtime_pin()
-    assert contract_module.TESSERA_DEV_PIN_COMMIT == pin.commit
+    assert contract_module.TESSERA_DEV_PIN_COMMIT == pin.producer_commit
     assert contract_module.TESSERA_DEV_PIN_CONTRACT_SHA256 == pin.contract_sha256
 
 
