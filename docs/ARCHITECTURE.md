@@ -10,8 +10,10 @@ projection stays a named dependency on the lane spec's new `campaign_tools`
 roster. `lane_specs/tessera.json` `producer_tools` is now exactly the
 supported exporter, so the arm's `unsupported_producer_tools` report is
 empty; a contract whose `producer_interface` block does not list the driver
-refuses rather than silently dropping `--producer-authority`. Fail-closed at
-the admitted v42 pin until the pin moves to #687 (§9.4, export arm).
+refuses rather than silently dropping `--producer-authority`. (Rebased onto
+PQ #1616's v44 pin, Tessera master's #687 merge: the writer is live against
+the pinned package; it stays fail-closed with a named refusal on any older
+pin whose package lacks `tessera.serving_plan` (§9.4, export arm).)
 
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`, exact probe): the
 PACT hull's binding-budget probe is now `prismaquant/exact_mckp.py`, an exact
