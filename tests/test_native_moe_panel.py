@@ -658,16 +658,18 @@ def test_an_additive_receipt_field_gives_the_same_observation(joined, tmp_path):
     panel, receipt, trace = receipt_fixture(joined)
     trace_path = tmp_path / "trace.json"
     write(trace_path, trace)
-    base_path = tmp_path / "base.json"
-    base = consume_moe_receipt(base_path, expected_sha256=write(base_path, receipt),
+    path = tmp_path / "receipt.json"
+    base_sha = write(path, receipt)
+    base = consume_moe_receipt(path, expected_sha256=base_sha,
                                expected_panel=panel, memory_trace_path=trace_path)
     receipt = copy.deepcopy(receipt)
     for name, target in _moe_receipt_targets(receipt).items():
         target[f"added_{name}"] = {"schema": "tessera.future.v1"}
-    path = tmp_path / "receipt.json"
-    observed = consume_moe_receipt(path, expected_sha256=write(path, receipt),
+    new_sha = write(path, receipt)
+    observed = consume_moe_receipt(path, expected_sha256=new_sha,
                                    expected_panel=panel, memory_trace_path=trace_path)
-    assert observed == {**base, "receipt_sha256": observed["receipt_sha256"]}
+    # Same path, so the only receipt-derived difference is the file's digest.
+    assert json.loads(json.dumps(observed).replace(new_sha, base_sha)) == json.loads(json.dumps(base))
 
 
 @pytest.mark.parametrize("where", ["receipt", "operator", "resources", "phase", "route"])
