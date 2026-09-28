@@ -7419,13 +7419,24 @@ def _main(argv, *, source_scope) -> int:
     payload["anchor_counts"] = {
         n: {f: len(a) for f, a in by_f.items()} for n, by_f in measured.items()
     }
+    total = sum(len(rows) for rows in payload["costs"].values())
+    if total == 0 and any(menus.values()):
+        # A row whose menu admitted rungs but priced none, with no rung raising
+        # (a --max-artifact-bpp cap below every rung, or a deadline before the
+        # first anchor), would publish a table of 0 priced rungs with rc 0, and
+        # PrismaBuild would count it as done (RobTand/prismaquant#1481). An
+        # empty menu refuses earlier with EXIT_EMPTY_MENU; this is the other
+        # half. Nothing is written.
+        raise RuntimeError(
+            f"campaign row priced no rung out of a non-empty menu "
+            f"({sum(len(m) for m in menus.values())} admitted rungs over "
+            f"{sum(1 for m in menus.values() if m)} units); no cost table was written")
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     # Canonical bytes: a resumed or adopted row is an equal but distinct object
     # from the one a fresh encode shares, and plain ``pickle.dump`` would make
     # the file's digest depend on which path built it (PQ #1403).
     from .digests import canonical_pickle_bytes
     Path(args.out).write_bytes(canonical_pickle_bytes(payload))
-    total = sum(len(rows) for rows in payload["costs"].values())
     print(f"[campaign] wrote {args.out}: {len(payload['costs'])} units, "
           f"{total} priced rungs, {len(payload['formats'])} distinct formats",
           flush=True)

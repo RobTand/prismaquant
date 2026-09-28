@@ -3996,6 +3996,10 @@ Stage A campaign's served-quantiser binding and failure contract** (PQ #1481,
     rung of the row.
   - Before this change the rung was printed and skipped. A row whose every rung
     failed published an empty table with rc 0.
+  - A row that prices no rung out of a non-empty menu also raises and writes no
+    `cost.pkl`, even when no rung raised: a `--max-artifact-bpp` cap below every
+    rung, or a deadline before the first anchor. An empty menu still refuses
+    earlier with `EXIT_EMPTY_MENU` (#291).
   - A failed rung no longer reaches a cost table as a `no_successful_anchor`
     unit in `population.unpriced`. The reason stays for a unit with a menu and
     no anchor for any other cause, such as a deadline stop, and older tables
