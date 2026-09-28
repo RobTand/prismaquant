@@ -89,7 +89,7 @@ import pickle
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 if __package__:
     from .tessera_campaign_container import (
@@ -2964,6 +2964,67 @@ def cmd_submit_allocation(args) -> int:
             str(joint_cost), str(plan_path), produced_by=provenance, argv=inner))
 
 
+#: PrismaQuant's reuse authority, relative to the PrismaQuant tree the
+#: container runs (tessera#599 step 2).
+REUSE_AUTHORITY_RELATIVE = Path("prismaquant", "tessera_reuse_authority.py")
+
+
+def export_inner_with_authority(inner: list[str], spec: dict, *, cwd: str) -> list[str]:
+    """The export's inner argv, with PrismaQuant's reuse authority when attested.
+
+    The inner command is written in container paths and runs Tessera's
+    exporter from a mounted checkout. That checkout's own
+    ``runtime_contract.json`` decides (``tessera_export_lane.
+    producer_authority_argv``): a pin whose contract publishes no
+    ``producer_interface`` block -- every pin before Tessera contract v40,
+    including the live campaign's -- gets ``inner`` back unchanged, because
+    its exporter would refuse the option as an unknown argument. A pin that
+    publishes it gets ``--producer-authority`` inserted after the exporter,
+    naming the adopter in the PrismaQuant tree the container actually runs
+    (``pinned_source_root``: a declared mount, or the sealed ``/workspace``).
+
+    An inner command that already passes the option, or that names no exporter
+    script (``python -m ...``), is returned unchanged: the caller spelled it.
+    """
+    from prismaquant.tessera_export_lane import (
+        EXPORTER_DRIVER, PRODUCER_AUTHORITY_OPTION, producer_authority_argv)
+    from tools.tessera_campaign_container import host_path, pinned_source_root
+
+    if PRODUCER_AUTHORITY_OPTION in inner or any(
+            item.startswith(PRODUCER_AUTHORITY_OPTION + "=") for item in inner):
+        return list(inner)
+    suffix = PurePosixPath(EXPORTER_DRIVER)
+    hits = [index for index, item in enumerate(inner)
+            if PurePosixPath(item).parts[-len(suffix.parts):] == suffix.parts]
+    if not hits:
+        return list(inner)
+    if len({inner[index] for index in hits}) != 1:
+        raise RuntimeError(
+            "the export command names more than one Tessera exporter: "
+            + ", ".join(sorted({inner[index] for index in hits})))
+    exporter = inner[hits[0]]
+    mounts = spec.get("container", {}).get("mounts", [])
+    exporter_host = host_path(exporter, cwd=cwd, mounts=mounts)
+    if exporter_host is None or not exporter_host.is_file():
+        raise RuntimeError(
+            f"the export command's exporter {exporter} is not a file behind "
+            "any mount the spec declares, so its checkout's contract cannot be "
+            "read to decide whether it takes --producer-authority")
+    checkout = exporter_host.parents[len(suffix.parts) - 1]
+    entry, pq_root, _ = pinned_source_root(spec, cwd=cwd)
+    authority_container = str(PurePosixPath(entry or "/workspace")
+                              / PurePosixPath(*REUSE_AUTHORITY_RELATIVE.parts))
+    extra = producer_authority_argv(checkout, authority_container)
+    if not extra:
+        return list(inner)
+    if not (pq_root / REUSE_AUTHORITY_RELATIVE).is_file():
+        raise RuntimeError(
+            f"the Tessera checkout {checkout} attests its exporter takes "
+            f"--producer-authority, but the PrismaQuant tree the container "
+            f"runs ({pq_root}) has no {REUSE_AUTHORITY_RELATIVE}")
+    return inner[:hits[0] + 1] + extra + inner[hits[0] + 1:]
+
+
 def cmd_submit_export(args) -> int:
     producer = _manifest_producer()
     plan_path = Path(args.plan).resolve()
@@ -2976,6 +3037,8 @@ def cmd_submit_export(args) -> int:
         raise RuntimeError(
             "the export entry point lives in the Tessera tree, so its command "
             "is not derived here; pass it after --")
+    inner = export_inner_with_authority(
+        inner, json.loads(Path(args.spec).read_text()), cwd=os.getcwd())
     provenance = producer.deterministic_entry_provenance(
         EXPORT_ENTRY_POINT, plan=str(plan_path), plan_sha256=plan_sha256,
         workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))

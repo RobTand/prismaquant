@@ -42,6 +42,14 @@ reviewed digest, plus route detail/cell ids and requires_serve_flags for the
 three units. The v5 fixture now selects the A4/GLM image, not the default
 image that lost A4. Allocations, applicability and Pareto outputs are
 byte-identical; no allocator arithmetic changed.
+
+Re-taken 2026-09-28 for PQ #1542's v40 pin (Tessera #675, merged as
+db5b6e23). PB receipts a10255cf089e (before: c36c02e1e76 under the
+20bf5346 interpreter) and 21c7668c7738 (after: the db5b6e23 interpreter)
+capture the normalised layer.json. Exactly two fields change:
+``contract_version`` (39 to 40) and ``reviewed_contract_sha256``
+(f2f90948 to d6768313). The allocation, the applicability file and the
+Pareto outputs are byte-identical.
 """
 from __future__ import annotations
 
@@ -86,7 +94,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "079a8ccada658ad5fc30c48b0cbcac0c0419933692b4bc31bc6332563c96df46"
+        "92d8ad7d7bf2dfa8c6f9fb2a77d24c8a0ac40f5502e2a4f3dde582c952e00ee0"
     ),
     "pareto.csv": (
         "0abb6a82a89d9cd9686c6a250368bb77603d3904dc2707ccb69a13c9eec70c5a"

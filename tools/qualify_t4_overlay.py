@@ -15,12 +15,11 @@ def decoder_provenance():
  import importlib.metadata
  distribution=importlib.metadata.distribution('tessera-quant');direct_url=distribution.read_text('direct_url.json')
  return {'schema':'prismaquant.catalog_qualification_decoder.v1','decoder':_decoder_identity(None),'distribution':{'name':distribution.metadata['Name'],'version':distribution.version,'direct_url':None if direct_url is None else json.loads(direct_url),'direct_url_sha256':None if direct_url is None else hashlib.sha256(direct_url.encode()).hexdigest()},'installed_encoder_source_sha256':_checkpoint_identity_api().encoder_source_sha256(),'torch':torch.__version__,'cuda':torch.version.cuda,'scope':'actual installed decoder used for this cell; no encoding performed'}
-def digest(raw):return hashlib.sha256(raw).hexdigest()
-def stamp(path):
- s=path.stat();return dict(inode=s.st_ino,bytes=s.st_size,mtime_ns=s.st_mtime_ns,ctime_ns=s.st_ctime_ns)
+from prismaquant.digests import bytes_sha256hex as digest
+from prismaquant.joint_catalog_extension import catalog_stat_fence
 def read_cell(cell):
  started=time.monotonic();wire=Path(cell['wire']);render=Path(cell['render'])
- assert stamp(wire)==cell['wire_stat'];assert stamp(render)==cell['render_stat'];origin=_resolve_render_origin(render,wire=wire,record=cell['record'],name=cell['qname'],fmt=cell['format'],shape=cell['source_weight']['shape'],reader=None);assert origin==cell['render_origin'];assert RENDER_COMPARISON_BY_ORIGIN[origin]==cell['render_comparison']
+ assert catalog_stat_fence(wire.stat())==cell['wire_stat'];assert catalog_stat_fence(render.stat())==cell['render_stat'];origin=_resolve_render_origin(render,wire=wire,record=cell['record'],name=cell['qname'],fmt=cell['format'],shape=cell['source_weight']['shape'],reader=None);assert origin==cell['render_origin'];assert RENDER_COMPARISON_BY_ORIGIN[origin]==cell['render_comparison']
  if policy_is_active():
   from prismaquant.residency_shard_reader import await_staged_spans, staged_range_wait_s
   from prismaquant.staged_lease import stage_cover_is_published
@@ -30,7 +29,7 @@ def read_cell(cell):
   wanted=[(cell[k],0,cell[k+'_stat']['bytes'],cell[k+'_stat']['bytes']) for k in ('wire','render')]
   verdict=await_staged_spans(resolver,wanted,deadline=time.monotonic()+staged_range_wait_s(),published=stage_cover_is_published)
   if verdict!=RANGE_HIT:raise refuse_pool_bulk_read(str(wire),'qualification-readiness-'+verdict)
- wire_start=time.monotonic();blob,_wire_digest=_read_verified_wire_blob(cell);verify_cached_unit(blob,cell['record'],cell['record']['identity']);assert stamp(wire)==cell['wire_stat']
+ wire_start=time.monotonic();blob,_wire_digest=_read_verified_wire_blob(cell);verify_cached_unit(blob,cell['record'],cell['record']['identity']);assert catalog_stat_fence(wire.stat())==cell['wire_stat']
  wire_seconds=time.monotonic()-wire_start;render_start=time.monotonic();resolver=residency_resolver();staged=None if resolver is None else resolver.staged_read(render)
  if policy_is_active() and staged is None:raise refuse_pool_bulk_read(str(render),'new-candidate-render-not-staged')
  # First qualification has no prior digest. Existing bounded reader checks
@@ -46,7 +45,7 @@ def read_cell(cell):
  return (cell,started,blob,tensor,identity,file_sha,wire_seconds,render_seconds)
 def finish_cell(loaded):
  cell,started,blob,tensor,identity,file_sha,wire_seconds,render_seconds=loaded;render=Path(cell['render']);wire=Path(cell['wire']);decode_start=time.monotonic();decoded=_decode_wire(blob,reader=None,device='cuda').to(torch.bfloat16).cpu()
- decode_seconds=time.monotonic()-decode_start;assert torch.equal(decoded,tensor),cell['qname'];assert stamp(render)==cell['render_stat'];assert stamp(wire)==cell['wire_stat']
+ decode_seconds=time.monotonic()-decode_start;assert torch.equal(decoded,tensor),cell['qname'];assert catalog_stat_fence(render.stat())==cell['render_stat'];assert catalog_stat_fence(wire.stat())==cell['wire_stat']
  return {**{k:cell[k] for k in ('source_weight','activation','encoding_identity_sha256','render_origin','render_comparison','catalog_source_adoption','adopted_source_hessian')},'rendered_weight':identity,'render_file_sha256':file_sha,'wire_sha256':cell['record']['blob_sha256'],'render_stat':cell['render_stat'],'wire_stat':cell['wire_stat'],'qualification_decoder':decoder_provenance(),'qualification_seconds':time.monotonic()-started,'phase_seconds':{'wire_read_verify':wire_seconds,'render_read_hash_tensor':render_seconds,'decode_cpu_compare_transfer':decode_seconds}}
 def qualify(cell):return finish_cell(read_cell(cell))
 def main():
@@ -63,7 +62,7 @@ def main():
  def read_task(task):
   cell=task['payload']['cell'];out=Path(task['payload']['output'])
   if out.exists():
-   raw=out.read_bytes();expected=task['payload'].get('existing_result_sha256');assert expected is None or digest(raw)==expected;value=json.loads(raw);assert value['cell_sha256']==digest(json.dumps(cell,sort_keys=True,separators=(',',':')).encode());assert stamp(Path(cell['render']))==cell['render_stat'];assert stamp(Path(cell['wire']))==cell['wire_stat']
+   raw=out.read_bytes();expected=task['payload'].get('existing_result_sha256');assert expected is None or digest(raw)==expected;value=json.loads(raw);assert value['cell_sha256']==digest(json.dumps(cell,sort_keys=True,separators=(',',':')).encode());assert catalog_stat_fence(Path(cell['render']).stat())==cell['render_stat'];assert catalog_stat_fence(Path(cell['wire']).stat())==cell['wire_stat']
    if expected is None:assert value.get('verified_cell_sha256')==digest(json.dumps(value['verified_cell'],sort_keys=True,separators=(',',':')).encode())
    return ('existing',raw,value)
   if task['payload'].get('existing_result_sha256'):raise RuntimeError('previously qualified result is missing; sealed task declares no payload reads')

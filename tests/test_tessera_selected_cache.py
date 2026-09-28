@@ -10,6 +10,7 @@ import pytest
 
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.tessera_export_lane import TesseraExportLaneError, selected_cached_units_manifest
+from prismaquant.tessera_reuse_authority import PRODUCER_AUTHORITY
 from test_tessera_expert_projection import (
     STACK, _declared, _projection, _record,
 )
@@ -326,7 +327,8 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     # v1 extension as rooted cached-unit authority. Tessera f46be81f7 (in the
     # af7a86d43 pin) reads v2 as well, so a band-created extension now binds
     # through the same reader and the full bundle checks below apply to it.
-    bundle = CachedUnitBundle(manifest, tmp_path, set(names), source)
+    bundle = CachedUnitBundle(manifest, tmp_path, set(names), source,
+                              authority=PRODUCER_AUTHORITY)
     assert len(bundle.roots) == 2 and bundle.producer_packages == packages
     for name in names:
         blob, record = bundle.read(name)

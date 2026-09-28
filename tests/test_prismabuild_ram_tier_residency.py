@@ -28,6 +28,10 @@ from test_prismabuild_residency_map import (
     MANIFEST, LEAD, _bind, _pool_cache, _stage, _wire_cell,
 )
 
+#: The resolver validates maps with PrismaBuild's own validator, through the
+#: client SDK (PB #1254); bind the reviewed installed one for every test.
+pytestmark = pytest.mark.usefixtures("installed_client_sdk")
+
 RAM_TIER = 'ram:dl380g10'
 EPOCH = '1789771929-aba6e46e41fb03ef'
 LATER_EPOCH = '1789788888-9c1d2e3f4a5b'
@@ -401,7 +405,8 @@ def test_a_ram_path_outside_the_ram_root_refuses_the_map_whole(tmp_path, monkeyp
     report = residency_report()
     assert report['entries'] == 0 and report['hits'] == 0
     assert report['bytes_from_pool'] == len(blob)
-    assert 'outside' in report['refused']
+    # PrismaBuild's validate_map words the refusal (PB #1254).
+    assert 'ram_path must live under' in report['refused']
 
 
 def test_an_entry_naming_a_ram_path_without_the_announced_header_refuses_whole(

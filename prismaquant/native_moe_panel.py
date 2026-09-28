@@ -536,18 +536,40 @@ def validate_glm_routing(routing):
     `gemm1_clamp_limit`), so a reference without them is not this owner.
 
     The reference is the producer's; the shared contract here is only what the
-    two sides must agree on for a receipt to mean anything.
+    two sides must agree on for a receipt to mean anything.  The first branch
+    names every field that disagrees, observed against expected, so a refusal
+    identifies the failing field instead of the whole protocol (#1536).
     """
-    if (routing["activation"] != "silu" or routing["scoring_func"] != "sigmoid"
-            or type(routing["renormalize"]) is not bool
-            or routing["apply_router_weight_on_input"] is not False
-            or routing["expert_map"] is not None
-            or routing["input_dtype"] != "torch.bfloat16"
-            or routing["topk_weights_dtype"] not in ("torch.bfloat16", "torch.float32")
-            or routing["topk_ids_dtype"] not in ("torch.int32", "torch.int64")
-            or routing["device"] != "cuda:0"
-            or routing["weights_contract"] != "post_renormalization_and_routed_scaling"):
-        raise ValueError("GLM routed owner is outside its captured route protocol")
+    problems = []
+    if routing["activation"] != "silu":
+        problems.append(f"activation={routing['activation']!r} (expected 'silu')")
+    if routing["scoring_func"] != "sigmoid":
+        problems.append(f"scoring_func={routing['scoring_func']!r} (expected 'sigmoid')")
+    if type(routing["renormalize"]) is not bool:
+        problems.append(f"renormalize={routing['renormalize']!r} (expected bool)")
+    if routing["apply_router_weight_on_input"] is not False:
+        problems.append(
+            f"apply_router_weight_on_input={routing['apply_router_weight_on_input']!r} (expected False)")
+    if routing["expert_map"] is not None:
+        problems.append(f"expert_map={routing['expert_map']!r} (expected None)")
+    if routing["input_dtype"] != "torch.bfloat16":
+        problems.append(f"input_dtype={routing['input_dtype']!r} (expected 'torch.bfloat16')")
+    if routing["topk_weights_dtype"] not in ("torch.bfloat16", "torch.float32"):
+        problems.append(
+            f"topk_weights_dtype={routing['topk_weights_dtype']!r} "
+            "(expected 'torch.bfloat16' or 'torch.float32')")
+    if routing["topk_ids_dtype"] not in ("torch.int32", "torch.int64"):
+        problems.append(
+            f"topk_ids_dtype={routing['topk_ids_dtype']!r} "
+            "(expected 'torch.int32' or 'torch.int64')")
+    if routing["device"] != "cuda:0":
+        problems.append(f"device={routing['device']!r} (expected 'cuda:0')")
+    if routing["weights_contract"] != "post_renormalization_and_routed_scaling":
+        problems.append(
+            f"weights_contract={routing['weights_contract']!r} "
+            "(expected 'post_renormalization_and_routed_scaling')")
+    if problems:
+        raise ValueError("GLM routed owner is outside its captured route protocol: " + "; ".join(problems))
     if routing["topk_method"] != GLM_SOURCE_GEOMETRY["topk_method"]:
         raise ValueError(
             f"GLM routed owner top-k method is {routing['topk_method']!r}, and this "

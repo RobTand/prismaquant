@@ -6,11 +6,15 @@ from its movers' fragments and injects the map's path as
 ``PRISMABUILD_RESIDENCY_MAP``. This module is the consumer half. Without a
 reader the stage is a copy nobody reads, and the before/after says exactly that.
 
-The schema is PrismaBuild's, not ours. These field rules mirror
-``src/prismabuild/residency_map.py`` at ``182166a04d`` on
-``flash/583-movers-egress-20260918``, field for field; nothing here imports
-``prismabuild``, so the rules are re-stated rather than shared, and a drift
-between the two is a refusal here rather than a wrong read.
+The schema is PrismaBuild's, not ours, and so is its validator: a map is
+checked by PB's own ``validate_residency_map`` from its client SDK
+(``prismabuild.client``, PB #1254), reached through
+:func:`prismaquant.staged_lease.client_sdk` from the same sealed generation as
+every other PB call this process makes. Nothing here restates PB's field
+rules. A process with no PB SDK bound cannot tell a valid map from an invalid
+one, so it refuses the map whole, with that reason, and reads declared paths.
+What stays here is this reader's own binding: the map must name the data
+manifest this process was submitted with.
 
 One resolver, one store (principle 8). Every read site that can be served from
 the stage asks this module, and the bytes on either side of the redirect are
@@ -134,13 +138,6 @@ RANGE_UNDECLARED = "undeclared"
 RANGE_REFUSED = "refused"
 
 
-_ROOT_KEYS = {"schema", "tier_id", "stage_root", "manifest_sha256", "leads",
-              "generation", "entries"}
-#: The ram overlay's optional header: which tier, under which root, in which
-#: epoch. A map naming ram paths must announce all three (PrismaBuild's
-#: ``validate_map`` refuses less), and a map naming none may carry them anyway.
-_RAM_ROOT_KEYS = {"ram_tier_id", "ram_root", "ram_epoch"}
-_ENTRY_KEYS = {"stage_path", "bytes", "offset", "sha256", "ram_path"}
 _HEX = frozenset("0123456789abcdef")
 
 
@@ -437,69 +434,48 @@ class ResidencyResolver:
         self._tier_record = None
 
     def _adopt(self, payload: object, raw: bytes) -> None:
-        if type(payload) is not dict:
+        # PrismaBuild's own validator decides whether this is a map at all
+        # (PB #1254); the binding to this run's manifest is this reader's.
+        from .staged_lease import LeaseRefused, client_sdk
+        try:
+            client = client_sdk()
+        except LeaseRefused as refusal:
+            # An SDK that resolves to a divergent tree fails clear, as it
+            # does for the lease; only an SDK that is not available refuses
+            # the map and reads the declared paths.
+            if refusal.kind != "availability":
+                raise
             raise ResidencyMapRefused(
-                f"residency map must be an object, not {type(payload).__name__}")
-        unknown = sorted(set(payload) - _ROOT_KEYS - _RAM_ROOT_KEYS)
-        if unknown:
-            raise ResidencyMapRefused(f"unknown residency map fields: {unknown}")
-        missing = sorted(_ROOT_KEYS - set(payload))
-        if missing:
-            raise ResidencyMapRefused(f"residency map is missing {missing}")
-        if payload["schema"] != SCHEMA:
-            raise ResidencyMapRefused(
-                f"residency map declares schema {payload['schema']!r}, not {SCHEMA}")
-        if not _is_hex64(payload["manifest_sha256"]):
-            raise ResidencyMapRefused("residency map manifest_sha256 is not a digest")
-        if payload["manifest_sha256"] != self._manifest_sha256:
+                f"no PrismaBuild SDK to validate the map with: {refusal}") from None
+        try:
+            checked = client.validate_residency_map(payload)
+        except client.ResidencyMapError as error:
+            raise ResidencyMapRefused(str(error)) from None
+        if checked["manifest_sha256"] != self._manifest_sha256:
             raise ResidencyMapRefused(
                 "residency map names data manifest "
-                f"{payload['manifest_sha256'][:12]}, this run reads "
+                f"{checked['manifest_sha256'][:12]}, this run reads "
                 f"{self._manifest_sha256[:12]}")
-        stage_root = payload["stage_root"]
-        if (type(stage_root) is not str or not stage_root.startswith("/")
-                or os.path.normpath(stage_root) != stage_root):
-            raise ResidencyMapRefused("residency map stage_root is not a normalized absolute path")
-        tier_id = payload["tier_id"]
-        if type(tier_id) is not str or not tier_id or "/" in tier_id:
-            raise ResidencyMapRefused("residency map tier_id is not a tier id")
-        leads = payload["leads"]
-        if type(leads) is not list or any(not _is_hex64(lead) for lead in leads):
-            raise ResidencyMapRefused("residency map leads must be 64-character action keys")
-        if len(set(leads)) != len(leads):
-            raise ResidencyMapRefused("residency map leads repeat a key")
-        generation = payload["generation"]
-        if type(generation) is not int or isinstance(generation, bool) or generation < 0:
-            raise ResidencyMapRefused("residency map generation must be a count")
-        ram_tier_id, ram_root, ram_epoch = self._ram_header(payload)
-        entries = payload["entries"]
-        if type(entries) is not dict:
-            raise ResidencyMapRefused(
-                "residency map entries must be an object keyed by '<offset>:<path>', not "
-                f"{type(entries).__name__} (a ranged roster of rows is not this schema)")
-        prefix = stage_root.rstrip("/") + "/"
         adopted: dict[str, dict] = {}
-        for key, row in entries.items():
-            adopted[str(key)] = self._entry(str(key), row, stage_root, prefix, ram_root)
-        if any("ram_path" in entry for entry in adopted.values()) and (
-                ram_tier_id is None or ram_root is None or ram_epoch is None):
-            # A ram copy nobody can date is not resident (#640): the tmpfs
-            # empties on reboot while the map survives, so an entry naming a
-            # ram path without the tier, root and epoch that place it in time
-            # is refused the way any other entry that says too little is.
-            raise ResidencyMapRefused(
-                "a residency map naming ram paths must announce its "
-                "ram tier, root and epoch")
+        for key, row in checked["entries"].items():
+            entry = {"stage_path": row["stage_path"], "bytes": row["bytes"],
+                     "offset": row["offset"], "sha256": row["sha256"],
+                     "declared_path": key.partition(":")[2]}
+            if "ram_path" in row:
+                entry["ram_path"] = row["ram_path"]
+            adopted[key] = entry
+        tier_id = checked["tier_id"]
+        generation = checked["generation"]
         self._entries = adopted
         self._real_entries = None
         self._map_sha256 = hashlib.sha256(raw).hexdigest()
         self._tier_id = tier_id
-        self._stage_root = stage_root
-        self._leads = tuple(leads)
+        self._stage_root = checked["stage_root"]
+        self._leads = tuple(checked["leads"])
         self._generation = generation
-        self._ram_tier_id = ram_tier_id
-        self._ram_root = ram_root
-        self._ram_epoch = ram_epoch
+        self._ram_tier_id = checked.get("ram_tier_id")
+        self._ram_root = checked.get("ram_root")
+        self._ram_epoch = checked.get("ram_epoch")
         self._ram_refusal = None
         self._tier_record_identity = None
         self._tier_record = None
@@ -507,90 +483,6 @@ class ResidencyResolver:
             print(f"[residency] adopted {self._map_path}: {len(adopted)} entries "
                   f"on {tier_id}, generation {generation}", flush=True)
         self._refused = None
-
-    @staticmethod
-    def _ram_header(payload: dict) -> tuple[str | None, str | None, str | None]:
-        """The map's optional ram announcement, with PrismaBuild's own rules.
-
-        The three fields are independent optionals in the writer's schema --
-        only an entry naming a ``ram_path`` requires all three -- and each is
-        validated the way ``prismabuild.residency_map.validate_map`` validates
-        it: the root a normalized absolute path, the tier id and the epoch
-        non-empty strings without ``/``, because the epoch is a filename-safe
-        identity the tier loop mints.
-        """
-
-        ram_root = payload.get("ram_root")
-        if ram_root is not None and (
-                type(ram_root) is not str or not ram_root.startswith("/")
-                or os.path.normpath(ram_root) != ram_root):
-            raise ResidencyMapRefused(
-                "residency map ram_root is not a normalized absolute path")
-        ram_tier_id = payload.get("ram_tier_id")
-        if ram_tier_id is not None and (
-                type(ram_tier_id) is not str or not ram_tier_id or "/" in ram_tier_id):
-            raise ResidencyMapRefused("residency map ram_tier_id is not a tier id")
-        ram_epoch = payload.get("ram_epoch")
-        if ram_epoch is not None and (
-                type(ram_epoch) is not str or not ram_epoch or "/" in ram_epoch):
-            raise ResidencyMapRefused("residency map ram_epoch is not an epoch")
-        return ram_tier_id, ram_root, ram_epoch
-
-    @staticmethod
-    def _entry(key: str, row: object, stage_root: str, prefix: str,
-               ram_root: str | None = None) -> dict:
-        head, separator, path = key.partition(":")
-        if not separator or not path or not head.isdigit():
-            raise ResidencyMapRefused(f"malformed residency map key {key!r}")
-        offset = int(head)
-        if type(row) is not dict:
-            raise ResidencyMapRefused(f"residency map entry {key!r} must be an object")
-        unknown = sorted(set(row) - _ENTRY_KEYS)
-        if unknown:
-            raise ResidencyMapRefused(f"unknown residency map entry fields: {unknown}")
-        stage_path = row.get("stage_path")
-        if (type(stage_path) is not str or not stage_path.startswith("/")
-                or os.path.normpath(stage_path) != stage_path):
-            raise ResidencyMapRefused(
-                f"residency map entry {key!r} stage_path is not a normalized absolute path")
-        if not (stage_path == stage_root or stage_path.startswith(prefix)):
-            raise ResidencyMapRefused(
-                f"residency map entry {key!r} is staged outside {stage_root!r}")
-        size = row.get("bytes")
-        if type(size) is not int or isinstance(size, bool) or size <= 0:
-            raise ResidencyMapRefused(f"residency map entry {key!r} has no positive size")
-        declared = row.get("offset", offset)
-        if type(declared) is not int or isinstance(declared, bool) or declared < 0:
-            raise ResidencyMapRefused(f"residency map entry {key!r} offset is not a count")
-        if declared != offset:
-            raise ResidencyMapRefused(
-                f"residency map entry {key!r} offset {declared} disagrees with its key")
-        if not _is_hex64(row.get("sha256")):
-            raise ResidencyMapRefused(f"residency map entry {key!r} has no SHA-256 digest")
-        checked = {"stage_path": stage_path, "bytes": size, "offset": offset,
-                   "sha256": row["sha256"], "declared_path": path}
-        ram_path = row.get("ram_path")
-        if ram_path is not None:
-            if ram_root is None:
-                # PrismaBuild's own compose refuses this shape; a map that
-                # carries it is a map this reader refuses whole, like every
-                # other entry that does not say what the schema requires.
-                raise ResidencyMapRefused(
-                    f"residency map entry {key!r} names a ram_path, "
-                    "but the map announces no ram root")
-            if (type(ram_path) is not str or not ram_path.startswith("/")
-                    or os.path.normpath(ram_path) != ram_path):
-                raise ResidencyMapRefused(
-                    f"residency map entry {key!r} ram_path is not a normalized absolute path")
-            ram_prefix = ram_root.rstrip("/") + "/"
-            if not (ram_path == ram_root or ram_path.startswith(ram_prefix)):
-                # A map that could name a path outside the announced ram tier
-                # is a map that could redirect a consumer's read anywhere.
-                raise ResidencyMapRefused(
-                    f"residency map entry {key!r} ram_path is outside "
-                    f"the map's ram root {ram_root!r}")
-            checked["ram_path"] = ram_path
-        return checked
 
     def _real_key(self, key: str) -> dict | None:
         """Second index, for a caller that resolved symlinks and the map did not.

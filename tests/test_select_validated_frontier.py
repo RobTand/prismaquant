@@ -19,6 +19,7 @@ from prismaquant.select_validated_frontier import (
     _log_error_values,
     _saturation_pick,
     leave_one_out_kneedle_diagnostic,
+    main,
     measured_frontier,
     measured_rows,
     practical_knee,
@@ -60,6 +61,16 @@ def _sat_results(stderr):
             r["kl_stderr"] = stderr
         out.append(r)
     return out
+
+
+def test_cli_help_renders_literal_percent(capsys):
+    # 3.14 validates help on add_argument; older Python validates on --help.
+    with pytest.raises(SystemExit) as exited:
+        main(["--help"])
+    assert exited.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "(2.0 ~= 95%)." in help_text
+    assert "95%%" not in help_text
 
 
 def test_saturation_mode_picks_bstar_with_real_stderr():

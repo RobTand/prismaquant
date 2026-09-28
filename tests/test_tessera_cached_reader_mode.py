@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from prismaquant import tessera_export_lane as export
+from prismaquant.tessera_reuse_authority import PRODUCER_AUTHORITY
 from tessera import cached_unit
 
 
@@ -22,7 +23,7 @@ def test_reader_mode_is_explicit_and_warnings_are_not_dropped(monkeypatch, capsy
 
     def reader(*args, **kwargs):
         assert args == arguments
-        assert kwargs == {"encoder_source_proof_mode": expected}
+        assert kwargs == {"encoder_source_proof_mode": expected, "authority": PRODUCER_AUTHORITY}
         return bundle
 
     monkeypatch.setattr(cached_unit, "CachedUnitBundle", reader)
@@ -48,7 +49,7 @@ def test_composed_preflight_retains_reader_warnings(tmp_path, monkeypatch, value
 
     def reader(*args, **kwargs):
         assert args[2:] == ({"body", "mtp"}, source)
-        assert kwargs == {"encoder_source_proof_mode": expected}
+        assert kwargs == {"encoder_source_proof_mode": expected, "authority": PRODUCER_AUTHORITY}
         return SimpleNamespace(units={**body, **mtp}, child_manifests=[],
                                encoder_source_proof_mode=expected, warnings=stamps)
 

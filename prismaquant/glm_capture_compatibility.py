@@ -16,6 +16,7 @@ from .glm_source_derivative import (
     bound_json, _require, source_derivative_identity,
 )
 from .digests import DIRECT_UTF8_STRICT
+from .staged_lease import client_sdk
 
 SCHEMA = 'prismaquant.glm_capture_derivative_compatibility.v1'
 CAPTURE_ACTION = '8740a0b3456bb6cb334ae80b0e35fc3da31c62918abdda8c41ad226020c4e88a'
@@ -46,16 +47,26 @@ def _completion_literal(text):
     return value
 
 
+#: This module's message for each ``prismabuild.client.cas_receipt_self_check``
+#: refusal, in PB's check order (``RECEIPT_REFUSALS``).
+_RECEIPT_REFUSAL_MESSAGES = {
+    'cas-receipt-shape': 'canonical v3 CAS receipt required',
+    'cas-receipt-digest': 'CAS receipt body digest differs',
+    'worker-attestation-digest': 'CAS producer attestation digest differs',
+}
+
+
 def _verify_cas_receipt(receipt, snapshot, output):
-    _require(set(receipt) == {'schema', 'action_key', 'action_manifest_sha256', 'producer', 'result', 'receipt_sha256'} and
-             receipt['schema'] == 'prismaquant.prismabuild.cas_receipt.v3', 'canonical v3 CAS receipt required')
-    body = {key: value for key, value in receipt.items() if key != 'receipt_sha256'}
-    _require(_digest(body) == receipt['receipt_sha256'], 'CAS receipt body digest differs')
+    """PB's receipt self-check, then this capture's own bindings.
+
+    The receipt's shape and both digests are PrismaBuild's to define, so they
+    are checked by PB's client SDK (``cas_receipt_self_check``, PB #1254),
+    never restated here. What is this module's is what the receipt must bind:
+    the reviewed source snapshot input and these exact output bytes.
+    """
+    refusal = client_sdk().cas_receipt_self_check(receipt)
+    _require(refusal is None, _RECEIPT_REFUSAL_MESSAGES.get(refusal, f'CAS receipt refused: {refusal}'))
     producer = receipt['producer']
-    _require(producer.get('schema') == 'prismaquant.prismabuild.worker_attestation.v2' and
-             producer.get('action_key') == receipt['action_key'] and
-             _digest({key: value for key, value in producer.items() if key != 'attestation_sha256'}) == producer.get('attestation_sha256'),
-             'CAS producer attestation digest differs')
     _require(snapshot['input'] in producer.get('inputs', []), 'CAS producer does not bind the reviewed source snapshot input')
     _require(receipt['result'] == dict(sha256=hashlib.sha256(output).hexdigest(), bytes=len(output)),
              'original CAS output is not bound by its receipt')
@@ -72,7 +83,7 @@ def _producer(evidence, capture):
     output = _bytes(evidence['output'], 'original capture CAS output')
     _require(request.get('action_key') == terminal.get('action_key') == receipt.get('action_key') == CAPTURE_ACTION,
              'original producer action differs')
-    _require(terminal.get('schema') == 'prismaquant.prismabuild.pool_outcome.v1' and terminal.get('status') == 'executed' and
+    _require(terminal.get('schema') == client_sdk().POOL_OUTCOME_SCHEMA_V1 and terminal.get('status') == 'executed' and
              type(terminal.get('detail', {}).get('returncode')) is int and terminal['detail']['returncode'] == 0 and
              terminal.get('resource_scope_cleanup', {}).get('complete') is True, 'original capture has not completed successfully')
     snapshot = request['params']['checkout_snapshot']
