@@ -1313,7 +1313,7 @@ def _plane_dispatch(tmp_path, campaign, monkeypatch, *, env=None, host=28 << 30,
                           "mounts": [{"source": "/home/rob/pb-scratch/glm-stageb",
                                       "target": "/home/rob/pb-scratch/glm-stageb",
                                       "readonly": False}]},
-        "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
+        "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": host >> 30,
         "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10",
                 **(env or {})}}
     dispatch.SPEC_PATH.write_text(json.dumps(spec))
