@@ -575,7 +575,7 @@ def format_family_for_name(name: object) -> LaneFormatFamily | None:
     return None
 
 
-def format_family(family_id: str) -> LaneFormatFamily:
+def format_family_by_id(family_id: str) -> LaneFormatFamily:
     for family in format_families():
         if family.id == family_id:
             return family

@@ -84,13 +84,13 @@ def test_overlapping_family_prefixes_are_refused(monkeypatch):
 
 
 def test_a_family_whose_plugin_lacks_a_hook_refuses():
-    family = lane_spec.format_family("tessera")
+    family = lane_spec.format_family_by_id("tessera")
     with pytest.raises(LookupError, match="no 'no_such_hook' hook"):
         lane_spec.family_hook(family, "no_such_hook")
 
 
 def test_every_family_hook_core_calls_exists_on_the_tessera_plugin():
-    family = lane_spec.format_family("tessera")
+    family = lane_spec.format_family_by_id("tessera")
     for hook in ("synthesize_format", "format_admitted_in_contexts",
                  "render_production", "resolved_serving_lane",
                  "require_canonical_subfamily", "format_subfamily"):

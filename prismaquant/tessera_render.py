@@ -830,10 +830,10 @@ def tessera_quantize_dequantize(name: str, recipe=None):
 
 def _lane_family():
     """The ``tessera`` format family as ``lane_specs/tessera.json`` declares it."""
-    from .lane_spec import format_family
+    from .lane_spec import format_family_by_id
     from .tessera_lane import FAMILY_ID
 
-    return format_family(FAMILY_ID)
+    return format_family_by_id(FAMILY_ID)
 
 
 def _identity_activation(x: torch.Tensor) -> torch.Tensor:
