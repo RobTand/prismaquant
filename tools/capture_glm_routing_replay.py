@@ -18,7 +18,7 @@ from prismaquant.joint_aura import source_execution_identity
 from prismaquant.joint_cost_quantum import build_quantum_source_runner
 from prismaquant.matmul_arithmetic import bf16_reduction_stamp, pin_matmul_arithmetic
 from prismaquant.perturbed_x_cache import prefetch_exact_activation_cache_entries
-from prismaquant.tessera_joint_allocation import _read_bound
+from prismaquant.stage_inputs import read_bound as _read_bound
 from prismaquant.tessera_joint_aura import _seed_source_identity_cache
 
 

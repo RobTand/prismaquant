@@ -89,7 +89,7 @@ import pickle
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 if __package__:
     from .tessera_campaign_container import (
@@ -417,7 +417,8 @@ def load_spec(path: Path) -> dict:
     forbidden = {"--model", "--out", "--cache-dir", "--checkpoint", "--units",
                  "--calibration-census", "--census-out", "--seed-checkpoint",
                  "--seed-wire-dir", "--capture-calibration-out",
-                 "--calibration-cache", "--calibration-cache-sha256"}
+                 "--calibration-cache", "--calibration-cache-sha256",
+                 "--source-identity-cache", "--source-identity-cache-sha256"}
     named = forbidden.intersection(spec["campaign_argv"])
     if named:
         raise RuntimeError(
@@ -1892,6 +1893,24 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
 #: ``test_the_planner_and_the_campaign_agree_on_the_selection_schemas``, which
 #: runs where the package is importable.
 UNITS_SCHEMA = "prismaquant.tessera_campaign_units.v1"
+def _source_identity_cache_binding(path, model):
+    """Bind the campaign's full-file source SHA proof by digest, or ``None``.
+
+    A selected-source row adopts this proof before its first payload read
+    instead of hashing every shard it reads under its GPU reservation
+    (PQ #1497). The row re-checks every shard's stat fingerprint and SHA
+    against the canonical capture when it adopts, so this only refuses a
+    file that is not a streamed identity proof of ``model`` at all.
+    """
+    if not path:
+        return None
+    from prismaquant.cost_streaming import _read_streamed_model_identity_cache
+    from prismaquant.tessera_calibration_cache import sha256
+    path = Path(path).resolve()
+    _read_streamed_model_identity_cache(path, source_model=str(model))
+    return dict(path=str(path), sha256=sha256(path))
+
+
 UNITS_SCHEMA_V2 = "prismaquant.tessera_campaign_units.v2"
 
 
@@ -1944,6 +1963,14 @@ def cmd_plan(args) -> int:
     selected_source = '--streaming' in spec['campaign_argv']
     if selected_source and calibration_cache is None:
         raise RuntimeError('streaming anchor rows require a hash-bound complete calibration cache')
+    source_identity_cache = _source_identity_cache_binding(
+        getattr(args, "source_identity_cache", None), spec["model"])
+    if source_identity_cache is not None and not selected_source:
+        raise RuntimeError('--source-identity-cache binds streaming anchor rows only')
+    if selected_source and source_identity_cache is None:
+        print("[dispatch] WARNING: no --source-identity-cache: every row hashes each "
+              "source shard it reads, whole, on its GPU reservation before its first "
+              "encode (PQ #1497)", flush=True)
     seed_rows, seed_workspace = None, None
     if getattr(args, 'seed_workspace', None):
         if args.seed_checkpoint or args.seed_wire_dir:
@@ -2013,6 +2040,9 @@ def cmd_plan(args) -> int:
         if calibration_cache:
             argv += ["--calibration-cache", calibration_cache["path"],
                      "--calibration-cache-sha256", calibration_cache["sha256"]]
+        if source_identity_cache:
+            argv += ["--source-identity-cache", source_identity_cache["path"],
+                     "--source-identity-cache-sha256", source_identity_cache["sha256"]]
         row_seed = (_seed_for_selection(seed_rows, bundle, selection)
                     if seed_rows is not None else None)
         if row_seed is not None:
@@ -2060,6 +2090,8 @@ def cmd_plan(args) -> int:
         "spec": str(args.spec),
         "census": str(workspace / "census.json"),
         "calibration_cache": calibration_cache,
+        **({"source_identity_cache": source_identity_cache}
+           if source_identity_cache is not None else {}),
         "manifest": str(manifest),
         "groups_per_row": int(args.groups_per_row),
         "rows_per_box": per_box,
@@ -2932,6 +2964,67 @@ def cmd_submit_allocation(args) -> int:
             str(joint_cost), str(plan_path), produced_by=provenance, argv=inner))
 
 
+#: PrismaQuant's reuse authority, relative to the PrismaQuant tree the
+#: container runs (tessera#599 step 2).
+REUSE_AUTHORITY_RELATIVE = Path("prismaquant", "tessera_reuse_authority.py")
+
+
+def export_inner_with_authority(inner: list[str], spec: dict, *, cwd: str) -> list[str]:
+    """The export's inner argv, with PrismaQuant's reuse authority when attested.
+
+    The inner command is written in container paths and runs Tessera's
+    exporter from a mounted checkout. That checkout's own
+    ``runtime_contract.json`` decides (``tessera_export_lane.
+    producer_authority_argv``): a pin whose contract publishes no
+    ``producer_interface`` block -- every pin before Tessera contract v40,
+    including the live campaign's -- gets ``inner`` back unchanged, because
+    its exporter would refuse the option as an unknown argument. A pin that
+    publishes it gets ``--producer-authority`` inserted after the exporter,
+    naming the adopter in the PrismaQuant tree the container actually runs
+    (``pinned_source_root``: a declared mount, or the sealed ``/workspace``).
+
+    An inner command that already passes the option, or that names no exporter
+    script (``python -m ...``), is returned unchanged: the caller spelled it.
+    """
+    from prismaquant.tessera_export_lane import (
+        EXPORTER_DRIVER, PRODUCER_AUTHORITY_OPTION, producer_authority_argv)
+    from tools.tessera_campaign_container import host_path, pinned_source_root
+
+    if PRODUCER_AUTHORITY_OPTION in inner or any(
+            item.startswith(PRODUCER_AUTHORITY_OPTION + "=") for item in inner):
+        return list(inner)
+    suffix = PurePosixPath(EXPORTER_DRIVER)
+    hits = [index for index, item in enumerate(inner)
+            if PurePosixPath(item).parts[-len(suffix.parts):] == suffix.parts]
+    if not hits:
+        return list(inner)
+    if len({inner[index] for index in hits}) != 1:
+        raise RuntimeError(
+            "the export command names more than one Tessera exporter: "
+            + ", ".join(sorted({inner[index] for index in hits})))
+    exporter = inner[hits[0]]
+    mounts = spec.get("container", {}).get("mounts", [])
+    exporter_host = host_path(exporter, cwd=cwd, mounts=mounts)
+    if exporter_host is None or not exporter_host.is_file():
+        raise RuntimeError(
+            f"the export command's exporter {exporter} is not a file behind "
+            "any mount the spec declares, so its checkout's contract cannot be "
+            "read to decide whether it takes --producer-authority")
+    checkout = exporter_host.parents[len(suffix.parts) - 1]
+    entry, pq_root, _ = pinned_source_root(spec, cwd=cwd)
+    authority_container = str(PurePosixPath(entry or "/workspace")
+                              / PurePosixPath(*REUSE_AUTHORITY_RELATIVE.parts))
+    extra = producer_authority_argv(checkout, authority_container)
+    if not extra:
+        return list(inner)
+    if not (pq_root / REUSE_AUTHORITY_RELATIVE).is_file():
+        raise RuntimeError(
+            f"the Tessera checkout {checkout} attests its exporter takes "
+            f"--producer-authority, but the PrismaQuant tree the container "
+            f"runs ({pq_root}) has no {REUSE_AUTHORITY_RELATIVE}")
+    return inner[:hits[0] + 1] + extra + inner[hits[0] + 1:]
+
+
 def cmd_submit_export(args) -> int:
     producer = _manifest_producer()
     plan_path = Path(args.plan).resolve()
@@ -2944,6 +3037,8 @@ def cmd_submit_export(args) -> int:
         raise RuntimeError(
             "the export entry point lives in the Tessera tree, so its command "
             "is not derived here; pass it after --")
+    inner = export_inner_with_authority(
+        inner, json.loads(Path(args.spec).read_text()), cwd=os.getcwd())
     provenance = producer.deterministic_entry_provenance(
         EXPORT_ENTRY_POINT, plan=str(plan_path), plan_sha256=plan_sha256,
         workspace=str(Path(plan["inputs"]["campaign_plan"]["path"]).parent))
@@ -3809,6 +3904,12 @@ def main(argv=None) -> int:
     plan.add_argument("--workspace", required=True)
     plan.add_argument("--calibration-cache", default=None,
                       help="complete capture manifest to hash-bind into every row")
+    plan.add_argument("--source-identity-cache", default=None,
+                      help="the campaign's streamed source identity proof "
+                           "(prismaquant.streamed_model.identity_cache.v1) to "
+                           "hash-bind into every selected-source row, which "
+                           "adopts it instead of hashing the shards it reads "
+                           "(PQ #1497)")
     plan.add_argument("--groups-per-row", type=int, default=1)
     plan.add_argument("--rows-per-box", type=int, default=1,
                       help="how many of these rows one box is meant to run at "

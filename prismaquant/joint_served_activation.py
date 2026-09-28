@@ -28,7 +28,7 @@ _require = Contract(ValueError, "served activation policy: ").require
 
 def _policy_bytes(bound, label, read_bound):
     if read_bound is None:
-        from .tessera_joint_allocation import _read_bound
+        from .stage_inputs import read_bound as _read_bound
         return _read_bound(bound,label)
     import hashlib
     raw=read_bound(bound)
@@ -55,7 +55,7 @@ def derive_policy(original_prepared, *, formats=None, read_bound=None):
     v2 policy over those added formats, each of which must quantize its input
     to 4 bits.
     """
-    from .tessera_joint_allocation import _read_bound
+    from .stage_inputs import read_bound as _read_bound
     from .cost_stage_checkpoint import canonical_json_sha256
     from .model_profiles import detect_profile
     from .nvfp4_activation_contract import routed_executed_max_abs, LEGACY_INPUT_GLOBAL_SCALE_POLICY
@@ -99,7 +99,7 @@ def derive_policy(original_prepared, *, formats=None, read_bound=None):
 
 
 def verify_policy(bound, *, original_prepared=None, read_bound=None):
-    from .tessera_joint_allocation import _read_bound, _bound_stat_fence
+    from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
     key = (bound["path"], bound["sha256"], _bound_stat_fence(Path(bound["path"])))
     cached = _VERIFIED.get(key)
     if cached is not None and cached["fences"] == tuple(

@@ -25,10 +25,19 @@ def select_original_routes(module, args, kwargs, *, sequence_length):
         raise ValueError("routing replay must contain exactly the original first sequence")
     if ids.dtype not in (torch.int32, torch.int64) or weights.dtype not in (torch.float32, torch.bfloat16):
         raise ValueError("routing replay refuses a cast or unsupported original route dtype")
+    # The device is observed BEFORE the host copy below: the copy moves the
+    # tensors to the host, so reading their device afterwards would report
+    # 'cpu' for every real GPU boundary, and validate_glm_routing requires
+    # the indexed device the boundary actually ran on (#1536). A boundary
+    # split across devices is a different, unassemblable capture.
+    observed_device = str(x.device)
+    if str(ids.device) != observed_device or str(weights.device) != observed_device:
+        raise ValueError("routing replay requires the boundary tensors on one device")
     coordinates = torch.stack((torch.zeros(sequence_length, dtype=torch.int64),
                                torch.arange(sequence_length, dtype=torch.int64)), dim=1)
     return {"inputs": x.detach().cpu().contiguous(), "top_k_index": ids.detach().cpu().contiguous(),
-            "top_k_weights": weights.detach().cpu().contiguous(), "coordinates": coordinates}
+            "top_k_weights": weights.detach().cpu().contiguous(), "coordinates": coordinates,
+            "observed_device": observed_device}
 
 
 def router_normalization_epsilon(router):
@@ -53,14 +62,14 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
     """Run a source layer only until the real packed-expert call is reached."""
     from . import pretrained_initialization_contract
     from .cost_streaming import StreamedForwardBoundaries
-    from .tessera_expert_projection import _require_source_identity
+    from .stage_inputs import require_source_identity
 
     if runner.profile.name != "glm5_next" or not (3 <= layer < runner.num_layers):
         raise ValueError("routing replay requires a body GLM MoE layer")
     if (calibration_ids.shape != (1, 512) or hidden.shape[0] != 1 or hidden.shape[1] != 512
             or calibration.get("shape") != [512, 512] or hidden.dtype != torch.bfloat16):
         raise ValueError("routing replay requires sample zero of the exact 512x512 calibration")
-    source = _require_source_identity(producer_source)
+    source = require_source_identity(producer_source)
     unit = f"model.language_model.layers.{layer}.mlp.experts"
     module = runner.model.get_submodule(unit)
     parent = runner.model.get_submodule(unit.rsplit(".", 1)[0])
@@ -112,12 +121,25 @@ def glm_route_record(runner, module, router, captured, *, layer, calibration,
     if bias.dtype != torch.float32 or list(bias.shape) != [module.num_experts] or not torch.isfinite(bias).all():
         raise ValueError("GLM routing capture requires the original finite FP32 correction bias")
     captured["expert_bias"] = bias.detach().cpu().contiguous()
+    # Pop the string field before the identity loop: every remaining captured
+    # value must be a tensor, and the published record carries the device in
+    # its routing metadata, not as a pseudo-tensor. The field is mandatory so
+    # a hand-built capture cannot forget where the boundary ran (#1536).
+    observed_device = captured.pop("observed_device", None)
+    if not isinstance(observed_device, str) or not observed_device:
+        raise ValueError("GLM routing capture must name the device it observed the boundary on")
     tensor_identity = {k: _cb_cache_tensor_identity(v) for k, v in captured.items()}
     routing = dict(activation="silu", scoring_func="sigmoid", renormalize=router.norm_topk_prob,
         routed_scaling_factor=router.routed_scaling_factor, apply_router_weight_on_input=False,
         expert_map=None, input_dtype=str(captured["inputs"].dtype),
         topk_weights_dtype=str(captured["top_k_weights"].dtype),
-        topk_ids_dtype=str(captured["top_k_index"].dtype), device=str(runner.device),
+        topk_ids_dtype=str(captured["top_k_index"].dtype),
+        # The device select_original_routes OBSERVED at the boundary, before
+        # its host copy (indexed, e.g. 'cuda:0'): joint_cost_quantum builds
+        # the streamed runner with torch.device("cuda"), whose str() is the
+        # unindexed 'cuda', and validate_glm_routing requires the indexed
+        # device that actually produced the tensors (#1536).
+        device=observed_device,
         weights_contract="post_renormalization_and_routed_scaling", topk_method="noaux_tc",
         n_group=router.num_group, topk_group=router.topk_group, swiglu_limit=module.swiglu_limit,
         source_protocol=dict(router_class=f"{type(router).__module__}.{type(router).__qualname__}",

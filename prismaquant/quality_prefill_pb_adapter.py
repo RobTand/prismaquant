@@ -5,20 +5,16 @@ DEPLOYMENT DEPENDENCY -- READ BEFORE USING THIS MODULE
 This adapter targets PrismaBuild's pre-execution decomposition (PB issue #517),
 which PB #518 merged.  A source merge alone does not establish deployed support:
 a phase emitted here can be submitted for real only once the published runtime
-generation under ``/mnt/shared/prismabuild-fleet/repo`` carries both
-``src/prismabuild/decomposition.py`` and a ``def decompose(`` entry point in
-``tools/fleet/pbcampaign.py``, which :func:`decomposition_support` probes.  On
-2026-09-25 the published generation carried the module but not that entry
-point, so the probe still reports it unsupported: decomposition is not
-deployed to the fleet.  Until it is, the only place this adapter is exercised
-is **in process**, against a PB checkout, by
+generation under ``/mnt/shared/prismabuild-fleet/repo`` advertises the
+``decomposition-v1`` capability in its client SDK (``prismabuild.client
+.CAPABILITIES``, PB #1254), which :func:`decomposition_support` asks the runtime
+for.  On 2026-09-27 no published generation carried that SDK, so the probe
+reports decomposition not deployed to the fleet.  Until it is, the only place
+this adapter is exercised is **in process**, against a PB checkout, by
 ``tests/test_quality_prefill_pb_adapter_serve_once.py``.
 
-PrismaBuild advertises no capability token for decomposition the way it does for
-progress reporting (``prismabuild.core.PROGRESS_TAG == "progress-v1"``), so
-:func:`decomposition_support` probes the runtime tree for the two artifacts the
-capability is made of.  That absence is itself a finding worth reporting to PB;
-it is recorded here rather than worked around.
+The capability is PrismaBuild's to advertise, so the probe reads PB's own tag
+rather than looking for the files the capability happens to be made of today.
 
 **There is no fallback.**  :func:`prepare_logical_request` refuses by name when
 decomposition support is absent.  It does not submit the phase as one
@@ -50,24 +46,27 @@ This module and :mod:`prismaquant.quality_prefill_contract` are one experiment's
 two halves, not two copies: the contract owns the frozen manifest, the evidence
 envelopes and the phase DAG and performs no I/O; this adapter owns the one
 PrismaBuild logical request a phase becomes.  Their shared primitives already
-have one owner each: canonical JSON and its digest come from
-:mod:`prismaquant.cost_stage_checkpoint`, and the strict reader and the closed
+have one owner each: canonical JSON comes from
+:mod:`prismaquant.cost_stage_checkpoint`, the identity digest of a PrismaBuild
+document from PrismaBuild's client SDK, and the strict reader and the closed
 field checks from :mod:`prismaquant.schemas` (``strict_json_loads``,
 ``Contract``, PQ #1300).  The thin wrappers left in each module differ on
 purpose: each raises its own module's error, with its own text, and this
 adapter's ids follow PrismaBuild's grammar, not PrismaQuant's.
 
 The identifier grammar is **PrismaBuild's**, not PrismaQuant's: roster ids reach
-a sealed action key, so they must satisfy ``prismabuild.core._ID_RE``
+a sealed action key, so they must satisfy PB's ``client.ID_PATTERN``
 (``[a-z0-9][a-z0-9._/-]{0,255}``), which admits ``/`` and 256 characters where
 PrismaQuant's own contract ids admit neither.  Validating against the wrong one
 would refuse legal ids or, worse, accept ids PB refuses after a plan was
 already frozen.
 
-Like :mod:`prismaquant.prismabuild_progress`, this module is written against
-PrismaBuild's **wire format** rather than by importing ``prismabuild``; the
-fleet runtime is not on PrismaQuant's import path, and agreement with PB's own
-validators is proved in the tests instead.
+So the grammar, the environment-name grammar and the identity digest come from
+PrismaBuild's client SDK (``prismabuild.client``, PB #1254) through
+:func:`prismaquant.staged_lease.client_sdk`, never from a copy here.  The
+process must therefore have PB's SDK bound: inside an action PB injects it,
+and a submitter binds the runtime it submits to with
+``staged_lease.set_lease_helper_root``.
 """
 
 from __future__ import annotations
@@ -79,7 +78,7 @@ import math
 from pathlib import Path
 import re
 
-from prismaquant.cost_stage_checkpoint import canonical_json, canonical_json_sha256
+from prismaquant.cost_stage_checkpoint import canonical_json
 from prismaquant.schemas import Contract, SchemaValidationError, strict_json_loads
 
 
@@ -137,10 +136,6 @@ _TASK_PAYLOAD_KEYS = frozenset({
     "currency",
 })
 
-#: ``prismabuild.core._ID_RE`` verbatim.  See the module docstring.
-_PB_ID_RE = re.compile(r"[a-z0-9][a-z0-9._/-]{0,255}\Z")
-#: ``prismabuild.core._ENV_RE`` verbatim.
-_PB_ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 #: A cost estimate's evidence names owned bytes, in the shape PrismaBuild's own
 #: decomposition tests use (``cas:sha256:<digest>``).  Specification §3.2: path
@@ -196,8 +191,15 @@ def _text(
     return text
 
 
+def _pb():
+    """PrismaBuild's client SDK: the grammars and the digest are its own."""
+
+    from prismaquant.staged_lease import client_sdk
+    return client_sdk()
+
+
 def _identifier(value: object, *, where: str) -> str:
-    return _text(value, where=where, pattern=_PB_ID_RE)
+    return _text(value, where=where, pattern=_pb().ID_PATTERN)
 
 
 def _sha256(value: object, *, where: str) -> str:
@@ -297,16 +299,17 @@ def document_bytes(value: object) -> bytes:
 def canonical_sha256(value: object) -> str:
     """The digest of the value itself, without its file's trailing newline.
 
-    The same digest ``prismabuild.core.canonical_sha256`` computes, so a value
-    hashed here and the same value hashed by the fleet agree.  This is the one
-    to hash an *identity* with; :func:`document_file_sha256` is the one a
-    content-addressed store will give the file.  PrismaBuild keeps the same two
-    and the distinction is the trailing newline, which is exactly the kind of
-    difference that reads as a tampered blob rather than a formatting choice.
+    PrismaBuild's own ``canonical_sha256`` (``prismabuild.client``), so a value
+    hashed here and the same value hashed by the fleet agree by construction.
+    This is the one to hash an *identity* with; :func:`document_file_sha256` is
+    the one a content-addressed store will give the file.  PrismaBuild keeps
+    the same two and the distinction is the trailing newline, which is exactly
+    the kind of difference that reads as a tampered blob rather than a
+    formatting choice.
     """
 
     try:
-        return canonical_json_sha256(value, where="quality-prefill document")
+        return _pb().canonical_sha256(value)
     except (TypeError, ValueError) as exc:
         _fail(f"document is not canonical JSON data: {exc}")
         raise AssertionError("unreachable")  # pragma: no cover
@@ -409,7 +412,7 @@ def validate_phase_plan(value: object) -> dict[str, object]:
         _fail("phase plan env must be an object")
     env: dict[str, str] = {}
     for name in sorted(raw_env):  # type: ignore[union-attr]
-        _text(name, where="phase plan env key", pattern=_PB_ENV_RE)
+        _text(name, where="phase plan env key", pattern=_pb().ENV_NAME_PATTERN)
         env[name] = _text(raw_env[name], where=f"phase plan env[{name!r}]")
 
     raw_demand = plan["demand"]
@@ -417,7 +420,7 @@ def validate_phase_plan(value: object) -> dict[str, object]:
         _fail("phase plan demand must be a non-empty object")
     demand: dict[str, int] = {}
     for name in sorted(raw_demand):  # type: ignore[union-attr]
-        _text(name, where="phase plan demand key", pattern=_PB_ID_RE)
+        _text(name, where="phase plan demand key", pattern=_pb().ID_PATTERN)
         demand[name] = _integer(raw_demand[name],
                                 where=f"phase plan demand[{name!r}]", minimum=0)
 
@@ -623,44 +626,71 @@ def write_logical_request(phase_plan: Mapping[str, object], path: str | Path) ->
 #: request implies.
 DEPLOYED_RUNTIME_ROOT = Path("/mnt/shared/prismabuild-fleet/repo")
 
-_DECOMPOSITION_MODULE = Path("src/prismabuild/decomposition.py")
-_CAMPAIGN_TOOL = Path("tools/fleet/pbcampaign.py")
-_CAMPAIGN_ENTRY = "def decompose("
+#: PrismaBuild's capability tag for pre-execution decomposition
+#: (``prismabuild.client.DECOMPOSITION_TAG``, PB #1254).
+DECOMPOSITION_TAG = "decomposition-v1"
+
+#: Asks one runtime tree's client SDK what it advertises.  Run in a child
+#: interpreter in isolated mode (``-I``), with that tree's ``src`` first on the
+#: path, so the asking process neither imports a foreign runtime nor binds to
+#: it.  An answer served from outside the tree is refused: for a tree with no
+#: client, an installed ``prismabuild`` would otherwise answer in its place.
+_CAPABILITY_QUERY = (
+    "import json, os, sys\n"
+    "sys.path.insert(0, sys.argv[1])\n"
+    "import prismabuild.client as client\n"
+    "tree = os.path.realpath(os.path.join(sys.argv[1], 'prismabuild'))\n"
+    "served = os.path.realpath(client.__file__)\n"
+    "if os.path.commonpath([tree, served]) != tree:\n"
+    "    sys.exit(f'prismabuild.client served from {served}, not the tree {tree}')\n"
+    "print(json.dumps({'sdk_version': client.SDK_VERSION,"
+    " 'capabilities': sorted(client.CAPABILITIES)}))\n"
+)
 
 
 def decomposition_support(
     runtime_root: str | Path = DEPLOYED_RUNTIME_ROOT,
 ) -> dict[str, object]:
-    """What one PrismaBuild runtime tree can be shown to carry.
+    """Whether one PrismaBuild runtime tree advertises decomposition.
 
-    A filesystem probe rather than an import, for two reasons.  Importing a
-    foreign runtime into the producer's process is what ``AGENTS.md`` forbids
-    for a serving runtime and is no better here; and a runtime tree that is not
-    on ``sys.path`` cannot be imported at all, which is the ordinary case.
-
-    PrismaBuild publishes no capability token for decomposition -- ``core.py``
-    carries ``PROGRESS_TAG = "progress-v1"`` and nothing equivalent for #517 --
-    so support is the two artifacts it is made of: the module that owns the
-    plan, and the campaign entry point that publishes children from one.  When
-    #518 lands a token, this probe should read the token instead and this
-    comment is the reason it does not yet.
+    The runtime's client SDK names what it supports (``CAPABILITIES``), so this
+    asks it -- in a child interpreter, because importing a foreign runtime into
+    the producer's process is what ``AGENTS.md`` forbids for a serving runtime
+    and is no better here, and a runtime tree that is not on ``sys.path``
+    cannot be imported at all, which is the ordinary case.  A tree whose SDK
+    cannot be asked (none, or one that fails to import) advertises nothing;
+    ``sdk_error`` says why.
     """
 
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
     root = Path(runtime_root)
-    module = (root / _DECOMPOSITION_MODULE).is_file()
-    tool = root / _CAMPAIGN_TOOL
-    entry = False
-    if tool.is_file():
-        try:
-            entry = _CAMPAIGN_ENTRY in tool.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            entry = False
-    return {
-        "runtime_root": str(root),
-        "decomposition_module": module,
-        "campaign_decompose_entry": entry,
-        "supported": bool(module and entry),
+    answer: dict[str, object] = {
+        "runtime_root": str(root), "sdk_version": None, "capabilities": [],
+        "sdk_error": None, "supported": False,
     }
+    try:
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", _CAPABILITY_QUERY, str(root / "src")],
+            capture_output=True, text=True, timeout=120, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        answer["sdk_error"] = f"{type(exc).__name__}: {exc}"
+        return answer
+    if done.returncode != 0:
+        tail = (done.stderr.strip().splitlines() or [f"exit {done.returncode}"])[-1]
+        answer["sdk_error"] = tail
+        return answer
+    try:
+        reported = json.loads(done.stdout)
+        capabilities = [str(tag) for tag in reported["capabilities"]]
+        version = reported["sdk_version"]
+    except (ValueError, KeyError, TypeError) as exc:
+        answer["sdk_error"] = f"unreadable capability answer: {exc}"
+        return answer
+    answer.update(sdk_version=version, capabilities=capabilities,
+                  supported=DECOMPOSITION_TAG in capabilities)
+    return answer
 
 
 def require_decomposition_support(
@@ -680,20 +710,16 @@ def require_decomposition_support(
     support = decomposition_support(runtime_root)
     if support["supported"]:
         return support
-    missing = [
-        name
-        for name, present in (
-            (str(_DECOMPOSITION_MODULE), support["decomposition_module"]),
-            (f"{_CAMPAIGN_TOOL} :: {_CAMPAIGN_ENTRY}",
-             support["campaign_decompose_entry"]),
-        )
-        if not present
-    ]
+    found = (f"its client SDK advertises {support['capabilities']}"
+             if support["sdk_error"] is None
+             else f"its client SDK could not be asked: {support['sdk_error']}")
     raise DecompositionUnavailable(
         f"PrismaBuild pre-execution decomposition (PB #517) is not available in "
-        f"the runtime at {support['runtime_root']}: missing {missing}. "
+        f"the runtime at {support['runtime_root']}: it does not advertise "
+        f"{DECOMPOSITION_TAG!r} ({found}). "
         f"It needs PB pull request #518 merged AND a PrismaBuild runtime "
-        f"generation carrying it published to the fleet; a merge alone is not "
+        f"generation carrying it and PB's client SDK (#1254) published to the "
+        f"fleet; a merge alone is not "
         f"deployed support, and publishing a generation needs Rob's explicit "
         f"word and an idle queue. Until then this phase is exercised only in "
         f"process against a checkout of the #518 branch. This adapter does not "

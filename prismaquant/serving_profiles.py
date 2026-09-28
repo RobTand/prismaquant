@@ -89,18 +89,19 @@ def _load_pinned_lane_tables() -> tuple[Any, Any, str]:
     from .lane_eligibility import (
         load_eligibility_table, load_published_formats,
     )
-    from .tessera_serving_runtime_pin import (
-        TesseraServingRuntimePinError,
-        load_tessera_serving_runtime_pin,
-        tessera_serving_runtime_pin_path,
-    )
+    from .lane_spec import single_lane_plugin
 
-    pin_path = tessera_serving_runtime_pin_path()
+    # The lane that pins a serving runtime names its pin and contract loaders
+    # on its plugin (decoupling step 6); this module never imports the lane.
+    lane = single_lane_plugin("serving_runtime_pin_path")
+    if lane is None:
+        return None, None, ROUTE_STATUS_SOURCE_NO_PIN
+    pin_path = lane.serving_runtime_pin_path()
     if not pin_path.exists():
         return None, None, ROUTE_STATUS_SOURCE_NO_PIN
     try:
-        pin = load_tessera_serving_runtime_pin()
-    except TesseraServingRuntimePinError:
+        pin = lane.load_serving_runtime_pin()
+    except lane.ServingRuntimePinError:
         # A malformed pin is a defect to fix, not an absence to report; it
         # must not read as "no runtime is pinned".
         return None, None, "serving_runtime_contract::pin_unreadable"
@@ -109,8 +110,7 @@ def _load_pinned_lane_tables() -> tuple[Any, Any, str]:
     from importlib.resources import as_file
 
     try:
-        from .tessera_runtime_contract import contract_path
-        with as_file(contract_path()) as path:
+        with as_file(lane.serving_runtime_contract_path()) as path:
             table = load_eligibility_table(version, contract_path=path)
             formats = load_published_formats(version, contract_path=path)
     except Exception:  # ModuleNotFoundError, OSError, FileNotFoundError...
@@ -1490,13 +1490,14 @@ def serving_lane_route(
     #
     # Deliberately AFTER the profile lookup, not before: a profile that one
     # day declares a real Tessera lane overrides this, exactly as it would for
-    # any other format.
-    if isinstance(fmt, str) and fmt.startswith("TESSERA_"):
-        from .tessera_menu import tessera_resolved_serving_lane
-        return tessera_resolved_serving_lane(
+    # any other format. The owning lane's plugin resolves it (decoupling step
+    # 6); a family is matched on the name as written, as it always was here.
+    family = fr.format_family_of(fmt) if isinstance(fmt, str) else None
+    if family is not None and fmt.startswith(family.name_prefix):
+        from .lane_spec import family_hook
+        return family_hook(family, "resolved_serving_lane")(
             fmt, runtime_version=(runtime_version or ""),
-            **({"serving_context": serving_context}
-               if serving_context is not None else {}))
+            serving_context=serving_context)
     return None
 
 
@@ -1592,34 +1593,33 @@ def _format_in(fmt: str, names: Collection[str]) -> bool:
 
 
 def _declared_tessera_families(values, *, owner: str) -> tuple[str, ...]:
+    """Canonical lane subfamily names (``allow_tessera_families``), validated
+    by the lane plugin that owns each one's format family."""
     if not isinstance(values, (list, tuple)):
         raise ValueError(f"{owner}: allow_tessera_families must be a list of canonical families")
     if not values:
-        return ()  # Existing profiles do not acquire a Tessera dependency.
-    from .tessera_formats import get_tessera_family, TesseraFormatError
+        return ()  # Existing profiles do not acquire a lane dependency.
+    from .lane_spec import family_hook
 
     names = []
     for value in values:
-        try:
-            family = get_tessera_family(value)
-        except TesseraFormatError as exc:
-            raise ValueError(f"{owner}: invalid Tessera family {value!r}") from exc
-        if not isinstance(value, str) or family.name != value:
-            raise ValueError(f"{owner}: expected a canonical Tessera family, got {value!r}")
-        names.append(value)
+        family = fr.format_family_of(value)
+        if family is None:
+            raise ValueError(f"{owner}: invalid format family {value!r}")
+        names.append(family_hook(family, "require_canonical_subfamily")(value, owner=owner))
     return tuple(dict.fromkeys(names))
 
 
 def _tessera_family_in(fmt: str, names: Collection[str]) -> bool:
-    if not names or not fr.is_tessera_format_name(fmt):
+    if not names:
         return False
-    from .tessera_formats import parse_tessera_format_name, TesseraFormatError
+    family = fr.format_family_of(fmt)
+    if family is None:
+        return False
+    from .lane_spec import family_hook
 
-    try:
-        parsed = parse_tessera_format_name(fr.canonical_format_name(fmt))
-    except TesseraFormatError:
-        return False
-    return parsed is not None and parsed[0].name in names
+    subfamily = family_hook(family, "format_subfamily")(fr.canonical_format_name(fmt))
+    return subfamily is not None and subfamily in names
 
 
 def _runtime_shape_validator_accepts(

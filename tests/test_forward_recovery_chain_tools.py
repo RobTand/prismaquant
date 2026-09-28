@@ -12,6 +12,7 @@ from __future__ import annotations
 import ast
 import gzip
 import hashlib
+import inspect
 import json
 from pathlib import Path
 
@@ -42,7 +43,10 @@ def test_rendered_launcher_is_the_sealed_r11_launcher():
     from tools.build_stagea_forward_recovery_package import render_launcher
     text = render_launcher(_campaign(), **R11)
     compile(text, 'launch-r11.py', 'exec')
-    digest = hashlib.sha256(ast.dump(ast.parse(text)).encode()).hexdigest()
+    # 3.13+ can omit empty AST fields; retain the 3.12 representation the
+    # sealed golden binds, not a second golden for the current interpreter.
+    options = {"show_empty": True} if "show_empty" in inspect.signature(ast.dump).parameters else {}
+    digest = hashlib.sha256(ast.dump(ast.parse(text), **options).encode()).hexdigest()
     assert digest == R11_LAUNCHER_AST_SHA256
 
 

@@ -353,12 +353,12 @@ def staged_reads() -> StagedPreparationReads | None:
 
 
 def _install_bound_reader(reads: StagedPreparationReads | None) -> None:
-    # ``tessera_joint_allocation._read_bound`` serves the catalog pair's
-    # control documents and pickles; the preparation reads them through it.
-    from . import tessera_joint_allocation as allocation
-    allocation.BOUND_READER = (None if reads is None else
-                               lambda path, sha256, label: reads.whole(
-                                   path, sha256=sha256, where=label))
+    # ``stage_inputs.read_bound`` serves the catalog pair's control
+    # documents and pickles; the preparation reads them through it.
+    from . import stage_inputs
+    stage_inputs.BOUND_READER = (None if reads is None else
+                                 lambda path, sha256, label: reads.whole(
+                                     path, sha256=sha256, where=label))
 
 
 def reset_staged_reads_for_tests() -> None:

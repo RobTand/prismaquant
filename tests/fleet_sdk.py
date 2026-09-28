@@ -163,3 +163,27 @@ def prismabuild_imports_restored():
             if (parent is not None and module is not None
                     and getattr(parent, leaf, None) is module):
                 delattr(parent, leaf)
+
+
+@contextlib.contextmanager
+def installed_client_bound(monkeypatch):
+    """Bind the reviewed installed ``prismabuild.client`` for one test.
+
+    PQ modules reach PrismaBuild only through ``staged_lease.client_sdk``
+    (PB #1254), which resolves the generation PB injected before anything
+    else. Inside a pbtest shard that is the fleet's live generation, not the
+    reviewed pin this tree is tested against, so the injected root is
+    removed first and the installed distribution is bound explicitly. On a
+    box with no installed distribution the test skips, naming the fleet.
+    """
+
+    require_prismabuild_sdk()
+    from prismaquant import staged_lease
+
+    monkeypatch.delenv(staged_lease.HELPER_ROOT_ENV_VAR, raising=False)
+    staged_lease.set_lease_helper_root(None)
+    module = staged_lease.inject_installed_sdk_for_tests()
+    try:
+        yield module
+    finally:
+        staged_lease.clear_injected_sdk_for_tests()

@@ -160,3 +160,19 @@ def test_an_unbindable_quantizer_stops_the_row_at_its_first_rung(monkeypatch, tm
         campaign.main(argv)
     assert len(calls) == 1
     assert not (tmp_path / "cost.pkl").exists()
+
+
+def test_a_row_that_prices_no_rung_of_a_nonempty_menu_writes_no_table(
+        monkeypatch, tmp_path):
+    """#1481's second refusal: zero priced rungs out of a non-empty menu.
+
+    No rung raises here. The ``--max-artifact-bpp`` cap sits below both rungs
+    (4 and 6 bpp), so the loop prices nothing. Before the fix the row wrote a
+    table of 0 priced rungs and returned 0, which PrismaBuild counts as done.
+    """
+    campaign, argv = _two_rung_row(monkeypatch, tmp_path, set())
+    assert argv[-2] == "--max-artifact-bpp"
+    argv[-1] = "1"
+    with pytest.raises(RuntimeError, match="priced no rung"):
+        campaign.main(argv)
+    assert not (tmp_path / "cost.pkl").exists()

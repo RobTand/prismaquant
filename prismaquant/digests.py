@@ -285,6 +285,14 @@ def canonical_pickle_bytes(value: object) -> bytes:
 #: The read size ``file_sha256hex`` uses when a site does not keep its own.
 FILE_BLOCK_BYTES = 8 << 20
 
+#: The guarded source hash's read block (``tessera_calibration_cache.sha256``).
+#: With ``release_read_pages`` it is also the page window: each block's pages
+#: are advised away right after the digest consumes it, so one hash holds at
+#: most this block and its pages. Admission charges exactly that
+#: (``autoscale.selected_anchor_resources``, RobTand/prismaquant#1491), so the
+#: two read the same number from here.
+SOURCE_HASH_BLOCK_BYTES = 16 * 1024**2
+
 
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
     return hashlib.sha256(data).hexdigest()

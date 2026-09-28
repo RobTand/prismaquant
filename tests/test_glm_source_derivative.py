@@ -155,7 +155,8 @@ def test_real_image_build_preserves_config_layers_and_source():
     assert len(build['changed_payload_files']) == 1
 
 
-def test_real_pb_receipt_binds_canonical_body_payload_and_source():
+def test_real_pb_receipt_binds_canonical_body_payload_and_source(installed_client_sdk):
+    # The receipt's shape and digests are checked by PB's client SDK (PB #1254).
     audit = json.loads((EVIDENCE/'image-build-audit.json').read_text())
     output = (EVIDENCE/'image-build-output.log').read_bytes()
     compatibility._verify_cas_receipt(audit['receipt'], audit['source_snapshot'], output)

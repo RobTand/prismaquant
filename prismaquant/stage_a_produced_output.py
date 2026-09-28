@@ -573,16 +573,26 @@ class BoundaryRepeatMaterializationUnsupported(RuntimeError):
     """
 
 
-def _produced_output_module() -> Any:
-    from .staged_lease import LeaseRefused, sdk_submodule
+def _client() -> Any:
+    """PrismaBuild's client SDK, from the SAME sealed generation as the lease.
+
+    ``prismabuild.client`` (PB #1254) carries the produced-output, queue and
+    residency-map calls this lane makes, so the lane binds one module rather
+    than three internal ones.
+    """
+
+    from .staged_lease import LeaseRefused, client_sdk
     try:
-        module = sdk_submodule("produced_output")
+        return client_sdk()
     except LeaseRefused as exc:
         raise BoundaryProducedBindingError(
             "the Stage A boundary publication needs PrismaBuild's\n"
-            "produced_output API from the SAME sealed generation as the\n"
+            "client SDK from the SAME sealed generation as the\n"
             f"reader SDK: {exc}") from exc
-    po = module
+
+
+def _produced_output_module() -> Any:
+    po = _client()
     for name in ("declared_template", "bind_declared_instance",
                  "declare_instance", "admit_instance", "admit_funded_window",
                  "require_prewrite", "abort_prewrite", "publish_prepaid_batch",
@@ -594,34 +604,18 @@ def _produced_output_module() -> Any:
                  "recover_batches", "due_mover_rows"):
         if not callable(getattr(po, name, None)):
             raise BoundaryProducedBindingError(
-                "the installed prismabuild.produced_output lacks "
+                "the installed prismabuild.client lacks "
                 f"{name!r}: a runtime without the produced-output API "
                 "cannot stage Stage A's own boundary entries")
     return po
 
 
 def _pool_module() -> Any:
-    from .staged_lease import LeaseRefused, sdk_submodule
-    try:
-        module = sdk_submodule("pool")
-    except LeaseRefused as exc:
-        raise BoundaryProducedBindingError(
-            "the Stage A boundary publication needs PrismaBuild's pool\n"
-            "module from the SAME sealed generation as the reader SDK: "
-            f"{exc}") from exc
-    return module
+    return _client()
 
 
 def _residency_map_module() -> Any:
-    from .staged_lease import LeaseRefused, sdk_submodule
-    try:
-        module = sdk_submodule("residency_map")
-    except LeaseRefused as exc:
-        raise BoundaryProducedBindingError(
-            "composing a produced batch's reader context needs\n"
-            "PrismaBuild's residency_map module from the SAME sealed\n"
-            f"generation as the reader SDK: {exc}") from exc
-    return module
+    return _client()
 
 
 def launch_queue_root(env: Mapping[str, str] | None = None) -> Path:
@@ -708,7 +702,7 @@ class BoundaryProducedPublication:
                 getattr(self._po, "commit_origin_batch", None)):
             raise BoundaryProducedBindingError(
                 "the declared template is write-only, and the loaded "
-                "prismabuild.produced_output has no commit_origin_batch "
+                "PrismaBuild client SDK has no commit_origin_batch "
                 "(PrismaBuild #912): its groups could never be committed")
         self._generation: str | None = None
         # batch_id -> the manifest digest its descriptors sealed. Needed to
@@ -775,8 +769,7 @@ class BoundaryProducedPublication:
                 f"the declared template authorizes no {wanted!r} slot: "
                 "Stage A's boundary entries have nowhere to be filed")
         try:
-            claim_snapshot = pool_mod._read_json(
-                queue.item_path(pool_mod.CLAIMED, owner))
+            claim_snapshot = pool_mod.read_claimed_record(queue, owner)
         except Exception as exc:
             raise BoundaryProducedBindingError(
                 f"the owner claim is unreadable: {exc}") from exc
@@ -1294,7 +1287,7 @@ class BoundaryProducedPublication:
                                        manifest_digest=digest)
         root = self.fragment_root()
         try:
-            fragments = map_mod.read_fragments(root, namespace)
+            fragments = map_mod.read_residency_fragments(root, namespace)
         except Exception as exc:
             raise BoundaryProducedBindingError(
                 f"cannot read the fragments for boundary group "
@@ -1320,7 +1313,7 @@ class BoundaryProducedPublication:
                     "batch composes like a whole one, so the receipt is "
                     "what this read waits on")
         try:
-            composed = map_mod.compose(fragments)
+            composed = map_mod.compose_residency_map(fragments)
         except Exception as exc:
             raise BoundaryProducedBindingError(
                 f"the fragments for boundary group {batch_id!r} do not "
@@ -1331,7 +1324,7 @@ class BoundaryProducedPublication:
                 f"manifest {str(composed.get('manifest_sha256'))[:12]}, not "
                 f"this group's {digest[:12]}")
         path = self.reader_context_root() / f"{namespace}.map.json"
-        map_mod.write_map(path, composed)
+        map_mod.write_residency_map(path, composed)
         entries = composed.get("entries")
         return {"batch_id": str(batch_id), "map_path": str(path),
                 "manifest_sha256": digest, "material_namespace": namespace,
@@ -1637,15 +1630,19 @@ class BoundaryProducedPublication:
         return out
 
     def release(self, lease_sdk=None) -> dict:
-        """Close the instance and reclaim leftover holdings."""
+        """Close the instance and reclaim leftover holdings.
+
+        By default PB's own ``release_produced_instance`` supplies the
+        reader-lease module from the same generation as the rest of this
+        lane's calls. ``lease_sdk`` names another one explicitly (tests).
+        """
 
         if lease_sdk is None:
-            try:
-                from prismabuild import reader_lease as lease_sdk
-            except ImportError:
-                lease_sdk = None
-        out = self._po.safe_release_instance(
-            self.queue, self.instance, self.template, lease_sdk=lease_sdk)
+            out = self._po.release_produced_instance(
+                self.queue, self.instance, self.template)
+        else:
+            out = self._po.safe_release_instance(
+                self.queue, self.instance, self.template, lease_sdk=lease_sdk)
         return dict(out) if isinstance(out, dict) else {"ok": True}
 
 

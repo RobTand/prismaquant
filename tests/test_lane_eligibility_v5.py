@@ -92,7 +92,10 @@ def test_v5_missing_or_wrong_runtime_scope_cannot_borrow_a_cell(structure, image
     {"image": DENSE_IMAGE, "execution_modes": ["automatic"]},
     {"image": DENSE_IMAGE, "execution_modes": ["eager", "eager"]},
     {"image": DENSE_IMAGE, "execution_modes": "eager"},
-    {"image": DENSE_IMAGE, "execution_modes": ["eager"], "default": True},
+    # An unmarked extra member is skipped (#1548); marked must-understand, it
+    # still refuses.
+    {"image": DENSE_IMAGE, "execution_modes": ["eager"], "default": True,
+     "must_understand": ["default"]},
 ])
 def test_v5_runtime_grammar_refuses_missing_unknown_or_mutable_scope(runtime):
     block, formats = _contract()
@@ -102,6 +105,13 @@ def test_v5_runtime_grammar_refuses_missing_unknown_or_mutable_scope(runtime):
         block["cells"][0]["runtime"] = runtime
     with pytest.raises(lane.LaneEligibilityError, match=r"cells.*runtime"):
         _parse(block, formats)
+
+
+def test_v5_runtime_scope_skips_an_unmarked_additive_member():
+    block, formats = _contract()
+    before = _parse(deepcopy(block), deepcopy(formats))
+    block["cells"][0]["runtime"]["cuda"] = "13.0"
+    assert _parse(block, formats).cells == before.cells
 
 
 def test_v5_overlap_is_checked_per_runtime_and_execution_mode():

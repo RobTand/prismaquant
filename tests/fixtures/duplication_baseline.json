@@ -147,9 +147,9 @@
   "hashlib:prismaquant/joint_aura_source_transition.py::create_transition",
   "hashlib:prismaquant/joint_aura_source_transition.py::source_proof",
   "hashlib:prismaquant/joint_aura_transitions.py::receipt_version",
-  "hashlib:prismaquant/joint_catalog_extension.py::_artifact_fence",
   "hashlib:prismaquant/joint_catalog_extension.py::_check_capture",
-  "hashlib:prismaquant/joint_catalog_extension.py::attach_candidate_overlay",
+  "hashlib:prismaquant/joint_catalog_extension.py::_rehash_drifted",
+  "hashlib:prismaquant/joint_catalog_extension.py::_verify_overlay_payload",
   "hashlib:prismaquant/joint_catalog_extension.py::create_extension",
   "hashlib:prismaquant/joint_cost_quantum.py::_digest_of",
   "hashlib:prismaquant/joint_cost_quantum.py::publish_quantum_outputs",
@@ -273,6 +273,7 @@
   "hashlib:prismaquant/stage_b_prep_io.py::_hash_range",
   "hashlib:prismaquant/stage_b_prep_io.py::build_preparation_template",
   "hashlib:prismaquant/stage_b_workspace_profile.py::write_profile",
+  "hashlib:prismaquant/stage_inputs.py::read_bound",
   "hashlib:prismaquant/staged_lease.py::_load_sealed_payload",
   "hashlib:prismaquant/streaming_model.py::_StreamingInitializationAudit._observe",
   "hashlib:prismaquant/tessera_anchored_surface.py::load_campaign_measurements",
@@ -290,7 +291,6 @@
   "hashlib:prismaquant/tessera_export_lane.py::selected_cached_units_manifest",
   "hashlib:prismaquant/tessera_export_lane.py::write_cached_expert_units",
   "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256",
-  "hashlib:prismaquant/tessera_joint_allocation.py::_read_bound",
   "hashlib:prismaquant/tessera_joint_allocation.py::handoff",
   "hashlib:prismaquant/tessera_joint_aura.py::_qualification_cells_sha256",
   "hashlib:prismaquant/tessera_joint_aura.py::_qualification_file_sha",
@@ -324,6 +324,10 @@
   "hashlib:tools/audit_tessera_selected_cache_slice.py::main",
   "hashlib:tools/band_serial_handoff_live_pair.py::_sha",
   "hashlib:tools/band_serial_handoff_live_pair.py::prepare",
+  "hashlib:tools/bench_fence_rehash.py::_busy_consumer",
+  "hashlib:tools/bench_fence_rehash.py::_read_digest",
+  "hashlib:tools/bench_fence_rehash.py::_write_drifted_wires",
+  "hashlib:tools/bench_fence_rehash.py::main",
   "hashlib:tools/benchmarks/joint_validation_pair.py::sha",
   "hashlib:tools/build_diverse_calibration.py::_json_digest",
   "hashlib:tools/build_diverse_calibration.py::_sha256_text",
@@ -392,7 +396,6 @@
   "hashlib:tools/measure_vllm_wikitext_ppl.py::_canonical_sha256",
   "hashlib:tools/measure_vllm_wikitext_ppl.py::_load_ids",
   "hashlib:tools/measure_wire_rehash_readers.py::_hash",
-  "hashlib:tools/nvfp4_served_qdq_bench.py::digest",
   "hashlib:tools/pilot_existing_t4.py::main",
   "hashlib:tools/pilot_existing_t4.py::main.unit",
   "hashlib:tools/pq282_equality/recheck_refusal_order.py::<module>",
@@ -415,7 +418,6 @@
   "hashlib:tools/pwc_window_load_bench.py::run_setup",
   "hashlib:tools/pwc_window_load_bench.py::run_window",
   "hashlib:tools/qualify_t4_overlay.py::decoder_provenance",
-  "hashlib:tools/qualify_t4_overlay.py::digest",
   "hashlib:tools/rebind_t4_qualified_results.py::sha",
   "hashlib:tools/regenerate_joint_quanta.py::_build_head_slices",
   "hashlib:tools/regenerate_joint_quanta.py::_load_json",
@@ -445,6 +447,8 @@
   "hashlib:tools/staged_exact_read_bench.py::load_slice",
   "hashlib:tools/staged_read_stream_ab.py::digest_tensor",
   "hashlib:tools/tessera_campaign_container.py::inspect_or_load",
+  "hashlib:tools/tessera_fleet/model_worker.py::digest_file",
+  "hashlib:tools/tessera_fleet/model_worker.py::digest_json",
   "hashlib:tools/union_tessera_census_tables.py::Table.load",
   "hashlib:tools/union_tessera_census_tables.py::_digest",
   "hashlib:tools/union_tessera_census_tables.py::_sha256_file",
@@ -530,6 +534,7 @@
   "sorted-json:prismaquant/prefill_frontier.py::_publish_assignment",
   "sorted-json:prismaquant/prefill_frontier.py::main",
   "sorted-json:prismaquant/prepriced_cost.py::main",
+  "sorted-json:prismaquant/prismabuild_progress.py::commit",
   "sorted-json:prismaquant/prismabuild_progress.py::declare_export_wait",
   "sorted-json:prismaquant/prismabuild_progress.py::declare_staged_wait",
   "sorted-json:prismaquant/prismabuild_progress.py::report",
@@ -587,7 +592,6 @@
   "sorted-json:prismaquant/tessera_formats.py::TesseraRateSurface.identity",
   "sorted-json:prismaquant/tessera_joint_allocation.py::handoff",
   "sorted-json:prismaquant/tessera_joint_aura.py::_json",
-  "sorted-json:prismaquant/tessera_joint_aura.py::_pb_commit",
   "sorted-json:prismaquant/tessera_joint_aura.py::_qualification_cells_sha256",
   "sorted-json:prismaquant/tessera_joint_eval_panel.py::main",
   "sorted-json:prismaquant/tessera_materialization.py::_json",
@@ -614,6 +618,7 @@
   "sorted-json:tools/band_serial_handoff_live_pair.py::main",
   "sorted-json:tools/band_serial_handoff_live_pair.py::prepare",
   "sorted-json:tools/band_serial_handoff_live_pair.py::producer_role",
+  "sorted-json:tools/bench_fence_rehash.py::_finish",
   "sorted-json:tools/build_diverse_calibration.py::_json_digest",
   "sorted-json:tools/build_glm_derivative_image.py::main",
   "sorted-json:tools/build_prismasnap_27b_campaign.py::_canonical_bytes",
@@ -732,6 +737,9 @@
   "sorted-json:tools/stagea_forward_recovery.py::main",
   "sorted-json:tools/staged_exact_read_bench.py::child_main",
   "sorted-json:tools/staged_exact_read_bench.py::driver_main",
+  "sorted-json:tools/tessera_fleet/model_worker.py::atomic_json",
+  "sorted-json:tools/tessera_fleet/model_worker.py::digest_json",
+  "sorted-json:tools/tessera_fleet/model_worker.py::main",
   "sorted-json:tools/tessera_surface_replay.py::main",
   "sorted-json:tools/test_qualify_t4_overlay.py::test_partial_checkpoint_corruption_is_not_adopted",
   "sorted-json:tools/union_tessera_census_tables.py::<module>",
@@ -749,6 +757,11 @@
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py"
   ],
+  "_admit": [
+   "prismaquant/native_operator_panel.py",
+   "prismaquant/stage_b_workspace_profile.py",
+   "prismaquant/tessera_runtime_contract.py"
+  ],
   "_argv_flag": [
    "prismaquant/joint_layer_quanta.py",
    "prismaquant/prismasnap_validation.py"
@@ -757,7 +770,6 @@
    "prismaquant/joint_aura_retained_budget_transition.py",
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py",
-   "prismaquant/tessera_joint_aura.py",
    "tools/build_tessera_census_cache.py",
    "tools/build_tessera_selected_cache.py",
    "tools/derive_retained_window_budget.py",
@@ -966,10 +978,6 @@
    "tools/measure_vllm_full_kl.py",
    "tools/measure_vllm_wikitext_ppl.py"
   ],
-  "_load_plan": [
-   "prismaquant/tessera_joint_aura.py",
-   "tools/checkpoint_parse_probe.py"
-  ],
   "_load_probe": [
    "prismaquant/prismasnap_checkpoint.py",
    "prismaquant/production_cache_stripes.py"
@@ -1072,10 +1080,6 @@
    "prismaquant/proposal_validation.py",
    "prismaquant/stage_a_chain_seed.py"
   ],
-  "_read_bound": [
-   "prismaquant/tessera_joint_allocation.py",
-   "prismaquant/tessera_sampled_stack_proposal.py"
-  ],
   "_read_json": [
    "prismaquant/stage_a_chain_resume.py",
    "prismaquant/stage_a_retirement.py"
@@ -1156,7 +1160,6 @@
   "_same": [
    "prismaquant/joint_catalog_extension.py",
    "prismaquant/joint_stage_b_head.py",
-   "prismaquant/tessera_joint_aura.py",
    "tools/union_tessera_census_tables.py"
   ],
   "_sample": [
@@ -1331,10 +1334,6 @@
    "prismaquant/joint_served_activation.py",
    "prismaquant/joint_stageb_resources.py"
   ],
-  "digest": [
-   "tools/nvfp4_served_qdq_bench.py",
-   "tools/qualify_t4_overlay.py"
-  ],
   "drop_client_cache": [
    "tools/staged_exact_read_bench.py",
    "tools/staged_read_stream_ab.py"
@@ -1440,10 +1439,6 @@
   "stage_multimodal": [
    "prismaquant/build_rtn_cache.py",
    "prismaquant/sensitivity_probe.py"
-  ],
-  "stamp": [
-   "tools/build_t4_overlay_catalog.py",
-   "tools/qualify_t4_overlay.py"
   ],
   "submit": [
    "tools/dispatch_stage_a_split.py",

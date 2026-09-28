@@ -1,0 +1,30 @@
+# Shrink-only allowlist for tests/test_prismabuild_boundary.py (PQ reaching into PrismaBuild
+# internals). Step 2 (the PB client SDK) empties it.
+# One line per occurrence: path<TAB>kind<TAB>value. Delete lines; never add.
+# CI refuses a pull request that adds a line here.
+prismaquant/joint_forward_resume.py	import	prismabuild.*
+prismaquant/produced_output_spool.py	import	prismabuild.produced_spool
+prismaquant/residency_map.py	literal	prismaquant.prismabuild.residency_map.v1
+prismaquant/residency_map.py	literal	prismaquant.prismabuild.residency_map_fragment.v1
+prismaquant/staged_lease.py	import	prismabuild.*
+tools/audit_produced_window_tokens.py	import	prismabuild.pool
+tools/audit_produced_window_tokens.py	import	prismabuild.pool
+tools/audit_produced_window_tokens.py	import	prismabuild.pool
+tools/audit_produced_window_tokens.py	private	_read_json
+tools/audit_produced_window_tokens.py	private	_read_json
+tools/band_serial_handoff_live_pair.py	import	prismabuild.produced_output
+tools/band_serial_handoff_live_pair.py	private	_prewrites_dir
+tools/band_serial_handoff_live_pair.py	private	_read_prewrite
+tools/build_stagea_forward_recovery_package.py	import	prismabuild.core
+tools/build_stagea_seed_package.py	import	prismabuild.core
+tools/build_t4_logical_request.py	literal	prismabuild-fleet/cas
+tools/build_t4_recovery_request.py	literal	prismabuild-fleet/cas
+tools/build_t4_recovery_request.py	literal	prismabuild-fleet/pb-queue
+tools/derive_tessera_progress_grace.py	literal	prismabuild-fleet/pb-queue
+tools/fleet_qualification_driver.py	import	prismabuild.core
+tools/fleet_qualification_driver.py	literal	prismabuild-fleet/cas
+tools/fleet_qualification_driver.py	literal	prismabuild-fleet/pb-queue
+tools/fleet_qualification_driver.py	literal	prismabuild-fleet/pb-queue
+tools/live_reader_qualify.py	import	prismabuild.pool
+tools/stage_fed_demonstration.py	literal	prismabuild-fleet/pb-queue
+tools/stagea_produced_live_cycle.py	import	prismabuild.*

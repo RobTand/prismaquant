@@ -21,8 +21,9 @@ from .dev_mode import seal_check
 from .joint_aura import (
     prepare_joint_aura_identities, release_joint_aura_identities, validated_identity_memo,
 )
+from .stage_inputs import read_bound as _read_bound, require as _require, same as _same
 from .tessera_joint_aura import (
-    HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA, _require, _same,
+    HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA,
     cell_render_census, render_origin_census,
 )
 
@@ -245,48 +246,6 @@ def bind_allocation_payload(joint, data, prepared, cache_metadata, *, plan_sha25
     _same(currency_gate(result), currency, 'unchanged joint currency')
     release_joint_aura_identities(result)
     return result
-
-
-def _bound_stat_fence(path):
-    """The stat identity a memoized bound read trusts a hit on (P3 #682)."""
-    value = path.stat()
-    return (value.st_mode, value.st_dev, value.st_ino, value.st_size,
-            value.st_mtime_ns, value.st_ctime_ns)
-
-
-#: Process-scoped bound bytes by ``(path, sha256)`` with the stat fence the
-#: bytes were verified under. The digest check is what authenticates the
-#: bytes; the fence only admits reusing them without re-reading and
-#: re-hashing. A fence drift re-reads and re-verifies, and a digest mismatch
-#: still refuses -- a memo hit never authenticates anything.
-_BOUND_BYTES = {}
-
-
-#: A process-wide reader for :func:`_read_bound`'s bytes, ``(path, sha256,
-#: label) -> bytes``. None reads the path. The Stage B preparation installs
-#: its strict staged reader here (``stage_b_prep_io.bind_staged_reads``,
-#: PQ #1092), so the control documents it reads come off the stage.
-BOUND_READER = None
-
-
-def _read_bound(record, label):
-    _require(isinstance(record, dict) and set(record) == {'path', 'sha256'}, f'{label}: bound path and SHA256 required')
-    path = Path(record['path'])
-    key = (str(path), record['sha256'])
-    try:
-        fence = _bound_stat_fence(path)
-    except OSError:
-        fence = None
-    if fence is not None:
-        hit = _BOUND_BYTES.get(key)
-        if hit is not None and hit[0] == fence:
-            return hit[1]
-    raw = (path.read_bytes() if BOUND_READER is None
-           else BOUND_READER(path, record['sha256'], label))
-    _same(hashlib.sha256(raw).hexdigest(), record['sha256'], f'{label}: owned bytes')
-    if fence is not None and len(raw) == fence[3]:
-        _BOUND_BYTES[key] = (fence, raw)
-    return raw
 
 
 def handoff(*, joint_binding, plan_binding, output_path):

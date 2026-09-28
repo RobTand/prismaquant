@@ -8,6 +8,7 @@ import pytest
 from prismaquant import lane_eligibility as lane
 from prismaquant import shipcard
 from prismaquant import tessera_route_receipt as receipt
+from prismaquant import tessera_shipcard
 from tessera.serving import runtime_image
 
 
@@ -142,7 +143,7 @@ def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
 
 def make(data):
     census, binding, build, model_dir, _units = data
-    return shipcard.make_route_census_record(tool="test", model_sha=shipcard.compute_model_sha(model_dir),
+    return tessera_shipcard.make_route_census_record(tool="test", model_sha=shipcard.compute_model_sha(model_dir),
         route_records=census, priced_routes=[], substitute_decoders=[],
         binding=binding, build=build, model_dir=model_dir)
 
@@ -159,7 +160,7 @@ def test_raw_v2_positive_retains_runtime_phase_owner_and_exact_price(tmp_path, m
     if structure == "routed_moe":
         assert record["served_decoders"] == ["torch_materialize_stock"]
         assert ":TRITON" in next(iter(record["route_census"]["records"]["decode"].values()))["symbol"]
-    assert shipcard._verify_route_census_record("route.census", record,
+    assert tessera_shipcard.verify_route_census_record("route.census", record,
         card={"build": data[2]}, model_dir=data[3]) == []
 
 
@@ -199,7 +200,7 @@ def test_runtime_declaration_refuses_at_fill_and_publication(tmp_path, monkeypat
         with pytest.raises(receipt.TesseraRouteReceiptError, match="image.declaration"):
             make(data)
     else:
-        problems = shipcard._verify_route_census_record("route.census", record,
+        problems = tessera_shipcard.verify_route_census_record("route.census", record,
             card={"build": data[2]}, model_dir=data[3])
         assert problems and "image_declaration" in " ".join(problems)
     if mutation == "missing" and operation == "replay":
@@ -215,7 +216,7 @@ def test_runtime_declaration_replay_uses_carried_evidence_and_manifest_identity(
     monkeypatch.setenv(runtime_image.CENSUS_DECLARATION_ENV, "not-json")
     record = make(data)
     assert record["passed"] is True
-    assert shipcard._verify_route_census_record("route.census", record,
+    assert tessera_shipcard.verify_route_census_record("route.census", record,
         card={"build": data[2]}, model_dir=data[3]) == []
 
 
@@ -286,7 +287,7 @@ def test_offline_replay_rejects_edited_scope_raw_record_and_stale_verdict(tmp_pa
     record = make(data)
     record["route_census"]["runtime"]["image"] = "example/other@sha256:" + "b" * 64
     record["scoped_verdict"]["target"]["runtime_image"] = record["route_census"]["runtime"]["image"]
-    assert shipcard._verify_route_census_record("route.census", record,
+    assert tessera_shipcard.verify_route_census_record("route.census", record,
         card={"build": data[2]}, model_dir=data[3])
 
 
@@ -311,14 +312,14 @@ def test_scoped_card_cannot_replay_flat_legacy_receipt(tmp_path, monkeypatch):
         def absent():
             raise ModuleNotFoundError("No module named 'tessera'", name="tessera")
         historical.setattr(receipt, "_current_scoped_contract", absent)
-        legacy = shipcard.make_route_census_record(tool="legacy", model_sha="fixture",
+        legacy = tessera_shipcard.make_route_census_record(tool="legacy", model_sha="fixture",
             priced_routes=["TESSERA_FP8"], route_records=[{"route": "TESSERA_FP8", "decoder": "native"}],
             substitute_decoders=["fallback"])
-    assert shipcard._verify_route_census_record("route.census", legacy, card={"build": data[2]})
+    assert tessera_shipcard.verify_route_census_record("route.census", legacy, card={"build": data[2]})
     # Filling that same flat list where the scoped table IS current refuses
     # by name, before any card sees it.
     with pytest.raises(receipt.TesseraRouteReceiptError, match="cannot attest an unbound legacy flat census"):
-        shipcard.make_route_census_record(tool="legacy", model_sha="fixture",
+        tessera_shipcard.make_route_census_record(tool="legacy", model_sha="fixture",
             priced_routes=["TESSERA_FP8"], route_records=[{"route": "TESSERA_FP8", "decoder": "native"}],
             substitute_decoders=["fallback"])
 
@@ -326,7 +327,7 @@ def test_scoped_card_cannot_replay_flat_legacy_receipt(tmp_path, monkeypatch):
 def test_scoped_verification_requires_independent_artifact_files(tmp_path, monkeypatch):
     data = fixture(tmp_path, monkeypatch)
     record = make(data)
-    assert shipcard._verify_route_census_record("route.census", record, card={"build": data[2]})
+    assert tessera_shipcard.verify_route_census_record("route.census", record, card={"build": data[2]})
 
 
 def test_missing_packaged_contract_is_typed_refusal(tmp_path, monkeypatch):

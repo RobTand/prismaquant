@@ -170,7 +170,7 @@ def _plan(tmp_path):
 
 
 def test_plan_admits_reference_default_but_refuses_unknown_backend(tmp_path):
-    from prismaquant.tessera_joint_aura import _load_plan, _sha
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan, _sha
     config = _plan(tmp_path)
     path = tmp_path / 'plan.json'
     path.write_text(json.dumps(config))
@@ -315,7 +315,7 @@ def qualification_nvcc():
 
 def test_plan_preflight_refuses_an_unqualified_image_without_a_device(tmp_path, monkeypatch):
     """Step 3a loads the plan in the campaign's own container, before the GB10."""
-    from prismaquant.tessera_joint_aura import _load_plan, _sha
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan, _sha
     qualification, _ = backend._qualification()
     environment = {key: value for key, value in qualification['runtime'].items() if key != 'device'}
     config = _plan(tmp_path)
@@ -336,7 +336,7 @@ def test_plan_preflight_refuses_an_unqualified_image_without_a_device(tmp_path, 
 
 def test_the_synthesize_stage_is_not_held_to_the_projection_runtime(tmp_path, monkeypatch):
     """#552's decode runs off the qualified box on purpose; it loads no backend."""
-    from prismaquant.tessera_joint_aura import _load_plan, _sha
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan, _sha
     config = _plan(tmp_path)
     config['execution']['projection_backend'] = selector()
     path = tmp_path / 'plan.json'

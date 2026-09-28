@@ -18,6 +18,7 @@ import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
+from prismaquant.tessera_reuse_authority import CANONICAL_CAPTURE
 
 
 def collection_document(paths) -> dict:
@@ -30,7 +31,7 @@ def collection_document(paths) -> dict:
     with ExitStack() as owners:
         references, commitments, provenance = [], {}, None
         for path in names:
-            child = owners.enter_context(ReferenceHessians(path))
+            child = owners.enter_context(ReferenceHessians(path, canonical_capture=CANONICAL_CAPTURE))
             if provenance is None:
                 provenance = child.provenance
             elif child.provenance != provenance:
@@ -60,12 +61,12 @@ def publish_collection(paths, output: str | Path) -> dict:
     with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".collection.references.json") as temp:
         temp.write(raw)
         temp.flush()
-        with ReferenceHessianCollection(temp.name) as checked:
+        with ReferenceHessianCollection(temp.name, canonical_capture=CANONICAL_CAPTURE) as checked:
             if sorted(checked) != document["units"]:
                 raise ValueError("Tessera reader disagrees with the authored collection")
     if not publish_new_bytes(output, raw):
         raise FileExistsError(f"Hessian collection output exists: {output}")
-    with ReferenceHessianCollection(output) as checked:
+    with ReferenceHessianCollection(output, canonical_capture=CANONICAL_CAPTURE) as checked:
         return {"path": str(output.resolve()), "sha256": hashlib.sha256(raw).hexdigest(),
                 "capture_sha256": document["capture_sha256"],
                 "reference_binding": checked.binding(),

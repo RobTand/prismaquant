@@ -47,7 +47,7 @@ def main(argv=None) -> int:
         if actual != args.plan_sha256:
             raise SystemExit(
                 f"plan {plan_path} hashes to {actual}, not {args.plan_sha256}")
-    config = tessera_joint_aura._load_plan(plan_path, args.plan_sha256,
+    config = tessera_joint_aura.load_joint_anchor_plan(plan_path, args.plan_sha256,
                                            projection_runtime=False)
 
     # 4. The two budgets, held apart. ``check`` needs a device, so nothing here
