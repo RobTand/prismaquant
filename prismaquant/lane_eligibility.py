@@ -1622,10 +1622,14 @@ def parse_lane_claims(native_extensions: Any, where: str) -> tuple[LaneClaim, ..
 
 
 def lane_claim_for_cell(cell: Any, lanes: Sequence[LaneClaim]) -> LaneClaim | None:
-    """The lane whose predicate governs this cell, or ``None``.
+    """The first lane-bearing claim among this cell's launches, or ``None``.
 
-    A cell is lane-gated exactly when one of the decoders it EXECUTES is the
-    decoder a lane serves and that lane publishes a predicate. A decoder no
+    This answers only whether a cell is lane-gated at all. Since Tessera
+    contract v42 a cell can name several launches, some through a lane and
+    some beside it, so the first claim is not the decision: whether a rung is
+    admitted, and through which launches, is :func:`cell_rung_launches`
+    (PQ #1274). A cell is lane-gated exactly when one of the decoders it
+    EXECUTES is the decoder a lane serves and that lane publishes a predicate. A decoder no
     lane names (``torch_window``, ``torch_materialize_stock``) is the route's
     own path, gated by the cell's route status and evidence alone -- the
     contract publishes no wire predicate for it, and inventing one here would
