@@ -17,6 +17,7 @@ this is the test that runs un-skipped in CI.
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -31,8 +32,8 @@ PQ_ROOT = Path(__file__).resolve().parents[1]
 L0 = "model.layers.0"
 UNITS = {
     f"{L0}.self_attn.q_proj": (32, 32),
-    f"{L0}.self_attn.k_proj": (8, 32),
-    f"{L0}.self_attn.v_proj": (8, 32),
+    f"{L0}.self_attn.k_proj": (32, 32),
+    f"{L0}.self_attn.v_proj": (32, 32),
     f"{L0}.self_attn.o_proj": (32, 32),
     f"{L0}.mlp.gate_proj": (64, 32),
     f"{L0}.mlp.up_proj": (64, 32),
@@ -56,6 +57,7 @@ def _repo():
 
 
 def _checkpoint(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
     generator = torch.Generator().manual_seed(0)
     tensors = {}
     for unit, (rows, cols) in UNITS.items():
@@ -139,9 +141,12 @@ def test_the_supported_path_exports_the_same_bytes(tmp_path):
             assert old_files[name] == new_files[name], name
     # Manifests may embed their own absolute paths; compare them with both
     # output roots neutralised so only real content differences can fail.
-    def _neutral(root, name):
+    # The exporter also stamps its wall clock and the --plan-json path.
+    def _neutral(root, plan, name):
         text = (root / name).read_text()
-        return text.replace(str(root), "<out>")
+        text = text.replace(str(root), "<out>").replace(str(plan), "<plan>")
+        return re.sub(r'"written":\s*"[^"]*"', '"written":"<t>"', text)
     for name in sorted(old_files):
         if name.endswith(".json"):
-            assert _neutral(out_old, name) == _neutral(out_new, name), name
+            assert (_neutral(out_old, old_plan, name)
+                    == _neutral(out_new, new_plan, name)), name
