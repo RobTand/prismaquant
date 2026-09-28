@@ -266,6 +266,11 @@ ALLOWLIST = {
         "running artifact ceiling: PrismaBuild admits the one and the run spends the other"),
     ("prismaquant/stage_inputs.py", "bound"): (
         1, INTEGRITY, "an artifact's bytes against the digest it was bound under"),
+    # Moved unchanged from tessera_expert_projection.py, which this lint never
+    # scanned, when stage_inputs.py joined the campaign path (PQ #1555).
+    ("prismaquant/stage_inputs.py", "require_source_identity"): (
+        1, STRUCTURE, "a producer source identity record carries exactly the four "
+        "declared keys; a shape check, not a seal"),
     ("prismaquant/tessera_joint_aura.py", "require_encoder_source_reuse_record"): (
         1, STRUCTURE, "a reuse record names two different encoder seals"),
     ("tools/dispatch_joint_quanta.py", "_container_wrap"): (
