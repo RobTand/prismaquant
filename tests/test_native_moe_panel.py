@@ -588,3 +588,97 @@ def test_packed_reference_uses_glm_apply_gate_without_inventing_act_fn():
     out=_packed_experts_forward_with_weights(GlmLike(),x,torch.zeros(1,1,dtype=torch.long),
         torch.ones(1,1),gate_up,torch.eye(4).unsqueeze(0))
     assert torch.equal(out,torch.full((1,4),torch.nn.functional.silu(torch.tensor(.5)).item()))
+
+
+# ---------------------------------------------------------------------------
+# #1565: Tessera-published preflight, workspace and receipt fields are read
+# under the #1548 rule -- an additive field is accepted, a consumed field is
+# required, and a producer's must_understand mark refuses.
+# ---------------------------------------------------------------------------
+MU = "must_understand"
+EMPTY_SLOT = {"index": 1, "allocation": None}
+
+
+def _restamp(preflight):
+    preflight["runtime_sha256"] = identity_sha256(preflight["runtime"])
+    preflight["workspace_sha256"] = identity_sha256(preflight["workspace"])
+    return preflight
+
+
+def test_additive_preflight_and_workspace_fields_freeze_the_same_panel_facts(joined):
+    base = freeze_moe_panel(*joined, cost_sha256="4" * 64)
+    inputs, preflight, rows = copy.deepcopy(joined)
+    preflight["producer_note"] = "prose"
+    preflight["operator"]["compile_note"] = "prose"
+    preflight["runtime"]["execution"]["cuda_graphs"] = False
+    preflight["workspace"]["allocator"] = "caching"
+    preflight["workspace"]["slots"][0]["alignment"] = 256
+    preflight["workspace"]["slots"].append({**EMPTY_SLOT, "reserved_for": "prefill"})
+    panel = freeze_moe_panel(inputs, _restamp(preflight), rows, cost_sha256="4" * 64)
+    assert panel["execution"] == base["execution"]
+    assert panel["runtime_binding"] == base["runtime_binding"]
+    assert panel["workspace"]["resident_bytes"] == base["workspace"]["resident_bytes"]
+
+
+def test_an_empty_slot_that_carries_an_allocation_geometry_is_still_refused(joined):
+    inputs, preflight, rows = copy.deepcopy(joined)
+    preflight["workspace"]["slots"].append({**EMPTY_SLOT, "storage_bytes": 64})
+    with pytest.raises(ValueError, match="empty workspace slot"):
+        freeze_moe_panel(inputs, _restamp(preflight), rows, cost_sha256="4" * 64)
+
+
+@pytest.mark.parametrize("where", ["preflight", "operator", "execution", "workspace", "slot", "empty_slot"])
+def test_a_must_understand_preflight_field_is_refused(joined, where):
+    inputs, preflight, rows = copy.deepcopy(joined)
+    preflight["workspace"]["slots"].append(dict(EMPTY_SLOT))
+    target = {"preflight": preflight, "operator": preflight["operator"],
+              "execution": preflight["runtime"]["execution"], "workspace": preflight["workspace"],
+              "slot": preflight["workspace"]["slots"][0],
+              "empty_slot": preflight["workspace"]["slots"][1]}[where]
+    target["new_axis"] = 1
+    target[MU] = ["new_axis"]
+    with pytest.raises(ValueError, match="must-understand"):
+        freeze_moe_panel(inputs, _restamp(preflight), rows, cost_sha256="4" * 64)
+
+
+def test_a_missing_consumed_workspace_field_is_a_refusal_not_a_key_error(joined):
+    inputs, preflight, rows = copy.deepcopy(joined)
+    del preflight["workspace"]["resident_bytes"]
+    with pytest.raises(ValueError, match="missing field"):
+        freeze_moe_panel(inputs, _restamp(preflight), rows, cost_sha256="4" * 64)
+
+
+def _moe_receipt_targets(receipt):
+    phase = receipt["phases"]["decode"]
+    return {"receipt": receipt, "operator": receipt["operator"], "resources": receipt["resources"],
+            "phase": phase, "route": phase["route"]}
+
+
+def test_an_additive_receipt_field_gives_the_same_observation(joined, tmp_path):
+    panel, receipt, trace = receipt_fixture(joined)
+    trace_path = tmp_path / "trace.json"
+    write(trace_path, trace)
+    base_path = tmp_path / "base.json"
+    base = consume_moe_receipt(base_path, expected_sha256=write(base_path, receipt),
+                               expected_panel=panel, memory_trace_path=trace_path)
+    receipt = copy.deepcopy(receipt)
+    for name, target in _moe_receipt_targets(receipt).items():
+        target[f"added_{name}"] = {"schema": "tessera.future.v1"}
+    path = tmp_path / "receipt.json"
+    observed = consume_moe_receipt(path, expected_sha256=write(path, receipt),
+                                   expected_panel=panel, memory_trace_path=trace_path)
+    assert observed == {**base, "receipt_sha256": observed["receipt_sha256"]}
+
+
+@pytest.mark.parametrize("where", ["receipt", "operator", "resources", "phase", "route"])
+def test_a_must_understand_receipt_field_is_refused(joined, tmp_path, where):
+    panel, receipt, trace = receipt_fixture(joined)
+    receipt = copy.deepcopy(receipt)
+    target = _moe_receipt_targets(receipt)[where]
+    target["new_axis"] = 1
+    target[MU] = ["new_axis"]
+    path, trace_path = tmp_path / "receipt.json", tmp_path / "trace.json"
+    write(trace_path, trace)
+    with pytest.raises(ValueError, match="must-understand"):
+        consume_moe_receipt(path, expected_sha256=write(path, receipt),
+                            expected_panel=panel, memory_trace_path=trace_path)

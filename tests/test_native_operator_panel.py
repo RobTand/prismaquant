@@ -272,3 +272,92 @@ def test_execution_panel_equals_final_joint_execution_projection(joined):
     changed=copy.deepcopy(preflight);changed['operator']['wire_sha256']='0'*64
     with pytest.raises(ValueError,match='wire bytes'):
         freeze_execution_panel(inputs,changed,source_sha256=final['source_sha256'])
+
+
+# ---------------------------------------------------------------------------
+# #1565: Tessera-published preflight/receipt fields are read under the #1548
+# rule -- an additive field is accepted, a consumed field is required, and a
+# producer's must_understand mark refuses.
+# ---------------------------------------------------------------------------
+MU = "must_understand"
+
+
+def _with_additive_preflight(joined):
+    inputs, preflight, row = copy.deepcopy(joined)
+    preflight["producer_note"] = "prose"
+    preflight["operator"]["compile_note"] = "prose"
+    preflight["runtime"]["execution"]["cuda_graphs"] = False
+    preflight["runtime_sha256"] = identity_sha256(preflight["runtime"])
+    return inputs, preflight, row
+
+
+def test_an_additive_preflight_field_freezes_the_same_execution(joined):
+    base = freeze_native_panel(*joined, cost_sha256="4" * 64)
+    panel = freeze_native_panel(*_with_additive_preflight(joined), cost_sha256="4" * 64)
+    assert panel["execution"] == base["execution"]
+    assert panel["joint_operator_identity"] == base["joint_operator_identity"]
+
+
+@pytest.mark.parametrize("where", ["preflight", "operator", "runtime", "execution"])
+def test_a_must_understand_preflight_field_is_refused(joined, where):
+    inputs, preflight, row = copy.deepcopy(joined)
+    target = {"preflight": preflight, "operator": preflight["operator"],
+              "runtime": preflight["runtime"], "execution": preflight["runtime"]["execution"]}[where]
+    target["new_axis"] = 1
+    target[MU] = ["new_axis"]
+    preflight["runtime_sha256"] = identity_sha256(preflight["runtime"])
+    with pytest.raises(ValueError, match="must-understand"):
+        freeze_native_panel(inputs, preflight, row, cost_sha256="4" * 64)
+
+
+def test_a_missing_consumed_preflight_field_is_a_refusal_not_a_key_error(joined):
+    inputs, preflight, row = copy.deepcopy(joined)
+    del preflight["operator"]["scheme"]
+    with pytest.raises(ValueError, match="missing field"):
+        freeze_native_panel(inputs, preflight, row, cost_sha256="4" * 64)
+
+
+def _receipt_targets(receipt):
+    phase = receipt["phases"]["decode"]
+    return {"receipt": receipt, "operator": receipt["operator"], "resources": receipt["resources"],
+            "phase": phase, "route": phase["route"]}
+
+
+def test_an_additive_receipt_field_gives_the_same_observation(joined, tmp_path):
+    panel, receipt, trace = receipt_fixture(joined, complete=True)
+    trace_path = tmp_path / "trace.json"
+    write(trace_path, trace)
+    base_path = tmp_path / "base.json"
+    base = consume_native_receipt(base_path, expected_sha256=write(base_path, receipt),
+                                  expected_panel=panel, memory_trace_path=trace_path)
+    receipt = copy.deepcopy(receipt)
+    receipt["operator"] = copy.deepcopy(receipt["operator"])
+    for name, target in _receipt_targets(receipt).items():
+        target[f"added_{name}"] = {"schema": "tessera.future.v1"}
+    path = tmp_path / "receipt.json"
+    observed = consume_native_receipt(path, expected_sha256=write(path, receipt),
+                                      expected_panel=panel, memory_trace_path=trace_path)
+    assert observed == {**base, "receipt_sha256": observed["receipt_sha256"]}
+
+
+@pytest.mark.parametrize("where", ["receipt", "operator", "resources", "phase", "route"])
+def test_a_must_understand_receipt_field_is_refused(joined, tmp_path, where):
+    panel, receipt, trace = receipt_fixture(joined, complete=True)
+    receipt = copy.deepcopy(receipt)
+    receipt["operator"] = copy.deepcopy(receipt["operator"])
+    target = _receipt_targets(receipt)[where]
+    target["new_axis"] = 1
+    target[MU] = ["new_axis"]
+    path, trace_path = tmp_path / "receipt.json", tmp_path / "trace.json"
+    write(trace_path, trace)
+    with pytest.raises(ValueError, match="must-understand"):
+        consume_native_receipt(path, expected_sha256=write(path, receipt),
+                               expected_panel=panel, memory_trace_path=trace_path)
+
+
+def test_a_missing_consumed_receipt_field_is_a_refusal_not_a_key_error(joined, tmp_path):
+    panel, receipt, _ = receipt_fixture(joined)
+    del receipt["resources"]["resident_bytes"]
+    path = tmp_path / "receipt.json"
+    with pytest.raises(ValueError, match="missing field"):
+        consume_native_receipt(path, expected_sha256=write(path, receipt), expected_panel=panel)
