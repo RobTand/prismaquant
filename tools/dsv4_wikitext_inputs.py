@@ -79,10 +79,10 @@ class DSv4WikiTextInputsError(ValueError):
 
 
 def canonical_json_bytes(value: object) -> bytes:
-    from prismaquant.digests import canonical_json_bytes as _owner_bytes
+    from prismaquant.digests import DIRECT_UTF8_STRICT
 
     try:
-        return _owner_bytes(value, where="WikiText inputs")
+        return DIRECT_UTF8_STRICT.encoded(value)
     except (TypeError, ValueError) as exc:
         raise DSv4WikiTextInputsError(
             "WikiText inputs are not strict canonical JSON"
@@ -90,10 +90,10 @@ def canonical_json_bytes(value: object) -> bytes:
 
 
 def canonical_sha256(value: object) -> str:
-    from prismaquant.digests import canonical_json_sha256 as _owner_sha256
+    from prismaquant.digests import DIRECT_UTF8_STRICT
 
     try:
-        return _owner_sha256(value, where="WikiText inputs")
+        return DIRECT_UTF8_STRICT.sha256(value)
     except (TypeError, ValueError) as exc:
         raise DSv4WikiTextInputsError(
             "WikiText inputs are not strict canonical JSON"
