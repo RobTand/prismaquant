@@ -205,9 +205,14 @@ def test_a_missing_envelope_member_refuses(tmp_path, member):
         consume(tmp_path, mutated(lambda r: r.pop(member)))
 
 
-def test_an_unnamed_envelope_field_refuses(tmp_path):
-    with pytest.raises(RuntimePriceError, match="expected exactly fields"):
-        consume(tmp_path, mutated(lambda r: r.update(admission="qualified")))
+def test_an_unnamed_envelope_field_is_accepted_and_read_by_nothing(tmp_path):
+    """An additive envelope member moves no recomputed value (#1548); one the
+    producer marks must-understand, and this consumer does not know, refuses."""
+    assert consume(tmp_path, mutated(lambda r: r.update(admission="qualified"))) == consume(
+        tmp_path, supplied())
+    with pytest.raises(RuntimePriceError, match="must-understand"):
+        consume(tmp_path, mutated(lambda r: r.update(admission="qualified",
+                                                      must_understand=["admission"])))
 
 
 def test_a_boolean_where_an_integer_is_declared_refuses(tmp_path):
@@ -443,7 +448,7 @@ def test_the_owed_observations_are_named_and_null_rather_than_absent(tmp_path):
     for name in consumer.OWED_OBSERVATIONS:
         def mutate(report, name=name):
             del report["observations"][name]
-        with pytest.raises(RuntimePriceError, match="missing required observation"):
+        with pytest.raises(RuntimePriceError, match="missing field"):
             consume(tmp_path, mutated(mutate))
 
 
@@ -467,18 +472,22 @@ def test_a_domain_that_closes_on_evidence_the_envelope_does_not_carry_refuses(tm
         consume(tmp_path, mutated(mutate))
 
 
-def test_the_partition_owns_the_domains_and_derived_may_not_restate_them(tmp_path):
+def test_the_partition_owns_the_domains_and_derived_cannot_restate_them(tmp_path):
     """Two copies of one claim are two things that can drift apart. `derived`
     carries the numbers; `partition` carries the domain states the numbers
-    depend on, and a `derived` that restates them is an unnamed field."""
+    depend on. A `derived` that restates them -- even contradicting them -- is
+    an unnamed field this consumer never reads (#1548), so the verdict is the
+    partition's."""
     report = supplied()
     assert "domains" in report["partition"]
     assert "domains" not in report["derived"]
 
     def mutate(report):
-        report["derived"]["domains"] = copy.deepcopy(report["partition"]["domains"])
-    with pytest.raises(RuntimePriceError, match="expected exactly fields"):
-        consume(tmp_path, mutated(mutate))
+        restated = copy.deepcopy(report["partition"]["domains"])
+        for record in restated.values():
+            record.update(state="closed", evidence=["capture_sha256"], reason=None)
+        report["derived"]["domains"] = restated
+    assert consume(tmp_path, mutated(mutate)) == consume(tmp_path, supplied())
 
 
 def test_a_domain_that_closes_without_evidence_refuses(tmp_path):
@@ -1604,7 +1613,7 @@ def test_a_capture_without_the_observations_keeps_the_terms_null(tmp_path):
 
 @pytest.mark.parametrize("observation,value,diagnostic", [
     ("worker_startup_records", [{"rank": 0, "memory_allocated_bytes": 1024}],
-     "expected exactly fields"),
+     "missing field"),
     ("worker_startup_records", [{"rank": 0, "memory_allocated_bytes": True,
                                  "receipt_resident_bytes": 1024, "workspace_resident_bytes": 512,
                                  "workspace_locked": True, "scope": STARTUP_SCOPE}],
@@ -1613,13 +1622,12 @@ def test_a_capture_without_the_observations_keeps_the_terms_null(tmp_path):
                                  "receipt_resident_bytes": 1024, "workspace_resident_bytes": 512,
                                  "workspace_locked": 1, "scope": STARTUP_SCOPE}],
      "expected a boolean"),
-    # The KV observation is deliberately an open mapping: it carries the
-    # runtime's own resolved descriptors and the consumer requires only the
-    # coordinates it recomputes from, so a record missing them refuses by name
-    # rather than by a closed field set.
+    # The KV observation carries the runtime's own resolved descriptors and the
+    # consumer requires only the coordinates it recomputes from, so a record
+    # missing them refuses by name.
     ("kv_observations", [{"num_blocks": 2, "group_page_size_bytes": [1024],
                           "max_num_batched_tokens": 1}],
-     "missing required fields"),
+     "missing field"),
     ("kv_observations", [kv_record(num_blocks="two")],
      "expected integer"),
     ("kv_observations", [kv_record(num_blocks=-1)],
@@ -1654,7 +1662,7 @@ def test_a_rank_scoped_capture_names_its_rank_and_world(tmp_path):
 
 
 @pytest.mark.parametrize("scope,diagnostic", [
-    ({"rank": 1}, "expected exactly fields"),
+    ({"rank": 1}, "missing field"),
     ({"rank": 2, "world_size": 2}, "is not inside a world"),
     ({"rank": 0, "world_size": 0}, "is not inside a world"),
 ])
@@ -1808,11 +1816,19 @@ def test_admission_counts_ride_the_owner_views_gap(tmp_path):
     assert len(gaps) == 2 and all("owner_views" in reason for reason in gaps)
 
 
-def test_an_unknown_observation_key_refuses_by_name(tmp_path):
+def test_an_unknown_observation_key_is_read_by_nothing(tmp_path):
+    """#927: a producer observation this consumer never heard of refused the
+    whole report. It is now accepted and closes nothing (#1548); marked
+    must-understand, it refuses by name."""
     def mutate(report):
         report["observations"]["next_capture_probe"] = {"claimed": 1}
-    with pytest.raises(RuntimePriceError, match="not a registered observation"):
-        consume(tmp_path, mutated(mutate))
+    assert consume(tmp_path, mutated(mutate)) == consume(tmp_path, supplied())
+
+    def mark(report):
+        mutate(report)
+        report["observations"]["must_understand"] = ["next_capture_probe"]
+    with pytest.raises(RuntimePriceError, match="must-understand"):
+        consume(tmp_path, mutated(mark))
 
 
 def test_a_registered_optional_observation_reads(tmp_path):
@@ -1888,10 +1904,14 @@ def test_an_unknown_partition_schema_refuses_by_name(tmp_path):
         consume(tmp_path, mutated(mutate))
 
 
-def test_an_unregistered_derived_block_refuses_by_name(tmp_path):
+def test_an_unregistered_derived_block_is_read_by_nothing(tmp_path):
+    """Nothing here reads a number out of `derived`, so an unknown block
+    moves no verdict (#1548); marked must-understand, it refuses by name."""
     report = _v2_with_admission(supplied())
     report["derived"]["next_verdict"] = {}
-    with pytest.raises(RuntimePriceError, match="not a registered v2 block"):
+    assert consume(tmp_path, report) == consume(tmp_path, _v2_with_admission(supplied()))
+    report["derived"]["must_understand"] = ["next_verdict"]
+    with pytest.raises(RuntimePriceError, match="must-understand"):
         consume(tmp_path, report)
 
 

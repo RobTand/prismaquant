@@ -75,6 +75,7 @@ from .measured_runtime_prices import (
     RANK_RESOURCES_SCHEMA, RuntimeBinding, RuntimePriceError, _object, _string,
     identity_sha256, load_measured_runtime_table, parse_runtime_context,
 )
+from . import record_fields
 from .runtime_provenance import SCHEMA as RELATION_SCHEMA, recompute_fixed_resources
 from .digests import file_sha256hex
 
@@ -138,6 +139,17 @@ PANEL_STRUCTURE = {DENSE_PANEL_SCHEMA: "dense", MOE_PANEL_SCHEMA: "routed_moe"}
 #: between runs, but a path present in both must carry the same bytes. This
 #: emitter was the stricter of the two, and it was the one that refused.
 PER_ROUTE_RUNTIME_FIELD = "native_libraries"
+
+#: What this emitter reads off a panel's attested native runtime record, by
+#: object. The record is Tessera's, so it is admitted through the shared
+#: tolerant rule (#1548): these fields are required, a field the producer adds
+#: is accepted (and still compared across panels by :func:`_require_one_runtime`,
+#: which is a comparability rule, not a field vocabulary), and a field the
+#: producer marks ``must_understand`` that this emitter does not know refuses.
+RUNTIME_RECORD_FIELDS = ("image", "execution", "gpu")
+RUNTIME_RECORD_OPTIONAL_FIELDS = (PER_ROUTE_RUNTIME_FIELD, "source")
+RUNTIME_EXECUTION_FIELDS = ("mode", "execution_mode", "tensor_parallel")
+RUNTIME_GPU_FIELDS = ("uuid", "capability")
 
 file_sha256 = file_sha256hex
 
@@ -430,6 +442,23 @@ def bind_native_receipt(spec: Mapping, *, cost_payload: Mapping, cost_sha256: st
             "cost_row_identity_sha256": cost_row["joint_operator_identity_sha256"]}
 
 
+def _runtime_record(panel: Mapping, where: str) -> Mapping:
+    """One panel's native runtime record, admitted before anything reads it."""
+    def admit(value: Any, at: str, required: tuple, optional: tuple = ()) -> Mapping:
+        return record_fields.admit_fields(value, at, required=required, optional=optional,
+                                          error=RuntimePriceError)
+
+    runtime = admit(panel.get("runtime"), where, RUNTIME_RECORD_FIELDS,
+                    RUNTIME_RECORD_OPTIONAL_FIELDS)
+    admit(runtime["execution"], where + ".execution", RUNTIME_EXECUTION_FIELDS)
+    gpu = admit(runtime["gpu"], where + ".gpu", RUNTIME_GPU_FIELDS)
+    capability = gpu["capability"]
+    if (not isinstance(gpu["uuid"], str) or not isinstance(capability, list)
+            or len(capability) != 2):
+        raise RuntimePriceError("native runtime record names no GPU identity")
+    return runtime
+
+
 def _require_one_runtime(panels: list[Mapping]) -> None:
     """Refuse panels that are not on one clock; allow one route its own kernels.
 
@@ -504,6 +533,8 @@ def derive_context(panels: list[Mapping], *, relation: Mapping,
     """
     if not panels:
         raise RuntimePriceError("no native receipts were bound; a table needs at least one row")
+    for panel in panels:
+        _runtime_record(panel, f"native runtime record of {panel.get('unit')}@{panel.get('format')}")
     boundary = None
     if observations is not None:
         from .transient_charge_boundary import BOUNDARY_V1, NATIVE_BOUND_COMPOSITION
@@ -540,9 +571,7 @@ def derive_context(panels: list[Mapping], *, relation: Mapping,
                 raise RuntimePriceError(f"native receipts were produced on more than one {what}")
     runtime = first["runtime"]
     execution = runtime["execution"]
-    gpu = runtime.get("gpu")
-    if not isinstance(gpu, Mapping) or not isinstance(gpu.get("uuid"), str) or not isinstance(gpu.get("capability"), list):
-        raise RuntimePriceError("native runtime record names no GPU identity")
+    gpu = runtime["gpu"]
     major, minor = gpu["capability"]
     for phase in PHASES:
         expected = first["phases"]["prefill"]["m"] if phase == "prefill" else 1

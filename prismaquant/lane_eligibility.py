@@ -69,9 +69,17 @@ versions it was measured under. ``v7`` (Tessera #195) adds the smoke's
 ``attribution`` derived from it. ``v8`` (Tessera #198) adds
 ``evidence.artifact``, the encoder scope of the KL: which commit wrote the
 bytes it was measured on, and whether a later encoder reproduces them.
-Each is parsed closed at its own schema and refused by name where this
-reader does not understand it; see :func:`parse_cell_evidence` and, for
-what the reader DECIDES on, :func:`cell_evidence_admits`.
+Each schema names the fields this reader consumes, and each is required at
+its own schema; see :func:`parse_cell_evidence` and, for what the reader
+DECIDES on, :func:`cell_evidence_admits`.
+
+Additive fields (#1548). A field or block this reader does not know is
+accepted and never read, so a Tessera release that adds one does not break
+this reader. A producer that adds a field an old reader may not skip lists it
+in the object's ``must_understand`` array, and this reader then refuses the
+table. Both rules live in :mod:`prismaquant.record_fields`. The ``requires``
+predicate is the exception: every key in it is a condition, so an unknown
+requirement is still refused (:func:`parse_lane_claim`).
 
 The lane predicate (contract v20, Tessera #264)
 -----------------------------------------------
@@ -135,6 +143,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from . import record_fields
 from .digests import file_sha256hex
 
 
@@ -1077,7 +1086,7 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
                         execution_modes: Sequence[str] = (),
                         cell_rungs: Sequence[int] | None = None,
                         schema: str = LANE_ELIGIBILITY_SCHEMA_TESSERA) -> CellEvidence:
-    """The ``evidence`` grammar, closed at every level, at the table's schema.
+    """The ``evidence`` grammar at the table's schema.
 
     Every structural rule the publisher's validator enforces is re-checked
     here rather than assumed, because the two that matter most are exactly the
@@ -1092,10 +1101,10 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
 
     ``schema`` selects the member set: v6 is ``{grade, kl, smoke{status,
     receipt}}``; v7 adds ``smoke.attribution`` and ``smoke.control``; v8 adds
-    ``artifact``; v9 adds ``smoke.record``. A field from a later grammar on an
-    older table is refused as unknown, exactly as an unknown field on the
-    current one is -- a v6 table that carries an attribution is not a v6
-    table, and a v8 table that carries a record is not a v8 table.
+    ``artifact``; v9 adds ``smoke.record``. The schema decides what this
+    reader reads: a field from a later grammar on an older table is accepted
+    and never read, like any other additive field (#1548), so a v6 table that
+    carries an attribution still reads as a v6 table with no attribution.
     """
     if not isinstance(payload, Mapping):
         raise LaneEligibilityError(f"{where} must be a JSON object")
@@ -1405,7 +1414,7 @@ class LaneClaim:
 
 
 def parse_lane_claim(payload: Any, where: str, *, extension: str) -> LaneClaim:
-    """Read one ``lane`` block closed at Tessera's vocabulary, or refuse by name.
+    """Read one ``lane`` block at Tessera's vocabulary, or refuse by name.
 
     Mirrors the publisher's own validator (``tessera.serving.contract``,
     ``_validate_lane``): required ``decoder``, optional non-empty
@@ -1416,6 +1425,12 @@ def parse_lane_claim(payload: Any, where: str, *, extension: str) -> LaneClaim:
     reader cannot read is a refusal of the whole table -- a lane whose
     predicate is unreadable is a lane no gate can decide, and absent evidence
     is not a pass.
+
+    The block's own fields are read tolerantly (#1548): an added field beside
+    ``decoder`` and ``requires`` is accepted unless the producer marks it
+    ``must_understand``. The keys of ``requires`` are not fields. Each one is
+    a condition a unit's wire must satisfy, so an unknown requirement stays a
+    refusal: skipping it would admit a unit the loader refuses.
     """
     if not isinstance(payload, Mapping):
         raise LaneEligibilityError(
@@ -3146,13 +3161,14 @@ def _predicate_holds(actual: Any, op: str, value: Any) -> bool:
 # ---------------------------------------------------------------------------
 def _require_keys(payload: Mapping[str, Any], where: str, *,
                   required: set[str], optional: set[str]) -> None:
-    actual = set(payload)
-    missing = sorted(required - actual)
-    extra = sorted(actual - required - optional)
-    if missing:
-        raise LaneEligibilityError(f"{where}: missing field(s) {missing}")
-    if extra:
-        raise LaneEligibilityError(f"{where}: unknown field(s) {extra}")
+    """Admit one published object through the shared tolerant rule (#1548).
+
+    Every field this reader consumes must be present; a field it does not know
+    is accepted and never read, unless the producer lists it in the object's
+    ``must_understand`` array. See :mod:`prismaquant.record_fields`.
+    """
+    record_fields.admit_fields(payload, where, required=required, optional=optional,
+                               error=LaneEligibilityError)
 
 
 _sha256 = file_sha256hex
