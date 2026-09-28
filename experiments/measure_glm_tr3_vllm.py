@@ -6,6 +6,17 @@ candidate/runtime/topology binding for the whole panel. No core patches.
 ``--qualify-then-score`` does both in one engine load: it writes the standard
 hook qualification, passes it through the same replay check, and only then
 scores the rest of the panel.
+
+``--execution-mode compiled`` builds the same engine with ``enforce_eager`` off
+and one declared ``--compilation-config`` (PQ #1634). The declared config is
+recorded in the engine kwargs, checked against the configuration the
+coordinator and every worker resolved, and stamped on the runtime binding as
+``execution_mode``, so a compiled qualification never replays an eager run or
+the reverse. Speculative decoding stays refused in both modes. Scope: the
+scorer reads prompt log-probabilities from one prefill per window. Under
+FULL_DECODE_ONLY that prefill runs outside the captured graphs, so a compiled
+receipt measures the engine the compiled serve builds, not its graph-replayed
+decode steps.
 """
 from __future__ import annotations
 
@@ -30,13 +41,79 @@ import torch
 
 from experiments.glm_tr3_full_vocab import (
     CONTEXT_LENGTH, LOGITS_LAYOUTS, PANEL_SHA256, TOKENIZER_SHA256, VOCAB_SIZE,
-    PromptLogitsCapture, bound_json, cached_checkpoint_identity, collect_tp_result, load_panel, sha256, summarize_panel,
+    PromptLogitsCapture, bound_json, cached_checkpoint_identity, collect_tp_result, collect_tp_result2, load_panel, sha256, summarize_panel,
 )
 from experiments.build_glm_tr3_teacher import producer_identity
 from tools.full_kl_teacher_payload import atomic_json_write, canonical_sha256, tokenizer_identity
 from tools.gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs
 from tools.serve_fingerprint import self_manifest
 from tools.spec_decode_guard import refuse_if_spec_decode
+
+
+#: How the scorer's engine executes. ``eager`` is the historical contract and its
+#: engine kwargs and runtime binding are unchanged; ``compiled`` turns
+#: ``enforce_eager`` off and declares one compilation config (PQ #1634).
+EXECUTION_MODES = ("eager", "compiled")
+
+#: The compilation-config keys a compiled run states, and the only ones it may
+#: state: ``LLM()`` filters a dict compilation config through ``is_init_field``
+#: and drops any other key silently, so an extra key is refused, not lost.
+COMPILATION_FIELDS = ("mode", "cudagraph_mode", "cudagraph_capture_sizes")
+
+
+def parse_compilation_config(text):
+    """The declared compilation config of a compiled run, in its one spelling.
+
+    Every field is stated: ``mode`` and ``cudagraph_mode`` as upper-case member
+    names, the capture sizes as a strictly ascending list of positive integers
+    no larger than the scorer's batch. The engine must resolve to exactly these
+    values. A field the runtime overrides refuses at observation rather than
+    scoring another configuration: GLM-5.3 auto-enables breakable CUDA graphs,
+    which force ``mode`` to NONE, so a declared VLLM_COMPILE refuses there.
+    """
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"compilation config must be JSON: {exc.msg}") from None
+    if not isinstance(value, dict):
+        raise ValueError("compilation config must be a JSON object")
+    if sorted(value) != sorted(COMPILATION_FIELDS):
+        raise ValueError("compilation config must state exactly " + ", ".join(COMPILATION_FIELDS)
+                         + "; got " + (", ".join(sorted(value)) or "no field"))
+    for key in ("mode", "cudagraph_mode"):
+        name = value[key]
+        if not isinstance(name, str) or not name or name != name.upper():
+            raise ValueError(f"compilation config {key} must be an upper-case member name")
+    if value["cudagraph_mode"] == "NONE":
+        raise ValueError("a compiled run captures CUDA graphs; cudagraph_mode NONE is the eager contract")
+    sizes = value["cudagraph_capture_sizes"]
+    if (not isinstance(sizes, list) or not sizes
+            or any(type(size) is not int or not 0 < size <= CONTEXT_LENGTH + 1 for size in sizes)
+            or sizes != sorted(set(sizes))):
+        raise ValueError("cudagraph_capture_sizes must be a strictly ascending list of positive "
+                         f"integers no larger than the scorer's batch of {CONTEXT_LENGTH + 1} tokens")
+    return {key: copy.deepcopy(value[key]) for key in COMPILATION_FIELDS}
+
+
+def declared_compilation(args):
+    """None for an eager run; the parsed compilation config of a compiled run."""
+    mode = getattr(args, "execution_mode", "eager")
+    text = getattr(args, "compilation_config", None)
+    if mode not in EXECUTION_MODES:
+        raise ValueError("execution mode must be one of " + ", ".join(EXECUTION_MODES))
+    if mode == "eager":
+        if text is not None:
+            raise ValueError("--compilation-config applies only to --execution-mode compiled")
+        return None
+    if text is None:
+        raise ValueError("--execution-mode compiled requires --compilation-config")
+    return parse_compilation_config(text)
+
+
+def _member_name(value):
+    """An enum member's name; any other value unchanged, so it cannot pass as a name."""
+    name = getattr(value, "name", None)
+    return name if isinstance(name, str) else value
 
 
 def load_teacher(path, digest, panel):
@@ -159,18 +236,32 @@ def load_teacher_window(path, descriptor):
     return array.reshape(shape[::-1]).transpose() if fortran_order else array.reshape(shape)
 
 
-def arm_capture(model, *, index, window_id, descriptor, teacher_root, target_ids):
+def _resident_window(teacher_root, descriptor):
+    a = load_teacher_window(Path(teacher_root) / descriptor["path"], descriptor)
+    if a.dtype != np.float32 or list(a.shape) != descriptor["shape"]:
+        raise ValueError("teacher array geometry/dtype mismatch")
+    resident = torch.from_numpy(a).to("cuda")
+    del a  # the host staging buffer of this window is released before the next window loads
+    return resident
+
+
+def arm_capture(model, *, index, window_id, descriptor, teacher_root, target_ids,
+                descriptor2=None, teacher2_root=None):
     state = model._tr3_capture
-    teacher = targets = None
+    teacher = teacher2 = targets = None
     if state.rank == 0:
-        a = load_teacher_window(Path(teacher_root) / descriptor["path"], descriptor)
-        if a.dtype != np.float32 or list(a.shape) != descriptor["shape"]:
-            raise ValueError("teacher array geometry/dtype mismatch")
-        teacher = torch.from_numpy(a).to("cuda")
-        del a
+        teacher = _resident_window(teacher_root, descriptor)
+        if descriptor2 is not None:
+            # Optional second teacher: streamed one window at a time, resident on
+            # the GPU only until finish() drops it. Host staging is sequential
+            # with teacher 1's (freed above), so host peak stays one window.
+            teacher2 = _resident_window(teacher2_root, descriptor2)
         targets = torch.tensor(target_ids, dtype=torch.long, device="cuda")
         torch.cuda.synchronize()
-    state.arm(index, window_id, teacher, targets)
+    if descriptor2 is None:
+        state.arm(index, window_id, teacher, targets)
+    else:
+        state.arm(index, window_id, teacher, targets, teacher2=teacher2)
     return {"rank": state.rank, "window_id": window_id, "teacher_resident": state.rank == 0}
 
 
@@ -184,7 +275,8 @@ def remove_capture(model):
     return True
 
 
-def observed_engine_configuration(llm, *, expected_kv_cache_dtype, requested_kv_cache_dtype=None):
+def observed_engine_configuration(llm, *, expected_kv_cache_dtype, requested_kv_cache_dtype=None,
+                                  compilation=None):
     config = getattr(llm.llm_engine, "vllm_config", None)
     # Worker-local MLA construction can promote the cache without mutating the
     # coordinator's copied configuration. Keep the requested and resolved
@@ -195,13 +287,19 @@ def observed_engine_configuration(llm, *, expected_kv_cache_dtype, requested_kv_
         allowed.add(requested_kv_cache_dtype)
     if actual not in allowed:
         raise ValueError("native coordinator cache_config is neither requested nor declared resolved dtype")
-    return observed_configuration(config, expected_kv_cache_dtype=actual)
+    return observed_configuration(config, expected_kv_cache_dtype=actual, compilation=compilation)
 
 
-def observed_configuration(config, *, expected_kv_cache_dtype):
+def observed_configuration(config, *, expected_kv_cache_dtype, compilation=None):
+    """The resolved engine configuration, refused unless it is the isolated prompt contract.
+
+    ``compilation`` is None for the eager contract (``enforce_eager`` on) and the
+    declared compilation config for a compiled run (``enforce_eager`` off), whose
+    resolved values are then recorded under ``compilation_config``.
+    """
     if config is None:
         raise ValueError("cannot observe the native engine configuration")
-    required = {"model_config": {"enforce_eager": True, "max_model_len": CONTEXT_LENGTH + 1,
+    required = {"model_config": {"enforce_eager": compilation is None, "max_model_len": CONTEXT_LENGTH + 1,
                                  "logprobs_mode": "raw_logprobs"},
                 "cache_config": {"enable_prefix_caching": False, "cache_dtype": expected_kv_cache_dtype},
                 "scheduler_config": {"enable_chunked_prefill": False, "max_num_seqs": 1,
@@ -218,13 +316,31 @@ def observed_configuration(config, *, expected_kv_cache_dtype):
     if getattr(getattr(config.model_config, "multimodal_config", None), "language_model_only", None) is not True:
         raise ValueError("native engine did not observe the explicit language-model-only contract")
     observed["language_model_only"] = True
+    if compilation is not None:
+        owner = getattr(config, "compilation_config", None)
+        sizes = getattr(owner, "cudagraph_capture_sizes", None)
+        resolved = {"mode": _member_name(getattr(owner, "mode", None)),
+                    "cudagraph_mode": _member_name(getattr(owner, "cudagraph_mode", None)),
+                    "cudagraph_capture_sizes": list(sizes) if isinstance(sizes, (list, tuple)) else sizes}
+        differing = [key for key in COMPILATION_FIELDS if resolved[key] != compilation[key]]
+        if differing:
+            raise ValueError("native engine compilation differs from the declared compiled contract: "
+                             + ", ".join(differing))
+        observed["compilation_config"] = resolved
     return observed
 
 
-def observed_worker_configuration(worker, *, expected_kv_cache_dtype, logits_layout="legacy_single"):
-    """Public control RPC observes worker-local promotion after model loading."""
+def observed_worker_configuration(worker, *, expected_kv_cache_dtype, logits_layout="legacy_single",
+                                  compilation=None):
+    """Public control RPC observes worker-local promotion after model loading.
+
+    The worker's own configuration is checked, so a CUDA-graph mode the model
+    runner resolves differently from the coordinator (a backend that cannot
+    capture it) refuses here.
+    """
     config = observed_configuration(getattr(worker, "vllm_config", None),
-                                    expected_kv_cache_dtype=expected_kv_cache_dtype)
+                                    expected_kv_cache_dtype=expected_kv_cache_dtype,
+                                    compilation=compilation)
     runner = getattr(worker, "model_runner", None)
     worker_dtype = getattr(getattr(worker, "cache_config", None), "cache_dtype", None)
     runner_dtype = getattr(getattr(runner, "cache_config", None), "cache_dtype", None)
@@ -408,9 +524,10 @@ def require_native_qualification(qualification, runtime_binding):
 
 def scorer_engine_kwargs(args, *, model, topology):
     """Build the recorded native-engine request before model construction."""
+    compilation = declared_compilation(args)
     kwargs = {"model": str(model), "trust_remote_code": True, "dtype": "bfloat16",
               "language_model_only": True, "kv_cache_dtype": args.kv_cache_dtype,
-              "enforce_eager": True, "enable_prefix_caching": False, "enable_chunked_prefill": False,
+              "enforce_eager": compilation is None, "enable_prefix_caching": False, "enable_chunked_prefill": False,
               "max_model_len": CONTEXT_LENGTH + 1, "max_num_batched_tokens": CONTEXT_LENGTH + 1,
               "max_num_seqs": 1, "max_logprobs": 1, "disable_log_stats": True,
               "logprobs_mode": "raw_logprobs",
@@ -421,21 +538,29 @@ def scorer_engine_kwargs(args, *, model, topology):
         kwargs["kernel_config"] = json.loads(args.kernel_config)
     if args.quantization:
         kwargs["quantization"] = args.quantization
+    if compilation is not None:
+        kwargs["compilation_config"] = compilation
     return kwargs
 
 
 def measure(args):
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
+    t2_path = getattr(args, "teacher2", None)  # absent on legacy single-teacher callers
+    t2_sha = getattr(args, "teacher2_sha256", None)
+    teacher2 = load_teacher(t2_path, t2_sha, panel) if t2_path is not None else None
     model = Path(args.model).resolve(strict=True)
     if sha256(model / "tokenizer.json") != TOKENIZER_SHA256:
         raise ValueError("candidate tokenizer.json differs from sealed reference vocabulary")
     token_identity = tokenizer_identity(model)
     if token_identity != teacher["tokenizer_identity"]:
         raise ValueError("candidate tokenizer files differ from teacher")
+    if teacher2 is not None and token_identity != teacher2["tokenizer_identity"]:
+        raise ValueError("candidate tokenizer files differ from teacher2")
     candidate_identity = cached_checkpoint_identity(model, args.candidate_digest_cache)
     producer = producer_identity()
     topology = gold_engine_kwargs(args)
+    compilation = declared_compilation(args)
     kwargs = scorer_engine_kwargs(args, model=model, topology=topology)
     in_process = getattr(args, "qualify_then_score", None) is not None
     if in_process and (args.qualify_hook or args.qualification is not None
@@ -457,7 +582,7 @@ def measure(args):
             raise ValueError("speculative decoding must be observed disabled")
         observed_configuration = observed_engine_configuration(
             llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
-            requested_kv_cache_dtype=args.kv_cache_dtype)
+            requested_kv_cache_dtype=args.kv_cache_dtype, compilation=compilation)
         worker_runtime = llm.apply_model(partial(install_capture, tile_rows=args.tile_rows,
                                                 logits_layout=args.logits_layout))
         installed = True
@@ -465,10 +590,12 @@ def measure(args):
         if ([row["rank"] for row in worker_runtime] != list(range(topology["tensor_parallel_size"]))
                 or any(row["world_size"] != topology["tensor_parallel_size"] for row in worker_runtime)):
             raise ValueError("native hook installation lacks complete TP rank evidence")
-        worker_configuration = llm.collective_rpc(
-            observed_worker_configuration,
-            kwargs={"expected_kv_cache_dtype": args.expected_kv_cache_dtype,
-                    "logits_layout": args.logits_layout})
+        worker_kwargs = {"expected_kv_cache_dtype": args.expected_kv_cache_dtype,
+                         "logits_layout": args.logits_layout}
+        if compilation is not None:
+            # Sent only when compiled, so an eager run's RPC is the one it always was.
+            worker_kwargs["compilation"] = compilation
+        worker_configuration = llm.collective_rpc(observed_worker_configuration, kwargs=worker_kwargs)
         worker_configuration.sort(key=lambda row: row["rank"])
         if [row["rank"] for row in worker_configuration] != list(range(topology["tensor_parallel_size"])):
             raise ValueError("native configuration observation lacks every TP worker")
@@ -481,11 +608,20 @@ def measure(args):
                            "logits_layout": args.logits_layout}
         diagnostics_before = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
         runtime_binding["require_exl3_diag"] = args.require_exl3_diag
+        if teacher2 is not None:
+            # Added only with a second teacher, so single-teacher bindings (and the
+            # qualification records compared against them) are unchanged.
+            runtime_binding["teacher2_sha256"] = t2_sha
+        if compilation is not None:
+            # Added only when compiled, for the same reason: an eager binding (and
+            # every eager qualification) is unchanged, and an absent key reads as
+            # eager. A qualification from the other mode differs here and refuses.
+            runtime_binding["execution_mode"] = "compiled"
         observation = write_runtime_observation(args.output, runtime_binding)
         print(f"[tr3-full-kl] initialized runtime observation {observation}", flush=True)
         if qualification is not None:
             require_native_qualification(qualification, runtime_binding)
-        vectors, alignment, rank_calls = [], [], []
+        vectors, vectors2, alignment, rank_calls = [], [], [], []
         count = 1 if args.qualify_hook else len(inputs)
 
         def recheck_identities():
@@ -494,6 +630,8 @@ def measure(args):
             if (tokenizer_identity(model) != token_identity or producer_identity() != producer
                     or bound_json(args.teacher, args.teacher_sha256) != teacher):
                 raise ValueError("teacher/tokenizer/producer changed while scoring")
+            if teacher2 is not None and bound_json(t2_path, t2_sha) != teacher2:
+                raise ValueError("teacher2 changed while scoring")
             load_panel(args.panel, arrays_root=args.arrays_root)
             after = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
             if args.require_exl3_diag:
@@ -501,7 +639,8 @@ def measure(args):
                                        world_size=topology["tensor_parallel_size"])
             if observed_engine_configuration(
                     llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
-                    requested_kv_cache_dtype=args.kv_cache_dtype) != observed_configuration:
+                    requested_kv_cache_dtype=args.kv_cache_dtype,
+                    compilation=compilation) != observed_configuration:
                 raise ValueError("native engine configuration changed during scoring")
             return after
 
@@ -509,7 +648,7 @@ def measure(args):
             manifest = self_manifest(image=args.serve_image,
                                      extra={"measurement_tool": "experimental_glm_tr3_full_vocabulary",
                                             "runtime_binding": runtime_binding})
-            return {"schema": schema,
+            result = {"schema": schema,
                     "passed": True, "runtime_binding": runtime_binding, "serve_manifest": manifest,
                     "estimator": "KL(reference||candidate), raw logits normalized and summed in FP64 over full vocabulary",
                     "per_position_kl": vectors[:scored], "prompt_alignment": alignment[:scored],
@@ -517,13 +656,25 @@ def measure(args):
                     "route_diagnostics": {"before": diagnostics_before, "after": diagnostics_after},
                     "teacher_source_execution": teacher["source_execution"],
                     "summary": summarize_panel({"windows": panel["windows"][:scored]}, vectors[:scored])}
+            if teacher2 is not None:
+                # Same schema as the first teacher's block, keyed by the teacher2 sha.
+                result["second_teacher_full_vocabulary_kl"] = {t2_sha: {
+                    "estimator": result["estimator"],
+                    "per_position_kl": vectors2[:scored],
+                    "teacher_source_execution": teacher2["source_execution"],
+                    "summary": summarize_panel({"windows": panel["windows"][:scored]},
+                                               vectors2[:scored])}}
+            return result
 
         for index in range(count):
             window, row = panel["windows"][index], teacher["windows"][index]
             tokens = inputs[index][0].tolist()
+            second = ({} if teacher2 is None else
+                      {"descriptor2": teacher2["windows"][index],
+                       "teacher2_root": str(Path(t2_path).resolve().parent)})
             armed = llm.apply_model(partial(arm_capture, index=index, window_id=window["window_id"],
                                            descriptor=row, teacher_root=str(Path(args.teacher).resolve().parent),
-                                           target_ids=tokens[1:]))
+                                           target_ids=tokens[1:], **second))
             if sum(r["teacher_resident"] for r in armed) != 1:
                 raise ValueError("resident teacher must have exactly one TP owner")
             outputs = llm.generate([{"prompt_token_ids": tokens}],
@@ -537,6 +688,8 @@ def measure(args):
                                             world_size=topology["tensor_parallel_size"],
                                             rows=CONTEXT_LENGTH - 1, vocab_size=VOCAB_SIZE,
                                             logits_layout=args.logits_layout))
+            if teacher2 is not None:
+                vectors2.append(collect_tp_result2(reports, rows=CONTEXT_LENGTH - 1))
             alignment.append(verify_prompt_alignment(outputs[0], tokens, reports))
             rank_calls.append([{k: r[k] for k in ("rank", "world_size", "window_id", "calls", "logits_layout")} for r in reports])
             print(f"[tr3-full-kl] measured {window['window_id']}", flush=True)
@@ -569,6 +722,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("model", "candidate-digest-cache", "panel", "teacher", "teacher-sha256", "serve-image", "output"):
         p.add_argument("--" + name, required=True)
+    p.add_argument("--teacher2", help="optional second raw teacher.json; scored in the same pass")
+    p.add_argument("--teacher2-sha256", help="required with --teacher2")
     p.add_argument("--arrays-root")
     p.add_argument("--quantization")
     p.add_argument("--kv-cache-dtype", choices=("auto", "bfloat16", "fp8_ds_mla"), required=True)
@@ -578,6 +733,15 @@ def main():
                    help="explicit stock-vLLM attention backend; CUSTOM selects a registered plugin backend")
     p.add_argument("--kernel-config", default=None,
                    help="JSON object forwarded to vLLM (GLM53 NoPE requires enable_flashinfer_autotune=false)")
+    p.add_argument("--execution-mode", choices=EXECUTION_MODES, default="eager",
+                   help="eager: enforce_eager, the historical contract. compiled: enforce_eager off with "
+                        "the declared --compilation-config. Speculative decoding is refused in both")
+    p.add_argument("--compilation-config", default=None,
+                   help="compiled only: a JSON object stating exactly mode, cudagraph_mode and "
+                        "cudagraph_capture_sizes, for example "
+                        '{"mode":"NONE","cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,3,4]}. '
+                        "The resolved engine must match it; GLM-5.3 auto-enables breakable CUDA graphs, "
+                        "which force mode NONE, so a declared VLLM_COMPILE refuses")
     p.add_argument("--require-exl3-diag", action="store_true")
     p.add_argument("--gpu-memory-utilization", type=float, default=.9)
     p.add_argument("--tile-rows", type=int, default=32)
@@ -591,6 +755,10 @@ def main():
                         "then score the whole panel in the same engine")
     add_gold_engine_arguments(p)
     args = p.parse_args()
+    if (args.teacher2 is None) != (args.teacher2_sha256 is None):
+        p.error("--teacher2 and --teacher2-sha256 go together")
+    if args.teacher2_sha256 is not None and args.teacher2_sha256 == args.teacher_sha256:
+        p.error("teacher2 must differ from teacher")
     if args.tile_rows <= 0 or args.tile_rows > 64:
         p.error("tile rows must be 1..64")
     if args.kernel_config is not None:
@@ -602,6 +770,10 @@ def main():
             p.error("kernel config must be a JSON object")
     if "@sha256:" not in args.serve_image:
         p.error("serve image must be immutable digest-qualified")
+    try:
+        declared_compilation(args)
+    except ValueError as exc:
+        p.error(str(exc))
     measure(args)
 
 

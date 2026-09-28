@@ -56,11 +56,12 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
 from .digests import newline_utf8_sha256
+from .source_read_plan import uncovered_spans
 
 
 LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
@@ -163,6 +164,26 @@ def seal_manifest_bytes(manifest: Mapping) -> bytes:
     except (TypeError, ValueError) as exc:
         raise ValueError("a data manifest must be canonical JSON data") from exc
     return gzip.compress(decoded, mtime=0)
+
+
+def append_read_phase(phases: list[dict], entries: Sequence[Mapping],
+                        name: str, indices: Sequence[int], cumulative: int,
+                        *, refuse: Callable[[str], Exception]) -> int:
+    """Append one phase row and return the new cumulative byte count (pure).
+
+    The row arithmetic is the seal-phase construction shared by the quantum
+    manifest builders and the band-serial derivation (PQ #1635): ``bytes`` is
+    the phase's summed entry bytes, ``cumulative_bytes`` the running total.
+    An empty phase refuses with the caller's own error -- each site's refusal
+    text and type is preserved, and no site gains a new refusal.
+    """
+    size = sum(entries[index]["bytes"] for index in indices)
+    if size <= 0:
+        raise refuse(name)
+    cumulative += size
+    phases.append({"name": name, "entry_indices": list(indices),
+                   "bytes": size, "cumulative_bytes": cumulative})
+    return cumulative
 
 
 def quantum_id(layer: int) -> str:
@@ -869,14 +890,12 @@ def uncovered_source_spans(entries: Sequence[Mapping],
     span from the one staged range that contains it and reads a straddling
     span from the pool (``residency_shard_reader``), which the strict tier
     policy refuses. Two entries that together cover a span do not cover it.
+
+    Delegates to :func:`source_read_plan.uncovered_spans` (PQ #1643): the
+    same algorithm over plain tuples, with ``int()`` coercion that is the
+    identity on every value this module passes.
     """
-    by_path: dict[str, list[tuple[int, int]]] = {}
-    for entry in entries:
-        by_path.setdefault(os.path.normpath(entry["path"]), []).append(
-            (entry["offset"], entry["offset"] + entry["bytes"]))
-    return [(path, start, end) for path, start, end in spans
-            if not any(low <= start and end <= high
-                       for low, high in by_path.get(os.path.normpath(path), ()))]
+    return uncovered_spans(entries, spans)
 
 
 def complete_source_extent(entries: Sequence[Mapping],
@@ -1690,12 +1709,10 @@ def build_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
 
     def _seal_phase(name: str, indices: list[int]) -> None:
         nonlocal cumulative
-        size = sum(manifest_entries[index]["bytes"] for index in indices)
-        if size <= 0:
-            raise ValueError(f"read phase {name} is empty: refusing")
-        cumulative += size
-        read_phases.append({"name": name, "entry_indices": list(indices),
-                            "bytes": size, "cumulative_bytes": cumulative})
+        cumulative = append_read_phase(
+            read_phases, manifest_entries, name, indices, cumulative,
+            refuse=lambda phase: ValueError(
+                f"read phase {phase} is empty: refusing"))
 
     _seal_phase("checkpoint", checkpoint_indices)
     for boundary in chain:
@@ -2719,12 +2736,10 @@ def build_quantum_executable_manifest(
 
     def _seal_phase(name: str, indices: list[int]) -> None:
         nonlocal cumulative
-        size = sum(manifest_entries[index]["bytes"] for index in indices)
-        if size <= 0:
-            raise ValueError(f"read phase {name} is empty: refusing")
-        cumulative += size
-        read_phases.append({"name": name, "entry_indices": list(indices),
-                            "bytes": size, "cumulative_bytes": cumulative})
+        cumulative = append_read_phase(
+            read_phases, manifest_entries, name, indices, cumulative,
+            refuse=lambda phase: ValueError(
+                f"read phase {phase} is empty: refusing"))
 
     _seal_phase("head", head_indices)
     _seal_phase(CHECKPOINT_LOAD_PHASE, checkpoint_indices)

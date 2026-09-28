@@ -199,10 +199,12 @@ def test_the_installed_predicate_is_read_closed_at_tesseras_vocabulary(table, pa
     _row(bare, WINDOW_LANE)["lane"] = {"decoder": "window_gemv"}
     bare_claims = {claim.extension: claim for claim in _table(bare).lanes}
     assert bare_claims[WINDOW_LANE].requires is None
-    # The vocabulary this reader closes is exactly what the pinned lane
-    # publishes today: a requirement the lane grows is refused by name below,
-    # never skipped.
-    assert set(lane.LANE_REQUIREMENT_FIELDS) == set(window.requires)
+    # The vocabulary this reader closes is what the pinned lane publishes
+    # today plus the one name it has learned ahead of the pin
+    # (``column_rates_routed_moe``, Tessera v45, PQ #1618): a requirement the
+    # lane grows beyond that is refused by name below, never skipped.
+    assert set(lane.LANE_REQUIREMENT_FIELDS) == (
+        set(window.requires) | {"column_rates_routed_moe"})
     assert table.provenance()["lanes"] == [
         claim.answer() | {"extension": claim.extension} for claim in table.lanes]
 
@@ -601,7 +603,7 @@ def test_a_decorated_plan_is_refused_at_every_requirement_it_breaks(payload, mon
     decorated = dict(render.planned_wire_facts(E4M3, E4M3_RATE))
     decorated.update(rates=(5,), window_bits=12, release_overrides=3, diagonals=True,
                      rotation="R_IN_ONLY", start_state=True, grid_arity=2)
-    monkeypatch.setattr(render, "planned_wire_facts", lambda family, rung: decorated)
+    monkeypatch.setattr(render, "planned_wire_facts", lambda family, rung, **kw: decorated)
     table = _table(_gated_carrier(payload))
     cell = _parsed_cell(table, GATED_CARRIER)
     admits, why = lane.cell_lane_admits(cell, E4M3_RATE, table.lanes)

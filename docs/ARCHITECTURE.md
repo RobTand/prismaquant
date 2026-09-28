@@ -15,6 +15,73 @@ PQ #1616's v44 pin, Tessera master's #687 merge: the writer is live against
 the pinned package; it stays fail-closed with a named refusal on any older
 pin whose package lacks `tessera.serving_plan` (§9.4, export arm).)
 
+Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
+TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
+opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
+with `enforce_eager` off and one declared `--compilation-config` that states
+exactly `mode`, `cudagraph_mode` and `cudagraph_capture_sizes`
+(`cudagraph_mode` NONE refuses; sizes are strictly ascending within 1..2049,
+the scorer's batch). The coordinator's and every worker's resolved mode,
+graph mode and capture sizes must equal the declared ones, so the pinned
+vLLM's silent switch to compilation mode NONE on GLM-5.3 refuses instead of
+scoring. Speculative decoding stays refused in both modes. Only a compiled
+run's `runtime_binding` gains `execution_mode: "compiled"` and
+`engine_kwargs.compilation_config`; an eager run's engine kwargs, binding and
+worker RPC are unchanged, so every eager qualification still replays.
+`gold_engine_options.headless_peer_argv` spells the config
+`--compilation-config` and states `--no-enforce-eager` only beside it, so the
+other gold tools' peer argv and serve fingerprints are unchanged. Under
+FULL_DECODE_ONLY the scorer's one prefill per window runs outside the captured
+graphs: a compiled receipt measures the engine a compiled serve builds, not
+its graph-replayed decode. Measurement-tool contract only; no default, stage,
+format, lane or ship gate changes. Gates: `tests/test_glm_tr3_full_vocab.py`,
+`tests/test_gold_engine_options.py`.
+
+Re-stamped 2026-09-28 (PQ #1626, `claude/pq-route-trace-union`): **the
+`route.trace` gate judges an ARTIFACT against the union of its serve phases**
+(§8.2, §9.4). A phase compared against the whole price can never pass for an MTP
+artifact: the draft layer is priced, and a non-speculative serve never
+dispatches it. `tessera_route_trace_gate.compare_artifact_route_traces` takes
+the caller's claimed phases explicitly (`{"nonspec": [rank traces], "spec":
+[rank traces]}`; phases are never inferred from which files exist) and
+requires, per module: a priced module is dispatched in at least one claimed
+phase, a served Tessera module is priced, and its activation contract equals
+the priced one in EVERY phase that dispatches it. A claimed phase with a
+missing or empty trace is NOT VERIFIED, ranks that name different module sets
+are REFUSED, and a REFUSED finding in an observed phase outranks a NOT
+VERIFIED one from a missing phase. Per-phase verdicts stay in the result,
+labelled diagnostic; only the artifact verdict is the gate. There is no
+exclusion list: a module unserved in every claimed phase is REFUSED by name.
+`compare_route_traces` (one phase against the whole price) is unchanged.
+The draft layer's served name is the attested draft namespace
+(`model.layers.45.mlp.experts`, #1490). Gates:
+`tests/test_tessera_route_trace_gate_artifact.py` on fixtures cut from the real
+A8 traces (`tests/fixtures/tessera_route_trace_union/`, see its
+`PROVENANCE.md`). No pipeline default, stage, format or lane changes.
+
+Re-stamped 2026-09-28 (PQ #1618, `claude/pq-1618-routed-rates`): the lane
+roster mirror learns Tessera v45's structure-scoped `column_rates_routed_moe`
+requirement. `lane_eligibility.parse_lane_claim` reads it (an ascending subset
+of `column_rates`), `tessera_render.planned_wire_facts` states the unit's
+structure from the eligibility cell, and Tessera's decision core decides it for
+`routed_moe` units only; a unit with no structure fact is refused by name. No
+pipeline default, stage, format or ship gate changes and the Tessera pin does
+not move. See the lane predicate paragraph and the "lane the cell launches
+through" item.
+
+Re-stamped 2026-09-28 (PQ #1632, `claude/mtp-stamp-binds-emitted-1632`): the
+whole-artifact budget stamp's `selection_assignment_sha256` now binds the
+assignment the layer config emits, which is the body plus the selected MTP
+rungs under `--mtp-joint-cost`. #1610 moved the MTP bytes into the price and
+left the digest on the body alone, so every consumer that hashes the file it
+loads refused: the exporter preflight, `select_validated_frontier`, and the R2
+compose. On the GLM-5.3 release pick, the stamp `086c7302…` equals the file's
+digest without its 867 layer-45 units, and the file hashes to `69d7c894…`. One
+allocator function (`_stamped_assignment`) serves both layer-config stamp
+sites. Pareto point files emit and bind the body alone and are unchanged. No
+default, stage, format, lane or ship gate moves. Gate:
+`tests/test_mtp_card_rebase_1610.py`.
+
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`, exact probe): the
 PACT hull's binding-budget probe is now `prismaquant/exact_mckp.py`, an exact
 single-budget multiple-choice knapsack in integer arithmetic, in place of a
@@ -3872,6 +3939,17 @@ can emit the export's PB read paths. The v1 single-root path is unchanged. The
 reader is the pinned Tessera (`acf9eafa6a…`, #966); see "Selected cached wires
 from an additive historical catalog". No format, default, stage or ship gate
 changes.
+Its `--plan`/`--plan-sha256` (2026-09-28, PQ #1488) read the original joint
+plan by digest, admit it only when the handoff was joined under that digest
+with the same inputs, and pass only its `historical_encoder_reuse` to the
+anchor loader, as the allocation handoff does. Without `--plan` the loader's
+strict encoder check is unchanged.
+Its `--child-manifest`/`--child-manifest-sha256` (2026-09-28, PQ #1641) bind a
+cached-units child by bytes and leave the selected units it names out of the
+handoff manifest, refusing a child unit that is unselected or BF16
+passthrough; `tools/compose_tessera_cached_units.py` then composes the two
+(the GLM-5.3 release's MTP layer 45 rides the A16 MTP child this way). The
+census roster rule still judges every unit the handoff supplies.
 
 Tessera pin (2026-09-22, `ws-j2/tessera-pin-v34`, Refs #944 #939): the
 serving-runtime pin and the reader dev pin move from `cc739a5516…` (contract
@@ -4191,8 +4269,14 @@ resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
-As of: 2026-09-28 · `claude/pact-1584-hull`.
+As of: 2026-09-28 · `claude/tr3-compiled-1634`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-28, `claude/tr3-compiled-1634`) for **the TR3 scorer's
+compiled execution mode** (PQ #1634): `--execution-mode compiled` with a
+declared compilation config, observed on every rank; the headless peer states
+`--no-enforce-eager` only beside a compilation config; see the stamp at the
+top of this document.
 
 Re-stamped (2026-09-28, `claude/pact-1584-hull`) for **the PACT hull's exact
 binding-budget probe** (PQ #1584): `prismaquant/exact_mckp.py` replaces the
@@ -4758,8 +4842,9 @@ priced (PQ #1610), and stamp the record after the body is final:
 The selection writes the layer-45 entries and a `mtp_selection` record into the
 layer-config metadata. It moves no body bpp (principle 12). Under a
 whole-artifact card it moves the body's byte room: the card prices the selected
-MTP bytes in place of the layer's source bytes (PQ #1610). A
-unit that the body also assigned is refused. There is no λ. Without the flag,
+MTP bytes in place of the layer's source bytes (PQ #1610), and the budget
+stamp's digest binds the body plus those rungs, the assignment the file
+emits (PQ #1632). A unit that the body also assigned is refused. There is no λ. Without the flag,
 the output is byte-identical. Gates: `tests/test_glm_mtp_selection.py` and
 `tests/test_allocator_output_pin_1304.py`. A quantum prices only one Tessera
 rate, so when a layer's attested rungs sit at more than one rate, the payload is a
@@ -9330,8 +9415,9 @@ route's E4M3/BF16 semantics and its separate source/cache/geometry/runtime
 checks remain required. Gate: `tests/test_glm_packed_research_profile.py`.
 
 Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
-GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer has always
-forced eager execution and already carries the selected stock MP topology,
+GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer then always
+forced eager execution (PQ #1634 added an opt-in compiled mode on 2026-09-28;
+see that re-stamp) and already carries the selected stock MP topology,
 including `moe_backend`; it now accepts the explicit stock-vLLM `CUSTOM`
 attention backend and a JSON-object kernel configuration, then records both in
 `runtime_binding.engine_kwargs`. The one-window hook qualification and the
@@ -21995,7 +22081,7 @@ alone:
    A cell's `executes` names a lane launch only for the rungs the ATTESTED
    wire stamp reaches, and that stamp is not this producer's plan.
    `lane_eligibility.cell_lane_admits(cell, rung, table.lanes)` therefore
-   reads the plan off `tessera_render.planned_wire_facts(family, rung)` — the
+   reads the plan off `tessera_render.planned_wire_facts(family, rung, structure=...)` — the
    rate set (`tessera.grammar.rate_set` over the family's root and cap), the
    recipe's window width, body and plane, and the render's own decoration
    constants (`TESSERA_PLANNED_ROTATION / _DIAGONALS / _RELEASE_OVERRIDES`,
@@ -22015,6 +22101,21 @@ alone:
    rows travel into `EligibilityTable.provenance()["lanes"]` and into the
    reviewed dev-pin answer (`native_extensions[].lane`), so a lane that
    widens or narrows what it reads is a re-review, not a silent widening.
+   **Structure-scoped rates (Tessera v45, PQ #1618).** A fused lane may
+   publish `column_rates_routed_moe` beside `column_rates`: the routed
+   gate/up two-table launch does not fit sm_121 shared memory above rate 6, so
+   the lane reads `[1..6]` for a routed unit and `[1..8]` for a dense one.
+   `parse_lane_claim` now knows the name and holds it to an ascending subset of
+   `column_rates` (Tessera's validator rule). `planned_wire_facts(family, rung,
+   structure=...)` states the unit's structure — `dense` or `routed_moe`, read
+   off the eligibility cell (the serving profile's fact, never inferred from
+   bytes) and omitted when the cell states none — and Tessera's
+   `decide_lane_requirements` decides the field only for `routed_moe`: absent
+   structure is refused by name, dense ignores it, and a routed unit outside the
+   set is refused with the compact adapter named as the route it keeps. The
+   installed pin (contract v44 and earlier) publishes no such field, so nothing
+   changes hands until the pin moves; a v45 table is read, not refused as an
+   unknown requirement (`tests/test_tessera_lane_routed_rates.py`).
    Consequence on the pinned table today: nothing changes hands — the only
    cells that launch through the window-GEMV lane are the two streamed dense
    E4M3 cells at rung 1024, whose plan (`rates (4,)`, 14-bit window, WINDOW /
@@ -23858,6 +23959,10 @@ from the coordinator's own engine kwargs by
 `gold_engine_options.headless_peer_argv`, which **refuses** a kwarg it has no
 published stock spelling for rather than dropping it, and a multi-node receipt
 stamps that argv so the launcher can be checked against the engine rank 0 built.
+A coordinator that declares a `compilation_config` (the TR3 scorer's compiled
+mode, PQ #1634) states `--no-enforce-eager` beside `--compilation-config`; no
+other caller's argv carries either, so the two gold tools' stamped argv is
+unchanged.
 
 **Served-artifact vLLM KL-vs-BF16** — `tools/measure_vllm_full_kl.py` retains the
 exact-full-vocabulary path for teachers that fit its ordinary vLLM two-pass
@@ -25868,7 +25973,11 @@ artifact's `config.json` prices, and stays unfilled when any rank's trace is
 missing. The priced targets are checkpoint names, so the gate first names each
 one in the serve's namespace through `ModelProfile.served_module_name` (§8.2,
 PQ #1490); GLM-5.3 serves its body as `language_model.model.…` and its MTP
-draft as `model.layers.N.…`. The eighth is `uniform_control`, which `required_slots` adds because
+draft as `model.layers.N.…`. A single phase is diagnostic: an artifact is judged
+by `compare_artifact_route_traces` against the union of its explicitly claimed
+serve phases (PQ #1626), so a non-speculative phase that never dispatches the
+priced draft layer no longer refuses an MTP artifact that a speculative phase
+does serve. The eighth is `uniform_control`, which `required_slots` adds because
 the artifact has a rate axis, not because any lane asked for it (#121, §7.1).
 `open_lane_shipcard` stamps `export_container` into the card's build block so
 that second obligation rests on the card as well as on the checkpoint's
