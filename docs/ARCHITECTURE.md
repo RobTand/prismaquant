@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1586 research half, the `research_only`
+publication gate): `tools/publish_artifact.py` now refuses a card whose
+build block carries `research_only: true` — the stamp
+`prefill_frontier_replay_claim` puts on every prefill-frontier replay card
+(§4.5, research replay) — naming the field and its source, and the only
+path past it is the recorded `--force-unverified` override. Research
+standing was previously stamped and read by nothing that refuses. The
+`native_export.graph` half of #1586 is unchanged and still open.
+
 Re-stamped 2026-09-28 (PQ #1583, `claude/pact-shape-table`): PACT's
 shape-time price table, `prismaquant/shape_runtime_prices.py`
 (`prismaquant.shape_runtime_prices.v1`), lands as a library. Nothing in the
@@ -22762,7 +22771,12 @@ deliberately expensive: `--force-unverified` requires the
 operator to **re-type the artifact directory's basename** (interactively, or `--confirm-name`
 for scripts) and stamps `forced_unverified: true` plus the overridden problems into the
 shipcard, so the artifact itself carries the record that it shipped with an
-evidence override (never an access-gate or licensing bypass). Before reporting
+evidence override (never an access-gate or licensing bypass). The same
+ceremony is the only path past the research gate: a card whose build block
+carries `research_only: true` — stamped by `prefill_frontier_replay_claim`
+onto prefill-frontier replay assignments — is refused with the field and
+its source named (PQ #1586), so a research artifact reaches the Hub only as
+a declared UNVERIFIED publication. Before reporting
 success, the publisher reads the access setting back again; a missing/manual/
 false setting or API error refuses. A post-commit failure names the existing
 commit and requires inspection before announcement. Publication output records
