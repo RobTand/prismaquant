@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1583, `claude/pact-shape-table`): PACT's
+shape-time price table, `prismaquant/shape_runtime_prices.py`
+(`prismaquant.shape_runtime_prices.v1`), lands as a library. Nothing in the
+pipeline reads it yet. The allocator mode that consumes it is #1584, so no
+default, stage, format, lane or ship gate changes. See §4.5,
+"Shape-time price table".
+
 Re-stamped 2026-09-28 (PQ #1561, the #1549 follow-up,
 `claude/pq-1561-serving-code-identity`): PrismaQuant reads
 Tessera's serving code identity (Tessera #678, contract v41). The change is
@@ -18725,6 +18732,53 @@ labels grant no serving qualification: native-row/world equality, scope and
 wire admission, fixed-resource refusals, and every shipcard slot including
 `route.trace` still apply. Plain shape-only single-solve and device-budget
 refusals stay unchanged. CPU gates: `tests/test_prefill_frontier_replay.py`.
+
+**Shape-time price table (2026-09-28, PQ #1583).**
+`prismaquant/shape_runtime_prices.py` defines `prismaquant.shape_runtime_prices.v1`,
+PACT's time input. It sits beside the unit-keyed v2 table and does not extend it.
+
+- **Row key and value.** A row is keyed `(structure, rank_local_shape, family,
+  rate_q256, M)`. It carries at least three GPU-timed samples (`cuda_events` or
+  `gpu_profiler`), a receipt path and SHA-256, and the `(symbol, decoder)`
+  `kernel_lane` its launch ran on. It carries no weight identity.
+- **Context.** The table's context names the runtime image, Tessera commit,
+  contract digest, tensor-parallel world, platform, execution mode, residency,
+  batch size 1 and the measured `M` regimes.
+- **Fixed claims.** `claims` is always `operator_sum_proposal`,
+  `certifies_placement: false` and `served_p95: not_claimed`. A table that
+  states anything else is refused.
+- **Admission.** `admit_shape_table` refuses the whole table if any of these
+  fails:
+  - The context must equal the independently supplied scope, and the
+    eligibility table must be the pinned contract.
+  - For every row and every pooled rate, a pinned lane cell must cover the
+    rate and must name the row's launch in `executes`.
+  - The published predicate of that launch's lane must admit the rate
+    (`lane_eligibility.cell_lane_admits`, asked about that one launch).
+  So the fused routed launch admits at R1024 and is refused at R896, where its
+  `column_rates` requirement fails.
+- **Rate pools.** Rates are pooled only where the table declares a
+  `rate_pools` entry, and all of the pool's rows must share one lane. Pooled
+  samples are the source rows' samples concatenated in rate order. The pool
+  record states whether a spread across rates was measured.
+- **Unit time.** `build_shape_runtime_resources` derives each unit's one
+  served operator with `served_operator`, through
+  `measured_runtime_prices.rank_local_member_shapes`. Fused siblings form one
+  GEMM, concatenated on axis 0, and a routed group is one
+  `E<n>:w13=<2I>x<H>:w2=<H>x<I>` stack. The function returns
+  `RuntimeResources`, the same type `build_runtime_resources` returns.
+- **Unpriced options.** An option is unpriced when it has no row, carries a
+  mixed rate, has no rate address, or has an underivable shape. It is absent,
+  never zero, and listed in `gap_report()`.
+- **Dispersion.** `operator_sum_bootstrap` draws each distinct measurement
+  once per draw and weights it by its reader count. It uses
+  `bootstrap_sum(multiplicities=...)`, and `None` keeps every earlier draw
+  bit-identical.
+- **Receipt converter.** The converter for Tessera's
+  `tessera.shape_time_panel.v1` receipt is a named stub (`convert` exits 2)
+  until tessera#688 publishes that schema.
+
+CPU gates: `tests/test_shape_runtime_prices.py`.
 
 ### 4.6 Selection
 

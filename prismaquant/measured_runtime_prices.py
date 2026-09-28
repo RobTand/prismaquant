@@ -652,7 +652,8 @@ class OperatorMeasurement:
                 "receipt_sha256": self.receipt_sha256}
 
 
-def bootstrap_sum(samples_per_row, *, draws: int, seed: int, offset_ms: float = 0.0) -> dict:
+def bootstrap_sum(samples_per_row, *, draws: int, seed: int, offset_ms: float = 0.0,
+                  multiplicities=None) -> dict:
     """The distribution of an operator sum under each row's own samples.
 
     Every row is resampled with replacement from its OWN measured samples and
@@ -665,20 +666,39 @@ def bootstrap_sum(samples_per_row, *, draws: int, seed: int, offset_ms: float = 
     distribution and contributes no width: the report schema observes no
     samples for the fixed term, so there is no dispersion to draw from and
     inventing one would be a number with no measurement under it.
+
+    ``multiplicities`` (one positive integer per row, or ``None``) is for a
+    sum in which one measurement is read several times -- a shape-time row
+    that prices every unit of one shape (``shape_runtime_prices``). That row
+    is ONE measurement, so it is resampled once per draw and counted that
+    many times; resampling it once per reader would treat perfectly
+    correlated terms as independent and shrink the interval. ``None`` keeps
+    the exact draws, and therefore the exact numbers, of every earlier call.
     """
     if draws < 1:
         raise RuntimePriceError("bootstrap draws must be at least 1")
+    samples_per_row = [list(samples) for samples in samples_per_row]
+    if multiplicities is not None:
+        multiplicities = list(multiplicities)
+        if len(multiplicities) != len(samples_per_row) or any(
+                type(count) is not int or count < 1 for count in multiplicities):
+            raise RuntimePriceError("bootstrap multiplicities need one positive integer per row")
     rng = random.Random(seed)
     totals = []
     for _ in range(draws):
-        totals.append(offset_ms + sum(statistics.median(rng.choices(samples, k=len(samples)))
-                                      for samples in samples_per_row))
+        if multiplicities is None:
+            totals.append(offset_ms + sum(statistics.median(rng.choices(samples, k=len(samples)))
+                                          for samples in samples_per_row))
+        else:
+            totals.append(offset_ms + sum(count * statistics.median(rng.choices(samples, k=len(samples)))
+                                          for samples, count in zip(samples_per_row, multiplicities)))
     totals.sort()
     return {"draws": draws, "seed": seed,
             "p2.5": totals[int(0.025 * draws)], "p50": totals[draws // 2],
             "p97.5": totals[min(draws - 1, int(0.975 * draws))],
             "offset_ms": float(offset_ms),
-            "samples_per_row": [len(samples) for samples in samples_per_row]}
+            "samples_per_row": [len(samples) for samples in samples_per_row],
+            **({"multiplicities": multiplicities} if multiplicities is not None else {})}
 
 
 @dataclass(frozen=True)
