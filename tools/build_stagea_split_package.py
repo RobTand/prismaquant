@@ -31,6 +31,23 @@ checks every manifest.
 The package directory holds the manifests and ``split-package.json`` (their
 digests, phases, bytes and peak consecutive phase bytes, and the source
 bytes each quantum reads, which a round reads once per quantum).
+
+``forward`` (the first argument) seals a fresh run's **forward split**
+instead (``prismaquant.stage_a_forward_split``), from the fresh run's own
+submitted manifest and before anything runs:
+
+* **The prep** (``forward-prep-manifest.json.gz``): the source run's
+  ``head``. It mints the generation and seals a small record; it captures
+  nothing.
+* **Each quantum** (``forward-samples-SSSSSS-EEEEEE-manifest.json.gz``): the
+  head and every ``forward-*`` phase, each layer's weights. A quantum reads
+  no entry another row wrote: it captures its own partitions' boundaries.
+  Every ``chain-*`` phase is dropped; the chain split rounds that follow
+  the forward join are sealed with the builder above.
+
+``forward-package.json`` records the same per-manifest fields and the
+source bytes of the whole round, which it reads once per quantum: the
+duplicated weight reads a forward split trades for idle GPUs.
 """
 from __future__ import annotations
 
@@ -61,6 +78,9 @@ from tools.build_stagea_seed_package import (  # noqa: E402
 PACKAGE_NAME = "split-package.json"
 PACKAGE_SCHEMA = "prismaquant.stage_a.split_package.v1"
 PREP_MANIFEST_NAME = "prep-manifest.json.gz"
+FORWARD_PACKAGE_NAME = "forward-package.json"
+FORWARD_PACKAGE_SCHEMA = "prismaquant.stage_a.forward_split_package.v1"
+FORWARD_PREP_MANIFEST_NAME = "forward-prep-manifest.json.gz"
 _SOURCE = re.compile(r"\.safetensors$")
 
 
@@ -71,6 +91,11 @@ class SplitPackageRefused(ValueError):
 def quantum_manifest_name(start: int, stop: int) -> str:
     from prismaquant.stage_a_chain_split import range_name
     return f"quantum-{range_name(start, stop)}-manifest.json.gz"
+
+
+def forward_quantum_manifest_name(start: int, stop: int) -> str:
+    from prismaquant.stage_a_chain_split import range_name
+    return f"forward-{range_name(start, stop)}-manifest.json.gz"
 
 
 def load_round(output_root, chain_state_sha256, checkpoint_sha256) -> dict:
@@ -138,7 +163,7 @@ def _plane_rows(record, start, stop) -> list[dict]:
             for row in record["activation_entries"] if row["name"] in names]
 
 
-def _derive(original, names, added_rows, annotation) -> dict:
+def _derive(original, names, added_rows, annotation, *, key="chain_split") -> dict:
     """``original`` with ``names``' phases, each extended by ``added_rows[name]``."""
     by_name = {phase["name"]: phase for phase in original["read_plan"]["phases"]}
     missing = [name for name in names if name not in by_name]
@@ -155,7 +180,7 @@ def _derive(original, names, added_rows, annotation) -> dict:
         assemble_phases(manifest, by_name, names, added)
     except ValueError as exc:
         raise SplitPackageRefused(f"a split input {exc}") from exc
-    manifest["annotations"]["chain_split"] = annotation
+    manifest["annotations"][key] = annotation
     return manifest
 
 
@@ -197,6 +222,37 @@ def round_manifests(original, loaded, *, through, ranges):
     return prep, quanta
 
 
+def forward_manifests(original, *, ranges, n_batches, group_size):
+    """``(prep manifest, {(start, stop): quantum manifest})`` for a forward split.
+
+    ``n_batches`` and ``group_size`` are the run's calibration partitions and
+    read window; the prep row checks them against the run it binds.
+    """
+    from prismaquant.stage_a_chain_split import (
+        ChainSplitRefused, check_ranges, require_whole_plane)
+
+    try:
+        check_ranges(ranges, n_batches=int(n_batches), group_size=int(group_size),
+                     where="the forward split's")
+        require_whole_plane(ranges, n_batches=int(n_batches))
+    except ChainSplitRefused as exc:
+        raise SplitPackageRefused(str(exc)) from exc
+    names = [phase["name"] for phase in original["read_plan"]["phases"]]
+    forward = [name for name in names if name.startswith("forward-")]
+    if not forward:
+        raise SplitPackageRefused("the source manifest has no forward phase to split")
+    stamp = {"n_batches": int(n_batches), "group_size": int(group_size)}
+    ordered = sorted(tuple(pair) for pair in ranges)
+    prep = _derive(original, ["head"], {},
+                   {**stamp, "role": "prep", "ranges": [list(pair) for pair in ordered]},
+                   key="forward_split")
+    quanta = {pair: _derive(original, ["head", *forward], {},
+                            {**stamp, "role": "quantum", "samples": list(pair)},
+                            key="forward_split")
+              for pair in ordered}
+    return prep, quanta
+
+
 def stat_check(manifest, original_paths) -> dict:
     """Every entry the builder added is on disk at its recorded size."""
     checked, missing, other = 0, [], []
@@ -218,22 +274,22 @@ def stat_check(manifest, original_paths) -> dict:
     return {"checked": checked, "missing": 0, "size_mismatch": 0}
 
 
-def source_bytes(manifest) -> int:
-    """The model source bytes the manifest's chain phases read."""
+def source_bytes(manifest, prefix="chain-") -> int:
+    """The model source bytes the manifest's ``prefix`` phases read."""
     entries = manifest["entries"]
     return sum(int(entries[index]["bytes"]) for phase in manifest["read_plan"]["phases"]
-               if phase["name"].startswith("chain-") for index in phase["entry_indices"]
+               if phase["name"].startswith(prefix) for index in phase["entry_indices"]
                if _SOURCE.search(entries[index]["path"]))
 
 
-def _describe(path, wire, manifest, stat) -> dict:
+def _describe(path, wire, manifest, stat, prefix="chain-") -> dict:
     phases = manifest["read_plan"]["phases"]
     return {"data_manifest": {"path": str(path), "sha256": hashlib.sha256(wire).hexdigest()},
             "phases": [{"name": phase["name"], "bytes": phase["bytes"],
                         "entries": len(phase["entry_indices"])} for phase in phases],
             "entry_count": manifest["entry_count"],
             "read_bytes": manifest["read_plan"]["read_bytes"],
-            "source_bytes": source_bytes(manifest),
+            "source_bytes": source_bytes(manifest, prefix),
             "peak_consecutive_phase_bytes": peak_consecutive_bytes(phases),
             "stat_check": stat}
 
@@ -242,14 +298,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, output_root,
           chain_state_sha256, checkpoint_sha256, through, ranges, output,
           validate=None) -> dict:
     """Write the round's package into ``output``, a directory that must not exist."""
-    wire = Path(original_manifest).read_bytes()
-    if hashlib.sha256(wire).hexdigest() != original_manifest_sha256:
-        raise SplitPackageRefused("the source manifest does not have the pinned digest")
-    original = json.loads(gzip.decompress(wire) if wire[:2] == b"\x1f\x8b" else wire)
-    try:
-        original, dropped = drop_source_head_walk_reads(original, plan)
-    except ValueError as error:
-        raise SplitPackageRefused(str(error)) from error
+    original, dropped = _load_original(original_manifest, original_manifest_sha256, plan)
     loaded = load_round(output_root, chain_state_sha256, checkpoint_sha256)
     prep, quanta = round_manifests(original, loaded, through=through, ranges=ranges)
     original_paths = {(entry["path"], entry["offset"]) for entry in original["entries"]}
@@ -290,8 +339,93 @@ def build(*, original_manifest, original_manifest_sha256, plan, output_root,
     return package
 
 
+def _load_original(original_manifest, original_manifest_sha256, plan):
+    wire = Path(original_manifest).read_bytes()
+    if hashlib.sha256(wire).hexdigest() != original_manifest_sha256:
+        raise SplitPackageRefused("the source manifest does not have the pinned digest")
+    original = json.loads(gzip.decompress(wire) if wire[:2] == b"\x1f\x8b" else wire)
+    try:
+        return drop_source_head_walk_reads(original, plan)
+    except ValueError as error:
+        raise SplitPackageRefused(str(error)) from error
+
+
+def build_forward(*, original_manifest, original_manifest_sha256, plan, ranges, n_batches,
+                  group_size, output, validate=None) -> dict:
+    """Write a forward split's package into ``output``, a directory that must not exist."""
+    original, dropped = _load_original(original_manifest, original_manifest_sha256, plan)
+    prep, quanta = forward_manifests(original, ranges=ranges, n_batches=n_batches,
+                                     group_size=group_size)
+    original_paths = {(entry["path"], entry["offset"]) for entry in original["entries"]}
+    root = Path(output)
+    written = [(root / FORWARD_PREP_MANIFEST_NAME, prep)]
+    written += [(root / forward_quantum_manifest_name(*pair), manifest)
+                for pair, manifest in quanta.items()]
+    described = []
+    for path, manifest in written:
+        stat = stat_check(manifest, original_paths)
+        if validate is not None:
+            validate(manifest)
+        described.append((path, manifest_wire(manifest), manifest, stat))
+    package = {
+        "schema": FORWARD_PACKAGE_SCHEMA,
+        "source_manifest": {"path": str(original_manifest),
+                            "sha256": original_manifest_sha256},
+        "ranges": [list(pair) for pair in quanta],
+        "n_batches": int(n_batches), "group_size": int(group_size),
+        "head_walk_reads_dropped": dropped,
+        "prep": _describe(*described[0], prefix="forward-"),
+        "quanta": [{"samples": list(pair), **_describe(*item, prefix="forward-")}
+                   for pair, item in zip(quanta, described[1:])],
+    }
+    package["round_source_bytes"] = sum(item["source_bytes"] for item in package["quanta"])
+    root.mkdir(parents=True, exist_ok=False)
+    for path, data, _manifest, _stat in described:
+        path.write_bytes(data)
+    (root / FORWARD_PACKAGE_NAME).write_text(json.dumps(package, indent=2, sort_keys=True)
+                                             + "\n")
+    return package
+
+
+def forward_main(argv=None) -> int:
+    """``forward``: seal a fresh run's forward split package."""
+    from prismaquant.stage_a_chain_split import ChainSplitRefused, parse_ranges
+
+    parser = argparse.ArgumentParser(prog="build_stagea_split_package.py forward",
+                                     description=forward_main.__doc__)
+    parser.add_argument("--original-manifest", required=True,
+                        help="the fresh run's submitted Stage A data manifest")
+    parser.add_argument("--original-manifest-sha256", required=True)
+    parser.add_argument("--plan", required=True)
+    parser.add_argument("--plan-sha256", required=True)
+    parser.add_argument("--ranges", required=True, metavar="S:E,...")
+    parser.add_argument("--n-batches", type=int, required=True,
+                        help="the run's calibration partitions (entries per plane)")
+    parser.add_argument("--group-size", type=int, required=True,
+                        help="the run's read window (boundary_storage.prefetch_batches)")
+    parser.add_argument("--output", required=True, help="package directory (must not exist)")
+    args = parser.parse_args(argv)
+    try:
+        ranges = parse_ranges(args.ranges)
+    except ChainSplitRefused as exc:
+        parser.error(str(exc))
+    package = build_forward(
+        original_manifest=args.original_manifest,
+        original_manifest_sha256=args.original_manifest_sha256,
+        plan={"path": args.plan, "sha256": args.plan_sha256}, ranges=ranges,
+        n_batches=args.n_batches, group_size=args.group_size, output=args.output,
+        validate=_pb_validate())
+    print(json.dumps({key: value for key, value in package.items()
+                      if key not in ("prep", "quanta")}, sort_keys=True))
+    return 0
+
+
 def main(argv=None) -> int:
     from prismaquant.stage_a_chain_split import ChainSplitRefused, parse_ranges
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["forward"]:
+        return forward_main(argv[1:])
 
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--original-manifest", required=True,

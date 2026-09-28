@@ -139,20 +139,53 @@ def parse_ranges(text) -> list[list[int]]:
 
 
 def even_ranges(n_batches: int, group_size: int, quanta: int) -> list[list[int]]:
-    """``quanta`` contiguous ranges of whole read windows, as even as they go."""
+    """``quanta`` contiguous ranges of whole read windows, as even as they go.
+
+    The partition planner (``cost_streaming.plan_boundary_partition_ranges``)
+    cuts the run's read windows; each window range is then its samples, the
+    last one stopping at the last sample. The chain split and the forward
+    split (``stage_a_forward_split``) both cut their quanta here.
+    """
+    from .cost_streaming import plan_boundary_partition_ranges
+
     groups = -(-int(n_batches) // int(group_size))
     if not 1 <= int(quanta) <= groups:
         raise ChainSplitRefused(
             f"{quanta} quanta cannot each hold whole windows of {group_size} among "
             f"{n_batches} samples ({groups} windows)")
-    base, extra = divmod(groups, int(quanta))
-    ranges, group = [], 0
-    for index in range(int(quanta)):
-        count = base + (1 if index < extra else 0)
-        start = group * int(group_size)
-        group += count
-        ranges.append([start, min(group * int(group_size), int(n_batches))])
-    return ranges
+    return [[entry["partition_start"] * int(group_size),
+             min(entry["partition_end"] * int(group_size), int(n_batches))]
+            for entry in plan_boundary_partition_ranges(n_partitions=groups,
+                                                        n_ranges=int(quanta))]
+
+
+def partition_ranges(ranges, *, n_batches: int) -> list[dict]:
+    """Sample ranges as the partition planner's range records, in sample order.
+
+    A calibration partition is one batch of the run's plane, so a sample
+    range is a partition range; the records are what
+    ``cost_streaming.verify_boundary_partition_coverage`` checks.
+    """
+    from .cost_streaming import BOUNDARY_PARTITION_RANGE_SCHEMA
+
+    ordered = sorted(tuple(int(value) for value in pair) for pair in ranges)
+    return [{"schema": BOUNDARY_PARTITION_RANGE_SCHEMA, "range_index": index,
+             "n_ranges": len(ordered), "n_partitions": int(n_batches),
+             "partition_start": start, "partition_end": stop, "partitions": stop - start}
+            for index, (start, stop) in enumerate(ordered)]
+
+
+def require_whole_plane(ranges, *, n_batches: int) -> None:
+    """The ranges tile ``0 .. n_batches``: no gap, no overlap, no sample outside."""
+    from .cost_streaming import verify_boundary_partition_coverage
+
+    try:
+        verify_boundary_partition_coverage(partition_ranges(ranges, n_batches=n_batches),
+                                           n_partitions=int(n_batches))
+    except ValueError as exc:
+        raise ChainSplitRefused(
+            f"the ranges {[list(pair) for pair in ranges]} do not tile the run's "
+            f"{n_batches} samples: {exc}") from exc
 
 
 def check_ranges(ranges, *, n_batches: int, group_size: int, where: str) -> None:

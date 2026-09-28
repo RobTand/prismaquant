@@ -251,6 +251,13 @@ def verify_boundary_partition_coverage(ranges, *, n_partitions):
     return sorted(items, key=lambda entry: entry["range_index"])
 
 
+def _checked_owner_label(label):
+    """An owner label is a plain file name: ``owners/<label>.json``."""
+    if type(label) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", label):
+        raise RuntimeError(f"an owner label is a plain file name, not {label!r}")
+    return label
+
+
 def _state_tensors(value):
     """Closed source-metadata grammar: opaque tensor owners must refuse."""
     from collections.abc import Mapping
@@ -514,8 +521,15 @@ class StreamedBoundaryArtifacts:
     def __enter__(self):
         return self
 
-    def bind(self, identity, *, n_probes, check_memory=None, published=False):
+    def bind(self, identity, *, n_probes, check_memory=None, published=False,
+             owner_label=None):
         """Start one generation; ``published`` keeps its entries on exit.
+
+        ``owner_label`` (a forward split prep, PQ #738) mints the generation
+        for a split round's owners: ``generation.json`` is written once at
+        ``running`` and never again by this owner, whose own status goes to
+        ``owners/<owner_label>.json``. The quanta then rebind the generation,
+        and the run stays unfinished until its chain completes.
 
         A working generation (the single run's) is deliberately disposable:
         closing it retires every entry, because only completed cost shards
@@ -538,6 +552,13 @@ class StreamedBoundaryArtifacts:
         self.directory.mkdir(parents=True, exist_ok=False)
         self._status = "running"
         self._publish_status()
+        if owner_label is not None:
+            if not self._published:
+                raise RuntimeError("only a published generation has several owners")
+            self._owner_label = _checked_owner_label(owner_label)
+            # The owners that rebind this generation write into it.
+            (self.directory / "entries").mkdir(exist_ok=True)
+            self._publish_status()
 
     def rebind(self, session, *, identity, n_probes, check_memory=None,
                owner_label=None):
@@ -609,11 +630,7 @@ class StreamedBoundaryArtifacts:
         if not (directory / "entries").is_dir():
             raise RuntimeError(f"the resumed generation has no entries at {directory}")
         if owner_label is not None:
-            if (type(owner_label) is not str
-                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", owner_label)):
-                raise RuntimeError(
-                    f"an owner label is a plain file name, not {owner_label!r}")
-            self._owner_label = owner_label
+            self._owner_label = _checked_owner_label(owner_label)
         self._n_probes = n_probes
         self._check_memory = check_memory
         self._published = True
@@ -5585,8 +5602,14 @@ class StreamedCausalLM:
         self.context.shutdown()
 
     def capture_layer_major_boundaries(self, input_batches, *, storage, source_phase=None,
-                                       forward_recovery=None):
-        """Capture exact baseline boundaries through the existing layer visitor."""
+                                       forward_recovery=None, batch_offset=0):
+        """Capture exact baseline boundaries through the existing layer visitor.
+
+        ``batch_offset`` is the global index of ``input_batches[0]``: a
+        forward split quantum captures one contiguous range of the run's
+        calibration partitions and names every entry by its global batch, so
+        its entries are the single owner's (PQ #738).
+        """
         if storage.config.get("capture_order") != "layer_major":
             raise ValueError("layer-major boundary capture requires the explicit v2 policy")
         input_batches = tuple(input_batches)
@@ -5594,10 +5617,12 @@ class StreamedCausalLM:
             for input_ids in input_batches:
                 forward_batch(input_ids)
         return self.visit_layer_batches(input_batches, visit, boundary_storage=storage,
-                                        source_phase=source_phase, forward_recovery=forward_recovery)
+                                        source_phase=source_phase, forward_recovery=forward_recovery,
+                                        batch_offset=batch_offset)
 
     def visit_layer_batches(self, input_batches, visitor, *, output_consumer=None,
-                            boundary_storage=None, source_phase=None, forward_recovery=None):
+                            boundary_storage=None, source_phase=None, forward_recovery=None,
+                            batch_offset=0):
         """Visit one resident source layer over the original ordered batches.
 
         The original visitor retains one current hidden tensor per batch. With
@@ -5612,6 +5637,12 @@ class StreamedCausalLM:
             raise RuntimeError("layer-batch traversal cannot start with a pinned layer")
         exact = boundary_storage is not None
         start_layer = 0
+        if type(batch_offset) is not int or batch_offset < 0:
+            raise ValueError("a layer visitor's batch offset is a nonnegative integer")
+        if batch_offset and (not exact or forward_recovery is not None):
+            # Only exact entries carry a global batch coordinate, and a
+            # forward-recovery capsule lends the whole run's partitions.
+            raise ValueError("a batch offset needs exact boundaries and no forward recovery")
         if forward_recovery is not None:
             from .joint_forward_resume import require_stateless_profile
             require_stateless_profile(self)
@@ -5699,7 +5730,7 @@ class StreamedCausalLM:
                         check_state()
                         if forward_recovery is None:
                             batch.activations_cpu.append(boundary_storage.write(hidden,
-                                batch_index=batch_index, boundary_index=0))
+                                batch_index=batch_offset + batch_index, boundary_index=0))
                         else:
                             refs = forward_recovery.batch_references(batch_index)
                             if any(ref.shape != tuple(hidden.shape) or ref.dtype != str(hidden.dtype)
@@ -5769,7 +5800,8 @@ class StreamedCausalLM:
                                     if exact:
                                         check_state()
                                         batch.activations_cpu.append(boundary_storage.write(output,
-                                            batch_index=next_batch, boundary_index=layer + 1))
+                                            batch_index=batch_offset + next_batch,
+                                            boundary_index=layer + 1))
                                     else:
                                         states[next_batch][1] = output
                                     next_batch += 1
