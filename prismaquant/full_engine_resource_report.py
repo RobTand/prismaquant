@@ -549,6 +549,16 @@ def _recomputed_coverage_state(intervals, executed: Any) -> str:
     return "partial"
 
 
+def _understood_run(run: Mapping) -> dict:
+    """The run-identity fields this reader knows, for comparing two identities.
+
+    An additive field in either copy is not part of the identity this reader
+    checks (#1548), so it cannot make two otherwise equal identities differ.
+    A known field present in one copy and absent from the other still differs.
+    """
+    return {name: run[name] for name in _RUN_FIELDS_V3 if name in run}
+
+
 def _run_identity(value: Any, where: str, *, schema: str = REPORT_SCHEMA) -> Mapping:
     """One capture's run identity, optionally scoped to a rank of a world.
 
@@ -1784,7 +1794,7 @@ def consume_full_engine_resource_report(reference: Mapping, *, root: Path,
                            ("partition", partition["capture_sha256"])):
         if digest != identity["capture_sha256"]:
             disagree(f"{member} names a different capture than the report identity")
-    if partition["identity"] != identity["run"]:
+    if _understood_run(partition["identity"]) != _understood_run(identity["run"]):
         disagree("the partition's run identity differs from the report identity")
     for key, expected in (expected_run_identity or {}).items():
         if key not in identity["run"]:
