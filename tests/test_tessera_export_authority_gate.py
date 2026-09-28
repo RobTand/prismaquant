@@ -203,6 +203,66 @@ def test_the_helper_reads_the_contract_not_a_constant(tmp_path):
         lane.producer_authority_argv(tmp_path / "missing", "/a.py")
 
 
+def _both_drivers_contract():
+    """The v44 shape: the package exporter beside the legacy shim."""
+    contract = json.loads(json.dumps(NEW_PIN_CONTRACT))
+    drivers = contract["producer_interface"]["reuse_authority"]["drivers"]
+    assert campaign.LEGACY_EXPORTER_SCRIPT not in drivers
+    return contract
+
+
+def test_a_legacy_shim_inner_keeps_the_authority(tmp_path):
+    """No silent drop: the shim is still a listed driver at v44, so an
+    inner naming ``experiments/export_tessera_serving.py`` gets the option
+    (checked against the spelling it uses), not a downstream
+    MISSING_REUSE_AUTHORITY."""
+    contract = _both_drivers_contract()
+    contract["producer_interface"]["reuse_authority"]["drivers"].append(
+        campaign.LEGACY_EXPORTER_SCRIPT)
+    checkout = _checkout(tmp_path / "tessera", contract)
+    shim = checkout / campaign.LEGACY_EXPORTER_SCRIPT
+    shim.parent.mkdir(parents=True, exist_ok=True)
+    shim.write_text("# shim\n")
+    inner = ["python3", f"{CONTAINER_TESSERA}/{campaign.LEGACY_EXPORTER_SCRIPT}",
+             "/models/glm", "/out/exported", "--plan-json", "/out/plan.json"]
+    spec = {"container": {"mounts": [{"source": str(checkout),
+                                          "target": CONTAINER_TESSERA}]}}
+    # No declared mount holds a PrismaQuant package, so the sealed checkout
+    # (cwd) is the tree to run: the adopter lives beside the test's cwd.
+    adopter = tmp_path / "prismaquant" / "tessera_reuse_authority.py"
+    adopter.parent.mkdir(parents=True)
+    adopter.write_text("# adopter\n")
+    got = campaign.export_inner_with_authority(inner, spec, cwd=str(tmp_path))
+    assert got == [*inner[:2], "--producer-authority",
+                   "/workspace/prismaquant/tessera_reuse_authority.py",
+                   *inner[2:]]
+
+
+def test_a_legacy_shim_inner_refuses_when_only_the_new_driver_is_listed(tmp_path):
+    """The check names the spelling the inner uses: a contract attesting
+    only the package exporter refuses the shim up front."""
+    checkout = _checkout(tmp_path / "tessera", _both_drivers_contract())
+    shim = checkout / campaign.LEGACY_EXPORTER_SCRIPT
+    shim.parent.mkdir(parents=True, exist_ok=True)
+    shim.write_text("# shim\n")
+    inner = ["python3", f"{CONTAINER_TESSERA}/{campaign.LEGACY_EXPORTER_SCRIPT}"]
+    spec = {"container": {"mounts": [{"source": str(checkout),
+                                          "target": CONTAINER_TESSERA}]}}
+    with pytest.raises(lane.ProducerInterfaceError, match="does not list"):
+        campaign.export_inner_with_authority(inner, spec, cwd=str(tmp_path))
+
+
+def test_module_checkout_honours_a_relative_mount_source(tmp_path):
+    """``_module_checkout`` takes ``cwd``: a relative mount source resolves
+    against it instead of the process cwd."""
+    checkout = tmp_path / "rel" / "tessera"
+    exporter = checkout / "src" / "tessera" / "export_serving.py"
+    exporter.parent.mkdir(parents=True)
+    exporter.write_text("# exporter\n")
+    mounts = [{"source": "rel/tessera", "target": CONTAINER_TESSERA}]
+    assert campaign._module_checkout(mounts, cwd=str(tmp_path)) == checkout
+
+
 def test_run_pipeline_passes_the_authority_only_through_the_helper():
     script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
     call = script[script.index("python3 -m tessera.export_serving"):]
