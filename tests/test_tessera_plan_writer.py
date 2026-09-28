@@ -75,10 +75,27 @@ def _surface(*, dense=None, routed=None, stacks=None, scheme=None):
                              for name, shape in tensors.items()}}
                 for stack, tensors in stacks.items()}
 
+    _TesseraError = type("TesseraError", (Exception,), {})
+
+    def units_from_plan(plan, shapes):
+        # Like the real tessera.control.units_from_plan: every planned
+        # tensor needs a shape, and a stack key has none, so the stacked
+        # plan must refuse here exactly as it does on real Tessera.
+        units = []
+        for tensor in sorted(plan):
+            if tensor not in shapes:
+                raise _TesseraError(
+                    f"{tensor} is planned but has no shape")
+            value = plan[tensor]
+            if isinstance(value, dict):
+                units.append(SimpleNamespace(grid=value["grid"],
+                                             q256=value["q256"]))
+        return units
+
     return SimpleNamespace(
         MOE_ROUTER=re.compile(r"^.*\.mlp\.(?:gate|router)\.weight$"),
         MOE_SOURCE_UNPACKED="unpacked_per_expert",
-        TesseraError=type("TesseraError", (Exception,), {}),
+        TesseraError=_TesseraError,
         quantizable=quantizable,
         expert_stacks=expert_stacks,
         packed_expert_stacks=lambda packed: {},
@@ -92,9 +109,7 @@ def _surface(*, dense=None, routed=None, stacks=None, scheme=None):
             scheme(grid) if scheme else (
                 {"E4M3": "TESSERA_E4M3", "E2M1x2": "TESSERA_NVFP4"}[grid.name],
                 grid.name, "WINDOW", "LUT")),
-        units_from_plan=lambda plan, shapes: [
-            SimpleNamespace(grid=value["grid"], q256=value["q256"])
-            for value in plan.values() if isinstance(value, dict)],
+        units_from_plan=units_from_plan,
         uniform_control=lambda units, rule="nearest", assert_match=False:
             SimpleNamespace(grid="E4M3", q256=1024,
                             plan={"model.layers.0.mlp.down_proj.weight":
@@ -310,7 +325,7 @@ def test_a_routed_stack_is_planned_at_one_exact_rung(tmp_path, monkeypatch):
            for role in ("w1", "w3", "w2")},
     }
     shapes, members, layouts = _context(surface, config, tmp_path)
-    plan, provenance = writer.plan_from_assignment(
+    plan, provenance, _logical = writer.plan_from_assignment(
         config, shapes, members, layouts, model=tmp_path, cover="as-allocated",
         allow_disagreement=False, control_rule="nearest", with_control=True,
         surface=surface)
@@ -320,6 +335,33 @@ def test_a_routed_stack_is_planned_at_one_exact_rung(tmp_path, monkeypatch):
         assert tensor not in plan
     assert provenance["expert_stacks"][STACK]["planned_as"] == {
         "grid": "E4M3", "q256": 1024, "source_layout": "unpacked_per_expert"}
+
+
+def test_the_uniform_plan_reads_the_logical_leaves_not_the_stack(tmp_path, monkeypatch):
+    """Regression: --write-uniform-plan fed the stacked plan to
+    units_from_plan, whose stack key has no shape.  Real Tessera raises
+    ``<stack> is planned but has no shape`` there (PB 1dce79c2 step [3]);
+    the double used to ignore shapes and hid it."""
+    surface = _stack_surface()
+    monkeypatch.setattr(writer, "tessera_surface", lambda: surface)
+    (tmp_path / "config.json").write_text("{}")
+    fmt = {"tessera_format": "TESSERA_E4M3_K1_R1024"}
+    config = {
+        "model.layers.0.self_attn.q_proj": fmt,
+        "model.layers.0.self_attn.k_proj": fmt,
+        "model.layers.0.self_attn.v_proj": fmt,
+        **{f"{STACK}.expert_0.{role}": fmt
+           for role in ("w1", "w3", "w2")},
+    }
+    shapes, members, layouts = _context(surface, config, tmp_path)
+    plan, _provenance, logical = writer.plan_from_assignment(
+        config, shapes, members, layouts, model=tmp_path, cover="as-allocated",
+        allow_disagreement=False, control_rule="nearest", with_control=True,
+        surface=surface)
+    assert STACK in plan and STACK not in logical
+    assert surface.units_from_plan(logical, shapes)
+    with pytest.raises(surface.TesseraError, match="has no shape"):
+        surface.units_from_plan(plan, shapes)
 
 
 def test_mixed_choices_inside_a_stack_refuse(tmp_path, monkeypatch):
@@ -375,7 +417,7 @@ def test_carried_projection_supplies_the_stack_membership(tmp_path, monkeypatch)
     }
     shapes, members, layouts = _context(surface, config, tmp_path)
     assert layouts[STACK] == packed_layout
-    plan, provenance = writer.plan_from_assignment(
+    plan, provenance, _logical = writer.plan_from_assignment(
         config, shapes, members, layouts, model=tmp_path, cover="as-allocated",
         allow_disagreement=False, control_rule="nearest", with_control=True,
         surface=surface)

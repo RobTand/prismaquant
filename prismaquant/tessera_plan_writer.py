@@ -595,6 +595,11 @@ def plan_from_assignment(config: dict, shapes: dict, members: dict, layouts: dic
                              allow_disagreement=allow_disagreement,
                              surface=surface, control_rule=control_rule,
                              with_control=with_control)
+    # The logical plan is what every shape-keyed reader takes: expert
+    # stacks have no shape, so units_from_plan (real Tessera raises
+    # "planned but has no shape") must see the leaves, never the stack.
+    # Returned alongside for --write-uniform-plan; main() must not
+    # reconstruct it, because a reordering of the stacked plan is not it.
     logical_plan = plan
     plan = stack_plan(logical_plan, members, layouts)
     # Only quantized expert stacks need model-config geometry. Dense planning
@@ -617,7 +622,7 @@ def plan_from_assignment(config: dict, shapes: dict, members: dict, layouts: dic
     provenance["expert_stacks"] = {stack: {"units": stack_members, "planned_as": plan[stack]}
                                    for stack, stack_members in members.items()}
     provenance["immutable_bf16_routers"] = sorted(routers)
-    return plan, provenance
+    return plan, provenance, logical_plan
 
 
 def main(argv=None):
@@ -658,15 +663,11 @@ def main(argv=None):
     refuse_before_source(config, surface, research_input)
     shapes, stack_members, layouts = model_plan_context(
         args.model, config, surface, research_selected=research_input is not None)
-    plan, provenance = plan_from_assignment(
+    plan, provenance, logical_plan = plan_from_assignment(
         config, shapes, stack_members, layouts, model=args.model, cover=args.cover,
         allow_disagreement=args.allow_fused_disagreement, surface=surface,
         control_rule=args.control_rule, with_control=not args.no_uniform_control,
         research_input=research_input)
-    logical_plan = {tensor: value for tensor, value in plan.items()
-                    if tensor not in stack_members}
-    logical_plan.update({tensor: value for tensor, value in plan.items()
-                         if tensor in stack_members})
     provenance["source_layer_config"] = str(args.layer_config.resolve())
     provenance["model"] = str(args.model.resolve())
     args.out.parent.mkdir(parents=True, exist_ok=True)
