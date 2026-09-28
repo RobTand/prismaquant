@@ -71,10 +71,14 @@ def test_artifact_completeness_header_filters_metadata_like_before(checkpoint):
 def test_pipeline_parameter_count_matches_the_inline_parse(checkpoint):
     from prismaquant import pipeline
     directory, _shard, _header = checkpoint
+    # the model carries an index, so the counter reads exactly the indexed
+    # shards -- the same set the old inline parse read
+    index = json.loads((Path(directory) / "model.safetensors.index.json").read_text())
     old_total = 0
-    for shard in sorted(Path(directory).glob("*.safetensors")):
-        for name, meta in _old_parse(shard).items():
-            if name == "__metadata__":
+    for name in sorted(set(index["weight_map"].values())):
+        shard = Path(directory) / name
+        for tensor, meta in _old_parse(shard).items():
+            if tensor == "__metadata__":
                 continue
             old_total += int(meta["shape"][0]) * (
                 int(meta["shape"][1]) if len(meta["shape"]) > 1 else 1)
@@ -110,9 +114,10 @@ def test_chain_roll_spans_match_the_inline_parse(checkpoint):
     spans = chain_roll_bench._safetensors_spans(
         Path(directory), ["tensor.a.weight", "tensor.b.weight"])
     assert spans, "the bench must still produce merged read spans"
-    covered = {(s["path"], s["start"], s["end"]) for s in spans}
-    first = sorted(Path(directory).glob("*.safetensors"))[0]
+    covered = {(s["path"], s["offset"], s["bytes"]) for s in spans}
+    first = Path(directory) / "model-00001-of-00002.safetensors"
     blob_len = len(json.dumps(header, separators=(",", ":")).encode())
+    # header + both contiguous tensors merge into one whole-file read
     assert (str(first), 0, 8 + blob_len + 24) in covered
 
 
