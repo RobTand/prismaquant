@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Primitive digest-site ratchet (2026-09-27, `astra/digest-site-ratchet`, PQ
+#1508): the #1298 shrink-only duplication baseline now also records every raw
+`hashlib` constructor site and literal `sort_keys=True` JSON encoding outside
+the digest owners (`prismaquant/digests.py`, `prismaquant/tensor_digests.py`),
+counted per enclosing scope with import aliases resolved -- the method of the
+round-2 snapshots. New code that adds such a site outside the owners fails
+`tests/test_duplication_baseline.py`; consolidating a site onto an owner
+lowers the baseline. Baseline regeneration runs through PrismaBuild. This is
+a development gate: no pipeline default, format, serving lane or ship gate
+changes.
+
 ## Offline release receipt ingestion (PQ #1487)
 
 The Tessera lane names its existing external `uniform_control.py verify` and

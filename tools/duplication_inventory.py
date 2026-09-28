@@ -14,6 +14,12 @@ line. This scanner compares structure and names instead:
   exactly.
 - **Same-name helpers.** A module-level function name defined in more than
   one module.
+- **Primitive digest sites** (PQ #1508). Raw ``hashlib`` constructor calls
+  and literal ``sort_keys=True`` JSON encodings, counted per enclosing
+  scope with import aliases resolved -- the same static method as the
+  round-2 count snapshots. Sites inside :data:`DIGEST_OWNERS` are the
+  sanctioned homes and are not ratcheted; a new site anywhere else fails
+  the gate, and removing one lowers the baseline.
 
 ``tests/test_duplication_baseline.py`` holds the live result against
 ``tests/fixtures/duplication_baseline.json``, which only shrinks.
@@ -47,6 +53,10 @@ _K, _BANDS = 64, 16
 # CLI entry points are expected once per script, not duplication.
 ENTRY_POINTS = frozenset({"main", "_main", "parse_args", "_parse_args",
                           "build_parser", "_build_parser", "cli"})
+#: The sanctioned owners of digest recipes. A new primitive ``hashlib`` or
+#: sorted-JSON site inside one of these files is expected -- that is where
+#: consolidation moves sites to -- so only sites OUTSIDE them are ratcheted.
+DIGEST_OWNERS = frozenset({"prismaquant/digests.py", "prismaquant/tensor_digests.py"})
 
 
 def _files(root: Path):
@@ -73,6 +83,86 @@ def _shingles(tokens: list[str]) -> frozenset[int]:
         int.from_bytes(hashlib.blake2b(
             "\x1f".join(tokens[i:i + SHINGLE]).encode(), digest_size=8).digest(), "big")
         for i in range(max(0, len(tokens) - SHINGLE + 1)))
+
+
+def _import_aliases(tree: ast.Module) -> dict[str, str]:
+    """Map every bound name to the dotted name it resolves to, module-wide.
+
+    ``import hashlib as h`` yields ``h -> hashlib``; ``from hashlib import
+    sha256`` yields ``sha256 -> hashlib.sha256``. Module-wide is the method
+    the round-2 count snapshots used: a function-local import is visible to
+    the whole module's resolution, which over-approximates (never misses) a
+    digest site.
+    """
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+    return aliases
+
+
+def _resolved_callee(func: ast.expr, aliases: dict[str, str]) -> str | None:
+    """The dotted callee for ``Name`` and ``Name.attr`` calls, else None."""
+    if isinstance(func, ast.Name):
+        return aliases.get(func.id, func.id)
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        return aliases.get(func.value.id, func.value.id) + "." + func.attr
+    return None
+
+
+def _iter_scoped_calls(tree: ast.Module):
+    """Yield ``(call, scope)`` with the innermost enclosing scope's name.
+
+    The scope is the dotted chain of function/class names, or ``<module>``
+    at module level. A site is identified by scope, not line number, so the
+    baseline does not churn when unrelated lines shift; several calls of
+    one family inside the same scope count as one ratcheted site.
+    """
+    stack: list[tuple[ast.AST, list[str]]] = [(tree, [])]
+    while stack:
+        node, scope = stack.pop()
+        for child in ast.iter_child_nodes(node):
+            child_scope = scope
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                child_scope = scope + [child.name]
+            if isinstance(child, ast.Call):
+                yield child, ".".join(child_scope) or "<module>"
+            stack.append((child, child_scope))
+
+
+def digest_sites(root: Path = ROOT) -> list[str]:
+    """Every primitive digest site, as ``family:file::scope`` strings.
+
+    Families, with the round-2 count snapshots' method: a call whose
+    alias-resolved callee starts with ``hashlib.`` is a ``hashlib`` site; a
+    ``json.dumps``/``json.JSONEncoder`` call with literal ``sort_keys=True``
+    is a ``sorted-json`` site (``json.dump`` and dynamic ``sort_keys`` values
+    are outside this static method). Both families are returned for every
+    scanned file; the ratchet gates only the sites outside
+    :data:`DIGEST_OWNERS`.
+    """
+    sites: set[str] = set()
+    for path in _files(root):
+        rel = path.relative_to(root).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        aliases = _import_aliases(tree)
+        for call, scope in _iter_scoped_calls(tree):
+            callee = _resolved_callee(call.func, aliases)
+            if callee is None:
+                continue
+            if callee.startswith("hashlib."):
+                sites.add(f"hashlib:{rel}::{scope}")
+            elif callee in ("json.dumps", "json.JSONEncoder") and any(
+                    keyword.arg == "sort_keys"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    for keyword in call.keywords):
+                sites.add(f"sorted-json:{rel}::{scope}")
+    return sorted(sites)
 
 
 def scan(root: Path = ROOT) -> dict:
@@ -124,6 +214,9 @@ def scan(root: Path = ROOT) -> dict:
     return {
         "near_duplicates": sorted([list(p) for p in pairs]),
         "same_name_helpers": {n: sorted(m) for n, m in sorted(names.items()) if len(m) > 1},
+        # The ratcheted set: every primitive digest site outside the owners.
+        "primitive_digest_sites": [s for s in digest_sites(root)
+                                   if s.split(":", 1)[1].split("::", 1)[0] not in DIGEST_OWNERS],
     }
 
 
@@ -140,10 +233,12 @@ def main() -> int:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
         BASELINE.write_text(json.dumps(live, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     groups = live["same_name_helpers"]
+    digest_count = len(live["primitive_digest_sites"])
     print(f"near-duplicate pairs >= {THRESHOLD}: {len(live['near_duplicates'])}; "
           f"same-name helper groups: {len(groups)} "
           f"({sum(len(v) for v in groups.values())} definitions); "
-          f"must-differ pairs: {len(live['must_differ'])}")
+          f"must-differ pairs: {len(live['must_differ'])}; "
+          f"gated primitive digest sites: {digest_count}")
     return 0
 
 
