@@ -1,0 +1,75 @@
+{
+  "case0": {
+    "hex": "7b2266696c6573223a7b2262223a5b312c322c7b2261223a6e756c6c7d5d7d2c226e223a312e352c2275223a2268c3a96c6c6fe29c93227d",
+    "input": {
+      "files": {
+        "b": [
+          1,
+          2,
+          {
+            "a": null
+          }
+        ]
+      },
+      "n": 1.5,
+      "u": "h\u00e9llo\u2713"
+    },
+    "sha": "f0ae645554e2b481610566639af45bacc75337d73ce24ef4dd0660620ccc84e2"
+  },
+  "case1": {
+    "hex": "7b2265223a7b7d2c226c223a5b5d2c2274223a5b312c325d2c227a223a5b7b226b223a2276227d5d7d",
+    "input": {
+      "e": {},
+      "l": [],
+      "t": [
+        1,
+        2
+      ],
+      "z": [
+        {
+          "k": "v"
+        }
+      ]
+    },
+    "sha": "d9734db93b6c9e109409e2f517ab572d44ab79d47b8bf902c1774d8400f06580"
+  },
+  "case2": {
+    "hex": "7b7d",
+    "input": {},
+    "sha": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  "case3": {
+    "hex": "5b5d",
+    "input": [],
+    "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "case4": {
+    "hex": "227322",
+    "input": "s",
+    "sha": "0f4657778ae14ff7aeeb2c2190ede79099aa9c4e8a9e54829462f0e92af659e5"
+  },
+  "case5": {
+    "hex": "35",
+    "input": 5,
+    "sha": "ef2d127de37b942baad06145e54b0c619a1f22327b2ebbcfbec78f5564afe39d"
+  },
+  "case6": {
+    "hex": "332e3134",
+    "input": 3.14,
+    "sha": "2efff1261c25d94dd6698ea1047f5c0a7107ca98b0a6c2427ee6614143500215"
+  },
+  "case7": {
+    "hex": "74727565",
+    "input": true,
+    "sha": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+  },
+  "case8": {
+    "hex": "6e756c6c",
+    "input": null,
+    "sha": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "refusals": {
+    "nan": "TeacherPayloadError",
+    "set": "TeacherPayloadError"
+  }
+}

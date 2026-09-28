@@ -105,20 +105,21 @@ class TeacherPayloadError(ValueError):
 
 def canonical_json_bytes(value: object) -> bytes:
     """Encode strict canonical JSON used by every digest in this contract."""
+    from prismaquant.digests import canonical_json_bytes as _owner_bytes
+
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
+        return _owner_bytes(value, where="teacher value")
     except (TypeError, ValueError) as exc:
         raise TeacherPayloadError("value is not strict canonical JSON") from exc
 
 
 def canonical_sha256(value: object) -> str:
-    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+    from prismaquant.digests import canonical_json_sha256 as _owner_sha256
+
+    try:
+        return _owner_sha256(value, where="teacher value")
+    except (TypeError, ValueError) as exc:
+        raise TeacherPayloadError("value is not strict canonical JSON") from exc
 
 
 def file_sha256(path: str | os.PathLike) -> str:

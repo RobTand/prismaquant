@@ -79,14 +79,10 @@ class DSv4WikiTextInputsError(ValueError):
 
 
 def canonical_json_bytes(value: object) -> bytes:
+    from prismaquant.digests import canonical_json_bytes as _owner_bytes
+
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
+        return _owner_bytes(value, where="WikiText inputs")
     except (TypeError, ValueError) as exc:
         raise DSv4WikiTextInputsError(
             "WikiText inputs are not strict canonical JSON"
@@ -94,7 +90,14 @@ def canonical_json_bytes(value: object) -> bytes:
 
 
 def canonical_sha256(value: object) -> str:
-    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+    from prismaquant.digests import canonical_json_sha256 as _owner_sha256
+
+    try:
+        return _owner_sha256(value, where="WikiText inputs")
+    except (TypeError, ValueError) as exc:
+        raise DSv4WikiTextInputsError(
+            "WikiText inputs are not strict canonical JSON"
+        ) from exc
 
 
 def _tensor_sha256(value: torch.Tensor) -> str:
