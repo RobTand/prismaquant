@@ -25,8 +25,6 @@ import os
 import time
 from pathlib import Path
 
-from .dev_mode import dev_mode_enabled, dev_stamp
-
 
 #: The record schema PrismaBuild's ``ProgressWatch`` accepts.  A record with
 #: any other value here is not advancement, so this string is a contract with
@@ -136,9 +134,12 @@ def commit(units, phase, unit=None):
     record = {"schema": RECORD_SCHEMA, "token": token,
               "phase": phase, "units_completed": units, "unit": unit,
               "reported_unix": time.time()}
-    if (dev_mode_enabled()
-            and os.environ.get("PRISMAQUANT_DEV_PROGRESS_STAMP") == "1"):
-        record.update(dev_stamp(_progress_dev_source_sha256()))
+    # The opt-in flag is read before dev mode so this module keeps importing
+    # without the package (a container runs it by path); both reads are pure.
+    if os.environ.get("PRISMAQUANT_DEV_PROGRESS_STAMP") == "1":
+        from . import dev_mode
+        if dev_mode.dev_mode_enabled():
+            record.update(dev_mode.dev_stamp(_progress_dev_source_sha256()))
     temporary = f"{path}.{os.getpid()}.tmp"
     with open(temporary, "w") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")

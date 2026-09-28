@@ -52,13 +52,15 @@ def test_pb_commit_dev_stamp_reuses_the_memo(monkeypatch, tmp_path):
 
     calls = []
     monkeypatch.setattr(prismabuild_progress, "_DEV_SOURCE_SHA256_MEMO", "b" * 64, raising=True)
-    real_stamp = prismabuild_progress.dev_stamp
+    from prismaquant import dev_mode
+
+    real_stamp = dev_mode.dev_stamp
 
     def counting(value):
         calls.append(value)
         return real_stamp(value)
 
-    monkeypatch.setattr(prismabuild_progress, "dev_stamp", counting, raising=True)
+    monkeypatch.setattr(dev_mode, "dev_stamp", counting, raising=True)
     try:
         assert prismabuild_progress.commit(1, "head", unit="layers.0.a")
         assert prismabuild_progress.commit(2, "head", unit="layers.0.b")
