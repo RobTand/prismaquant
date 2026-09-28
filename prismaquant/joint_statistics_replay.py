@@ -370,17 +370,20 @@ class RetainedRenderDeviceCache:
 #: (``tests/test_reclaim_readings_gb10.py``), which fails when a free moves a
 #: reading its declaration leaves out, or leaves one it names.
 #: Renders read ahead are sealed memfds (#1315), shmem charged to the cgroup.
-#: MemAvailable does not show their freed pages at once: freeing 805 MB of
-#: them moved it by -28 MB.
-RENDER_STREAM_RECLAIM_LOWERS = frozenset({'committed'})
+#: On the GB10 the host and the device share one pool, so the pages a free
+#: returns show in MemAvailable as well: freeing 805 MB of them lowered
+#: committed by 807 MB and raised MemAvailable by 755 MB, both read at once
+#: (PQ #1431; the earlier -28 MB reading of MemAvailable did not repeat).
+RENDER_STREAM_RECLAIM_LOWERS = frozenset({'committed', 'available'})
 #: Renders kept on the device are CUDA allocations, which the GB10 does not
 #: charge to the memcg. They are unified memory, so MemAvailable rises by
 #: what the reservation returns.
 RENDER_CACHE_RECLAIM_LOWERS = frozenset({'reserved', 'available'})
 #: Spill chunks read ahead are pinned host buffers. On the GB10 torch's
-#: pinned allocator returns shmem charged to the cgroup, and MemAvailable
-#: does not show those pages at once either.
-SPILL_REPLAY_RECLAIM_LOWERS = frozenset({'committed'})
+#: pinned allocator returns shmem charged to the cgroup, and the pages come
+#: back to the host too: freeing 805 MB of them lowered committed by 808 MB
+#: and raised MemAvailable by 863 MB, read at once (PQ #1431).
+SPILL_REPLAY_RECLAIM_LOWERS = frozenset({'committed', 'available'})
 
 
 def register_replay_reclaimers(guard, *, spill, render_cache, render_stream):

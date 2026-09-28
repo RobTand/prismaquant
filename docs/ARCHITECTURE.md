@@ -23,6 +23,24 @@ not checked. No format, default, stage or ship gate changes; a policy without
 the `cotangent` block derives and verifies as before. Gates:
 `tests/test_joint_stageb_resources.py`, `tests/test_dispatch_joint_quanta.py`.
 
+Re-stamped 2026-09-28 (PQ #1431, `sonnet/1431-reclaim-declarations`): the
+Stage B render stream and spill replay reclaimers now declare that their
+frees lower `MemAvailable` as well as committed bytes
+(`RENDER_STREAM_RECLAIM_LOWERS`, `SPILL_REPLAY_RECLAIM_LOWERS`,
+`joint_statistics_replay.py:377,386`). The GB10 probe measured both frees
+returning about the bytes freed to the host; the declaration of `committed`
+alone was wrong. The probe's midpoint criterion stays, but its host reading is
+the rise of the host reading the guard acts on: `MemAvailable` plus the pages
+on the per-CPU free lists (`io_spans.host_memory`, read by
+`CaptureMemoryGuard._observe` through `memory_management._host_memory_info`,
+and by the probe). The same free read +755 MB in `MemAvailable` on one run and
+-1 MB on the next, with the pages parked on per-CPU lists that `MemAvailable`
+does not count until the kernel trims them; the sum does not depend on where
+they land. A host-term shortfall now asks all three reclaimers, in
+refill-cost order. See the
+reclaim bullet in the Stage B replay section. No pipeline default, stage,
+format or lane changes.
+
 Re-stamped 2026-09-28 (PQ #1613, `claude/1613-streaming-resume`): **a
 selected-source row resumes a checkpoint on the stream head**, and is admitted
 against the window plan it was declared with. Before this change, a
@@ -1005,7 +1023,7 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   never less than the two chunk buffers the replay phase reserves.
 - **One pool, one reclaim order, and each step read (PQ #1383).** On a GB10
   the host and the device share one pool, so a shortfall can have several
-  reclaimers. `register_replay_reclaimers` (`joint_statistics_replay.py:386`,
+  reclaimers. `register_replay_reclaimers` (`joint_statistics_replay.py:389`,
   called at `joint_cost_quantum.py:2383`) registers them in order of refill
   cost: spill chunks read ahead (`reclaim_replay`,
   `joint_replay_spill.py:1024`, which also hands the pinned allocator's idle
@@ -1020,10 +1038,23 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
     committed bytes, and the device envelope only the reservation.
   - Measured on the GB10, read at once after the free: the spill chunks and
     the renders read ahead lower committed bytes, since pinned buffers and
-    sealed memfds are both shmem charged to the cgroup. The renders kept on
-    the device lower the reservation and `MemAvailable`. `MemAvailable` does
-    not show a shmem free at once (805 MB of memfds freed, `MemAvailable`
-    moved by -28 MB), so a host-term shortfall asks only the render cache.
+    sealed memfds are both shmem charged to the cgroup. They also lower
+    `MemAvailable`: the pages go back to the host, which shares one pool
+    with the device (805 MB of memfds freed: committed -807 MB,
+    `MemAvailable` +755 MB; 805 MB of pinned chunks: committed -808 MB,
+    `MemAvailable` +863 MB; PQ #1431). The renders kept on the device lower
+    the reservation and `MemAvailable`. So a host-term shortfall asks all
+    three reclaimers, in refill-cost order, and the guard's re-read after
+    each ask ends the pass once the term clears. A reading counts as lowered
+    when it moves by more than half of what was freed. The host reading is one
+    quantity everywhere: `MemAvailable` plus the per-CPU free-list pages
+    (`io_spans.host_memory`, `memory_management._host_memory_info`). The guard
+    reads it and the probe takes its rise, because a freed page can sit on a
+    per-CPU list that `MemAvailable` skips until the kernel trims it (the same
+    805 MB memfd free read +755 MB and -1 MB in `MemAvailable` on different
+    runs). Reading `/proc/zoneinfo` costs 0.085 ms against 0.0088 ms for
+    `/proc/meminfo`; a check runs per operator or allocation, not per token. The earlier declaration that shmem frees leave
+    `MemAvailable` alone (a -28 MB reading) was that second case.
   - A check that would refuse makes one pass in order
     (`CaptureMemoryGuard._reclaim`, `:702`). A reclaimer is asked only while
     a term that reads one of its readings is exceeded, and for the largest
