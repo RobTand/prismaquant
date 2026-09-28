@@ -3718,7 +3718,7 @@
  },
  "route_trace_verdicts": {
   "packaged/exact_509": {
-   "detail": "exact per-module: 5 named module(s) on every rank served the activation contract they were priced on, across 2 rank(s): TESSERA_BF16/dense/bf16_unquantized=1, TESSERA_FP8/dense/fp8_per_token_dynamic=1, TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static=2, TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static=1",
+   "detail": "exact per-module: 5 named module(s) on every rank served the activation contract they were priced on, across 2 rank(s): TESSERA_BF16/dense/bf16_unquantized=1, TESSERA_FP8/dense/fp8_per_token_dynamic=1, TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static=2, TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static=1; 5 priced target(s) named in the serve's namespace by the glm5_next profile",
    "exact_module_qualified": true,
    "expected_ranks": 2,
    "granularity": "module name per (route family, kind, activation contract), per token count M, per rank; the trace names its modules",
@@ -3831,24 +3831,34 @@
    },
    "served_modules": {
     "rank0": {
-     "model.language_model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
-     "model.language_model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
-     "model.language_model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+     "language_model.model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
+     "language_model.model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
+     "language_model.model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
     },
     "rank1": {
-     "model.language_model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
-     "model.language_model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
-     "model.language_model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+     "language_model.model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
+     "language_model.model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
+     "language_model.model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+    }
+   },
+   "served_namespace": {
+    "profile": "glm5_next",
+    "renamed": {
+     "model.language_model.layers.0.mlp.down_proj": "language_model.model.layers.0.mlp.down_proj",
+     "model.language_model.layers.0.mlp.gate_up_proj": "language_model.model.layers.0.mlp.gate_up_proj",
+     "model.language_model.layers.1.mlp.experts": "language_model.model.layers.1.mlp.experts",
+     "model.language_model.layers.1.mlp.shared_experts.down_proj": "language_model.model.layers.1.mlp.shared_experts.down_proj",
+     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
     }
    },
    "status": "agree"
   },
   "packaged/exact_509_stamped": {
-   "detail": "exact per-module: 5 named module(s) on every rank served the activation contract they were priced on, across 2 rank(s): TESSERA_BF16/dense/bf16_unquantized=1, TESSERA_FP8/dense/fp8_per_token_dynamic=1, TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static=2, TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static=1",
+   "detail": "exact per-module: 5 named module(s) on every rank served the activation contract they were priced on, across 2 rank(s): TESSERA_BF16/dense/bf16_unquantized=1, TESSERA_FP8/dense/fp8_per_token_dynamic=1, TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static=2, TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static=1; 5 priced target(s) named in the serve's namespace by the glm5_next profile",
    "exact_module_qualified": true,
    "expected_ranks": 2,
    "granularity": "module name per (route family, kind, activation contract), per token count M, per rank; the trace names its modules",
@@ -3961,18 +3971,28 @@
    },
    "served_modules": {
     "rank0": {
-     "model.language_model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
-     "model.language_model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
-     "model.language_model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+     "language_model.model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
+     "language_model.model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
+     "language_model.model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
     },
     "rank1": {
-     "model.language_model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
-     "model.language_model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
-     "model.language_model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+     "language_model.model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
+     "language_model.model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
+     "language_model.model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+    }
+   },
+   "served_namespace": {
+    "profile": "glm5_next",
+    "renamed": {
+     "model.language_model.layers.0.mlp.down_proj": "language_model.model.layers.0.mlp.down_proj",
+     "model.language_model.layers.0.mlp.gate_up_proj": "language_model.model.layers.0.mlp.gate_up_proj",
+     "model.language_model.layers.1.mlp.experts": "language_model.model.layers.1.mlp.experts",
+     "model.language_model.layers.1.mlp.shared_experts.down_proj": "language_model.model.layers.1.mlp.shared_experts.down_proj",
+     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
     }
    },
    "status": "agree"
@@ -4092,6 +4112,16 @@
     }
    },
    "served_modules": null,
+   "served_namespace": {
+    "profile": "glm5_next",
+    "renamed": {
+     "model.language_model.layers.0.mlp.down_proj": "language_model.model.layers.0.mlp.down_proj",
+     "model.language_model.layers.0.mlp.gate_up_proj": "language_model.model.layers.0.mlp.gate_up_proj",
+     "model.language_model.layers.1.mlp.experts": "language_model.model.layers.1.mlp.experts",
+     "model.language_model.layers.1.mlp.shared_experts.down_proj": "language_model.model.layers.1.mlp.shared_experts.down_proj",
+     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
+    }
+   },
    "status": "not_verified"
   },
   "packaged/legacy_m44e1_stamped": {
@@ -4209,10 +4239,20 @@
     }
    },
    "served_modules": null,
+   "served_namespace": {
+    "profile": "glm5_next",
+    "renamed": {
+     "model.language_model.layers.0.mlp.down_proj": "language_model.model.layers.0.mlp.down_proj",
+     "model.language_model.layers.0.mlp.gate_up_proj": "language_model.model.layers.0.mlp.gate_up_proj",
+     "model.language_model.layers.1.mlp.experts": "language_model.model.layers.1.mlp.experts",
+     "model.language_model.layers.1.mlp.shared_experts.down_proj": "language_model.model.layers.1.mlp.shared_experts.down_proj",
+     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
+    }
+   },
    "status": "not_verified"
   },
   "stand_in/exact_509": {
-   "detail": "exact per-module: 5 named module(s) on every rank served the activation contract they were priced on, across 2 rank(s): TESSERA_BF16/dense/bf16_unquantized=1, TESSERA_FP8/dense/fp8_per_token_dynamic=1, TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static=2, TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static=1",
+   "detail": "exact per-module: 5 named module(s) on every rank served the activation contract they were priced on, across 2 rank(s): TESSERA_BF16/dense/bf16_unquantized=1, TESSERA_FP8/dense/fp8_per_token_dynamic=1, TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static=2, TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static=1; 5 priced target(s) named in the serve's namespace by the glm5_next profile",
    "exact_module_qualified": true,
    "expected_ranks": 2,
    "granularity": "module name per (route family, kind, activation contract), per token count M, per rank; the trace names its modules",
@@ -4325,24 +4365,34 @@
    },
    "served_modules": {
     "rank0": {
-     "model.language_model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
-     "model.language_model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
-     "model.language_model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+     "language_model.model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
+     "language_model.model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
+     "language_model.model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
     },
     "rank1": {
-     "model.language_model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
-     "model.language_model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
-     "model.language_model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+     "language_model.model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
+     "language_model.model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
+     "language_model.model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+    }
+   },
+   "served_namespace": {
+    "profile": "glm5_next",
+    "renamed": {
+     "model.language_model.layers.0.mlp.down_proj": "language_model.model.layers.0.mlp.down_proj",
+     "model.language_model.layers.0.mlp.gate_up_proj": "language_model.model.layers.0.mlp.gate_up_proj",
+     "model.language_model.layers.1.mlp.experts": "language_model.model.layers.1.mlp.experts",
+     "model.language_model.layers.1.mlp.shared_experts.down_proj": "language_model.model.layers.1.mlp.shared_experts.down_proj",
+     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
     }
    },
    "status": "agree"
   },
   "stand_in/exact_509_stamped": {
-   "detail": "exact per-module: 5 named module(s) on every rank served the activation contract they were priced on, across 2 rank(s): TESSERA_BF16/dense/bf16_unquantized=1, TESSERA_FP8/dense/fp8_per_token_dynamic=1, TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static=2, TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static=1",
+   "detail": "exact per-module: 5 named module(s) on every rank served the activation contract they were priced on, across 2 rank(s): TESSERA_BF16/dense/bf16_unquantized=1, TESSERA_FP8/dense/fp8_per_token_dynamic=1, TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static=2, TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static=1; 5 priced target(s) named in the serve's namespace by the glm5_next profile",
    "exact_module_qualified": true,
    "expected_ranks": 2,
    "granularity": "module name per (route family, kind, activation contract), per token count M, per rank; the trace names its modules",
@@ -4455,18 +4505,28 @@
    },
    "served_modules": {
     "rank0": {
-     "model.language_model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
-     "model.language_model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
-     "model.language_model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+     "language_model.model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
+     "language_model.model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
+     "language_model.model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
     },
     "rank1": {
-     "model.language_model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
-     "model.language_model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
-     "model.language_model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
-     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+     "language_model.model.layers.0.mlp.down_proj": "TESSERA_BF16/dense/bf16_unquantized",
+     "language_model.model.layers.0.mlp.gate_up_proj": "TESSERA_FP8/dense/fp8_per_token_dynamic",
+     "language_model.model.layers.1.mlp.experts": "TESSERA_NVFP4/moe/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.down_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static",
+     "language_model.model.layers.1.mlp.shared_experts.gate_up_proj": "TESSERA_NVFP4/dense/e2m1_group16_ue4m3_static"
+    }
+   },
+   "served_namespace": {
+    "profile": "glm5_next",
+    "renamed": {
+     "model.language_model.layers.0.mlp.down_proj": "language_model.model.layers.0.mlp.down_proj",
+     "model.language_model.layers.0.mlp.gate_up_proj": "language_model.model.layers.0.mlp.gate_up_proj",
+     "model.language_model.layers.1.mlp.experts": "language_model.model.layers.1.mlp.experts",
+     "model.language_model.layers.1.mlp.shared_experts.down_proj": "language_model.model.layers.1.mlp.shared_experts.down_proj",
+     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
     }
    },
    "status": "agree"
@@ -4586,6 +4646,16 @@
     }
    },
    "served_modules": null,
+   "served_namespace": {
+    "profile": "glm5_next",
+    "renamed": {
+     "model.language_model.layers.0.mlp.down_proj": "language_model.model.layers.0.mlp.down_proj",
+     "model.language_model.layers.0.mlp.gate_up_proj": "language_model.model.layers.0.mlp.gate_up_proj",
+     "model.language_model.layers.1.mlp.experts": "language_model.model.layers.1.mlp.experts",
+     "model.language_model.layers.1.mlp.shared_experts.down_proj": "language_model.model.layers.1.mlp.shared_experts.down_proj",
+     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
+    }
+   },
    "status": "not_verified"
   },
   "stand_in/legacy_m44e1_stamped": {
@@ -4703,6 +4773,16 @@
     }
    },
    "served_modules": null,
+   "served_namespace": {
+    "profile": "glm5_next",
+    "renamed": {
+     "model.language_model.layers.0.mlp.down_proj": "language_model.model.layers.0.mlp.down_proj",
+     "model.language_model.layers.0.mlp.gate_up_proj": "language_model.model.layers.0.mlp.gate_up_proj",
+     "model.language_model.layers.1.mlp.experts": "language_model.model.layers.1.mlp.experts",
+     "model.language_model.layers.1.mlp.shared_experts.down_proj": "language_model.model.layers.1.mlp.shared_experts.down_proj",
+     "model.language_model.layers.1.mlp.shared_experts.gate_up_proj": "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
+    }
+   },
    "status": "not_verified"
   }
  },
