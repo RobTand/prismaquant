@@ -1,5 +1,28 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1141, `sonnet/1141-cotangent-guards`): **a Stage B
+row that loads the whole cotangent plane refuses before the load when the host
+cannot hold it.** Without the cotangent scratch pair the checkpoint load holds
+the entire `(probe, batch)` plane on the host, a cost the sealed resource
+policy did not price and the container's 28 GiB cap then enforced by kill.
+`derive_policy` takes an optional `cotangent = {"host_plane_bytes": N}` block
+(`joint_stageb_resources.cotangent_policy`, rederived by `verify_policy`) that
+subtracts N from the retained-render host bound
+(`derive_retained_window_budget(host_cotangent_bytes=...)`), so a plan whose
+render window plus plane exceeds the host refuses at planning. The one shared
+check `verify_cotangent_plane_fits(plane_bytes, policy, environ)` is applied
+twice: by `tools/dispatch_joint_quanta.quantum_argv` against the sealed spec's
+`env` (a band row with no handoff, before the container wraps), and by
+`joint_cost_quantum` before the checkpoint/handoff load against `os.environ`.
+With the scratch pair declared the ceiling must cover the plane (the pair is
+parsed once, by `joint_stageb_resources.cotangent_scratch`, which
+`cost_streaming.checkpoint_cotangent_sink` also calls); without it the
+plane plus the host owners and the render cap must fit the policy's host bound.
+A handoff row with the one-pass spill streams its incoming plane (#1143) and is
+not checked. No format, default, stage or ship gate changes; a policy without
+the `cotangent` block derives and verifies as before. Gates:
+`tests/test_joint_stageb_resources.py`, `tests/test_dispatch_joint_quanta.py`.
+
 Re-stamped 2026-09-28 (PQ #1431, `sonnet/1431-reclaim-declarations`): the
 Stage B render stream and spill replay reclaimers now declare that their
 frees lower `MemAvailable` as well as committed bytes
@@ -4075,6 +4098,8 @@ on local disk. The existing boundary owner preallocates the exact tensor-byte
 extent in a private disposable file, loads authenticated checkpoint entries
 through the existing strict pinned reader in leased windows under its
 resident budget (PQ #1142), and owns cleanup.
+A row that declares no scratch pair holds the whole plane on the host; the
+dispatcher and the run refuse it when the sealed host bound cannot (PQ #1141).
 Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
 and overwrites the same slot. A Stage B capture pass reads slots into its
 held staging buffer instead (`read_into`, PQ #1246), and writes them from it.
