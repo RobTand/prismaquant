@@ -410,7 +410,7 @@ def seal_forward_round(*, round_dir, checkout, forward_package, campaign, spec,
     prep seals it into the run identity the chain split rounds resume under.
     """
     from prismaquant.joint_adjoint_checkpoints import adjoint_space
-    from prismaquant.stage_a_forward_split import quantum_label
+    from prismaquant.stage_a_chain_split import quantum_label
 
     priority = str(priority)
     if not _PRIORITY.fullmatch(priority):
@@ -467,7 +467,7 @@ def seal_forward_round(*, round_dir, checkout, forward_package, campaign, spec,
     labels = []
     for described, rate in zip(package["quanta"], rates):
         start, stop = described["samples"]
-        label = quantum_label(start, stop)
+        label = quantum_label(start, stop, role="forward")
         labels.append(label)
         manifest = json.loads(gzip.decompress(
             Path(described["data_manifest"]["path"]).read_bytes()))

@@ -63,6 +63,10 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import (  # noqa: E402
+    bytes_sha256hex,
+    indent2_json_file_bytes,
+)
 from prismaquant.joint_adjoint_slices import checkpoint_cotangent_plane  # noqa: E402
 from prismaquant.joint_layer_quanta import adjoint_chain_phase_name  # noqa: E402
 from prismaquant.stage_a_head import drop_source_head_walk_reads  # noqa: E402
@@ -341,7 +345,7 @@ def build(*, original_manifest, original_manifest_sha256, plan, output_root,
 
 def _load_original(original_manifest, original_manifest_sha256, plan):
     wire = Path(original_manifest).read_bytes()
-    if hashlib.sha256(wire).hexdigest() != original_manifest_sha256:
+    if bytes_sha256hex(wire) != original_manifest_sha256:
         raise SplitPackageRefused("the source manifest does not have the pinned digest")
     original = json.loads(gzip.decompress(wire) if wire[:2] == b"\x1f\x8b" else wire)
     try:
@@ -382,8 +386,7 @@ def build_forward(*, original_manifest, original_manifest_sha256, plan, ranges, 
     root.mkdir(parents=True, exist_ok=False)
     for path, data, _manifest, _stat in described:
         path.write_bytes(data)
-    (root / FORWARD_PACKAGE_NAME).write_text(json.dumps(package, indent=2, sort_keys=True)
-                                             + "\n")
+    (root / FORWARD_PACKAGE_NAME).write_bytes(indent2_json_file_bytes(package))
     return package
 
 
@@ -415,8 +418,8 @@ def forward_main(argv=None) -> int:
         plan={"path": args.plan, "sha256": args.plan_sha256}, ranges=ranges,
         n_batches=args.n_batches, group_size=args.group_size, output=args.output,
         validate=_pb_validate())
-    print(json.dumps({key: value for key, value in package.items()
-                      if key not in ("prep", "quanta")}, sort_keys=True))
+    print(indent2_json_file_bytes({key: value for key, value in package.items()
+                                   if key not in ("prep", "quanta")}).decode(), end="")
     return 0
 
 

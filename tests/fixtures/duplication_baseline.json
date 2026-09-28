@@ -279,7 +279,6 @@
   "hashlib:tools/build_stagea_seed_package.py::_pin",
   "hashlib:tools/build_stagea_seed_package.py::build",
   "hashlib:tools/build_stagea_split_package.py::_describe",
-  "hashlib:tools/build_stagea_split_package.py::build",
   "hashlib:tools/build_stagea_split_package.py::load_round",
   "hashlib:tools/build_t4_logical_request.py::sha",
   "hashlib:tools/build_t4_recovery_request.py::sha",

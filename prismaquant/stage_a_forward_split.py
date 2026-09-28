@@ -41,7 +41,6 @@ that were written, and that the plane it publishes is whole.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -52,9 +51,11 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256,
     publish_new_bytes,
 )
+from .digests import bytes_sha256hex, canonical_json_bytes, indent2_json_file_bytes
 from .stage_a_chain_split import (
     ChainSplitRefused,
     parse_ranges,
+    quantum_label,
     range_name,
     require_whole_plane,
     split_root,
@@ -93,13 +94,9 @@ def fragment_path(space, start: int, stop: int) -> Path:
     return forward_root(space) / f"{range_name(start, stop)}.entries.json"
 
 
-def quantum_label(start: int, stop: int) -> str:
-    """One forward quantum's owner label and receipt name."""
-    return f"forward-{range_name(start, stop)}"
-
-
 def owner_status_path(generation_directory, start: int, stop: int) -> Path:
-    return Path(generation_directory) / "owners" / f"{quantum_label(start, stop)}.json"
+    label = quantum_label(start, stop, role="forward")
+    return Path(generation_directory) / "owners" / f"{label}.json"
 
 
 # -- the split spec ------------------------------------------------------------
@@ -141,26 +138,22 @@ def parse_quantum(text) -> list[int]:
 
 # -- the prep record -------------------------------------------------------------
 
-def _seal(body: dict) -> dict:
-    body = canonical_json(body, where="forward split prep")
-    return {**body, "prep_sha256": canonical_json_sha256(body, where="forward split prep")}
-
-
 def write_prep_record(space, *, chain_state: dict, session: dict, ranges, n_probes: int,
                       group_size: int) -> dict:
     """Seal the prep record once; a second prep of the run refuses."""
     if set(chain_state) != set(CHAIN_STATE_FIELDS):
         raise ForwardSplitRefused("the prep seals every chain-state field but the produced ones")
-    document = _seal({"schema": PREP_RECORD_SCHEMA, "chain_state": chain_state,
-                      "session": session, "ranges": [list(pair) for pair in ranges],
-                      "n_probes": int(n_probes), "group_size": int(group_size)})
+    body = canonical_json({"schema": PREP_RECORD_SCHEMA, "chain_state": chain_state,
+                           "session": session, "ranges": [list(pair) for pair in ranges],
+                           "n_probes": int(n_probes), "group_size": int(group_size)},
+                          where="forward split prep")
+    document = {**body, "prep_sha256": canonical_json_sha256(body, where="forward split prep")}
     path = prep_record_path(space)
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False)
-               + "\n").encode()
+    payload = indent2_json_file_bytes(document)
     if not publish_new_bytes(path, payload):
         raise ForwardSplitRefused(f"{path} exists: a run's forward split is prepped once")
-    return {"path": str(path), "sha256": hashlib.sha256(payload).hexdigest(),
+    return {"path": str(path), "sha256": bytes_sha256hex(payload),
             "document": document}
 
 
@@ -174,7 +167,7 @@ def read_prep_record(space) -> dict:
     if not isinstance(document, dict) or document.get("schema") != PREP_RECORD_SCHEMA:
         raise ForwardSplitRefused(f"{path} is not a {PREP_RECORD_SCHEMA} document")
     body = {key: value for key, value in document.items() if key != "prep_sha256"}
-    if _seal(body)["prep_sha256"] != document.get("prep_sha256"):
+    if canonical_json_sha256(body, where="forward split prep") != document.get("prep_sha256"):
         raise ForwardSplitRefused(f"{path} does not seal its own content")
     return document
 
@@ -193,8 +186,7 @@ def write_fragment(space, samples, *, session: dict, boundary_entries: dict) -> 
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {"schema": FRAGMENT_SCHEMA, "samples": [start, stop], "session": session,
                 "boundary_entries": boundary_entries}
-    atomic_write_bytes(path, (json.dumps(canonical_json(document, where="forward entries"),
-                                         sort_keys=True, allow_nan=False) + "\n").encode())
+    atomic_write_bytes(path, canonical_json_bytes(document, where="forward entries") + b"\n")
     return path
 
 
@@ -308,9 +300,8 @@ def main(argv=None) -> int:
         print(f"stage_a_forward_split: join refused: {exc}", file=sys.stderr, flush=True)
         return 2
     if args.receipt is not None:
-        atomic_write_bytes(Path(args.receipt), (json.dumps(
-            receipt, sort_keys=True, indent=2) + "\n").encode())
-    print(json.dumps(receipt, sort_keys=True), flush=True)
+        atomic_write_bytes(Path(args.receipt), indent2_json_file_bytes(receipt))
+    print(indent2_json_file_bytes(receipt).decode(), end="", flush=True)
     return 0
 
 

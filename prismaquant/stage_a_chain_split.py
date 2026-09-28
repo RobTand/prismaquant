@@ -76,10 +76,20 @@ def partial_directory(space, boundary: int, start: int, stop: int) -> Path:
     return split_root(space) / f"boundary-{int(boundary):03d}" / range_name(start, stop)
 
 
-def quantum_label(from_boundary: int, through: int, start: int, stop: int) -> str:
-    """One quantum's name: its owner status file and its receipt files."""
-    return (f"from-{int(from_boundary):03d}-through-{int(through):03d}-"
-            f"{range_name(start, stop)}")
+def quantum_label(*coordinates: int, role: str = "chain") -> str:
+    """One quantum's name: its owner status file and its receipt files.
+
+    A chain split quantum (``role="chain"``) is named by
+    ``(from_boundary, through, start, stop)``; a forward split quantum
+    (``role="forward"``, PQ #738) by its samples ``(start, stop)`` alone.
+    """
+    if role == "forward" and len(coordinates) == 2:
+        return f"forward-{range_name(*coordinates)}"
+    if role == "chain" and len(coordinates) == 4:
+        from_boundary, through, start, stop = coordinates
+        return (f"from-{int(from_boundary):03d}-through-{int(through):03d}-"
+                f"{range_name(start, stop)}")
+    raise ValueError(f"no {role!r} quantum is named by {coordinates!r}")
 
 
 def quantum_directory(space) -> Path:

@@ -1371,14 +1371,14 @@ def run_adjoint_capture_core(
             raise AdjointIdentityRefused(f"chain split refused: {exc}") from exc
         if quantum:
             batch_offset = samples[0]
-            label = quantum_label(resume_plan.boundary, split["through"], *samples)
+            label = quantum_label(resume_plan.boundary, split["through"], *samples, role="chain")
         else:
             return _split_prep(space, resume_plan, split, boundaries=boundaries,
                                n_batches=len(row_offsets), group_size=group_size)
     if forward is not None:
         from .stage_a_chain_split import (
             ChainSplitRefused, check_ranges, partial_directory, require_whole_plane)
-        from .stage_a_forward_split import quantum_label as forward_quantum_label
+        from .stage_a_chain_split import quantum_label as forward_quantum_label
         group_size = int(storage_policy["prefetch_batches"])
         try:
             if forward_quantum:
@@ -1402,7 +1402,7 @@ def run_adjoint_capture_core(
                     f"forward split refused: {samples[0]}:{samples[1]} is not a range the "
                     f"prep launched ({forward_prep['ranges']})")
             batch_offset = samples[0]
-            label = forward_quantum_label(*samples)
+            label = forward_quantum_label(*samples, role="forward")
     seed_plan = None
     if chain_seed is not None:
         try:
