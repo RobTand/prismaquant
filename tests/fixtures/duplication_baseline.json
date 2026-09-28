@@ -2,13 +2,6 @@
  "must_differ": [
   {
    "pair": [
-    "prismaquant/aura_cost.py::_atomic_write_bytes",
-    "tools/reseal_campaign_identity.py::atomic_write"
-   ],
-   "reason": "tools/reseal_campaign_identity.py keeps its row rewrites stdlib-only: import prismaquant pulls in torch, it imports the package lazily only for consumer_merge, and aura_cost cannot import a tool."
-  },
-  {
-   "pair": [
     "prismaquant/joint_aura_retained_budget_transition.py::_actual_execution",
     "prismaquant/joint_aura_run_transition.py::_actual_execution"
    ],
@@ -37,10 +30,6 @@
   }
  ],
  "near_duplicates": [
-  [
-   "prismaquant/aura_cost.py::_atomic_write_bytes",
-   "tools/reseal_campaign_identity.py::atomic_write"
-  ],
   [
    "prismaquant/joint_aura_retained_budget_transition.py::_actual_execution",
    "prismaquant/joint_aura_run_transition.py::_actual_execution"
