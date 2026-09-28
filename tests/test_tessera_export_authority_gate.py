@@ -193,7 +193,7 @@ def test_the_helper_reads_the_contract_not_a_constant(tmp_path):
     # #1587 (tessera#691 review item 1): a block that does not list the
     # driver refuses -- silently dropping the option hands the exporter an
     # argv whose cached-unit bundle refuses downstream instead of here.
-    with pytest.raises(lane.ProducerInterfaceError, match="does not list"):
+    with pytest.raises(lane.ProducerInterfaceError, match="does not include"):
         lane.producer_authority_argv(_checkout(tmp_path / "unlisted", unlisted), "/a.py")
     renamed = json.loads(json.dumps(NEW_PIN_CONTRACT))
     renamed["producer_interface"]["reuse_authority"]["option"] = "--authority"
@@ -248,7 +248,7 @@ def test_a_legacy_shim_inner_refuses_when_only_the_new_driver_is_listed(tmp_path
     inner = ["python3", f"{CONTAINER_TESSERA}/{campaign.LEGACY_EXPORTER_SCRIPT}"]
     spec = {"container": {"mounts": [{"source": str(checkout),
                                           "target": CONTAINER_TESSERA}]}}
-    with pytest.raises(lane.ProducerInterfaceError, match="does not list"):
+    with pytest.raises(lane.ProducerInterfaceError, match="does not include"):
         campaign.export_inner_with_authority(inner, spec, cwd=str(tmp_path))
 
 

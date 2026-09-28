@@ -99,14 +99,17 @@ def producer_authority_argv(tessera_checkout, authority_path,
     """
     contract = json.loads(checkout_contract_path(tessera_checkout).read_text())
     if not advertises_producer_authority(contract, driver):
+        # Reaching here means the block is present and well-formed:
+        # advertises_producer_authority raises on a missing or malformed
+        # block and returns False only when the drivers list omits driver.
+        # Say exactly that, not the vaguer "publishes reuse_authority".
         if contract.get("producer_interface") is not None:
             raise ProducerInterfaceError(
-                f"the Tessera contract publishes producer_interface "
-                f"reuse_authority but does not list {driver!r} in its "
-                f"drivers; the exporter this argv names does not take "
-                f"{PRODUCER_AUTHORITY_OPTION}, so passing a cached-unit "
-                f"bundle with it would refuse downstream with "
-                f"MISSING_REUSE_AUTHORITY")
+                f"the Tessera contract's producer_interface.reuse_authority "
+                f"drivers list does not include {driver!r}; the exporter "
+                f"this argv names does not take {PRODUCER_AUTHORITY_OPTION}, "
+                f"so passing a cached-unit bundle with it would refuse "
+                f"downstream with MISSING_REUSE_AUTHORITY")
         return []
     return [PRODUCER_AUTHORITY_OPTION, str(authority_path)]
 

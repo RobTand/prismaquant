@@ -173,10 +173,15 @@ def test_the_supported_path_exports_the_same_bytes(tmp_path):
          cwd=repo, env=dict(os.environ,
                             PYTHONPATH=str(repo / "src")))
 
-    assert json.loads(new_plan.read_text()) == json.loads(old_plan.read_text())
+    # The writer declares the schema it planned against and holds it to
+    # the package validator; the pre-#687 translator emits no declaration.
+    # Compare the served entries equal, and the declaration separately.
+    new = json.loads(new_plan.read_text())
+    assert new.pop("schema") == "tessera.serving_plan.v1"
+    assert new == json.loads(old_plan.read_text())
     # The MoE path ran: the stack is planned as one unit, not completed BF16.
     stack = f"{L1MOE}.experts"
-    entry = json.loads(new_plan.read_text())[stack]
+    entry = new[stack]
     assert entry == {"grid": "E4M3", "q256": 1024,
                       "source_layout": "unpacked_per_expert"}, entry
 
@@ -187,11 +192,15 @@ def test_the_supported_path_exports_the_same_bytes(tmp_path):
             assert old_files[name] == new_files[name], name
     # Manifests may embed their own absolute paths; compare them with both
     # output roots neutralised so only real content differences can fail.
-    # The exporter also stamps its wall clock and the --plan-json path.
+    # The exporter also stamps its wall clock, the --plan-json path, and
+    # the plan's schema declaration (which only the new path writes; the
+    # manifest records it by design).
     def _neutral(root, plan, name):
         text = (root / name).read_text()
         text = text.replace(str(root), "<out>").replace(str(plan), "<plan>")
-        return re.sub(r'"written":\s*"[^"]*"', '"written":"<t>"', text)
+        text = re.sub(r'"written":\s*"[^"]*"', '"written":"<t>"', text)
+        return re.sub(r'"plan_schema":\s*(?:"[^"]*"|null)',
+                      '"plan_schema":"<s>"', text)
     for name in sorted(old_files):
         if name.endswith(".json"):
             assert (_neutral(out_old, old_plan, name)

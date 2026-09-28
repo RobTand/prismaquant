@@ -95,6 +95,8 @@ def _surface(*, dense=None, routed=None, stacks=None, scheme=None):
     return SimpleNamespace(
         MOE_ROUTER=re.compile(r"^.*\.mlp\.(?:gate|router)\.weight$"),
         MOE_SOURCE_UNPACKED="unpacked_per_expert",
+        SERVING_PLAN_SCHEMA="tessera.serving_plan.v1",
+        validate_serving_plan=lambda plan: None,
         TesseraError=_TesseraError,
         quantizable=quantizable,
         expert_stacks=expert_stacks,
@@ -362,6 +364,33 @@ def test_the_uniform_plan_reads_the_logical_leaves_not_the_stack(tmp_path, monke
     assert surface.units_from_plan(logical, shapes)
     with pytest.raises(surface.TesseraError, match="has no shape"):
         surface.units_from_plan(plan, shapes)
+
+
+def test_the_plan_declares_its_schema_and_self_validates(tmp_path, monkeypatch):
+    surface = _surface()
+    monkeypatch.setattr(writer, "tessera_surface", lambda: surface)
+    assert writer.PLAN_SCHEMA == surface.SERVING_PLAN_SCHEMA
+    one = {"tessera_format": "TESSERA_E4M3_K1_R1024"}
+    config = {
+        "model.layers.0.self_attn.q_proj": one,
+        "model.layers.0.self_attn.k_proj": one,
+        "model.layers.0.self_attn.v_proj": one,
+    }
+    shapes, members, layouts = _context(surface, config, tmp_path)
+    plan, _provenance, _logical = writer.plan_from_assignment(
+        config, shapes, members, layouts, model=tmp_path, cover="as-allocated",
+        allow_disagreement=False, control_rule="nearest", with_control=False,
+        surface=surface)
+    assert plan["schema"] == "tessera.serving_plan.v1"
+
+    def _refusing(plan):
+        raise ValueError("has an invalid entry 'x': no such thing")
+    surface.validate_serving_plan = _refusing
+    with pytest.raises(SystemExit, match="the writer's own plan fails"):
+        writer.plan_from_assignment(
+            config, shapes, members, layouts, model=tmp_path, cover="as-allocated",
+            allow_disagreement=False, control_rule="nearest", with_control=False,
+            surface=surface)
 
 
 def test_mixed_choices_inside_a_stack_refuse(tmp_path, monkeypatch):

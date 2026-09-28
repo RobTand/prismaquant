@@ -122,7 +122,8 @@ def tessera_surface() -> SimpleNamespace:
         from tessera.serving_parts import (
             SOURCE_ROSTER_FIELDS, source_roster_identity)
         from tessera.serving_plan import (
-            family_for, module_scheme_key)
+            SERVING_PLAN_SCHEMA, family_for, module_scheme_key,
+            validate_serving_plan)
     except ImportError as exc:
         raise RuntimeError(
             "the Tessera pin packages no tessera.export_serving/"
@@ -135,9 +136,11 @@ def tessera_surface() -> SimpleNamespace:
         control_block=control_block, grid_for_name=grid_for_name,
         selection_requirement=selection_requirement,
         uniform_control=uniform_control, units_from_plan=units_from_plan,
+        SERVING_PLAN_SCHEMA=SERVING_PLAN_SCHEMA,
         body_layer=body_layer, expert_stacks=expert_stacks,
         family_for=family_for, fused_module=fused_module,
         module_scheme_key=module_scheme_key,
+        validate_serving_plan=validate_serving_plan,
         packed_expert_stacks=packed_expert_stacks,
         project_expert_plan=project_expert_plan, quantizable=quantizable,
         SOURCE_ROSTER_FIELDS=SOURCE_ROSTER_FIELDS,
@@ -606,7 +609,15 @@ def plan_from_assignment(config: dict, shapes: dict, members: dict, layouts: dic
     # Returned alongside for --write-uniform-plan; main() must not
     # reconstruct it, because a reordering of the stacked plan is not it.
     logical_plan = plan
-    plan = stack_plan(logical_plan, members, layouts)
+    stacked = stack_plan(logical_plan, members, layouts)
+    # Declare the schema the plan is written against and hold it to the
+    # package's own validator before anything reads it: a package schema
+    # move refuses here, at plan time, not after the first encode.
+    plan = {"schema": PLAN_SCHEMA, **stacked}
+    try:
+        surface.validate_serving_plan(plan)
+    except ValueError as exc:
+        raise PlanError(f"the writer's own plan fails {PLAN_SCHEMA}: {exc}") from exc
     # Only quantized expert stacks need model-config geometry. Dense planning
     # remains a header-only operation, including its selection warning.
     selected_stacks = {stack: plan[stack] for stack in members
