@@ -1424,15 +1424,33 @@ def test_the_selection_caveat_records_the_served_measurement():
 
 
 def test_the_allocator_stamps_the_caveat_rather_than_only_printing_it():
-    """A terminal line is not a property of the artifact."""
-    import inspect
-    from prismaquant import allocator
+    """A terminal line is not a property of the artifact.
 
-    src = inspect.getsource(allocator)
-    assert src.count("surrogate_selection_caveat()") >= 2, (
-        "the caveat must reach BOTH provenance stamp sites, not just the "
-        "layer_config one")
-    assert "CANDIDATE, not a selection" in src
+    The allocator writes the lane's blocks through the plugin's two metadata
+    hooks (#1558), so the caveat must come out of BOTH -- ``layer_config.json``
+    and ``selection.json`` -- whenever a Tessera rung reached the menu, and out
+    of neither on a stock run.
+    """
+    import inspect
+    from prismaquant import tessera_lane
+
+    widths = {"tessera_rungs_before_reduction": 3}
+    layer_config = tessera_lane.allocation_layer_config_meta(
+        menu_report={}, menu_report_agg={}, menu_widths=widths,
+        group_menu_report={}, hessian_identity={}, dev_pin={},
+        assignment={}, cost_data={"costs": {}})
+    selection = tessera_lane.allocation_selection_meta(
+        menu_report={}, menu_report_agg={}, menu_widths=widths,
+        group_menu_report={}, dev_pin={})
+    for meta in (layer_config, selection):
+        assert meta["tessera_menu"]["selection_caveat"] == (
+            tm.surrogate_selection_caveat())
+
+    stock = tessera_lane.allocation_selection_meta(
+        menu_report={}, menu_report_agg={}, menu_widths={},
+        group_menu_report={}, dev_pin={})
+    assert "selection_caveat" not in stock["tessera_menu"]
+    assert "CANDIDATE, not a selection" in inspect.getsource(tessera_lane)
 
 
 # ---------------------------------------------------------------------------
