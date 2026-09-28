@@ -4,6 +4,11 @@ Tessera contract v40 publishes, as data, which export drivers accept
 ``--producer-authority`` (``producer_interface.reuse_authority``, tessera#599).
 This module reads that block from a checkout's packaged contract and answers
 with the argv to add, which is empty for a pin that predates the option.
+Since PrismaQuant #1587 the named driver is the supported package entry
+point ``src/tessera/export_serving.py`` (RobTand/tessera#687); a contract
+whose block does not list it is refused, not answered with ``[]`` --
+silently dropping the option hands the exporter an argv whose cached-unit
+bundle then refuses downstream with MISSING_REUSE_AUTHORITY.
 
 It imports only the standard library. ``run-pipeline.sh`` runs it by path
 (``python3 -c 'import runpy ...'``), so one JSON read does not first import the
@@ -25,7 +30,10 @@ class ProducerInterfaceError(RuntimeError):
 
 
 #: The exporter every PrismaQuant export argv names, relative to its checkout.
-EXPORTER_DRIVER = "experiments/export_tessera_serving.py"
+#: Since #1587 the supported package entry point (tessera#687); the old
+#: experiments shim path is gone from this constant, so a pin that predates
+#: #687 fails the preflight's producer-tools existence check AND refuses here.
+EXPORTER_DRIVER = "src/tessera/export_serving.py"
 
 #: The option the reuse-authority seam adds (tessera#599), as the contract
 #: spells it. Read back from the contract below; never passed on this alone.
@@ -83,10 +91,22 @@ def producer_authority_argv(tessera_checkout, authority_path,
     Every PrismaQuant export argv goes through this, so a Tessera pin that
     predates the option is handed the argv it was always handed, byte for
     byte, and a pin that publishes it is handed PrismaQuant's reuse
-    authority (``tessera_reuse_authority.py``).
+    authority (``tessera_reuse_authority.py``).  A contract that publishes
+    the block but does not list ``driver`` REFUSES: the exporter this argv
+    names does not take the option, and returning ``[]`` would hand it an
+    argv whose cached-unit bundle refuses downstream with
+    MISSING_REUSE_AUTHORITY instead of here, where the cause is named.
     """
     contract = json.loads(checkout_contract_path(tessera_checkout).read_text())
     if not advertises_producer_authority(contract, driver):
+        if contract.get("producer_interface") is not None:
+            raise ProducerInterfaceError(
+                f"the Tessera contract publishes producer_interface "
+                f"reuse_authority but does not list {driver!r} in its "
+                f"drivers; the exporter this argv names does not take "
+                f"{PRODUCER_AUTHORITY_OPTION}, so passing a cached-unit "
+                f"bundle with it would refuse downstream with "
+                f"MISSING_REUSE_AUTHORITY")
         return []
     return [PRODUCER_AUTHORITY_OPTION, str(authority_path)]
 

@@ -2983,8 +2983,12 @@ def export_inner_with_authority(inner: list[str], spec: dict, *, cwd: str) -> li
     naming the adopter in the PrismaQuant tree the container actually runs
     (``pinned_source_root``: a declared mount, or the sealed ``/workspace``).
 
-    An inner command that already passes the option, or that names no exporter
-    script (``python -m ...``), is returned unchanged: the caller spelled it.
+    An inner command that already passes the option, or that names no Tessera
+    exporter at all, is returned unchanged: the caller spelled it.  Both
+    spellings resolve: the checkout-relative script path (pins before
+    tessera#687) and the supported module form ``python -m
+    tessera.export_serving`` (#1587), whose checkout is the mounted tree
+    that carries the driver's file.
     """
     from prismaquant.tessera_export_lane import (
         EXPORTER_DRIVER, PRODUCER_AUTHORITY_OPTION, producer_authority_argv)
@@ -2996,21 +3000,31 @@ def export_inner_with_authority(inner: list[str], spec: dict, *, cwd: str) -> li
     suffix = PurePosixPath(EXPORTER_DRIVER)
     hits = [index for index, item in enumerate(inner)
             if PurePosixPath(item).parts[-len(suffix.parts):] == suffix.parts]
-    if not hits:
+    mounts = spec.get("container", {}).get("mounts", [])
+    module = _exporter_module_form(EXPORTER_DRIVER)
+    module_hits = (
+        [index + 1 for index, item in enumerate(inner[:-1])
+         if module is not None and item == "-m" and inner[index + 1] == module]
+        if not hits else [])
+    if not hits and not module_hits:
         return list(inner)
-    if len({inner[index] for index in hits}) != 1:
+    if len({inner[index] for index in hits + module_hits}) != 1:
         raise RuntimeError(
             "the export command names more than one Tessera exporter: "
-            + ", ".join(sorted({inner[index] for index in hits})))
-    exporter = inner[hits[0]]
-    mounts = spec.get("container", {}).get("mounts", [])
-    exporter_host = host_path(exporter, cwd=cwd, mounts=mounts)
-    if exporter_host is None or not exporter_host.is_file():
-        raise RuntimeError(
-            f"the export command's exporter {exporter} is not a file behind "
-            "any mount the spec declares, so its checkout's contract cannot be "
-            "read to decide whether it takes --producer-authority")
-    checkout = exporter_host.parents[len(suffix.parts) - 1]
+            + ", ".join(sorted({inner[index] for index in hits + module_hits})))
+    if module_hits:
+        checkout = _module_checkout(mounts, cwd=cwd)
+        at = module_hits[0]
+    else:
+        exporter = inner[hits[0]]
+        exporter_host = host_path(exporter, cwd=cwd, mounts=mounts)
+        if exporter_host is None or not exporter_host.is_file():
+            raise RuntimeError(
+                f"the export command's exporter {exporter} is not a file behind "
+                "any mount the spec declares, so its checkout's contract cannot be "
+                "read to decide whether it takes --producer-authority")
+        checkout = exporter_host.parents[len(suffix.parts) - 1]
+        at = hits[0]
     entry, pq_root, _ = pinned_source_root(spec, cwd=cwd)
     authority_container = str(PurePosixPath(entry or "/workspace")
                               / PurePosixPath(*REUSE_AUTHORITY_RELATIVE.parts))
@@ -3022,7 +3036,48 @@ def export_inner_with_authority(inner: list[str], spec: dict, *, cwd: str) -> li
             f"the Tessera checkout {checkout} attests its exporter takes "
             f"--producer-authority, but the PrismaQuant tree the container "
             f"runs ({pq_root}) has no {REUSE_AUTHORITY_RELATIVE}")
-    return inner[:hits[0] + 1] + extra + inner[hits[0] + 1:]
+    return inner[:at + 1] + extra + inner[at + 1:]
+
+
+def _exporter_module_form(driver: str) -> "str | None":
+    """The ``python -m`` spelling of a ``src/``-layout driver, if it has one.
+
+    ``src/tessera/export_serving.py`` runs as ``tessera.export_serving``
+    with the checkout's ``src/`` on the path (tessera#687); a driver that
+    does not live under ``src/`` has no derivable module form.
+    """
+    parts = PurePosixPath(driver).parts
+    if len(parts) < 2 or parts[0] != "src" or not parts[-1].endswith(".py"):
+        return None
+    return ".".join(parts[1:-1] + (parts[-1][:-len(".py")],))
+
+
+def _module_checkout(mounts: list, *, cwd: str):
+    """The mounted Tessera checkout that carries the module-form exporter.
+
+    The module name resolves through the container's ``PYTHONPATH``, which
+    this helper cannot see; the host side it CAN see is the mounts.  The
+    checkout is the mount whose host tree carries the driver's file --
+    exactly one must, or the exporter is not a file behind any declared
+    mount and the contract cannot be read.
+    """
+    from pathlib import Path
+
+    from prismaquant.tessera_export_lane import EXPORTER_DRIVER
+
+    providers = [
+        mount["source"]
+        for mount in mounts
+        if isinstance(mount, dict) and mount.get("source")
+        and (Path(mount["source"]) / EXPORTER_DRIVER).is_file()
+    ]
+    if len(providers) != 1:
+        raise RuntimeError(
+            "the export command's exporter "
+            f"{_exporter_module_form(EXPORTER_DRIVER)} is not a file behind "
+            "any mount the spec declares, so its checkout's contract cannot be "
+            "read to decide whether it takes --producer-authority")
+    return Path(providers[0])
 
 
 def cmd_submit_export(args) -> int:

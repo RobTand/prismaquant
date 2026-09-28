@@ -2369,15 +2369,17 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   # the checkpoint selects the plugin. Scoped targets additionally bind the
   # exact image and execution mode rather than inheriting wrapper defaults.
   #
-  # TWO CALLS OUT, ZERO CODECS IN. The layer_config -> plan translation and
-  # the encode both live in the Tessera repository and are NAMED here, never
-  # copied: `plan_from_layer_config.py` is the only place the
-  # `TESSERA_<BASE>_K<arity>_R<rung>` spelling is turned into the exporter's
-  # (grid, q256), and `export_tessera_serving.py` is the only place the wire
-  # is written. A second copy of either in this repository would be a second
-  # place a wire recipe can drift, which is exactly what the producer/consumer
+  # ONE CALL OUT, ZERO CODECS IN. The layer_config -> plan translation lives
+  # in THIS repository (`python -m prismaquant.tessera_plan_writer`, #1587:
+  # the `TESSERA_<BASE>_K<arity>_R<rung>` spelling and the charged-bits
+  # accounting are the producer's own records, not the exporter's), and the
+  # encode is Tessera's supported package entry point
+  # (`python -m tessera.export_serving`, RobTand/tessera#687), NAMED here and
+  # run with the pin-verified checkout first on its PYTHONPATH, never copied:
+  # a second copy of either in this repository would be a second place a
+  # wire recipe can drift, which is exactly what the producer/consumer
   # boundary exists to prevent. The lane preflight above has already refused
-  # if TESSERA_REPO does not hold both.
+  # if TESSERA_REPO does not hold the declared exporter.
   # Re-read the allocation's scope and actual source header dimensions even
   # when an old plan exists: a cached plan is not an admission receipt.
   TESSERA_BUILD_JSON="${WORK_DIR}/artifacts/tessera_build.json"
@@ -2429,13 +2431,14 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   if [[ ! -f "$TESSERA_PLAN" ]]; then
     echo "[pipeline] [4/4] translating layer_config.json -> Tessera plan (cover=${TESSERA_PLAN_COVER}) ..."
     # Write-then-rename: a crashed translation must not leave a partial plan
-    # that the skip-gate above then trusts.
-    python3 "${TESSERA_REPO%/}/experiments/plan_from_layer_config.py" \
+    # that the skip-gate above then trusts. The writer is PrismaQuant's own
+    # module (#1587) -- no --prismaquant flag: there is no translation layer
+    # left to point at this repository.
+    python3 -m prismaquant.tessera_plan_writer \
       "$TESSERA_PLAN_ASSIGNMENT" \
       "$MODEL_PATH" \
       "${TESSERA_PLAN}.tmp" \
       --cover "$TESSERA_PLAN_COVER" \
-      --prismaquant "$PIPELINE_SCRIPT_DIR/.." \
       2>&1 | tee "${WORK_DIR}/logs/tessera_plan.log"
     if [[ "$TESSERA_PLAN_ASSIGNMENT" != "${WORK_DIR}/artifacts/layer_config.json" ]]; then
       TESSERA_PLAN_ASSIGNMENT_DIGEST=$(sha256sum "$TESSERA_PLAN_ASSIGNMENT")
@@ -2445,8 +2448,8 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
       fi
     fi
     mv "${TESSERA_PLAN}.tmp" "$TESSERA_PLAN"
-    # The translator writes `<out>.provenance.json` beside the plan: the
-    # source path, the allocation's own __prismaquant__ block, the coverage
+    # The writer writes `<out>.provenance.json` beside the plan: the source
+    # path, the allocation's own __prismaquant__ block, the coverage
     # decision, and the per-unit shape/rung/wire-bytes table an export is
     # checked against. It moves with the plan, not after it. An explicit `if`
     # rather than `[[ ... ]] &&` because a false test would be this block's
@@ -2494,9 +2497,11 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   # correct; omitting them on an H-aware allocation is unreachable -- the
   # preflight exits 2 above before this line runs.
   # The reuse authority rides only when the checkout's contract attests the
-  # exporter takes it (Tessera contract v40); an older pin gets today's argv.
-  # The reader is stdlib-only and runs by path, so this JSON read does not
-  # import the prismaquant package (torch, transformers) first.
+  # exporter takes it (Tessera contract v40+); a pin whose contract has no
+  # producer_interface block gets today's argv, and a pin whose block does
+  # not list the exporter refuses rather than silently dropping the option
+  # (#1587). The reader is stdlib-only and runs by path, so this JSON read
+  # does not import the prismaquant package (torch, transformers) first.
   if ! TESSERA_AUTHORITY_LINES=$(python3 -c 'import runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name="__main__")' \
       "${PIPELINE_SCRIPT_DIR}/tessera_producer_interface.py" \
       "${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"); then
@@ -2506,7 +2511,11 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   if [[ -n "$TESSERA_AUTHORITY_LINES" ]]; then
     mapfile -t TESSERA_AUTHORITY_ARGS <<< "$TESSERA_AUTHORITY_LINES"
   fi
-  python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py" \
+  # The exporter resolves from the pin-verified checkout FIRST: a Tessera
+  # installed beside the checkout (the PB venvs install one non-editable)
+  # must never answer `python -m tessera.export_serving` while a different
+  # checkout wrote the plan the preflight checked (principle 8).
+  PYTHONPATH="${TESSERA_REPO%/}/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m tessera.export_serving \
     "$MODEL_PATH" "${WORK_DIR}/exported" \
     --plan-json "$TESSERA_PLAN" \
     --priced-inputs "$TESSERA_BUILD_JSON" \

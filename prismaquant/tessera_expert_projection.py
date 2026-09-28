@@ -62,7 +62,8 @@ SOURCE_LAYOUT_UNPACKED = "unpacked_per_expert"
 #: The producer's whole-tensor selector for an unpacked unit.
 WHOLE_SELECTOR = "whole"
 #: The producer tool this bridge shells out to, as declared in
-#: ``lane_specs/tessera.json`` ``producer_tools``.
+#: ``lane_specs/tessera.json`` ``campaign_tools`` (#1587: a campaign
+#: dependency, not an export-arm call).
 PRODUCER_PLAN_TOOL = "experiments/tessera_producer_plan.py"
 #: The keys of a producer unit record that ``tessera.cached_unit.unit_input_identity``
 #: seals into the priced-wire receipt.  Pinned against the producer by test.
@@ -88,22 +89,29 @@ CARRIED_PROJECTION_SCHEMA = "prismaquant.tessera_expert_projection.v1"
 def producer_plan_tool(env: Mapping[str, str] | None = None) -> Path:
     """The declared producer projection tool, located through the lane spec.
 
-    The lane spec's ``producer_tools`` roster is the one list of Tessera files
-    this repository shells out to; a tool absent from it is one nobody can
-    check for.  ``TESSERA_REPO`` locates the pinned checkout, as it does for
-    the translator and the exporter.
+    The lane spec's ``campaign_tools`` roster (#1587) is the list of Tessera
+    files the campaign shells out to that the export arm does not call; a
+    tool absent from it is one nobody can check for.  ``TESSERA_REPO``
+    locates the pinned checkout, as it does for the plan writer and the
+    exporter.  Both rosters are scanned -- the export roster first -- so a
+    future move of the tool back onto the arm's path keeps resolving.
     """
-    from .tessera_export_lane import TesseraExportLaneError, require_producer_tools
+    from .tessera_export_lane import (
+        TesseraExportLaneError,
+        require_campaign_tools,
+        require_producer_tools,
+    )
 
     try:
-        resolved = require_producer_tools(env=env)
+        resolved = (*require_producer_tools(env=env),
+                    *require_campaign_tools(env=env))
     except TesseraExportLaneError as exc:
         raise ExpertProjectionError(str(exc)) from exc
     for path in resolved:
         if path.endswith("/" + PRODUCER_PLAN_TOOL):
             return Path(path)
     raise ExpertProjectionError(
-        f"lane_specs/tessera.json producer_tools does not declare {PRODUCER_PLAN_TOOL}; "
+        f"lane_specs/tessera.json campaign_tools does not declare {PRODUCER_PLAN_TOOL}; "
         "the packed-expert bridge needs the producer's explicit projection and "
         "will not derive one from tensor names")
 

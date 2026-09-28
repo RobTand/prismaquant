@@ -341,6 +341,7 @@ def test_mixed_choices_inside_a_stack_refuse(tmp_path, monkeypatch):
 def test_carried_projection_supplies_the_stack_membership(tmp_path, monkeypatch):
     surface = _stack_surface()
     monkeypatch.setattr(writer, "tessera_surface", lambda: surface)
+    (tmp_path / "config.json").write_text("{}")
     packed_layout = "out_first_chunked"
     producer_stacks = {
         STACK: {"source_layout": packed_layout,
@@ -381,6 +382,7 @@ def test_carried_projection_disagreement_with_the_producer_refuses(
         tmp_path, monkeypatch):
     surface = _stack_surface()
     monkeypatch.setattr(writer, "tessera_surface", lambda: surface)
+    (tmp_path / "config.json").write_text("{}")
     producer_stacks = {
         STACK: {"source_layout": "unpacked_per_expert",
                 "units": [{"tensor": name, "rows": shape[0], "cols": shape[1]}
@@ -467,8 +469,7 @@ def test_main_writes_the_plan_and_the_sidecar(tmp_path, monkeypatch):
         **{f"model.layers.0.mlp.{role}_proj": fmt for role in ("gate", "up")},
         "model.layers.1.mlp.down_proj": "BF16"}))
     out = tmp_path / "plan.json"
-    rc = writer.main(["--model", str(tmp_path / "model"),
-                      str(assignment), str(out)])
+    rc = writer.main([str(assignment), str(tmp_path / "model"), str(out)])
     assert rc == 0
     plan = json.loads(out.read_text())
     assert plan["model.layers.0.self_attn.q_proj.weight"] == {"grid": "E4M3", "q256": 1024}

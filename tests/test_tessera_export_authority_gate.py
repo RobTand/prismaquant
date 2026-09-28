@@ -1,12 +1,14 @@
 """The reuse authority reaches Tessera's exporter only when its pin attests it.
 
-Tessera#599 step 2 gave ``experiments/export_tessera_serving.py`` a
-``--producer-authority`` option, and Tessera contract v40 publishes that as
-data (``producer_interface.reuse_authority``). An exporter from before v40
+Tessera#599 step 2 gave the serving exporter a ``--producer-authority``
+option, and Tessera contract v40 publishes that as data
+(``producer_interface.reuse_authority``). An exporter from before v40
 refuses the option as an unknown argument, and the live campaign pins one
 (``tessera-a3e83875``), so every PrismaQuant export argv asks the checkout's
 own contract first (principle 14: read what the pinned runtime attests, never
-assert it).
+assert it). Since #1587 the named driver is the supported package entry
+point ``src/tessera/export_serving.py`` (tessera#687); a contract whose block
+does not list it refuses rather than silently dropping the option.
 
 These tests drive the real builders:
 
@@ -188,7 +190,11 @@ def test_the_helper_reads_the_contract_not_a_constant(tmp_path):
     assert lane.producer_authority_argv(new, "/a.py") == ["--producer-authority", "/a.py"]
     unlisted = json.loads(json.dumps(NEW_PIN_CONTRACT))
     unlisted["producer_interface"]["reuse_authority"]["drivers"].remove(lane.EXPORTER_DRIVER)
-    assert lane.producer_authority_argv(_checkout(tmp_path / "unlisted", unlisted), "/a.py") == []
+    # #1587 (tessera#691 review item 1): a block that does not list the
+    # driver refuses -- silently dropping the option hands the exporter an
+    # argv whose cached-unit bundle refuses downstream instead of here.
+    with pytest.raises(lane.ProducerInterfaceError, match="does not list"):
+        lane.producer_authority_argv(_checkout(tmp_path / "unlisted", unlisted), "/a.py")
     renamed = json.loads(json.dumps(NEW_PIN_CONTRACT))
     renamed["producer_interface"]["reuse_authority"]["option"] = "--authority"
     with pytest.raises(lane.ProducerInterfaceError, match="does not publish"):
@@ -272,10 +278,16 @@ def test_run_pipeline_reads_the_contract_without_importing_prismaquant(
     assert not imported & {"prismaquant", "torch", "transformers", "numpy"}, sorted(imported)
 
 
-def test_the_packaged_pin_attests_the_option():
-    """The pin this tree admits publishes the block, so run-pipeline passes it."""
+def test_the_packaged_pin_does_not_yet_attest_the_new_driver(tmp_path):
+    """Fail-closed until the pin moves to tessera#691: the admitted v42
+    contract attests the old shim path, not ``src/tessera/export_serving.py``,
+    so the reader refuses rather than silently dropping the option.  The pin
+    bump (contract v43 + new PB venv) is the step that flips this."""
     from prismaquant import tessera_render as tr
     from importlib.resources import as_file
     with as_file(tr.tessera_serving_contract_path()) as path:
         contract = json.loads(Path(path).read_text())
-    assert lane.advertises_producer_authority(contract)
+    assert not lane.advertises_producer_authority(contract)
+    checkout = _checkout(tmp_path / "tessera", contract)
+    with pytest.raises(lane.ProducerInterfaceError, match="does not list"):
+        lane.producer_authority_argv(checkout, "/a.py")
