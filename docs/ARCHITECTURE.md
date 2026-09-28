@@ -3767,7 +3767,14 @@ own, and `hash_workers` leaves `attach_candidate_overlay`. `_bounded_hash_pool`
 and `_fence_hash_workers` are gone, so `tests/test_io_site_freeze.py` passes by
 removal. A hash job's refusal travels as its value and is raised by the
 admitting thread, so a refused file is hashed once and never retried as a
-read-ahead failure.
+read-ahead failure. Every file stat fence now reads one identity,
+`file_identity.file_stat_signature` (epic #1295): the two same-name
+`_stat_fence` helpers and the private copies in `perturbed_x_cache`,
+`residency_shard_reader` and `tessera_calibration_cache` are gone. The sealed
+overlay catalog projects its four persisted keys from it
+(`joint_catalog_extension._catalog_fence`), byte-identical to the dict #1519
+sealed. Gates: `tests/test_duplication_baseline.py`,
+`tests/test_file_identity.py`.
 
 Gates: `tests/test_io_site_freeze.py`, `tests/test_overlay_fence_pool_1519.py`,
 `tests/test_selected_fence_pool_1522.py`.
@@ -7476,7 +7483,8 @@ NFS that was 11.0% of main-thread wall time, 3,305 of 29,999 py-spy samples in
 `/home/rob/dq-runs/salvage/joint-aura-perf-20260917/prepare-300s.speedscope.json`).
 The total is a pure function of the file's bytes, so `_window_file` now
 remembers it under the file identity this cache already trusts for exactly
-that purpose -- the `cache_file_stat_signature` tuple every window read
+that purpose -- the `file_identity.file_stat_signature` tuple (formerly
+`perturbed_x_cache.cache_file_stat_signature`, PQ #1531) every window read
 re-checks -- and a file whose signature moved is a miss and is rescanned. The
 memo is one small entry per distinct backing path, so it cannot outgrow the
 roster the cache already holds a path for, and it is dropped when a window
@@ -21220,6 +21228,12 @@ fallback:
   consumer that resolves a format by name — candidates, the production-cache
   render, the KL validator — works unchanged, and nothing else in the pipeline
   imports the seam.
+  That is the intent, not yet the code: 17 core modules still import lane
+  modules or branch on Tessera names. `tests/test_tessera_core_boundary.py`
+  (PQ #1534) freezes those sites and the private lane helpers other modules
+  import, `tests/test_prismabuild_boundary.py` freezes PQ's reach into
+  PrismaBuild internals, and their allowlists under `tests/boundary_allowlists/`
+  only shrink.
 
 **Exact pricing, or refusal.** `FormatSpec.bits_for_shape_fn` (added on this
 branch) is a format's own accountant. A Tessera spec has no scalar bpp:

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .dev_mode import dev_mode_enabled, dev_warning, seal_check
+from .file_identity import file_stat_signature
 from .tessera_joint_allocation import _read_bound, _bound_stat_fence
 from .schemas import Contract
 
@@ -85,9 +86,12 @@ def _same(a, b, message):
 FENCE_REHASHED = {}
 
 
-def _stat_fence(stat):
-    return {"inode": stat.st_ino, "bytes": stat.st_size,
-            "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns}
+def _catalog_fence(stat):
+    """The four stat keys a sealed catalog persists, projected from the one
+    file identity (``file_identity.file_stat_signature``, PQ #1531). The
+    dict is part of the sealed wire format: its keys and values are unchanged."""
+    _device, inode, size, mtime_ns, ctime_ns = file_stat_signature(stat)
+    return {"inode": inode, "bytes": size, "mtime_ns": mtime_ns, "ctime_ns": ctime_ns}
 
 
 def _fence_drift(stat, recorded, content_sha256, message):
@@ -105,7 +109,7 @@ def _fence_drift(stat, recorded, content_sha256, message):
     refuses here, without hashing, and so does an artifact with no recorded
     digest: it keeps the strict fence.
     """
-    current = _stat_fence(stat)
+    current = _catalog_fence(stat)
     if current == recorded:
         return None
     _require(content_sha256 is not None and current["bytes"] == recorded.get("bytes"), message + " differs")
@@ -116,7 +120,7 @@ def _rehash_drifted(path, before, content_sha256, message):
     """Admit a stat-drifted artifact only by its recorded digest, hashed while its stat held still."""
     with open(path, "rb") as handle:
         digest = hashlib.file_digest(handle, "sha256").hexdigest()
-    _same(_stat_fence(Path(path).stat()), before, f"{message} of {path} (stat while re-hashing)")
+    _same(_catalog_fence(Path(path).stat()), before, f"{message} of {path} (stat while re-hashing)")
     _same(digest, content_sha256, f"{message} (content re-hash after stat drift) of {path}")
     return digest
 
@@ -241,14 +245,14 @@ def _verify_overlay_payload(observed, blob_sha256, *, rehash, hash_render):
     else:
         with open(wire, "rb") as handle:
             digest = hashlib.file_digest(handle, "sha256").hexdigest()
-        _same(_stat_fence(wire.stat()), observed["wire"][2], f"overlay wire {wire} (stat while hashing)")
+        _same(_catalog_fence(wire.stat()), observed["wire"][2], f"overlay wire {wire} (stat while hashing)")
         _same(digest, blob_sha256, f"overlay wire bytes of {wire}")
     if not hash_render:
         return None
     render, _, before = observed["render"]
     with open(render, "rb") as handle:
         digest = hashlib.file_digest(handle, "sha256").hexdigest()
-    _same(_stat_fence(render.stat()), before, f"overlay render {render} (stat while hashing)")
+    _same(_catalog_fence(render.stat()), before, f"overlay render {render} (stat while hashing)")
     return digest
 
 

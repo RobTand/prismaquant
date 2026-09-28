@@ -98,7 +98,7 @@ import threading
 import time
 from typing import Any, Callable, Hashable, Iterable, Protocol
 
-from .perturbed_x_cache import cache_file_stat_signature as _stat_signature
+from .file_identity import file_stat_signature as _stat_signature
 from .residency_map import StagedReadRefused
 
 
