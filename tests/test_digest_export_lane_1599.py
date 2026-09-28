@@ -68,9 +68,6 @@ def test_bytes_and_text_rows_are_byte_identical(row):
         # Pre-change spelling, verbatim: hashlib.sha256(raw).hexdigest()
         assert hashlib.sha256(raw).hexdigest() == row["expected_hex"]
         assert bytes_sha256hex(raw) == row["expected_hex"]
-        if raw:
-            # digest and bytes producers stay consistent for every intake shape
-            assert bytes_sha256hex(raw) == bytes_sha256hex(base64.b64encode(raw) and raw)
     elif family.startswith("text_sha256hex"):
         text = row["input_text"]
         # Pre-change spelling, verbatim: hashlib.sha256(str(x).encode()).hexdigest()

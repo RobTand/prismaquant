@@ -83,6 +83,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Sequence
 
+from .digests import (
+    bytes_sha256hex, indent2_json_file_bytes, text_sha256hex,
+)
+
 
 #: ``config.json`` keys whose positive value means the checkpoint routes tokens
 #: to experts.  Named rather than sniffed: every in-tree MoE architecture spells
@@ -159,9 +163,6 @@ def packaged_contract_path() -> Path:
 #: Whether a Tessera checkout's exporter takes the producer authority is read
 #: by a stdlib-only module, so ``run-pipeline.sh`` can ask it by path without
 #: importing this package (torch, transformers) to read one JSON block.
-from .digests import (
-    bytes_sha256hex, indent2_json_file_bytes, text_sha256hex,
-)
 from .tessera_producer_interface import (  # noqa: E402  (re-exported)
     EXPORTER_DRIVER, PRODUCER_AUTHORITY_OPTION, ProducerInterfaceError,
     advertises_producer_authority, checkout_contract_path,
