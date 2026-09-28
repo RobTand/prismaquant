@@ -36,7 +36,10 @@ from .joint_head_walk_quanta import check_quantum_for_roster
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
-from .digests import file_sha256hex
+from .digests import (
+    DIRECT_UTF8_STRICT, bytes_sha256hex, file_digest_sha256hex,
+    file_sha256hex, indent2_json_file_bytes, newline_utf8_sha256,
+)
 from .file_identity import file_stat_signature
 from .prismabuild_progress import commit as _pb_commit
 from .stage_inputs import (
@@ -246,7 +249,7 @@ def _read_verified_wire_blob(cell):
                 raise LeaseRefused("lease-open-size-changed", kind="integrity")
         # The window closed (descriptor shut, exact ref released) before
         # these bytes are bound to the receipt.
-        digest = hashlib.sha256(blob).hexdigest()
+        digest = bytes_sha256hex(blob)
         if digest != expected:
             raise refuse_pool_bulk_read(
                 str(wire), "content-corruption:staged wire bytes differ "
@@ -325,7 +328,7 @@ def _read_wire_bytes(wire, size, *, expected, staged):
           f"{wire}: wire changed during its content read")
     _same(_stat_signature(wire.lstat()), _stat_signature(before),
           f"{wire}: wire changed during its content read")
-    digest = hashlib.sha256(blob).hexdigest()
+    digest = bytes_sha256hex(blob)
     if staged and digest != expected:
         raise _StagedWireCorrupt('staged wire bytes differ from the receipt digest')
     _same(digest, expected, f"{wire}: wire checksum")
@@ -333,8 +336,7 @@ def _read_wire_bytes(wire, size, *, expected, staged):
 
 
 def _json(path, value):
-    atomic_write_bytes(Path(path), (json.dumps(value, indent=2, sort_keys=True,
-                                              allow_nan=False) + "\n").encode())
+    atomic_write_bytes(Path(path), indent2_json_file_bytes(value))
 
 
 def _require_sha256(value, where):
@@ -704,7 +706,7 @@ def _synthesize_render_from_wire(render, *, wire, record, name, fmt, shape, read
     from .production_weight_cache import _store_rendered_weight_entry
 
     blob = Path(wire).read_bytes()
-    _same(hashlib.sha256(blob).hexdigest(), record["blob_sha256"],
+    _same(bytes_sha256hex(blob), record["blob_sha256"],
           f"{name}@{fmt}: wire checksum before synthesizing its render")
     try:
         decoded = _decode_wire(blob, reader=reader, device=device).to(torch.bfloat16)
@@ -1111,7 +1113,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             "required_source_units": inputs["required_source_units"],
             "required_campaign_groups": inputs["required_campaign_groups"],
             "checkpoint_seal": seal,
-            "roster_sha256": hashlib.sha256("\n".join(roster).encode("utf-8")).hexdigest(),
+            "roster_sha256": newline_utf8_sha256(roster),
             "render_mirror_root": render_mirror_root,
             "encoder_source_reuse_sha256": (None if encoder_source_reuse is None else
                 canonical_json_sha256(encoder_source_reuse, where="head walk encoder reuse")),
@@ -1162,7 +1164,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                         return False
                     marker = _render_origin_marker_path(row["render"])
                     digest = (None if not marker.is_file()
-                              else hashlib.sha256(marker.read_bytes()).hexdigest())
+                              else bytes_sha256hex(marker.read_bytes()))
                     if digest != fence.get("marker_sha256"):
                         return False
                 return True
@@ -1303,7 +1305,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             fences[fmt] = {"wire_size": wire_stat.st_size,
                            "render_signature": list(_stat_signature(Path(target).stat())),
                            "marker_sha256": (None if not marker.is_file()
-                                             else hashlib.sha256(marker.read_bytes()).hexdigest())}
+                                             else bytes_sha256hex(marker.read_bytes()))}
         formats_row = (*sorted(anchors), "BF16")
         return {"formats": formats_row, "cells": unit_cells, "synthesized_events": events,
                 "bank": {"schema": HEAD_WALK_STATE_SCHEMA,
@@ -1517,7 +1519,7 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
               f"{name}@{fmt}: read-ahead wire size differs from receipt")
         blob = wire_blob
         if wire_sha256 is None:
-            actual_wire_sha256 = hashlib.sha256(blob).hexdigest()
+            actual_wire_sha256 = bytes_sha256hex(blob)
         else:
             # The read-ahead reader already fenced this exact buffer -- size,
             # stat signatures and the receipt digest -- and the handoff is one
@@ -1634,7 +1636,7 @@ def _qualification_file_sha(path):
     with os.fdopen(fd, 'rb') as handle:
         _same(signature(os.fstat(handle.fileno())), signature(before),
               f'qualification input changed before its read: {path}')
-        digest = hashlib.file_digest(handle, 'sha256').hexdigest()
+        digest = file_digest_sha256hex(handle)
         _same(signature(os.fstat(handle.fileno())), signature(before),
               f'qualification input changed while hashing: {path}')
     _same(signature(path.lstat()), signature(before),
@@ -1749,12 +1751,11 @@ def _qualification_cells_sha256(cells):
     digest = hashlib.sha256(QUALIFICATION_CELLS_SCHEMA.encode() + b"\n")
     for name, fmt in sorted(cells):
         cell = cells[name, fmt]
-        row = json.dumps((name, fmt, {
+        row = DIRECT_UTF8_STRICT.encoded((name, fmt, {
             'anchor': cell['anchor'], 'record': cell['record'],
             'render': cell['render'], 'wire': cell['wire'],
             'render_origin': cell['render_origin'],
-        }), sort_keys=True, separators=(',', ':'), ensure_ascii=False,
-            allow_nan=False).encode('utf-8')
+        }))
         digest.update(len(row).to_bytes(8, 'big'))
         digest.update(row)
     return digest.hexdigest()
@@ -2741,7 +2742,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         _same(session.get("command", [])[1:4],
               ["-m", "prismaquant.tessera_joint_aura", command], "observed joint command")
         result["sampling_session"] = {"path": str(session_path),
-                                      "sha256": hashlib.sha256(session_bytes).hexdigest()}
+                                      "sha256": bytes_sha256hex(session_bytes)}
     runner = source_authentication = qualification_guard = None
     completion_path = completion = output = payload = None
     started, before_io = time.time(), _io_counters()
