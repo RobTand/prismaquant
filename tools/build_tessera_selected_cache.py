@@ -17,6 +17,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
+from prismaquant.footprint import whole_artifact_budget_from_assignment_payload
 from prismaquant.layer_config import load_assignment, read_layer_config_metadata
 from prismaquant.tessera_export_lane import selected_cached_units_manifest
 from prismaquant.tessera_joint_aura import load_measured_anchor_input
@@ -28,6 +29,37 @@ def _bound(path: str, digest: str, label: str) -> bytes:
     if hashlib.sha256(raw).hexdigest() != digest:
         raise ValueError(f"{label} SHA-256 differs from the selected receipt")
     return raw
+
+
+def _bind_selected_assignment(assignment_path: str, expected_digest: str) -> dict:
+    """Bind the selected assignment by the allocator's own digest primitive.
+
+    The identity of a selected assignment is
+    ``footprint.assignment_serialization_sha256`` over the canonical
+    unit-to-format mapping (meta excluded) -- the same digest the allocator
+    stamps as ``selection_assignment_sha256``. Raw file bytes are NOT the
+    identity: allocator stamps, meta blocks and JSON re-serialization all
+    change bytes without changing the selection. Returns the validated
+    whole-artifact budget stamp.
+    """
+    payload = json.loads(Path(assignment_path).read_text())
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"selected assignment {assignment_path} is not a JSON object")
+    assignment = load_assignment(assignment_path)
+    stamp = whole_artifact_budget_from_assignment_payload(
+        payload, where=f"selected assignment {assignment_path}",
+        assignment=assignment)
+    if stamp is None:
+        raise ValueError(
+            f"selected assignment {assignment_path} carries no whole-artifact "
+            "budget stamp; refusing unstamped selection")
+    stamped = stamp["selection_assignment_sha256"]
+    if expected_digest != stamped:
+        raise ValueError(
+            f"selected assignment flag names {expected_digest} but the "
+            f"assignment's budget stamp binds {stamped}")
+    return stamp
 
 
 def main(argv=None) -> int:
@@ -72,7 +104,7 @@ def main(argv=None) -> int:
             plan_binding=research['input_bindings']['pilot_plan'])
     else:
         handoff = pickle.loads(_bound(args.handoff, args.handoff_sha256, "joint handoff"))
-    _bound(args.assignment, args.assignment_sha256, "selected assignment")
+    _bind_selected_assignment(args.assignment, args.assignment_sha256)
     assignment = load_assignment(args.assignment)
     metadata = read_layer_config_metadata(args.assignment)
     if research is not None:
