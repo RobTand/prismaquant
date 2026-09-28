@@ -493,8 +493,9 @@ def test_the_surface_imports_from_the_package_not_experiments():
     the package's own objects.
     """
     try:
-        module = __import__("tessera.export_serving")
-        serving_plan = __import__("tessera.serving_plan")
+        import importlib
+        module = importlib.import_module("tessera.export_serving")
+        serving_plan = importlib.import_module("tessera.serving_plan")
     except ImportError:
         with pytest.raises(RuntimeError, match="tessera#687"):
             writer.tessera_surface()

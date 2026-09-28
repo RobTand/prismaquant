@@ -278,16 +278,19 @@ def test_run_pipeline_reads_the_contract_without_importing_prismaquant(
     assert not imported & {"prismaquant", "torch", "transformers", "numpy"}, sorted(imported)
 
 
-def test_the_packaged_pin_does_not_yet_attest_the_new_driver(tmp_path):
-    """Fail-closed until the pin moves to tessera#691: the admitted v42
-    contract attests the old shim path, not ``src/tessera/export_serving.py``,
-    so the reader refuses rather than silently dropping the option.  The pin
-    bump (contract v43 + new PB venv) is the step that flips this."""
+def test_the_packaged_pin_attests_the_new_driver(tmp_path):
+    """Flipped by the PQ #1616 pin move to tessera#691: the admitted v44
+    contract attests ``src/tessera/export_serving.py`` beside the shim, so
+    the reader passes the authority through instead of refusing.  Before the
+    bump this test asserted the refusal (the v42 contract attested the old
+    shim path only); the refusal path itself is still pinned by
+    ``test_the_helper_reads_the_contract_not_a_constant`` on fixture
+    contracts."""
     from prismaquant import tessera_render as tr
     from importlib.resources import as_file
     with as_file(tr.tessera_serving_contract_path()) as path:
         contract = json.loads(Path(path).read_text())
-    assert not lane.advertises_producer_authority(contract)
+    assert lane.advertises_producer_authority(contract)
     checkout = _checkout(tmp_path / "tessera", contract)
-    with pytest.raises(lane.ProducerInterfaceError, match="does not list"):
-        lane.producer_authority_argv(checkout, "/a.py")
+    assert lane.producer_authority_argv(checkout, "/a.py") == [
+        "--producer-authority", "/a.py"]
