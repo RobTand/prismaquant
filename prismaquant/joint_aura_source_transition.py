@@ -18,6 +18,9 @@ import re
 import subprocess
 import weakref
 
+from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
+from .joint_aura_transition_base import _bound, _require
+
 VERSION = "empty_joint_lease_v1"
 SCHEMA = "prismaquant.joint_aura.source_transition.v1"
 _CONTRACT = {
@@ -130,29 +133,6 @@ _SOURCE_REWRITES = {'aura_cost.py': [('            joint_lease = None\n         
                             '    print(json.dumps')]}
 
 
-def _require(ok, message):
-    if not ok:
-        raise ValueError(f"joint source transition: {message}")
-
-
-def _canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False, allow_nan=False).encode()
-
-
-def _sha(path):
-    with Path(path).open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-def _bound(record, label):
-    _require(isinstance(record, dict) and set(record) == {"path", "sha256"},
-             f"{label} requires independently bound path/SHA256")
-    path = Path(record["path"])
-    _require(path.is_file() and _sha(path) == record["sha256"], f"{label} bytes changed")
-    return path
-
-
 def source_proof(package_root=None):
     """Reconstruct old bytes; any additional source change fails closed."""
     root = Path(package_root) if package_root is not None else Path(__file__).resolve().parent
@@ -182,7 +162,7 @@ def source_proof(package_root=None):
     _require(original.hexdigest() == _CONTRACT["source_sha256"], "unapproved producer package change")
     return {"producer_source_sha256": current.hexdigest(),
             "reconstructed_source_sha256": original.hexdigest(),
-            "transition_module_sha256": _sha(root / "joint_aura_source_transition.py")}
+            "transition_module_sha256": file_sha256hex(root / "joint_aura_source_transition.py")}
 
 
 def _actual_execution():
@@ -209,10 +189,10 @@ def _load_inputs(bindings, checkpoint_dir):
     _require(prepared["production_cache"]["sha256"] == _CONTRACT["production_cache_sha256"], "PWC binding mismatch")
     _bound(prepared["production_cache"], "prepared production cache")
     manifest_path = Path(checkpoint_dir) / "manifest.json"
-    _require(_sha(manifest_path) == _CONTRACT["manifest_sha256"], "original manifest changed")
+    _require(file_sha256hex(manifest_path) == _CONTRACT["manifest_sha256"], "original manifest changed")
     manifest = json.loads(manifest_path.read_bytes())
     _require(manifest["identity_sha256"] == _CONTRACT["identity_sha256"] ==
-             hashlib.sha256(_canonical(manifest["identity"])).hexdigest(), "original identity seal mismatch")
+             DIRECT_UTF8_STRICT.sha256(manifest["identity"]), "original identity seal mismatch")
     _require(manifest["identity"]["git_commit"] == _CONTRACT["git_commit"] and
              manifest["identity"]["producer_source_sha256"] == _CONTRACT["source_sha256"], "original producer mismatch")
     _require(inspection["identity_sha256"] == manifest["identity_sha256"] and
@@ -245,12 +225,12 @@ def _unit_roster(checkpoint_dir, manifest, preserved, execution_provenance=None,
         if name in old:
             row = old[name]
             _require(path.is_file() and path.stat().st_size == row["bytes"] and
-                     _sha(path) == row["sha256"] and row["file"] == path.relative_to(root).as_posix(),
+                     file_sha256hex(path) == row["sha256"] and row["file"] == path.relative_to(root).as_posix(),
                      f"preserved unit bytes changed: {name}")
         elif name in prior:
             row = prior[name]
             _require(path.is_file() and path.stat().st_size == row["bytes"] and
-                     _sha(path) == row["sha256"] and row["file"] == path.relative_to(root).as_posix(),
+                     file_sha256hex(path) == row["sha256"] and row["file"] == path.relative_to(root).as_posix(),
                      f"predecessor unit bytes changed: {name}")
         elif not path.exists():
             continue
@@ -268,7 +248,7 @@ def _unit_roster(checkpoint_dir, manifest, preserved, execution_provenance=None,
                 _require(envelope["payload_sha256"] == prior[name]["payload_sha256"],
                          f"predecessor payload changed: {name}")
             new.append({"qname": name, "file": path.relative_to(root).as_posix(),
-                        "sha256": _sha(path), "payload_sha256": envelope["payload_sha256"],
+                        "sha256": file_sha256hex(path), "payload_sha256": envelope["payload_sha256"],
                         "bytes": path.stat().st_size, "execution_provenance": expected_execution})
     return new
 
@@ -284,7 +264,7 @@ def _read_chain(bound, *, execution, bindings=None, seen=frozenset()):
     _require(bound["sha256"] not in seen and len(seen) < 128, "cyclic or excessive predecessor chain")
     path = _bound(bound, "transition receipt")
     raw = path.read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == bound["sha256"], "receipt changed during read")
+    _require(bytes_sha256hex(raw) == bound["sha256"], "receipt changed during read")
     receipt = json.loads(raw)
     _require(set(receipt) == {"schema", "version", "execution", "original", "inputs", "preserved_units",
                              "predecessor", "adopted_units"}, "unexpected receipt fields")
@@ -340,12 +320,12 @@ def create_transition(*, bindings, checkpoint_dir, output, predecessor=None):
     receipt = {"schema": SCHEMA, "version": VERSION, "execution": execution,
                "original": dict(_CONTRACT), "inputs": bindings, "preserved_units": preserved,
                "predecessor": predecessor, "adopted_units": adopted}
-    raw = _canonical(receipt) + b"\n"
+    raw = DIRECT_UTF8_STRICT.encoded(receipt) + b"\n"
     with Path(output).open("xb") as handle:
         handle.write(raw)
         handle.flush()
         os.fsync(handle.fileno())
-    return {"path": str(output), "sha256": hashlib.sha256(raw).hexdigest()}
+    return {"path": str(output), "sha256": bytes_sha256hex(raw)}
 
 
 _ISSUED = weakref.WeakSet()
@@ -401,7 +381,7 @@ def load_transition(bound_receipt, *, config, plan_sha256, prepared, checkpoint_
     _require(prepared == receipt["inputs"]["prepared"], "runtime prepared binding changed")
     _require(receipt["preserved_units"] == loaded["inspection"]["units"], "preserved roster changed")
     verified = VerifiedTransition(raw, str(path), bound_receipt["sha256"],
-                                  str(Path(checkpoint_dir).resolve()), _canonical(manifest))
+                                  str(Path(checkpoint_dir).resolve()), DIRECT_UTF8_STRICT.encoded(manifest))
     _unit_roster(checkpoint_dir, manifest, receipt["preserved_units"], verified.execution_provenance,
                  receipt["adopted_units"])
     _ISSUED.add(verified)
@@ -414,11 +394,11 @@ def require_verified_transition(value, *, checkpoint_dir, resume, joint_activati
     _require(resume is True and joint_activation is True and checkpoint_dir is not None and
              Path(checkpoint_dir).resolve() == Path(value._checkpoint_dir), "transition is restricted to bound joint resume")
     receipt = json.loads(value._receipt_bytes)
-    _require(_sha(value._receipt_path) == value._receipt_sha256, "admitted receipt bytes changed")
+    _require(file_sha256hex(value._receipt_path) == value._receipt_sha256, "admitted receipt bytes changed")
     execution = _actual_execution()
     _require(receipt["execution"] == execution, "producer source changed after admission")
     _read_chain({"path": value._receipt_path, "sha256": value._receipt_sha256}, execution=execution)
-    _require(_sha(Path(checkpoint_dir) / "manifest.json") == receipt["original"]["manifest_sha256"],
+    _require(file_sha256hex(Path(checkpoint_dir) / "manifest.json") == receipt["original"]["manifest_sha256"],
              "manifest changed after admission")
     _unit_roster(checkpoint_dir, json.loads(value._manifest_bytes),
                  receipt["preserved_units"], value.execution_provenance, receipt["adopted_units"])
