@@ -11,12 +11,13 @@ import pytest
 
 from prismaquant import aura_cost as aura
 from prismaquant import joint_aura_source_transition as transition
+from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
 from test_joint_aura_streamed import _fixture, _run
 
 
 def _write_json(path, value):
-    path.write_bytes(transition._canonical(value) + b"\n")
-    return {"path": str(path), "sha256": transition._sha(path)}
+    path.write_bytes(DIRECT_UTF8_STRICT.encoded(value) + b"\n")
+    return {"path": str(path), "sha256": file_sha256hex(path)}
 
 
 def _build_adopted(tmp_path, monkeypatch, *, layers=2):
@@ -35,7 +36,7 @@ def _build_adopted(tmp_path, monkeypatch, *, layers=2):
     kept_bytes = kept.read_bytes()
     envelope = pickle.loads(kept_bytes)
     preserved = [{"qname": kept_name, "file": kept.relative_to(root).as_posix(),
-                  "sha256": transition._sha(kept), "bytes": len(kept_bytes),
+                  "sha256": file_sha256hex(kept), "bytes": len(kept_bytes),
                   "payload_sha256": envelope["payload_sha256"]}]
     config = {"output_root": str(tmp_path), "calibration": "fixed", "backend": "fixed"}
     plan = _write_json(tmp_path / "plan.json", config)
@@ -43,14 +44,14 @@ def _build_adopted(tmp_path, monkeypatch, *, layers=2):
     cache_file.write_bytes(b"prepared test fixture")
     prepared = _write_json(tmp_path / "prepared.json", {
         "implementation_sha256": old_source, "plan_sha256": plan["sha256"],
-        "production_cache": {"path": str(cache_file), "sha256": transition._sha(cache_file)}})
+        "production_cache": {"path": str(cache_file), "sha256": file_sha256hex(cache_file)}})
     inspection = _write_json(tmp_path / "inspection.json", {
-        "identity_sha256": manifest["identity_sha256"], "manifest_sha256": transition._sha(root / "manifest.json"),
+        "identity_sha256": manifest["identity_sha256"], "manifest_sha256": file_sha256hex(root / "manifest.json"),
         "original_source_commit": old_git, "completed_units": 1, "total_units": layers, "units": preserved})
     contract = {"source_sha256": old_source, "git_commit": old_git,
-        "manifest_sha256": transition._sha(root / "manifest.json"), "identity_sha256": manifest["identity_sha256"],
+        "manifest_sha256": file_sha256hex(root / "manifest.json"), "identity_sha256": manifest["identity_sha256"],
         "inspection_sha256": inspection["sha256"], "plan_sha256": plan["sha256"],
-        "prepared_sha256": prepared["sha256"], "production_cache_sha256": transition._sha(cache_file),
+        "prepared_sha256": prepared["sha256"], "production_cache_sha256": file_sha256hex(cache_file),
         "preserved_units": 1, "total_units": layers}
     execution = {"git_commit": new_git, "producer_source_sha256": new_source,
                  "reconstructed_source_sha256": old_source, "transition_module_sha256": "5" * 64}
