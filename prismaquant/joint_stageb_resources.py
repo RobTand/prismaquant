@@ -78,6 +78,23 @@ COTANGENT_SCRATCH_ENV = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT",
                          "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
 
 
+def cotangent_scratch(environ):
+    """The declared cotangent scratch, ``(root, max_bytes)``, or ``None``.
+
+    The one reader of ``COTANGENT_SCRATCH_ENV`` (PQ #1141): the dispatcher's
+    admission, the run's own check and ``checkpoint_cotangent_sink`` all
+    parse the pair here. Neither variable set means no scratch; one without
+    the other, an empty root, or a non-positive-decimal ceiling raises
+    ``ValueError``.
+    """
+    root, ceiling = (environ.get(name) for name in COTANGENT_SCRATCH_ENV)
+    if root is None and ceiling is None:
+        return None
+    if not root or not ceiling or not str(ceiling).isdecimal() or int(ceiling) <= 0:
+        raise ValueError("cotangent scratch requires explicit root and positive max bytes")
+    return root, int(ceiling)
+
+
 def checkpoint_plane_bytes(checkpoint_record) -> int:
     """The bytes of a checkpoint's cotangent plane, as one load would hold them.
 
@@ -106,13 +123,12 @@ def verify_cotangent_plane_fits(plane_bytes, policy, environ):
     callers share this one derivation, so the dispatcher's admission and the
     run's own check cannot disagree. Raises ``ValueError``.
     """
-    root, ceiling = (environ.get(name) for name in COTANGENT_SCRATCH_ENV)
-    if root is not None or ceiling is not None:
-        if not root or not ceiling or not str(ceiling).isdecimal() or int(ceiling) <= 0:
-            raise ValueError("cotangent scratch requires explicit root and positive max bytes")
-        if int(ceiling) < plane_bytes:
+    scratch = cotangent_scratch(environ)
+    if scratch is not None:
+        ceiling = scratch[1]
+        if ceiling < plane_bytes:
             raise ValueError(
-                f"the {plane_bytes}-byte cotangent plane exceeds the {int(ceiling)}-byte "
+                f"the {plane_bytes}-byte cotangent plane exceeds the {ceiling}-byte "
                 "cotangent scratch ceiling: raise PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
         return
     from .joint_retained_window_plan import HOST_RESIDENT_BUDGET_FIELDS
