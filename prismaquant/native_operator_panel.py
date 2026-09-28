@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 from typing import Mapping
 
+from . import record_fields
 from .joint_aura import identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import OperatorMeasurement
 from .digests import DIRECT_ASCII_STRICT
@@ -55,6 +56,48 @@ def _sha(value, name):
 def _equal(actual, expected, name):
     if identity_sha256(actual) != identity_sha256(expected):
         raise ValueError(f"native panel {name} differs from independently frozen input")
+
+
+#: What this reader consumes from Tessera's published dense records. Every
+#: other member is accepted and left unread, and a member the producer lists in
+#: ``must_understand`` that is not named here refuses the record (#1548, #1565).
+#: The runtime block is copied into the panel whole, so the fields this tree
+#: reads out of it again are its understood set.
+PREFLIGHT_FIELDS = ("schema", "status", "operator", "runtime", "runtime_sha256",
+                    "native_tensors_sha256", "scheme_sha256")
+OPERATOR_FIELDS = ("source_weight", "rendered_weight", "input_global_scale", "clip_enabled",
+                   "wire_sha256", "wire_record_sha256", "native_tensors", "scheme")
+RUNTIME_FIELDS = ("execution", "image")
+RUNTIME_OPTIONAL_FIELDS = ("schema", "distributed", "resource_collector")
+RECEIPT_FIELDS = ("schema", "status", "panel", "panel_sha256", "runtime", "runtime_sha256",
+                  "operator", "resources", "phases")
+RESOURCE_FIELDS = ("status", "phases", "resident_bytes")
+RESOURCE_OPTIONAL_FIELDS = ("trace_sha256",)
+RECEIPT_PHASE_FIELDS = ("input", "reference_qdq", "reference_output", "route", "numerics",
+                        "qdq_numerics", "measurement")
+ROUTE_FIELDS = ("state", "shape")
+ROUTE_OPTIONAL_FIELDS = ("reason", "platform", "kernel_schedule", "kind", "policy", "symbol",
+                         "decoder", "contract", "tile_m")
+
+
+def _admit(value, where, required, optional=()):
+    """One Tessera-published object under the #1548 rule, refusing as ``ValueError``."""
+    return record_fields.admit_fields(value, f"native {where}", required=required,
+                                      optional=optional, error=ValueError)
+
+
+def _executed(published, declared, name):
+    """Tessera's executed block, compared on the fields this tree declared.
+
+    The runtime echoes the execution (or rendezvous) it ran under. A field the
+    runtime adds is not one this tree declared, so it cannot contradict the
+    declaration and is left unread; a field it marks must-understand refuses.
+    """
+    if declared is None:
+        _equal(published, None, name)
+        return
+    _admit(published, name, required=tuple(declared))
+    _equal({key: published[key] for key in declared}, declared, name)
 
 
 def _number(value, name):
@@ -338,8 +381,9 @@ def require_native_execution(inputs, preflight):
             raise ValueError("native execution.tensor_parallel_cut_axis must be input or output")
         expected.update(tensor_parallel=world, tensor_parallel_cut_axis=axis)
     _equal(execution, expected, "execution grammar")
-    runtime = preflight["runtime"]
-    _equal(runtime["execution"], execution, "native execution")
+    runtime = _admit(preflight["runtime"], "preflight runtime", RUNTIME_FIELDS,
+                     RUNTIME_OPTIONAL_FIELDS)
+    _executed(runtime["execution"], execution, "native execution")
     distributed = inputs.get("distributed")
     if distributed is None:
         if world != 1:
@@ -356,7 +400,7 @@ def require_native_execution(inputs, preflight):
             raise ValueError("native distributed.init_method must be an explicit tcp:// rendezvous")
         if type(distributed["timeout_seconds"]) is not int or distributed["timeout_seconds"] < 1:
             raise ValueError("native distributed.timeout_seconds must be a positive integer")
-    _equal(runtime.get("distributed"), distributed, "native distributed rank/rendezvous")
+    _executed(runtime.get("distributed"), distributed, "native distributed rank/rendezvous")
     if world == 2:
         shape = inputs["shape"]
         if (not isinstance(shape, list) or len(shape) != 2
@@ -393,6 +437,9 @@ def freeze_native_panel(inputs, preflight, cost_row, *, cost_sha256):
     if (preflight.get("schema") != "tessera.native_dense_preflight.v1"
             or preflight.get("status") != "untimed_preparation"):
         raise ValueError("native panel requires untimed producer preparation")
+    _admit(preflight, "preflight", PREFLIGHT_FIELDS)
+    _admit(preflight["operator"], "preflight operator",
+           OPERATOR_FIELDS + ("declared_route", "activation_contract"))
     if not validate_joint_aura_entry(cost_row):
         raise ValueError("native panel requires an actual joint AURA cost row")
     joint = cost_row["joint_operator_identity"]
@@ -460,6 +507,10 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
         receipt = resolve_execution_binding(receipt, expected_panel)
     if receipt.get("schema") != "tessera.native_dense_operator_receipt.v1" or receipt.get("status") != "timing_admissible":
         raise ValueError("native receipt has no admitted numerical/timing observation")
+    _admit(receipt, "receipt", RECEIPT_FIELDS)
+    _admit(receipt["operator"], "receipt operator", OPERATOR_FIELDS,
+           ("declared_route", "activation_contract"))
+    _admit(receipt["resources"], "receipt resources", RESOURCE_FIELDS, RESOURCE_OPTIONAL_FIELDS)
     _equal(receipt["panel"], expected_panel, "receipt panel")
     _equal(receipt["panel_sha256"], identity_sha256(expected_panel), "receipt panel digest")
     _equal(receipt["runtime"], expected_panel["runtime"], "receipt runtime")
@@ -491,9 +542,11 @@ def consume_native_receipt(path, *, expected_sha256, expected_panel, memory_trac
     observations = {}
     for phase in PHASES:
         observed, expected = receipt["phases"][phase], expected_panel["phases"][phase]
+        _admit(observed, f"receipt {phase}", RECEIPT_PHASE_FIELDS)
         for name in ("input", "reference_qdq", "reference_output"):
             _equal(observed[name], expected[name], f"{phase} {name}")
-        route = observed["route"]
+        route = _admit(observed["route"], f"receipt {phase} route",
+                       ROUTE_FIELDS + tuple(expected["expected_route"]), ROUTE_OPTIONAL_FIELDS)
         _equal({key: route[key] for key in expected["expected_route"]}, expected["expected_route"], f"{phase} route")
         if (route.get("state") != "served" or route.get("reason") is not None
                 or route.get("shape") != f"M{expected['m']}:N{expected_panel['shape'][0]}:K{expected_panel['shape'][1]}"):
