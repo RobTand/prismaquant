@@ -6,6 +6,10 @@
     {
      "decoder": "native_window_gemm",
      "symbol": "tessera::window_gemm_dense"
+    },
+    {
+     "decoder": "native_fused_window_dense",
+     "symbol": "tessera::fused_window_dense"
     }
    ],
    "family": "TESSERA_E4M3_K1",
@@ -35,6 +39,10 @@
     {
      "decoder": "native_window_gemm",
      "symbol": "tessera::window_gemm_dense"
+    },
+    {
+     "decoder": "native_fused_window_dense",
+     "symbol": "tessera::fused_window_dense"
     }
    ],
    "family": "TESSERA_E4M3_K1",
@@ -64,6 +72,10 @@
     {
      "decoder": "native_window_gemm",
      "symbol": "tessera::window_gemm_dense"
+    },
+    {
+     "decoder": "native_fused_window_dense",
+     "symbol": "tessera::fused_window_dense"
     }
    ],
    "family": "TESSERA_E4M3_K1",
@@ -99,6 +111,10 @@
     {
      "decoder": "native_window_gemm",
      "symbol": "tessera::window_gemm_dense"
+    },
+    {
+     "decoder": "native_fused_window_dense",
+     "symbol": "tessera::fused_window_dense"
     }
    ],
    "family": "TESSERA_E4M3_K1",
@@ -134,6 +150,10 @@
     {
      "decoder": "native_window_gemm_folded",
      "symbol": "tessera::window_gemm_dense"
+    },
+    {
+     "decoder": "native_fused_window_dense_folded",
+     "symbol": "tessera::fused_window_dense"
     }
    ],
    "family": "TESSERA_BF16_K1",
@@ -170,6 +190,10 @@
     {
      "decoder": "native_window_gemm_folded",
      "symbol": "tessera::window_gemm_dense"
+    },
+    {
+     "decoder": "native_fused_window_dense_folded",
+     "symbol": "tessera::fused_window_dense"
     }
    ],
    "family": "TESSERA_BF16_K1",
@@ -2393,6 +2417,10 @@
      ],
      [
       [
+       "tessera::fused_window_dense",
+       "native_fused_window_dense_folded"
+      ],
+      [
        "tessera::window_gemm_dense",
        "native_window_gemm_folded"
       ]
@@ -2442,6 +2470,10 @@
       "TESSERA_SERVE_MODE=resident"
      ],
      [
+      [
+       "tessera::fused_window_dense",
+       "native_fused_window_dense_folded"
+      ],
       [
        "tessera::window_gemm_dense",
        "native_window_gemm_folded"
@@ -2752,6 +2784,10 @@
      ],
      [
       [
+       "tessera::fused_window_dense",
+       "native_fused_window_dense"
+      ],
+      [
        "tessera::window_gemm_dense",
        "native_window_gemm"
       ]
@@ -2802,6 +2838,10 @@
      ],
      [
       [
+       "tessera::fused_window_dense",
+       "native_fused_window_dense"
+      ],
+      [
        "tessera::window_gemm_dense",
        "native_window_gemm"
       ]
@@ -2844,6 +2884,10 @@
       "TESSERA_SERVE_MODE=resident|streamed"
      ],
      [
+      [
+       "tessera::fused_window_dense",
+       "native_fused_window_dense"
+      ],
       [
        "tessera::window_gemm_dense",
        "native_window_gemm"
@@ -2894,6 +2938,10 @@
       "TESSERA_SERVE_MODE=resident"
      ],
      [
+      [
+       "tessera::fused_window_dense",
+       "native_fused_window_dense"
+      ],
       [
        "tessera::window_gemm_dense",
        "native_window_gemm"
@@ -3798,8 +3846,8 @@
   ]
  },
  "pin": {
-  "commit": "38e960127478b651e42c14d52acf2274b54bca38",
-  "contract_sha256": "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb",
+  "commit": "a5f3b232cb3c424b537a06713c728c86153d55fb",
+  "contract_sha256": "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c",
   "live_gate": "admits",
   "native_extension_rows": [
    {
@@ -4961,6 +5009,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -4988,6 +5040,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5050,6 +5106,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5077,6 +5137,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5139,6 +5203,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5166,6 +5234,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5228,6 +5300,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5255,6 +5331,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5317,6 +5397,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5344,6 +5428,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5406,6 +5494,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5433,6 +5525,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5495,6 +5591,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5522,6 +5622,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5584,6 +5688,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5611,6 +5719,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5673,6 +5785,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5700,6 +5816,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5762,6 +5882,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5789,6 +5913,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5851,6 +5979,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5878,6 +6010,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5940,6 +6076,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -5967,6 +6107,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6029,6 +6173,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6056,6 +6204,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6118,6 +6270,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6145,6 +6301,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6207,6 +6367,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6234,6 +6398,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6296,6 +6464,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6323,6 +6495,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6385,6 +6561,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6412,6 +6592,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6474,6 +6658,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6501,6 +6689,10 @@
        {
         "decoder": "native_window_gemm",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6563,6 +6755,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6590,6 +6786,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6652,6 +6852,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6679,6 +6883,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6741,6 +6949,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6768,6 +6980,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6830,6 +7046,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6857,6 +7077,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6919,6 +7143,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -6946,6 +7174,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7008,6 +7240,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7035,6 +7271,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7097,6 +7337,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7124,6 +7368,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7186,6 +7434,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7213,6 +7465,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7275,6 +7531,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7302,6 +7562,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7364,6 +7628,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7391,6 +7659,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7453,6 +7725,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7480,6 +7756,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7542,6 +7822,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7569,6 +7853,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7631,6 +7919,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7658,6 +7950,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7720,6 +8016,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7747,6 +8047,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7809,6 +8113,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7836,6 +8144,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7898,6 +8210,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",
@@ -7925,6 +8241,10 @@
        {
         "decoder": "native_window_gemm_folded",
         "symbol": "tessera::window_gemm_dense"
+       },
+       {
+        "decoder": "native_fused_window_dense_folded",
+        "symbol": "tessera::fused_window_dense"
        }
       ],
       "execution_mode": "eager",

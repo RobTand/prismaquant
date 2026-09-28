@@ -397,14 +397,23 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: two NEW ``native_extensions`` rows, and one more launch pair in the four
 #: window routed cells' ``executes``. ``export.py`` and ``grammar.py`` did not
 #: move.
-TESSERA_DEV_PIN_COMMIT = "38e960127478b651e42c14d52acf2274b54bca38"
+#: Re-pinned 2026-09-28 to a5f3b232cb, Tessera master's merge of #691
+#: (tessera#687), on top of #693, under PQ #1616. v43 (#693) names the fused
+#: window kernel's dense identity as a second launch in the six dense window
+#: cells; v44 (#691) moves the supported exporter into the installed package
+#: and publishes the serving plan schema, moving no answer. (PQ #1616.)
+#: The literal below
+#: is ``pprint.pformat(contract_answer(c), width=79, sort_dicts=False)`` on
+#: the v44 contract, and its diff against the v42 literal is exactly the 24
+#: executes paths of those six cells.
+TESSERA_DEV_PIN_COMMIT = "a5f3b232cb3c424b537a06713c728c86153d55fb"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
+    "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -495,63 +504,11 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: rungs. The vanilla dense E4M3 q1024 pair remains; withdrawn-image
 #: claims do not. Route-only evidence is not a new KL measurement.
 #: Earlier pin reviews inside the literal remain historical.
+#: v43/v44 review: the six dense window cells name the fused dense
+#: launch beside the window-GEMM one (v43, tessera#693); v44
+#: (tessera#687) moves no answer -- same rows, same columns, the
+#: fused pair first, the window pair second, in every widened cell.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
- # Against the v38 contract (v35-v38) the review is six moves, and one of
- # them SHRINKS admission.
- # (1) v35/#607 adds a third sm_121 fp4 activation-quantiser row, for the
- # spark-vllm-nccl230@a5424378 image the routed E2M1_K2 cells name.
- # (2) v37/#614 WITHDRAWS tessera_bf16_k1_dense_sm121_{batch,decode} (q1792,
- # epilogue arithmetic).  No cell carries TESSERA_BF16_K1 R1792 any more, so
- # that dense rung answers unattested/no_cell on every platform and image.
- # (3) v38/#604 mints dense _resident cells for E4M3_K1 and BF16_K1 at q832,
- # q1024 and q1088 on spark-vllm-nccl230@f8dbe1a0 (eager, resident,
- # route_only, smoke not_recorded).  The family rows' attested rungs widen to
- # match.  The v34 E4M3 R1024 dense pair on the stock image is unchanged.
- # (4) v38 mints the routed BF16_K1 pair at q1024 on the same image.
- # (5) v38 REUSES the two routed E4M3_K1 ids for a different claim.  At v34
- # they meant q1024 on eugr/spark-vllm@0afec8d4, launched through the
- # materialising modular kernel, with smoke recorded.  At v38 they mean q896
- # on spark-vllm-nccl230@f8dbe1a0, launched through the compact window MoE
- # adapter, route_only and not_recorded.  The old claim was withdrawn because
- # the build cannot make that launch.  Routed E4M3 R1024 is now unattested
- # under every scope, and the answer keys cells by id, so this row's diff
- # below is the whole review of that change (tests/test_tessera_pin_v38_scope.py).
- # (6) Nothing else moved: lane schema v10, native extensions, the quant
- # method and the fused-module rule are byte-identical.
- # The v34 review follows, as history.
- # Against the v34 contract the review is five additions and no removals.
- # (1) v33/#568 publishes the sm_121 fp4 activation-quantiser table as a list
- # of per-image attestations; the stock-image row below is byte-identical to
- # v32's, and a second row for the glm53-nope-sm121 serving image arrives
- # with the same rounding vectors.  (2)-(5) v34/#579 attests the fused window
- # GEMM and mints four dense sm_121 cells on tessera::window_gemm_dense:
- # TESSERA_BF16_K1 q1792 and TESSERA_E4M3_K1 q1024, batch and decode, graded
- # route_only with smoke.status not_recorded, which the status-only evidence
- # gate does not refuse.  Accepting this answer therefore ADMITS those two
- # dense rungs on sm_121 (backed_with_serve_flag, TESSERA_SERVE_MODE) where
- # the v32 pin answered unattested/no_cell.  Every other row is unchanged.
- # The v32 review follows, as history; its 'only cells' count is superseded.
- # Against the v32 contract the review is exactly four moves, and the
- # WITHDRAWALS are the headline, not the widenings.  Tessera master (its #538
- # and the A4 retirement) withdrew all eight dense cells that were not
- # E2M1_K2: the four TESSERA_BF16_K1 rows -- which carried ``recorded``
- # evidence and were the only cells on gfx1201 -- and the four TESSERA_E4M3_K1
- # dense rows, resident and streamed.  Accepting this answer therefore admits
- # STRICTLY LESS than the v29 pin did on dense routes: TESSERA_BF16_K1_R1792
- # answers ``unattested``/``no_cell`` on every platform again, as it did
- # before 2026-09-13, and the lane's only cells are the six sm_121 rows below.
- # The routed-MoE ``recorded`` pair (E4M3_K1, rung 1024) is byte-identical,
- # so the status-only evidence gate admits the same scope it did at v29 --
- # the routed E2M1_K2 widen ([896] -> the full trellis domain [128..896]
- # step 128, receipted by the seven-rung green load) rides the two
- # ``not_recorded``/``route_only`` cells as before and is Rob's #198 call,
- # flagged here rather than decided by this literal.  D2b scopes the dense
- # batch cell's KL receipts to the rung they measured (``@q896`` in the kl
- # token -- the reader's widened projection, first exercised by this pin),
- # and the retired span-2 CUDA decoder leaves ``native_extensions`` with the
- # one window-GEMV row.  Nothing else moved: lane schema stays v10, the TP
- # ceiling stays 2 on the same receipt, and the quantiser table is
- # byte-identical.
  'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
  'quant_method': 'tessera',
@@ -566,13 +523,6 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                              'structure': 'shared'},
                   'sidecar_q256': 'int_or_per_role_list',
                   'mixed_rung_receipt': False},
- # v42 review (Tessera #640): two NEW lane-bearing extensions from one source,
- # csrc/routed_fused_window.cu -- tessera_routed_fused_e4m3 (TESSERA_FP8,
- # native_routed_fused_window) and tessera_routed_fused_value (TESSERA_BF16,
- # native_routed_fused_window_folded). Each lane admits rate-4, window_bits 14,
- # undecorated window/channel stacks (q256 1024), and when the library is
- # absent the serve substitutes the compact adapter's decoder in both
- # residencies. The window_gemv row did not move.
  'native_extensions': [{'module_name_prefix': 'tessera_routed_fused_e4m3',
                         'filename_glob': 'tessera_routed_fused_e4m3*.so',
                         'match': 'basename_fnmatch',
@@ -2275,13 +2225,6 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                   'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}}},
- # v42 review (Tessera #640): the four window routed cells,
- # tessera_{bf16,e4m3}_k1_routed_moe_sm121_{batch,decode}_resident, each
- # name one more launch in column 11, the fused routed pair beside the
- # compact pair they already named. No other column, cell, rung, image,
- # flag or evidence value moved, so admission is unchanged. v41 adds only
- # optional runtime.tessera_commit / serving_source_sha256 fields that no
- # packaged cell stamps, so this projection does not see them.
  'cells': [['tessera_bf16_k1_dense_sm121_batch_resident',
             'sm_121',
             'TESSERA_BF16_K1',
@@ -2293,7 +2236,9 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['tessera::window_gemm_dense', 'native_window_gemm_folded']],
+            [['tessera::fused_window_dense',
+              'native_fused_window_dense_folded'],
+             ['tessera::window_gemm_dense', 'native_window_gemm_folded']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2317,7 +2262,9 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['tessera::window_gemm_dense', 'native_window_gemm_folded']],
+            [['tessera::fused_window_dense',
+              'native_fused_window_dense_folded'],
+             ['tessera::window_gemm_dense', 'native_window_gemm_folded']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2493,7 +2440,8 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident|streamed'],
-            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            [['tessera::fused_window_dense', 'native_fused_window_dense'],
+             ['tessera::window_gemm_dense', 'native_window_gemm']],
             ['resident', 'streamed'],
             {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
              'execution_modes': ['eager']},
@@ -2517,7 +2465,8 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            [['tessera::fused_window_dense', 'native_fused_window_dense'],
+             ['tessera::window_gemm_dense', 'native_window_gemm']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2541,7 +2490,8 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident|streamed'],
-            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            [['tessera::fused_window_dense', 'native_fused_window_dense'],
+             ['tessera::window_gemm_dense', 'native_window_gemm']],
             ['resident', 'streamed'],
             {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
              'execution_modes': ['eager']},
@@ -2565,7 +2515,8 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            [['tessera::fused_window_dense', 'native_fused_window_dense'],
+             ['tessera::window_gemm_dense', 'native_window_gemm']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},

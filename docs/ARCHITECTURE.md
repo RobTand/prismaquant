@@ -112,6 +112,40 @@ moves.
   `07013de7488f`, sparklina `e8cb68eab74e`). The `db5b6e23` interpreters stay
   in place.
 
+Re-stamped 2026-09-28 (PQ #1616, `astra/tessera-pin-a5f3b232`): the exact
+Tessera pin is `a5f3b232cb3c424b537a06713c728c86153d55fb`, Tessera master's
+merge of #691 (contract v44, tessera#687) on top of #693 (contract v43). The
+packaged contract is v44 (`47b01355…`); the pin stays schema v2 (no v44 cell
+stamps serving code) and the JSON's extension rows are unchanged.
+
+- **What v43+v44 move.** v43 (#693) names the fused window kernel's dense
+  identity as a second launch in the six dense window cells, fused pair
+  first, window pair second. v44 (#691) moves the supported exporter into
+  the installed package and publishes the serving plan schema, moving no
+  admission answer: the regenerated dev-pin answer literal diffs from v42 in
+  exactly the 24 executes paths of those six cells, and the reader parses
+  v42/v43/v44 with no grammar change. The legal inventory gains the
+  `reader-pin-a5f3b232` byte-state: `export.py` moved by one docstring line
+  (`e54f3f1b…` -> `427a8f97…`), `grammar.py` (`9ae1f824…`), `wire_recipe`
+  and the WINDOW constants are byte-identical, so it joins the equivalent
+  states and no rate count moves.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`, PB action
+  `3026f7547eee`) differs only in the pin's commit and digest, the six dense
+  cells' launches, the answer's 24 executes paths, and 136 unit-route paths
+  that record the fused pair beside the compact one; no route status,
+  qualification, cell id or refusal moves. The Tessera `layer.json` pin
+  (`tests/test_allocator_output_pin_1304.py`, PB actions `c9dc357bb01d`
+  before and `a01e39b687a2` after) moves only in `tessera_dev_pin`
+  provenance (`contract_version` 42 to 44, `reviewed_contract_sha256`
+  `4aeba5dc` to `47b01355`); allocation, applicability and Pareto are
+  byte-identical.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-a5f3b232`, copied
+  from the `38e96012` interpreters with only Tessera reinstalled, on dl380g10
+  so far; the Sparks' copies (plus `-tf516`) come after the U4 measurement
+  window closes. PQ CPU tests run on dl380g10; PrismaBuild's own tests stay
+  off it (PB #628).
+
 Re-stamped 2026-09-28 (PQ #1583, `claude/pact-shape-table`): PACT's
 shape-time price table, `prismaquant/shape_runtime_prices.py`
 (`prismaquant.shape_runtime_prices.v1`), lands as a library. Nothing in the
