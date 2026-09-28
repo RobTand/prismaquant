@@ -20,6 +20,22 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Re-stamped 2026-09-28 (PQ #1553, decoupling step 6 part 3): a lane's ship-record
+slots reach core through its plugin (§8.10). `shipcard` and `shipcard_cli`
+import no lane module. The Tessera lane's `route.census` and `route.trace`
+fill and replay code moves unchanged into `prismaquant/tessera_shipcard.py`,
+and the plugin registers the replays (`shipcard_slot_verifiers`) and the
+`fill-route-census` and `fill-route-trace` commands (`shipcard_cli_commands`).
+`shipcard.LANE_SLOT_VERIFIERS` keeps only the replays core owns
+(`route.sweep`), and `shipcard.lane_slot_verifiers()` is the merged view
+every check reads. The rate axis, the uniform control's block schema, the
+checkpoint's `quant_method` and the route-histogram obligation are lane-spec
+data. The core-boundary allowlist loses the last 10 shipcard lines, which
+leaves only the 5 seam-conformant `pipeline.py` settings. The recorded
+GLM-5.3 allocation reproduces every output byte for byte on main and on the
+branch, apart from the wall-clock `solver_seconds` stamp. No format, default,
+stage, stored byte or ship gate changes.
+
 Re-stamped 2026-09-28 (PQ #1558, decoupling step 6 part 2b): the allocator
 CLI reaches the lane through the allocation protocol (§8.10). `allocator.py`
 imports no lane module, and importing it loads none (27 before). The lane's
@@ -22445,8 +22461,9 @@ never replaces it, so **a lane can add a requirement and can never subtract
 one** — the GGUF lane declares no `native_export.graph` gate and is still
 required to close that slot. The vocabulary is derived from every lane spec
 (`shipcard.all_slots`), and each derived slot names the verifier
-`shipcard.verify` replays for it (`shipcard.LANE_SLOT_VERIFIERS`, dispatched
-by registry, #162 closed). The fourth link is `publish_artifact`, above.
+`shipcard.verify` replays for it (`shipcard.lane_slot_verifiers()`: core's
+`LANE_SLOT_VERIFIERS` plus the replays a lane plugin registers, PQ #1553;
+dispatched by registry, #162 closed). The fourth link is `publish_artifact`, above.
 
 One lane holds all four links, and it is Tessera. Native
 compressed-tensors holds the first, third and fourth but not the second:
@@ -22566,8 +22583,8 @@ those counts, never the per-unit rows, through `shipcard.route_histogram_claim`
 into the build block: `tessera_export_lane.preflight` into the build anchor that
 `lane_shipcard open --build-json` stamps, and `export_native_compressed.
 _write_shipcard` directly. `verify` requires the histogram on a card whose lane
-is `tessera` or whose build or `config.json` names the Tessera container, and
-replays it: the schema, a positive `units_total`, positive integer counts, the
+declares `route_histogram_required` (Tessera) or whose build or `config.json`
+names a rate-axis container, and replays it: the schema, a positive `units_total`, positive integer counts, the
 route statuses summing to `units_total`, and the contract counts summing to no
 more. `no_declared_lane` units (the plain-BF16 picks no lane declares) are
 carried as counted. A native card owes no histogram yet, because a native
@@ -22588,8 +22605,10 @@ opens from 2026-09-17 on.
 Tessera-lane card carries the lane's required `route.census` slot: the receipt
 that the routes the serve actually emitted -- each stamped by the plugin with
 the decoder that ran -- are the routes the artifact priced
-(`prismaquant/tessera_route_receipt.py`, `make_route_census_record`; CLI
-`fill-route-census`; the lane spec's `route.census` gate names this slot).
+(`prismaquant/tessera_route_receipt.py`,
+`tessera_shipcard.make_route_census_record`; CLI `fill-route-census`, which
+the lane plugin registers; the lane spec's `route.census` gate names this
+slot).
 For a scoped artifact, `fill-route-census --census <raw-v2.json>
 --layer-config <allocation.json> --model-dir <artifact>` retains the complete
 producer census as `route_census`, exact UTF-8 allocation/config/manifest
@@ -22669,7 +22688,7 @@ publish a current table (`tests/test_tessera_route_receipt.py`). At the `1221d2a
 pin the packaged table was v4, so that refusal never fired; it does now. Fill
 and verify apply the same rule from one home
 (`tessera_route_receipt.current_table_refuses_flat_census`): `fill-route-census`
-/ `make_route_census_record` refuse a flat row array by name at fill time on
+/ `tessera_shipcard.make_route_census_record` refuse a flat row array by name at fill time on
 the box where `verify` would refuse it, rather than stamping `passed=True`
 first (RobTand/prismaquant#214). "No census was ever compared" reads as `UNFILLED`. Known
 limit: coverage strictness is uncalibrated against a real serve (nothing has
@@ -24831,6 +24850,24 @@ plus a plugin module.
   protocol's written statement; `tests/test_lane_allocation_protocol.py`
   holds the Tessera plugin to all of it. Importing the allocator imports no
   lane module (27 on the parent commit).
+- **Ship-record slots (PQ #1553).** A lane that declares an evidence slot in
+  its `gates[]` registers the slot's replay on its plugin
+  (`shipcard_slot_verifiers`, returning `{slot: replay}`) and the commands
+  that fill it (`shipcard_cli_commands`, which adds subparsers to
+  `python -m prismaquant.shipcard_cli`). `shipcard.lane_slot_verifiers()`
+  merges core's own `LANE_SLOT_VERIFIERS` (the replays of a data-only lane's
+  slots, today `route.sweep`) with every plugin's, and refuses a slot two
+  owners claim. A plugin replay takes `(slot, record, *, card, model_dir)`
+  and owns the slot's whole verdict, so `verify` routes it past the generic
+  `passed` check; a core entry keeps the historical `(slot, record)` call
+  after that check. The Tessera lane's replays and commands live in
+  `tessera_shipcard`. Four facts the ship record used to spell as `tessera`
+  are lane-spec data: a rate-axis family's `uniform_control_schema` (the
+  control block the record accepts), the lane's `quant_method` and
+  `export_container` (which artifacts have a rate axis,
+  `lane_spec.rate_axis_lanes`), and `route_histogram_required` (which lanes'
+  cards owe `build.route_histogram`). A rate-axis family without a control
+  schema is refused when the spec is parsed.
 - **Neutral homes for shared helpers.** `digests.SOURCE_HASH_BLOCK_BYTES`
   (the guarded source hash's read block, which admission charges) and
   `joint_eval_observation` (the pilot panel's `STATUS` and
@@ -25302,7 +25339,8 @@ build lane must not spawn those inside a pipeline run. The seventh,
 `route.trace`, needs no container of its own: it reads the trace files an
 eager serve writes when `TESSERA_ROUTE_TRACE` is set. Building that runner is
 R16's open half and stays with RobTand/prismaquant#119. `verify` replays
-`route.census` through its registered verifier (`_verify_route_census_record`):
+`route.census` through its registered verifier
+(`tessera_shipcard.verify_route_census_record`, registered by the lane plugin):
 the record must carry the priced-vs-served `route_census` block and its
 verdict must agree with it, so the slot refuses a *wrong* census as well as
 *silence* (#162).

@@ -627,3 +627,26 @@ def serving_runtime_contract_path():
     from .tessera_runtime_contract import contract_path
 
     return contract_path()
+
+
+# -- the ship record (shipcard, shipcard_cli) --------------------------------
+
+def shipcard_slot_verifiers() -> dict:
+    """``{slot: replay}`` for the evidence slots this lane's gates declare.
+
+    ``shipcard.verify`` runs each replay as ``(slot, record, *, card,
+    model_dir)``, and the replay owns the slot's whole verdict.
+    """
+    from . import tessera_shipcard as receipts
+
+    return {
+        receipts.ROUTE_CENSUS_SLOT: receipts.verify_route_census_record,
+        receipts.ROUTE_TRACE_SLOT: receipts.verify_route_trace_record,
+    }
+
+
+def shipcard_cli_commands(subparsers) -> None:
+    """Add ``fill-route-census`` and ``fill-route-trace`` to the shipcard CLI."""
+    from .tessera_shipcard import register_cli
+
+    register_cli(subparsers)

@@ -192,7 +192,8 @@ def _tessera_card(tmp_path):
 
 
 def _passing_census_record(model_dir):
-    from prismaquant.shipcard import compute_model_sha, make_route_census_record
+    from prismaquant.shipcard import compute_model_sha
+    from prismaquant.tessera_shipcard import make_route_census_record
 
     return make_route_census_record(
         tool="test",
@@ -204,8 +205,8 @@ def _passing_census_record(model_dir):
 
 
 def test_a_tessera_artifact_owes_a_route_census_receipt(tmp_path):
+    from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard import (
-        ROUTE_CENSUS_SLOT,
         load_shipcard,
         required_slots,
         verify,
@@ -219,8 +220,8 @@ def test_a_tessera_artifact_owes_a_route_census_receipt(tmp_path):
 
 
 def test_a_non_tessera_artifact_owes_no_route_census(tmp_path):
+    from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard import (
-        ROUTE_CENSUS_SLOT,
         build_shipcard,
         load_shipcard,
         required_slots,
@@ -245,8 +246,8 @@ def test_a_tessera_card_without_a_lane_key_owes_no_census(tmp_path):
     `required_slots`; that second requirement path is dropped in favour of
     the lane union, which is the one mechanism a lane can add requirements
     through."""
+    from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard import (
-        ROUTE_CENSUS_SLOT,
         build_shipcard,
         load_shipcard,
         required_slots,
@@ -270,12 +271,14 @@ def test_a_passed_flag_on_substitute_records_does_not_verify(tmp_path, monkeypat
     """The replay reads the carried records, not the carried boolean: a
     `passed=true` stamped over a substitute-decoder serve still refuses."""
     from prismaquant.shipcard import (
-        ROUTE_CENSUS_SLOT,
         compute_model_sha,
         fill_slot,
         load_shipcard,
-        make_route_census_record,
         verify,
+    )
+    from prismaquant.tessera_shipcard import (
+        ROUTE_CENSUS_SLOT,
+        make_route_census_record,
     )
 
     _no_runtime_installed(monkeypatch)
@@ -298,8 +301,8 @@ def test_a_passed_flag_on_substitute_records_does_not_verify(tmp_path, monkeypat
 
 
 def test_a_native_census_receipt_closes_the_slot(tmp_path, monkeypatch):
+    from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard import (
-        ROUTE_CENSUS_SLOT,
         fill_slot,
         load_shipcard,
         verify,
@@ -323,8 +326,8 @@ def test_the_current_scoped_table_refuses_a_flat_legacy_receipt_by_name(tmp_path
     """
     from prismaquant import tessera_route_receipt as receipt
     from prismaquant.lane_eligibility import LANE_ELIGIBILITY_SCHEMA_TESSERA
+    from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard import (
-        ROUTE_CENSUS_SLOT,
         fill_slot,
         load_shipcard,
         verify,
@@ -362,9 +365,9 @@ def test_fill_applies_the_same_flat_census_rule_as_verify(tmp_path, monkeypatch)
     """
     from prismaquant import tessera_route_receipt as receipt
     from prismaquant.lane_eligibility import LANE_ELIGIBILITY_SCHEMA_TESSERA
-    from prismaquant.shipcard import (
+    from prismaquant.shipcard import compute_model_sha
+    from prismaquant.tessera_shipcard import (
         ROUTE_CENSUS_SLOT,
-        compute_model_sha,
         make_route_census_record,
     )
     from prismaquant.shipcard_cli import main as shipcard_cli
@@ -405,7 +408,8 @@ def test_fill_applies_the_same_flat_census_rule_as_verify(tmp_path, monkeypatch)
 
 
 def test_fill_route_census_cli_closes_the_slot_from_files(tmp_path, monkeypatch):
-    from prismaquant.shipcard import ROUTE_CENSUS_SLOT, load_shipcard, verify
+    from prismaquant.shipcard import load_shipcard, verify
+    from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard_cli import main as shipcard_cli
 
     _no_runtime_installed(monkeypatch)
@@ -427,7 +431,8 @@ def test_fill_route_census_cli_closes_the_slot_from_files(tmp_path, monkeypatch)
 
 
 def test_fill_route_census_cli_refuses_a_decoder_less_census(tmp_path):
-    from prismaquant.shipcard import ROUTE_CENSUS_SLOT, load_shipcard
+    from prismaquant.shipcard import load_shipcard
+    from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT
     from prismaquant.shipcard_cli import main as shipcard_cli
 
     model_dir = _tessera_card(tmp_path)

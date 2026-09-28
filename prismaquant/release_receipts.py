@@ -16,9 +16,9 @@ from prismaquant.shipcard import (
     _strict_json_object,
     fill_slot,
     load_shipcard,
-    make_route_trace_record,
     verify,
 )
+from prismaquant.tessera_shipcard import make_route_trace_record
 
 _MAX_RECEIPT_BYTES = 128 * 1024 * 1024
 

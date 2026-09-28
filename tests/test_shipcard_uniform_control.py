@@ -24,7 +24,6 @@ if not (pathlib.Path(__file__).resolve().parents[1] / "tools").is_dir():
 from prismaquant.shipcard import (
     GOLD_SLOTS,
     REQUIRED_SLOTS,
-    ROUTE_CENSUS_SLOT,
     ROUTE_HISTOGRAM_SCHEMA,
     UNIFORM_CONTROL_SLOT,
     build_shipcard,
@@ -32,7 +31,6 @@ from prismaquant.shipcard import (
     fill_slot,
     load_shipcard,
     make_record,
-    make_route_census_record,
     make_uniform_control_record,
     required_slots,
     uniform_control_summary,
@@ -40,6 +38,7 @@ from prismaquant.shipcard import (
     write_shipcard,
 )
 from prismaquant.shipcard_cli import main as shipcard_cli
+from prismaquant.tessera_shipcard import ROUTE_CENSUS_SLOT, make_route_census_record
 from prismaquant.validate_quantized_model import (
     BOUNDARY_ENDPOINT,
     BOUNDARY_REQUEST_SCHEMA,
@@ -393,7 +392,7 @@ def _fill_trace(path, model_dir):
     with `rank_source: "torch.distributed"`, a present null `rank_conflict`,
     the latched platform) and not the pre-#509 histogram-only document.
     """
-    from prismaquant.shipcard import ROUTE_TRACE_SLOT, make_route_trace_record
+    from prismaquant.tessera_shipcard import ROUTE_TRACE_SLOT, make_route_trace_record
 
     target = "model.layers.0.mlp.down_proj"
     trace = {
