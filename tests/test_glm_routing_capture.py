@@ -269,6 +269,7 @@ def test_route_record_records_the_observed_tensor_device():
                       torch.zeros(512, 8, dtype=torch.float32)),
         {}, sequence_length=512)
     assert captured['observed_device'] == str(inputs.device)
+    observed = captured['observed_device']
     runner = SimpleNamespace(device=torch.device('cuda'), model=model)
     record = glm_route_record(runner, mlp.experts, mlp.gate, captured, layer=3,
         calibration={'calibration_sha256': '0' * 64, 'shape': [1, 512],
@@ -277,7 +278,7 @@ def test_route_record_records_the_observed_tensor_device():
         epsilon=1e-20, model_load_contract={'fixture': True},
         replay_source='fresh_streamed_bf16_source_pass')
     routing = record['metadata']['routing']
-    assert routing['device'] == captured['observed_device']
+    assert routing['device'] == observed
     assert routing['input_dtype'] == 'torch.bfloat16'
     assert routing['topk_weights_dtype'] == 'torch.float32'
     assert routing['topk_ids_dtype'] == 'torch.int64'
