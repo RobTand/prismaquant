@@ -9,20 +9,6 @@
   },
   {
    "pair": [
-    "prismaquant/joint_aura_retained_budget_transition.py::_committed_package",
-    "prismaquant/joint_aura_run_transition.py::_committed_package"
-   ],
-   "reason": "The joint_aura_*_transition modules are sealed: every transition receipt binds transition_module_sha256 over the module's own bytes, so each stays self-contained and byte-stable, and sharing a helper would change a sealed identity."
-  },
-  {
-   "pair": [
-    "prismaquant/joint_aura_retained_budget_transition.py::checkout_head_commit",
-    "prismaquant/joint_aura_run_transition.py::checkout_head_commit"
-   ],
-   "reason": "The joint_aura_*_transition modules are sealed: every transition receipt binds transition_module_sha256 over the module's own bytes, so each stays self-contained and byte-stable, and sharing a helper would change a sealed identity."
-  },
-  {
-   "pair": [
     "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
     "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
    ],
@@ -33,14 +19,6 @@
   [
    "prismaquant/joint_aura_retained_budget_transition.py::_actual_execution",
    "prismaquant/joint_aura_run_transition.py::_actual_execution"
-  ],
-  [
-   "prismaquant/joint_aura_retained_budget_transition.py::_committed_package",
-   "prismaquant/joint_aura_run_transition.py::_committed_package"
-  ],
-  [
-   "prismaquant/joint_aura_retained_budget_transition.py::checkout_head_commit",
-   "prismaquant/joint_aura_run_transition.py::checkout_head_commit"
   ],
   [
    "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
@@ -121,21 +99,9 @@
   "hashlib:prismaquant/joint_adjoint_slices.py::write_adjoint_slice",
   "hashlib:prismaquant/joint_adjoint_slices.py::write_band_receipt",
   "hashlib:prismaquant/joint_aura.py::_ValidatedProbeIdentity.__init__",
-  "hashlib:prismaquant/joint_aura_retained_budget_transition.py::_read_receipt",
-  "hashlib:prismaquant/joint_aura_retained_budget_transition.py::_reported",
-  "hashlib:prismaquant/joint_aura_retained_budget_transition.py::_sha",
-  "hashlib:prismaquant/joint_aura_retained_budget_transition.py::create_transition",
   "hashlib:prismaquant/joint_aura_retained_budget_transition.py::source_proof",
-  "hashlib:prismaquant/joint_aura_run_transition.py::_read_receipt",
-  "hashlib:prismaquant/joint_aura_run_transition.py::_sha",
-  "hashlib:prismaquant/joint_aura_run_transition.py::create_transition",
   "hashlib:prismaquant/joint_aura_run_transition.py::source_proof",
-  "hashlib:prismaquant/joint_aura_source_transition.py::_load_inputs",
-  "hashlib:prismaquant/joint_aura_source_transition.py::_read_chain",
-  "hashlib:prismaquant/joint_aura_source_transition.py::_sha",
-  "hashlib:prismaquant/joint_aura_source_transition.py::create_transition",
   "hashlib:prismaquant/joint_aura_source_transition.py::source_proof",
-  "hashlib:prismaquant/joint_aura_transitions.py::receipt_version",
   "hashlib:prismaquant/joint_catalog_extension.py::_check_capture",
   "hashlib:prismaquant/joint_catalog_extension.py::_rehash_drifted",
   "hashlib:prismaquant/joint_catalog_extension.py::_verify_overlay_payload",
@@ -475,9 +441,6 @@
   "sorted-json:prismaquant/joint_aura.py::_ValidatedProbeIdentity.__init__",
   "sorted-json:prismaquant/joint_aura.py::_joint_projection_requirements",
   "sorted-json:prismaquant/joint_aura.py::source_execution_identity",
-  "sorted-json:prismaquant/joint_aura_retained_budget_transition.py::_canonical",
-  "sorted-json:prismaquant/joint_aura_run_transition.py::_canonical",
-  "sorted-json:prismaquant/joint_aura_source_transition.py::_canonical",
   "sorted-json:prismaquant/joint_catalog_extension.py::create_extension",
   "sorted-json:prismaquant/joint_catalog_extension.py::main",
   "sorted-json:prismaquant/joint_cost_quantum.py::publish_quantum_outputs",
@@ -734,9 +697,7 @@
    "prismaquant/prismasnap_validation.py"
   ],
   "_bound": [
-   "prismaquant/joint_aura_retained_budget_transition.py",
-   "prismaquant/joint_aura_run_transition.py",
-   "prismaquant/joint_aura_source_transition.py",
+   "prismaquant/joint_aura_transition_base.py",
    "tools/build_tessera_census_cache.py",
    "tools/build_tessera_selected_cache.py",
    "tools/derive_retained_window_budget.py",
@@ -750,18 +711,9 @@
    "prismaquant/glm_capture_compatibility.py",
    "prismaquant/native_operator_panel.py"
   ],
-  "_bytes_identity": [
-   "prismaquant/joint_aura_retained_budget_transition.py",
-   "prismaquant/joint_aura_run_transition.py"
-  ],
   "_canon_fmt": [
    "prismaquant/mtp_production_cache.py",
    "prismaquant/streaming_production_cache.py"
-  ],
-  "_canonical": [
-   "prismaquant/joint_aura_retained_budget_transition.py",
-   "prismaquant/joint_aura_run_transition.py",
-   "prismaquant/joint_aura_source_transition.py"
   ],
   "_canonical_bytes": [
    "prismaquant/artifact_collection.py",
@@ -788,10 +740,6 @@
   "_cmd_show": [
    "prismaquant/shipcard_cli.py",
    "tools/serve_fingerprint.py"
-  ],
-  "_committed_package": [
-   "prismaquant/joint_aura_retained_budget_transition.py",
-   "prismaquant/joint_aura_run_transition.py"
   ],
   "_cost_entry": [
    "prismaquant/kl_measurement.py",
@@ -1075,10 +1023,7 @@
   ],
   "_require": [
    "prismaquant/glm_source_derivative.py",
-   "prismaquant/joint_aura_retained_budget_transition.py",
-   "prismaquant/joint_aura_run_transition.py",
-   "prismaquant/joint_aura_source_transition.py",
-   "prismaquant/joint_aura_transitions.py",
+   "prismaquant/joint_aura_transition_base.py",
    "prismaquant/serving_runtime_patch_set.py",
    "prismaquant/tessera_route_receipt.py",
    "prismaquant/tessera_runtime_contract.py"
@@ -1150,9 +1095,6 @@
    "prismaquant/quality_prefill_pb_adapter.py"
   ],
   "_sha": [
-   "prismaquant/joint_aura_retained_budget_transition.py",
-   "prismaquant/joint_aura_run_transition.py",
-   "prismaquant/joint_aura_source_transition.py",
    "prismaquant/joint_cost_read_schedule.py",
    "prismaquant/measured_runtime_prices.py",
    "prismaquant/native_operator_panel.py",
@@ -1258,10 +1200,6 @@
   "checkout_commit": [
    "tools/dispatch_stage_a_split.py",
    "tools/tessera_campaign_container.py"
-  ],
-  "checkout_head_commit": [
-   "prismaquant/joint_aura_retained_budget_transition.py",
-   "prismaquant/joint_aura_run_transition.py"
   ],
   "cmd_analyze": [
    "tools/chain_roll_bench.py",
