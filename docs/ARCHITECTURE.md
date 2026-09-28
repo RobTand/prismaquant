@@ -1,5 +1,27 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1626, `claude/pq-route-trace-union`): **the
+`route.trace` gate judges an ARTIFACT against the union of its serve phases**
+(§8.2, §9.4). A phase compared against the whole price can never pass for an MTP
+artifact: the draft layer is priced, and a non-speculative serve never
+dispatches it. `tessera_route_trace_gate.compare_artifact_route_traces` takes
+the caller's claimed phases explicitly (`{"nonspec": [rank traces], "spec":
+[rank traces]}`; phases are never inferred from which files exist) and
+requires, per module: a priced module is dispatched in at least one claimed
+phase, a served Tessera module is priced, and its activation contract equals
+the priced one in EVERY phase that dispatches it. A claimed phase with a
+missing or empty trace is NOT VERIFIED, ranks that name different module sets
+are REFUSED, and a REFUSED finding in an observed phase outranks a NOT
+VERIFIED one from a missing phase. Per-phase verdicts stay in the result,
+labelled diagnostic; only the artifact verdict is the gate. There is no
+exclusion list: a module unserved in every claimed phase is REFUSED by name.
+`compare_route_traces` (one phase against the whole price) is unchanged.
+The draft layer's served name is the attested draft namespace
+(`model.layers.45.mlp.experts`, #1490). Gates:
+`tests/test_tessera_route_trace_gate_artifact.py` on fixtures cut from the real
+A8 traces (`tests/fixtures/tessera_route_trace_union/`, see its
+`PROVENANCE.md`). No pipeline default, stage, format or lane changes.
+
 Re-stamped 2026-09-28 (PQ #1618, `claude/pq-1618-routed-rates`): the lane
 roster mirror learns Tessera v45's structure-scoped `column_rates_routed_moe`
 requirement. `lane_eligibility.parse_lane_claim` reads it (an ascending subset
@@ -25886,7 +25908,11 @@ artifact's `config.json` prices, and stays unfilled when any rank's trace is
 missing. The priced targets are checkpoint names, so the gate first names each
 one in the serve's namespace through `ModelProfile.served_module_name` (§8.2,
 PQ #1490); GLM-5.3 serves its body as `language_model.model.…` and its MTP
-draft as `model.layers.N.…`. The eighth is `uniform_control`, which `required_slots` adds because
+draft as `model.layers.N.…`. A single phase is diagnostic: an artifact is judged
+by `compare_artifact_route_traces` against the union of its explicitly claimed
+serve phases (PQ #1626), so a non-speculative phase that never dispatches the
+priced draft layer no longer refuses an MTP artifact that a speculative phase
+does serve. The eighth is `uniform_control`, which `required_slots` adds because
 the artifact has a rate axis, not because any lane asked for it (#121, §7.1).
 `open_lane_shipcard` stamps `export_container` into the card's build block so
 that second obligation rests on the card as well as on the checkpoint's
