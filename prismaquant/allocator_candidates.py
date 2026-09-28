@@ -665,68 +665,29 @@ def _tensor_parallel_applicability(
     to the shape before asking the profile's own kernel-shape rules, which is
     what a rule like NVFP4's ``in_features_multiple_of: 16`` needs.  This is the
     second half, for a format whose *layout* has its own shard granularity that
-    no JSON rule can state: a Tessera unit's trellis runs across ``arity x
-    span`` row periods and its block scale plane tiles the input axis on 16 or
-    32, and its rate schedule is realisable only over column counts the
-    Bresenham root divides.  A rung can therefore be legal on a tensor and
-    illegal on an Nth of it.
+    no JSON rule can state: a lane family's rung can be legal on a tensor and
+    illegal on an Nth of it (a Tessera unit's trellis runs across ``arity x
+    32``, and its rate schedule is realisable only over column counts the
+    Bresenham root divides).
 
-    The granularity is read through ONE function,
-    ``tessera_menu.tessera_shard_granularity``, which asks
-    ``tessera.layout.shard_granularity`` -- Tessera's own derivation from the
-    checks ``slice_unit`` applies, so a period it reports is one that slices.
-    A format with no declared granularity is legal here by construction --
-    this gate adds a refusal, it never invents one -- so every non-Tessera
-    format is unchanged.
+    The owning lane answers through its plugin's
+    ``tensor_parallel_applicability`` hook. A format no family claims is legal
+    here by construction -- this gate adds a refusal, it never invents one --
+    so every registry format is unchanged.
     """
-    if not str(fmt).startswith("TESSERA_"):
+    family = fr.format_family_of(fmt)
+    if family is None:
         return FormatApplicability(True)
-    from .serving_profiles import load_serving_profile
-    from .tessera_menu import (
-        MENU_ATTESTED, PARALLEL_NONE, TesseraMenuError, menu_mode,
-        tessera_tp_legal,
-    )
-    from .tessera_formats import parse_tessera_format_name
+    from .lane_spec import family_hook
 
-    try:
-        profile = load_serving_profile(target_profile)
-    except FileNotFoundError:
-        # ``None`` is the research spelling and loads above.  A *string* that
-        # names no profile is a typo, and a typo is not a research run: the
-        # same ``profile_mismatch`` ``check_serving_format`` answers one seam
-        # over (#120).  Loading ``research`` here priced Tessera rungs under
-        # the research world size for a profile the export would then refuse.
-        return FormatApplicability(
-            False,
-            reason="profile_mismatch",
-            detail=f"unknown target profile {target_profile!r}",
-            provenance={"target_profile": target_profile},
-        )
-    world = int(profile.tensor_parallel.world_size)
-    kind = (
-        PARALLEL_NONE if packed_expert
-        else profile.tensor_parallel.kind_for(qname)
+    return family_hook(family, "tensor_parallel_applicability")(
+        fmt,
+        qname=qname,
+        target_profile=target_profile,
+        in_features=in_features,
+        out_features=out_features,
+        packed_expert=packed_expert,
     )
-    provenance = {"tp_degree": world, "tp_parallel_kind": kind}
-    try:
-        parsed = parse_tessera_format_name(fmt)
-    except Exception as exc:
-        return FormatApplicability(
-            False, "unknown_format", str(exc), provenance)
-    if parsed is None:
-        return FormatApplicability(True)
-    family, rung = parsed
-    try:
-        legal, reason = tessera_tp_legal(
-            family, rung, (out_features, in_features),
-            tp_degree=world, parallel_kind=kind, unit=qname,
-            require_attested_world=(menu_mode() == MENU_ATTESTED),
-        )
-    except TesseraMenuError as exc:
-        return FormatApplicability(False, TP_SHARD_REASON, str(exc), provenance)
-    if legal:
-        return FormatApplicability(True, None, "", provenance)
-    return FormatApplicability(False, TP_SHARD_REASON, reason, provenance)
 
 
 def check_format_applicability(
@@ -1167,8 +1128,7 @@ def _census_cell_family(row: Mapping, fmt: str) -> str | None:
     family = row.get("tessera_family")
     if isinstance(family, str) and family:
         return family
-    from .tessera_formats import parse_tessera_format_name
-    if parse_tessera_format_name(fmt) is None:
+    if fr.parse_family_rung(fmt) is None:
         return None
     return fmt.rsplit("_R", 1)[0]
 
@@ -2127,13 +2087,13 @@ def reduce_continuous_menu(
     claims and a receipt has to be able to say which one made a result look
     coarse:
 
-    * **dominance** (``tessera_menu.prune_dominated``) drops a rung only when
+    * **dominance** (``allocator_solver.prune_dominated``) drops a rung only when
       another is no larger in BYTES and no larger in COST. Exact for any
       knapsack whatsoever. Explicitly not a convex hull: the budget is
       discrete, so a point strictly inside the hull can still be the optimum
       at one particular remaining capacity, and hull pruning drops exactly
       those points.
-    * **bin collapse** (``tessera_menu.collapse_to_dp_bins``) drops a rung
+    * **bin collapse** (``allocator_solver.collapse_to_dp_bins``) drops a rung
       only when another lands in the same charged bin of THIS DP
       (``_charged_bins`` at ``bit_precision``, against the unit's own cheapest
       candidate, which is the baseline ``solve_allocation`` uses). Exact for
@@ -2157,8 +2117,19 @@ def reduce_continuous_menu(
                 "rungs_menu": sum(map(len, candidates.values())),
             })
         return {name: list(rows) for name, rows in candidates.items()}
-    from .tessera_formats import format_promotion_class
-    from .tessera_menu import collapse_to_dp_bins, prune_dominated
+    from .allocator_solver import collapse_to_dp_bins, prune_dominated
+
+    # A rung on a lane family's rate axis is the only candidate whose
+    # promotion class differs from its name; that is the lane's one input to
+    # this reduction. Memoised per call because a continuous menu repeats a
+    # few thousand names across every unit.
+    promotion_class: dict[str, str] = {}
+
+    def on_rate_axis(fmt: str) -> bool:
+        cls = promotion_class.get(fmt)
+        if cls is None:
+            cls = promotion_class[fmt] = fr.promotion_class_for(fmt)
+        return cls != fmt
 
     per_unit: dict[str, dict] = {}
     total_params = sum(
@@ -2171,11 +2142,11 @@ def reduce_continuous_menu(
         if name in deferred:
             out[name] = cands
             continue
-        tessera = [c for c in cands if format_promotion_class(c.fmt) != c.fmt]
+        tessera = [c for c in cands if on_rate_axis(c.fmt)]
         if not tessera:
             out[name] = cands
             continue
-        others = [c for c in cands if format_promotion_class(c.fmt) == c.fmt]
+        others = [c for c in cands if not on_rate_axis(c.fmt)]
         rows = [(int(c.memory_bytes), float(c.predicted_dloss), c) for c in tessera]
         n_menu = len(rows)
         rows = prune_dominated(rows)
@@ -2405,18 +2376,21 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                     [],
                 ).append(name)
                 continue
-            if spec.name.startswith("TESSERA_"):
-                from . import tessera_menu
+            family = fr.format_family_of(spec.name)
+            if family is not None and spec.name.startswith(family.name_prefix):
+                # The owning lane's pinned runtime admits the rung, per
+                # serving scope, through the lane's own seam.
+                from .lane_spec import family_hook
 
                 cache_key = (spec.name, context_key)
                 if cache_key not in admission_cache:
-                    admission_cache[cache_key] = tessera_menu.route_admission(
-                        spec.name, **scope_kwargs
-                    )
+                    admission_cache[cache_key] = family_hook(
+                        family, "rung_admission")(spec.name, **scope_kwargs)
                 admission = admission_cache[cache_key]
                 if (
                     (admission.requires_serving_context or serving_context is not None)
-                    and not admission.admits(tessera_menu.menu_mode(tessera_menu_mode))
+                    and not admission.admits(
+                        family_hook(family, "menu_mode_in_force")(tessera_menu_mode))
                 ):
                     reason = "tessera_serving_context"
                     if mask_records is not None:
@@ -2941,18 +2915,19 @@ def _fused_group_licence(licence) -> "tuple[str, frozenset[str]]":
     A ``shared`` field this allocator cannot evaluate refuses outright: the
     fold cannot hold fixed a thing it cannot compute, and enumerating as
     though the field were not there is exactly the assertion reading a table
-    exists to avoid.  Which fields those are is a rule, not a roster --
-    ``tessera_formats.FUSED_MODULE_RUNG_FIELDS`` are the ones a rung decides
-    and ``FUSED_MODULE_SHAPE_FIELDS`` the ones fixed before the allocator
-    chooses anything -- so a field outside both is an unknown vocabulary.
+    exists to avoid.  Which fields those are is a rule, not a roster: the
+    licensing lane publishes its vocabulary (``fused_module_fields``; for
+    Tessera ``tessera_formats.FUSED_MODULE_RUNG_FIELDS`` are the ones a rung
+    decides and ``FUSED_MODULE_SHAPE_FIELDS`` the ones fixed before the
+    allocator chooses anything), so a field outside both is an unknown
+    vocabulary.
     """
-    from .tessera_formats import (
-        FUSED_MODULE_RATE_FIELD, FUSED_MODULE_RUNG_FIELDS,
-        FUSED_MODULE_SHAPE_FIELDS,
-    )
-
     if licence is None:
         return FUSED_LICENCE_UNPINNED, frozenset()
+    from .allocator_solver import lane_fused_module_fields
+
+    (FUSED_MODULE_RUNG_FIELDS, FUSED_MODULE_SHAPE_FIELDS,
+     FUSED_MODULE_RATE_FIELD) = lane_fused_module_fields()
     known = {*FUSED_MODULE_RUNG_FIELDS, *FUSED_MODULE_SHAPE_FIELDS,
              FUSED_MODULE_RATE_FIELD}
     unknown = sorted(licence.shared_fields() - known)
@@ -3069,7 +3044,7 @@ def tessera_group_composites(
       write a WINDOW body, 896 writes TCQ -- so a family-only fold could put
       two ``body`` values in one module, and ``body`` is ``shared``.  The fold
       therefore runs per **coherence class**: the members' menus are keyed by
-      :func:`tessera_formats.fused_shared_signature`, which evaluates exactly
+      :func:`format_registry.fused_shared_signature` (the family's own), which evaluates exactly
       the shared fields a rung decides, and only rungs in one class are summed.
       A contract that later frees ``body`` widens the classes on its own.
 
@@ -3097,10 +3072,9 @@ def tessera_group_composites(
       conservative uncertainty bound on uniform groups does not establish
       support for uncertainty repricing across this separate option path.
     """
-    from .tessera_formats import (
-        format_promotion_class, fused_shared_signature,
-        tessera_group_option_name,
-    )
+    # The family's name grammar, answered by its lane.
+    format_promotion_class = fr.promotion_class_for
+    fused_shared_signature = fr.fused_signature_for
 
     if len(members) < 2:
         return []
@@ -3220,7 +3194,7 @@ def tessera_group_composites(
         for total_bytes, total_cost, fmts in frontier:
             member_formats = dict(zip(members, fmts))
             out.append(Candidate(
-                fmt=tessera_group_option_name(family, index),
+                fmt=fr.whole_group_option_name(family, index),
                 bits_per_param=8.0 * total_bytes / max(int(n_params), 1),
                 memory_bytes=int(total_bytes),
                 predicted_dloss=max(float(total_cost), 0.0),
@@ -3305,14 +3279,15 @@ def aggregate_fused_siblings(
     ucb_z = _cost_ucb_z()
     # Principle 14: what one fused module's roles may disagree about is a fact
     # about the serving runtime, so it is read from the table that runtime
-    # publishes -- once per aggregation, not once per group, and through
-    # ``tessera_menu``'s declared one read, so the licence and the route
-    # admission cannot come from two different Tessera builds inside one run.
-    # ``None`` is "no Tessera runtime is pinned", which is production with the
-    # dev pin unset, and the fold declines rather than assuming the licence it
-    # used to assert in a docstring (#132).
-    from .tessera_menu import fused_module_licence as _fused_module_licence
-    fused_licence = _fused_module_licence()
+    # publishes -- once per aggregation, not once per group, and through the
+    # licensing lane's hook, which for Tessera is ``tessera_menu``'s declared
+    # one read, so the licence and the route admission cannot come from two
+    # different Tessera builds inside one run. ``None`` is "no runtime is
+    # pinned", which is production with the dev pin unset, and the fold
+    # declines rather than assuming the licence it used to assert in a
+    # docstring (#132).
+    from .allocator_solver import lane_fused_module_licence
+    fused_licence = lane_fused_module_licence()
     grouped, ungrouped = _fused_sibling_groups(candidates, profile)
 
     if not grouped:
@@ -3424,8 +3399,8 @@ def aggregate_fused_siblings(
         # exactly what the NAME intersection is. Counting the family here on
         # an unpinned run would let the group past this gate on a permission
         # nothing granted, and it would then reach the fold and get nothing.
-        from .tessera_formats import format_promotion_class as _promo
-        from .tessera_formats import fused_shared_signature as _sig
+        _promo = fr.promotion_class_for
+        _sig = fr.fused_signature_for
         if _q256_licence == "per_member":
             # The same CELL key the fold uses, so this gate and the fold agree
             # on what "the members share a foldable class" means.
@@ -3734,13 +3709,11 @@ def expand_fused_sibling_assignment(assignment: dict[str, str],
     ``compute_achieved`` would then price the whole group off a fabricated
     spec.
     """
-    from .tessera_formats import is_tessera_group_option
-
     out = {}
     for name, fmt in assignment.items():
         if _FUSED_SIBLING_MARKER in name:
             members = stats_ext[name].get("_fused_siblings", [])
-            if is_tessera_group_option(fmt):
+            if fr.is_whole_group_option(fmt):
                 member_formats = (
                     stats_ext[name].get("_fused_member_formats") or {}
                 ).get(fmt)

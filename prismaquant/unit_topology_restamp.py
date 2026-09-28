@@ -35,7 +35,7 @@ def restamp_table(*, table: str, table_sha256: str, output: str,
                   model: str | None = None) -> dict:
     from . import model_profiles
     from .cluster_campaign import _atomic_write_new_bytes
-    from .tessera_serving_scope import restamp_unit_topology
+    from .lane_spec import single_lane_hook
 
     source = Path(table)
     target = Path(output)
@@ -54,6 +54,9 @@ def restamp_table(*, table: str, table_sha256: str, output: str,
     if not model_path:
         raise ValueError("no model: pass --model or restamp a table whose provenance names one")
     profile = model_profiles.detect_profile(model_path)
+    restamp_unit_topology = single_lane_hook("restamp_topology")
+    if restamp_unit_topology is None:
+        raise LookupError("no lane plugin provides 'restamp_unit_topology'")
     result, summary = restamp_unit_topology(payload, profile, input_sha256=digest)
     encoded = pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL)
     receipt = {

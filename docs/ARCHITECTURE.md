@@ -20,6 +20,64 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Re-stamped 2026-09-28 (PQ #1553, decoupling step 6 part 3): a lane's ship-record
+slots reach core through its plugin (§8.10). `shipcard` and `shipcard_cli`
+import no lane module. The Tessera lane's `route.census` and `route.trace`
+fill and replay code moves unchanged into `prismaquant/tessera_shipcard.py`,
+and the plugin registers the replays (`shipcard_slot_verifiers`) and the
+`fill-route-census` and `fill-route-trace` commands (`shipcard_cli_commands`).
+`shipcard.LANE_SLOT_VERIFIERS` keeps only the replays core owns
+(`route.sweep`), and `shipcard.lane_slot_verifiers()` is the merged view
+every check reads. The rate axis, the uniform control's block schema, the
+checkpoint's `quant_method` and the route-histogram obligation are lane-spec
+data. The core-boundary allowlist loses the last 10 shipcard lines, which
+leaves only the 5 seam-conformant `pipeline.py` settings. The recorded
+GLM-5.3 allocation reproduces every output byte for byte on main and on the
+branch, apart from the wall-clock `solver_seconds` stamp. No format, default,
+stage, stored byte or ship gate changes.
+
+Re-stamped 2026-09-28 (PQ #1558, decoupling step 6 part 2b): the allocator
+CLI reaches the lane through the allocation protocol (§8.10). `allocator.py`
+imports no lane module, and importing it loads none (27 before). The lane's
+flags, serving scope, menu-token expansion, cost-table identity checks,
+metadata blocks and selection side outputs are plugin hooks on
+`prismaquant.tessera_lane`, moved unchanged, and the metadata blocks are
+inserted at the positions they occupied. The core-boundary allowlist loses
+the last 13 `allocator.py` lines. The recorded GLM-5.3 allocation reproduces
+every output byte for byte on main and on the branch, apart from the
+wall-clock `solver_seconds` stamp. No format, default, stage, stored byte or
+ship gate changes.
+
+Re-stamped 2026-09-28 (PQ #1552, decoupling step 6 part 2a): the DP
+receives lane facts through hooks (§8.10). `allocator_solver`,
+`allocator_candidates`, `cost_currency`, `prepriced_cost` and
+`unit_topology_restamp` import no lane module. A format name's family grammar
+(promotion class, group options, fused-module signature, rung parse) is
+answered through `format_registry`, the fused-module licence and its field
+vocabulary through `allocator_solver.lane_fused_module_licence` and
+`lane_fused_module_fields`, and the campaign currency is declared on the
+Tessera family as `cost_currency`. `prune_dominated` and
+`collapse_to_dp_bins` move into `allocator_solver`. The core-boundary
+allowlist loses 24 lines. The recorded GLM-5.3 allocation reproduces every
+output byte for byte on main and on the branch, apart from the wall-clock
+`solver_seconds` stamp. No format, default, stage, stored byte or ship gate
+changes.
+
+Re-stamped 2026-09-28 (PQ #1551, decoupling step 6 part 1): core reaches
+the Tessera lane's format code through lane data and a plugin, not imports
+(§8.10). `lane_specs/tessera.json` declares `plugin:
+prismaquant.tessera_lane`, the `tessera` format family (`TESSERA_`, with
+`requires_production_render` and `rate_axis`) and the `tessera_` metadata
+prefix. `format_registry`, `production_weight_cache`, `perturbed_x_cache`,
+`weight_session`, `aura_cost`, `select_validated_frontier`, `serving_profiles`
+and `autoscale` import no lane module; `is_tessera_format_name` is gone from
+core, and `FormatSpec` gains `render_owner` and `requires_production_render`.
+The core-boundary allowlist loses 22 lines. A recorded GLM-5.3 allocation
+reproduces every output byte for byte on main and on the branch, except the
+wall-clock `solve_diagnostics.<target>.solver_seconds` stamp in
+`layer_config.json` and `selection.json`, which differs between any two runs
+of one commit. No format, default, stage, stored byte or ship gate changes.
+
 Tessera record readers accept additive fields (re-stamped 2026-09-27,
 `claude/decouple3-tolerant-readers`, PQ #1548, decoupling step 3a). The four
 readers of Tessera-published records -- `lane_eligibility.py`,
@@ -19750,10 +19808,12 @@ the same format name, and the seam refuses rather than downgrade silently:
 * **The predicate does not import Tessera.** All four sites below are on the
   hot path of every *non*-Tessera format, and `tessera_formats` /
   `tessera_render` both require the `tessera` package at import. So the
-  question "is this mine?" is `format_registry.is_tessera_format_name` — the
-  family's name grammar anchored at the start, the same line `get_format`
-  already drew — and `tessera_render` is imported inside the Tessera branch
-  only. Pinned by a subprocess test that blocks the `tessera` import.
+  question "is this mine?" is `format_registry.format_family_of` (since
+  2026-09-28, PQ #1551; it replaced `is_tessera_format_name`) — the
+  family's name prefix, declared in `lane_specs/tessera.json`, the same line
+  `get_format` already drew — and `tessera_render` is reached through the
+  lane plugin inside the family's branch only (§8.10). Pinned by a subprocess
+  test that blocks the `tessera` import.
 * **All three cache-miss RTN fallbacks refuse Tessera** —
   `weight_session._format_weight` and `perturbed_x_cache` (both gated by
   `PRISMAQUANT_STRICT_PRODUCTION_CACHE`, default refuse) and `aura_cost`'s
@@ -22426,8 +22486,9 @@ never replaces it, so **a lane can add a requirement and can never subtract
 one** — the GGUF lane declares no `native_export.graph` gate and is still
 required to close that slot. The vocabulary is derived from every lane spec
 (`shipcard.all_slots`), and each derived slot names the verifier
-`shipcard.verify` replays for it (`shipcard.LANE_SLOT_VERIFIERS`, dispatched
-by registry, #162 closed). The fourth link is `publish_artifact`, above.
+`shipcard.verify` replays for it (`shipcard.lane_slot_verifiers()`: core's
+`LANE_SLOT_VERIFIERS` plus the replays a lane plugin registers, PQ #1553;
+dispatched by registry, #162 closed). The fourth link is `publish_artifact`, above.
 
 One lane holds all four links, and it is Tessera. Native
 compressed-tensors holds the first, third and fourth but not the second:
@@ -22547,8 +22608,8 @@ those counts, never the per-unit rows, through `shipcard.route_histogram_claim`
 into the build block: `tessera_export_lane.preflight` into the build anchor that
 `lane_shipcard open --build-json` stamps, and `export_native_compressed.
 _write_shipcard` directly. `verify` requires the histogram on a card whose lane
-is `tessera` or whose build or `config.json` names the Tessera container, and
-replays it: the schema, a positive `units_total`, positive integer counts, the
+declares `route_histogram_required` (Tessera) or whose build or `config.json`
+names a rate-axis container, and replays it: the schema, a positive `units_total`, positive integer counts, the
 route statuses summing to `units_total`, and the contract counts summing to no
 more. `no_declared_lane` units (the plain-BF16 picks no lane declares) are
 carried as counted. A native card owes no histogram yet, because a native
@@ -22569,8 +22630,10 @@ opens from 2026-09-17 on.
 Tessera-lane card carries the lane's required `route.census` slot: the receipt
 that the routes the serve actually emitted -- each stamped by the plugin with
 the decoder that ran -- are the routes the artifact priced
-(`prismaquant/tessera_route_receipt.py`, `make_route_census_record`; CLI
-`fill-route-census`; the lane spec's `route.census` gate names this slot).
+(`prismaquant/tessera_route_receipt.py`,
+`tessera_shipcard.make_route_census_record`; CLI `fill-route-census`, which
+the lane plugin registers; the lane spec's `route.census` gate names this
+slot).
 For a scoped artifact, `fill-route-census --census <raw-v2.json>
 --layer-config <allocation.json> --model-dir <artifact>` retains the complete
 producer census as `route_census`, exact UTF-8 allocation/config/manifest
@@ -22650,7 +22713,7 @@ publish a current table (`tests/test_tessera_route_receipt.py`). At the `1221d2a
 pin the packaged table was v4, so that refusal never fired; it does now. Fill
 and verify apply the same rule from one home
 (`tessera_route_receipt.current_table_refuses_flat_census`): `fill-route-census`
-/ `make_route_census_record` refuse a flat row array by name at fill time on
+/ `tessera_shipcard.make_route_census_record` refuse a flat row array by name at fill time on
 the box where `verify` would refuse it, rather than stamping `passed=True`
 first (RobTand/prismaquant#214). "No census was ever compared" reads as `UNFILLED`. Known
 limit: coverage strictness is uncalibrated against a real serve (nothing has
@@ -24728,6 +24791,114 @@ shared by both probe backends):
   no grouped structure lane. "Priced, kept on FP8_SOURCE" is now an honest
   allocator decision where silence used to be.
 
+### 8.10 Lane plugins: how core reaches a lane's code (decoupling step 6, 2026-09-28)
+
+Core modules do not import lane modules (`tessera_*`) and do not test a
+lane's name. They reach a lane through `prismaquant/lane_spec.py`, the one
+lane registry, and the step-0 gate (`tests/test_tessera_core_boundary.py`)
+holds them to it with a shrink-only allowlist. A fourth lane is a lane spec
+plus a plugin module.
+
+- **Declared as data** (`lane_specs/<lane>.json`): `plugin`, the dotted
+  module that holds the lane's hooks; `format_families`, each with an `id`, a
+  `label`, an upper-case `name_prefix` and the capabilities
+  `requires_production_render` and `rate_axis`, and an optional
+  `cost_currency` its priced rows must carry; and
+  `layer_config_meta_prefixes`, the metadata keys the lane's allocation
+  writes. `LaneSpec.from_dict` refuses a family with no plugin, and
+  `lane_spec.format_families()` refuses two families whose prefixes overlap.
+  Tessera declares one family (`TESSERA_`), both capabilities, the currency
+  `output_mse_under_route_activation_contract` (held equal to
+  `tessera_campaign.CURRENCY` by `tests/test_cost_currency.py`), the plugin
+  `prismaquant.tessera_lane` and the prefix `tessera_`.
+- **Resolved without the plugin.** `format_registry.format_family_of(name)`
+  is a prefix match over the declared families. It imports neither the plugin
+  nor the lane's package, so the render path and the three cache-miss
+  fallbacks can ask it for every stock format
+  (`tests/test_lane_format_families.py` blocks both imports in a
+  subprocess). `requires_production_render(name)`, `rate_axis_format(name)`
+  and `format_owner_label(name)` answer the family's capabilities for a bare
+  name. A synthesized spec carries the same two capabilities as
+  `FormatSpec.render_owner` and `FormatSpec.requires_production_render`.
+- **Hooks bind at call time.** `lane_spec.family_hook(family, name)` returns
+  the hook on the owning lane's plugin and raises when a declared family's
+  plugin lacks it. `lane_spec.single_lane_plugin(name)` returns the one plugin
+  that provides a run-level hook, and refuses when two do. The plugin imports
+  nothing from the lane at module scope; each hook imports its lane function
+  when called, so substituting that function in a test still reaches every
+  caller.
+- **Family hooks today:** `synthesize_format` (`get_format`'s miss path),
+  `format_admitted_in_contexts` (`format_is_producer_eligible` under serving
+  contexts), `render_production` (`render_production_weight`),
+  `resolved_serving_lane` (`serving_profiles.serving_lane_route`),
+  `require_canonical_subfamily` and `format_subfamily` (a serving profile's
+  `allow_tessera_families`). **Run-level hooks:** the pinned serving runtime's
+  `serving_runtime_pin_path`, `load_serving_runtime_pin`,
+  `ServingRuntimePinError` and `serving_runtime_contract_path`, which
+  `serving_profiles._load_pinned_lane_tables` reads.
+- **What the DP receives (PQ #1552).** A family's name grammar is answered
+  by its plugin through `format_registry`: `promotion_class_for` (what a
+  serving unit's members must share; a registry format is its own class),
+  `is_whole_group_option`, `whole_group_option_name`, `fused_signature_for`
+  and `parse_family_rung` (raising on an illegal rung of a family-shaped
+  name), from the family hooks `promotion_class`, `is_group_option`,
+  `group_option_name`, `fused_signature` and `parse_format_name`.
+  Candidate admission uses the family hooks `rung_admission` and
+  `menu_mode_in_force`, and the shard gate `tensor_parallel_applicability`.
+  No hook or registry function reuses the name of the lane function it
+  forwards to, so `tools/duplication_inventory.py` finds no new same-name
+  group. The
+  fused-module licence and its field vocabulary reach promotion and the group
+  knapsack through `allocator_solver.lane_fused_module_licence` and
+  `lane_fused_module_fields` (run-level hooks `fused_licence` and
+  `fused_module_fields`); no licence means one rung per group. The DP's exact
+  reductions, `prune_dominated` and `collapse_to_dp_bins`, live in
+  `allocator_solver` beside `_charged_bins`; the lane's only input to them is
+  which candidates sit on a rate axis (promotion class differs from name).
+  The currency gate reads `cost_currency` off the family declaration, and
+  `prepriced_cost` and `unit_topology_restamp` reach the run-level hooks
+  `hessian_identity` and `restamp_topology`.
+- **The allocation protocol (PQ #1558).** `allocator.main` reads every lane
+  step off one plugin, the one providing `allocation_menu`
+  (`allocator._allocation_lane`): its flags (`allocation_arguments`: the
+  `--tessera-*` scope flags and `--tessera-materialization-plan`), its serving
+  target and per-unit contexts (`allocation_serving_target`,
+  `allocation_contexts`, `allocation_unit_context`), its cost-table Hessian
+  identity and runtime-contract identity (`allocation_hessian_identity`,
+  `allocation_runtime_identity`), the menu token's expansion with its width
+  report and refusal cause (`allocation_menu`), its metadata blocks at the two
+  positions they have always occupied (`allocation_scope_meta`,
+  `allocation_layer_config_meta`, `allocation_selection_meta`), and its
+  selection side outputs (`allocation_selection_request_path`,
+  `write_allocation_selection_request`, `allocation_expert_projection`).
+  `allocator._StockAllocationLane` holds the stock answer to each and is the
+  protocol's written statement; `tests/test_lane_allocation_protocol.py`
+  holds the Tessera plugin to all of it. Importing the allocator imports no
+  lane module (27 on the parent commit).
+- **Ship-record slots (PQ #1553).** A lane that declares an evidence slot in
+  its `gates[]` registers the slot's replay on its plugin
+  (`shipcard_slot_verifiers`, returning `{slot: replay}`) and the commands
+  that fill it (`shipcard_cli_commands`, which adds subparsers to
+  `python -m prismaquant.shipcard_cli`). `shipcard.lane_slot_verifiers()`
+  merges core's own `LANE_SLOT_VERIFIERS` (the replays of a data-only lane's
+  slots, today `route.sweep`) with every plugin's, and refuses a slot two
+  owners claim. A plugin replay takes `(slot, record, *, card, model_dir)`
+  and owns the slot's whole verdict, so `verify` routes it past the generic
+  `passed` check; a core entry keeps the historical `(slot, record)` call
+  after that check. The Tessera lane's replays and commands live in
+  `tessera_shipcard`. Four facts the ship record used to spell as `tessera`
+  are lane-spec data: a rate-axis family's `uniform_control_schema` (the
+  control block the record accepts), the lane's `quant_method` and
+  `export_container` (which artifacts have a rate axis,
+  `lane_spec.rate_axis_lanes`), and `route_histogram_required` (which lanes'
+  cards owe `build.route_histogram`). A rate-axis family without a control
+  schema is refused when the spec is parsed.
+- **Neutral homes for shared helpers.** `digests.SOURCE_HASH_BLOCK_BYTES`
+  (the guarded source hash's read block, which admission charges) and
+  `joint_eval_observation` (the pilot panel's `STATUS` and
+  `observation_status`) moved out of `tessera_calibration_cache` and
+  `tessera_joint_eval_panel`, which re-export them.
+
 ## 9. Serving lanes
 
 Three artifact containers, one allocator (a fourth, the Gridbook codebook lane,
@@ -25193,7 +25364,8 @@ build lane must not spawn those inside a pipeline run. The seventh,
 `route.trace`, needs no container of its own: it reads the trace files an
 eager serve writes when `TESSERA_ROUTE_TRACE` is set. Building that runner is
 R16's open half and stays with RobTand/prismaquant#119. `verify` replays
-`route.census` through its registered verifier (`_verify_route_census_record`):
+`route.census` through its registered verifier
+(`tessera_shipcard.verify_route_census_record`, registered by the lane plugin):
 the record must carry the priced-vs-served `route_census` block and its
 verdict must agree with it, so the slot refuses a *wrong* census as well as
 *silence* (#162).

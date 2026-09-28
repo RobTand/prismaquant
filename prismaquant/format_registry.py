@@ -126,6 +126,16 @@ class FormatSpec:
     # name (#205).  None for dynamic W8A8 (FP8, MX) and A16 rows.  Kept last
     # to preserve the positional constructor ABI.
     static_activation_contract: "StaticActivationContract | None" = None
+    # The format family whose lane owns this format's bytes, or None for a
+    # registry row. A lane-owned spec is synthesized by that lane's plugin and
+    # rendered by it (``production_weight_cache.render_production_weight``).
+    # Kept last to preserve the positional constructor ABI.
+    render_owner: str | None = None
+    # Only the production cache may render these bytes: ``quantize_dequantize``
+    # is a reconstruction, not the encode that ships, so a cache miss refuses
+    # rather than falling back to it. ``requires_production_render(name)``
+    # answers the same question for a bare name without synthesizing a spec.
+    requires_production_render: bool = False
 
     @property
     def act_quant_changes_input(self) -> bool:
@@ -1292,16 +1302,17 @@ def format_is_producer_eligible(name: str, *, context_by_unit=None) -> bool:
     """
 
     canonical = canonical_format_name(name)
-    if context_by_unit is not None and is_tessera_format_name(canonical):
+    family = format_family_of(canonical) if context_by_unit is not None else None
+    if family is not None:
         # A shared allocator menu is the union of its units' admissible rungs,
         # not a model-wide attestation. build_candidates still tests EACH
         # unit against its own context. Never install this transient answer
         # in the registry or in a context-free synthesized FormatSpec.
-        from .tessera_menu import menu_mode, route_admission
+        from .lane_spec import family_hook
         unique = {context.key(): context for context in context_by_unit.values()
                   if context is not None}
-        return any(route_admission(canonical, serving_context=context).admits(menu_mode())
-                   for context in unique.values())
+        return family_hook(family, "format_admitted_in_contexts")(
+            canonical, tuple(unique.values()))
     try:
         spec = get_format(canonical)
     except KeyError:
@@ -1343,26 +1354,132 @@ def require_producer_formats(
     return [get_format(name) for name in requested]
 
 
-def is_tessera_format_name(name: object) -> bool:
-    """True for a Tessera-shaped format name, **without importing Tessera**.
+def format_family_of(name: object):
+    """The lane format family that owns ``name``, **without importing it**.
 
-    Four consumers ask only "is this one of mine?" before deciding whether to
-    take the Tessera path: ``render_production_weight`` and the three
+    Four consumers ask only "whose format is this?" before deciding whether to
+    take a lane's path: ``render_production_weight`` and the three
     production-cache miss fallbacks (``weight_session``, ``perturbed_x_cache``,
-    ``aura_cost``). All four are on the hot path of every *non*-Tessera format
-    too, so the question must not drag in the answer's dependencies --
-    ``tessera_formats`` and ``tessera_render`` both require the ``tessera``
-    package at import, and an NVFP4-only pipeline must not.
+    ``aura_cost``). All four are on the hot path of every stock format too,
+    so the question must not drag in the answer's dependencies -- a lane's
+    code can require a package an NVFP4-only pipeline does not have.
 
-    So this is the family's own name grammar anchored at the start, the same
-    line ``get_format`` draws below, and it is deliberately a *prefix* test
-    rather than a parse: a ``TESSERA_``-shaped name naming an illegal rung is
-    still Tessera's to refuse, with Tessera's own error, not the registry's
-    KeyError about an unknown format.
+    So this is the family's own name prefix, declared as data in the lane spec
+    (``lane_specs/*.json`` ``format_families``), and it is deliberately a
+    *prefix* test rather than a parse: a family-shaped name naming an illegal
+    member is still the family's to refuse, with its own error, not the
+    registry's KeyError about an unknown format. Returns a
+    ``lane_spec.LaneFormatFamily`` or ``None`` for a registry format.
     """
-    if not isinstance(name, str):
+    from .lane_spec import format_family_for_name
+
+    return format_family_for_name(name)
+
+
+def requires_production_render(name: object) -> bool:
+    """Must ``name`` be rendered by the production cache, never by RTN?
+
+    Answered for a bare name from the owning family's declaration, so a
+    cache-miss fallback can refuse before it resolves (and synthesizes) the
+    spec. A registry row answers with its own ``FormatSpec`` field.
+    """
+    family = format_family_of(name)
+    if family is not None:
+        return family.requires_production_render
+    spec = REGISTRY.get(canonical_format_name(str(name))) if isinstance(name, str) else None
+    return bool(spec is not None and spec.requires_production_render)
+
+
+def format_owner_label(name: object) -> str:
+    """The display label of the family that owns ``name``, for refusals."""
+    family = format_family_of(name)
+    return family.label if family is not None else str(name)
+
+
+def rate_axis_format(name: object) -> bool:
+    """Is ``name`` a rung on a lane family's continuous rate axis?"""
+    family = format_family_of(name)
+    return family is not None and family.rate_axis
+
+
+# -- a family's name grammar, answered by its lane (decoupling step 6) ------
+#
+# The allocator and its DP ask four questions about a format NAME that only
+# the name's family can answer: what a serving unit's members must share
+# (the promotion class), whether a name is a whole-group option, what one
+# fused module commits to, and which member and rung a name spells. A registry
+# format answers each without a lane: it is its own class, never a group
+# option, commits to nothing a licence names, and parses to no rung. A family
+# answers through its lane plugin, looked up when asked, so a test that
+# substitutes the lane's function still reaches every caller.
+
+def promotion_class_for(fmt: object) -> str:
+    """The identity every member of one serving unit must share.
+
+    A registry format is its own class. A family rung answers with the part
+    of its name the runtime dispatches on (for Tessera, the family without
+    the rate), so promotion can require the shared decoder and leave the rate
+    free per member.
+    """
+    if not isinstance(fmt, str):
+        return str(fmt)
+    family = format_family_of(fmt)
+    if family is None:
+        return fmt
+    from .lane_spec import family_hook
+
+    return family_hook(family, "promotion_class")(fmt)
+
+
+def is_whole_group_option(fmt: object) -> bool:
+    """Is ``fmt`` a whole-group option (a rung per member), not one format?"""
+    family = format_family_of(fmt)
+    if family is None:
         return False
-    return name.strip().upper().startswith("TESSERA_")
+    from .lane_spec import family_hook
+
+    return bool(family_hook(family, "is_group_option")(fmt))
+
+
+def whole_group_option_name(promotion_class: str, index: int) -> str:
+    """The name of the ``index``-th whole-group option of one promotion class."""
+    family = format_family_of(promotion_class)
+    if family is None:
+        raise ValueError(
+            f"{promotion_class!r} is a registry format; only a lane family's "
+            "promotion class has whole-group options")
+    from .lane_spec import family_hook
+
+    return family_hook(family, "group_option_name")(promotion_class, index)
+
+
+def fused_signature_for(fmt: object, shared_fields):
+    """What ``fmt`` commits one fused module to over ``shared_fields``.
+
+    ``None`` for a name no family claims: the question does not apply.
+    """
+    family = format_family_of(fmt)
+    if family is None:
+        return None
+    from .lane_spec import family_hook
+
+    return family_hook(family, "fused_signature")(fmt, shared_fields)
+
+
+def parse_family_rung(fmt: object):
+    """``(member, rung)`` for a family rung name, or ``None``.
+
+    ``None`` for a registry format and for a family name that is not a rung.
+    A family-shaped name that spells an illegal rung raises the family's own
+    ``ValueError``: silence there would put an unpriced format in front of
+    the DP.
+    """
+    family = format_family_of(fmt)
+    if family is None:
+        return None
+    from .lane_spec import family_hook
+
+    return family_hook(family, "parse_format_name")(fmt)
 
 
 # The retired Gridbook lane's codebook rungs (NVFP4_CB_K<k>, FP8_CB_K<k>).
@@ -1381,23 +1498,25 @@ class RetiredFormatError(ValueError):
 def get_format(name: str) -> FormatSpec:
     canonical = canonical_format_name(name)
     if canonical not in REGISTRY:
-        # Tessera rungs are parameters of a family, not registry rows: one
-        # family addresses ~9500 rungs at 1/256-bpp resolution, and freezing
-        # those into REGISTRY would turn a continuous rate axis into a menu
-        # someone has to maintain. Synthesize on demand so every consumer that
-        # resolves a format by name works unchanged, then fall through to the
-        # normal KeyError for anything that is not Tessera-shaped.
+        # A lane family's rungs are parameters of the family, not registry
+        # rows: one Tessera family addresses ~9500 rungs at 1/256-bpp
+        # resolution, and freezing those into REGISTRY would turn a continuous
+        # rate axis into a menu someone has to maintain. The owning lane's
+        # plugin synthesizes on demand so every consumer that resolves a
+        # format by name works unchanged, then fall through to the normal
+        # KeyError for anything no family claims.
         #
         # The prefix test is the family's own name grammar anchored at the
-        # start (``tessera_formats._FORMAT_NAME``), and it is here rather than
-        # inside the synthesizer because reaching the synthesizer imports the
-        # ``tessera`` package: an unknown NON-Tessera name must raise KeyError
+        # start, declared by its lane, and it is here rather than inside the
+        # synthesizer because reaching the synthesizer imports the lane's
+        # code: an unknown name outside every family must raise KeyError
         # naming the registry, not ModuleNotFoundError naming a package it was
-        # never asking for.  ``is_tessera_format_name`` above is that line.
-        if is_tessera_format_name(canonical):
-            from .tessera_render import synthesize_tessera_spec
+        # never asking for.  ``format_family_of`` above is that line.
+        family = format_family_of(canonical)
+        if family is not None:
+            from .lane_spec import family_hook
 
-            spec = synthesize_tessera_spec(canonical)
+            spec = family_hook(family, "synthesize_format")(canonical)
             if spec is not None:
                 return spec
         if RETIRED_CODEBOOK_FORMAT_RE.fullmatch(canonical.upper()):
