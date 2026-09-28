@@ -137,8 +137,13 @@ def test_the_mtp_mapper_script_is_the_bytes_the_image_ran() -> None:
         "import_weights_mapper", "glm5next_mtp_hf_to_vllm_mapper"}
 
 
-def test_an_unserved_mtp_mapper_set_qualifies_no_layers() -> None:
+def test_the_mtp_mapper_set_is_qualified_by_the_r6_census_and_no_wider() -> None:
+    """r6 (u4-BAL-20260928T0540Z-2c-r6-2c) served the 45-layer body plus the
+    drafter on the derived image, with a VALID census receipt (PQ #1490)."""
     patch_set = load_serving_runtime_patch_set(MTP_MAPPER)
-    assert patch_set.qualified_model_layers == 0
-    with pytest.raises(ServingRuntimePatchSetError, match="qualified on 0 layers"):
-        patch_set.require_qualified_for(model_layers=4)
+    assert patch_set.qualified_model_layers == patch_set.full_model_layers == 45
+    patch_set.require_qualified_for(model_layers=45)
+    with pytest.raises(ServingRuntimePatchSetError, match="qualified on 45 layers"):
+        patch_set.require_qualified_for(model_layers=46)
+    assert patch_set.qualification["modes_ready"] == ["eager"]
+    assert patch_set.raw["receipts"]["census_run_id"] == "u4-BAL-20260928T0540Z-2c-r6-2c"

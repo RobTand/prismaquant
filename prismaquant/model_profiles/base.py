@@ -102,10 +102,19 @@ class ModelProfile(ABC):
         # an on-disk census to disambiguate two source layouts that share the
         # same HF config declaration.
         self._declared_model_path: Path | None = None
+        # The parsed config.json detection resolved this profile from, when
+        # detection had one (`detect_profile`, `profile_from_config`). Empty
+        # for a hand-built profile. Private intake context, like the path: a
+        # family reads layer counts from it rather than restating them.
+        self._declared_config: dict | None = None
 
     def _declare_model_path(self, model_path: str | Path) -> None:
         """Attach path-only checkpoint evidence after config resolution."""
         self._declared_model_path = Path(model_path)
+
+    def _declare_config_document(self, config: dict | None) -> None:
+        """Attach the parsed config.json detection resolved this profile from."""
+        self._declared_config = config if isinstance(config, dict) else None
 
     def declare_config(
         self,
@@ -627,6 +636,26 @@ class ModelProfile(ABC):
             ):
                 return mapped
         return self._name_remapper(checkpoint_name)
+
+    def served_module_name(self, checkpoint_name: str, config: dict) -> str:
+        """The name the serving runtime's module tree gives a priced target.
+
+        ``config_groups`` targets are checkpoint names. Route telemetry
+        (Tessera's ``TESSERA_ROUTE_TRACE``) records each dispatching layer's
+        ``prefix``, which is the name vLLM built the module under. The
+        ``route.trace`` gate (`tessera_route_trace_gate`, PQ #1490) maps each
+        priced target through this method before it compares the two.
+
+        ``config`` is the artifact's parsed ``config.json``. A profile that
+        serves a separate draft model (MTP) reads its layer range from it.
+
+        The default is the identity: a profile that attests no runtime
+        namespace compares checkpoint names verbatim, exactly as the gate did
+        before this hook existed. It deliberately does NOT fall back to
+        :meth:`to_vllm_internal_name`, which imports the vLLM class to read
+        its mapper. A profile overrides this only with a mapping it cites to
+        the pinned serving image (principle 14)."""
+        return checkpoint_name
 
     def runtime_loads_source_fp8(self, module_name: str) -> bool:
         """True when the pinned serving runtime loads this Linear's FP8

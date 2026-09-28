@@ -441,6 +441,11 @@ def test_every_gate_answers_exactly_as_it_did_before_under_the_v2_pin():
     their scopes resolve to, the development contract's reviewed answer and
     admitted cells, and eight route-trace verdicts, four of them on traces
     whose header carries a digest a v2 pin must not read.
+
+    Regenerated once, through PrismaBuild, when #1490 merged onto this gate:
+    the route-trace verdicts gained the glm5_next served-namespace fields
+    (``served_namespace``, renamed priced targets, one sentence in
+    ``detail``), and no verdict changed.
     """
     now = snapshot_module.canonical(snapshot_module.snapshot())
     before = GOLDEN.read_text(encoding="utf-8")

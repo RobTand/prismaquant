@@ -51,9 +51,12 @@ def _glm_case(tmp_path, *, visual_entry=ALLOCATOR_BF16):
     model.mkdir()
     (model / "config.json").write_text(json.dumps({
         "model_type": "glm5_next", "architectures": ["Glm5NextForConditionalGeneration"],
-        # The one-expert population this fixture writes, at GLM's own widths.
+        # The one-expert population this fixture writes, at GLM's own widths,
+        # and GLM-5.3-Flash's own layer counts (source config sha256
+        # 33e63ec7…f943), from which the profile derives the MTP draft layer.
         "text_config": {"n_routed_experts": 1, "hidden_size": 4096,
-                        "moe_intermediate_size": 2048},
+                        "moe_intermediate_size": 2048, "num_hidden_layers": 45,
+                        "num_nextn_predict_layers": 1},
     }))
     tensors = {name + ".weight": torch.zeros(shape, dtype=torch.bfloat16)
                for name, shape in {**ROUTED, BODY_BF16: (256, 256), VISUAL: (64, 64)}.items()}
