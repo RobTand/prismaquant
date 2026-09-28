@@ -337,12 +337,20 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: v41 lets a cell stamp its serving code, and no v42 cell does, so a v3 pin
 #: would admit no cell. The digest a v3 pin at this commit would carry is
 #: ``445da73b…`` (``prismaquant/tessera_runtime/README.md``).
+#: Re-pinned 2026-09-28 to a5f3b232cb, Tessera master's merge of #691
+#: (tessera#687), on top of #693. v43 (#693) names the fused window
+#: kernel's dense identity as a second launch in the six dense window cells;
+#: v44 (#691) moves the supported exporter into the installed package and
+#: publishes the serving plan schema -- the packaged contract gains the
+#: ``src/tessera/export_serving.py`` driver beside the shim, and the
+#: admission answer does not move from v43. The pin stays schema v2: no v44
+#: cell stamps serving code.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "38e960127478b651e42c14d52acf2274b54bca38"
+    "a5f3b232cb3c424b537a06713c728c86153d55fb"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
+    "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
 )
 #: The v3 split (#1561).  ``TESSERA_SERVING_RUNTIME_PINNED_COMMIT`` above is
 #: the SERVING commit; the producer commit and the serving code digest are
@@ -352,7 +360,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "38e960127478b651e42c14d52acf2274b54bca38"
+    "a5f3b232cb3c424b537a06713c728c86153d55fb"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 

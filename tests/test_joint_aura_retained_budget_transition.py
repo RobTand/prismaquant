@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,6 +10,7 @@ import pytest
 
 from prismaquant import aura_cost as aura
 from prismaquant import joint_aura_retained_budget_transition as transition
+from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
 from prismaquant import joint_aura_run_transition as run_transition
 from prismaquant import joint_aura_source_transition as resume_transition
 from prismaquant import joint_aura_transitions as transitions
@@ -59,8 +59,8 @@ def _plan(tmp_path, budget=None, **overrides):
 
 
 def _write_json(path, value):
-    path.write_bytes(transition._canonical(value) + b"\n")
-    return {"path": str(path), "sha256": transition._sha(path)}
+    path.write_bytes(DIRECT_UTF8_STRICT.encoded(value) + b"\n")
+    return {"path": str(path), "sha256": file_sha256hex(path)}
 
 
 @pytest.fixture
@@ -96,11 +96,11 @@ def sealed(tmp_path, monkeypatch):
     prepared = _write_json(tmp_path / "prepared.json", {
         "schema": transition.PREPARED_SCHEMA, "status": "complete", "measured_cells": 6,
         "implementation_sha256": old_source, "plan_sha256": prepared_plan["sha256"],
-        "production_cache": {"path": str(cache_file), "sha256": transition._sha(cache_file)}})
+        "production_cache": {"path": str(cache_file), "sha256": file_sha256hex(cache_file)}})
     identity = _write_json(tmp_path / "identity.json", {"schema": "campaign identity fixture"})
     contract = {**transition._CONTRACT, "source_sha256": old_source, "git_commit": "1" * 40,
                 "prepared_plan_sha256": prepared_plan["sha256"], "prepared_sha256": prepared["sha256"],
-                "production_cache_sha256": transition._sha(cache_file),
+                "production_cache_sha256": file_sha256hex(cache_file),
                 "campaign_identity_sha256": identity["sha256"], "measured_cells": 6}
     monkeypatch.setattr(transition, "_CONTRACT", contract)
     state = {"commit": new_git, "package": package}
@@ -167,7 +167,7 @@ def test_the_derivation_record_rides_and_is_recorded_without_being_read(sealed):
                     retained_window_budget_derivation=record)
     difference = transition.plan_difference(sealed["prepared_config"], changed)
     entry = [row for row in difference if row["path"] == ["retained_window_budget_derivation"]]
-    digest = hashlib.sha256(transition._canonical(record)).hexdigest()
+    digest = DIRECT_UTF8_STRICT.sha256(record)
     assert entry == [{"path": ["retained_window_budget_derivation"],
                       "prepared_plan": {"present": False},
                       "run_plan": {"present": True, "canonical_sha256": digest}}]
@@ -296,7 +296,7 @@ def test_a_receipt_whose_recorded_difference_was_edited_is_refused(sealed):
 
 def test_a_run_plan_swapped_after_the_receipt_is_refused(sealed):
     other = _plan(sealed["tmp_path"], budget={**_SEALED_BUDGET, "candidate_delta_bytes": 33554432})
-    Path(sealed["run_plan"]["path"]).write_bytes(transition._canonical(other) + b"\n")
+    Path(sealed["run_plan"]["path"]).write_bytes(DIRECT_UTF8_STRICT.encoded(other) + b"\n")
     with pytest.raises(ValueError, match="run plan bytes changed"):
         sealed["load"]()
 
