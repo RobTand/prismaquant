@@ -30,8 +30,10 @@ prefix. `format_registry`, `production_weight_cache`, `perturbed_x_cache`,
 and `autoscale` import no lane module; `is_tessera_format_name` is gone from
 core, and `FormatSpec` gains `render_owner` and `requires_production_render`.
 The core-boundary allowlist loses 21 lines. A recorded GLM-5.3 allocation
-reproduces `layer_config.json` and `selection.json` byte for byte on main and
-on the branch. No format, default, stage, stored byte or ship gate changes.
+reproduces every output byte for byte on main and on the branch, except the
+wall-clock `solve_diagnostics.<target>.solver_seconds` stamp in
+`layer_config.json` and `selection.json`, which differs between any two runs
+of one commit. No format, default, stage, stored byte or ship gate changes.
 
 Stage A rows adopt the campaign's source proof (2026-09-27,
 `claude/pq-1497-stage-a-adopt-identity`, PQ #1497): a selected-source
