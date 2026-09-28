@@ -77,6 +77,8 @@ from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
+from .digests import indent2_json_file_bytes
+
 #: ``TESSERA_<BASE>_K<arity>_R<rung>`` -- the allocator's format spelling.
 FORMAT = re.compile(r"^TESSERA_(?P<base>[A-Z0-9]+)_K(?P<arity>\d+)_R(?P<rung>\d+)$")
 FAMILY = re.compile(r"^TESSERA_(?P<base>[A-Z0-9]+)_K(?P<arity>\d+)$")
@@ -204,7 +206,7 @@ def refuse_non_tessera_choices(other: dict) -> None:
         f"BF16 module and is planned as one.")
 
 
-def carried_projection(config: dict):
+def read_carried_projection(config: dict):
     """The carried expert projection, schema-checked, or ``None`` without one."""
     carried = (config.get("__prismaquant__") or {}).get("tessera_expert_projection")
     if carried is None:
@@ -224,7 +226,7 @@ def refuse_before_source(config: dict, surface, research_input=None) -> None:
     Runs before the planner opens the source checkpoint, so a plan that cannot
     be written fails in seconds, not after a pass over the source.
     """
-    carried_projection(config)
+    read_carried_projection(config)
     choices = {qname: parse_entry(qname, entry) for qname, entry in config.items()
                if not qname.startswith("__")}
     refuse_non_tessera_choices({qname: payload for qname, (kind, payload) in choices.items()
@@ -258,7 +260,7 @@ def model_plan_context(model: Path, config: dict, surface, *, research_selected:
     members = {stack: [name for expert in experts.values() for name, _shape in expert.values()]
                for stack, experts in stacks.items()}
     layouts = {stack: surface.MOE_SOURCE_UNPACKED for stack in stacks}
-    carried = carried_projection(config)
+    carried = read_carried_projection(config)
     if carried is not None:
         producer, request = carried["producer"], carried["request"]
         # Bind the projection to this checkpoint's config and tensor roster,
@@ -372,7 +374,7 @@ def uniform_control_block(plan: dict, shapes: dict, surface, *, rule: str = "nea
     return block
 
 
-def build(config: dict, shapes: dict, *, cover: str, allow_disagreement: bool,
+def build_serving_plan(config: dict, shapes: dict, *, cover: str, allow_disagreement: bool,
           surface, control_rule: str = "nearest", with_control: bool = True):
     meta = config.get("__prismaquant__")
     assignment = {k: v for k, v in config.items() if not k.startswith("__")}
@@ -589,7 +591,7 @@ def plan_from_assignment(config: dict, shapes: dict, members: dict, layouts: dic
     for name in allocation:
         if not name.startswith("__") and name + ".weight" not in shapes:
             raise PlanError(f"{name}: allocation unit is absent from the producer's logical body projection")
-    plan, provenance = build(allocation, shapes, cover=cover,
+    plan, provenance = build_serving_plan(allocation, shapes, cover=cover,
                              allow_disagreement=allow_disagreement,
                              surface=surface, control_rule=control_rule,
                              with_control=with_control)
@@ -668,7 +670,9 @@ def main(argv=None):
     provenance["source_layer_config"] = str(args.layer_config.resolve())
     provenance["model"] = str(args.model.resolve())
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(plan, indent=2, sort_keys=True))
+    # Plan bytes go through the digest owner's spelling (PQ #1508): the
+    # acceptance compares parsed plans, so the owner's trailing LF is safe.
+    args.out.write_bytes(indent2_json_file_bytes(plan))
     sidecar = args.out.with_suffix(args.out.suffix + ".provenance.json")
     sidecar.write_text(json.dumps(provenance, indent=2))
 
@@ -722,9 +726,9 @@ def main(argv=None):
         units = surface.units_from_plan(logical_plan, shapes)
         control = surface.uniform_control(units, rule=args.control_rule)
         args.write_uniform_plan.parent.mkdir(parents=True, exist_ok=True)
-        args.write_uniform_plan.write_text(
-            json.dumps(stack_plan(control.plan, stack_members, layouts),
-                       indent=2, sort_keys=True))
+        args.write_uniform_plan.write_bytes(
+            indent2_json_file_bytes(
+                stack_plan(control.plan, stack_members, layouts)))
         print(f"  -> {args.write_uniform_plan}  (uniform {control.grid} "
               f"R{control.q256}, the control arm)")
     print(f"  -> {args.out}\n  -> {sidecar}")

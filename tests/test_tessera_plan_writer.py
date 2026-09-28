@@ -138,7 +138,7 @@ def test_as_allocated_plans_exactly_the_allocation_and_completes_with_bf16(
         "model.layers.1.mlp.down_proj": "BF16",
     }
     shapes, members, layouts = _context(surface, config, tmp_path)
-    plan, provenance = writer.build(config, shapes, cover="as-allocated",
+    plan, provenance = writer.build_serving_plan(config, shapes, cover="as-allocated",
                                     allow_disagreement=False,
                                     control_rule="nearest", with_control=True,
                                     surface=surface)
@@ -171,7 +171,7 @@ def test_fused_scheme_disagreement_refuses(tmp_path, monkeypatch):
     }
     shapes, _members, _layouts = _context(surface, config, tmp_path)
     with pytest.raises(SystemExit, match="do not share one scheme"):
-        writer.build(config, shapes, cover="as-allocated", allow_disagreement=False,
+        writer.build_serving_plan(config, shapes, cover="as-allocated", allow_disagreement=False,
                      control_rule="nearest", with_control=True, surface=surface)
 
 
@@ -187,7 +187,7 @@ def test_allow_fused_disagreement_demotes_the_whole_group_to_bf16(
         "model.layers.0.mlp.up_proj": {"tessera_format": "TESSERA_E4M3_K1_R1024"},
     }
     shapes, _m, _l = _context(surface, config, tmp_path)
-    plan, provenance = writer.build(config, shapes, cover="as-allocated",
+    plan, provenance = writer.build_serving_plan(config, shapes, cover="as-allocated",
                                     allow_disagreement=True,
                                     control_rule="nearest", with_control=True,
                                     surface=surface)
@@ -209,7 +209,7 @@ def test_partially_allocated_fused_module_is_a_disagreement(tmp_path, monkeypatc
               {"tessera_format": "TESSERA_E4M3_K1_R1024"}}
     shapes, _m, _l = _context(surface, config, tmp_path)
     with pytest.raises(SystemExit, match="do not share one scheme"):
-        writer.build(config, shapes, cover="as-allocated", allow_disagreement=False,
+        writer.build_serving_plan(config, shapes, cover="as-allocated", allow_disagreement=False,
                      control_rule="nearest", with_control=True, surface=surface)
 
 
@@ -264,7 +264,7 @@ def test_broadcast_by_role_extrapolates_and_stamps(tmp_path, monkeypatch):
     config = {"model.layers.0.mlp.down_proj":
               {"tessera_format": "TESSERA_E4M3_K1_R1024"}}
     shapes, _m, _l = _context(surface, config, tmp_path)
-    plan, provenance = writer.build(config, shapes, cover="broadcast-by-role",
+    plan, provenance = writer.build_serving_plan(config, shapes, cover="broadcast-by-role",
                                     allow_disagreement=False,
                                     control_rule="nearest", with_control=True,
                                     surface=surface)
@@ -282,7 +282,7 @@ def test_broadcast_by_role_needs_a_single_layer(tmp_path, monkeypatch):
         "model.layers.1.mlp.down_proj": {"tessera_format": "TESSERA_E4M3_K1_R896"},
     }
     with pytest.raises(SystemExit, match="single-layer allocation"):
-        writer.build(config, dict(DENSE),
+        writer.build_serving_plan(config, dict(DENSE),
                      cover="broadcast-by-role", allow_disagreement=False,
                      control_rule="nearest", with_control=True, surface=surface)
 
@@ -428,7 +428,7 @@ def test_the_sidecar_carries_prismaquant_wire_accounting(tmp_path, monkeypatch):
         "model.layers.0.mlp.up_proj": {"tessera_format": "TESSERA_E4M3_K1_R896"},
     }
     shapes, _m, _l = _context(surface, config, tmp_path)
-    plan, provenance = writer.build(config, shapes, cover="as-allocated",
+    plan, provenance = writer.build_serving_plan(config, shapes, cover="as-allocated",
                                     allow_disagreement=False,
                                     control_rule="nearest", with_control=True,
                                     surface=surface)
@@ -452,7 +452,7 @@ def test_the_plan_and_provenance_schemas_are_named(tmp_path, monkeypatch):
     config.update({f"model.layers.0.mlp.{role}_proj": fmt
                    for role in ("gate", "up")})
     shapes, _m, _l = _context(surface, config, tmp_path)
-    plan, provenance = writer.build(config, shapes, cover="as-allocated",
+    plan, provenance = writer.build_serving_plan(config, shapes, cover="as-allocated",
                                     allow_disagreement=False,
                                     control_rule="nearest", with_control=True,
                                     surface=surface)
