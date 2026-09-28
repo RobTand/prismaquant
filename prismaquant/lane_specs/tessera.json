@@ -14,7 +14,8 @@
       "label": "Tessera",
       "name_prefix": "TESSERA_",
       "requires_production_render": true,
-      "rate_axis": true
+      "rate_axis": true,
+      "cost_currency": "output_mse_under_route_activation_contract"
     }
   ],
   "layer_config_meta_prefixes": ["tessera_"],

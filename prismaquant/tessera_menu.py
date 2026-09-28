@@ -97,6 +97,7 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
 
+from .allocator_solver import collapse_to_dp_bins, prune_dominated
 from .lane_eligibility import (
     SCOPED_LANE_SCHEMAS,
     legacy_runtime_scope_refusal,
@@ -1509,74 +1510,10 @@ def expand_tessera_menu(
 # Making a 3000-rung menu tractable, exactly
 # ---------------------------------------------------------------------------
 
-def prune_dominated(
-    rows: Sequence[tuple[int, float, object]],
-) -> list[tuple[int, float, object]]:
-    """Drop only rows another row beats on BOTH axes.  Exact, not a hull.
-
-    ``rows`` is ``(memory_bytes, cost, payload)``.  A row is dominated when
-    another row is no larger in bytes and no larger in cost, and strictly
-    better on at least one -- which is the only reduction a multi-choice
-    knapsack admits without changing its answer, because the DP's budget is
-    discrete and a point strictly inside the convex hull can still be the
-    optimum for one particular remaining capacity.  Hull pruning would drop
-    exactly those points, so it is refused here rather than offered behind a
-    flag.
-
-    Ties on both axes keep the first row in the sorted order, so the reduction
-    is deterministic.
-    """
-    ordered = sorted(rows, key=lambda r: (int(r[0]), float(r[1])))
-    kept: list[tuple[int, float, object]] = []
-    best = float("inf")
-    for row in ordered:
-        cost = float(row[1])
-        if cost < best:
-            kept.append(row)
-            best = cost
-    return kept
-
-
-def collapse_to_dp_bins(
-    rows: Sequence[tuple[int, float, object]],
-    *,
-    baseline_bits_per_param: float,
-    n_params: int,
-    total_params: int,
-    bit_precision: float,
-) -> list[tuple[int, float, object]]:
-    """Keep one row per distinct DP bin.  Exact **for this DP**, and says so.
-
-    ``allocator_solver.solve_allocation`` charges a candidate
-    ``round(((bpp - baseline_bpp) * n_params/total_params) / bit_precision)``
-    bins and can express nothing finer.  Two rungs that land in the same bin are
-    indistinguishable *to the solver*, so keeping the lower-cost one changes no
-    answer it could have given -- which is a different and weaker statement than
-    :func:`prune_dominated`'s, and is why the two are separate functions with
-    separately reported counts.
-
-    The distinction matters for reading a receipt.  If an allocation's selected
-    rates look coarse, this tells you whether the campaign priced few rungs
-    (a campaign result) or the DP's bin width swallowed them (a
-    ``--bit-precision`` result).  On a 0.6B model a 3M-parameter Linear holds a
-    fraction near 0.007 of the body, so Tessera's 1/256-bpp step is ~2.7e-5
-    average bits and the default ``bit_precision=1e-4`` resolves roughly one
-    rung in four.  Neither number is a constant here: both are reported.
-    """
-    from .allocator_solver import _charged_bins
-
-    if total_params <= 0 or n_params <= 0:
-        return list(rows)
-    fraction = float(n_params) / float(total_params)
-    best: dict[int, tuple[int, float, object]] = {}
-    for row in sorted(rows, key=lambda r: (int(r[0]), float(r[1]))):
-        bits_per_param = float(row[0]) * 8.0 / float(n_params)
-        d_avg = (bits_per_param - float(baseline_bits_per_param)) * fraction
-        dbins = _charged_bins(d_avg, float(bit_precision))
-        prior = best.get(dbins)
-        if prior is None or float(row[1]) < float(prior[1]):
-            best[dbins] = row
-    return [best[k] for k in sorted(best)]
+# ``prune_dominated`` and ``collapse_to_dp_bins`` are the DP's own exact
+# reductions and live in ``allocator_solver`` beside ``_charged_bins``, the bin
+# arithmetic the collapse must agree with (decoupling step 6, PQ #1552). They
+# are imported at the top of this module for this module's callers.
 
 
 def expand_menu_tokens(names, priced_formats=()) -> list[str]:
