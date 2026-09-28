@@ -83,6 +83,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Sequence
 
+from .digests import (
+    bytes_sha256hex, indent2_json_file_bytes, text_sha256hex,
+)
+
 
 #: ``config.json`` keys whose positive value means the checkpoint routes tokens
 #: to experts.  Named rather than sniffed: every in-tree MoE architecture spells
@@ -985,8 +989,7 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
                     raise TesseraExportLaneError(f"{name}@{fmt}: {exc}") from exc
             records[name] = record
             if rooted:
-                import hashlib
-                root_id = hashlib.sha256(str(cell_wire_dir).encode()).hexdigest()
+                root_id = text_sha256hex(str(cell_wire_dir))
                 wire_roots[root_id] = str(cell_wire_dir)
                 unit_roots[name] = root_id
     if not records:
@@ -1019,8 +1022,6 @@ def write_cached_expert_units(projection: Mapping[str, Any]) -> Path:
     the schema is the producer's constant, imported rather than restated, and
     a checkout whose producer has no such API cannot bundle (refused by name).
     """
-    import hashlib
-
     from .cluster_campaign import CampaignContractError, _atomic_write_new_bytes
     from .tessera_expert_projection import ExpertProjectionError, cached_units_manifest
 
@@ -1037,8 +1038,8 @@ def write_cached_expert_units(projection: Mapping[str, Any]) -> Path:
                                          schema=CACHE_SCHEMA)
     except ExpertProjectionError as exc:
         raise TesseraExportLaneError(f"expert projection: {exc}") from exc
-    encoded = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
-    digest = hashlib.sha256(encoded).hexdigest()
+    encoded = indent2_json_file_bytes(manifest)
+    digest = bytes_sha256hex(encoded)
     destination = Path(projection["wire_dir"]) / f"{CACHED_EXPERT_UNITS_PREFIX}.{digest}.json"
     try:
         _atomic_write_new_bytes(destination, encoded)
@@ -2243,7 +2244,6 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
     Tessera still owns conversion from layer-config entries to wire plans.
     Called after scope/wire admission.
     """
-    import hashlib
     from .cost_stage_checkpoint import atomic_write_bytes
     from .layer_config import (
         canonicalize_assignment, canonicalize_format, layer_config_metadata, strip_weight,
@@ -2256,7 +2256,7 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
 
     source_path = Path(assignment_path)
     raw = source_path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+    if bytes_sha256hex(raw) != expected_sha256:
         raise TesseraExportLaneError("allocation changed before export assignment projection")
     original = json.loads(raw)
     metadata = layer_config_metadata(original)
@@ -2312,10 +2312,10 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
         },
     }
     output = source_path.with_name(source_path.stem + ".tessera-source-units.json")
-    payload = (json.dumps(projected, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    payload = indent2_json_file_bytes(projected)
     atomic_write_bytes(output, payload)
     return {"plan_assignment": str(output),
-            "plan_assignment_sha256": hashlib.sha256(payload).hexdigest()}
+            "plan_assignment_sha256": bytes_sha256hex(payload)}
 
 
 # ---------------------------------------------------------------------------
@@ -2353,7 +2353,6 @@ def require_composed_cached_units(path: str | Path, *, scope: Mapping,
     receipt to the bytes the allocation priced; the exporter hashes the blobs
     and derives their source/H/recipe identities at intake.
     """
-    import hashlib
     from tessera.cached_unit import COMPOSED_CACHE_SCHEMA, read_manifest
 
     path = Path(path)
@@ -2383,7 +2382,7 @@ def require_composed_cached_units(path: str | Path, *, scope: Mapping,
             if bundle.units.get(name) != record:
                 raise TesseraExportLaneError(
                     f'{name}: composed cached {cohort} receipt differs from selected price')
-    return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
+    return {'path': str(path), 'sha256': bytes_sha256hex(raw),
             'units': len(bundle.units), 'children': bundle.child_manifests,
             'encoder_source_proof_mode': bundle.encoder_source_proof_mode,
             'warnings': bundle.warnings}
@@ -2672,9 +2671,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # mutable destination. The driver retains it in argv across the handoff.
     output = sys.stderr if args.print_build_sha256 else sys.stdout
     if args.print_build_sha256:
-        import hashlib
-
-        print(hashlib.sha256(build_bytes).hexdigest())
+        print(bytes_sha256hex(build_bytes))
     print("[preflight] tessera lane OK: "
           f"structure={report['structure']} "
           f"executes={report['executes']} "
