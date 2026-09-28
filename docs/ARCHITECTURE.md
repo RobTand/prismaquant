@@ -80,6 +80,14 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Re-stamped 2026-09-28 (PQ #1571, prismabuild#1076): Stage A retirement and
+the forward-recovery loader read PrismaBuild batch records, claimed records
+and file identity through published names (`produced_output.batch_record`
+and `batch_records`, `client.read_claimed_record`,
+`reader_lease.portable_identity`) instead of private helpers. One refusal is
+added: a retirement rerun refuses when a reclaimed batch's record is missing.
+No format, pipeline default, stage, serving lane or ship gate changes.
+
 Re-stamped 2026-09-28 (PQ #1553, decoupling step 6 part 3): a lane's ship-record
 slots reach core through its plugin (§8.10). `shipcard` and `shipcard_cli`
 import no lane module. The Tessera lane's `route.census` and `route.trace`
@@ -2878,9 +2886,11 @@ first, which makes chain resume, seed and band refuse the space. It then
 removes `checkpoints/` and the referenced entries, and calls
 `reclaim_origin` for each retired batch. A rerun finishes from the sealed
 record. The queue root comes from the producer records, so no
-produced-output binding is needed. The tool reads PrismaBuild's private
-`_load_batch_record` and `_read_commitments`, because PrismaBuild publishes
-no reader for a staged batch. Gates:
+produced-output binding is needed. The tool reads each batch through
+PrismaBuild's public reader `produced_output.batch_records` (prismabuild#955,
+PQ #1571). That reader reads every batch, reclaimed ones included, and
+refuses a record it cannot read, so a rerun refuses when a reclaimed batch's
+record is gone. Gates:
 - `tests/test_stage_a_retirement_1073.py`;
 - `tests/test_stage_a_retirement_pb_1073.py`: on a real owner, the durable
   charge drops by exactly the pinned batch's bytes.
