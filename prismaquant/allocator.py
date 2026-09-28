@@ -778,13 +778,14 @@ def _mtp_rung_attestation(serving_target, profile):
     return eligible
 
 
-def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping, *,
-                         serving_target=None, profile=None) -> None:
-    """Add the MTP layer's selected rungs to ``layer_cfg`` (PQ #1346).
+def _select_mtp(args, *, serving_target=None, profile=None) -> tuple[dict, dict]:
+    """The MTP payload and its selection record under ``--mtp-byte-budget`` (PQ #1346).
 
-    The selection runs after the body is final, on its own payload and its own
-    declared sub-budget, so it moves no body byte and no body bpp. A unit the
-    body also assigned is refused: one unit cannot be priced in two currencies.
+    Runs BEFORE any whole-artifact card is priced (PQ #1610): the card must
+    charge the selected MTP rungs, not the layer's source bytes, and the
+    selection reads only its own payload and sub-budget, never the body.
+    ``--mtp-fixed-formats`` pins named groups to one rung each, intersected
+    with the same attested menu (``select_mtp_rungs(fixed_formats=)``).
     """
     from .glm_mtp_selection import load_mtp_cost, select_mtp_rungs
 
@@ -796,11 +797,28 @@ def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping, *,
         constants = json.loads(Path(args.mtp_serve_constants).read_text())
         points = (json.loads(Path(args.mtp_acceptance_points).read_text())
                   if args.mtp_acceptance_points else [])
+        fixed = (json.loads(Path(args.mtp_fixed_formats).read_text())
+                 if getattr(args, "mtp_fixed_formats", None) else None)
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
                                   constants=constants, acceptance_points=points,
-                                  eligible=_mtp_rung_attestation(serving_target, profile))
+                                  eligible=_mtp_rung_attestation(serving_target, profile),
+                                  fixed_formats=fixed)
     except ValueError as exc:
         raise SystemExit(f"[alloc] ERROR: MTP selection: {exc}") from exc
+    return payload, record
+
+
+def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
+                         record: Mapping) -> None:
+    """Add the MTP layer's selected rungs (``_select_mtp``) to ``layer_cfg``.
+
+    The selection moves no body bpp: it is chosen on its own payload and its
+    own declared sub-budget. Under a whole-artifact card it DOES move the body's
+    byte room, because the card prices the selected MTP bytes in place of the
+    layer's source bytes (PQ #1610). A unit the body also assigned is refused:
+    one unit cannot be priced in two currencies.
+    """
+    record = dict(record)
     assignment = record.pop("assignment")
     clash = sorted(set(assignment) & (set(body_assignment) | set(layer_cfg)))
     if clash:
@@ -2060,6 +2078,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "c_ms_per_bit and their source (required with "
                          "--mtp-joint-cost; recorded, and inert without "
                          "acceptance points).")
+    ap.add_argument("--mtp-fixed-formats", default=None,
+                    help="Optional JSON file mapping MTP group names to one format "
+                         "each; the selector keeps only that rung for the group, "
+                         "intersected with the attested menu.")
     ap.add_argument("--mtp-acceptance-points", default=None,
                     help="Optional JSON list of served acceptance points "
                          "({measured_acceptance, rung_name|bits}) for the MTP "
@@ -2582,6 +2604,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     from .serving_profiles import load_serving_profile
     tessera_serving_target = lane.allocation_serving_target(
         args, target_platform=load_serving_profile(target_profile).target_platform)
+    _mtp_selection_memo: list = []
+
+    def _mtp_selection():
+        """``(payload, record)``, selected once: the card and the stamp read one choice."""
+        if not _mtp_selection_memo:
+            _mtp_selection_memo.append(_select_mtp(
+                args, serving_target=tessera_serving_target, profile=model_profile))
+        return _mtp_selection_memo[0]
 
     with open(args.probe, "rb") as f:
         probe = pickle.load(f)
@@ -4405,8 +4435,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # no keys, and a table carrying a population but no projection carries
         # only the population.
         if args.mtp_joint_cost:
-            _stamp_mtp_selection(args, layer_cfg, assignment_expanded,
-                                 serving_target=tessera_serving_target, profile=model_profile)
+            _stamp_mtp_selection(args, layer_cfg, assignment_expanded, _mtp_selection()[1])
         selection_request = lane.allocation_selection_request_path(args)
         if selection_request:
             lane.write_allocation_selection_request(selection_request,
@@ -4464,7 +4493,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
 
     def _partition_source_total(_fp, src_total, src_manifest, *, where,
                                 assigned_names=()):
-        """Apply --exclude-source-prefix, or pass the total through.
+        """Apply --exclude-source-prefix and the MTP selection's bytes (PQ #1610).
 
         Raises SystemExit (not ValueError) on a bad prefix ON PURPOSE: both
         callers of the pricing scalars sit behind `except Exception` clauses
@@ -4474,6 +4503,33 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         number stays self-consistent. SystemExit is a BaseException, so it
         passes through those clauses to the operator.
         """
+        total, part = _excluded_source_total(
+            _fp, src_total, src_manifest, where=where, assigned_names=assigned_names)
+        if not args.mtp_joint_cost:
+            return total, part
+        # PQ #1610: the MTP layer ships its selected rungs, not its source
+        # bytes; the floor must hold what ships.
+        payload, record = _mtp_selection()
+        excluded = tuple(getattr(args, "exclude_source_prefix", None) or ())
+        overlap = sorted(n for n in payload["params"] if n.startswith(excluded)) \
+            if excluded else []
+        if overlap:
+            raise SystemExit(f"[alloc] ERROR: --exclude-source-prefix also removes "
+                             f"{len(overlap)} selected MTP unit(s): {overlap[:4]}")
+        try:
+            rebase = _fp.mtp_selection_rebased_bytes(
+                total, payload, record["resident_bytes"], context=where,
+                manifest=src_manifest, assigned_names=assigned_names)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: {exc}") from None
+        print(
+            f"[alloc] MTP rebase ({where}): {rebase['n_units']} MTP units priced "
+            f"at the selected {rebase['mtp_resident_bytes']:,} B instead of "
+            f"their source {rebase['mtp_source_bytes']:,} B", flush=True)
+        return rebase["total_bytes"], part
+
+    def _excluded_source_total(_fp, src_total, src_manifest, *, where,
+                               assigned_names=()):
         if not getattr(args, "exclude_source_prefix", None):
             return int(src_total), None
         try:

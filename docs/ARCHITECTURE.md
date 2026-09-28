@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1610, `claude/mtp-card-rebase-1610`): a
+whole-artifact card prices the GLM MTP layer at its SELECTED bytes. With
+`--mtp-joint-cost`, the allocator runs the MTP selection once, before any card
+is priced, and `_partition_source_total` swaps the MTP units' source spans for
+the selection's resident bytes (`footprint.mtp_selection_rebased_bytes`, which
+resolves every unit in the source manifest and refuses a disagreement with the
+payload's params x source dtype). The card had kept layer 45 at source BF16
+while the export shipped the selection: +10,837,919,808 B against the headers
+of `a8/body-mtp-v39/exported-r2`, so every GLM card under-filled the body by
+that much. `tools/reselect_mtp_fixed.py` now calls the same helper instead of
+its inline copy. `--mtp-fixed-formats` passes `fixed_formats` to the selector
+from the allocator. After the swap the card and exported-r2 differ only by the
+Tessera side bytes #1609 names (28,802,632 B). Gate:
+`tests/test_mtp_card_rebase_1610.py`.
+
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
 gains a research-only PACT mode, reached only through
 `prismaquant.prefill_frontier` (`--pact-shape-table`, `--pact-regime`,
@@ -4650,7 +4665,8 @@ GLM MTP path** (PQ #1346, M6 of #1271, P1). The GLM-5.3 MTP layer
 head's self-KL (`glm_mtp.MTP_OBJECTIVE`). The body join refuses that currency.
 `--mtp-joint-cost` (payload `prismaquant.glm_mtp_cost.v1`), `--mtp-byte-budget`
 and `--mtp-serve-constants`, with optional `--mtp-acceptance-points`, run
-`glm_mtp_selection.select_mtp_rungs` after the body is final:
+`glm_mtp_selection.select_mtp_rungs` once, before any whole-artifact card is
+priced (PQ #1610), and stamp the record after the body is final:
 - `mtp_rung_selection.group_product_menu` builds one uniform rung per declared
   group (routed stack, shared expert), with `E` and bytes summed over the units;
 - a group whose source is BF16 is also offered BF16 passthrough at zero cost;
@@ -4662,7 +4678,9 @@ and `--mtp-serve-constants`, with optional `--mtp-acceptance-points`, run
   points it is degenerate: the lowest-E rung within the budget.
 
 The selection writes the layer-45 entries and a `mtp_selection` record into the
-layer-config metadata. It moves no body byte and no body bpp (principle 12). A
+layer-config metadata. It moves no body bpp (principle 12). Under a
+whole-artifact card it moves the body's byte room: the card prices the selected
+MTP bytes in place of the layer's source bytes (PQ #1610). A
 unit that the body also assigned is refused. There is no λ. Without the flag,
 the output is byte-identical. Gates: `tests/test_glm_mtp_selection.py` and
 `tests/test_allocator_output_pin_1304.py`. A quantum prices only one Tessera
