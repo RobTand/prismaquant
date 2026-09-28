@@ -63,8 +63,17 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import weakref
+
+from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
+from .joint_aura_transition_base import (
+    _COMMIT,
+    _bound,
+    _bytes_identity,
+    _committed_package,
+    _require,
+    checkout_head_commit,
+)
 
 VERSION = "meta_skeleton_render_proof_retained_budget_v1"
 SCHEMA = "prismaquant.joint_aura.run_source_transition.v2"
@@ -218,33 +227,8 @@ _SOURCE_REWRITES = {'aura_cost.py': [('        from prismaquant.joint_aura_sourc
                             '            for key, value in (("plan_sha256", prepared_plan_sha256), '
                             '("implementation_sha256", implementation),\n')]}
 # END GENERATED REWRITES
-_COMMIT = r"[0-9a-f]{40}|[0-9a-f]{64}"
-_BYTES = ("producer_source_sha256", "reconstructed_source_sha256", "transition_module_sha256")
 _RECEIPT_FIELDS = {"schema", "version", "execution", "original", "inputs", "plan_difference"}
 _INPUT_LABELS = ("prepared_plan", "run_plan", "prepared", "campaign_identity")
-
-
-def _require(ok, message):
-    if not ok:
-        raise ValueError(f"joint source transition: {message}")
-
-
-def _canonical(value):
-    return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                      ensure_ascii=False, allow_nan=False).encode()
-
-
-def _sha(path):
-    with Path(path).open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-def _bound(record, label):
-    _require(isinstance(record, dict) and set(record) == {"path", "sha256"},
-             f"{label} requires independently bound path/SHA256")
-    path = Path(record["path"])
-    _require(path.is_file() and _sha(path) == record["sha256"], f"{label} bytes changed")
-    return path
 
 
 def source_proof(package_root=None):
@@ -279,14 +263,7 @@ def source_proof(package_root=None):
     _require(original.hexdigest() == _CONTRACT["source_sha256"], "unapproved producer package change")
     return {"producer_source_sha256": current.hexdigest(),
             "reconstructed_source_sha256": original.hexdigest(),
-            "transition_module_sha256": _sha(root / "joint_aura_retained_budget_transition.py")}
-
-
-def _bytes_identity(execution):
-    _require(isinstance(execution, dict) and all(
-        isinstance(execution.get(key), str) and len(execution[key]) == 64 for key in _BYTES),
-        "execution record lacks the package byte identity")
-    return {key: execution[key] for key in _BYTES}
+            "transition_module_sha256": file_sha256hex(root / "joint_aura_retained_budget_transition.py")}
 
 
 def _take(plan, path):
@@ -335,7 +312,7 @@ def _reported(path, entry):
     if path in _BUDGET_KEYS:
         return {"present": True, "value": entry["value"]}
     return {"present": True,
-            "canonical_sha256": hashlib.sha256(_canonical(entry["value"])).hexdigest()}
+            "canonical_sha256": DIRECT_UTF8_STRICT.sha256(entry["value"])}
 
 
 def plan_difference(prepared_plan, run_plan):
@@ -349,7 +326,7 @@ def plan_difference(prepared_plan, run_plan):
     _require(isinstance(prepared_plan, dict) and isinstance(run_plan, dict), "plans must be JSON objects")
     prepared_residue, prepared_held = _residue(prepared_plan)
     run_residue, run_held = _residue(run_plan)
-    _require(_canonical(prepared_residue) == _canonical(run_residue),
+    _require(DIRECT_UTF8_STRICT.encoded(prepared_residue) == DIRECT_UTF8_STRICT.encoded(run_residue),
              "run plan differs from the prepared plan outside the admitted retained-budget keys")
     for path in _BUDGET_KEYS:
         for label, held in (("prepared", prepared_held), ("run", run_held)):
@@ -367,47 +344,6 @@ def plan_difference(prepared_plan, run_plan):
             if prepared_held[path] != run_held[path]]
 
 
-def checkout_head_commit(repo_root):
-    """The sealed checkout's HEAD commit, read as files.
-
-    The campaign image carries no git binary. A PrismaBuild checkout is
-    detached at its snapshot commit (``.git/HEAD`` holds the id); a developer
-    worktree may hold ``ref: refs/heads/...`` resolved through the loose ref,
-    the common directory of a linked worktree, or ``packed-refs``.
-    """
-    root = Path(repo_root)
-    git = root / ".git"
-    if git.is_file():
-        pointer = git.read_text().strip()
-        _require(pointer.startswith("gitdir: "), "unreadable .git pointer")
-        git = Path(pointer[len("gitdir: "):])
-        if not git.is_absolute():
-            git = root / git
-    _require(git.is_dir() and (git / "HEAD").is_file(), "no sealed Git checkout at the package root")
-    head = (git / "HEAD").read_text().strip()
-    if re.fullmatch(_COMMIT, head):
-        return head
-    _require(head.startswith("ref: "), "unreadable HEAD")
-    ref = head[len("ref: "):]
-    common = git
-    if (git / "commondir").is_file():
-        common = (git / (git / "commondir").read_text().strip()).resolve()
-    for candidate in (git / ref, common / ref):
-        if candidate.is_file():
-            value = candidate.read_text().strip()
-            _require(re.fullmatch(_COMMIT, value) is not None, f"unreadable ref {ref}")
-            return value
-    packed = common / "packed-refs"
-    if packed.is_file():
-        for line in packed.read_text().splitlines():
-            if not line or line[0] in "#^":
-                continue
-            value, _, name = line.partition(" ")
-            if name == ref and re.fullmatch(_COMMIT, value):
-                return value
-    _require(False, f"HEAD ref {ref} is unresolved")
-
-
 def _actual_execution():
     """The package that is executing: its bytes, and the commit it runs as."""
     root = Path(__file__).resolve().parents[1]
@@ -416,22 +352,6 @@ def _actual_execution():
     commit = _checkpoint_git_commit()
     _require(commit == observed, "checkpoint Git identity contradicts the sealed checkout HEAD")
     return {"git_commit": commit, **source_proof()}
-
-
-def _committed_package(repo_root):
-    """Creating a receipt is a producer act: the package must be committed and clean."""
-    try:
-        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all", "--", "prismaquant"],
-                                cwd=repo_root, check=True, capture_output=True, text=True, timeout=10).stdout
-        parent = subprocess.run(["git", "rev-parse", "HEAD^"], cwd=repo_root, check=True,
-                                capture_output=True, text=True, timeout=10).stdout.strip()
-    except (OSError, subprocess.SubprocessError) as exc:
-        _require(False, f"creating a transition requires git and a committed checkout: {exc}")
-    _require(not status.strip(), "producer package must be committed and clean")
-    _require(re.fullmatch(_COMMIT, parent) is not None, "unreadable parent commit")
-    # A PrismaBuild snapshot commit exists only in its bundle; its parent is
-    # the branch commit a reader can find. Recorded, never compared.
-    return {"git_parent_commit": parent}
 
 
 def _load_inputs(bindings):
@@ -465,7 +385,7 @@ def _load_inputs(bindings):
 def _read_receipt(bound_receipt, *, execution):
     path = _bound(bound_receipt, "transition receipt")
     raw = path.read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == bound_receipt["sha256"], "receipt changed during read")
+    _require(bytes_sha256hex(raw) == bound_receipt["sha256"], "receipt changed during read")
     receipt = json.loads(raw)
     _require(isinstance(receipt, dict) and set(receipt) == _RECEIPT_FIELDS, "unexpected receipt fields")
     _require(receipt["schema"] == SCHEMA and receipt["version"] == VERSION and receipt["original"] == _CONTRACT,
@@ -485,12 +405,12 @@ def create_transition(*, bindings, output):
     receipt = {"schema": SCHEMA, "version": VERSION, "execution": execution,
                "original": dict(_CONTRACT), "inputs": bindings,
                "plan_difference": loaded["plan_difference"]}
-    raw = _canonical(receipt) + b"\n"
+    raw = DIRECT_UTF8_STRICT.encoded(receipt) + b"\n"
     with Path(output).open("xb") as handle:
         handle.write(raw)
         handle.flush()
         os.fsync(handle.fileno())
-    return {"path": str(output), "sha256": hashlib.sha256(raw).hexdigest()}
+    return {"path": str(output), "sha256": bytes_sha256hex(raw)}
 
 
 _ISSUED = weakref.WeakSet()
@@ -591,7 +511,7 @@ def require_verified_transition(value, *, checkpoint_dir, resume, joint_activati
     _require(resume is True and joint_activation is True and checkpoint_dir is not None and
              Path(checkpoint_dir).resolve() == Path(value._checkpoint_dir),
              "transition is restricted to bound joint resume")
-    _require(_sha(value._receipt_path) == value._receipt_sha256, "admitted receipt bytes changed")
+    _require(file_sha256hex(value._receipt_path) == value._receipt_sha256, "admitted receipt bytes changed")
     execution = _actual_execution()
     receipt = json.loads(value._receipt_bytes)
     _require(_bytes_identity(receipt["execution"]) == _bytes_identity(execution) and

@@ -10,6 +10,8 @@ import pytest
 
 from prismaquant import aura_cost as aura
 from prismaquant import joint_aura_run_transition as transition
+from prismaquant.joint_aura_transition_base import _BYTES
+from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
 from prismaquant import joint_aura_transitions as transitions
 from prismaquant import joint_aura_source_transition as resume_transition
 from prismaquant.production_weight_cache import _production_cache_source_sha256
@@ -17,8 +19,8 @@ from test_joint_aura_streamed import _fixture, _run
 
 
 def _write_json(path, value):
-    path.write_bytes(transition._canonical(value) + b"\n")
-    return {"path": str(path), "sha256": transition._sha(path)}
+    path.write_bytes(DIRECT_UTF8_STRICT.encoded(value) + b"\n")
+    return {"path": str(path), "sha256": file_sha256hex(path)}
 
 
 def _git(root, *args):
@@ -55,10 +57,10 @@ def sealed(tmp_path, monkeypatch):
     prepared = _write_json(tmp_path / "prepared.json", {
         "schema": transition.PREPARED_SCHEMA, "status": "complete", "measured_cells": 6,
         "implementation_sha256": old_source, "plan_sha256": plan["sha256"],
-        "production_cache": {"path": str(cache_file), "sha256": transition._sha(cache_file)}})
+        "production_cache": {"path": str(cache_file), "sha256": file_sha256hex(cache_file)}})
     identity = _write_json(tmp_path / "identity.json", {"schema": "campaign identity fixture"})
     contract = {"source_sha256": old_source, "git_commit": "1" * 40, "plan_sha256": plan["sha256"],
-                "prepared_sha256": prepared["sha256"], "production_cache_sha256": transition._sha(cache_file),
+                "prepared_sha256": prepared["sha256"], "production_cache_sha256": file_sha256hex(cache_file),
                 "campaign_identity_sha256": identity["sha256"], "measured_cells": 6}
     monkeypatch.setattr(transition, "_CONTRACT", contract)
     state = {"commit": new_git, "package": package}
@@ -262,7 +264,7 @@ def test_actual_execution_binds_the_checkpoint_commit_to_the_sealed_head(tmp_pat
     assert transition.checkout_head_commit(root) == head
     _git(root, "checkout", "-q", "--detach")
     assert transition.checkout_head_commit(root) == head
-    monkeypatch.setattr(transition, "source_proof", lambda: {key: "7" * 64 for key in transition._BYTES})
+    monkeypatch.setattr(transition, "source_proof", lambda: {key: "7" * 64 for key in _BYTES})
     monkeypatch.setattr(transition, "__file__", str(root / "prismaquant" / "joint_aura_run_transition.py"))
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: head)
     assert transition._actual_execution()["git_commit"] == head
