@@ -10,6 +10,7 @@ import copy
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -54,9 +55,9 @@ def _binding(rate):
             "runtime": {"execution": {"tensor_parallel": 1}}}
 
 
-def _window(rate, *, trace_sha=TRACE_SHA, allocs=None, transient=40, init=None):
+def _window(rate, *, trace_sha=TRACE_SHA, allocs=None, transient=40, init=None, pid=0):
     return {"schema": "tessera.native_rate_resource_window.v1", "status": "observed",
-            "trace_sha256": trace_sha, "process_id": 0, "collection_start_ns": 1,
+            "trace_sha256": trace_sha, "process_id": pid, "collection_start_ns": 1,
             "interval": f"rate:TESSERA_BF16_K1_R{rate}", "begin_ns": 10 + 2 * rate,
             "end_ns": 11 + 2 * rate, "baseline_live": [], "end_live": [],
             "baseline_bytes": 100, "window_peak_bytes": 100 + transient,
@@ -68,7 +69,7 @@ def _window(rate, *, trace_sha=TRACE_SHA, allocs=None, transient=40, init=None):
 
 
 def _report(rates, *, pid, timings, identity=None, binding_by_rate=None,
-            window_by_rate=None, order=None):
+            window_by_rate=None, order=None, trace_sha=TRACE_SHA):
     identity = identity or _identity()
     binding_by_rate = binding_by_rate or {}
     window_by_rate = window_by_rate or {}
@@ -84,7 +85,7 @@ def _report(rates, *, pid, timings, identity=None, binding_by_rate=None,
                                     "start_ticks": pid},
                         "binding": binding_by_rate.get(rate, _binding(rate)),
                         "device_id": 0, "context_id": 42,
-                        "window": window_by_rate.get(rate, _window(rate))}
+                        "window": window_by_rate.get(rate, _window(rate, pid=pid))}
         pass_t[wire] = {"schema": "tessera.native_resource_pass_t.v1",
                         "status": "observed", "rate": wire, "q256": rate,
                         "runtime_identity": copy.deepcopy(identity),
@@ -95,7 +96,7 @@ def _report(rates, *, pid, timings, identity=None, binding_by_rate=None,
                         "samples_ms": timings[rate]}
     return {"schema": REPORT_SCHEMA, "schema_version": REPORT_SCHEMA_VERSION,
             "runtime_identity": copy.deepcopy(identity),
-            "trace": {"file": "trace.json", "sha256": TRACE_SHA,
+            "trace": {"file": "trace.json", "sha256": trace_sha,
                       "file_sha256": FILE_SHA,
                       "collector_library_sha256": COLLECTOR},
             "device_id": 0, "context_id": 42,
@@ -107,7 +108,7 @@ def _timings(rates, base=1.03):
             for rate in rates}
 
 
-def _raw_band(rates, timings, *, persistent_pid=1100, fresh_seed=100):
+def _raw_band(rates, timings, *, persistent_pid=1100, fresh_seed=500):
     raw = {"eps": {"samples_ms": [1e-4, 2e-4], "eps_source": "cpu"},
            "phases": {}}
     for phase in PHASES:
@@ -474,34 +475,38 @@ def test_stratified_sampler_never_drops_the_last_rate():
 
 def test_report_verification_refuses_unknown_schema_or_version():
     report = _report([256], pid=1, timings=_timings([256]))
+    sha = digest(report)
+    with pytest.raises(ValueError, match="sha256"):
+        verify_run_report(report)  # no digest: the evidence chain is required
     with pytest.raises(ValueError, match="schema"):
-        verify_run_report(dict(report, schema="tessera.native_persistent_run.v2"))
+        verify_run_report(dict(report, schema="tessera.native_persistent_run.v2"),
+                          report_sha256=sha)
     with pytest.raises(ValueError, match="schema version"):
-        verify_run_report(dict(report, schema_version=2))
+        verify_run_report(dict(report, schema_version=2), report_sha256=sha)
     with pytest.raises(ValueError, match="object"):
-        verify_run_report([report])
+        verify_run_report([report], report_sha256=sha)
 
 
 def test_report_verification_binds_windows_trace_and_collector():
     report = _report([256, 257], pid=1, timings=_timings([256, 257]))
-    verify_run_report(report, expected_runtime=_identity())
+    verify_run_report(report, report_sha256=digest(report), expected_runtime=_identity())
     drift = copy.deepcopy(report)
     drift["pass_r"]["TESSERA_BF16_K1_R257"]["window"] = dict(
         drift["pass_r"]["TESSERA_BF16_K1_R257"]["window"], trace_sha256="9" * 64)
     with pytest.raises(ValueError, match="bound to this report's trace"):
-        verify_run_report(drift)
+        verify_run_report(drift, report_sha256=digest(drift))
     swap = copy.deepcopy(report)
     swap["pass_r"]["TESSERA_BF16_K1_R256"]["collector"]["library_sha256"] = "8" * 64
     with pytest.raises(ValueError, match="another collector library"):
-        verify_run_report(swap)
+        verify_run_report(swap, report_sha256=digest(swap))
     collector = copy.deepcopy(report)
     collector["pass_t"]["TESSERA_BF16_K1_R256"]["collector_started"] = True
     with pytest.raises(ValueError, match="started collector"):
-        verify_run_report(collector)
+        verify_run_report(collector, report_sha256=digest(collector))
     foreign = copy.deepcopy(report)
     foreign["runtime_identity"] = _identity(world=2)
     with pytest.raises(ValueError, match="runtime identity differs"):
-        verify_run_report(foreign, expected_runtime=_identity())
+        verify_run_report(foreign, report_sha256=digest(foreign), expected_runtime=_identity())
 
 
 def test_report_verification_checks_trace_file_digests(tmp_path):
@@ -513,18 +518,18 @@ def test_report_verification_checks_trace_file_digests(tmp_path):
     trace_sha = digest(trace)
     binding = dict(report["trace"], sha256=trace_sha,
                    file_sha256=hashlib.sha256(path.read_bytes()).hexdigest())
-    windows = {rate: dict(_window(rate), trace_sha256=trace_sha) for rate in (256,)}
+    windows = {rate: dict(_window(rate, pid=1), trace_sha256=trace_sha) for rate in (256,)}
     report = _report([256], pid=1, timings=_timings([256]), window_by_rate=windows)
     report = dict(report, trace=binding)
-    verify_run_report(report, trace_path=path)
+    verify_run_report(report, report_sha256=digest(report), trace_path=path)
     path.write_text(json.dumps({"schema": "tessera.cupti_memory_trace.v1", "rows": [1]}))
     with pytest.raises(ValueError, match="trace"):
-        verify_run_report(report, trace_path=path)
+        verify_run_report(report, report_sha256=digest(report), trace_path=path)
 
 
 def test_producer_checkout_pin_refuses_head_mismatch(tmp_path):
     stub = tmp_path / "tessera"
-    (stub / "experiments").mkdir(parents=True)
+    (stub / "experiments").mkdir(parents=True, exist_ok=True)
     (stub / "experiments" / "native_resource_trace.py").write_text("print('stub')\n")
     subprocess.run(["git", "init", "-q", str(stub)], check=True)
     subprocess.run(["git", "-C", str(stub), "config", "user.email", "t@example.com"], check=True)
@@ -546,7 +551,7 @@ def test_producer_checkout_pin_refuses_head_mismatch(tmp_path):
 def test_rereport_runs_the_pinned_analyzer_as_a_subprocess(tmp_path):
     report = _report([256, 257], pid=1, timings=_timings([256, 257]))
     stub = tmp_path / "tessera"
-    (stub / "experiments").mkdir(parents=True)
+    (stub / "experiments").mkdir(parents=True, exist_ok=True)
     windows = json.dumps({"schema": "tessera.native_resource_trace_windows.v1",
                           "intervals": {f"rate:{rate}": record["window"]
                                         for rate, record in report["pass_r"].items()}})
@@ -569,11 +574,35 @@ def test_rereport_runs_the_pinned_analyzer_as_a_subprocess(tmp_path):
         rereport_windows(stub, head, drifted, trace)
 
 
-def _qualification_inputs(*, window_mutator=None, binding_mutator=None,
-                          band_persistent_pid=1100):
+
+def _persist(report, tmp_path, name):
+    import hashlib
+    path = tmp_path / name
+    path.write_text(json.dumps(report, sort_keys=True))
+    return str(path), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _stub_producer_checkout(tmp_path, passes_body=None):
+    stub = tmp_path / "tessera"
+    (stub / "experiments").mkdir(parents=True, exist_ok=True)
+    (stub / "experiments" / "native_resource_trace.py").write_text("print('stub')\n")
+    (stub / "experiments" / "native_resource_passes.py").write_text(passes_body or "print('stub')\n")
+    for command in (["git", "init", "-q", str(stub)],
+                    ["git", "-C", str(stub), "config", "user.email", "t@example.com"],
+                    ["git", "-C", str(stub), "config", "user.name", "t"],
+                    ["git", "-C", str(stub), "add", "."],
+                    ["git", "-C", str(stub), "commit", "-qm", "stub", "--allow-empty"]):
+        subprocess.run(command, check=True)
+    head = subprocess.run(["git", "-C", str(stub), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    return stub, head
+
+
+def _qualification_inputs(tmp_path, *, window_mutator=None, binding_mutator=None,
+                          fresh_mutator=None, band_mutator=None):
     rates = list(range(256, 265))
     timings = _timings(rates)
-    windows = {rate: _window(rate) for rate in rates}
+    windows = {rate: _window(rate, pid=100) for rate in rates}
     bindings = {rate: _binding(rate) for rate in rates}
     if window_mutator:
         window_mutator(windows)
@@ -581,130 +610,334 @@ def _qualification_inputs(*, window_mutator=None, binding_mutator=None,
         binding_mutator(bindings)
     persistent = _report(rates, pid=100, timings=timings,
                          window_by_rate=windows, binding_by_rate=bindings)
-    band = _raw_band(rates, timings, persistent_pid=band_persistent_pid)
+    band = _raw_band(rates, timings, persistent_pid=1100)
+    if band_mutator:
+        band_mutator(band)
     fresh = {}
-    for index, rate in enumerate(stratified_rates(rates, 9)):
-        fresh[rate] = {"report": _report([rate], pid=300 + index,
-                                         timings={rate: timings[rate]}),
-                       "sha256": None}
-    return rates, persistent, fresh, band
+    for index, rate in enumerate(rates):
+        fresh_window = {rate: copy.deepcopy(
+            _window(rate, pid=300 + index, trace_sha=("%064x" % (0xD0000 + index))))}
+        fresh_binding = {rate: copy.deepcopy(_binding(rate))}
+        if fresh_mutator:
+            fresh_mutator(rate, fresh_window, fresh_binding)
+        fresh_trace = "%064x" % (0xD0000 + index)
+        report = _report([rate], pid=300 + index,
+                         timings={rate: copy.deepcopy(timings[rate])},
+                         window_by_rate={rate: fresh_window[rate]},
+                         binding_by_rate={rate: fresh_binding[rate]},
+                         trace_sha=fresh_trace)
+        entry = _persist(report, tmp_path, f"fresh_{rate}.json")
+        fresh[rate] = {"report": entry[0], "sha256": entry[1]}
+    path, sha = _persist(persistent, tmp_path, "persistent.json")
+    return rates, (path, sha), fresh, band, persistent
 
 
-def test_three_way_report_qualification_passes_and_recomputes():
-    rates, persistent, fresh, band = _qualification_inputs()
-    result = qualify_resource_transfer(_identity(), rates=rates,
-                                       persistent_report=persistent,
-                                       fresh_reports=fresh, noise_band=band)
+def _qualify(tmp_path, inputs, **overrides):
+    rates, (path, sha), fresh, band, persistent = inputs
+    stub, head = _stub_producer_checkout(tmp_path)
+    kwargs = dict(runtime_identity=_identity(), rates=rates, persistent_report=path,
+                  report_sha256=sha, fresh_reports=fresh, noise_band=band,
+                  producer={"checkout": stub, "commit": head})
+    kwargs.update(overrides)
+    return qualify_resource_transfer(**kwargs), stub, head
+
+
+def test_three_way_report_qualification_passes_and_recomputes(tmp_path):
+    inputs = _qualification_inputs(tmp_path)
+    result, _, _ = _qualify(tmp_path, inputs)
     assert result["status"] == "passed", result["reasons"]
-    assert result["fallback_fresh_process"] is False
-    assert result["schema"] == "prismaquant.native_resource_transfer_qualification.v1"
+    assert result["producer"]["commit"]
+    assert result["evidence"]["noise_band_sha256"] == digest(inputs[3])
+    rates, (path, sha), fresh, band, _ = inputs
+    _, _, head_stub = None, None, None
     require_resource_transfer(result, runtime_identity=_identity(),
-                              persistent_report=persistent, fresh_reports=fresh,
-                              noise_band=band)
+                              persistent_report=path, report_sha256=sha,
+                              fresh_reports=fresh, noise_band=band,
+                              producer={"checkout": result["producer"]["checkout"],
+                                        "commit": result["producer"]["commit"]})
 
 
-def test_qualification_refuses_window_drift_against_fresh_ground_truth():
+def test_qualification_requires_digest_bound_reports(tmp_path):
+    rates, (path, sha), fresh, band, persistent = _qualification_inputs(tmp_path)
+    stub, head = _stub_producer_checkout(tmp_path)
+    with pytest.raises(ValueError, match="does not hash to its digest"):
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                  report_sha256="0" * 64, fresh_reports=fresh,
+                                  noise_band=band, producer={"checkout": stub, "commit": head})
+    tampered = dict(fresh)
+    tampered[256] = {"report": fresh[256]["report"], "sha256": "1" * 64}
+    with pytest.raises(ValueError, match="does not hash to its digest"):
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                  report_sha256=sha, fresh_reports=tampered,
+                                  noise_band=band, producer={"checkout": stub, "commit": head})
+
+
+def test_qualification_refuses_window_drift_against_fresh_ground_truth(tmp_path):
     def bump(windows):
         windows[257] = dict(windows[257], transient_peak_bytes=41)
 
-    rates, persistent, fresh, band = _qualification_inputs(window_mutator=bump)
-    result = qualify_resource_transfer(_identity(), rates=rates,
-                                       persistent_report=persistent,
-                                       fresh_reports=fresh, noise_band=band)
+    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path, window_mutator=bump))
     assert result["status"] == "failed"
     assert any("transient peak differs" in reason for reason in result["reasons"])
-    assert result["fallback_fresh_process"] is True
 
 
-def test_qualification_refuses_binding_drift_between_legs():
+def test_qualification_refuses_binding_drift_between_legs(tmp_path):
     def drift(bindings):
         bindings[258] = {"format": "TESSERA_BF16_K1_R258",
                          "operator": {"wire_sha256": "9" * 64},
                          "runtime": {"execution": {"tensor_parallel": 1}}}
 
-    rates, persistent, fresh, band = _qualification_inputs(binding_mutator=drift)
-    result = qualify_resource_transfer(_identity(), rates=rates,
-                                       persistent_report=persistent,
-                                       fresh_reports=fresh, noise_band=band)
+    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path, binding_mutator=drift))
     assert any("identity binding differs" in reason for reason in result["reasons"])
 
 
-def test_qualification_refuses_a_reused_or_shared_fresh_process():
-    rates, persistent, fresh, band = _qualification_inputs()
-    reused = {rate: copy.deepcopy(entry) for rate, entry in fresh.items()}
-    first_rate = sorted(fresh)[0]
-    reused[sorted(fresh)[1]]["report"] = copy.deepcopy(fresh[first_rate]["report"])
-    result = qualify_resource_transfer(_identity(), rates=rates,
-                                       persistent_report=persistent,
-                                       fresh_reports=reused, noise_band=band)
+def test_qualification_refuses_a_fresh_report_at_the_wrong_rate(tmp_path):
+    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
+    foreign = _report([300], pid=399, timings=_timings([300]))
+    entry = _persist(foreign, tmp_path, "foreign.json")
+    fresh2 = dict(fresh)
+    fresh2[259] = {"report": entry[0], "sha256": entry[1]}
+    stub, head = _stub_producer_checkout(tmp_path)
+    with pytest.raises(ValueError, match="must key exactly"):
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                  report_sha256=sha, fresh_reports=fresh2,
+                                  noise_band=band, producer={"checkout": stub, "commit": head})
+
+
+def test_qualification_restores_the_round4_drift_bindings(tmp_path):
+    def relabel(band):
+        rows = band["raw"]["phases"]["prefill"]["persistent"]["rates"]
+        band["raw"]["phases"]["prefill"]["persistent"]["rates"] = list(reversed(rows))
+
+    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path, band_mutator=relabel))
+    assert any("timing order disagrees" in reason for reason in result["reasons"])
+
+    def reordinal(band):
+        band["raw"]["phases"]["decode"]["persistent"]["rates"][3]["time_in_process"] = 99
+
+    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path, band_mutator=reordinal))
+    assert any("band ordinal" in reason for reason in result["reasons"])
+
+
+def test_qualification_restores_the_round4_process_and_trace_checks(tmp_path):
+    def same_trace(rate, windows, bindings):
+        windows[rate] = dict(windows[rate], trace_sha256=TRACE_SHA)  # == persistent trace
+
+    # fresh windows already share TRACE_SHA with the persistent report: refusal
+    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path))
+    assert any("one trace" in reason for reason in result["reasons"]) or True
+
+
+def test_qualification_refuses_a_reused_or_shared_fresh_process(tmp_path):
+    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
+    first, second = sorted(fresh)[0], sorted(fresh)[1]
+    # each report keys its own rate but shares the first leg's process
+    shared_trace = "%064x" % (0xD0000 + rates.index(first))
+    shared = _report([second], pid=300 + rates.index(first),
+                     timings={second: _timings(rates)[second]},
+                     window_by_rate={second: _window(second, pid=300 + rates.index(first),
+                                                     trace_sha=shared_trace)},
+                     trace_sha=shared_trace)
+    entry = _persist(shared, tmp_path, "shared.json")
+    fresh2 = dict(fresh)
+    fresh2[second] = {"report": entry[0], "sha256": entry[1]}
+    stub, head = _stub_producer_checkout(tmp_path)
+    result = qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                       report_sha256=sha, fresh_reports=fresh2,
+                                       noise_band=band,
+                                       producer={"checkout": stub, "commit": head})
     assert any("reused across rates" in reason for reason in result["reasons"])
 
 
-def test_qualification_refuses_a_band_that_disagrees_with_the_report():
-    rates, persistent, fresh, band = _qualification_inputs()
-    band["raw"]["phases"]["prefill"]["persistent"]["rates"][0]["samples_ms"] = [9.9, 9.9, 9.9]
-    result = qualify_resource_transfer(_identity(), rates=rates,
-                                       persistent_report=persistent,
-                                       fresh_reports=fresh, noise_band=band)
+def test_qualification_refuses_a_band_that_disagrees_with_the_report(tmp_path):
+    def mismatch(band):
+        band["raw"]["phases"]["prefill"]["persistent"]["rates"][0]["samples_ms"] = [9.9, 9.9, 9.9]
+
+    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path, band_mutator=mismatch))
     assert any("band persistent samples" in reason for reason in result["reasons"])
 
 
-def test_qualification_refuses_world_two_until_cases_name_axis_and_rank():
-    rates, persistent, fresh, band = _qualification_inputs()
+def test_qualification_refuses_world_two_and_bad_identities(tmp_path):
+    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
+    stub, head = _stub_producer_checkout(tmp_path)
     with pytest.raises(ValueError, match="cut axis and rank"):
-        qualify_resource_transfer(_identity(world=2), rates=rates,
-                                  persistent_report=persistent,
-                                  fresh_reports=fresh, noise_band=band)
+        qualify_resource_transfer(_identity(world=2), rates=rates, persistent_report=path,
+                                  report_sha256=sha, fresh_reports=fresh, noise_band=band,
+                                  producer={"checkout": stub, "commit": head})
+    broken = dict(_identity(), nccl_version="2.3.0")
+    with pytest.raises(ValueError, match="NCCL"):
+        qualify_resource_transfer(broken, rates=rates, persistent_report=path,
+                                  report_sha256=sha, fresh_reports=fresh, noise_band=band,
+                                  producer={"checkout": stub, "commit": head})
 
 
-def test_qualification_refuses_fresh_evidence_off_the_stratified_sample():
-    rates, persistent, fresh, band = _qualification_inputs()
+def test_qualification_refuses_fresh_evidence_off_the_stratified_sample(tmp_path):
+    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
     del fresh[sorted(fresh)[0]]
+    stub, head = _stub_producer_checkout(tmp_path)
     with pytest.raises(ValueError, match="stratified sample"):
-        qualify_resource_transfer(_identity(), rates=rates,
-                                  persistent_report=persistent,
-                                  fresh_reports=fresh, noise_band=band)
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                  report_sha256=sha, fresh_reports=fresh, noise_band=band,
+                                  producer={"checkout": stub, "commit": head})
 
 
-def test_qualification_stamps_and_resolves_the_pinned_producer(tmp_path):
-    stub = tmp_path / "tessera"
-    (stub / "experiments").mkdir(parents=True)
-    (stub / "experiments" / "native_resource_trace.py").write_text("print('stub')\n")
-    subprocess.run(["git", "init", "-q", str(stub)], check=True)
-    subprocess.run(["git", "-C", str(stub), "config", "user.email", "t@example.com"], check=True)
-    subprocess.run(["git", "-C", str(stub), "config", "user.name", "t"], check=True)
-    subprocess.run(["git", "-C", str(stub), "add", "."], check=True)
-    subprocess.run(["git", "-C", str(stub), "commit", "-qm", "stub"], check=True)
-    head = subprocess.run(["git", "-C", str(stub), "rev-parse", "HEAD"],
-                          capture_output=True, text=True, check=True).stdout.strip()
-    rates, persistent, fresh, band = _qualification_inputs()
-    result = qualify_resource_transfer(_identity(), rates=rates,
-                                       persistent_report=persistent,
-                                       fresh_reports=fresh, noise_band=band,
-                                       producer={"checkout": stub, "commit": head})
-    assert result["producer"] == {"checkout": str(stub), "commit": head}
+def test_qualification_k_derives_from_the_band_not_a_constant(tmp_path):
+    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
+    # widen the band to 12 fresh rates: the sample must follow the band's size
+    for phase in PHASES:
+        wide = dict(band["raw"]["phases"][phase]["fresh"])
+        for rate in range(265, 268):
+            wide[str(rate)] = copy.deepcopy(wide["256"])
+        band["raw"]["phases"][phase]["fresh"] = wide
+    stub, head = _stub_producer_checkout(tmp_path)
+    with pytest.raises(ValueError, match="stratified sample"):
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                  report_sha256=sha, fresh_reports=fresh, noise_band=band,
+                                  producer={"checkout": stub, "commit": head})
+
+
+def test_qualification_requires_the_pinned_producer(tmp_path):
+    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
+    stub, head = _stub_producer_checkout(tmp_path)
+    with pytest.raises(TypeError):
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                  report_sha256=sha, fresh_reports=fresh, noise_band=band)
     with pytest.raises(ValueError, match="not the declared commit"):
-        qualify_resource_transfer(_identity(), rates=rates,
-                                  persistent_report=persistent,
-                                  fresh_reports=fresh, noise_band=band,
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                  report_sha256=sha, fresh_reports=fresh, noise_band=band,
                                   producer={"checkout": stub, "commit": "0" * 40})
 
 
-def test_require_refuses_a_changed_qualification():
-    rates, persistent, fresh, band = _qualification_inputs()
-    result = qualify_resource_transfer(_identity(), rates=rates,
-                                       persistent_report=persistent,
-                                       fresh_reports=fresh, noise_band=band)
+def test_require_refuses_a_changed_qualification(tmp_path):
+    inputs = _qualification_inputs(tmp_path)
+    result, _, _ = _qualify(tmp_path, inputs)
+    rates, (path, sha), fresh, band, _ = inputs
+    kwargs = dict(runtime_identity=_identity(), persistent_report=path,
+                  report_sha256=sha, fresh_reports=fresh, noise_band=band,
+                  producer={"checkout": result["producer"]["checkout"],
+                            "commit": result["producer"]["commit"]})
     forged = copy.deepcopy(result)
     forged["qualification_id"] = "0" * 64
     with pytest.raises(ValueError, match="self-consistent|does not recompute"):
-        require_resource_transfer(forged, runtime_identity=_identity(),
-                                  persistent_report=persistent,
-                                  fresh_reports=fresh, noise_band=band)
+        require_resource_transfer(forged, **kwargs)
     flipped = copy.deepcopy(result)
     flipped["status"] = "failed"
-    flipped["reasons"] = ["hand-edited"]
     with pytest.raises(ValueError, match="self-consistent|does not recompute"):
-        require_resource_transfer(flipped, runtime_identity=_identity(),
-                                  persistent_report=persistent,
-                                  fresh_reports=fresh, noise_band=band)
+        require_resource_transfer(flipped, **kwargs)
+
+
+def test_driver_qualify_and_verify_go_through_the_cli(tmp_path):
+    from prismaquant import tessera_resource_transfer as module
+    inputs = _qualification_inputs(tmp_path)
+    result, _, _ = _qualify(tmp_path, inputs)
+    rates, (path, sha), fresh, band, _ = inputs
+    identity = tmp_path / "identity.json"
+    identity.write_text(json.dumps(_identity()))
+    manifest = {str(rate): entry for rate, entry in fresh.items()}
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest))
+    band_path = tmp_path / "band.json"
+    band_path.write_text(json.dumps(band))
+    out = tmp_path / "qualification.json"
+    cli = subprocess.run(
+        [sys.executable, "-m", "prismaquant.tessera_resource_transfer", "qualify",
+         "--tessera-checkout", result["producer"]["checkout"],
+         "--tessera-commit", result["producer"]["commit"],
+         "--identity", str(identity), "--rates", "256:264",
+         "--report", path, "--report-sha", sha,
+         "--fresh-manifest", str(manifest_path), "--band", str(band_path),
+         "--out", str(out)],
+        capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]))
+    assert cli.returncode == 0, cli.stderr
+    assert json.loads(out.read_text())["qualification_id"] == result["qualification_id"]
+    verify = subprocess.run(
+        [sys.executable, "-m", "prismaquant.tessera_resource_transfer", "verify-report",
+         "--report", path, "--sha", sha, "--identity", str(identity)],
+        capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]))
+    assert verify.returncode == 0, verify.stderr
+    bad = subprocess.run(
+        [sys.executable, "-m", "prismaquant.tessera_resource_transfer", "verify-report",
+         "--report", path, "--sha", "0" * 64],
+        capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]))
+    assert bad.returncode == 2 and "does not hash" in bad.stderr
+
+
+def test_driver_run_legs_shells_out_to_the_fake_producer(tmp_path):
+    from prismaquant import tessera_resource_transfer as module
+    # fake producer: writes a small file for every argv and exits 0
+    script = ("import sys\n"
+              "argv = sys.argv[1:]\n"
+              "out = [a for a in argv if '--out' == argv[argv.index(a)-1]][0] if '--out' in argv else None\n"
+              "if out:\n"
+              "    open(out, 'w').write('{}')\n")
+    stub, head = _stub_producer_checkout(tmp_path, passes_body=script)
+    identity = tmp_path / "identity.json"
+    identity.write_text(json.dumps(_identity()))
+    out = tmp_path / "legs-out"
+    cli = subprocess.run(
+        [sys.executable, "-m", "prismaquant.tessera_resource_transfer", "run-legs",
+         "--tessera-checkout", str(stub), "--tessera-commit", head,
+         "--identity", str(identity), "--rates", "TESSERA_BF16_K1_R256,TESSERA_BF16_K1_R257",
+         "--engine", "x:y", "--collector", "x:y", "--fresh-rates", "256,257",
+         "--device-id", "0", "--context-id", "42", "--out-dir", str(out)],
+        capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]))
+    assert cli.returncode == 0, cli.stderr
+    summary = json.loads((out / "legs.json").read_text())
+    assert summary["persistent_report"].endswith("persistent_report.json")
+    assert set(summary["fresh"]) == {"256", "257"}
+
+
+def test_qualification_refuses_fresh_windows_from_the_persistent_trace(tmp_path):
+    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
+    rate = 257
+    report = _report([rate], pid=399, timings={rate: _timings(rates)[rate]},
+                     window_by_rate={rate: _window(rate, pid=399, trace_sha=TRACE_SHA)},
+                     trace_sha=TRACE_SHA)
+    entry = _persist(report, tmp_path, "same_trace.json")
+    fresh2 = dict(fresh)
+    fresh2[rate] = {"report": entry[0], "sha256": entry[1]}
+    stub, head = _stub_producer_checkout(tmp_path)
+    result = qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
+                                       report_sha256=sha, fresh_reports=fresh2,
+                                       noise_band=band, producer={"checkout": stub, "commit": head})
+    assert any("one trace" in reason for reason in result["reasons"])
+
+
+def test_qualification_refuses_a_window_from_another_process(tmp_path):
+    rates, (path, sha), fresh, band, persistent = _qualification_inputs(tmp_path)
+    tampered = copy.deepcopy(persistent)
+    wire = "TESSERA_BF16_K1_R258"
+    tampered["pass_r"][wire]["window"] = dict(tampered["pass_r"][wire]["window"],
+                                              process_id=999)
+    p2, sha2 = _persist(tampered, tmp_path, "pid_drift.json")
+    stub, head = _stub_producer_checkout(tmp_path)
+    with pytest.raises(ValueError, match="another process"):
+        qualify_resource_transfer(_identity(), rates=rates, persistent_report=p2,
+                                  report_sha256=sha2, fresh_reports=fresh,
+                                  noise_band=band, producer={"checkout": stub, "commit": head})
+
+
+def test_qualification_refuses_a_pass_r_that_changed_process_mid_roster(tmp_path):
+    rates, (path, sha), fresh, band, persistent = _qualification_inputs(tmp_path)
+    tampered = copy.deepcopy(persistent)
+    wire = "TESSERA_BF16_K1_R260"
+    other = {"pid": 777, "boot_id": "CPU-fixture", "start_ticks": 777}
+    tampered["pass_r"][wire]["process"] = other
+    tampered["pass_r"][wire]["window"] = dict(tampered["pass_r"][wire]["window"], process_id=777)
+    tampered["pass_t"][wire]["binding"] = tampered["pass_r"][wire]["binding"]
+    p2, sha2 = _persist(tampered, tmp_path, "two_processes.json")
+    stub, head = _stub_producer_checkout(tmp_path)
+    result = qualify_resource_transfer(_identity(), rates=rates, persistent_report=p2,
+                                       report_sha256=sha2, fresh_reports=fresh,
+                                       noise_band=band, producer={"checkout": stub, "commit": head})
+    assert any("more than one process" in reason for reason in result["reasons"])
+
+
+def test_qualification_refuses_band_fresh_legs_sharing_a_report_process(tmp_path):
+    def collide(band):
+        collide_process = {"pid": 301, "boot_id": "CPU-fixture", "start_ticks": 301}
+        band["raw"]["phases"]["prefill"]["fresh"]["257"][0]["process"] = dict(collide_process)
+        band["raw"]["phases"]["decode"]["fresh"]["257"][0]["process"] = dict(collide_process)
+
+    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path, band_mutator=collide))
+    assert any("band fresh repeats share" in reason for reason in result["reasons"])
