@@ -601,7 +601,9 @@ def test_a_resumed_checkpoint_streams_under_its_window_plan(monkeypatch, tmp_pat
 def test_a_finalized_row_relaunches_on_the_stream_head_and_encodes_nothing(
         monkeypatch, tmp_path, capsys):
     """A complete row, relaunched: every unit is adopted through the window, no
-    unit is encoded, and the row writes the bytes it wrote before."""
+    unit is encoded, and the row writes what it wrote before. This is the
+    issue's adopt-and-exit case: the receipts are content digests, so a
+    verified adoption reads every entry once whichever way it is spelled."""
     from prismaquant.tessera_row_stream import EXECUTION_FILENAME
     campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
     _pin_clock(campaign, monkeypatch)
@@ -618,7 +620,21 @@ def test_a_finalized_row_relaunches_on_the_stream_head_and_encodes_nothing(
     assert record["memory_plan"] == "stream_memory_bytes"
     assert probe["reads"] == len(UNITS)
     assert probe["peak"] <= record["window_units"] * probe["entry_bytes"]
-    assert produced(tmp_path) == clean
+    after = produced(tmp_path)
+    assert sorted(after) == sorted(clean)
+    assert [name for name in sorted(clean) if clean[name] != after[name]
+            and name != "cost.pkl"] == []
+    # The one difference is execution telemetry, not identity: the per-step
+    # growth list is stamped only when a round plans encode steps, and a
+    # relaunch that encodes nothing plans none, on either head.
+    import pickle
+    before, relaunched = pickle.loads(clean["cost.pkl"]), pickle.loads(after["cost.pkl"])
+    preparation = before["provenance"]["selected_source_preparation"]
+    assert "anchor_batch_growth_bytes" in preparation
+    del preparation["anchor_batch_growth_bytes"]
+    assert "anchor_batch_growth_bytes" not in \
+        relaunched["provenance"]["selected_source_preparation"]
+    assert relaunched == before
 
 
 @pytest.mark.parametrize("unit", [UNITS[0], UNITS[1]], ids=["journalled", "pending"])
