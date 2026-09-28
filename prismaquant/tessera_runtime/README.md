@@ -40,51 +40,79 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `af7a86d43da3487179b7d16606ef0f5a3046d73c`, Tessera master on
-2026-09-26 after #621 (tessera#604: the GLM serving image's window cells). It is
-contract **v38**, lane schema still **v10**, contract sha256
-`04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4`. The answer
-moved from the previous pin `07bfcc0e9b7d…` (v34); the head of
-`TESSERA_DEV_PIN_ANSWER` in `prismaquant/tessera_runtime_contract.py` lists what
-moved, including the one admission shrink (dense `TESSERA_BF16_K1` R1792) and
-the two routed `TESSERA_E4M3_K1` cell ids that v38 reuses for q896 on
-`spark-vllm-nccl230@f8dbe1a0`. `export.py` and `grammar.py` are byte-identical
-to the previous pin's. Install that revision
+The current pin is Tessera `20bf53464f9113f3115f454f8fa80453e71c0308`, master
+on 2026-09-27 after #669 (tessera#668, PQ #1527). At a mixed-rate window rung,
+the batched LDLQ encode runs a window span's rate calls on per-rate CUDA
+streams, bit-exact, which cuts the G2 w01b encode by 18.5-22.4 % a batch. Only
+`encode.py` and docs move: the contract, admission answer, `grammar.py` and
+`export.py` are byte-identical to `a3e83875d`, so the legal inventory keeps the
+`reader-pin-f94929de` byte-state and no rate count moves.
+
+The previous pin was Tessera `a3e83875d20f54c685307da13a34992d70256f02`, master
+on 2026-09-27 after #671 (tessera#670, PQ #1524). The rooted cached-unit
+reader accepts `prismaquant.joint_catalog_extension.v3`, the schema of the
+real Stage B catalog extension. The contract, admission answer, `grammar.py`
+and `export.py` are byte-identical to `f94929def`, so the legal inventory
+keeps the `reader-pin-f94929de` byte-state and no rate count moves.
+
+The previous pin was Tessera `f94929defd9fa00b8726160a2cd436f02733b6dc`, master
+on 2026-09-27 after #663 (tessera#662, PQ #1502). The contract, admission
+answer and `grammar.py` are unchanged from `4c4ff1c2e`. `export.py` gains
+`served_recipe(grid, q256, structure)`, and the cached-unit receipts stamp it
+per structure. The legal inventory records the new `export.py` bytes as the
+additive byte-state `reader-pin-f94929de`; no rate count moves.
+
+The previous pin was Tessera `4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253`, master
+on 2026-09-27 after #646 (explicit cached-reader proof mode and v2 multi-rung
+activation policies, PQ #1456). Contract **v39**, lane schema **v10**, SHA-256
+`f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb`.
+Relative to the previous `09d6559d7…`/v38 pin, the reviewed answer adopts
+#641's withdrawn, minted and widened scopes: `f8dbe1a0…` carries every
+GLM-image cell while the vanilla image retains dense E4M3 q1024.
+`TESSERA_DEV_PIN_ANSWER`, `tests/test_tessera_pin_v38_scope.py` and
+`docs/ARCHITECTURE.md` record that review. `grammar.py` and `export.py` are
+byte-identical to the previous pin; the legal inventory keeps its unique
+`reader-pin-09d6559d` byte-state and unchanged wire counts. Install that revision
 and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 `experiments/` and are not wheel entry points.
 Provision the pin venv from a git URL so the install records the commit
 (`git+https://github.com/RobTand/tessera.git@<pin>`). The PrismaBuild test
-interpreter `/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4` is provisioned on
-sparky, sparklina and dl380g10. On the two GB10 boxes it is a copy of
-`pq846-pb461728e4` with only the Tessera distribution reinstalled at the pin.
-The `af7a86d4` interpreters were made by copying the `07bfcc0e` ones (and
-their `-tf516` siblings on both Sparks), rewriting the `base-shadow` `.pth`
-line, and reinstalling Tessera at the pin, as PrismaBuild actions on each box
-(2026-09-26).
-Its `direct_url.json` `vcs_info` names the commit, and its installed
-`runtime_contract.json` hashes to the pin's digest. On each GB10 box:
+interpreter for the current pin is
+`/home/rob/venvs/pq-pb461728e4-tessera-20bf5346`, a copy of its `a3e83875`
+predecessor with only Tessera reinstalled, non-editable. It is provisioned on
+dl380g10 (host-pinned PB build action `68bdb80acd8d`, 2026-09-27), and on
+sparky and sparklina with a `-tf516` sibling on each Spark
+(PB builds sparky `6940c8f1c592`, sparklina `062be8b71f67`). Each build asserts the commit in `direct_url.json`,
+the contract, `export.py` and `encode.py` digests, that `tessera.encode`
+carries the rate-stream switch, and that `tessera.cached_unit` accepts the v3
+catalog extension. The `a3e83875` interpreters (dl380g10 `0b441d56627a`,
+sparky `1020e04f6516`, sparklina `03baf1e3adbc`) stay in place. Old interpreters remain untouched for running
+sessions. Announce the new `--python` paths before merging a pin move; never
+update a live venv in place. On each box, run as a host-pinned PB action
+(`--tag <host>`); the GB10 boxes repeat it for the `-tf516` sibling, and
+the copy repoints any `base-shadow` `.pth` file from the source venv to the new
+one:
 
 ```bash
-V=/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4
-cp -a /home/rob/venvs/pq846-pb461728e4 "$V"
-echo "$V/base-shadow" > "$V/lib/python3.12/site-packages/pq846-base-shadow.pth"
+SRC=/home/rob/venvs/pq-pb461728e4-tessera-a3e83875   # + "-tf516" for the sibling
+V=/home/rob/venvs/pq-pb461728e4-tessera-20bf5346     # + "-tf516" for the sibling
+test ! -e "$V" || exit 1
+cp -a "$SRC" "$V"
+for pth in "$V"/lib/python*/site-packages/*base-shadow*.pth; do
+  [ -e "$pth" ] || continue
+  grep -qF "$SRC" "$pth" && sed -i "s#$SRC#$V#" "$pth"
+done
 "$V/bin/python" -m pip install --no-deps --no-build-isolation --force-reinstall \
-  'git+https://github.com/RobTand/tessera.git@af7a86d43da3487179b7d16606ef0f5a3046d73c'
+  'git+https://github.com/RobTand/tessera.git@20bf53464f9113f3115f454f8fa80453e71c0308'
 ```
 
-dl380g10 has no `pq846-pb461728e4`. Its x86 interpreter of the same name is a
-copy of `pq881-pb461728e4` (Python 3.14, CPU torch, no `base-shadow`), with
-only the Tessera distribution reinstalled the same way:
+dl380g10's x86 interpreter descends from `pq881-pb461728e4` (Python 3.14,
+CPU torch, no `base-shadow` and no `-tf516` sibling). Each build action's
+request in CAS (`cas/requests/<key[:2]>/<key>.json`) carries the exact script
+it ran, with its assertions.
 
-```bash
-V=/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4
-cp -a /home/rob/venvs/pq881-pb461728e4 "$V"
-"$V/bin/python" -m pip install --no-deps --no-build-isolation --force-reinstall \
-  'git+https://github.com/RobTand/tessera.git@af7a86d43da3487179b7d16606ef0f5a3046d73c'
-```
-
-**The GLM test modules need transformers 5.16 (PQ #1090).** The interpreter
-above takes transformers 5.6.0 from `pq-cu130`, and
+**The GLM test modules need transformers 5.16 (PQ #1090).** On the Sparks,
+the base interpreter takes transformers 5.6.0 from `pq-cu130`, and
 `tests/test_glm5_next_streamed_forward_parity.py` skips at collection below
 5.16 (`importorskip("transformers.models.glm5_next")`). Five modules import
 from it and skip with it: `test_glm_campaign_streaming`,
@@ -92,20 +120,24 @@ from it and skip with it: `test_glm_campaign_streaming`,
 `test_collector_source_release` and `test_streamed_capture_admission`. Until
 2026-09-23 none of the six had run in a PrismaBuild test run.
 
-The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4-tf516`
+The sibling interpreter `/home/rob/venvs/pq-pb461728e4-tessera-20bf5346-tf516`
 is the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
 safetensors 0.8.0, the versions in the campaign's `prismaquant-tf516` venv.
 Tessera, PrismaBuild, torch and every other package are the same, so
-`pbtest`'s pin check passes unchanged. It exists on **both Sparks**: on
-sparky from PrismaBuild action `fa510fbf5a02`, on sparklina from action
-`29ec7048687b` (2026-09-25). dl380g10's interpreter of the base name is a
+`pbtest` checks the same exact pin. Each pin move copies the previous pin's
+`-tf516` sibling in the Spark build actions above; the `20bf5346` siblings
+descend from `a3e83875-tf516`, the `a3e83875` ones from `f94929de-tf516`, and the `4c4ff1c2` ones from `09d6559d-tf516`. The original
+transformers installations came from actions `fa510fbf5a02` (sparky) and
+`29ec7048687b` (sparklina, 2026-09-25). dl380g10's interpreter of the base name is a
 different base (`pq881`, Python 3.14, CPU torch), so pin a run that uses it
 with `--tag gb10`. It is built the same way as its base, so a Tessera pin
 move re-provisions it too:
 
 ```bash
-SRC=/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4
-V=/home/rob/venvs/pq-pb461728e4-tessera-af7a86d4-tf516
+# Historical bootstrap of a tf516 sibling; a pin move copies that sibling.
+SRC=/home/rob/venvs/pq-pb461728e4-tessera-4c4ff1c2
+V=/home/rob/venvs/pq-pb461728e4-tessera-4c4ff1c2-tf516
+test ! -e "$V" || exit 1
 cp -a "$SRC" "$V"
 echo "$V/base-shadow" > "$V/lib/python3.12/site-packages/pq846-base-shadow.pth"
 # Unlink the base's copies from the new base-shadow first, so pip never
@@ -123,8 +155,9 @@ A PR that touches those six modules, or what they test, runs them there:
 ```bash
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
   --checkout <this worktree> --tag gb10 --priority -10 \
-  --python /home/rob/venvs/pq-pb461728e4-tessera-af7a86d4-tf516/bin/python \
-  --threads-per-shard 2 --mem-gb 8 --shards 6 \
+  --python /home/rob/venvs/pq-pb461728e4-tessera-20bf5346-tf516/bin/python \
+  --threads-per-shard 1 --workers-per-shard 2 --cpus-per-shard 2 --mem-gb 8 \
+  --timeout-s 1800 \
   tests/test_glm5_next_streamed_forward_parity.py \
   tests/test_glm_campaign_streaming.py tests/test_tessera_stack_group_cli.py \
   tests/test_selected_snapshot_scope.py tests/test_collector_source_release.py \
@@ -211,7 +244,7 @@ cat-file` command below. Tessera master has since advanced to contract v33
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p af7a86d43da3487179b7d16606ef0f5a3046d73c:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 20bf53464f9113f3115f454f8fa80453e71c0308:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -306,13 +339,13 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-26:
+Verified against `RobTand/tessera` master on 2026-09-27:
 
 ```
-commit           af7a86d43da3487179b7d16606ef0f5a3046d73c
-contract_sha256  04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4
+commit           20bf53464f9113f3115f454f8fa80453e71c0308
+contract_sha256  f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb
 versions.tessera 0.1.0
-contract_version 38
+contract_version 39
 lane schema      tessera.lane-eligibility.v10
 ```
 

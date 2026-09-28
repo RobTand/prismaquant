@@ -562,7 +562,8 @@ def require_serving_target(target=None, *, table=None):
 
 
 def _source_unit_shapes(model_path: str | Path, profile,
-                        shards: dict[str, str] | None = None) -> dict[str, list[tuple[str, tuple]]]:
+                        shards: dict[str, str] | None = None, *,
+                        source_scope=None) -> dict[str, list[tuple[str, tuple]]]:
     """Read source headers and the shared name projection; never load weights.
 
     Keyed by the SOURCE unit: the checkpoint tensor name without its
@@ -574,7 +575,9 @@ def _source_unit_shapes(model_path: str | Path, profile,
     every profile whose ``live_to_recipe`` rewrites a prefix: glm5_next folds
     ``model.language_model.`` to ``model.``, and a GLM allocation keyed by
     source units then found no shape at all (PrismaQuant #1388).  The name
-    projection still decides which tensors are body units (``MAPPED``).
+    projection still decides which tensors are body units (``MAPPED``). An
+    explicitly declared out-of-body source scope may add its own checkpoint
+    names without changing that body map.
 
     ``shards``, when given, is filled with ``{tensor: shard basename}`` for
     every mapped tensor, so a carried producer roster can be checked against
@@ -600,7 +603,8 @@ def _source_unit_shapes(model_path: str | Path, profile,
                     f"source checkpoint tensor {name!r} occurs in multiple shards")
             seen.add(name)
             projected = projection.checkpoint_to_live(name)
-            if projected.outcome != MAPPED:
+            if (projected.outcome != MAPPED and
+                    (source_scope is None or source_scope.live_name(name) is None)):
                 continue
             unit = strip_weight_leaf(name)
             shape = metadata.get("shape") if isinstance(metadata, Mapping) else None
@@ -646,7 +650,8 @@ BUILD_ROUTED_EXPERT_BYTES_KEY = "tessera_routed_expert_bytes"
 
 
 def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping[str, str],
-                               shards: Mapping[str, str]) -> tuple[str, dict | None]:
+                               shards: Mapping[str, str], *,
+                               carried_keys: Mapping[str, str] | None = None) -> tuple[str, dict | None]:
     """Re-bind the selected routed units to the projection the allocation carries.
 
     A carried projection is an UNLOCK, not a new requirement: an allocation
@@ -683,20 +688,29 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     )
     from .tessera_formats import parse_tessera_format_name
 
+    keys = {"projection": PROJECTION_KEY, "wires": EXPERT_WIRES_KEY,
+            "stack_formats": STACK_FORMATS_KEY, "wire_dir": WIRE_DIR_KEY}
+    if carried_keys is not None:
+        keys.update(carried_keys)
+    projection_key, wires_key = keys["projection"], keys["wires"]
+    roots_key = keys.get("wire_roots")
+
     # No routed unit selected, no routed bytes: neither path runs, whatever the
     # allocation happens to carry.  Decided before the keys are read so a dense
     # export is never stamped as a fallback -- and it changes nothing below,
     # because every check that follows already iterates over ``selected_routed``.
     fallback = (ROUTED_EXPERT_BYTES_REENCODED if selected_routed
                 else ROUTED_EXPERT_BYTES_NONE)
-    carried = meta.get(PROJECTION_KEY)
+    carried = meta.get(projection_key)
     if carried is None:
-        orphaned = sorted(key for key in (EXPERT_WIRES_KEY, STACK_FORMATS_KEY, WIRE_DIR_KEY)
+        orphaned = sorted(key for key in (wires_key, keys["stack_formats"], keys["wire_dir"],
+                                          roots_key)
+                          if key is not None
                           if meta.get(key) is not None)
         if orphaned:
             raise TesseraExportLaneError(
                 f"the allocation carries {orphaned} but no producer expert projection "
-                f"({PROJECTION_KEY}); priced expert wires that are bound to no executed "
+                f"({projection_key}); priced expert wires that are bound to no executed "
                 "unit cannot be handed to the exporter (PrismaQuant #183)")
         return fallback, None
     try:
@@ -714,20 +728,24 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
                     f"{name}: the producer hashed {tensor} in shard {hashed!r}, the source "
                     f"checkpoint holds it in {shards.get(tensor)!r}")
         stack_formats = require_stack_uniform_assignment(selected_routed, stack_of, units)
-        stamped = meta.get(STACK_FORMATS_KEY)
+        stamped = meta.get(keys["stack_formats"])
         if stamped is not None and {k: v for k, v in stamped.items()
-                                    if k in stack_formats} != stack_formats:
+                if k in stack_formats} != stack_formats:
             raise ExpertProjectionError(
-                f"the allocation's {STACK_FORMATS_KEY} stamp {stamped} disagrees with the "
+                f"the allocation's {keys['stack_formats']} stamp {stamped} disagrees with the "
                 f"selected stack formats {stack_formats}")
-        wire_dir = meta.get(WIRE_DIR_KEY)
-        if not isinstance(wire_dir, str) or not wire_dir:
+        wire_dir = meta.get(keys["wire_dir"])
+        roots = meta.get(roots_key) if roots_key is not None else None
+        if roots_key is not None and (not isinstance(roots, Mapping) or
+                                      set(roots) != set(selected_routed)):
+            raise ExpertProjectionError("selected expert wire roots do not cover exact routed units")
+        if roots_key is None and (not isinstance(wire_dir, str) or not wire_dir):
             raise ExpertProjectionError(
-                f"the allocation names no {WIRE_DIR_KEY} for its priced expert wires")
-        wires = meta.get(EXPERT_WIRES_KEY)
+                f"the allocation names no {keys['wire_dir']} for its priced expert wires")
+        wires = meta.get(wires_key)
         if not isinstance(wires, Mapping):
             raise ExpertProjectionError(
-                f"the allocation carries a producer projection but no {EXPERT_WIRES_KEY}")
+                f"the allocation carries a producer projection but no {wires_key}")
         records = {}
         for name, fmt in sorted(selected_routed.items()):
             family, q256 = parse_tessera_format_name(fmt)
@@ -743,7 +761,10 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
             record = check_expert_wire_receipt(
                 record, name=name, unit=units[name], q256=int(q256),
                 grid=family.payload_grid().name)
-            locate_expert_wire(record, name=name, wire_dir=Path(wire_dir))
+            root = roots[name] if roots is not None else wire_dir
+            if not isinstance(root, str) or not root:
+                raise ExpertProjectionError(f"{name}: selected priced wire has no root")
+            locate_expert_wire(record, name=name, wire_dir=Path(root))
             records[name] = record
     except ExpertProjectionError as exc:
         raise TesseraExportLaneError(f"expert projection: {exc}") from exc
@@ -753,6 +774,7 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     return (ROUTED_EXPERT_BYTES_PRICED_WIRES if selected_routed else fallback), {
         "source": source, "units": records, "stacks": stack_formats,
         "wire_dir": wire_dir,
+        **({"wire_roots_by_unit": dict(roots)} if roots is not None else {}),
         "geometry": {name: (units[name]["rows"], units[name]["cols"])
                      for name in selected_routed}}
 
@@ -820,17 +842,23 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             costs=handoff.get("costs"))
     except ExpertProjectionError as exc:
         raise TesseraExportLaneError(f"selected cache projection: {exc}") from exc
-    if set(selected) != set(data.census["unit_shapes"]):
-        raise TesseraExportLaneError("selected cache assignment does not cover the full source roster")
+    from .tessera_census_cache import census_roster_selection
+    selected = census_roster_selection(selected, data.census["unit_shapes"], TesseraExportLaneError)
     wire_dir = Path(provenance["wire_dir"]).resolve()
-    if (metadata.get(WIRE_DIR_KEY) != str(wire_dir) or
-            data.payload.get("provenance", {}).get("wire_dir") != str(wire_dir)):
+    # The allocator's recorded root must still name the handoff root: both
+    # sides describe WHICH root the selection was priced against.  The
+    # loader payload's provenance wire_dir names the root the receipts were
+    # measured under and may legitimately differ as a string; the per-unit
+    # content identity against those receipts is carried by the priced
+    # records and enforced at intake, so it is recorded by callers rather
+    # than gated here by path equality.
+    if metadata.get(WIRE_DIR_KEY) != str(wire_dir):
         raise TesseraExportLaneError("selected cache wire directory differs from the joint handoff")
     selected_expert_receipts = metadata.get(EXPERT_WIRES_KEY, {})
     if not isinstance(selected_expert_receipts, Mapping):
         raise TesseraExportLaneError("selected cache expert receipts are missing")
     from contextlib import nullcontext
-    from .joint_catalog_extension import (EncoderAdoptionValidation,
+    from .joint_catalog_extension import (EncoderAdoptionValidation, streamed_fences,
         require_selected_catalog_cell, require_extension, extension_run_header, _json)
     rooted = schema == "tessera.cached_units.v2"
     if rooted:
@@ -857,7 +885,11 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
         policy = verify_policy(policy_bound, original_prepared=extension["inputs"]["original_prepared"])
     records, wire_roots, unit_roots, adoptions, proofs = {}, {}, {}, {}, {}
     served_activations = {}
-    with EncoderAdoptionValidation() if rooted else nullcontext() as validation:
+    # A selected overlay wire whose stat fence drifted is re-hashed on the
+    # assigned-CPU pool while the walk continues; every re-hash is proven
+    # when this block exits, before the manifest is built (PQ #1522).
+    with (EncoderAdoptionValidation() if rooted else nullcontext()) as validation, \
+            (streamed_fences() if rooted else nullcontext()) as fences:
         for name, fmt in sorted(selected.items()):
             if fmt == "BF16":
                 continue
@@ -877,11 +909,19 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             sealed_unit = data.manifest["identity"]["units"][name]
             if record["identity"].get("source") != sealed_unit["weight"]:
                 raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
+            # The root this cell's bytes are read from: the handoff root, or,
+            # for a catalog-adopted cell, its catalog row's own directory
+            # (chosen below). ``locate_expert_wire`` gates that final root once
+            # (present, regular, non-symlink, directly in the root, receipted
+            # size) against ``record``, which ``require_selected_catalog_cell``
+            # holds equal to the catalog row's record. Content identity is
+            # enforced at intake by ``verify_cached_unit`` (#1513, #641/#643).
             cell_wire_dir = wire_dir
             if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
                 if not rooted:
                     raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")
-                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation)
+                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation,
+                                                         fences=fences)
                 adoptions[name] = accepted["adoption"]
                 if policy is None:
                     raise TesseraExportLaneError(f"{name}: added A4 selection needs the accepted served activation policy")
@@ -893,11 +933,16 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
                     "group": row["joint_operator_identity"]["served_activation_policy"]["group"],
                     "input_global_scale": scale}
                 cell_wire_dir = Path(accepted["wire_root"])
-                seal = record["identity"]["encoder_source_sha256"]
-                if producer_packages.get(seal) != accepted["producer_package"]:
-                    raise TesseraExportLaneError(f"{name}: producer package differs from accepted migration proof")
+                # A cell no reseal proof covers was admitted unproven, in dev
+                # mode only (``validated_encoder_adoption``, PQ #1147): it has
+                # no proof and no proof-bound producer package to compare. The
+                # exporter still needs this seal's producer package below.
                 proof = accepted["proof"]
-                proofs[proof["sha256"]] = proof
+                if proof is not None:
+                    seal = record["identity"]["encoder_source_sha256"]
+                    if producer_packages.get(seal) != accepted["producer_package"]:
+                        raise TesseraExportLaneError(f"{name}: producer package differs from accepted migration proof")
+                    proofs[proof["sha256"]] = proof
             expected_hessian = (sealed_unit.get("hessian") if
                                 measured_row.get("hessian_identity", {}).get("applied") is True else None)
             if (record["identity"].get("calibration") or {}).get("hessian") != expected_hessian:
@@ -1144,15 +1189,41 @@ def require_assignment_scope(model_path: str | Path, assignment_path: str | Path
         profile = detect_profile(str(model_path))
         fused_module = require_fused_rung_coherence(assignment, profile, path)
         shards: dict[str, str] = {}
-        shapes = _source_unit_shapes(model_path, profile, shards)
+        mtp_meta = meta.get('mtp_selection', {})
+        mtp_wires = mtp_meta.get('mtp_expert_wires', {}) if isinstance(mtp_meta, Mapping) else {}
+        mtp_names = set(mtp_wires) if isinstance(mtp_wires, Mapping) else set()
+        mtp_scope = profile.source_scope('mtp', model_path) if mtp_names else None
+        if mtp_names:
+            from .name_projection import MAPPED, NameProjection
+            body_projection = NameProjection(profile)
+            if not mtp_names <= set(selected):
+                raise TesseraExportLaneError('MTP wire roster includes an unselected unit')
+            for name in mtp_names:
+                tensor = name + '.weight'
+                if (mtp_scope.live_name(tensor) is None or
+                        body_projection.checkpoint_to_live(tensor).outcome == MAPPED):
+                    raise TesseraExportLaneError(
+                        f'{name}: MTP priced wire is outside the disjoint profile MTP source scope')
+        shapes = _source_unit_shapes(model_path, profile, shards, source_scope=mtp_scope)
         structures = {name: unit_structure_from_profile(name, profile) for name in selected}
         # The producer's projection first: it is the structural refusal, it is
         # cheaper than a route resolution, and it is what attests the executed
         # geometry the rest of this loop resolves a routed unit on.
         routed_expert_bytes, projection = _carried_expert_projection(
             meta, {name: fmt for name, fmt in selected.items()
-                   if structures[name] == STRUCTURE_ROUTED_MOE}, shards)
-        attested = projection["geometry"] if projection is not None else {}
+                   if structures[name] == STRUCTURE_ROUTED_MOE and name not in mtp_names},
+            shards)
+        mtp_routed_bytes, mtp_projection = _carried_expert_projection(
+            mtp_meta, {name: selected[name] for name in mtp_names
+                       if name in selected and structures[name] == STRUCTURE_ROUTED_MOE},
+            shards, carried_keys={
+                'projection': 'mtp_expert_projection',
+                'wires': 'mtp_expert_wires',
+                'stack_formats': 'mtp_expert_stack_formats',
+                'wire_dir': 'mtp_expert_wire_dir',
+                'wire_roots': 'mtp_expert_wire_roots'}) if mtp_names else (ROUTED_EXPERT_BYTES_NONE, None)
+        attested = {**(projection["geometry"] if projection is not None else {}),
+                    **(mtp_projection["geometry"] if mtp_projection is not None else {})}
         formats = load_published_formats(contract_path=path)
         routes = {}
         for name, fmt in sorted(selected.items()):
@@ -1169,6 +1240,12 @@ def require_assignment_scope(model_path: str | Path, assignment_path: str | Path
             expected = target.context(structure)
             owner = member_owners.get(name, name)
             context_payload = by_unit.get(owner)
+            if name not in by_unit and name in mtp_names:
+                # The historical body scope has no MTP row. The disjoint
+                # profile scope and producer projection establish its source
+                # and geometry; the current target and cell gate below decide
+                # its serving context, without claiming a historical stamp.
+                context_payload = expected.as_dict()
             if name != owner and name in by_unit and by_unit[name] != context_payload:
                 raise TesseraExportLaneError(
                     f"{name}: source serving context disagrees with packed decision {owner}")
@@ -1211,6 +1288,9 @@ def require_assignment_scope(model_path: str | Path, assignment_path: str | Path
                   ROUTED_EXPERT_BYTES_KEY: routed_expert_bytes}
         if projection is not None:
             report["expert_projection"] = projection
+        if mtp_projection is not None:
+            report['mtp_expert_projection'] = mtp_projection
+            report['mtp_routed_expert_bytes'] = mtp_routed_bytes
         if fused_module is not None:
             report["fused_module"] = fused_module
         return report
@@ -1410,10 +1490,14 @@ def _is_hessian_reference(value):
     if isinstance(value, dict):
         return False
     try:
-        from tessera.hessian_capture import ReferenceHessians
+        from tessera import hessian_capture as reader
     except ImportError:
         return False
-    return isinstance(value, ReferenceHessians)
+    types = (reader.ReferenceHessians,)
+    collection = getattr(reader, 'ReferenceHessianCollection', None)
+    if collection is not None:
+        types += (collection,)
+    return isinstance(value, types)
 
 
 def _bound_hessian_capture(hessian_path: Path) -> tuple:
@@ -1473,6 +1557,101 @@ def _bound_hessian_capture(hessian_path: Path) -> tuple:
     return hessians, provenance, digest
 
 
+def _mtp_hessian_collection_proof(config, metadata, selected, block, owner):
+    """Bind an MTP choice and the body seal to disjoint producer H children.
+
+    The body allocation keeps its original H stamp. The MTP cost's exact
+    M6→M4→M3 anchors and selected receipts name their original child seals.
+    Tessera's collection reader proves the child rosters and union commitment;
+    this gate matches every selected unit back to its own priced child without
+    loading H payloads or rewriting a cached-unit identity.
+    """
+    selection = metadata.get('mtp_selection')
+    if not isinstance(selection, Mapping):
+        return None
+    chosen = selection.get('rung_by_group', {})
+    if not isinstance(chosen, Mapping) or not any(
+            isinstance(fmt, str) and fmt.startswith('TESSERA_') for fmt in chosen.values()):
+        return None
+    from tessera import hessian_capture as reader
+    from .glm_mtp_selection import (_bound_payload, backfill_mtp_selection_wires,
+                                    WIRE_BINDING_SCHEMA)
+
+    collection_type = getattr(reader, 'ReferenceHessianCollection', None)
+    if collection_type is None or not isinstance(owner, collection_type):
+        raise TesseraExportLaneError('selected MTP wires require a Hessian reference collection')
+    if selection.get('mtp_expert_wire_binding_schema') != WIRE_BINDING_SCHEMA:
+        raise TesseraExportLaneError('selected MTP wires carry no bound M3 priced receipts')
+    expected = backfill_mtp_selection_wires(config, selection['cost_path'])[
+        '__prismaquant__']['mtp_selection']
+    fields = ('mtp_joint_cost_sha256', 'mtp_expert_projection', 'mtp_expert_wires',
+              'mtp_expert_wire_roots', 'mtp_expert_source_bindings',
+              'mtp_expert_wire_binding_schema')
+    if any(selection.get(field) != expected[field] for field in fields):
+        raise TesseraExportLaneError('selected MTP receipts differ from their bound M6→M4→M3 cost')
+    mtp_receipts = selection['mtp_expert_wires']
+    if not mtp_receipts or not set(mtp_receipts) <= set(selected):
+        raise TesseraExportLaneError('selected MTP receipt roster is empty or unselected')
+    references = owner.binding()['references']
+    children, by_unit = [], {}
+    for reference in references:
+        with reader.ReferenceHessians(reference['path']) as child:
+            if (child.document_sha256 != reference['sha256'] or
+                    child.binding() != reference['binding']):
+                raise TesseraExportLaneError('Hessian collection child binding changed')
+            # open_hessian_reference checked the PrismaQuant capture runtime
+            # for each held child. The exact descriptor binding above and
+            # owner.require_current below fence this second metadata view.
+            commitments = child.committed_units()
+            capture = reader.capture_sha256_from_units(child.provenance, commitments)
+            info = {'path': reference['path'], 'sha256': reference['sha256'],
+                    'binding': reference['binding'], 'capture_sha256': capture,
+                    'units': len(commitments)}
+            children.append(info)
+            for name in commitments:
+                if name in by_unit:
+                    raise TesseraExportLaneError(f'Hessian collection overlaps on {name}')
+                by_unit[name] = info
+    body = [child for child in children if
+            child['binding'] == block.get('reference_binding') and
+            child['capture_sha256'] == block.get('capture_sha256')]
+    if len(body) != 1:
+        raise TesseraExportLaneError('Hessian collection has no unique body priced child')
+    body_units = set(selected) - set(mtp_receipts)
+    if any(by_unit.get(name) is not body[0] for name in body_units):
+        raise TesseraExportLaneError('body selected unit has no original priced Hessian child')
+    m3_sources = {}
+    source_seals = {name: body[0]['capture_sha256'] for name in body_units}
+    for name, record in mtp_receipts.items():
+        child = by_unit.get(name)
+        if child is None or child is body[0]:
+            raise TesseraExportLaneError(f'{name}: selected MTP H has no disjoint child')
+        ref = selection['mtp_expert_source_bindings'][name]['m3']
+        key = (ref['path'], ref['sha256'])
+        if key not in m3_sources:
+            m3_sources[key] = _bound_payload(ref, label='selected MTP M3 price')
+        m3 = m3_sources[key]
+        priced_h = m3.get('provenance', {}).get('hessian', {})
+        if (priced_h.get('capture_path') != child['path'] or
+                priced_h.get('capture_sha256') != child['capture_sha256'] or
+                priced_h.get('reference_binding') != child['binding']):
+            raise TesseraExportLaneError(f'{name}: M3 Hessian child differs from priced capture')
+        fmt = selected[name]
+        row_h = m3.get('costs', {}).get(name, {}).get(fmt, {}).get('hessian_identity', {})
+        if (row_h.get('applied') is not True or
+                row_h.get('capture_sha256') != child['capture_sha256'] or
+                row_h.get('reference_binding') != child['binding'] or
+                record.get('identity', {}).get('calibration', {}).get('hessian') !=
+                owner.commitment(name)):
+            raise TesseraExportLaneError(f'{name}: selected receipt H differs from priced child')
+        source_seals[name] = child['capture_sha256']
+    owner.require_current()
+    return {'binding': owner.binding(), 'capture_sha256':
+            hessian_capture_sha256(owner, owner.provenance),
+            'unit_capture_sha256': dict(sorted(source_seals.items())),
+            'children': children}
+
+
 def _crosscheck_capture_seal(hessian_path, hessians, provenance,
                              digest) -> "str | None":
     """Refuse when Tessera's own seal of the payload is not ours; the name of
@@ -1524,7 +1703,8 @@ def require_priced_export_inputs(
       row's answer, not its name's (#221).
     """
     from .footprint import _read_safetensors_header
-    from .layer_config import load_assignment, read_layer_config_metadata
+    from .layer_config import (canonicalize_assignment, layer_config_metadata,
+                               validate_layer_config_payload)
     from .nvfp4_activation_contract import (
         is_routed_expert_projection_name, routed_expert_scale_group,
     )
@@ -1537,12 +1717,14 @@ def require_priced_export_inputs(
         POPULATION_KEY, PROJECTION_KEY, ExpertProjectionError,
         carried_units, expand_stack_decision_assignment,
     )
-    assignment = load_assignment(assignment_path)
+    config = json.loads(Path(assignment_path).read_text())
+    validate_layer_config_payload(config, str(assignment_path))
+    assignment = canonicalize_assignment(config)
     # The names the allocation stamped, before any stack expansion: a
     # per-unit seal map (#1270) is keyed by the cost table's own names.
     stamped_names = {name for name, fmt in assignment.items()
                      if str(fmt).startswith("TESSERA_")}
-    metadata = read_layer_config_metadata(assignment_path)
+    metadata = layer_config_metadata(config)
     population = metadata.get(POPULATION_KEY)
     if isinstance(population, Mapping) and population.get("stack_decisions"):
         try:
@@ -1568,7 +1750,6 @@ def require_priced_export_inputs(
     if not selected:
         return report
 
-    metadata = read_layer_config_metadata(assignment_path)
     block = metadata.get("tessera_hessian")
     if not isinstance(block, Mapping) or not isinstance(
             block.get("supplied"), bool):
@@ -1618,7 +1799,17 @@ def require_priced_export_inputs(
             )
         hessians, identity, digest = _bound_hessian_capture(hessian_path)
         reference_binding = hessians.binding() if _is_hessian_reference(hessians) else None
-        if reference_binding != block.get('reference_binding'):
+        try:
+            composite = _mtp_hessian_collection_proof(
+                config, metadata, selected, block, hessians)
+        except BaseException:
+            if _is_hessian_reference(hessians):
+                hessians.close()
+            raise
+        priced_digest = (composite['capture_sha256'] if composite is not None else
+                         block.get('capture_sha256'))
+        expected_binding = composite['binding'] if composite is not None else block.get('reference_binding')
+        if reference_binding != expected_binding:
             if _is_hessian_reference(hessians):
                 hessians.close()
             raise TesseraExportLaneError('canonical Hessian reference binding differs from the allocation')
@@ -1635,7 +1826,8 @@ def require_priced_export_inputs(
         # commitment, so the encoder reads exactly the H that priced them.
         # Export checks only that the claim is well formed; completeness is
         # the allocator's, which holds the cost table this gate does not.
-        rebound = block.get('unit_capture_sha256')
+        rebound = (composite['unit_capture_sha256'] if composite is not None else
+                   block.get('unit_capture_sha256'))
         if rebound is not None:
             problem = None
             if reference_binding is None:
@@ -2018,7 +2210,7 @@ def _require_routed_scale_grouping_declaration(grouping, *, routed_units,
 
 
 def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
-                           profile) -> dict:
+                           profile, model_path=None) -> dict:
     """A producer-facing source-unit view of a verified allocation.
 
     The allocator's decision keys and file stay intact. This derived input
@@ -2075,12 +2267,20 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
         return "BF16" if canonicalize_format(entry) == "BF16" else entry
 
     name_projection = NameProjection(profile)
+    mtp = metadata.get('mtp_selection')
+    mtp_selected = (mtp.get('mtp_expert_wires') if isinstance(mtp, Mapping) else None)
+    mtp_scope = None
+    if mtp_selected:
+        if model_path is None:
+            raise TesseraExportLaneError('MTP export assignment needs its source model')
+        mtp_scope = profile.source_scope('mtp', model_path)
     projected: dict = {}
     outside_graph: list[str] = []
     for name in names:
         entry = producer_entry(entries[owners.get(name, name)])
         if (name_projection.checkpoint_to_live(name + ".weight").outcome
-                == DECLARED_OUT_OF_GRAPH):
+                == DECLARED_OUT_OF_GRAPH and
+                (mtp_scope is None or mtp_scope.live_name(name + '.weight') is None)):
             if entry != "BF16":
                 raise TesseraExportLaneError(
                     f"{name}: the model profile declares this unit outside the text "
@@ -2110,11 +2310,78 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
 # ---------------------------------------------------------------------------
 # The driver's entry point
 # ---------------------------------------------------------------------------
+def cached_unit_encoder_source_proof_mode() -> str:
+    """Translate this producer's dev switch into the reader's explicit input."""
+    from .dev_mode import dev_mode_enabled
+
+    return 'permissive' if dev_mode_enabled() else 'strict'
+
+
+def read_cached_unit_bundle(manifest, directory, expected_units, source):
+    """Read with the producer's mode, retaining and surfacing every warning."""
+    import sys
+    from tessera.cached_unit import CachedUnitBundle
+
+    bundle = CachedUnitBundle(
+        manifest, directory, expected_units, source,
+        encoder_source_proof_mode=cached_unit_encoder_source_proof_mode())
+    for warning in bundle.warnings:
+        print('[cached-unit warning] ' + json.dumps(warning, sort_keys=True),
+              file=sys.stderr)
+    return bundle
+
+
+def require_composed_cached_units(path: str | Path, *, scope: Mapping,
+                                  metadata: Mapping) -> dict:
+    """Bind an original-cohort bundle to this selection before export intake.
+
+    Tessera owns child-document/package and complete-plan verification. This
+    preflight additionally compares every selected MTP and carried body expert
+    receipt to the bytes the allocation priced; the exporter hashes the blobs
+    and derives their source/H/recipe identities at intake.
+    """
+    import hashlib
+    from tessera.cached_unit import COMPOSED_CACHE_SCHEMA, read_manifest
+
+    path = Path(path)
+    if not path.is_absolute() or path.is_symlink() or path.resolve() != path:
+        raise TesseraExportLaneError('composed cached units need a canonical absolute manifest')
+    raw = path.read_bytes()
+    manifest = read_manifest(path)
+    if not isinstance(manifest, Mapping) or manifest.get('schema') != COMPOSED_CACHE_SCHEMA:
+        raise TesseraExportLaneError('selected MTP wires require a composed cached-unit bundle')
+    body = scope.get('expert_projection')
+    mtp = scope.get('mtp_expert_projection')
+    if not isinstance(body, Mapping) or not isinstance(mtp, Mapping):
+        raise TesseraExportLaneError('composed cached units need both priced producer projections')
+    if body.get('source') != mtp.get('source'):
+        raise TesseraExportLaneError('body and MTP producer checkpoint sources differ')
+    expected = set(scope['by_unit'])
+    bundle = read_cached_unit_bundle(manifest, path.parent, expected, body['source'])
+    selection = metadata.get('mtp_selection', {})
+    priced_mtp = selection.get('mtp_expert_wires') if isinstance(selection, Mapping) else None
+    priced_body = body.get('units')
+    if not isinstance(priced_mtp, Mapping) or not priced_mtp or not isinstance(priced_body, Mapping):
+        raise TesseraExportLaneError('composed cache has no selected priced receipts')
+    if set(priced_mtp) & set(priced_body):
+        raise TesseraExportLaneError('body and MTP priced receipt rosters overlap')
+    for cohort, records in (('body', priced_body), ('MTP', priced_mtp)):
+        for name, record in records.items():
+            if bundle.units.get(name) != record:
+                raise TesseraExportLaneError(
+                    f'{name}: composed cached {cohort} receipt differs from selected price')
+    return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
+            'units': len(bundle.units), 'children': bundle.child_manifests,
+            'encoder_source_proof_mode': bundle.encoder_source_proof_mode,
+            'warnings': bundle.warnings}
+
+
 def preflight(model_path: str | Path, *, target=None,
               assignment_path: str | Path | None = None,
               hessian_path: str | Path | None = None,
               input_scales_path: str | Path | None = None,
-              cached_expert_units: bool = False) -> dict:
+              cached_expert_units: bool = False,
+              cached_units_path: str | Path | None = None) -> dict:
     """Every gate, in the order that puts the cheapest refusal first.
 
     ``cached_expert_units`` additionally writes the producer's cached-unit
@@ -2126,12 +2393,27 @@ def preflight(model_path: str | Path, *, target=None,
     in BF16, which is a decision the allocator emits and this gate refused
     until #229.
     """
+    from .layer_config import prefill_frontier_replay_claim, read_layer_config_metadata
+
     if assignment_path is not None:
-        from .layer_config import read_layer_config_metadata
-        if 'sampled_joint_proposal' in read_layer_config_metadata(assignment_path):
+        allocation_meta = read_layer_config_metadata(assignment_path)
+        try:
+            prefill_frontier_replay_claim(allocation_meta)
+        except ValueError as exc:
+            raise TesseraExportLaneError(str(exc)) from exc
+        if 'sampled_joint_proposal' in allocation_meta:
             raise TesseraExportLaneError(
                 'sampled joint research assignment is pending independent '
                 'validation; ordinary native export preflight remains closed')
+        mtp = allocation_meta.get('mtp_selection')
+        mtp_selected = (mtp.get('mtp_expert_wires') if isinstance(mtp, Mapping) else None)
+        if mtp_selected and cached_units_path is None:
+            raise TesseraExportLaneError(
+                'selected MTP priced wires require --cached-units; no encode fallback')
+        if cached_units_path is not None and not mtp_selected:
+            raise TesseraExportLaneError('--cached-units was supplied without selected MTP receipts')
+    elif cached_units_path is not None:
+        raise TesseraExportLaneError('--cached-units requires an allocation')
     structure = require_declared_structure(model_path)
     target = require_serving_target(target)
     executes = require_executes_derived_from_contract()
@@ -2152,9 +2434,14 @@ def preflight(model_path: str | Path, *, target=None,
             assignment_path, hessian_path=hessian_path,
             input_scales_path=input_scales_path)
         scope = require_assignment_scope(model_path, assignment_path, target=target)
+        composed_cache = (require_composed_cached_units(
+            cached_units_path, scope=scope, metadata=allocation_meta)
+            if cached_units_path is not None else None)
         build = {
             "source_model": str(model_path), "layer_config": str(assignment_path),
             "layer_config_sha": assignment_sha,
+            "cached_encoder_source_proof_mode": cached_unit_encoder_source_proof_mode(),
+            **prefill_frontier_replay_claim(read_layer_config_metadata(assignment_path)),
             "priced_inputs": {
                 "schema": ('tessera.priced_export_inputs.v2'
                            if priced_inputs.get('hessian_reference_binding') is not None
@@ -2204,6 +2491,14 @@ def preflight(model_path: str | Path, *, target=None,
         if scope is not None:
             build["tessera_serving_scope"] = read_layer_config_metadata(
                 assignment_path)["tessera_serving_scope"]
+            if composed_cache is not None:
+                build['cached_units'] = composed_cache['path']
+                build['cached_units_sha256'] = composed_cache['sha256']
+                build['cached_units_selected'] = {
+                    'units': composed_cache['units'],
+                    'children': composed_cache['children'],
+                    'encoder_source_proof_mode': composed_cache['encoder_source_proof_mode'],
+                    'warnings': composed_cache['warnings']}
             # Copied from the scope receipt, never recomputed: the anchor is
             # the only machine-readable thing this CLI writes, and
             # `lane_shipcard open --build-json` stamps it whole onto the
@@ -2228,7 +2523,7 @@ def preflight(model_path: str | Path, *, target=None,
                 # is the predicate, so the anchor names a bundle in exactly the
                 # runs whose bytes come from one, and `cached_units_manifest`
                 # keeps refusing an empty bundle where one IS required.
-                if cached_expert_units and (
+                if cached_expert_units and composed_cache is None and (
                         scope[ROUTED_EXPERT_BYTES_KEY]
                         == ROUTED_EXPERT_BYTES_PRICED_WIRES):
                     build["cached_expert_units"] = str(
@@ -2237,7 +2532,7 @@ def preflight(model_path: str | Path, *, target=None,
             from .model_profiles import detect_profile
             build.update(_write_plan_assignment(
                 assignment_path, expected_sha256=assignment_sha,
-                profile=detect_profile(str(model_path))))
+                profile=detect_profile(str(model_path)), model_path=model_path))
         if file_sha256(assignment_path) != assignment_sha:
             raise TesseraExportLaneError(
                 "allocation changed during scoped preflight; no build anchor was produced")
@@ -2313,6 +2608,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                              "(tessera.cached_units.v1) and name the manifest "
                              "in the build anchor, for the exporter's "
                              "--cached-expert-units intake")
+    parser.add_argument("--cached-units", default=None,
+                        help="prebuilt composed cached-unit manifest for all selected "
+                             "body and MTP Tessera units; required for MTP priced-wire reuse")
     from .tessera_serving_scope import add_serving_scope_arguments, serving_target_from_args
 
     add_serving_scope_arguments(parser)
@@ -2344,6 +2642,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = preflight(args.model, target=target,
                                assignment_path=args.assignment,
                                cached_expert_units=args.write_cached_expert_units,
+                               cached_units_path=args.cached_units,
                                **priced)
         if args.write_build_json is not None:
             destination = Path(args.write_build_json)

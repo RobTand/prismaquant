@@ -219,12 +219,14 @@ def test_a_scratch_plane_through_the_tee_ring_writes_the_same_bytes(
     records = [{"name": f"cotangent-{p}-{b}", "shape": list(shape),
                 "dtype": "torch.float32", "tensor_bytes": nbytes} for p, b in _keys()]
     (tmp_path / "scratch").mkdir()
+    if shape == (4, 1024):
+        from test_stageb_cotangent_scratch import require_direct_io
+        # Probe before constructing scratch: a skip must not leak its file.
+        require_direct_io(tmp_path / "scratch")
     scratch = ExactCotangentScratch(records, directory=tmp_path / "scratch",
                                     max_bytes=1 << 20)
     if shape == (4, 1024):
-        # The premise, checked rather than assumed: a box whose local disk
-        # has no direct I/O would pass this case on the buffered path.
-        assert _direct_io_supported(tmp_path / "scratch"), "no direct I/O here"
+        # Still prove this path really uses O_DIRECT on a capable worker.
         assert scratch._direct is not None
     try:
         emitter = _emitter(tmp_path, record, adjoint_slice)

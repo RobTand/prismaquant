@@ -1434,12 +1434,17 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
 # --------------------------------------------------------------------------
 
 
-def bind_joint_served_quantizer(formats_by_qname):
-    """Require the actual served static-A4 operator before Stage B pricing.
+def bind_joint_served_quantizer(formats_by_qname, *,
+                                context="joint Stage B activation pricing"):
+    """Require the actual served static-A4 operator before activation pricing.
 
     A registered binding includes the inspected image and extension build.
     A missing operator refuses; the Torch arithmetic model is never a price.
     A16/dynamic-only rosters do not load the serving extension.
+
+    This is the one owner of the rule. Stage B calls it, and so does the
+    Stage A campaign seam (``tessera_campaign._bind_served_quantizer``,
+    RobTand/prismaquant#1481), naming its own ``context``.
     """
     from . import format_registry as fr
     from .nvfp4_activation_contract import bind_served_quantizer_identity
@@ -1449,10 +1454,9 @@ def bind_joint_served_quantizer(formats_by_qname):
     for fmt in sorted({fmt for formats in formats_by_qname.values() for fmt in formats}):
         contract = fr.get_format(fmt).static_activation_contract
         if contract is not None and (contract.measured_as_served or served_override):
-            identity = bind_served_quantizer_identity(
-                require=True, context="joint Stage B activation pricing")
+            identity = bind_served_quantizer_identity(require=True, context=context)
             if contract.served_quantizer is not None and contract.served_quantizer != identity:
-                raise RuntimeError("joint Stage B format overrides the served quantizer binding")
+                raise RuntimeError(f"{context}: format overrides the served quantizer binding")
             return identity.as_record()
     return None
 

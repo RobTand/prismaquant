@@ -677,3 +677,255 @@ def test_missing_digest_cache_cannot_trigger_implicit_full_rehash(tmp_path, monk
                         lambda *a, **k: pytest.fail("must not hash missing/stale cache"))
     with pytest.raises(ValueError, match="incomplete/stale"):
         exp.cached_checkpoint_identity(tmp_path, tmp_path / "missing.json")
+
+
+class _FakeOutput:
+    def __init__(self, tokens):
+        self.prompt_token_ids = list(tokens)
+
+
+class _FakeLLM:
+    """Two TP ranks behind the public LLM surface measure() drives."""
+    instances = []
+
+    def __init__(self, *, bad_window=None, **kwargs):
+        self.kwargs, self.bad_window = kwargs, bad_window
+        self.armed, self.generated, self.removed = [], 0, False
+        _FakeLLM.instances.append(self)
+
+    def apply_model(self, fn):
+        name = getattr(fn, "func", fn).__name__
+        keywords = getattr(fn, "keywords", {})
+        if name == "install_capture":
+            attention = [{"module": "layers.0.self_attn.indexer",
+                          "backend": "vllm.v1.attention.backends.mla.indexer.DeepseekV32IndexerBackend",
+                          "allocated_kv_cache": {"dtype": "torch.uint8", "shape": [7, 64, 132],
+                                                 "device": "cuda:0"}}]
+            return [{"rank": rank, "world_size": 2, "attention_runtime": copy.deepcopy(attention)}
+                    for rank in (1, 0)]
+        if name == "route_diagnostics":
+            return [{"rank": 0, "exl3": None}, {"rank": 1, "exl3": None}]
+        if name == "arm_capture":
+            self.armed.append(keywords["index"])
+            return [{"rank": 0, "teacher_resident": True}, {"rank": 1, "teacher_resident": False}]
+        if name == "finish_capture":
+            rows, vocab = exp.CONTEXT_LENGTH - 1, exp.VOCAB_SIZE
+            fill = float("nan") if keywords["window_id"] == self.bad_window else 0.25
+            owner = {"rank": 0, "world_size": 2, "window_id": keywords["window_id"],
+                     "calls": [(1, vocab), (rows, vocab)], "values": [fill] * rows,
+                     "logits_layout": "legacy_single"}
+            other = {"rank": 1, "world_size": 2, "window_id": keywords["window_id"],
+                     "calls": [None, None], "values": None, "logits_layout": "legacy_single"}
+            return [owner, other]
+        if name == "remove_capture":
+            self.removed = True
+            return [True, True]
+        raise AssertionError(f"unexpected apply_model call {name}")
+
+    def collective_rpc(self, fn, kwargs=None):
+        return [{"rank": 1}, {"rank": 0}]
+
+    def generate(self, prompts, params, use_tqdm=False):
+        self.generated += 1
+        return [_FakeOutput(prompts[0]["prompt_token_ids"])]
+
+
+@pytest.fixture
+def fake_measure(tmp_path, monkeypatch):
+    """measure() with every identity source and the engine replaced by fakes."""
+    windows = [{"window_id": f"w{i}"} for i in range(3)]
+    tokens = [(np.arange(exp.CONTEXT_LENGTH) + i,) for i in range(3)]
+    teacher_value = {"tokenizer_identity": {"tok": 1}, "source_execution": {"teacher": 1},
+                     "windows": [{"window_id": w["window_id"]} for w in windows]}
+    model = tmp_path / "model"
+    model.mkdir()
+    teacher_path = tmp_path / "teacher.json"
+    real_bound_json = served.bound_json
+    monkeypatch.setattr(served, "load_panel", lambda path, arrays_root=None: ({"windows": windows}, tokens))
+    monkeypatch.setattr(served, "load_teacher", lambda path, digest, panel: teacher_value)
+    monkeypatch.setattr(served, "bound_json", lambda path, digest: (
+        teacher_value if Path(path) == teacher_path else real_bound_json(path, digest)))
+    monkeypatch.setattr(served, "sha256", lambda path: served.TOKENIZER_SHA256)
+    monkeypatch.setattr(served, "tokenizer_identity", lambda path: {"tok": 1})
+    monkeypatch.setattr(served, "cached_checkpoint_identity", lambda path, cache: {"ckpt": 1})
+    monkeypatch.setattr(served, "producer_identity", lambda: {"producer": 1})
+    monkeypatch.setattr(served, "gold_engine_kwargs", lambda args: {"tensor_parallel_size": 2})
+    monkeypatch.setattr(served, "refuse_if_spec_decode", lambda llm, context: False)
+    monkeypatch.setattr(served, "observed_engine_configuration", lambda llm, **kw: {"observed": 1})
+    monkeypatch.setattr(served, "verify_prompt_alignment", lambda output, tokens, reports: {"aligned": 1})
+    monkeypatch.setattr(served, "summarize_panel", lambda panel, vectors: {"windows": len(vectors)})
+    monkeypatch.setattr(served, "self_manifest", lambda image, extra: {"image": image})
+    state = {"bad_window": None}
+    _FakeLLM.instances = []
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(
+        LLM=lambda **kwargs: _FakeLLM(bad_window=state["bad_window"], **kwargs),
+        SamplingParams=lambda **kwargs: kwargs))
+    args = types.SimpleNamespace(
+        model=str(model), candidate_digest_cache="cache", panel="panel", arrays_root=None,
+        teacher=str(teacher_path), teacher_sha256="a" * 64,
+        serve_image="image@sha256:" + "b" * 64, output=str(tmp_path / "full.json"),
+        kv_cache_dtype="fp8_ds_mla", expected_kv_cache_dtype="fp8_ds_mla",
+        attention_backend=None, kernel_config=None, quantization=None, require_exl3_diag=False,
+        gpu_memory_utilization=.5, tile_rows=32, logits_layout="legacy_single",
+        qualify_hook=False, qualification=None, qualification_sha256=None,
+        qualify_then_score=str(tmp_path / "qualification.json"))
+    return args, state
+
+
+def test_qualify_then_score_gates_the_panel_on_the_real_replay_check(fake_measure, monkeypatch):
+    args, _ = fake_measure
+    seen = []
+    real_check = served.require_native_qualification
+
+    def spy(qualification, runtime_binding):
+        seen.append(qualification)
+        return real_check(qualification, runtime_binding)
+
+    monkeypatch.setattr(served, "require_native_qualification", spy)
+    result = served.measure(args)
+    (llm,) = _FakeLLM.instances
+    assert llm.armed == [0, 1, 2] and llm.generated == 3 and llm.removed
+    raw = Path(args.qualify_then_score).read_bytes()
+    record = json.loads(raw)
+    assert record["schema"] == "prismaquant.glm_tr3_hook_qualification/1" and record["passed"] is True
+    assert len(record["per_position_kl"]) == 1 and seen == [record]
+    written = json.loads(Path(args.output).read_bytes())
+    assert written == json.loads(json.dumps(result))
+    assert written["schema"] == "prismaquant.glm_tr3_full_vocabulary_kl/1"
+    assert written["qualification"] == {"mode": "in_process", "path": args.qualify_then_score,
+                                        "sha256": hashlib.sha256(raw).hexdigest(), "window_reused": True}
+    assert written["per_position_kl"][0] == record["per_position_kl"][0]
+    assert written["runtime_binding"] == record["runtime_binding"]
+    assert len(written["per_position_kl"]) == 3
+
+
+def test_qualify_then_score_refusal_writes_no_panel_result(fake_measure, monkeypatch):
+    args, _ = fake_measure
+
+    def refuse(qualification, runtime_binding):
+        raise ValueError("native qualification differs from this candidate/runtime/teacher/topology")
+
+    monkeypatch.setattr(served, "require_native_qualification", refuse)
+    with pytest.raises(ValueError, match="native qualification differs"):
+        served.measure(args)
+    (llm,) = _FakeLLM.instances
+    assert llm.armed == [0] and llm.generated == 1 and llm.removed
+    assert Path(args.qualify_then_score).exists()
+    assert not Path(args.output).exists()
+
+
+def test_qualify_then_score_window_zero_failure_writes_neither_file(fake_measure):
+    args, state = fake_measure
+    state["bad_window"] = "w0"
+    with pytest.raises(ValueError, match="nonfinite"):
+        served.measure(args)
+    assert not Path(args.qualify_then_score).exists()
+    assert not Path(args.output).exists()
+
+
+def test_two_process_modes_are_unchanged_by_the_in_process_mode(fake_measure):
+    args, _ = fake_measure
+    args.qualify_then_score, args.qualify_hook = None, True
+    qualification = served.measure(args)
+    assert "qualification" not in qualification
+    raw = Path(args.output).read_bytes()
+    assert json.loads(raw)["schema"] == "prismaquant.glm_tr3_hook_qualification/1"
+    args.qualify_hook, args.output = False, str(Path(args.output).with_name("panel.json"))
+    args.qualification, args.qualification_sha256 = str(Path(args.output).with_name("full.json")), \
+        hashlib.sha256(raw).hexdigest()
+    full = served.measure(args)
+    assert full["schema"] == "prismaquant.glm_tr3_full_vocabulary_kl/1" and "qualification" not in full
+    assert len(full["per_position_kl"]) == 3 and _FakeLLM.instances[-1].armed == [0, 1, 2]
+
+
+@pytest.mark.parametrize("other", ["qualify_hook", "qualification", "qualification_sha256", "same_path"])
+def test_qualify_then_score_refuses_a_second_qualification_mode(fake_measure, other):
+    args, _ = fake_measure
+    if other == "same_path":
+        args.qualify_then_score = args.output
+    else:
+        setattr(args, other, True if other == "qualify_hook" else "c" * 64)
+    with pytest.raises(ValueError, match="qualif|distinct paths"):
+        served.measure(args)
+    assert _FakeLLM.instances == []
+
+
+def _npy_window(tmp_path, array, name="window.npy"):
+    path = tmp_path / name
+    np.save(path, array, allow_pickle=False)
+    raw = path.read_bytes()
+    return path, {"path": name, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+                  "shape": list(array.shape)}
+
+
+@pytest.mark.parametrize("order", ["C", "F"])
+def test_teacher_window_single_read_matches_np_load_bitwise(tmp_path, order):
+    source = np.asarray(np.random.default_rng(3).standard_normal((33, 257)), dtype=np.float32, order=order)
+    source[0, :4] = [np.inf, -np.inf, -0.0, np.float32(1e-45)]
+    path, descriptor = _npy_window(tmp_path, source)
+    got = served.load_teacher_window(path, descriptor)
+    want = np.load(io.BytesIO(path.read_bytes()), allow_pickle=False)
+    assert got.dtype == want.dtype and got.shape == want.shape
+    assert got.tobytes(order="C") == want.tobytes(order="C")
+    base = got
+    while isinstance(base, np.ndarray) and base.base is not None:
+        base = base.base
+    owner = base.obj if isinstance(base, memoryview) else base
+    assert isinstance(owner, bytearray) and len(owner) == descriptor["bytes"]
+    assert got.flags.writeable  # torch.from_numpy takes it without a copy or warning
+
+
+def test_teacher_window_single_read_holds_one_window_on_the_host(tmp_path):
+    import tracemalloc
+    path, descriptor = _npy_window(tmp_path, np.ones((256, 4096), dtype=np.float32))
+    size = descriptor["bytes"]
+
+    def peak(load):
+        tracemalloc.start()
+        try:
+            value = load()
+            return tracemalloc.get_traced_memory()[1], value
+        finally:
+            tracemalloc.stop()
+
+    single, _ = peak(lambda: served.load_teacher_window(path, descriptor))
+    double, _ = peak(lambda: np.load(io.BytesIO(path.read_bytes()), allow_pickle=False))
+    assert single < 1.1 * size < 1.9 * size < double
+
+
+@pytest.mark.parametrize("mutation", ["flip", "truncate", "extend", "descriptor_bytes"])
+def test_teacher_window_single_read_refuses_changed_bytes(tmp_path, mutation):
+    path, descriptor = _npy_window(tmp_path, np.zeros((8, 16), dtype=np.float32))
+    raw = bytearray(path.read_bytes())
+    if mutation == "flip":
+        raw[-1] ^= 1
+    elif mutation == "truncate":
+        raw = raw[:-4]
+    elif mutation == "extend":
+        raw += b"\0\0\0\0"
+    else:
+        descriptor = {**descriptor, "bytes": descriptor["bytes"] - 4}
+    path.write_bytes(bytes(raw))
+    with pytest.raises(ValueError, match="teacher window bytes changed|geometry"):
+        served.load_teacher_window(path, descriptor)
+
+
+def test_arm_capture_teacher_tensor_matches_the_previous_two_copy_path(tmp_path):
+    if not torch.cuda.is_available():
+        pytest.skip("arm_capture preloads the teacher on CUDA; run on a GB10 worker")
+    source = np.random.default_rng(7).standard_normal((31, 129)).astype(np.float32)
+    path, descriptor = _npy_window(tmp_path, source)
+    armed = {}
+
+    class State:
+        rank = 0
+
+        def arm(self, index, window_id, teacher, targets):
+            armed.update(teacher=teacher, targets=targets)
+
+    model = types.SimpleNamespace(_tr3_capture=State())
+    served.arm_capture(model, index=0, window_id="w0", descriptor=descriptor,
+                       teacher_root=str(tmp_path), target_ids=list(range(31)))
+    previous = torch.from_numpy(np.load(io.BytesIO(path.read_bytes()), allow_pickle=False)).to("cuda")
+    assert armed["teacher"].device.type == "cuda" and armed["teacher"].dtype == torch.float32
+    assert torch.equal(armed["teacher"], previous)

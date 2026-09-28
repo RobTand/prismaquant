@@ -28,6 +28,14 @@ MAX_CAPTURE_METADATA_BYTES = 16 * 1024**2
 MAX_CAPTURE_EXECUTION_POLICIES = 8
 
 
+#: The guarded source hash's read block. With ``release_read_pages`` it is
+#: also the page window: each block's pages are advised away right after the
+#: digest consumes it, so one hash holds at most this block and its pages.
+#: Admission charges exactly that (``autoscale.selected_anchor_resources``,
+#: RobTand/prismaquant#1491), so the two read the same number.
+SOURCE_HASH_BLOCK_BYTES = 16 * 1024**2
+
+
 def sha256(path, *, resource_check=None, release_read_pages=False, file_descriptor=None):
     # A descriptor alias opens the already owned object, never its possibly
     # replaced source pathname. The ordinary full-capture path is unchanged.
@@ -44,7 +52,7 @@ def sha256(path, *, resource_check=None, release_read_pages=False, file_descript
             while True:
                 if resource_check is not None:
                     resource_check(f'before_capture_hash:{Path(path).name}')
-                block = handle.read(16*1024**2)
+                block = handle.read(SOURCE_HASH_BLOCK_BYTES)
                 if not block:
                     after = os.fstat(handle.fileno())
                     named = Path(path).stat()
@@ -264,7 +272,7 @@ class CaptureSourceAuthentication:
         """The SHA-256 of the identity cache this owner adopted, or ``None``."""
         return getattr(self, '_adopted_cache_sha256', None)
 
-    def adopt_streamed_identity_cache(self, cache_path):
+    def adopt_streamed_identity_cache(self, cache_path, *, expected_sha256=None):
         """Reuse the existing full-checkpoint SHA proof for held source objects.
 
         The existing cache validator checks the identity's content seal. We
@@ -275,6 +283,10 @@ class CaptureSourceAuthentication:
         config and executable weight map before qualification. A changed file
         (including a same-size edit with restored mtime) refuses; it is never
         silently rehashed under a manifest that omitted the source read.
+
+        ``expected_sha256`` binds the proof file itself: the bytes read here
+        must hash to it, checked before any held state changes. A caller that
+        planned a proof by digest (a Stage A row, PQ #1497) passes it.
         """
         from .cost_streaming import (_local_checkpoint_shards,
                                      _read_streamed_model_identity_cache,
@@ -287,6 +299,8 @@ class CaptureSourceAuthentication:
         after = path.stat()
         if _source_stat(before) != _source_stat(after):
             raise RuntimeError('streamed source identity cache changed while reading')
+        if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
+            raise RuntimeError('streamed source identity cache differs from its declared SHA256')
         checked_cache, identity = _read_streamed_model_identity_cache(
             path, source_model=str(self.root))
         if cached != checked_cache:
@@ -330,6 +344,38 @@ class CaptureSourceAuthentication:
             state['sha256_source'] = 'verified_streamed_identity_cache'
         self._adopted_cache_sha256 = hashlib.sha256(raw).hexdigest()
         return len(candidate)
+
+    def adopt_identity_proof_or_hash(self, cache_path, expected_sha256):
+        """Adopt a planned identity proof, or leave every read to hash fresh.
+
+        A Stage A row reads a few shards of a complete source. Hashing each
+        one on first read idled the GPU reservation for 41% of a row
+        (PQ #1497). The campaign already holds a full-file proof of every
+        shard, so the row adopts it through
+        :meth:`adopt_streamed_identity_cache`, with that method's own checks
+        and nothing weaker. A proof that refuses -- a changed stat
+        fingerprint, a proof file that differs from its declared digest, a
+        missing file -- changes no held state: each payload read then hashes
+        its shard through the held descriptor, as it did before this method
+        existed, and the receipt records why. Integrity is the same either
+        way; only where the digest came from differs. Returns the count of
+        shards adopted, 0 on refusal.
+        """
+        try:
+            adopted = self.adopt_streamed_identity_cache(
+                cache_path, expected_sha256=expected_sha256)
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+            # KeyError/TypeError: a proof whose shard rows lack the fields
+            # adoption reads is malformed, and refuses like any other.
+            self._identity_proof_refusal = dict(
+                path=str(cache_path), declared_sha256=expected_sha256,
+                reason=f'{type(exc).__name__}: {exc}')
+            print(f'[source] identity proof {cache_path} refused ({exc}); '
+                  'every payload read hashes its shard fresh', flush=True)
+            return 0
+        print(f'[source] adopted {adopted} full-file SHA proofs from {cache_path}',
+              flush=True)
+        return adopted
 
     def admit_derived_census(self, census_path):
         """Let a census derived from this capture's source bind its roster.
@@ -420,6 +466,8 @@ class CaptureSourceAuthentication:
                             'fresh SHA256 through held read-only source descriptors'),
             **({'streamed_identity_cache_sha256': self._adopted_cache_sha256}
                if adopted else {}),
+            **({'streamed_identity_cache_refused': self._identity_proof_refusal}
+               if getattr(self, '_identity_proof_refusal', None) else {}),
             **({'derived_census_sha256': sorted(self._derived_censuses)}
                if self._derived_censuses else {}),
             verified_files=verified,
@@ -1034,9 +1082,29 @@ def open_hessian_reference(path):
         from tessera.hessian_capture import ReferenceHessians
     except ImportError as error:
         raise RuntimeError('canonical Hessian references require the reviewed Tessera reference reader') from error
-    owner = ReferenceHessians(path)
+    collection = str(path).endswith('.collection.references.json')
+    if collection:
+        try:
+            from tessera.hessian_capture import ReferenceHessianCollection
+        except ImportError as error:
+            raise RuntimeError('Hessian reference collections require the reviewed Tessera collection reader') from error
+        owner = ReferenceHessianCollection(path)
+    else:
+        owner = ReferenceHessians(path)
     try:
-        validate_capture_contract(owner.canonical_manifest())
+        if collection:
+            # The collection reader proves each disjoint v1 child and holds
+            # their descriptors. Retain PrismaQuant's stronger source/runtime
+            # capture gate on every child's canonical metadata as well.
+            for child in owner.binding()['references']:
+                with ReferenceHessians(child['path']) as reference:
+                    if (reference.document_sha256 != child['sha256'] or
+                            reference.binding() != child['binding']):
+                        raise RuntimeError('Hessian collection child changed during capture validation')
+                    validate_capture_contract(reference.canonical_manifest())
+            owner.require_current()
+        else:
+            validate_capture_contract(owner.canonical_manifest())
         return owner
     except BaseException:
         owner.close()

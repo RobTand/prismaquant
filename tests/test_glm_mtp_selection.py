@@ -157,6 +157,41 @@ def test_lowest_E_within_the_sub_budget_without_acceptance_points():
         select_mtp_rungs(_payload(), byte_budget=tighter - 1, constants=CONSTANTS)
 
 
+def test_fixed_group_formats_intersect_the_priced_eligible_menu():
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+
+    payload = _payload()
+    bf16_wire = "TESSERA_BF16_K1_R1024"
+    for name in ROUTED:
+        payload["costs"][name][bf16_wire] = _row(
+            name, bf16_wire, [0.040, 0.041, 0.039, 0.040],
+            payload["costs"][name][R1024]["probe_identity"])
+        payload["wire_bytes"][name][bf16_wire] = payload["wire_bytes"][name][R1024]
+    budget = _bytes(R1024, "BF16")
+    default = select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS)
+    assert default["rung_by_group"]["routed"] == R1024
+
+    fixed = {"routed": bf16_wire, "shared": "BF16"}
+    selected = select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS,
+                                fixed_formats=fixed)
+    assert selected["rung_by_group"] == fixed
+    assert selected["fixed_formats"] == fixed
+    assert selected["E"] > default["E"]
+    assert all(selected["assignment"][name] == "BF16" for name in SHARED)
+    with pytest.raises(ValueError, match="unknown groups"):
+        select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS,
+                         fixed_formats={"other": bf16_wire})
+    with pytest.raises(ValueError, match="missing or ineligible"):
+        select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS,
+                         fixed_formats={"routed": "TESSERA_E2M1_K2_R896"})
+    with pytest.raises(ValueError, match="missing or ineligible"):
+        select_mtp_rungs(payload, byte_budget=budget, constants=CONSTANTS,
+                         fixed_formats=fixed, eligible=lambda _unit, rung: rung != bf16_wire)
+    with pytest.raises(ValueError, match="no rung fits"):
+        select_mtp_rungs(payload, byte_budget=budget - 1, constants=CONSTANTS,
+                         fixed_formats=fixed)
+
+
 def test_bf16_is_offered_only_for_a_bf16_source():
     from prismaquant.glm_mtp_selection import select_mtp_rungs
 
@@ -373,3 +408,35 @@ def test_a_single_part_is_not_a_merge():
 
     with pytest.raises(ValueError, match="at least two"):
         merge_mtp_costs([_part(_payload(), {R1024})])
+
+
+def test_shared_probe_is_released_as_plain_data_after_mtp_selection():
+    from prismaquant.glm_mtp_selection import _mtp_probe, select_mtp_rungs
+
+    payload = _payload()
+    assert len({id(row["probe_identity"]) for rows in payload["costs"].values()
+                for row in rows.values()}) == 1
+    _digest, probe = _mtp_probe(payload)
+    assert type(probe) is dict
+    select_mtp_rungs(payload, byte_budget=10**12, constants=CONSTANTS)
+    assert {type(row["probe_identity"]) for rows in payload["costs"].values()
+            for row in rows.values()} == {dict}
+
+
+def test_invalid_second_source_probe_refuses_and_releases_first():
+    from prismaquant.glm_mtp_selection import select_mtp_rungs
+
+    payload = _payload()
+    bad_probe = _probe()
+    bad_row = _row(ROUTED[-1], R832, [0.03] * 4, bad_probe)
+    bad_probe["source_model"]["content_sha256"] = "f" * 64
+    bad_row["probe_identity_sha256"] = joint.identity_sha256(bad_probe)
+    bad_row["joint_operator_identity"]["probe_identity_sha256"] = bad_row[
+        "probe_identity_sha256"]
+    bad_row["joint_operator_identity_sha256"] = joint.identity_sha256(
+        bad_row["joint_operator_identity"])
+    payload["costs"][ROUTED[-1]][R832] = bad_row
+    with pytest.raises(RuntimeError, match="content_sha256"):
+        select_mtp_rungs(payload, byte_budget=10**12, constants=CONSTANTS)
+    assert {type(row["probe_identity"]) for rows in payload["costs"].values()
+            for row in rows.values()} == {dict}

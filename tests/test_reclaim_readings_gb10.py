@@ -38,13 +38,18 @@ MemAvailable does not count, and both host readings again two seconds later.
 Neither is held to anything: they say where freed pages went that
 MemAvailable did not show.
 
-It needs CUDA and its own cgroup, and fails without either rather than
-skipping: a skipped probe certifies nothing. Each reading is printed as one
-``reclaim-reading`` JSON line, so a run with ``-s`` is the receipt.
+It needs CUDA and its own cgroup. A run that hides every GPU on purpose sets
+``CUDA_VISIBLE_DEVICES`` to the empty string, as CI and PrismaBuild's CPU-only
+shards do. That run declares that no GB10 is present, so the probe skips and
+says why. Anywhere else, a missing CUDA device or cgroup fails the probe
+rather than skipping it: a skipped probe certifies nothing. Each reading is
+printed as one ``reclaim-reading`` JSON line, so a run with ``-s`` is the
+receipt.
 """
 from __future__ import annotations
 
 import json
+import os
 import time
 from functools import partial
 from pathlib import Path
@@ -59,6 +64,8 @@ from prismaquant import joint_statistics_replay as replay
 from prismaquant import memory_management as mm
 
 from cgroup_readings import PAGE, READING_GRAIN, committed, own_cgroup, pages, quiet, renders
+
+pytestmark = pytest.mark.own_cgroup
 
 #: A 32 MiB BF16 render; 32 of them are the gigabyte each reclaimer holds.
 SHAPE = (4096, 4096)
@@ -79,6 +86,9 @@ def _no_residency_map(monkeypatch):
 
 @pytest.fixture
 def device():
+    if os.environ.get("CUDA_VISIBLE_DEVICES") == "":
+        pytest.skip("CUDA_VISIBLE_DEVICES is empty: this run hides every GPU, so "
+                    "there are no GB10 CUDA allocations to probe")
     assert torch.cuda.is_available(), "this probe measures the GB10's CUDA allocations"
     return torch.device("cuda")
 

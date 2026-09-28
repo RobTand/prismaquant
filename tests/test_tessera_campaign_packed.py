@@ -595,22 +595,23 @@ def test_main_reports_unpriced_targets_without_claiming_coverage(monkeypatch, tm
             return measure(**kwargs)
 
         monkeypatch.setattr(campaign, "_measure_anchor", failing_measure)
+        # A rung that fails to price fails the row, and no table claims the
+        # rest (RobTand/prismaquant#1481). Before #1481 this row exited 0 and
+        # reported the unit as ``no_successful_anchor``; the consumer then
+        # retained it at BF16, and a row whose every rung failed was counted done.
+        with pytest.raises(RuntimeError, match=f"{target} .*synthetic encode failure"):
+            campaign.main(argv)
+        assert not (tmp_path / "cost.pkl").exists()
+        return
     assert campaign.main(argv) == 0
     payload = pickle.loads((tmp_path / "cost.pkl").read_bytes())
     population = payload["provenance"]["population"]
     assert target not in payload["costs"]
-    if failure == "failed_expert":
-        assert target not in population["priced"]["routed_experts"]
-        assert population["enumerated"]["routed_experts"] == sorted(_expert_unit_names())
-        assert population["unpriced"]["routed_experts"] == {target: "no_successful_anchor"}
-        assert population["priced"]["stacks"] == []
-        assert population["priced"]["packed_parameters"] == {}
-        assert population["counts"]["routed_experts_priced"] == len(_expert_unit_names()) - 1
-        return
+    # A unit no rung was admitted for is still reported, not failed: that is
+    # admission, and the consumer retains it at BF16.
     assert population["priced"]["dense"] == []
     assert population["enumerated"]["dense"] == [dense]
-    assert population["unpriced"]["dense"] == {
-        dense: "no_admitted_menu" if failure == "empty_menu" else "no_successful_anchor"}
+    assert population["unpriced"]["dense"] == {dense: "no_admitted_menu"}
     assert population["counts"]["dense_priced"] == 0
     assert population["counts"]["dense_unpriced"] == 1
     assert population["priced"]["routed_experts"] == sorted(_expert_unit_names())

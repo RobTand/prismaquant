@@ -347,6 +347,25 @@ def test_canonical_pickle_bytes_are_pinned():
         "9a756781f28fff2028046167fcd6fb9ded1068c0323b996903ff192abeb2dbe7")
 
 
+def test_canonical_pickle_bytes_pass_protocol_four_explicitly(monkeypatch):
+    import pickle
+    original = pickle.dumps
+    calls = []
+
+    def record(value, *args, **kwargs):
+        calls.append((args, kwargs))
+        return original(value, *args, **kwargs)
+
+    monkeypatch.setattr(pickle, "dumps", record)
+    value = {"é": [1.5, ("x", b"\x00")]}
+    encoded = digests.canonical_pickle_bytes(value)
+    # Checking only the wire prefix would miss an omitted protocol on Python
+    # 3.12, whose default is already 4. Pin the call and the wire independently.
+    assert calls == [((), {"protocol": 4})]
+    assert encoded[:2] == b"\x80\x04"
+    assert pickle.loads(encoded) == value
+
+
 def test_canonical_pickle_bytes_refuse_a_container_that_contains_itself():
     loop = []
     loop.append(loop)

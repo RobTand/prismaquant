@@ -88,6 +88,7 @@ def test_selected_admission_excludes_unselected_source_and_forward_owners(monkey
         body_layer_bytes={'0': 1000, '1': 10000, '2': 2000},
         body_loader_transient_bytes={'0': 100, '1': 1000, '2': 200},
         body_source_file_bytes={'0': 900, '1': 9000, '2': 1800},
+        body_source_shards=dict.fromkeys(('0', '1', '2'), ['model.safetensors']),
         unit_source_weight_bytes={'layers.0.proj': 24, 'layers.2.proj': 24},
         full_hessian_bytes=128, full_prefix_bytes=64, source_header_sha256='a'*64))
     plan = autoscale.selected_anchor_resources('/source',
@@ -124,6 +125,7 @@ def test_selected_plan_terms_follow_the_allocations_they_bound(monkeypatch):
         live_layer_prefix='layers.', terms=dict(nonbody_source_bytes=100, declared_headroom_bytes=200),
         body_layer_bytes={'0': 1000, '2': 2000}, body_loader_transient_bytes={'0': 100, '2': 200},
         body_source_file_bytes={'0': 900, '2': 1800},
+        body_source_shards=dict.fromkeys(('0', '2'), ['model.safetensors']),
         unit_source_weight_bytes={'layers.0.proj': 24, 'layers.2.wide': 48},
         full_hessian_bytes=128, full_prefix_bytes=64, source_header_sha256='a'*64))
     shapes = {'layers.0.proj': [3, 4], 'layers.2.wide': [3, 6]}
@@ -190,7 +192,7 @@ def test_anchor_slot_charge_covers_the_encoder_peak_a_measured_sweep_read(monkey
     monkeypatch.setattr(autoscale, 'streamed_calibration_resources', lambda *a, **k: dict(
         live_layer_prefix='layers.', terms=dict(nonbody_source_bytes=0, declared_headroom_bytes=0),
         body_layer_bytes={'20': 0}, body_loader_transient_bytes={'20': 0},
-        body_source_file_bytes={'20': 0},
+        body_source_file_bytes={'20': 0}, body_source_shards={'20': ['model.safetensors']},
         unit_source_weight_bytes={'layers.20.gate_proj': 0, 'layers.20.down_proj': 0},
         full_hessian_bytes=0, full_prefix_bytes=0, source_header_sha256='a'*64))
     # The sweep's own shapes: a GLM-5.3 routed expert's gate/up [2048, 4096]
@@ -579,7 +581,8 @@ def test_an_absent_reservation_still_reports_the_pre_run_term_it_actually_has(mo
     monkeypatch.setattr(autoscale, 'streamed_calibration_resources', lambda *a, **k: dict(
         live_layer_prefix='layers.', terms=dict(nonbody_source_bytes=100, declared_headroom_bytes=200),
         body_layer_bytes={'0': 1000}, body_loader_transient_bytes={'0': 100},
-        body_source_file_bytes={'0': 900}, unit_source_weight_bytes={'layers.0.proj': 24},
+        body_source_file_bytes={'0': 900}, body_source_shards={'0': ['model.safetensors']},
+        unit_source_weight_bytes={'layers.0.proj': 24},
         full_hessian_bytes=128, full_prefix_bytes=64, source_header_sha256='a'*64))
     options = dict(unit_shapes={'layers.0.proj': [3, 4]}, counts={'layers.0.proj': 9},
                    max_act_rows=2, cache_slots=2, prefetch_workers=1,

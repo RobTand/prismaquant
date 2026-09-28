@@ -21,11 +21,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 
 from prismaquant.cost_stage_checkpoint import canonical_json, canonical_json_sha256
 from prismaquant.schemas import SchemaValidationError, strict_json_loads
-from prismaquant.digests import DIRECT_UTF8_STRICT
+from prismaquant.digests import DIRECT_UTF8_STRICT, SHA256_HEX, is_sha256hex
 
 
 CANDIDATE_SCHEMA = "prismaquant.artifact_collection.candidate.v1"
@@ -38,7 +37,7 @@ REFERENCE_SCHEMA = "prismaquant.artifact_collection.reference.v1"
 BYTE_BREAKDOWN_SCHEMA = "prismaquant.artifact_collection.byte_breakdown.v1"
 LEGACY_AUDIT_SCHEMA = "prismaquant.artifact_collection.legacy_export_audit.v1"
 
-_SHA256 = re.compile(r"[0-9a-f]{64}")
+_SHA256 = SHA256_HEX
 _STAGES = frozenset({
     "measure",
     "solve",
@@ -83,7 +82,7 @@ def _text(value: object, *, where: str) -> str:
 
 
 def _sha256(value: object, *, where: str) -> str:
-    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+    if not is_sha256hex(value):
         _fail(where, "expected a lowercase SHA-256 digest")
     return value
 

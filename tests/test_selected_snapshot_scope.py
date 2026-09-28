@@ -106,8 +106,16 @@ def test_glm_snapshot_preserves_source_bytes_without_head_or_unrelated_reads(
     before, after = (plan['phases']['source_preparation'] for plan in (whole, selected))
     assert before['nonbody_source_bytes'] > after['nonbody_source_bytes'] == 0
     assert after['source_window_bytes'] < before['source_window_bytes']
-    assert selected['phases']['resident_anchors']['source_validation_bytes'] == (
+    # The projection's page window is what the row reads: the selected
+    # tensors, not the whole layer (RobTand/prismaquant#1491). The source
+    # hash is charged once per file it opens, in source_preparation; this
+    # checkpoint is one file.
+    from prismaquant.tessera_calibration_cache import SOURCE_HASH_BLOCK_BYTES
+    hash_window = 2*SOURCE_HASH_BLOCK_BYTES
+    assert selected['phases']['resident_anchors']['source_validation_bytes'] < (
         whole['phases']['resident_anchors']['source_validation_bytes'])
+    assert after['source_authentication_window_bytes'] == hash_window
+    assert before['source_authentication_window_bytes'] == hash_window
     keys = selected['source_tensor_keys']
     if selection == 'dense':
         assert keys == [name+'.weight']

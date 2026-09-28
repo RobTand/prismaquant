@@ -44,6 +44,8 @@ dependencies = [
     # the VL probe path silently does nothing. It was never declared.
     "pillow>=10.0",
     "tqdm",
+    # Publisher validates model-card front matter without loading Hub bindings.
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

@@ -78,7 +78,8 @@ def _fixture(root):
                 "render_origin": "encoded", "render_comparison": "independent_render_vs_wire",
                 "catalog_source_adoption": {"schema": "adoption"}, "anchor": {"dloss": 1e-5},
                 "wire": str(wire), "wire_stat": _stat(wire),
-                "render": str(render), "render_stat": _stat(render)}
+                "render": str(render), "render_stat": _stat(render),
+                "record": {"blob_sha256": hashlib.sha256(b"wire" * (index + 1)).hexdigest()}}
         cells.append(cell)
         receipt = {key: cell[key] for key in ("source_weight", "activation", "encoding_identity_sha256",
                                               "render_origin", "render_comparison",
@@ -98,7 +99,6 @@ def fx(tmp_path, monkeypatch):
     fixture = _fixture(tmp_path)
     monkeypatch.setattr(assemble, "OLDPLAN", Path(fixture.r12[0]["path"]))
     monkeypatch.setattr(assemble, "OLDPREP", Path(fixture.r12[1]["path"]))
-    monkeypatch.setattr(assemble, "EXTENDED_CELLS", fixture.cells)
     return fixture
 
 
@@ -170,4 +170,80 @@ def test_a_sha_mismatch_refuses_and_publishes_nothing(fx, monkeypatch, capsys, w
     with pytest.raises(SystemExit):
         _run(fx, monkeypatch, *flags)
     assert "SHA-256" in capsys.readouterr().err
+    assert not fx.out.exists()
+
+
+# -- several added formats (PQ #1432) -------------------------------------------
+
+FMT2 = "TESSERA_E4M3_K1_R5"
+
+
+def _result_bytes(cell, bound_cell):
+    """A qualification result for ``cell`` that binds ``bound_cell``'s digest."""
+    receipt = {key: cell[key] for key in ("source_weight", "activation", "encoding_identity_sha256",
+                                          "render_origin", "render_comparison", "catalog_source_adoption")}
+    receipt.update(render_file_sha256="f" * 64, rendered_weight={"content_sha256": "c" * 64})
+    return json.dumps({"qname": cell["qname"], "format": cell["format"],
+                       "cell_sha256": rebind.cell_sha256(bound_cell), "verified_cell": receipt,
+                       "verified_cell_sha256": rebind.cell_sha256(receipt)}).encode()
+
+
+def _multi_format(fx, *, declare_carried=True):
+    """A catalog carrying the fixture's cells byte-identical from an earlier
+    catalog, whose results were rebound from older anchors as R13's were, plus
+    a second format qualified directly in its own directory."""
+    root = fx.root
+    cells = json.loads(Path(fx.catalog["path"]).read_bytes())["cells"]
+    carried = _write(root / "carried-catalog.json", json.dumps({"cells": cells}).encode())
+    rows = []
+    for cell in cells:
+        prior = {**cell, "anchor": {"dloss": 2e-5}}
+        raw = _result_bytes(cell, prior)
+        _write(fx.qualified / (_sha(cell["qname"].encode()) + ".json"), raw)
+        rows.append(rebind.rebind_cell(cell, prior, raw))
+    rebinding = _write(root / "rebinding.json", json.dumps(
+        {"schema": rebind.SCHEMA, "catalog": carried, "qualified_dir": str(fx.qualified), "rows": rows}).encode())
+    second = root / "qualified-e4m3"
+    added = []
+    for index, qname in enumerate(QNAMES):
+        wire = root / "wire2" / f"{index}.tsr"
+        render = root / "render2" / f"{index}.pt"
+        _write(wire, b"w2" * (index + 1))
+        _write(render, b"r2" * (index + 1))
+        cell = {**cells[index], "format": FMT2, "wire": str(wire), "wire_stat": _stat(wire),
+                "render": str(render), "render_stat": _stat(render),
+                "record": {"blob_sha256": hashlib.sha256(b"w2" * (index + 1)).hexdigest()}}
+        added.append(cell)
+        _write(second / (_sha(qname.encode()) + ".json"), _result_bytes(cell, cell))
+    catalog = {"cells": cells + added, **({"carried_from": [carried]} if declare_carried else {})}
+    fx.catalog = _write(root / "catalog-multi.json", json.dumps(catalog).encode())
+    fx.cells += len(added)
+    return ["--rebinding", rebinding["path"], "--rebinding-sha256", rebinding["sha256"],
+            "--format-qualified-dir", f"{FMT2}={second}"]
+
+
+def test_a_multi_format_catalog_assembles_with_carried_and_new_cells(fx, monkeypatch):
+    """Carried cells pass through the previous catalog's rebinding; the new
+    format's cells are qualified directly from their own directory; every
+    unit's added formats go, sorted, before its terminal BF16."""
+    extra = _multi_format(fx)
+    published = _run(fx, monkeypatch, *_flags(fx.r13), *extra)
+    prepared = json.loads(published["prepare/prepared.json"])
+    assert all(prepared["formats_by_qname"][q] == ["NVFP4", FMT, FMT2, "BF16"] for q in QNAMES)
+    cache = pickle.loads(published["prepare/production.pkl"])
+    assert len(cache.weights) == fx.cells == 5
+    assert prepared["measured_cells"] == 5
+
+
+def test_a_rebinding_of_an_undeclared_catalog_refuses(fx, monkeypatch):
+    extra = _multi_format(fx, declare_carried=False)
+    with pytest.raises(AssertionError, match="neither this catalog"):
+        _run(fx, monkeypatch, *_flags(fx.r13), *extra)
+    assert not fx.out.exists()
+
+
+def test_a_second_format_without_its_directory_refuses(fx, monkeypatch):
+    extra = _multi_format(fx)
+    with pytest.raises(AssertionError):
+        _run(fx, monkeypatch, *_flags(fx.r13), *extra[:4])
     assert not fx.out.exists()

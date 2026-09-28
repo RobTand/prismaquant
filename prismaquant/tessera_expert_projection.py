@@ -377,8 +377,15 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     The exporter re-reads exactly this tensor (``packed_expert_weight`` on an
     unpacked unit) and re-derives the cached identity from its bytes, so the
     campaign must price these bytes and nothing else.
+
+    The shard opens through ``layer_streaming._source_safe_open``, the seam
+    every other source-shard read passes through, so under a PrismaBuild
+    residency map the tensor's payload comes off the stage the same way the
+    row's layer loads do, with the same declared-file fallback (PQ #1529).
+    With no map that seam hands back ``safe_open`` itself, so the unmapped read
+    is the call it always was.
     """
-    from safetensors import safe_open
+    from .layer_streaming import _source_safe_open
 
     tensor = unit["source_tensor"]
     try:
@@ -386,8 +393,10 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     except KeyError:
         raise ExpertProjectionError(f"{tensor}: not in the producer's hashed tensor roster")
     path = Path(model_path) / file
-    context = (safe_open(str(path), framework="pt", device="cpu") if source_authentication is None else
-               source_authentication.safe_open(safe_open, path, framework="pt", device="cpu"))
+    context = (_source_safe_open(str(path), framework="pt", device="cpu")
+               if source_authentication is None else
+               _source_safe_open(path, source_authentication=source_authentication,
+                                 framework="pt", device="cpu"))
     with context as handle:
         if tensor not in handle.keys():
             raise ExpertProjectionError(f"{tensor}: absent from {path}")

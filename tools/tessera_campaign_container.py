@@ -294,7 +294,9 @@ def validate_container(spec: dict, *, bounded: bool = False) -> None:
 CONTAINER_IMAGE_FLAG = "--container-image"
 
 
-def admission_image_reference(spec: dict) -> str | None:
+def admission_image_reference(
+    spec: object, *, portable_refusal: type[Exception] = RuntimeError,
+) -> str | None:
     """The image reference PrismaBuild must admit this spec against, or ``None``.
 
     One reader for every submission path (the joint dispatcher's stage-A and
@@ -303,7 +305,13 @@ def admission_image_reference(spec: dict) -> str | None:
     launcher spec will inspect, and it comes from the same parsed document
     that is serialized into ``--spec``.
 
-    ``None`` -- declare nothing -- in exactly two cases:
+    An explicit ``container_admission_reference`` takes precedence: the
+    joint dispatcher's existing portable spelling is ``content:sha256:<hex64>``
+    and requires an inspected ``container.content_sha256``. ``portable_refusal``
+    preserves that caller's error type; container validation keeps its own.
+    This also preserves
+    an explicit declaration beside an archive; without an override,
+    ``None`` -- declare nothing -- applies in exactly two cases:
 
     * the spec runs no container at all; and
     * the spec binds a validated ``container.archive``.  The launcher's
@@ -317,16 +325,25 @@ def admission_image_reference(spec: dict) -> str | None:
 
     The spec is validated with the launcher's own :func:`validate_container`
     before anything is read from it, so a malformed archive or container
-    refuses here rather than silently skipping the declaration.  A mutable
-    tag is returned as declared -- exactly the reference the launcher will
+    refuses here rather than silently skipping the declaration. Without an
+    explicit portable reference, a mutable tag is returned as declared -- the
+    reference the launcher will
     resolve -- and PrismaBuild's admission refuses it, because a tag is not an
     identity that can be sealed into an action key.
     """
-    if not isinstance(spec, dict) or spec.get("container") is None:
+    if not isinstance(spec, dict):
         return None
-    validate_container(spec)
-    container = spec["container"]
-    if "archive" in container:
+    container = spec.get("container")
+    if container is not None:
+        validate_container(spec)
+    admission = spec.get("container_admission_reference")
+    if admission is not None:
+        if (not isinstance(admission, str)
+                or re.fullmatch(r"content:sha256:[0-9a-f]{64}", admission) is None
+                or not isinstance(container, dict) or "content_sha256" not in container):
+            raise portable_refusal("explicit portable image admission requires content SHA and inspected scientific image identity")
+        return admission
+    if container is None or "archive" in container:
         return None
     return container["image"]
 

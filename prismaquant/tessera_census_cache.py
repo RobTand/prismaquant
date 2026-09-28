@@ -190,6 +190,28 @@ def plan_layer_config_projection(config: Mapping[str, Any],
     return projected, sorted(key for key in config if key not in projected)
 
 
+def census_roster_selection(selected: Mapping[str, str], roster: Any,
+                            error: type[Exception]) -> dict[str, str]:
+    """The selected units inside the priced census roster.
+
+    Every roster unit must be selected. An allocator's layer config also names
+    the Linears it kept outside the priced population (GLM-5.3 Flash: 124
+    visual-tower Linears at BF16). The census holds no wire for them, so they
+    may only pass through at BF16, and they leave the selection here. The
+    census cache and the export lane both hold a selection to this one rule
+    (#1510).
+    """
+    if not set(roster) <= set(selected):
+        raise error("selected cache assignment does not cover the full source roster")
+    wired = sorted(f"{name}@{fmt}" for name, fmt in selected.items()
+                   if name not in roster and fmt != "BF16")
+    if wired:
+        raise error(
+            f"{len(wired)} selected unit(s) outside the census roster are not BF16 passthrough "
+            f"(first: {wired[0]})")
+    return {name: fmt for name, fmt in selected.items() if name in roster}
+
+
 def selected_census_assignment(assignment: Mapping[str, str], metadata: Mapping[str, Any],
                                cost: Mapping[str, Any]) -> tuple[dict[str, str], dict, dict, dict]:
     """``(selected, source, units, stack_of)`` after the roster and projection checks."""
@@ -206,18 +228,7 @@ def selected_census_assignment(assignment: Mapping[str, str], metadata: Mapping[
             {name: selected[name] for name in units if name in selected}, stack_of, units)
     except (ExpertProjectionError, KeyError) as exc:
         raise CensusCacheError(f"selected cache projection: {exc}") from exc
-    if not set(costs) <= set(selected):
-        raise CensusCacheError("selected cache assignment does not cover the full source roster")
-    # An allocator's layer config also names the Linears it kept outside the
-    # priced population (GLM-5.3 Flash: 124 visual-tower Linears at BF16). The
-    # census holds no wire for them, so they may only pass through at BF16.
-    outside = {name: fmt for name, fmt in selected.items() if name not in costs}
-    wired = sorted(f"{name}@{fmt}" for name, fmt in outside.items() if fmt != "BF16")
-    if wired:
-        raise CensusCacheError(
-            f"{len(wired)} selected unit(s) outside the census roster are not BF16 passthrough "
-            f"(first: {wired[0]})")
-    selected = {name: fmt for name, fmt in selected.items() if name in costs}
+    selected = census_roster_selection(selected, costs, CensusCacheError)
     if metadata.get(STACK_FORMATS_KEY) != stack_formats:
         raise CensusCacheError("selected cache stack formats differ from the assignment")
     return dict(selected), source, units, stack_of

@@ -79,6 +79,7 @@ if TYPE_CHECKING:
 from . import tessera_hessian as th
 from .nvfp4_activation_contract import (
     ActivationScaleContractError as _OwnedActivationScaleContractError,
+    ServedQuantizerUnboundError,
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
@@ -446,8 +447,13 @@ def _measure_anchor(
     *, qname: str, weight, activations, format_name: str, cache, wire_dir: Path,
     activation_kwargs_for=None, hessian_required: bool = True,
     static_input_scale: "float | None" = None, publisher=None,
+    structure: "str | None" = None,
 ):
     """Render one rung, price it as served, and store the wire beside it.
+
+    ``structure`` is the unit's serving structure (``dense``/``routed_moe``)
+    when the run declares one; the wire is then the one that structure is
+    served on (``tessera_served_wire_recipe``, #1502), not the research table.
 
     ``static_input_scale`` is the unit's calibrated NVFP4
     ``input_global_scale`` (fused-sibling unified), required whenever the
@@ -477,7 +483,8 @@ def _measure_anchor(
     prepared = _prepare_anchor(
         qname=qname, format_name=format_name,
         activation_kwargs_for=activation_kwargs_for,
-        hessian_required=hessian_required, static_input_scale=static_input_scale)
+        hessian_required=hessian_required, static_input_scale=static_input_scale,
+        structure=structure)
     started = time.time()
     render, blob = _encode_and_render(
         weight, format_name, recipe=prepared["wire"],
@@ -489,12 +496,58 @@ def _measure_anchor(
         publisher=publisher)
 
 
+#: The context the campaign's pricing seam names when it binds the served
+#: activation quantiser (RobTand/prismaquant#1481).
+SERVED_QUANTIZER_CONTEXT = "Stage A Tessera campaign activation pricing"
+
+#: The identity record this process bound through the owner, or ``None`` when
+#: the campaign bound nothing itself. Stamped into the cost table's provenance.
+_SERVED_QUANTIZER_RECORD = None
+
+
+def _bind_served_quantizer(qname, format_name):
+    """Bind the served activation arithmetic before this rung is scored.
+
+    A rung whose route executes the static NVFP4 activation contract is priced
+    by vLLM's registered ``scaled_fp4_quant``, and the contract refuses to price
+    it unbound (RobTand/prismaquant#567). Until #1481 nothing on the campaign
+    path bound it, so every A4 rung raised ``ServedQuantizerUnboundError``.
+
+    The rule has one owner, ``joint_cost_quantum.bind_joint_served_quantizer``,
+    which Stage B already calls; this seam calls it too. It requires the
+    registered operator for a served contract, never falls back to the Torch
+    model, and binds nothing for A8/A16 rungs, so those rosters never import the
+    serving extension.
+
+    A process that already holds a binding keeps it. Either an earlier rung of
+    this run bound it, or a CPU screen declared the model on purpose
+    (``tests/priced_model_screen.py``). The owner would refuse a second,
+    different binding anyway, so re-asking could only turn a declared choice
+    into a refusal.
+    """
+    global _SERVED_QUANTIZER_RECORD
+    from .nvfp4_activation_contract import active_served_quantizer_identity
+    from .joint_cost_quantum import bind_joint_served_quantizer
+
+    if active_served_quantizer_identity() is not None:
+        return
+    record = bind_joint_served_quantizer(
+        {qname: (format_name,)}, context=SERVED_QUANTIZER_CONTEXT)
+    if record is not None:
+        _SERVED_QUANTIZER_RECORD = dict(record)
+        print(f"[campaign] served quantizer bound for {format_name}: backend "
+              f"{record.get('backend')} op {record.get('op')} image "
+              f"{record.get('image_content_sha256')} dequant "
+              f"{record.get('dequant_kernel')}", flush=True)
+
+
 def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
-                    hessian_required, static_input_scale):
+                    hessian_required, static_input_scale, structure=None):
     """Admit each unit's Hessian and served activation contract before encode."""
+    _bind_served_quantizer(qname, format_name)
     from . import format_registry as fr
     from .tessera_formats import (
-        parse_tessera_format_name, tessera_serving_route, tessera_wire_recipe,
+        parse_tessera_format_name, tessera_served_wire_recipe, tessera_serving_route,
     )
     from .tessera_render import HessianContractError
 
@@ -505,7 +558,11 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
     # ONE resolve for this anchor. The plane the kwargs are built on, the plane
     # the predicate reads and the plane the encode writes are this object --
     # not three lookups that agree only while nothing clears the recipe memo.
-    wire = tessera_wire_recipe(family, rung)
+    # It is the wire this unit's STRUCTURE is served on (#1502): a routed
+    # E2M1x2 stack below the cap ships span-2 TCQ, not the research WINDOW
+    # recipe, and a structure the pinned contract attests no wire for refuses
+    # here rather than pricing bytes the serve cannot read.
+    wire = tessera_served_wire_recipe(family, rung, structure=structure)
     # The A side, as served.  A route with a STATIC activation contract
     # executes vLLM's static-global-scale ``scaled_fp4_quant`` (UE4M3 block
     # scales) against the artifact's ``trellis_input_global_scale``; every
@@ -557,7 +614,7 @@ def _prepare_anchor(*, qname, format_name, activation_kwargs_for,
             raise HessianContractError(
                 f"{qname}: no Hessian for this Linear. A lookup that misses "
                 "must not fall through to a weights-only encode.")
-    return dict(spec=spec, family=family, rung=rung, wire=wire,
+    return dict(spec=spec, family=family, rung=rung, wire=wire, structure=structure,
                 activation_qdq=activation_qdq, input_scale=input_scale,
                 activation_kwargs=activation_kwargs,
                 hessian_required=hessian_required)
@@ -685,8 +742,12 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
 def _measure_anchor_batch(*, qnames, weights, activations, format_name,
                           cache, wire_dir, activation_kwargs_for=None,
                           hessian_required=True, static_input_scales=None,
-                          publisher=None):
-    """One producer batch, with the scalar path's per-unit gates and storage."""
+                          publisher=None, structures=None):
+    """One producer batch, with the scalar path's per-unit gates and storage.
+
+    ``structures`` maps a unit to its serving structure, as ``structure`` does
+    for :func:`_measure_anchor`; a unit it does not name declares none.
+    """
     from .tessera_render import encode_tessera_units
 
     if not qnames or len(set(qnames)) != len(qnames):
@@ -697,7 +758,20 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
         qname=name, format_name=format_name,
         activation_kwargs_for=activation_kwargs_for,
         hessian_required=hessian_required,
-        static_input_scale=(static_input_scales or {}).get(name)) for name in qnames]
+        static_input_scale=(static_input_scales or {}).get(name),
+        structure=(structures or {}).get(name)) for name in qnames]
+    # The producer call takes ONE recipe and ONE Hessian requirement for the
+    # whole batch, from its first entry.  Both derive from (family, rung,
+    # structure) only, so a batch built by ``_anchor_batches`` agrees by
+    # construction; a batch
+    # that does not would encode some unit under another unit's recipe, and is
+    # refused rather than priced.
+    for name, entry in zip(qnames[1:], prepared[1:]):
+        if (entry["wire"] != prepared[0]["wire"]
+                or entry["hessian_required"] != prepared[0]["hessian_required"]):
+            raise ValueError(
+                f"anchor batch {format_name}: {name} prepares a different wire "
+                f"recipe or Hessian requirement than {qnames[0]}")
     started = time.time()
     encoded = encode_tessera_units(
         weights, format_name, recipe=prepared[0]["wire"],
@@ -714,11 +788,19 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
             qnames, weights, activations, prepared, encoded)]
 
 
-def _anchor_batches(pending, *, weights, expert_members, batch_size):
-    """Bound compatible expert encodes inside this action; never assign hosts.
+def _anchor_batches(pending, *, weights, batch_size, structures=None):
+    """Bound compatible encodes inside this action; never assign hosts.
 
-    Membership is by ``(family, rung, shape, dtype, device)`` for expert
-    units and by ``(unit, family, rung)`` otherwise, as before.  The ORDER of
+    Membership is by ``(family, rung, structure, shape, dtype, device)`` for
+    every unit, dense or projected expert.  A unit's wire recipe and Hessian
+    requirement are functions of ``(family, rung, structure)`` alone
+    (``_prepare_anchor``; structure since #1502, because a routed E2M1x2 stack
+    below the cap is served on another wire than a dense unit), and the
+    joined producer call is column-independent, so a dense unit joins
+    same-shape units of other groups exactly as an expert joins its stack.
+    Dense units used to be keyed by ``(unit, family, rung)``, which kept every
+    dense encode at batch one: a long serial chain of narrow Viterbi calls at
+    about 25 W of the 140 W envelope (RobTand/prismaquant#1479).  The ORDER of
     the batches is unit-major: the batches of one compatible key differ only
     by rung, and the chunk at one position holds the same members at every
     rung when the round pended every member at every rate (round one does,
@@ -739,11 +821,9 @@ def _anchor_batches(pending, *, weights, expert_members, batch_size):
     for item in pending:
         name, family, rung = item
         weight = weights[name]
-        if name in expert_members:
-            base = (family, tuple(weight.shape), weight.dtype, weight.device)
-            key = (family, rung, *base[1:])
-        else:
-            base = key = (name, family, rung)
+        base = (family, (structures or {}).get(name), tuple(weight.shape),
+                weight.dtype, weight.device)
+        key = (family, rung, *base[1:])
         groups.setdefault(key, (base, []))[1].append(item)
     # Sort key: the base (the key minus its rung) in first-appearance order,
     # then the chunk position, then the rung in first-appearance order -- so
@@ -757,6 +837,76 @@ def _anchor_batches(pending, *, weights, expert_members, batch_size):
                            group[start:start + batch_size]))
     chunks.sort(key=lambda chunk: chunk[0])
     return [batch for _rank, batch in chunks]
+
+
+def _stale_served_wire(anchor, record, *, structure) -> "str | None":
+    """Why a resumed row's receipt names a wire ``structure`` is not served on.
+
+    ``None`` when the receipt's stamped recipe is the served recipe for the
+    row's rung, or when the receipt carries no readable recipe (the full
+    identity check that follows refuses those).  Only a receipt whose recipe
+    is readable and differs is stale; every other disagreement stays a
+    refusal of the whole resume.
+    """
+    if structure is None:
+        return None
+    from .tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
+
+    stamped = ((record or {}).get("identity") or {}).get("recipe")
+    parsed = parse_tessera_format_name(anchor.format_name)
+    if not isinstance(stamped, dict) or parsed is None:
+        return None
+    family, rung = parsed
+    served = tessera_served_wire_recipe(family, rung, structure=structure,
+                                        refuse_unattested=False).to_config()
+    observed = {key: value for key, value in stamped.items() if key not in ("grid", "q256")}
+    if observed == served:
+        return None
+    return (f"{anchor.format_name}: receipt stamped {observed}, but a {structure} unit is "
+            f"served on {served} at this rung (#1502); re-priced, not adopted")
+
+
+def _served_route_refusals(family, rungs, members, *, encode_structure,
+                           projected_units) -> "dict[str, dict]":
+    """The rungs of ``family`` some member cannot be served on, with why.
+
+    ``{str(rung): {"reason": ..., "members": [...]}}`` for every refused rung.
+    Two facts refuse a rung, neither a judgement about the format
+    (principle 9):
+
+    * the pinned contract attests no served wire for the member's structure
+      there (:func:`~prismaquant.tessera_formats.tessera_served_route_refusal`);
+    * the member is declared routed but carries no producer projection, and
+      the routed served wire differs from the unstructured one: Tessera's
+      export intake adopts an unprojected unit on the dense receipt, which
+      cannot stamp the routed wire (tessera#662), so the bytes could be
+      neither the served ones nor adopted.
+    """
+    from .tessera_formats import (
+        tessera_served_route_refusal, tessera_served_wire_recipe, tessera_wire_recipe)
+
+    refused: dict[str, dict] = {}
+    for rung in sorted(int(r) for r in rungs):
+        reasons: dict[str, list[str]] = {}
+        for member in members:
+            structure = (encode_structure or {}).get(member)
+            reason = tessera_served_route_refusal(family, rung, structure=structure)
+            if (reason is None and structure == "routed_moe"
+                    and member not in (projected_units or {})
+                    and tessera_served_wire_recipe(family, rung, structure=structure,
+                                                   refuse_unattested=False)
+                    != tessera_wire_recipe(family, rung)):
+                reason = (f"{family}_R{rung}: a routed unit with no producer projection is "
+                          "adopted by Tessera's export intake on the dense receipt, which "
+                          "cannot stamp the routed served wire")
+            if reason is not None:
+                reasons.setdefault(reason, []).append(member)
+        if reasons:
+            (reason, names), *rest = sorted(reasons.items())
+            refused[str(rung)] = {"reason": reason, "members": sorted(names),
+                                  **({"other_reasons": {r: sorted(n) for r, n in rest}}
+                                     if rest else {})}
+    return refused
 
 
 # ---------------------------------------------------------------------------
@@ -2154,7 +2304,7 @@ class _BoundCheckpointUnitIdentity:
             raise ValueError("bound checkpoint producer projection changed")
 
     def derive(self, *, source_weight, qname, format_name, grid, rung,
-               activation, projected_unit):
+               activation, projected_unit, structure=None):
         import copy
         self._guard()
         if (source_weight is not self._weight or qname != self._name or
@@ -2165,9 +2315,14 @@ class _BoundCheckpointUnitIdentity:
         result["calibration"] = None if activation is None else result["calibration"]
         if activation is not None and result["calibration"] is None:
             raise ValueError("bound checkpoint unit has no H-bearing identity")
-        # wire_recipe is the unchanged owner used by encoding_input_identity.
-        # Its full settings, including body/plane/reach, are resolved anew.
-        recipe = _checkpoint_identity_api().wire_recipe(grid, rung)
+        # served_recipe is the owner encoding_input_identity/unit_input_identity
+        # stamp (tessera#662): the research wire_recipe wherever no structure
+        # moves it, the served wire of a routed stack where one does.  Its full
+        # settings, including body/plane/reach, are resolved anew; the template
+        # holds nothing else that depends on structure.
+        from tessera.export import served_recipe
+        recipe = (served_recipe(grid, rung) if structure is None
+                  else served_recipe(grid, rung, structure))
         result["recipe"] = {"grid": grid.name, "q256": rung, **recipe.to_config()}
         return result
 
@@ -2605,7 +2760,8 @@ def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
 
 
 def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
-                                static_scales, projected_units=None, bound_unit=None):
+                                static_scales, projected_units=None, bound_unit=None,
+                                structure=None):
     """The resumed row's inputs, as this run's producer would stamp them.
 
     A unit in ``projected_units`` (``{qname: producer unit record}``) is a
@@ -2623,8 +2779,14 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
     scales (:func:`_require_resumable_anchor`).  Only then is the producer's
     ``encoding_input_identity`` asked for, so the wire receipt is verified
     against a row already known to be a price of this run.
+
+    ``structure`` is the unit's serving structure when the run declares one
+    (#1502). It moves the stamped recipe to the wire that structure is served
+    on, exactly as :func:`_prepare_anchor` moves the encode, and is passed to
+    the producer's identity functions only when set, so a run that declares
+    none stamps what it always stamped.
     """
-    from .tessera_formats import parse_tessera_format_name, tessera_wire_recipe
+    from .tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
     from .tessera_render import rung_accepts_hessian
 
     if anchor.qname not in weights:
@@ -2637,7 +2799,10 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
         raise RuntimeError("checkpoint anchor family/rung disagrees with its format")
     if anchor.format_name not in {entry.format_name for entry in menus[anchor.qname]}:
         raise RuntimeError(f"checkpoint anchor is outside the current menu: {anchor.format_name}")
-    wire = tessera_wire_recipe(family, rung)
+    # A receipt is checked against the wire it was stamped on; whether that
+    # wire serves is the planner's refusal, not this reader's.
+    wire = tessera_served_wire_recipe(family, rung, structure=structure,
+                                      refuse_unattested=False)
     activation = (calibration_source if calibration_source is not None
                   and rung_accepts_hessian(anchor.format_name, wire) else None)
     if bool(anchor.hessian_applied) != (activation is not None):
@@ -2650,15 +2815,16 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
             raise ValueError("expected an actual bound checkpoint unit identity")
         return bound_unit.derive(source_weight=weights[anchor.qname], qname=anchor.qname,
             format_name=anchor.format_name, grid=family.payload_grid(), rung=int(rung),
-            activation=activation, projected_unit=projected)
+            activation=activation, projected_unit=projected, structure=structure)
+    structured = {} if structure is None else {"structure": structure}
     if projected is not None:
         return api.unit_input_identity(
             weights[anchor.qname], dict(projected), family.payload_grid(), int(rung),
-            activation=activation,
+            activation=activation, **structured,
         )
     return api.encoding_input_identity(
         weights[anchor.qname], anchor.qname, family.payload_grid(), int(rung),
-        activation=activation,
+        activation=activation, **structured,
     )
 
 
@@ -4424,6 +4590,12 @@ def _checked_projected_units(bound, *, weights, model_path, source,
                 resource_check(f'before_source_projection_check:{name}')
             try:
                 if release_source_pages:
+                    # The declared shard, stat and advice alike, as the layer
+                    # gather does (layer_streaming ``source_stats``): under a
+                    # residency map the read goes through the same staged
+                    # opener, the declared file supplies the header and any
+                    # span no staged range covers, and advising a payload
+                    # span the stage served drops nothing (PQ #1529).
                     path = Path(model_path)/source['tensors'][unit['source_tensor']]
                     source_stats.setdefault(str(path), path.stat() if source_authentication is None
                                             else source_authentication.file_stat(path))
@@ -5300,6 +5472,13 @@ def _main(argv, *, source_scope) -> int:
                     help="Verified capture manifest; prefetch selected X/H before encoding.")
     ap.add_argument("--calibration-cache-sha256", default=None,
                     help="Expected capture manifest hash, sealed by the campaign planner.")
+    ap.add_argument("--source-identity-cache", default=None,
+                    help="A prismaquant.streamed_model.identity_cache.v1 proof of every source "
+                         "shard's full-file SHA256. A selected-source row adopts it before any "
+                         "payload read instead of hashing the shards it reads; a proof that "
+                         "refuses leaves every read to hash fresh (PQ #1497).")
+    ap.add_argument("--source-identity-cache-sha256", default=None,
+                    help="Expected SHA256 of the --source-identity-cache file, bound by the planner.")
     args = ap.parse_args(argv)
     if args.exhaustive_rate_grid and parse_rate_band(args.rate_band) is None:
         ap.error("--exhaustive-rate-grid requires --rate-band")
@@ -5313,6 +5492,10 @@ def _main(argv, *, source_scope) -> int:
     selected_source = bool(args.streaming and args.units and args.calibration_cache
                            and args.calibration_cache_sha256
                            and not (args.census_out or args.capture_calibration_out))
+    if bool(args.source_identity_cache) != bool(args.source_identity_cache_sha256):
+        ap.error('--source-identity-cache and --source-identity-cache-sha256 go together')
+    if args.source_identity_cache and not selected_source:
+        ap.error('--source-identity-cache requires selected streaming capture reuse')
     if args.campaign_identity_bytes and not selected_source:
         ap.error('--campaign-identity-bytes requires selected streaming capture reuse')
     if args.source_snapshot_policy != 'whole-layer-v1' and not selected_source:
@@ -5430,6 +5613,12 @@ def _main(argv, *, source_scope) -> int:
                 calibration_parameters=dict(nsamples=args.nsamples, seqlen=args.seqlen, seed=args.seed),
                 resource_check=None if selected_guard is None else selected_guard.check,
                 release_read_pages=True))
+        if args.source_identity_cache:
+            # Before the runner or any payload read: every shard the snapshot
+            # reads then carries the campaign's proof instead of a fresh hash
+            # under this GPU reservation (PQ #1497).
+            source_authentication.adopt_identity_proof_or_hash(
+                args.source_identity_cache, args.source_identity_cache_sha256)
 
     from .model_profiles import detect_profile
     profile = detect_profile(args.model)
@@ -5597,6 +5786,13 @@ def _main(argv, *, source_scope) -> int:
                 raise ValueError("family restriction requires unambiguous topology for every target")
             structure_by_unit = {name: unit_structure_from_stats(name, topology[name], profile)
                                  for name in targets}
+    # The serving structure each unit's wire is resolved on (#1502): the
+    # restriction's authoritative map when there is one, else the serving
+    # context's. A run that declares neither prices the research recipe it
+    # always priced, and stamps that it did (``encode_structure: null``).
+    encode_structure = (dict(structure_by_unit) if structure_by_unit is not None
+                        else None if context_by_unit is None
+                        else {name: context.structure for name, context in context_by_unit.items()})
 
     tokens, corpus_text = _calibration_tokens(
         args.model, args.nsamples, args.seqlen, args.seed)
@@ -5912,6 +6108,17 @@ def _main(argv, *, source_scope) -> int:
                if selected_source else {}))
         print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
               f"{len(projected_units)} expert units priced here", flush=True)
+    # A projected unit is a routed stack member whatever the run declares:
+    # Tessera's export intake reads a projection as ``routed_moe`` and expects
+    # the routed served wire in its receipt (tessera#662), so pricing one on
+    # the unstructured spelling would write a receipt the exporter refuses.
+    if projected_units:
+        declared_dense = sorted(name for name in projected_units
+                                if (encode_structure or {}).get(name, "routed_moe") != "routed_moe")
+        if declared_dense:
+            raise ValueError(f"projected expert units declared non-routed: {declared_dense[:4]}")
+        encode_structure = {**(encode_structure or {}),
+                            **{name: "routed_moe" for name in projected_units}}
 
     if source_authentication is not None:
         selected_source_preparation['source_authentication'] = source_authentication.receipt()
@@ -6166,6 +6373,21 @@ def _main(argv, *, source_scope) -> int:
                     "adopted_from": where,
                 }
                 continue
+            stale = _stale_served_wire(anchor, state["wire_records"][anchor.format_name],
+                                       structure=(encode_structure or {}).get(name))
+            if stale is not None:
+                # On the menu, but stamped on a wire this unit's structure is
+                # not served on (#1502): a routed E2M1x2 row priced on the
+                # research WINDOW wire before the served recipe reached the
+                # encoder.  Kept as evidence, never adopted as a price; the
+                # round re-measures the rung on the served wire.
+                unservable.setdefault(name, {})[anchor.format_name] = {
+                    "anchor": dict(row),
+                    "wire_record": dict(state["wire_records"][anchor.format_name]),
+                    "adopted_from": where,
+                    "reason": stale,
+                }
+                continue
             # Row level, the same rule: the row's inputs (Hessian
             # applicability, static scale) must be what this run's producer
             # stamps for its rung, then its wire receipt must verify.
@@ -6178,7 +6400,8 @@ def _main(argv, *, source_scope) -> int:
             identity = _checkpoint_anchor_identity(
                 anchor, weights=weights, menus=menus,
                 calibration_source=source, static_scales=static_scales,
-                projected_units=projected_units, **bound)
+                projected_units=projected_units,
+                structure=(encode_structure or {}).get(name), **bound)
             existing = state["wire_records"][anchor.format_name]
             if deferred is not None:
                 deferred.append((name, anchor, identity, existing))
@@ -6508,6 +6731,11 @@ def _main(argv, *, source_scope) -> int:
     started = time.time()
     deadline = float(args.deadline_seconds)
     stopped_early = False
+    # Every (unit, format) whose last attempt failed to price, with its error.
+    # The loop keeps pricing past a failure, so the round's successes are
+    # journalled for the retry and a later round may still price the rung;
+    # whatever is left here fails the row before it writes a table (#1481).
+    anchor_failures = {}
 
     def out_of_time() -> bool:
         return deadline > 0 and (time.time() - started) > deadline
@@ -6549,6 +6777,10 @@ def _main(argv, *, source_scope) -> int:
     # missing from one member is not a group family at all: a shared grid over
     # a rung one sibling cannot build is not shared.
     group_rates: dict[str, dict[str, list[int]]] = {}
+    # Rungs a member's serving structure has no attested wire for (#1502),
+    # read off the pinned contract: kept in the menu, not measured, and
+    # recorded here with the contract's reason rather than hidden.
+    route_refused: dict[str, dict[str, dict[str, dict]]] = {}
     for key, members in anchor_groups.items():
         per_family: dict[str, list[int]] = {}
         families = set.intersection(*[
@@ -6556,9 +6788,20 @@ def _main(argv, *, source_scope) -> int:
         for family in sorted(families):
             shared = set.intersection(*[
                 rates_by_unit[m][family] for m in members])
+            refused = _served_route_refusals(
+                family, shared, members, encode_structure=encode_structure,
+                projected_units=projected_units)
+            if refused:
+                route_refused.setdefault(key, {})[family] = refused
+                shared = shared - {int(rung) for rung in refused}
             if shared:
                 per_family[family] = sorted(shared)
         group_rates[key] = per_family
+    if route_refused:
+        print("[campaign] route-refused rungs (kept in the menu, not measured): "
+              + ", ".join(f"{key}:{family}@{sorted(int(r) for r in rungs)}"
+                          for key, by_family in sorted(route_refused.items())
+                          for family, rungs in sorted(by_family.items())), flush=True)
 
     print("[campaign] anchor groups: "
           + ", ".join(
@@ -6694,8 +6937,8 @@ def _main(argv, *, source_scope) -> int:
             batches = _anchor_batches(
                 [item for item in pending
                  if row_stream is not None or acts.get(item[0]) is not None],
-                weights=weights, expert_members=expert_members,
-                batch_size=args.anchor_batch_size)
+                weights=weights, batch_size=args.anchor_batch_size,
+                structures=encode_structure)
             if row_stream is not None:
                 row_stream.plan([[item[0] for item in batch] for batch in batches])
             completed = 0
@@ -6752,19 +6995,23 @@ def _main(argv, *, source_scope) -> int:
                         anchors = [_measure_anchor(
                             qname=name, weight=weights[name].to(device),
                             activations=scoring_rows[name].to(device),
-                            static_input_scale=static_scales.get(name), **common)]
+                            static_input_scale=static_scales.get(name),
+                            structure=(encode_structure or {}).get(name), **common)]
                     else:
                         anchors = _measure_anchor_batch(
                             qnames=names,
                             weights=[weights[name].to(device) for name in names],
                             activations=[scoring_rows[name].to(device) for name in names],
-                            static_input_scales=static_scales, **common)
+                            static_input_scales=static_scales,
+                            structures=encode_structure, **common)
                 except (HessianContractError, ActivationScaleContractError,
-                        PublicationError):
+                        PublicationError, ServedQuantizerUnboundError):
                     # A staged artifact that did not reach its disk is not one
                     # batch's bad luck: the writer has stopped and everything
                     # behind it was dropped unwritten. Printing and continuing
                     # here would advance the loop past files that do not exist.
+                    # A served quantiser that cannot bind refuses every A4 rung
+                    # of the row, not one anchor (#1481), so it stops the row too.
                     raise
                 except Exception as exc:
                     if selected_guard is not None and selected_guard.failure is not None:
@@ -6777,8 +7024,13 @@ def _main(argv, *, source_scope) -> int:
                     # paths. That is what the synchronous path already does
                     # when a partial batch writes files and journals none of
                     # them, so the failure semantics do not change here.
+                    #
+                    # The failure is kept, not forgotten: the row fails before
+                    # it writes a table (RobTand/prismaquant#1481).
                     print(f"[campaign] {names} {fmt}: FAILED {type(exc).__name__}: "
                           f"{exc}", flush=True)
+                    for name in names:
+                        anchor_failures[(name, fmt)] = f"{type(exc).__name__}: {exc}"
                     continue
                 if selected_guard is not None:
                     # With publication staging on, this upper bracket includes the
@@ -6791,6 +7043,7 @@ def _main(argv, *, source_scope) -> int:
                     anchor_batch_growth.append(selected_guard.last[
                         'conservative_cgroup_plus_cuda_reserved_bytes'] - batch_floor)
                 for anchor in anchors:
+                    anchor_failures.pop((anchor.qname, anchor.format_name), None)
                     if row_stream is not None:
                         # The reader's holder, over this entry's own source:
                         # a template copy on the encode thread, taken while
@@ -6800,12 +7053,14 @@ def _main(argv, *, source_scope) -> int:
                             anchor, weights=weights, menus=menus,
                             calibration_source=entry.source if want_h else None,
                             static_scales=static_scales, projected_units=projected_units,
-                            bound_unit=entry.holder))
+                            bound_unit=entry.holder,
+                            structure=(encode_structure or {}).get(anchor.qname)))
                         continue
                     identity_of = functools.partial(
                         _checkpoint_anchor_identity, anchor, weights=weights,
                         menus=menus, calibration_source=calibration_source,
-                        static_scales=static_scales, projected_units=projected_units)
+                        static_scales=static_scales, projected_units=projected_units,
+                        structure=(encode_structure or {}).get(anchor.qname))
                     if bound_checkpoint_units:
                         # Derived from the unit's sealed template: a deepcopy
                         # and Tessera's wire_recipe, no tensor read.  The
@@ -6843,6 +7098,20 @@ def _main(argv, *, source_scope) -> int:
             # then the shards the loop could not yet journal.
             finalize_row_stream()
             flush_checkpoint()
+
+        if anchor_failures:
+            # A rung that failed to price fails the row (RobTand/prismaquant#1481).
+            # Writing the table anyway published it without those rungs, and
+            # when every rung failed, an EMPTY table that exited 0 and was
+            # counted as done. The successes are journalled above, so PB's
+            # retry encodes only what is missing; no cost.pkl is written here.
+            failed = sorted(anchor_failures.items())
+            shown = "; ".join(f"{name} {fmt}: {error}" for (name, fmt), error in failed[:8])
+            more = len(failed) - 8
+            raise RuntimeError(
+                f"campaign row failed to price {len(failed)} anchor(s); "
+                f"successful anchors are journaled and no cost table "
+                f"was written: {shown}" + (f"; and {more} more" if more > 0 else ""))
 
         # Finalization is quiet on purpose -- the last drain, the leave-one-out
         # checks and the cost payload commit nothing the journal counts -- so
@@ -7042,6 +7311,15 @@ def _main(argv, *, source_scope) -> int:
                 name: {fmt: rows[fmt] for fmt in sorted(rows)}
                 for name, rows in sorted(unservable.items())
             },
+            # Menu rungs a group's serving structure has no attested wire
+            # for on this pin (#1502): priced in the menu, never measured,
+            # with the contract's reason.  Always present, like "unservable".
+            "route_refused": {key: {family: dict(sorted(rungs.items()))
+                                    for family, rungs in sorted(by_family.items())}
+                              for key, by_family in sorted(route_refused.items())},
+            "encode_structure": (None if encode_structure is None else {
+                structure: sum(1 for value in encode_structure.values() if value == structure)
+                for structure in sorted(set(encode_structure.values()))}),
             "loo_gate": float(args.loo_gate),
             "max_artifact_bpp": float(args.max_artifact_bpp),
             **({"family_restriction": {"policy": args.family_restriction,
@@ -7131,6 +7409,11 @@ def _main(argv, *, source_scope) -> int:
             name: {fmt: dict(record) for fmt, record in sorted(wire_records[name].items())}
             for name in sorted(projected_units) if wire_records.get(name)
         }
+    if _SERVED_QUANTIZER_RECORD is not None:
+        # Which build of the served activation quantiser priced this table's
+        # served-contract rungs (RobTand/prismaquant#1481). Absent when the run
+        # priced none, so an A8/A16 table's bytes are unchanged.
+        payload["provenance"]["served_quantizer"] = dict(_SERVED_QUANTIZER_RECORD)
     payload["menu_sizes"] = {n: len(m) for n, m in menus.items()}
     payload["anchor_counts"] = {
         n: {f: len(a) for f, a in by_f.items()} for n, by_f in measured.items()

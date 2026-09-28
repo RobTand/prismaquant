@@ -314,7 +314,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
             continue
         write_unit(journal, stage=STAGE, qname=name, identity_sha256=journal_sha,
             state=dict(format=fmt, record=record, anchor=anchor))
-    for batch in tc._anchor_batches(missing, weights=weights, expert_members=units,
+    for batch in tc._anchor_batches(missing, weights=weights,
                                     batch_size=anchor_batch_size):
         batch_names = [item[0] for item in batch]
         fmt = group['assignment'][batch_names[0]]
