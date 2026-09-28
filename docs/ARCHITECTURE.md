@@ -110,10 +110,9 @@ menu, runtime pin or serving admission changes. Table world equality, native
 numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
 
-Re-stamped 2026-09-27 (PQ #1537, tessera#599 step 2): the exact Tessera pin is
-`43da1c3969175caa6afba6cb1c3826e3e5ff62d1`, the head of Tessera #675, pinned
-before that PR merges so both halves land together (re-pin to its merge
-commit). Tessera no longer names PrismaQuant records. The rooted cached-unit
+Re-stamped 2026-09-28 (PQ #1537, tessera#599 step 2): the exact Tessera pin is
+`db5b6e23a06869e87d778cb223c1ac5a5154aec5`, the merge of Tessera #675, whose
+tree equals the PR head `43da1c39` this change was first tested at. Tessera no longer names PrismaQuant records. The rooted cached-unit
 reader (`tessera.cached_units.v2`) takes a `ReuseAuthority` from its caller:
 catalog-extension and overlay schema, source adoption, reseal proof and served
 activation policy. The Hessian reference readers take the canonical capture
@@ -134,12 +133,13 @@ campaign's `a3e83875` is v39 -- gets byte-identical argv
 a change to that file alone. The reviewed admission answer and `grammar.py` are
 unchanged. `export.py` moves to `e54f3f1b…` (`from_capture` gains `canonical_capture`)
 with the wire functions byte-identical, so the legal inventory adds the
-equivalent `reader-pin-43da1c39` byte-state and no rate count moves. Its PB
-interpreters are `/home/rob/venvs/pq-pb461728e4-tessera-43da1c39` on dl380g10
-(PB build `6311aee82816`), sparky and sparklina, with a `-tf516` sibling on
-each Spark (PB builds sparky `cd407ffba31a`/`f6655667593e`, sparklina
-`cfdf59f7f2a6`/`cc4e0e0786c1`); the `cadc200c` (#675's first head, never a
-merged pin) and `20bf5346` interpreters stay in place.
+equivalent `reader-pin-db5b6e23` byte-state and no rate count moves. Its PB
+interpreters are `/home/rob/venvs/pq-pb059953bc-tessera-db5b6e23`, which also
+carry PrismaBuild's `059953bc` pin (PQ #1541), on dl380g10 (PB build
+`18ee90816fc6`), sparky and sparklina, with a `-tf516` sibling on each Spark
+(PB builds sparky `7d203c3cdacb`/`cb5f94eae9b2`, sparklina
+`27b513d61205`/`ddd47cb807ed`); the `43da1c39` and `cadc200c` interpreters
+(#675's heads, never a merged pin) and the `20bf5346` ones stay in place.
 
 Re-stamped 2026-09-27 (PQ #1527): the exact Tessera pin is
 `20bf53464f9113f3115f454f8fa80453e71c0308`, master after Tessera #669 (closing
