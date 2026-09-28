@@ -386,7 +386,6 @@
   "hashlib:tools/glm_mtp_capture.py::projection_phase",
   "hashlib:tools/inspect_t4_binding.py::main",
   "hashlib:tools/joint_prepare_startup_probe.py::main",
-  "hashlib:tools/live_reader_qualify.py::main",
   "hashlib:tools/materialize_wikitext_corpus.py::main",
   "hashlib:tools/measure_boundary_control.py::main",
   "hashlib:tools/measure_served_gold.py::_calibration_contract",
@@ -684,14 +683,12 @@
   "sorted-json:tools/exl3_grouped_down_replay.py::result_json",
   "sorted-json:tools/expand_probe_onto_tessera_census.py::main",
   "sorted-json:tools/extract_layer8_native_metadata.py::main",
-  "sorted-json:tools/fleet_qualification_driver.py::submit",
   "sorted-json:tools/full_kl_teacher_payload.py::atomic_json_write",
   "sorted-json:tools/full_kl_teacher_payload.py::canonical_json_bytes",
   "sorted-json:tools/glm_mtp_capture.py::main",
   "sorted-json:tools/glm_mtp_capture.py::projection_phase",
   "sorted-json:tools/gold_engine_options.py::headless_peer_argv",
   "sorted-json:tools/joint_prepare_startup_probe.py::main",
-  "sorted-json:tools/live_reader_qualify.py::main",
   "sorted-json:tools/make_uniform_assignment.py::main",
   "sorted-json:tools/measure_served_gold.py::_canonical_sha256",
   "sorted-json:tools/measure_vllm_wikitext_ppl.py::_canonical_sha256",
@@ -1266,7 +1263,6 @@
    "tools/build_stagea_split_package.py"
   ],
   "build_plan": [
-   "tools/fleet_qualification_driver.py",
    "tools/tp2_budget_plan.py",
    "tools/union_tessera_census_tables.py"
   ],
@@ -1439,10 +1435,6 @@
   "stage_multimodal": [
    "prismaquant/build_rtn_cache.py",
    "prismaquant/sensitivity_probe.py"
-  ],
-  "submit": [
-   "tools/dispatch_stage_a_split.py",
-   "tools/fleet_qualification_driver.py"
   ],
   "unit_path": [
    "prismaquant/cost_stage_checkpoint.py",
