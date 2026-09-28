@@ -248,8 +248,10 @@ def test_v9_is_scoped_and_carries_every_earlier_evidence_field(tessera_v9):
             "widens what a legacy table is allowed to attest")
 
 
-def test_a_record_on_a_v8_table_is_refused_as_an_unknown_field():
+def test_a_record_on_a_v8_table_is_not_read():
     """v9's key is not readable by the v8 grammar, and is not read as one.
+
+    It is an additive field the v8 grammar accepts and never reads (#1548).
 
     The installed table IS v9 now, so the v8 table is down-converted first --
     a test about an older grammar owns its fixture.
@@ -259,8 +261,7 @@ def test_a_record_on_a_v8_table_is_refused_as_an_unknown_field():
     payload = down_convert_lane_table(
         _installed(), lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V8)
     _cell(payload, MOE_DECODE)["evidence"]["smoke"]["record"] = copy.deepcopy(RECORD)
-    with pytest.raises(lane.LaneEligibilityError, match="unknown field"):
-        _table(payload)
+    assert _parsed_cell(_table(payload), MOE_DECODE).evidence.smoke_record is None
 
 
 def test_a_v9_table_missing_the_record_key_is_refused(tessera_v9):

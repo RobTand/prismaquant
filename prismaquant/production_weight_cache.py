@@ -1272,8 +1272,8 @@ class ProductionWeightCache:
 
     @staticmethod
     def _file_signature(value):
-        from .perturbed_x_cache import cache_file_stat_signature
-        return cache_file_stat_signature(value)
+        from .file_identity import file_stat_signature
+        return file_stat_signature(value)
 
     @staticmethod
     def _file_tensor_guard(tensor):
@@ -3507,17 +3507,19 @@ def render_production_weight(
     from prismaquant import format_registry as fr
 
     fmt = fr.canonical_format_name(str(fmt).strip().upper())
-    # Tessera owns its own byte path. It is intercepted here, ahead of the
-    # format cascade, because the cascade's terminal branch is the registry's
-    # ``quantize_dequantize`` -- for Tessera a weights-only *reconstruction*,
-    # not the decoded wire, and not the H-aware encode that ships. One render
-    # for the surrogate, the KL and the bytes (principle 8) means this one.
-    if fr.is_tessera_format_name(fmt):
-        # Imported inside the branch: ``tessera_render`` pulls in the
-        # ``tessera`` package, and an NVFP4-only pipeline must not.
-        from prismaquant.tessera_render import render_tessera_production
+    # A lane format family that owns its byte path (Tessera's, for example)
+    # is intercepted here, ahead of the format cascade, because the cascade's
+    # terminal branch is the registry's ``quantize_dequantize`` -- for such a
+    # family a weights-only *reconstruction*, not the decoded wire, and not
+    # the H-aware encode that ships. One render for the surrogate, the KL and
+    # the bytes (principle 8) means the owning lane's.
+    family = fr.format_family_of(fmt)
+    if family is not None and family.requires_production_render:
+        # Resolved through the lane's plugin inside the branch: the lane's
+        # render code can pull in a package an NVFP4-only pipeline must not.
+        from prismaquant.lane_spec import family_hook
 
-        return render_tessera_production(
+        return family_hook(family, "render_production")(
             weight,
             fmt,
             qname=qname,

@@ -241,6 +241,16 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "96fefc6af9bbb5057610d289df38277535994ea0626fca1b09b4bcef4ca050b9",
     },
+    "reader-pin-f94929de": {
+        "commit": "f94929defd9fa00b8726160a2cd436f02733b6dc",
+        "export.py":
+            "4e2e84876350a13acd27ae861a767b645f4e9a4bbb50bb26a3c2a65b69f459fd",
+    },
+    "reader-pin-db5b6e23": {
+        "commit": "db5b6e23a06869e87d778cb223c1ac5a5154aec5",
+        "export.py":
+            "e54f3f1b56d54fe2b6701ccadf3e74770e41385cff884a63118bf16f8590fedc",
+    },
     "unpinned-working-checkout-a9eb572e": {
         "commit": "a9eb572e1b90b17f716562192910681e65430fba",
         "export.py":
@@ -282,7 +292,7 @@ TESSERA_GRAMMAR_DIGESTS = frozenset({
 #: says so from the bytes rather than repeating the audit's prose.
 TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
-    "reader-pin-09d6559d",
+    "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-db5b6e23",
 )
 
 
@@ -492,18 +502,51 @@ def live_pins() -> DomainPins:
 #: ``grammar.py`` remains ``9ae1f824…``: reuse the uniquely identified
 #: ``reader-pin-09d6559d`` byte-state, not a duplicate digest entry. Legal
 #: rate counts are unchanged; the reviewed admission answer is separate.
+#: **Re-taken 2026-09-27 for ``f94929def`` (contract v39, unchanged), a
+#: re-transcription with one additive source state.**  Tessera #663
+#: (tessera#662) moved ``served_recipe(grid, q256, structure)`` into
+#: ``export.py`` from the serving experiment and imported the structure names
+#: from the new ``tessera.structure``, so ``export.py`` is now
+#: ``4e2e8487…``.  ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap
+#: expression and the ``*_WINDOW_BITS`` constants are byte-identical, and
+#: ``grammar.py`` is still ``9ae1f824…``, so ``reader-pin-f94929de`` joins
+#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves.  The served
+#: recipe differs from ``wire_recipe`` only for a routed E2M1x2 stack below
+#: the cap, which no ``PRIMARY_FAMILIES`` rung reaches.
+#: **Re-taken 2026-09-27 for ``a3e83875d`` (contract v39, unchanged), a
+#: re-transcription.**  Tessera #671 (tessera#670) adds the v3 catalog
+#: extension to the rooted cached-unit reader only.  ``export.py`` remains
+#: ``4e2e8487…`` and ``grammar.py`` remains ``9ae1f824…``: reuse the
+#: uniquely identified ``reader-pin-f94929de`` byte-state, not a duplicate
+#: digest entry.  No count moves (PQ #1524).
+#: **Re-taken 2026-09-27 for ``20bf5346`` (contract v39, unchanged), a
+#: re-transcription.**  Tessera #669 (tessera#668) changes ``encode.py`` and
+#: docs only.  ``export.py`` remains ``4e2e8487…`` and ``grammar.py`` remains
+#: ``9ae1f824…``: the ``reader-pin-f94929de`` byte-state still applies, and no
+#: count moves (PQ #1527).
+#: **Re-taken 2026-09-27 for ``db5b6e23`` (contract v40, additive), a
+#: re-transcription with one additive source state.**  ``db5b6e23`` is the
+#: merge of Tessera #675, whose tree equals the PR head ``43da1c39``.  #675
+#: (tessera#599 step 2) moves PrismaQuant's record checks out of the rooted
+#: cached-unit and Hessian reference readers; ``ActivationSource.from_capture``
+#: gains a ``canonical_capture`` keyword it passes to those readers, and its
+#: docstring says so, so ``export.py`` is now ``e54f3f1b…``.
+#: ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap expression and the
+#: ``*_WINDOW_BITS`` constants are byte-identical, and ``grammar.py`` is still
+#: ``9ae1f824…``, so ``reader-pin-db5b6e23`` joins
+#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves (PQ #1537).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253",
+    reader_dev_pin_commit="db5b6e23a06869e87d778cb223c1ac5a5154aec5",
     reader_dev_pin_contract_sha256=(
-        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
+        "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
     ),
-    serving_runtime_pinned_commit="4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253",
+    serving_runtime_pinned_commit="db5b6e23a06869e87d778cb223c1ac5a5154aec5",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
+        "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
     ),
     producer_installed_contract_sha256=(
-        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
+        "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
     ),
 )
 

@@ -46,6 +46,12 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+# ``SOURCE_IDENTITY_KEYS`` is the key set ``tessera.serving_parts.source_identity``
+# publishes; it, the error and the record check are lane-neutral (PQ #1555).
+from .stage_inputs import (
+    SOURCE_IDENTITY_KEYS, ExpertProjectionError, require_source_identity,
+)
+
 #: The producer's projection schema (``export_tessera_serving.project_expert_plan``).
 PROJECTION_SCHEMA = "tessera.expert_projection.v1"
 #: The only source layout this bridge executes: one whole per-expert 2-D source
@@ -62,9 +68,6 @@ PRODUCER_PLAN_TOOL = "experiments/tessera_producer_plan.py"
 #: seals into the priced-wire receipt.  Pinned against the producer by test.
 UNIT_IDENTITY_KEYS = ("cols", "expert", "group", "projection", "rows",
                       "source_layout", "source_slice", "source_tensor", "tensor")
-#: The keys ``tessera.serving_parts.source_identity`` publishes.
-SOURCE_IDENTITY_KEYS = ("auxiliary_sha256", "config_sha256", "files", "tensors")
-
 #: Where the campaign payload and the allocation carry the projection.
 PROJECTION_KEY = "tessera_expert_projection"
 #: Where the campaign payload and the allocation carry the priced-wire receipts
@@ -77,10 +80,6 @@ POPULATION_SCHEMA = "prismaquant.tessera_campaign_population.v2"
 LEGACY_POPULATION_SCHEMA = "prismaquant.tessera_campaign_population.v1"
 #: The projection block's own envelope schema inside PrismaQuant artifacts.
 CARRIED_PROJECTION_SCHEMA = "prismaquant.tessera_expert_projection.v1"
-
-
-class ExpertProjectionError(RuntimeError):
-    """The producer's projection is absent, malformed, or does not cover a unit."""
 
 
 # ---------------------------------------------------------------------------
@@ -180,24 +179,6 @@ def unit_name_of(tensor: str) -> str:
     return tensor[:-len(".weight")]
 
 
-def _require_source_identity(source: Any) -> dict:
-    if not isinstance(source, Mapping) or set(source) != set(SOURCE_IDENTITY_KEYS):
-        raise ExpertProjectionError(
-            "producer projection source identity must carry exactly "
-            f"{sorted(SOURCE_IDENTITY_KEYS)}")
-    for key in ("config_sha256",):
-        if not isinstance(source[key], str) or not source[key]:
-            raise ExpertProjectionError(f"producer projection source.{key} must be a sha256")
-    for key in ("auxiliary_sha256", "files", "tensors"):
-        if not isinstance(source[key], Mapping):
-            raise ExpertProjectionError(f"producer projection source.{key} must be an object")
-    for tensor, file in source["tensors"].items():
-        if not isinstance(tensor, str) or not isinstance(file, str) or file not in source["files"]:
-            raise ExpertProjectionError(
-                f"producer projection source.tensors[{tensor!r}] must name a hashed file")
-    return dict(source)
-
-
 def _validate_unit(stack: str, record: Any, declared_units: Mapping[str, tuple[int, int]],
                    tensors: Mapping[str, str]) -> tuple[str, dict]:
     if not isinstance(record, Mapping):
@@ -266,7 +247,7 @@ def bind_expert_projection(projection: Any, *,
             f"{PROJECTION_SCHEMA!r}")
     if not {"schema", "stacks", "source"} <= set(projection):
         raise ExpertProjectionError("producer projection must carry schema, stacks and source")
-    source = _require_source_identity(projection["source"])
+    source = require_source_identity(projection["source"])
     stacks = projection["stacks"]
     if not isinstance(stacks, Mapping):
         raise ExpertProjectionError("producer projection stacks must be an object")
@@ -361,7 +342,7 @@ def carried_units(carried: Any) -> tuple[dict, dict[str, dict], dict[str, str]]:
             if dict(stacks[stack][name]) != unit:
                 raise ExpertProjectionError(
                     f"{name}: carried unit record disagrees with the producer's projection")
-    source = _require_source_identity(carried["producer"]["source"])
+    source = require_source_identity(carried["producer"]["source"])
     units_flat = {name: unit for units in bound.values() for name, unit in units.items()}
     stack_of = {name: stack for stack, units in bound.items() for name in units}
     return source, units_flat, stack_of
@@ -377,8 +358,15 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     The exporter re-reads exactly this tensor (``packed_expert_weight`` on an
     unpacked unit) and re-derives the cached identity from its bytes, so the
     campaign must price these bytes and nothing else.
+
+    The shard opens through ``layer_streaming._source_safe_open``, the seam
+    every other source-shard read passes through, so under a PrismaBuild
+    residency map the tensor's payload comes off the stage the same way the
+    row's layer loads do, with the same declared-file fallback (PQ #1529).
+    With no map that seam hands back ``safe_open`` itself, so the unmapped read
+    is the call it always was.
     """
-    from safetensors import safe_open
+    from .layer_streaming import _source_safe_open
 
     tensor = unit["source_tensor"]
     try:
@@ -386,8 +374,10 @@ def source_unit_weight(model_path: str | Path, source: Mapping[str, Any], unit: 
     except KeyError:
         raise ExpertProjectionError(f"{tensor}: not in the producer's hashed tensor roster")
     path = Path(model_path) / file
-    context = (safe_open(str(path), framework="pt", device="cpu") if source_authentication is None else
-               source_authentication.safe_open(safe_open, path, framework="pt", device="cpu"))
+    context = (_source_safe_open(str(path), framework="pt", device="cpu")
+               if source_authentication is None else
+               _source_safe_open(path, source_authentication=source_authentication,
+                                 framework="pt", device="cpu"))
     with context as handle:
         if tensor not in handle.keys():
             raise ExpertProjectionError(f"{tensor}: absent from {path}")

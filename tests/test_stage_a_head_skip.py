@@ -314,14 +314,14 @@ def test_the_skip_reports_the_roster_once_under_the_head_phase(tmp_path, monkeyp
     monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_PATH", str(progress))
     monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "t")
     seen = []
-    from prismaquant import tessera_joint_aura
-    commit = tessera_joint_aura._pb_commit
+    from prismaquant import prismabuild_progress
+    commit = prismabuild_progress.commit
 
     def recorded(units, phase, unit=None):
         seen.append((units, phase))
         return commit(units, phase, unit=unit)
 
-    monkeypatch.setattr(tessera_joint_aura, "_pb_commit", recorded)
+    monkeypatch.setattr(prismabuild_progress, "commit", recorded)
     _capture(campaign, tmp_path / "run", monkeypatch)
     assert seen[0] == (len(campaign.names), "head")
 

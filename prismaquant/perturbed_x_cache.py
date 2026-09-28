@@ -47,6 +47,7 @@ from prismaquant.nvfp4_activation_contract import (
     require_matching_input_global_scale,
 )
 from .digests import DIRECT_ASCII_STRICT
+from .file_identity import file_stat_signature
 from .tensor_digests import tensor_hash_update as _tensor_hash_update
 
 _FNAME_SUB = re.compile(r"[^A-Za-z0-9_-]")
@@ -271,12 +272,6 @@ def write_activation_cache_entry(cache_dir, name, inputs, *, source="perturbed_x
     return path
 
 
-def cache_file_stat_signature(value):
-    """Stable file identity shared by the existing activation and PWC owners."""
-    return (value.st_dev, value.st_ino, value.st_size,
-            value.st_mtime_ns, value.st_ctime_ns)
-
-
 def _preflight_torch_zip_directory(source, *, metadata_cap, label):
     """Bound directory objects before ZipFile creates any ZipInfo instances.
 
@@ -479,14 +474,14 @@ def torch_archive_storage_bytes(source, *, label='PWC window', metadata_cap=None
 
 def _advise_activation_descriptor(descriptor, path, expected_stat, *, offset=0,
                                   length=0, durable=False):
-    expected = cache_file_stat_signature(expected_stat)
+    expected = file_stat_signature(expected_stat)
     actual = os.fstat(descriptor)
-    if not stat.S_ISREG(actual.st_mode) or cache_file_stat_signature(actual) != expected:
+    if not stat.S_ISREG(actual.st_mode) or file_stat_signature(actual) != expected:
         raise RuntimeError('capture entry changed before page advice')
     if durable:
         os.fsync(descriptor)
-    if (cache_file_stat_signature(os.fstat(descriptor)) != expected or
-            cache_file_stat_signature(os.stat(path, follow_symlinks=False)) != expected):
+    if (file_stat_signature(os.fstat(descriptor)) != expected or
+            file_stat_signature(os.stat(path, follow_symlinks=False)) != expected):
         raise RuntimeError('capture entry changed while completing durability')
     os.posix_fadvise(descriptor, offset, length, os.POSIX_FADV_DONTNEED)
 
@@ -806,10 +801,10 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         raise ValueError('verified activation load requires an exact SHA256 receipt')
     path = Path(path)
     before = path.lstat()
-    signature = cache_file_stat_signature(before)
+    signature = file_stat_signature(before)
     if not stat.S_ISREG(before.st_mode):
         raise RuntimeError('verified activation load requires a regular nonsymlink file')
-    if expected_stat is not None and cache_file_stat_signature(expected_stat) != signature:
+    if expected_stat is not None and file_stat_signature(expected_stat) != signature:
         raise RuntimeError('verified activation file changed before loading')
     if before.st_size <= 0 or before.st_size > policy['max_buffer_bytes']:
         raise RuntimeError('verified activation file exceeds serialized buffer budget')
@@ -825,7 +820,7 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
             path, expected_sha256, declared_size=before.st_size)
         descriptor, serving, tier = _enter_and_open_window(
             lease_resolver, window, key, path)
-        source_signature = cache_file_stat_signature(os.fstat(descriptor))
+        source_signature = file_stat_signature(os.fstat(descriptor))
         source, source_before = Path(window.stage_path(key) or path), os.fstat(descriptor)
     else:
         # The declared file: pool bytes when a map is bound (PQ #1026).
@@ -835,8 +830,8 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         if resource_check is not None:
             resource_check(label + ':' + path.name, reserve_bytes=reserve_bytes)
     def unchanged(descriptor):
-        if (cache_file_stat_signature(os.fstat(descriptor)) != source_signature or
-                cache_file_stat_signature(path.lstat()) != signature):
+        if (file_stat_signature(os.fstat(descriptor)) != source_signature or
+                file_stat_signature(path.lstat()) != signature):
             raise RuntimeError('verified activation file changed during loading')
     if window is None:
         descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -970,7 +965,7 @@ def _activation_file_signature(path):
     value = Path(path).lstat()
     if not stat.S_ISREG(value.st_mode):
         raise RuntimeError("exact activation entry is not a regular file")
-    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+    return file_stat_signature(value)
 
 
 def _is_compact_host_tensor(tensor, nbytes):
@@ -3039,9 +3034,10 @@ class PerturbedActivationCache:
                     )
             if q is None:
                 fmt_canon = fr.canonical_format_name(param_plan.spec.name)
-                if fr.is_tessera_format_name(fmt_canon):
+                if fr.requires_production_render(fmt_canon):
                     raise RuntimeError(
-                        f"production_weight_cache is required for Tessera "
+                        f"production_weight_cache is required for "
+                        f"{fr.format_owner_label(fmt_canon)} "
                         f"({param_plan.name!r}, {fmt_canon!r}); the registry "
                         "render is a weights-only reconstruction, not the "
                         "decoded wire and not the H-aware encode that ships"

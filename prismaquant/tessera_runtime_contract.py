@@ -21,6 +21,14 @@ its launches. Both readers retain those fields and reject malformed or
 overlapping claims through the shared parser. Neither accepts a Gridbook
 schema; that serving lane was retired on 2026-09-02.
 
+**Additive fields** (#1548).  Every object this reader walks goes through
+:func:`prismaquant.record_fields.admit_fields`: a field or block it does not
+know is accepted and never read, so a Tessera release that only adds one needs
+no reader change and moves no value in :func:`contract_answer`.  A field the
+producer lists in an object's ``must_understand`` array, and this reader does
+not know, refuses the contract.  Keyed tables whose keys are conditions (a
+lane's ``requires``, a unit's ``loader_axes``) stay closed.
+
 **The dev pin.** This reader provides an explicit development answer pin.
 Serving and export separately require the exact commit and packaged contract
 digest in ``tessera_serving_runtime_pin``; that gate does not require a release
@@ -95,6 +103,7 @@ from .lane_eligibility import (
     cell_matches_serving_context,
     parse_lane_claim,
 )
+from . import record_fields
 from .tessera_serving_runtime_pin import native_extension_contract_row
 
 __all__ = [
@@ -362,14 +371,33 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: contract bytes and the admission answer below remain unchanged.
 #: Re-pinned 2026-09-27 to 4c4ff1c2e after Tessera #646. This adopts #641's
 #: v39 admission scopes as well as the cached reader, under PQ #1456.
-TESSERA_DEV_PIN_COMMIT = "4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253"
+#: Re-pinned 2026-09-27 to f94929def after Tessera #663 (tessera#662): the
+#: served recipe moves into ``tessera.export`` and the cached-unit receipts
+#: stamp it per structure, under PQ #1502. The packaged v39 contract and the
+#: admission answer below are unchanged.
+#: Re-pinned 2026-09-27 to a3e83875d after Tessera #671 (tessera#670): the
+#: rooted cached-unit reader accepts the v3 catalog extension, under PQ
+#: #1524. The packaged v39 contract and the admission answer are unchanged.
+#: Re-pinned 2026-09-27 to 20bf5346 after Tessera #669 (tessera#668): a
+#: mixed-rate window span runs its rate calls on per-rate CUDA streams, bit
+#: for bit, under PQ #1527. The packaged v39 contract and the admission answer
+#: are unchanged.
+#: Re-pinned 2026-09-27 to db5b6e23, the merge of Tessera #675 (tessera#599
+#: step 2; its tree equals the PR head 43da1c39): the
+#: rooted cached-unit reader and the Hessian reference reader take PrismaQuant's
+#: record checks from ``prismaquant/tessera_reuse_authority.py`` instead of
+#: naming PQ schemas, under PQ #1537. Contract v40 adds only the
+#: ``producer_interface`` block (which export drivers take
+#: ``--producer-authority``), so the SHA-256 below moves and the admission
+#: answer does not.
+TESSERA_DEV_PIN_COMMIT = "db5b6e23a06869e87d778cb223c1ac5a5154aec5"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
+    "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -3229,6 +3257,38 @@ def _require(block: Mapping[str, Any], key: str, where: str) -> Any:
     return block[key]
 
 
+def _admit(block: Any, where: str, *, required: Sequence[str] = (),
+           optional: Sequence[str] = ()) -> Mapping[str, Any]:
+    """One contract object through the shared tolerant rule (#1548).
+
+    A field this reader does not know is accepted and never read; one the
+    producer marks ``must_understand`` that this reader does not know refuses
+    the contract.  See :mod:`prismaquant.record_fields`.
+    """
+    return record_fields.admit_fields(block, where, required=required,
+                                      optional=optional, error=TesseraContractError)
+
+
+#: The top-level members PrismaQuant reads somewhere, by any reader of this
+#: contract.  ``construction`` and ``changelog`` are published and read by no
+#: one here, so a producer that marks either ``must_understand`` is refused.
+_CONTRACT_MEMBERS_READ = (
+    "schema", "contract_version", "quant_method", "versions", "native_extensions",
+    "formats", "lane_eligibility", "tensor_parallel", "expert_parallel",
+    "fused_module", "activation_quantizers", "producer_interface",
+)
+
+#: The ``formats[]`` row members PrismaQuant reads somewhere.  The rows travel
+#: as whole mappings into several consumers (``lane_eligibility`` and the
+#: Tessera export lane among them), so this is their union.
+_FORMAT_ROW_MEMBERS_READ = (
+    "kind", "family", "grid", "name_pattern", "activation_contract",
+    "reader_rate_range_q256", "reader_rate_step_q256", "attested_rungs_q256",
+    "candidate_rungs_q256", "attested_wire", "residency_modes", "structures",
+    "mode", "n_sub", "rungs",
+)
+
+
 #: The one ``native_extensions[].match`` rule this reader implements.  A
 #: contract naming another rule is REFUSED rather than read with this one:
 #: the whole reason ``match`` is a value is that the predicate is not
@@ -3267,8 +3327,7 @@ def _parse_native_extensions(
         at = f"{where}[{i}]"
         if not isinstance(entry, Mapping):
             raise TesseraContractError(f"{at} must be a JSON object")
-        for member in _NATIVE_EXTENSION_MEMBERS:
-            _require(entry, member, at)
+        _admit(entry, at, required=_NATIVE_EXTENSION_MEMBERS)
         prefix = str(entry["module_name_prefix"])
         if not prefix:
             raise TesseraContractError(
@@ -3307,8 +3366,8 @@ def _parse_native_extensions(
             if not isinstance(behaviour, Mapping):
                 raise TesseraContractError(
                     f"{at}.when_unavailable[{mode!r}] must be an object")
-            _require(behaviour, "status", f"{at}.when_unavailable[{mode!r}]")
-            _require(behaviour, "decoder", f"{at}.when_unavailable[{mode!r}]")
+            _admit(behaviour, f"{at}.when_unavailable[{mode!r}]",
+                   required=("status", "decoder"))
             behaviours[str(mode)] = {
                 "status": str(behaviour["status"]),
                 "decoder": (None if behaviour["decoder"] is None
@@ -3447,13 +3506,14 @@ _ACTIVATION_CONTRACT_MEMBERS = (
 _ACTIVATION_VECTOR_MEMBERS = (
     "id", "boundary", "global_scale", "input", "stored_scale", "codes",
 )
-#: The vocabulary of ``platforms[p]``.  ``generated`` is the scope the table
-#: was taken under and is read here (RobTand/prismaquant#715); a third member
-#: is a review, for the same reason a contract entry's is.
+#: The members of ``platforms[p]`` this reader reads.  ``generated`` is the
+#: scope the table was taken under (RobTand/prismaquant#715).  A further member
+#: is accepted and never read unless the producer marks it ``must_understand``
+#: (#1548).
 _ACTIVATION_PLATFORM_MEMBERS = ("contracts", "generated")
-#: Every field of ``platforms[p].generated``.  All of them, exactly: a table
-#: that names its box but not its build, or its build but not its image, does
-#: not say what a consumer has to compare against.
+#: The fields of ``platforms[p].generated`` this reader requires.  All of them:
+#: a table that names its box but not its build, or its build but not its
+#: image, does not say what a consumer has to compare against.
 _ACTIVATION_GENERATED_MEMBERS = (
     "image", "vllm", "torch", "device", "compute_capability", "driver",
     "generator_sha256",
@@ -3614,6 +3674,7 @@ def _parse_activation_quantizers(payload: Mapping[str, Any], path: str
             f"{list(ACTIVATION_QUANTIZER_SCHEMAS)}. A quantiser table in a "
             "grammar this reader has not been taught is a review, not a thing "
             "to read with the grammar it happens to have.")
+    _admit(block, where, required=("schema",), optional=("platforms",))
     platforms = _require(block, "platforms", where)
     if not isinstance(platforms, Mapping):
         raise TesseraContractError(f"{where}.platforms must be a JSON object")
@@ -3683,13 +3744,9 @@ def _parse_activation_platform_entry(entry: Any, *, platform: str, where: str
     """
     if not isinstance(entry, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
-    unknown = sorted(set(entry) - set(_ACTIVATION_PLATFORM_MEMBERS))
-    if unknown:
-        raise TesseraContractError(
-            f"{where} publishes {unknown} which this reader does not know. "
-            "A field beside a platform's quantiser tables that nothing "
-            "here reads is either a value a gate should decide on or "
-            "prose that does not belong; either way it is a review.")
+    # A member beside the quantiser tables that nothing here reads is
+    # accepted; one the producer says a reader may not skip is refused.
+    _admit(entry, where, optional=_ACTIVATION_PLATFORM_MEMBERS)
     contracts = _require(entry, "contracts", where)
     if not isinstance(contracts, Mapping):
         raise TesseraContractError(f"{where}.contracts must be a JSON object")
@@ -3729,19 +3786,18 @@ def _parse_activation_generated(entry: Any, where: str
     :func:`native_operator_panel.require_panel_execution_scope` -- so a
     missing scope can never become a silent pass.
 
-    A PRESENT block is read strictly: exactly the published vocabulary, every
-    value a non-empty string.  A half-written scope is worse than none,
-    because it looks like an answer.
+    A PRESENT block is read strictly: every member this reader compares must
+    be present, and each a non-empty string.  A half-written scope is worse
+    than none, because it looks like an answer.  A member added beside them
+    is accepted and never read (#1548).
     """
     if entry is None:
         return None
     if not isinstance(entry, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
-    if set(entry) != set(_ACTIVATION_GENERATED_MEMBERS):
-        raise TesseraContractError(
-            f"{where} must publish exactly "
-            f"{sorted(_ACTIVATION_GENERATED_MEMBERS)}, got {sorted(entry)}")
-    for field, value in entry.items():
+    _admit(entry, where, required=_ACTIVATION_GENERATED_MEMBERS)
+    for field in _ACTIVATION_GENERATED_MEMBERS:
+        value = entry[field]
         if not isinstance(value, str) or not value.strip():
             raise TesseraContractError(
                 f"{where}.{field} must be a non-empty string, got {value!r}")
@@ -3755,13 +3811,10 @@ def _parse_activation_contract(entry: Any, *, platform: str, name: str,
                                ) -> ActivationQuantizerAttestation:
     if not isinstance(entry, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
-    unknown = sorted(set(entry) - set(_ACTIVATION_CONTRACT_MEMBERS))
-    if unknown:
-        raise TesseraContractError(
-            f"{where} publishes {unknown} which this reader does not know. A "
-            "field in a quantiser attestation that nothing here reads is "
-            "either a value a gate should decide on or prose that does not "
-            "belong; either way it is a review, not a thing to skip.")
+    # Each member here is a fact about what the vectors MEAN, so each is
+    # required and compared.  A member added beside them is accepted and
+    # never read, unless the producer marks it must-understand (#1548).
+    _admit(entry, where, required=_ACTIVATION_CONTRACT_MEMBERS)
     length = _require(entry, "unit_length", where)
     if type(length) is not int or length < 1:
         raise TesseraContractError(
@@ -3775,10 +3828,7 @@ def _parse_activation_contract(entry: Any, *, platform: str, name: str,
         spot = f"{where}.vectors[{i}]"
         if not isinstance(vector, Mapping):
             raise TesseraContractError(f"{spot} must be a JSON object")
-        if set(vector) != set(_ACTIVATION_VECTOR_MEMBERS):
-            raise TesseraContractError(
-                f"{spot} must publish exactly "
-                f"{sorted(_ACTIVATION_VECTOR_MEMBERS)}, got {sorted(vector)}")
+        _admit(vector, spot, required=_ACTIVATION_VECTOR_MEMBERS)
         inputs = vector["input"]
         codes = vector["codes"]
         for field, value in (("input", inputs), ("codes", codes)):
@@ -4176,6 +4226,11 @@ def _parse_fused_module(payload: Mapping[str, Any], path: str
     block = _require(payload, "fused_module", path)
     if not isinstance(block, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
+    # ``container`` and the ``*_note`` prose are published and not read, so
+    # they are not in the understood set: a producer that marks one
+    # must-understand is refused rather than skipped.
+    _admit(block, where, optional=("schema", "fields", "sidecar_q256",
+                                   "mixed_rung_receipt"))
     schema = block.get("schema")
     if schema != FUSED_MODULE_SCHEMA:
         raise TesseraContractError(
@@ -4264,6 +4319,7 @@ def _parse_loader_axes(block: Any, where: str) -> dict[str, str]:
                 f"{where}.loader_axes.{axis} must be an object carrying a "
                 f"'status', got {entry!r}"
             )
+        _admit(entry, f"{where}.loader_axes.{axis}", required=("status",))
         status = str(_require(entry, "status", f"{where}.loader_axes.{axis}"))
         if status not in TP_LOADER_AXIS_STATUSES:
             raise TesseraContractError(
@@ -4287,7 +4343,9 @@ def _parse_tensor_parallel(
     read together here so a unit row cannot be half-read: a family with a
     ceiling and no axis claim is a table this reader refuses.
     """
-    tp = _require(payload, "tensor_parallel", path)
+    tp = _admit(_require(payload, "tensor_parallel", path),
+                f"{path}.tensor_parallel",
+                optional=("semantics", "units", "world_size_receipts"))
     if str(tp.get("semantics")) != "closed_world":
         raise TesseraContractError(
             f"{path}.tensor_parallel.semantics is "
@@ -4300,6 +4358,8 @@ def _parse_tensor_parallel(
     axes: dict[str, dict[str, str]] = {}
     for i, unit in enumerate(tp.get("units", ())):
         where = f"{path}.tensor_parallel.units[{i}]"
+        _admit(unit, where, required=("unit", "max_world_size"),
+               optional=("world_size_receipt", "loader_axes"))
         name = str(_require(unit, "unit", where))
         declared = int(_require(unit, "max_world_size", where))
         if declared > 1:
@@ -4329,6 +4389,7 @@ def _parse_world_size_receipts(
     receipts: dict[str, tuple[int, frozenset[str]]] = {}
     for i, row in enumerate(rows):
         where = f"{where_block}[{i}]"
+        _admit(row, where, required=("id", "world_size", "executed_units"))
         receipt_id = str(_require(row, "id", where))
         if receipt_id in receipts:
             raise TesseraContractError(
@@ -4435,6 +4496,10 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             f"{schema!r}. An older contract is not a subset of this one, so it "
             "is refused rather than partially read."
         )
+    # Top-level blocks this reader does not know are accepted and never
+    # read (#1548); presence of each block it needs is checked where it is
+    # read, by name.
+    _admit(payload, path, optional=_CONTRACT_MEMBERS_READ)
     reader_range: dict[str, tuple[int, int]] = {}
     attested: dict[str, frozenset[int]] = {}
     formats = _require(payload, "formats", path)
@@ -4444,6 +4509,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
         if not isinstance(entry, Mapping):
             raise TesseraContractError(f"{path}.formats[{i}] must be an object")
         where = f"{path}.formats[{i}]"
+        _admit(entry, where, optional=_FORMAT_ROW_MEMBERS_READ)
         kind = str(_require(entry, "kind", where))
         if kind != "tessera_wire":
             raise TesseraContractError(

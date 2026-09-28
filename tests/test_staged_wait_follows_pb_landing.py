@@ -26,6 +26,10 @@ import pytest
 import prismaquant.residency_shard_reader as reader
 from prismaquant.residency_map import RANGE_HIT, RANGE_UNCOVERED
 
+#: The resolver validates maps with PrismaBuild's own validator, through the
+#: client SDK (PB #1254); bind the reviewed installed one for every test.
+pytestmark = pytest.mark.usefixtures("installed_client_sdk")
+
 MOVER = "ab" * 32
 TIER = "prismabuild-stage:dl380g10"
 
@@ -225,11 +229,10 @@ def _real_resolver(tmp_path, monkeypatch, *, state, tier_age_s=5.0):
     from disk, with the sealed read order cut by ``load_sealed_read_order``.
 
     Only the two hops that need a live PrismaBuild claim are stood in for:
-    the sealed manifest (``_load_sealed_payload``) and the generation's
-    ``storage_tiers`` module, whose v1 read order is list order.
+    the sealed manifest (``_load_sealed_payload``) and the client SDK's
+    ``manifest_read_entries``, whose v1 read order is list order.
     """
     import time as real_time
-    from types import SimpleNamespace
 
     from prismaquant import staged_lease
     from prismaquant.residency_map import ResidencyResolver
@@ -240,8 +243,9 @@ def _real_resolver(tmp_path, monkeypatch, *, state, tier_age_s=5.0):
                {"path": "/pool/a", "offset": 100, "bytes": 100}]
     monkeypatch.setattr(staged_lease, "_load_sealed_payload",
                         lambda digest: {"schema": "v1", "entries": entries})
-    monkeypatch.setattr(staged_lease, "sdk_submodule", lambda name: SimpleNamespace(
-        manifest_read_entries=lambda payload: list(payload["entries"])))
+    # The read order comes from PB's client SDK (PB #1254).
+    monkeypatch.setattr(staged_lease.client_sdk(), "manifest_read_entries",
+                        lambda payload: list(payload["entries"]))
     consumer = "cd" * 32
     root = tmp_path / "residency"
     root.mkdir(parents=True)

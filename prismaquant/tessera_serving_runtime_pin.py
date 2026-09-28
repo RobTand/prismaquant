@@ -284,12 +284,26 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: reader proof mode and v2 multi-rung activation policy. This also adopts
 #: #641's v39 scopes; the reviewed admission answer and scope tests move
 #: with this pin, not the serving gates or kernel identities.
+#: Re-pinned 2026-09-27 to f94929def after Tessera #663: the served recipe
+#: per structure reaches the cached-unit receipts (PQ #1502). Contract v39 and
+#: this reviewed answer do not move.
+#: Re-pinned 2026-09-27 to a3e83875d after Tessera #671: rooted cached units
+#: read the v3 catalog extension (PQ #1524). Contract v39 and this reviewed
+#: answer do not move.
+#: Re-pinned 2026-09-27 to 20bf5346 after Tessera #669: a mixed-rate window
+#: span runs its rate calls on per-rate CUDA streams, bit-exact (PQ #1527).
+#: Contract v39 and this reviewed answer do not move.
+#: Re-pinned 2026-09-27 to db5b6e23, the merge of Tessera #675 (tessera#599
+#: step 2; tree equal to the PR head 43da1c39): PQ's
+#: cached-unit and Hessian-reference record checks move to PQ's reuse authority
+#: (PQ #1537). Contract v40 adds only the ``producer_interface`` block, so
+#: the contract SHA-256 moves and this reviewed answer does not.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253"
+    "db5b6e23a06869e87d778cb223c1ac5a5154aec5"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
+    "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
 )
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the

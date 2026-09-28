@@ -50,7 +50,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .tessera_joint_aura import _require, _same, head_walk_read_set, is_head_walk_read
+from .stage_inputs import require as _require, same as _same
+from .tessera_joint_aura import head_walk_read_set, is_head_walk_read
 
 STAGE_A_HEAD_SCHEMA = "prismaquant.stage_a.head.v1"
 

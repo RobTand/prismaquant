@@ -771,7 +771,6 @@
    "prismaquant/joint_aura_retained_budget_transition.py",
    "prismaquant/joint_aura_run_transition.py",
    "prismaquant/joint_aura_source_transition.py",
-   "prismaquant/tessera_joint_aura.py",
    "tools/build_tessera_census_cache.py",
    "tools/build_tessera_selected_cache.py",
    "tools/derive_retained_window_budget.py",
@@ -980,10 +979,6 @@
    "tools/measure_vllm_full_kl.py",
    "tools/measure_vllm_wikitext_ppl.py"
   ],
-  "_load_plan": [
-   "prismaquant/tessera_joint_aura.py",
-   "tools/checkpoint_parse_probe.py"
-  ],
   "_load_probe": [
    "prismaquant/prismasnap_checkpoint.py",
    "prismaquant/production_cache_stripes.py"
@@ -1086,10 +1081,6 @@
    "prismaquant/proposal_validation.py",
    "prismaquant/stage_a_chain_seed.py"
   ],
-  "_read_bound": [
-   "prismaquant/tessera_joint_allocation.py",
-   "prismaquant/tessera_sampled_stack_proposal.py"
-  ],
   "_read_json": [
    "prismaquant/stage_a_chain_resume.py",
    "prismaquant/stage_a_retirement.py"
@@ -1170,7 +1161,6 @@
   "_same": [
    "prismaquant/joint_catalog_extension.py",
    "prismaquant/joint_stage_b_head.py",
-   "prismaquant/tessera_joint_aura.py",
    "tools/union_tessera_census_tables.py"
   ],
   "_sample": [
@@ -1345,10 +1335,6 @@
    "prismaquant/joint_served_activation.py",
    "prismaquant/joint_stageb_resources.py"
   ],
-  "digest": [
-   "tools/nvfp4_served_qdq_bench.py",
-   "tools/qualify_t4_overlay.py"
-  ],
   "drop_client_cache": [
    "tools/staged_exact_read_bench.py",
    "tools/staged_read_stream_ab.py"
@@ -1454,10 +1440,6 @@
   "stage_multimodal": [
    "prismaquant/build_rtn_cache.py",
    "prismaquant/sensitivity_probe.py"
-  ],
-  "stamp": [
-   "tools/build_t4_overlay_catalog.py",
-   "tools/qualify_t4_overlay.py"
   ],
   "submit": [
    "tools/dispatch_stage_a_split.py",

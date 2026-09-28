@@ -36,8 +36,13 @@ from .joint_head_walk_quanta import check_quantum_for_roster
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
-from .schemas import Contract
 from .digests import file_sha256hex
+from .file_identity import file_stat_signature
+from .prismabuild_progress import commit as _pb_commit
+from .stage_inputs import (
+    bound as _bound, require as _require, same as _same,
+    source_prefetch as _source_prefetch,
+)
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -129,6 +134,9 @@ HEAD_WALK_MAX_WORKERS = 16
 # unit: a crash loses at most one interval of verified work, and the cadence
 # matches the progress contract's own clock (#741).
 HEAD_WALK_BANK_INTERVAL_S = 60.0
+#: How many progress commits a replay phase makes per stall allowance. The
+#: derivation is in ``_ProgressCadence``.
+PROGRESS_CADENCE_SAFETY_FACTOR = 4
 #: Freed-but-cached decode blocks a cuda head walk tolerates before the
 #: retained pool is returned to the driver. Synthesis keeps no decoded
 #: tensor by reference (the shard is written to the render file), but the
@@ -145,16 +153,12 @@ HEAD_WALK_RECLAIM_GAP_BYTES = 2 * 1024 ** 3
 _HEAD_WALK_SYNTHESIS_LOCK = threading.Lock()
 
 
-_require = Contract(ValueError).require
-
-
 _sha = file_sha256hex
 
 
 def _stat_signature(value):
     """The identity fence for a wire byte read, including its file type."""
-    return (value.st_mode, value.st_dev, value.st_ino, value.st_size,
-            value.st_mtime_ns, value.st_ctime_ns)
+    return (value.st_mode, *file_stat_signature(value))
 
 
 def _read_verified_wire_blob(cell):
@@ -326,18 +330,6 @@ def _read_wire_bytes(wire, size, *, expected, staged):
         raise _StagedWireCorrupt('staged wire bytes differ from the receipt digest')
     _same(digest, expected, f"{wire}: wire checksum")
     return blob, digest
-
-
-def _bound(record, label):
-    _require(isinstance(record, dict) and set(record) == {"path", "sha256"},
-             f"{label}: independently bound path/SHA256 required")
-    path = Path(record["path"])
-    _require(_sha(path) == record["sha256"], f"{label}: artifact checksum changed")
-    return path
-
-
-def _same(actual, expected, label):
-    _require(actual == expected, f"{label}: identity mismatch")
 
 
 def _json(path, value):
@@ -539,65 +531,72 @@ def _decode_wire(blob, *, reader, device="cpu"):
 SYNTHESIS_PHASE = "synthesize"
 
 
-_DEV_SOURCE_SHA256_MEMO: str | None = None
+class _ProgressCadence:
+    """Commit a cumulative count on a clock derived from the phase's stall allowance.
 
+    Replaying banked work establishes no new durable unit, so #822 dropped
+    the per-unit commit: 36,423 serial NFS writes bought nothing. One commit
+    at the end, though, leaves the whole replay silent. The PrismaBuild
+    watchdog then reads a healthy 900 s replay as a stall and kills it (A4
+    r5 and r6, #1518). A cadence keeps #822's substance, O(1) writes per
+    window and none per unit, and still keeps the watchdog fed.
 
-def _progress_dev_source_sha256():
-    """The executing package's actual tree digest, for the dev stamps.
+    The watchdog accepts a report only when its count passes the highest
+    count accepted so far. It reads the progress file once per poll interval
+    ``P``; PrismaBuild's worker polls every ``HEARTBEAT_S = 30`` s. Commits
+    land on unit boundaries, so the quiet the watchdog observes between two
+    accepted reports is at most ``cadence + L + P``, where ``L`` is the
+    latency of the unit in flight when the window expires. With
+    ``cadence = A / PROGRESS_CADENCE_SAFETY_FACTOR`` and a factor of 4, the
+    remaining ``3A / 4`` covers ``L + P`` and also a second full window of
+    delay. That second window is the margin for one commit write held up on
+    the shared mount. For the A4 ``synthesize`` phase (``A = 600`` s) the
+    cadence is 150 s: 4 writes per allowance where #822 removed 36,423.
 
-    Lazy so importing this module never pulls ``aura_cost``; only a dev-mode
-    progress commit that opted into the stamp pays for the hash -- and it pays
-    it **once**: the digest is memoized after the first commit because a
-    progress line fires per durable unit and a walk commits tens of thousands
-    of them. Measured live
-    on stage A (2026-09-20, action 398c81b4): the un-memoized form re-walked
-    and re-hashed the whole package tree on every unit, holding the head
-    walk to ~0.3 units/s of pure pathlib with zero IO -- the dev stamp is an
-    identity, and the executing tree's identity does not change mid-run.
+    PrismaBuild does not export the allowance to the action.
+    ``PRISMABUILD_ACTION_PROGRESS_PHASES`` carries the phase names only
+    (``pool.py``, the launch environment). The caller therefore passes the
+    allowance it declared for ``phase``. Without it the cadence is off, and
+    the caller gets exactly the #822 behaviour: nothing until its final
+    commit. That keeps every caller that does not opt in byte-identical.
+
+    The first eligible unit commits at once. That enters the phase as soon
+    as the replay proves anything, so the preceding phase's grace only has
+    to cover parsing.
     """
-    global _DEV_SOURCE_SHA256_MEMO
-    if _DEV_SOURCE_SHA256_MEMO is None:
-        from .aura_cost import _aura_source_sha256
-        _DEV_SOURCE_SHA256_MEMO = _aura_source_sha256()
-    return _DEV_SOURCE_SHA256_MEMO
 
+    def __init__(self, phase, allowance_s, *, clock=time.monotonic):
+        _require(allowance_s is None or (type(allowance_s) in (int, float)
+                                         and math.isfinite(allowance_s) and allowance_s > 0),
+                 "progress_allowance_s must be the positive stall allowance declared "
+                 "for the progress phase, or None")
+        self.phase = phase
+        self.cadence_s = (None if phase is None or allowance_s is None
+                          else float(allowance_s) / PROGRESS_CADENCE_SAFETY_FACTOR)
+        self._clock = clock
+        self._last = None
+        self.committed = None
 
-def _pb_commit(units, phase, unit=None):
-    """Report cumulative durable units to PrismaBuild; a no-op elsewhere.
+    @property
+    def active(self):
+        return self.cadence_s is not None
 
-    Held byte for byte against the published submission skill's snippet
-    (``skills/prismabuild/SKILL.md``, ``pb-progress-snippet``) so an action
-    inside a container that cannot import PrismaBuild still reports. It is a
-    no-op when the action was not admitted under the progress contract, so it
-    is called unconditionally rather than by testing how we were launched.
+    def maybe_commit(self, units, unit=None):
+        """Commit ``units`` when this cadence window has run out; return whether it did."""
+        if not self.active:
+            return False
+        if self._last is not None and self._clock() - self._last < self.cadence_s:
+            return False
+        return self.commit(units, unit)
 
-    Under ``PRISMAQUANT_DEV_MODE=1`` the record may carry the dev stamp in
-    its metadata -- **opt-in** via ``PRISMAQUANT_DEV_PROGRESS_STAMP=1``.
-    The stamp is provenance ceremony; Rob's standing campaign directive
-    (2026-09-13) is that dev-mode campaign runs incur no sealing overhead,
-    and the per-line stamp measurably did: before the memo it re-hashed the
-    whole executing tree on every durable unit (2026-09-20, #826). The
-    run's identity is already recorded where it belongs -- once, in the
-    results record's top-level dev stamp and the startup implementation
-    line -- so the default progress record stays byte-identical to the
-    certified shape. The worker's ``ProgressWatch`` reads the fields it
-    knows and ignores the rest either way.
-    """
-    path = os.environ.get("PRISMABUILD_ACTION_PROGRESS_PATH")
-    token = os.environ.get("PRISMABUILD_ACTION_PROGRESS_TOKEN")
-    if not path or not token:
-        return False
-    record = {"schema": "prismabuild.action_progress.v1", "token": token,
-              "phase": phase, "units_completed": units, "unit": unit,
-              "reported_unix": time.time()}
-    if (dev_mode_enabled()
-            and os.environ.get("PRISMAQUANT_DEV_PROGRESS_STAMP") == "1"):
-        record.update(dev_stamp(_progress_dev_source_sha256()))
-    temporary = f"{path}.{os.getpid()}.tmp"
-    with open(temporary, "w") as handle:
-        handle.write(json.dumps(record, sort_keys=True) + "\n")
-    os.replace(temporary, path)
-    return True
+    def commit(self, units, unit=None):
+        """Commit ``units`` now, unless this cadence already reported that count."""
+        if not self.active or units == self.committed:
+            return False
+        _pb_commit(units, self.phase, unit=unit)
+        self._last = self._clock()
+        self.committed = units
+        return True
 
 
 def _head_walk_worker_count(requested=None, environ=None):
@@ -792,7 +791,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                                historical_encoder_reuse=None,
                                progress_phase=SYNTHESIS_PHASE,
                                head_checkpoint=None, head_resume=False,
-                               head_walk_workers=None, head_walk_quantum=None):
+                               head_walk_workers=None, head_walk_quantum=None,
+                               progress_allowance_s=None):
     """Read a complete merged journal and select only its measured wire cells.
 
     The default hashes all payload files. Preparation may explicitly defer
@@ -860,6 +860,21 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     this census reports 36,423 times rather than 197,990. The caller names the
     phase because only it knows what its submission declared: a name outside
     the declared set grants no continuation.
+
+    ``progress_allowance_s`` is the stall allowance the submission declared
+    for ``progress_phase``. PrismaBuild exports phase names to the action but
+    not their allowances, so only the caller knows it. When it is given, the
+    two phases that establish no new durable unit report on a cadence
+    derived from it (``_ProgressCadence``, #1518):
+
+    - A ``head_resume`` replay commits its cumulative verified prefix.
+    - A candidate overlay's fence commits the walk's count plus the overlay
+      cells admitted so far, then its final cumulative count.
+
+    ``progress_committed`` then carries that final count, so later stages
+    keep counting upward. Without the allowance both phases stay as #822
+    left them: the replay commits once at the end and the overlay commits
+    nothing.
 
     ``historical_encoder_reuse`` is the plan's explicit allowance for a
     recorded encoder source seal the installed package cannot re-derive. The
@@ -935,6 +950,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     _require(type(log_every) is int and log_every >= 0, "non-negative log_every required")
     _require(progress_phase is None or (type(progress_phase) is str and progress_phase),
              "progress_phase must be a declared phase name or None")
+    cadence = _ProgressCadence(progress_phase, progress_allowance_s)
     _require(type(require_existing_renders) is bool, "require_existing_renders must be boolean")
     _require(head_checkpoint is None or isinstance(head_checkpoint, (str, Path)),
              "head_checkpoint must be a directory path or None")
@@ -1167,6 +1183,9 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             if state is None:
                 raise _PrefixEnded
             banked.append((name, state))
+            # Only a verified roster prefix reaches this line, so the count
+            # is cumulative and never names an unverified suffix (#1518).
+            cadence.maybe_commit(len(banked), unit=name)
 
         # Independent read-only authentication may finish out of order, but
         # only the roster prefix is reusable. The existing bounded driver
@@ -1184,12 +1203,14 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         # every replayed unit paid 36,423 serial NFS writes in the GLM head
         # without establishing any additional durable work (#822). Nothing
         # it synthesized counts as written now -- a resume writes nothing.
+        # With a declared allowance the drive also committed its verified
+        # prefix on the cadence above; this is still its final count.
         for name, state in banked:
             for fmt, row in state["cells"].items():
                 cells[name, fmt] = row
             formats[name] = tuple(state["formats"])
             resolved += 1
-        if banked and progress_phase is not None:
+        if banked and progress_phase is not None and cadence.committed != resolved:
             _pb_commit(resolved, progress_phase, unit=banked[-1][0])
 
     def walk_one(name):
@@ -1348,9 +1369,29 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                   head_walk_workers=walk_workers, head_walk_resumed_units=len(banked))
     result = MeasuredAnchorInput(dict(inputs), payload, manifest, census, plan, cells,
                                 formats, encoder_source_reuse=encoder_source_reuse, **scoped)
+    # The pairs the walk verified; the overlay authenticates its own cells.
+    base_pairs = tuple(cells)
     if inputs.get("candidate_overlay") is not None:
         from .joint_catalog_extension import attach_candidate_overlay
-        attach_candidate_overlay(result, inputs["candidate_overlay"])
+
+        def overlay_admitted(admitted, unit):
+            # The overlay fence establishes no durable unit either, and on
+            # GLM it re-hashed tens of GB of stat-drifted wires in silence
+            # until the watchdog killed A4 r7 (#1519). Its admitted cells
+            # continue the walk's cumulative count on the same cadence.
+            cadence.maybe_commit(resolved + admitted, unit=unit)
+
+        # The overlay hashes each of its files once, through the process's
+        # IO engine, for every check the file answers: its drifted fence and
+        # this load's payload verification (#1519, #1531).
+        attach_candidate_overlay(result, inputs["candidate_overlay"],
+                                 verify_payloads=verify_payloads,
+                                 defer_render_hashes=defer_render_hashes,
+                                 progress=overlay_admitted)
+        overlay_cells = len(cells) - len(base_pairs)
+        if cadence.active and overlay_cells:
+            cadence.commit(resolved + overlay_cells, unit=f"candidate_overlay:{overlay_cells}")
+            result.progress_committed = resolved + overlay_cells
     if not verify_payloads:
         return result
 
@@ -1370,15 +1411,16 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         _same(after, before, f"{pair}: input files changed while hashing")
         return pair, digest
 
+    base_cells = [(pair, cells[pair]) for pair in base_pairs]
     if file_hash_workers == 1:
-        verified_files = map(verify_files, cells.items())
+        verified_files = map(verify_files, base_cells)
         for pair, digest in verified_files:
             if digest is not None:
                 cells[pair]["render_file_sha256"] = digest
     else:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=file_hash_workers, thread_name_prefix="anchor-file-hash") as workers:
-            for pair, digest in workers.map(verify_files, cells.items()):
+            for pair, digest in workers.map(verify_files, base_cells):
                 if digest is not None:
                     cells[pair]["render_file_sha256"] = digest
     return result
@@ -1447,6 +1489,11 @@ def verify_anchor_render(cell, source_weight, rendered_weight, *, calibration_so
         weights={name: source_weight}, menus={name: [SimpleNamespace(format_name=fmt)]},
         calibration_source=calibration_source, static_scales=static_scales,
         projected_units={} if projected_unit is None else {name: projected_unit},
+        # A projected unit is a routed stack member, which is the rule Tessera's
+        # export intake reads its structure by (tessera#662); its receipt
+        # stamps the wire a routed stack is served on (#1502). An unprojected
+        # unit keeps the unstructured spelling, which is the dense one.
+        structure=None if projected_unit is None else "routed_moe",
         **({} if bound_unit is None else {"bound_unit": bound_unit}))
     reuse = require_encoder_source_reuse_record(
         encoder_source_reuse, where=f"{name}@{fmt} encoder reuse")
@@ -2125,27 +2172,6 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     return cache
 
 
-def _source_prefetch(config):
-    prefetch = config.get("source_prefetch")
-    fields = {"max_cache_slots", "prefetch_workers", "prefetch_lookahead",
-              "cache_headroom_gb", "prefetch_min_available_gb",
-              "require_prefetched_residency"}
-    _require(isinstance(prefetch, dict) and set(prefetch) == fields,
-             "explicit complete source_prefetch settings required")
-    _require(prefetch["require_prefetched_residency"] is True,
-             "source_prefetch must require prefetched residency")
-    for name in ("max_cache_slots", "prefetch_workers", "prefetch_lookahead"):
-        _require(type(prefetch[name]) is int and prefetch[name] > 0,
-                 f"source_prefetch requires positive {name}")
-    _require(prefetch["prefetch_lookahead"] < prefetch["max_cache_slots"],
-             "source_prefetch lookahead must fit the declared cache slots")
-    for name in ("cache_headroom_gb", "prefetch_min_available_gb"):
-        _require(type(prefetch[name]) in (int, float) and
-                 math.isfinite(prefetch[name]) and prefetch[name] > 0,
-                 f"source_prefetch requires positive finite {name}")
-    return dict(prefetch)
-
-
 def _planned_source_window(config):
     """The prefetch note's bound from the sealed plan (PQ #1134), as kwargs.
 
@@ -2177,7 +2203,7 @@ def recommend_source_prefetch(*, cache_bytes, layer_bytes, cpu_count,
     up to four readers bounded by CPUs and slots, with the lookahead the
     slot count fits. The headroom and minimum-available floors stay operator
     policy: they are passed through, not derived. The result is validated
-    through :func:`_source_prefetch`, so a recommendation that cannot run
+    through :func:`stage_inputs.source_prefetch`, so a recommendation that cannot run
     refuses here instead of inside the action.
     """
     for label, value in (("cache_bytes", cache_bytes), ("layer_bytes", layer_bytes),
@@ -2227,7 +2253,7 @@ def _admit_candidate_phase(command, config, data, layer_bytes):
     return policy
 
 
-def _load_plan(path, digest, *, projection_runtime=True, defer_pool_reads=False):
+def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_reads=False):
     """Load and admit a joint anchor plan.
 
     ``defer_pool_reads`` is for a caller whose readset is not bound yet (a
@@ -2525,7 +2551,7 @@ def check_prepared_completion(completion, *, plan_sha256, implementation_sha256,
 def _config_device_envelope(config, command):
     """The device envelope a joint command declares, read before any device.
 
-    ``max_gpu_bytes`` is what ``_load_plan`` requires of every admitted plan,
+    ``max_gpu_bytes`` is what ``load_joint_anchor_plan`` requires of every admitted plan,
     and the envelope is the FIRST thing a command does that reaches the CUDA
     allocator. Reading it with ``config["max_gpu_bytes"]`` therefore turned a
     config the admission gate would have refused into a ``KeyError`` raised
@@ -2563,7 +2589,7 @@ def _restores_activation_scale_env(function):
     ``execute`` sets ``PRISMAQUANT_PROD_ACT_SCALES`` from the admitted plan so
     the render path it drives reads the campaign's value.  As a process entry
     point that is right; called in-process it leaves the value behind.  Every
-    admitted plan carries ``"0"`` (``_load_plan``), and that is the input
+    admitted plan carries ``"0"`` (``load_joint_anchor_plan``), and that is the input
     which turns the render scorer's activation clip OFF for everything that
     runs afterwards (``production_weight_cache.py``, in
     ``_local_forward_render_score``).  Plenty of code outside ``execute``
@@ -3233,7 +3259,7 @@ def main(argv=None):
     # identical across x86/aarch64 and CPU/CUDA. It is the one command that
     # does not need the projection runtime, and refusing it here would refuse
     # the stage that exists to run off the qualified box.
-    config = _load_plan(args.plan, args.plan_sha256,
+    config = load_joint_anchor_plan(args.plan, args.plan_sha256,
                         projection_runtime=args.command != "synthesize")
     if args.command == "synthesize":
         record = synthesize_renders(config, plan_sha256=args.plan_sha256, units=args.units,

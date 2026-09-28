@@ -250,7 +250,7 @@ def test_bind_refuses_a_second_digest_and_a_malformed_one(tmp_path, monkeypatch)
 
 
 def test_the_bound_reader_serves_read_bound_while_bound(tmp_path, monkeypatch):
-    from prismaquant import tessera_joint_allocation as allocation
+    from prismaquant import stage_inputs
 
     monkeypatch.setenv(ENV_VAR, str(tmp_path / "absent-map.json"))
     reads = io.bind_staged_reads(manifest_sha256=MANIFEST, allowed_tiers="ram,ssd")
@@ -260,8 +260,8 @@ def test_the_bound_reader_serves_read_bound_while_bound(tmp_path, monkeypatch):
     target = tmp_path / "control.json"
     target.write_bytes(b"{}")
     record = {"path": str(target), "sha256": hashlib.sha256(b"{}").hexdigest()}
-    allocation._BOUND_BYTES.clear()
-    assert allocation._read_bound(record, "control") == b"{}"
+    stage_inputs._BOUND_BYTES.clear()
+    assert stage_inputs.read_bound(record, "control") == b"{}"
     assert calls == [(str(target), record["sha256"], "control")]
     io.reset_staged_reads_for_tests()
-    assert allocation.BOUND_READER is None
+    assert stage_inputs.BOUND_READER is None

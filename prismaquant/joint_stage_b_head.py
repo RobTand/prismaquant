@@ -363,8 +363,9 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
 
     from .calibration_data import load_calibration_input
     from .production_weight_cache import ProductionWeightCache
+    from .prismabuild_progress import commit as _pb_commit
     from .tessera_joint_aura import (
-        _pb_commit, _prepared_digest_recorded, check_prepared_completion,
+        _prepared_digest_recorded, check_prepared_completion,
         normalize_historical_encoder_reuse, require_prepared_digests,
         resolve_encoder_source_reuse)
     from . import tessera_campaign as tc

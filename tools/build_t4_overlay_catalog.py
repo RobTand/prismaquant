@@ -43,7 +43,8 @@ from prismaquant.joint_aura import activation_identity
 from prismaquant import format_registry as fr
 from prismaquant.digests import bytes_sha256hex
 from prismaquant.joint_catalog_extension import (
-    CATALOG_SCHEMA_V1, CATALOG_SCHEMA_V2, R13_ADDED_FORMAT, added_format_recipes, catalog_sources, catalog_view)
+    CATALOG_SCHEMA_V1, CATALOG_SCHEMA_V2, R13_ADDED_FORMAT, added_format_recipes, catalog_sources, catalog_stat_fence,
+    catalog_view)
 
 BASE = Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911')
 PREP = Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/allocation/joint-panel/complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02/prepare/prepared.json')
@@ -68,11 +69,6 @@ MEASURED_CURRENCY = "output_mse_under_route_activation_contract"
 
 
 sha = bytes_sha256hex
-
-
-def stamp(path):
-    s = path.stat()
-    return {'inode': s.st_ino, 'bytes': s.st_size, 'mtime_ns': s.st_mtime_ns, 'ctime_ns': s.st_ctime_ns}
 
 
 def open_anchor_journal(manifest_path):
@@ -278,8 +274,8 @@ def main():
             render = owners[q] / 'cache' / (q.replace('/', '__').replace('.', '_') + '__' + fmt + '.pt')
             wire = Path(cost['provenance']['wire_dir']) / record['file']
             assert wire.stat().st_size == record['blob_bytes']
-            return {'qname': q, 'format': fmt, 'render': str(render), 'render_stat': stamp(render),
-                    'wire': str(wire), 'wire_stat': stamp(wire), 'record': record, 'anchor': anchor,
+            return {'qname': q, 'format': fmt, 'render': str(render), 'render_stat': catalog_stat_fence(render.stat()),
+                    'wire': str(wire), 'wire_stat': catalog_stat_fence(wire.stat()), 'record': record, 'anchor': anchor,
                     'source_weight': verified['source_weight'], 'activation': activation,
                     'encoding_identity_sha256': canonical_json_sha256(record['identity'], where='adopted encoding identity'),
                     'render_origin': 'encoded', 'render_comparison': 'independent_render_vs_wire',

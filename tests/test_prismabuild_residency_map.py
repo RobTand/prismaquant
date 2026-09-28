@@ -24,6 +24,10 @@ from prismaquant.residency_map import (
 # tool builds.
 from test_glm_joint_data_manifest_at_submit import scratch, shared_mount  # noqa: F401
 
+#: The resolver validates maps with PrismaBuild's own validator, through the
+#: client SDK (PB #1254); bind the reviewed installed one for every test.
+pytestmark = pytest.mark.usefixtures("installed_client_sdk")
+
 
 MANIFEST = 'a' * 64
 LEAD = 'b' * 64
@@ -329,7 +333,9 @@ def test_a_map_of_another_schema_is_refused_whole_with_a_reason(tmp_path, monkey
                           schema='prismaquant.prismabuild.residency_map.v2')
     report = _refusal(tmp_path, monkeypatch, map_path)
     assert report['entries'] == 0 and report['hits'] == 0
-    assert 'residency_map.v2' in report['refused'] and SCHEMA in report['refused']
+    # PrismaBuild's validate_map words the refusal (PB #1254): it names the
+    # schema it requires, not the one it was offered.
+    assert 'schema must be' in report['refused'] and SCHEMA in report['refused']
     assert report['map_sha256'] is None
 
 
@@ -343,7 +349,7 @@ def test_a_ranged_roster_is_refused_whole_and_the_shape_is_named(tmp_path, monke
         {'index': 0, 'path': str(paths[key]), 'offset': 0,
          'bytes': paths[key].stat().st_size, 'resident': True}])
     report = _refusal(tmp_path, monkeypatch, map_path)
-    assert report['entries'] == 0 and 'ranged roster' in report['refused']
+    assert report['entries'] == 0 and 'entries must be an object' in report['refused']
 
 
 def test_a_map_that_is_not_there_yet_is_recorded_not_fatal(tmp_path, monkeypatch):
@@ -362,7 +368,7 @@ def test_a_staged_path_outside_the_declared_root_is_refused_whole(tmp_path, monk
     body['entries'][key]['stage_path'] = str(tmp_path / 'elsewhere.pt')
     map_path.write_text(json.dumps(body))
     report = _refusal(tmp_path, monkeypatch, map_path)
-    assert report['entries'] == 0 and 'staged outside' in report['refused']
+    assert report['entries'] == 0 and 'stage_path must live under' in report['refused']
 
 
 def test_a_map_that_appears_later_is_adopted_on_the_next_read(tmp_path, monkeypatch):

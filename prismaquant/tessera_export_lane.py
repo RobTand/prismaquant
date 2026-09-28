@@ -156,6 +156,16 @@ def packaged_contract_path() -> Path:
         return Path(path)
 
 
+#: Whether a Tessera checkout's exporter takes the producer authority is read
+#: by a stdlib-only module, so ``run-pipeline.sh`` can ask it by path without
+#: importing this package (torch, transformers) to read one JSON block.
+from .tessera_producer_interface import (  # noqa: E402  (re-exported)
+    EXPORTER_DRIVER, PRODUCER_AUTHORITY_OPTION, ProducerInterfaceError,
+    advertises_producer_authority, checkout_contract_path,
+    producer_authority_argv,
+)
+
+
 def derive_executes(
     published_formats: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[str, ...]:
@@ -842,17 +852,23 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             costs=handoff.get("costs"))
     except ExpertProjectionError as exc:
         raise TesseraExportLaneError(f"selected cache projection: {exc}") from exc
-    if set(selected) != set(data.census["unit_shapes"]):
-        raise TesseraExportLaneError("selected cache assignment does not cover the full source roster")
+    from .tessera_census_cache import census_roster_selection
+    selected = census_roster_selection(selected, data.census["unit_shapes"], TesseraExportLaneError)
     wire_dir = Path(provenance["wire_dir"]).resolve()
-    if (metadata.get(WIRE_DIR_KEY) != str(wire_dir) or
-            data.payload.get("provenance", {}).get("wire_dir") != str(wire_dir)):
+    # The allocator's recorded root must still name the handoff root: both
+    # sides describe WHICH root the selection was priced against.  The
+    # loader payload's provenance wire_dir names the root the receipts were
+    # measured under and may legitimately differ as a string; the per-unit
+    # content identity against those receipts is carried by the priced
+    # records and enforced at intake, so it is recorded by callers rather
+    # than gated here by path equality.
+    if metadata.get(WIRE_DIR_KEY) != str(wire_dir):
         raise TesseraExportLaneError("selected cache wire directory differs from the joint handoff")
     selected_expert_receipts = metadata.get(EXPERT_WIRES_KEY, {})
     if not isinstance(selected_expert_receipts, Mapping):
         raise TesseraExportLaneError("selected cache expert receipts are missing")
     from contextlib import nullcontext
-    from .joint_catalog_extension import (EncoderAdoptionValidation,
+    from .joint_catalog_extension import (EncoderAdoptionValidation, streamed_fences,
         require_selected_catalog_cell, require_extension, extension_run_header, _json)
     rooted = schema == "tessera.cached_units.v2"
     if rooted:
@@ -879,7 +895,11 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
         policy = verify_policy(policy_bound, original_prepared=extension["inputs"]["original_prepared"])
     records, wire_roots, unit_roots, adoptions, proofs = {}, {}, {}, {}, {}
     served_activations = {}
-    with EncoderAdoptionValidation() if rooted else nullcontext() as validation:
+    # A selected overlay wire whose stat fence drifted is re-hashed on the
+    # assigned-CPU pool while the walk continues; every re-hash is proven
+    # when this block exits, before the manifest is built (PQ #1522).
+    with (EncoderAdoptionValidation() if rooted else nullcontext()) as validation, \
+            (streamed_fences() if rooted else nullcontext()) as fences:
         for name, fmt in sorted(selected.items()):
             if fmt == "BF16":
                 continue
@@ -899,11 +919,19 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             sealed_unit = data.manifest["identity"]["units"][name]
             if record["identity"].get("source") != sealed_unit["weight"]:
                 raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
+            # The root this cell's bytes are read from: the handoff root, or,
+            # for a catalog-adopted cell, its catalog row's own directory
+            # (chosen below). ``locate_expert_wire`` gates that final root once
+            # (present, regular, non-symlink, directly in the root, receipted
+            # size) against ``record``, which ``require_selected_catalog_cell``
+            # holds equal to the catalog row's record. Content identity is
+            # enforced at intake by ``verify_cached_unit`` (#1513, #641/#643).
             cell_wire_dir = wire_dir
             if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
                 if not rooted:
                     raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")
-                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation)
+                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation,
+                                                         fences=fences)
                 adoptions[name] = accepted["adoption"]
                 if policy is None:
                     raise TesseraExportLaneError(f"{name}: added A4 selection needs the accepted served activation policy")
@@ -1558,6 +1586,7 @@ def _mtp_hessian_collection_proof(config, metadata, selected, block, owner):
     from tessera import hessian_capture as reader
     from .glm_mtp_selection import (_bound_payload, backfill_mtp_selection_wires,
                                     WIRE_BINDING_SCHEMA)
+    from .tessera_reuse_authority import CANONICAL_CAPTURE
 
     collection_type = getattr(reader, 'ReferenceHessianCollection', None)
     if collection_type is None or not isinstance(owner, collection_type):
@@ -1577,7 +1606,7 @@ def _mtp_hessian_collection_proof(config, metadata, selected, block, owner):
     references = owner.binding()['references']
     children, by_unit = [], {}
     for reference in references:
-        with reader.ReferenceHessians(reference['path']) as child:
+        with reader.ReferenceHessians(reference['path'], canonical_capture=CANONICAL_CAPTURE) as child:
             if (child.document_sha256 != reference['sha256'] or
                     child.binding() != reference['binding']):
                 raise TesseraExportLaneError('Hessian collection child binding changed')
@@ -2303,10 +2332,12 @@ def read_cached_unit_bundle(manifest, directory, expected_units, source):
     """Read with the producer's mode, retaining and surfacing every warning."""
     import sys
     from tessera.cached_unit import CachedUnitBundle
+    from .tessera_reuse_authority import PRODUCER_AUTHORITY
 
     bundle = CachedUnitBundle(
         manifest, directory, expected_units, source,
-        encoder_source_proof_mode=cached_unit_encoder_source_proof_mode())
+        encoder_source_proof_mode=cached_unit_encoder_source_proof_mode(),
+        authority=PRODUCER_AUTHORITY)
     for warning in bundle.warnings:
         print('[cached-unit warning] ' + json.dumps(warning, sort_keys=True),
               file=sys.stderr)

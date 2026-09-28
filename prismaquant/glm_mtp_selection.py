@@ -110,7 +110,7 @@ def merge_mtp_costs(payloads, *, sources=()) -> dict:
 
 def _bound_payload(reference: Mapping, *, label: str) -> dict:
     """Read an already published cost artifact only under its exact byte anchor."""
-    from .tessera_joint_allocation import _read_bound
+    from .stage_inputs import read_bound as _read_bound
 
     if (not isinstance(reference, Mapping) or set(reference) != {"path", "sha256"}
             or not isinstance(reference["path"], str)

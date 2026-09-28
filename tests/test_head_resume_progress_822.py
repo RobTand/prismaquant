@@ -76,3 +76,108 @@ def test_corrupt_first_envelope_reports_no_replayed_prefix(tmp_path, monkeypatch
                                                head_walk_workers=1)
     assert resumed.head_walk_resumed_units == 0
     assert [r['units_completed'] for r in writes] == [1, 2]
+
+
+def _replay_drive_writes(monkeypatch, writes):
+    """How many commits landed while the replay drive itself was running."""
+    seen = []
+    drive = bridge._drive_ordered_walk
+
+    def observed(roster, walk, commit, **kwargs):
+        try:
+            return drive(roster, walk, commit, **kwargs)
+        finally:
+            seen.append(len(writes))
+
+    monkeypatch.setattr(bridge, '_drive_ordered_walk', observed)
+    return seen
+
+
+def test_replay_longer_than_the_cadence_commits_during_the_drive(tmp_path, monkeypatch):
+    # #1518: a --head-resume replay that outlives its cadence reports its
+    # cumulative verified prefix while the drive runs, not only at its end.
+    config, names, _, journal, writes = _case(tmp_path, monkeypatch)
+    allowance_s = 0.2
+    cadence_s = allowance_s / bridge.PROGRESS_CADENCE_SAFETY_FACTOR
+    import time as _time
+    real_sha = bridge._sha
+
+    def slow_sha(path):
+        # Every banked unit re-hashes its journal shard once; making that
+        # slower than the cadence makes the replay outlive every window.
+        _time.sleep(cadence_s * 1.5)
+        return real_sha(path)
+
+    monkeypatch.setattr(bridge, '_sha', slow_sha)
+    during = _replay_drive_writes(monkeypatch, writes)
+    resumed = bridge.load_measured_anchor_input(
+        config, verify_payloads=False, head_checkpoint=journal, head_resume=True,
+        head_walk_workers=1, progress_allowance_s=allowance_s)
+    assert resumed.head_walk_resumed_units == len(names)
+    units = [r['units_completed'] for r in writes]
+    assert during[0] >= 2, f'the replay drive committed {during[0]} times while it ran'
+    assert units == sorted(set(units)), 'cumulative counts never repeat or regress'
+    assert units[0] == 1 and units[-1] == len(names)
+    assert {r['phase'] for r in writes} == {'synthesize'}
+    assert resumed.progress_committed == len(names)
+
+
+def test_replay_cadence_is_the_allowance_over_the_stated_factor():
+    cadence = bridge._ProgressCadence('synthesize', 600)
+    assert bridge.PROGRESS_CADENCE_SAFETY_FACTOR == 4
+    assert cadence.cadence_s == 600 / bridge.PROGRESS_CADENCE_SAFETY_FACTOR == 150.0
+    assert not bridge._ProgressCadence('synthesize', None).active
+    assert not bridge._ProgressCadence(None, 600).active
+    import pytest
+    for bad in (0, -1, float('inf'), float('nan'), '600', True):
+        with pytest.raises(ValueError, match='progress_allowance_s'):
+            bridge._ProgressCadence('synthesize', bad)
+
+
+def test_replay_inside_one_window_writes_its_first_and_final_count_only(tmp_path, monkeypatch):
+    # O(1) writes per window (#822's substance): a fast replay under a long
+    # allowance commits the first verified unit and the final count, nothing per unit.
+    config, names, _, journal, writes = _case(tmp_path, monkeypatch)
+    resumed = bridge.load_measured_anchor_input(
+        config, verify_payloads=False, head_checkpoint=journal, head_resume=True,
+        head_walk_workers=1, progress_allowance_s=600)
+    assert resumed.head_walk_resumed_units == len(names)
+    assert [(r['units_completed'], r['unit']) for r in writes] == [(1, names[0]), (len(names), names[-1])]
+
+
+def test_overlay_fence_continues_the_count_on_the_cadence(tmp_path, monkeypatch):
+    # #1519: the candidate overlay's fence runs after the replay's last
+    # commit. Its admitted cells continue the cumulative count on the same
+    # cadence, and progress_committed carries the final count onward.
+    from prismaquant import joint_catalog_extension as jce
+    config, names, _, journal, writes = _case(tmp_path, monkeypatch)
+    allowance_s = 0.2
+    cadence_s = allowance_s / bridge.PROGRESS_CADENCE_SAFETY_FACTOR
+    overlay_cells = 3
+    calls = []
+
+    def slow_overlay(data, bound, **kwargs):
+        import time as _time
+        calls.append(kwargs)
+        progress = kwargs.get('progress')
+        for index in range(overlay_cells):
+            _time.sleep(cadence_s * 1.5)
+            data.cells[names[0], f'OVERLAY_{index}'] = {'overlay': index}
+            if progress is not None:
+                progress(index + 1, f'{names[0]}@OVERLAY_{index}')
+        return data
+
+    monkeypatch.setattr(jce, 'attach_candidate_overlay', slow_overlay)
+    config = dict(config, candidate_overlay={'path': 'fake', 'sha256': '0' * 64})
+    before = len(writes)
+    resumed = bridge.load_measured_anchor_input(
+        config, verify_payloads=False, head_checkpoint=journal, head_resume=True,
+        head_walk_workers=1, progress_allowance_s=allowance_s)
+    # The overlay's hash concurrency is the IO engine's, not the walk's (#1531).
+    assert calls and 'hash_workers' not in calls[0]
+    overlay = [r['units_completed'] for r in writes[before:] if r['units_completed'] > len(names)]
+    assert len(overlay) >= 2, f'the overlay fence committed {len(overlay)} times'
+    assert overlay[-1] == len(names) + overlay_cells
+    units = [r['units_completed'] for r in writes]
+    assert units == sorted(set(units))
+    assert resumed.progress_committed == len(names) + overlay_cells

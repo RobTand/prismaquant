@@ -99,7 +99,10 @@ def test_v4_cannot_invent_moe_attestation_from_dense_cells():
 @pytest.mark.parametrize("launches", [
     [],
     [{"symbol": "torch.mm"}],
-    [{"symbol": "torch.mm", "decoder": "torch_window", "rationale": "native"}],
+    # An unmarked prose member is skipped (#1548); a must-understand mark still
+    # forces the refusal.
+    [{"symbol": "torch.mm", "decoder": "torch_window", "rationale": "native",
+      "must_understand": ["rationale"]}],
     [{"symbol": "", "decoder": "torch_window"}],
     [{"symbol": "torch.mm", "decoder": None}],
     [{"symbol": "torch.mm", "decoder": "torch_window"}] * 2,

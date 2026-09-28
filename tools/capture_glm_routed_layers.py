@@ -46,7 +46,7 @@ def main(argv=None):
         authenticate_selected_capture_source,
         require_capture_contract,
     )
-    from prismaquant.tessera_joint_allocation import _read_bound
+    from prismaquant.stage_inputs import read_bound as _read_bound
 
     started = time.monotonic()
     plan_ref = {"path": args.plan, "sha256": args.plan_sha256}
