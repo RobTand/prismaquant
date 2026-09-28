@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1632, `claude/mtp-stamp-binds-emitted-1632`): the
+whole-artifact budget stamp's `selection_assignment_sha256` now binds the
+assignment the layer config emits, which is the body plus the selected MTP
+rungs under `--mtp-joint-cost`. #1610 moved the MTP bytes into the price and
+left the digest on the body alone, so every consumer that hashes the file it
+loads refused: the exporter preflight, `select_validated_frontier`, and the R2
+compose. On the GLM-5.3 release pick, the stamp `086c7302…` equals the file's
+digest without its 867 layer-45 units, and the file hashes to `69d7c894…`. One
+allocator function (`_stamped_assignment`) serves both layer-config stamp
+sites. Pareto point files emit and bind the body alone and are unchanged. No
+default, stage, format, lane or ship gate moves. Gate:
+`tests/test_mtp_card_rebase_1610.py`.
+
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`, exact probe): the
 PACT hull's binding-budget probe is now `prismaquant/exact_mckp.py`, an exact
 single-budget multiple-choice knapsack in integer arithmetic, in place of a
@@ -4742,8 +4755,9 @@ priced (PQ #1610), and stamp the record after the body is final:
 The selection writes the layer-45 entries and a `mtp_selection` record into the
 layer-config metadata. It moves no body bpp (principle 12). Under a
 whole-artifact card it moves the body's byte room: the card prices the selected
-MTP bytes in place of the layer's source bytes (PQ #1610). A
-unit that the body also assigned is refused. There is no λ. Without the flag,
+MTP bytes in place of the layer's source bytes (PQ #1610), and the budget
+stamp's digest binds the body plus those rungs, the assignment the file
+emits (PQ #1632). A unit that the body also assigned is refused. There is no λ. Without the flag,
 the output is byte-identical. Gates: `tests/test_glm_mtp_selection.py` and
 `tests/test_allocator_output_pin_1304.py`. A quantum prices only one Tessera
 rate, so when a layer's attested rungs sit at more than one rate, the payload is a
