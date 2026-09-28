@@ -23,17 +23,21 @@ dispatcher's demand could not cover the head the row then chose.
   pending unit is not encoded.
 - Journalled units are adopted through the window, one `--anchor-batch-size`
   chunk at a time, through the same `adopt_state` gates as a load-all resume.
-  Their wire receipts are verified on the row's threads while the chunk is
-  resident, and their shards are not rewritten. Only the rest is encoded.
+  Their shards are not rewritten. Only the rest is encoded. Wire receipts are
+  verified inline, one blob at a time, as the stream journal's adoption
+  verifies them. A verification holds its whole blob, and no plan charges a
+  pool of them, so threading it first needs a `stream_phases` term.
 - One invariant changes: the journal is open from before the first read, so a
   newly encoded unit's shard lands under the checkpoint's identity before
   finalize re-checks the whole identity. Each such unit's own receipts were
   checked when its entry was read. Finalize still compares the full run
   identity, built from this run's own receipts.
-- A complete row that is relaunched reads every entry once, encodes nothing,
-  and writes the same bytes. There is no separate `cost.pkl` short-circuit: the
-  receipts are content digests, so a verified adoption must read each entry
-  anyway.
+- A complete row that is relaunched reads every entry once and encodes
+  nothing. Every file it writes is the clean run's, except that the cost
+  payload's `provenance.selected_source_preparation` has no
+  `anchor_batch_growth_bytes`: no round plans an encode step. There is no
+  separate `cost.pkl` short-circuit: the receipts are content digests, so a
+  verified adoption must read each entry anyway.
 - The row's admission and the dispatcher's demand read one mapping,
   `tessera_row_stream.MEMORY_PLANS`. `row-head-execution.json` records the plan
   each head is admitted against as `memory_plan`.

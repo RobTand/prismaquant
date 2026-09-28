@@ -6516,9 +6516,11 @@ def _main(argv, *, source_scope) -> int:
         # verified like any batch, and ``expect_identities`` has required its
         # receipts to be the ones the manifest recorded before this sees it.
         # Then every row passes ``adopt_state``: its input identity against
-        # this entry, its wire receipt against the file on disk, verified on
-        # the row's threads a chunk at a time, while the chunk is resident. The
-        # units' shards already cite the checkpoint's identity, so, as on the
+        # this entry, its wire receipt against the file on disk. Wires are
+        # verified inline, one blob at a time, as the stream journal's
+        # adoption does: a verification holds its whole blob, and no stream
+        # phase charges a pool of them beside the window's readers. The units'
+        # shards already cite the checkpoint's identity, so, as on the
         # load-all resume, they are not rewritten.
         adopt_started = _time.monotonic()
         names = sorted(window_resumed)
@@ -6527,29 +6529,16 @@ def _main(argv, *, source_scope) -> int:
         row_stream.plan(chunks)
         for index, chunk in enumerate(chunks):
             row_stream.admit(index)
-            deferred_chunk = [] if identity_threads > 1 else None
             for name in chunk:
                 entry = row_stream.entry(name)
                 if entry.holder is None:
                     raise RuntimeError(
                         f"checkpoint unit {name}: this run's read of its entry binds no "
                         "producer identity; refusing to adopt its anchors")
-                adopt_state(name, window_resumed[name], where="checkpoint",
-                            deferred=deferred_chunk, entry=entry)
-            if deferred_chunk:
-                records = _verify_wire_records_on_threads(
-                    [(anchor, identity, existing)
-                     for _name, anchor, identity, existing in deferred_chunk],
-                    wire_dir, threads=identity_threads)
-                for (name, anchor, _identity, _existing), record in zip(deferred_chunk, records):
-                    wire_records[name][anchor.format_name] = record
-                # The input identities cite this chunk's sources; drop them
-                # before the window moves on.
-                deferred_chunk.clear()
+                adopt_state(name, window_resumed[name], where="checkpoint", entry=entry)
         print(f"[campaign] resumed {sum(len(state['anchors']) for state in window_resumed.values())} "
               f"verified anchors for {len(names)} units from {checkpoint.name} through the "
-              f"window in {_time.monotonic() - adopt_started:.1f} s ({identity_threads} threads)",
-              flush=True)
+              f"window in {_time.monotonic() - adopt_started:.1f} s", flush=True)
 
     seed_provenance = None
     if args.seed_checkpoint:

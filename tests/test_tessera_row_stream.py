@@ -625,8 +625,8 @@ def test_a_finalized_row_relaunches_on_the_stream_head_and_encodes_nothing(
     assert [name for name in sorted(clean) if clean[name] != after[name]
             and name != "cost.pkl"] == []
     # The one difference is execution telemetry, not identity: the per-step
-    # growth list is stamped only when a round plans encode steps, and a
-    # relaunch that encodes nothing plans none, on either head.
+    # growth list is stamped only when a round plans encode steps, and the
+    # round loop leaves before planning any when nothing is pending.
     import pickle
     before, relaunched = pickle.loads(clean["cost.pkl"]), pickle.loads(after["cost.pkl"])
     preparation = before["provenance"]["selected_source_preparation"]
