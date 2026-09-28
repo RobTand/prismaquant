@@ -41,6 +41,10 @@ from prismaquant.residency_map import (
     ResidencyResolver, bind_residency_manifest, reset_residency_resolver_for_tests,
     residency_map_key, residency_resolver)
 
+#: The resolver validates maps with PrismaBuild's own validator, through the
+#: client SDK (PB #1254); bind the reviewed installed one for every test.
+pytestmark = pytest.mark.usefixtures("installed_client_sdk")
+
 TIER = "prismabuild-stage:dl380g10"
 MANIFEST = "ef" * 32
 CONSUMER = "cd" * 32
@@ -123,7 +127,7 @@ def _read_order(monkeypatch, shard):
 
     Only the hops that need a live PrismaBuild claim are stood in for, as
     ``test_staged_wait_follows_pb_landing`` does: the sealed manifest and the
-    generation's ``storage_tiers``.  Its read order is the read plan's, which
+    client SDK's ``manifest_read_entries``.  Its read order is the read plan's, which
     names the head and the shard and not ``UNREAD``, so the shard is
     read-order bytes ``[HEAD_BYTES, HEAD_BYTES + size)``.
     """
@@ -132,8 +136,9 @@ def _read_order(monkeypatch, shard):
     entries = read + [{"path": UNREAD, "offset": 0, "bytes": 64}]
     monkeypatch.setattr(staged_lease, "_load_sealed_payload",
                         lambda digest: {"schema": "v2", "entries": entries})
-    monkeypatch.setattr(staged_lease, "sdk_submodule", lambda name: SimpleNamespace(
-        manifest_read_entries=lambda payload: list(read)))
+    # The read order comes from PB's client SDK (PB #1254).
+    monkeypatch.setattr(staged_lease.client_sdk(), "manifest_read_entries",
+                        lambda payload: list(read))
 
 
 def _landing(size: int, *, now: float, lists_every_leg: bool = True) -> dict:

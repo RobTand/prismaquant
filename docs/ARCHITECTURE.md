@@ -110,6 +110,25 @@ menu, runtime pin or serving admission changes. Table world equality, native
 numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
 
+Re-stamped 2026-09-27 (PQ #1541, decoupling step 2): PrismaQuant reaches
+PrismaBuild through `prismabuild.client`, PB's versioned client SDK
+(`SDK_VERSION = 1`, RobTand/prismabuild#1254), and `staged_lease.client_sdk`
+is the one place a module gets it. `staged_lease`, `stage_a_produced_output`,
+`glm_capture_compatibility`, `residency_map` and `quality_prefill_pb_adapter`
+no longer import PB internals or restate PB's residency-map rules, receipt
+check, id and env grammars or canonical digest.
+`tests/test_pb_client_sdk_differential.py` holds each old path against its SDK
+path. `PB_READER_LEASE_PIN_COMMIT` moves from `461728e4` to
+`059953bc3793f539600d333cd3311773e592b0e6`, the PB pull request head that
+carries the SDK, because no earlier commit does. Its PB test interpreter is
+`/home/rob/venvs/pq-pb059953bc-tessera-20bf5346` on sparky and sparklina (PB
+builds `df7f9ba521d5`, `03b761901e6c`), which is the `pq-pb461728e4-tessera-20bf5346`
+interpreter with only PrismaBuild reinstalled. No `-tf516` sibling or dl380g10
+interpreter exists for this pin yet. Production resolves the SDK from the
+sealed generation, so this change needs a published generation that carries
+`prismabuild.client` before it merges. No format, pipeline default, stage or
+lane changes.
+
 Re-stamped 2026-09-27 (PQ #1527): the exact Tessera pin is
 `20bf53464f9113f3115f454f8fa80453e71c0308`, master after Tessera #669 (closing
 tessera#668). At a mixed-rate window rung, the batched LDLQ encode now runs a
@@ -5793,8 +5812,9 @@ point is `tools/dispatch_joint_quanta.py --stage-a-produced-output-template`,
 forwarded as the deployed `pbrun --produced-output-template` envelope
 option, which ingests the document as a declared input, seals its
 declaration into request params and derives the tier window demand from it.
-Every `prismabuild.*` module loads through `staged_lease.sdk_submodule`, from
-the same sealed generation as the reader SDK. Geometry is derived from the
+Every PrismaBuild call goes through `prismabuild.client`, PB's versioned
+client SDK (PB #1254), reached by `staged_lease.client_sdk` from the same
+sealed generation as the reader lease. Geometry is derived from the
 effective configured artifact max; no budget figure is written into the code.
 A refused retirement is named from PrismaBuild's own egress receipt by
 `classify_egress_outcome`: `retire_batch` returns the category (refusal
@@ -5951,17 +5971,18 @@ row, which carries the `cas_root` and `residency.manifest_sha256`/
 **not** the ceiling — it is an input, and the same record carries
 `detail.prewarm.manifest_bytes`, 1,244,988,662,830 on this campaign, because
 that one measures the payload the entries describe. Both the stated size and
-the blob's own size are checked against `prismabuild.core.DATA_MANIFEST_MAX_BYTES`,
+the blob's own size are checked against the client SDK's `DATA_MANIFEST_MAX_BYTES`,
 PB's fixed bound, **before the blob is opened**; only then is it read and
 hashed against that digest *and* against the digest this run bound, and
-decoded by `prismabuild.core.read_data_manifest` — PB's own validating reader,
+decoded by the client SDK's `read_data_manifest` — PB's own validating reader,
 not a second parser. No payload is ever sealed or hashed. Its `entries` are the declared spans
 in file offsets. **When any hop is missing the readset is *unbound*, and an
 unbound readset never waits**: not knowing whether a range is declared is
 precisely the state in which waiting would be guessing, so the pre-#874
 behaviour stands with `declared_readset` in the residency report saying why.
-This reads a pool row directly and is a protocol extension beyond the SDK's
-exported names; the clean shape is a PB-side `ctx` field.
+The claim row is read by the SDK's `read_claimed_record`, so PQ no longer
+spells the queue layout, but taking the readset from a pool row is still a
+protocol extension; the clean shape is a PB-side `ctx` field.
 
 **(3) Readiness is decided before the shared gather pool is occupied.**
 `layer_streaming._await_layer_readset` runs in the thread about to submit a
@@ -6551,11 +6572,14 @@ it as layer 2 — so a consumer that refused the new fields would fall open to
 the declared paths at full pool cost behind the shrunken ARC. **The reader
 takes the ram half, and the map's epoch is the whole of its identity in time.**
 
-- **Acceptance mirrors the writer.** The optional header trio and per-entry
-  `ram_path` follow `prismabuild.residency_map.validate_map` field for field:
-  `ram_path` must live under `ram_root`, a map naming ram paths must announce
-  tier, root and epoch together, and each violation refuses the map **whole**
-  with a reason, exactly as every other field this reader checks. A map
+- **Acceptance is the writer's own.** The map, its optional header trio and
+  per-entry `ram_path` are checked by PB's `validate_map`, published in the
+  client SDK as `validate_residency_map` (PB #1254); PQ no longer restates
+  the field rules. `ram_path` must live under `ram_root`, a map naming ram
+  paths must announce tier, root and epoch together, and each violation
+  refuses the map **whole** with PB's reason. A process with no SDK bound
+  refuses every map and reads declared paths. What PQ adds is its own
+  binding: the map must name the data manifest this run was submitted with. A map
   carrying no ram field binds byte-for-byte as before — the parity tests hold
   the offered answer and the accounting keys to the old shape.
 - **The epoch decides residency, and it fails closed on the ram half only.**
@@ -7130,9 +7154,9 @@ says exactly that.
   `concurrent_groups=N` seals `2N` for read-ahead), which is a
   different quantity from the retained origin peak. The runtime binder refuses
   when the admitted template's declared maximum is not the effective one. Every
-  `prismabuild.*` module the publication uses loads through
-  `staged_lease.sdk_submodule`, i.e. from the **same sealed generation** as the
-  reader SDK: production forwards `PRISMABUILD_READER_HELPER_ROOT` and mounts
+  PrismaBuild call the publication makes goes through `prismabuild.client`
+  (PB #1254), loaded by `staged_lease.client_sdk`, i.e. from the **same sealed
+  generation** as the reader lease: production forwards `PRISMABUILD_READER_HELPER_ROOT` and mounts
   it without populating `sys.path`, so a bare import can serve an older
   container distribution or a mixture across modules, and qualified provenance
   over bytes you cannot name is not provenance. The template is sealed at **submit**, not
@@ -21195,7 +21219,13 @@ fallback:
   (PQ #1534) freezes those sites and the private lane helpers other modules
   import, `tests/test_prismabuild_boundary.py` freezes PQ's reach into
   PrismaBuild internals, and their allowlists under `tests/boundary_allowlists/`
-  only shrink.
+  only shrink. PQ's public door into PrismaBuild is `prismabuild.client`
+  (PB #1254, `PUBLIC_CLIENT` in that test): `staged_lease`,
+  `stage_a_produced_output`, `glm_capture_compatibility`, `residency_map` and
+  `quality_prefill_pb_adapter` reach PB only through it, via
+  `staged_lease.client_sdk`. `staged_lease.sdk_submodule` remains for
+  `joint_forward_resume`, `produced_output_spool` and some tools, which need
+  names the SDK does not publish yet.
   The Tessera fleet drivers PrismaBuild used to carry (the whole-model
   dispatcher and its worker, the per-shard export and ladder dispatchers, the
   status screen and `render_identity.py`) live here since 2026-09-28

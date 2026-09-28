@@ -2209,14 +2209,19 @@ def test_mixed_outcomes_cannot_extend_the_declared_deferral_bound(
     with _fleet(q, tmp_path):
         _strict(monkeypatch, env, pb_repo, q)
         import time as _time
-        started = _time.monotonic()
+        started = None
         try:
             with storage.prefetch(references) as window:
                 storage.get(window, references[0])
                 storage._produced_plan["staging_timeout_s"] = budget
                 monkeypatch.setattr(publication, "retire", alternating)
+                # The clock covers the release wait this test bounds, not
+                # the staging before it: how long the in-test mover takes to
+                # land the group depends on the host and the PB build.
+                started = _time.monotonic()
         except BoundaryProducedReleaseDeferred:
             pass
+        assert started is not None, "the group never staged"
         elapsed = _time.monotonic() - started
     assert elapsed < budget * 6, (
         "the wait must be bounded by the budget it declares, not by one "

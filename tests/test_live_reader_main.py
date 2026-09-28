@@ -88,7 +88,10 @@ def _artifact(tmp_path: Path):
 def _sdk():
     require_prismabuild_sdk()
     from prismaquant.staged_lease import inject_installed_sdk_for_tests
-    return inject_installed_sdk_for_tests()
+    inject_installed_sdk_for_tests()
+    # The fixtures act as PB's mover, so they use the writer half directly.
+    import prismabuild.reader_lease as module
+    return module
 
 
 def _composed(tmp_path: Path, artifact: Path, digest: str):

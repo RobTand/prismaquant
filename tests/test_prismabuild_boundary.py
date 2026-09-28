@@ -46,7 +46,7 @@ from collections import Counter
 
 from tests.boundary_gate import assert_equal, code_strings, escape, python_files
 
-PUBLIC_CLIENT: tuple[str, ...] = ()
+PUBLIC_CLIENT: tuple[str, ...] = ("prismabuild.client",)
 _PB = "prismabuild"
 _LOADER = "sdk_submodule"
 _PATHS = ("prismabuild-fleet/pb-queue", "prismabuild-fleet/cas")
