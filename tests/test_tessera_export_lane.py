@@ -412,8 +412,11 @@ def test_the_driver_has_a_real_tessera_arm_that_names_tesseras_own_tools():
     text = _run_pipeline_text()
     assert 'if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then' in text
     assert "python3 -m prismaquant.tessera_export_lane --model" in text
-    assert "experiments/plan_from_layer_config.py" in text
-    assert "experiments/export_tessera_serving.py" in text
+    # #1587: PrismaQuant writes the plan and the arm exports through the
+    # supported package entry point (tessera#687); neither experiments/
+    # script is named any more.
+    assert "python3 -m prismaquant.tessera_plan_writer" in text
+    assert "python3 -m tessera.export_serving" in text
     # No codec in this repository: the lane must not grow a second encoder.
     assert "export_native_compressed" not in text.split(
         'if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then')[1].split(
@@ -430,46 +433,59 @@ def test_the_driver_declares_the_residency_knob_and_validates_it():
 
 
 def test_the_arm_invokes_exactly_the_declared_producer_tools():
-    """#119 half 2, in-repo half: the arm shells out to Tessera's tools by
-    the path the lane DECLARATION names -- no second spelling in either
-    direction. A tidy-up in the Tessera repository that moves one script, or
-    an arm edit that calls a new one, fails here instead of dying at export
-    time (or worse: resolving to a different file than the declaration
-    advertises).
+    """#119 half 2, in-repo half -- restated for #1587: the arm invokes the
+    producer tools the lane DECLARATION names, in whatever form the entry
+    point takes, and no undeclared ones.
 
-    Both sides are derived from the code that owns them -- the declaration's
-    `producer_tools` and the driver's `${TESSERA_REPO}` command invocations
-    (not its banner echoes, which name the serve script and the census for
-    the operator) -- so a third tool needs no test edit, only a declaration
-    the arm honors.
-
-    One declared tool is run by PrismaQuant itself rather than by the arm: the
-    campaign asks the producer for its expert projection (#183) long before
-    the export container is chosen. That call site spells the path ONCE, as
-    the module constant `tessera_expert_projection.PRODUCER_PLAN_TOOL`, and
-    resolves it THROUGH `require_producer_tools` -- so it is counted here as
-    an invocation rather than exempted, and a fourth tool that nobody runs
-    still fails this test."""
+    The supported exporter is a package module (``python -m
+    tessera.export_serving``, RobTand/tessera#687) run with the pinned
+    checkout on its PYTHONPATH, so its invocation is checked in module form
+    AND checked to resolve through ``${TESSERA_REPO}`` -- the same fail-closed
+    rule the old path-form check enforced.  The plan translation is no longer
+    a producer tool at all (PrismaQuant writes the plan), and the campaign's
+    projection tool (#183) is declared on the ``campaign_tools`` roster and
+    resolved through it by ``tessera_expert_projection``, counted here the
+    same way it always was."""
     import re
 
     from prismaquant.lane_spec import load_lane_spec
     from prismaquant.tessera_expert_projection import PRODUCER_PLAN_TOOL
 
     text = _run_pipeline_text()
-    declared = {
-        f"${{TESSERA_REPO%/}}/{tool.path}"
-        for tool in load_lane_spec("tessera").producer_tools
-    }
+    declared = {tool.path for tool in load_lane_spec("tessera").producer_tools}
+    declared |= {tool.path for tool in load_lane_spec("tessera").campaign_tools}
     assert declared, "the lane declares no producer tools at all"
-    invoked = {"${TESSERA_REPO%/}/" + PRODUCER_PLAN_TOOL}
+
+    def module_form(path):
+        if not path.startswith("src/") or not path.endswith(".py"):
+            return None
+        return path[len("src/"):-len(".py")].replace("/", ".")
+
+    # Bare declaration paths: the ${TESSERA_REPO%/}/ prefix is stripped by
+    # the findall below, and the module form maps back to its src/ path.
+    invoked = {PRODUCER_PLAN_TOOL}
+    exporter_pythonpath = False
     for line in text.splitlines():
         stripped = line.strip()
+        if "${TESSERA_REPO%/}/src" in line and "PYTHONPATH" in line:
+            exporter_pythonpath = True
+        # The module-form exporter carries its PYTHONPATH on the same
+        # line (VAR=... prefix), so strip env assignments first.
+        stripped = re.sub(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+",
+                          "", stripped)
         if not (stripped.startswith("python3 ") or stripped.startswith("bash ")):
             continue
+        # Scripts only: the PYTHONPATH line names a directory, not a tool.
         invoked.update(
-            "${TESSERA_REPO%/}/" + path
-            for path in re.findall(r"\$\{TESSERA_REPO%/\}/([^\s\"]+)", line)
+            path for path in
+            re.findall(r"\$\{TESSERA_REPO%/\}/([^\s\"]+)", line)
+            if path.endswith(".py")
         )
+        run_module = re.findall(r"python3 -m ([\w.]+)", stripped)
+        for name in run_module:
+            candidate = f"src/{name.replace('.', '/')}.py"
+            if candidate in declared:
+                invoked.add(candidate)
     for tool in sorted(declared):
         assert tool in invoked, (
             f"the arm never invokes the declared producer tool {tool}")
@@ -477,6 +493,10 @@ def test_the_arm_invokes_exactly_the_declared_producer_tools():
     assert not undeclared, (
         "the arm shells out to Tessera-repository tools the lane does not "
         f"declare: {sorted(undeclared)}")
+    assert exporter_pythonpath, (
+        "the module-form exporter must run with the pinned checkout on its "
+        "PYTHONPATH (${TESSERA_REPO%/}/src), or a different tessera could "
+        "answer python3 -m tessera.export_serving")
 
 
 # ---------------------------------------------------------------------------

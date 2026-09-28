@@ -24,7 +24,7 @@ V40_CONTRACT = {"contract_version": 40, "producer_interface": {
                         "attribute": "PRODUCER_AUTHORITY",
                         "protocol": "tessera.cached_unit.ReuseAuthority",
                         "canonical_capture_attribute": "canonical_hessian_capture",
-                        "drivers": ["experiments/export_tessera_serving.py"]}}}
+                        "drivers": ["src/tessera/export_serving.py"]}}}
 V39_CONTRACT = {"contract_version": 39}
 
 
@@ -102,10 +102,10 @@ python3() {
     # A preflight handed a composed bundle names it back in the anchor.
     "$PYTEST_PYTHON" -c 'import json, os, sys; from prismaquant.dev_mode import dev_mode_enabled; d = {"cached_encoder_source_proof_mode": "permissive" if dev_mode_enabled() else "strict"}; p = os.environ.get("TEST_PLAN_ASSIGNMENT"); d.update(plan_assignment=p, plan_assignment_sha256=os.environ["TEST_PLAN_DIGEST"]) if p else None; d.update(cached_units=sys.argv[2]) if sys.argv[2] else None; open(sys.argv[1], "w").write(json.dumps(d))' "$build" "$cached"
     return 0
-  elif [[ "$1" == */plan_from_layer_config.py ]]; then
-    echo "TEST_TRANSLATOR_REACHED:$2" >&2
+  elif [[ "$1" == "-m" && "$2" == "prismaquant.tessera_plan_writer" ]]; then
+    echo "TEST_PLAN_WRITER_REACHED:$3" >&2
     return 81
-  elif [[ "$1" == */export_tessera_serving.py ]]; then
+  elif [[ "$1" == "-m" && "$2" == "tessera.export_serving" ]]; then
     echo "TEST_EXPORT_REACHED"
     echo "TEST_EXPORT_ARGS:$*" >&2
     return 0
@@ -149,7 +149,10 @@ def test_actual_driver_reuses_plan_for_identical_allocation(tmp_path):
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "TEST_EXPORT_REACHED" in result.stdout
-    assert "TEST_TRANSLATOR_REACHED" not in result.stderr
+    assert "TEST_PLAN_WRITER_REACHED" not in result.stderr
+    export = next(line for line in result.stdout.splitlines()
+                  if line.startswith("TEST_EXPORT_ARGS:"))
+    assert export.startswith("TEST_EXPORT_ARGS:-m tessera.export_serving"), export
 
 
 @pytest.mark.parametrize("mode,eager", [("eager", "1"), ("compiled", "0")])
@@ -186,7 +189,7 @@ def test_printed_census_recipe_keeps_raw_scope_and_bound_allocation(tmp_path, mo
 def test_actual_driver_translates_the_preflight_source_assignment(tmp_path):
     result = _run(tmp_path, derived=True, translate=True, manifest="missing")
     assert result.returncode == 81, result.stdout + result.stderr
-    assert "TEST_TRANSLATOR_REACHED:" + str(tmp_path / "work with spaces/artifacts/derived layer.json") in result.stdout
+    assert "TEST_PLAN_WRITER_REACHED:" + str(tmp_path / "work with spaces/artifacts/derived layer.json") in result.stdout
     assert "TEST_EXPORT_REACHED" not in result.stdout
 
 
@@ -194,7 +197,7 @@ def test_actual_driver_refuses_a_changed_derived_plan_assignment(tmp_path):
     result = _run(tmp_path, derived=True, translate=True, manifest="missing", corrupt_derived=True)
     assert result.returncode == 2, result.stdout + result.stderr
     assert "derived Tessera plan assignment changed" in result.stderr
-    assert "TEST_TRANSLATOR_REACHED" not in result.stderr
+    assert "TEST_PLAN_WRITER_REACHED" not in result.stderr
     assert "TEST_EXPORT_REACHED" not in result.stdout
 
 

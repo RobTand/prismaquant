@@ -43,12 +43,26 @@ batch and refuses one written under another identity. For each unit it holds,
 the relaunch reads the entry through the window, requires the entry's receipts
 to equal the recorded ones, and passes every row through the checkpoint
 resume's gates (input identity from the entry, wire receipt from the file).
-Only the remainder is encoded. The stream journal is not ``<checkpoint>.parts``,
-so its presence does not send the row to the load-all head.
+Only the remainder is encoded.
+
+**Resuming a checkpoint (PQ #1613).** A checkpoint journal
+(``<checkpoint>`` and ``<checkpoint>.parts``) that an earlier attempt left,
+under either head, is resumed on the stream head too. Its manifest binds every
+unit's W, X and H receipts (``RECEIPT_FIELDS``), and those can only be
+re-derived one entry at a time, so the relaunch takes them from the manifest
+and has ``prepare_journal`` compare every other field of the run identity by
+name before the first entry is read. ``RowStream.expect_identities`` then
+requires each entry's own first read to reproduce its unit's recorded
+receipts before the consumer sees the entry: a journalled unit is not adopted,
+and a pending one is not encoded, unless its inputs are the ones the
+checkpoint was priced on. Finalize compares the whole run identity, built from
+this run's own receipts, as it does for a fresh journal. The row is admitted
+against the window plan it was declared with (``MEMORY_PLANS``), not the
+load-all plan, which on a GLM-5.3 full routed row exceeds a GB10.
 
 **What still needs the load-all head.** ``stream_head_dependency`` names each
-case. A resume of a finalized checkpoint, or a seed adoption, needs the
-finalized run identity before the pending work is known; adaptive rounds after the first re-price units chosen
+case. A seed adoption needs the other campaign's run identity before the
+pending work is known; adaptive rounds after the first re-price units chosen
 from round one; the legacy ``hessian_capture.pt`` export serializes every H;
 and a run without a verified load policy has no per-entry receipt to fold.
 """
@@ -67,6 +81,11 @@ ROW_HEAD_LOAD_ALL = "load-all"
 ROW_HEADS = (ROW_HEAD_STREAM, ROW_HEAD_LOAD_ALL)
 EXECUTION_SCHEMA = "prismaquant.row_head_execution.v1"
 EXECUTION_FILENAME = "row-head-execution.json"
+#: The selected-anchor phase plan each head is admitted against: the row's own
+#: admission and the dispatcher's demand read the same key.
+MEMORY_PLANS = {ROW_HEAD_STREAM: "stream_memory_bytes", ROW_HEAD_LOAD_ALL: "memory_bytes"}
+#: A unit's run-level receipts, in the order the run identity lists them.
+RECEIPT_FIELDS = ("weight", "scoring_rows", "hessian")
 
 #: The writes that cite the run identity, in the order finalize makes them.
 IDENTITY_BOUND_WRITES = (
@@ -97,7 +116,7 @@ def resolve_identity_threads(requested) -> int:
 
 
 def checkpoint_present(checkpoint) -> bool:
-    """Whether a journal a resume would adopt already exists."""
+    """Whether a checkpoint journal a resume would open already exists."""
     checkpoint = Path(checkpoint)
     units = checkpoint.with_name(checkpoint.name + ".parts") / "units"
     return checkpoint.exists() or (units.is_dir() and any(units.iterdir()))
@@ -105,7 +124,7 @@ def checkpoint_present(checkpoint) -> bool:
 
 def stream_head_dependency(*, row_head, selected_source, capture_load_policy,
                            export_hessian_reference_policy, max_rounds,
-                           seed_checkpoint, checkpoint_exists):
+                           seed_checkpoint):
     """``None`` when the stream head may run; otherwise what needs load-all."""
     if row_head == ROW_HEAD_LOAD_ALL:
         return "--row-head load-all was requested"
@@ -126,9 +145,6 @@ def stream_head_dependency(*, row_head, selected_source, capture_load_policy,
     if seed_checkpoint:
         return ("--seed-checkpoint adopts rows under the run identity, which binds "
                 "every unit's inputs before the pending work is known")
-    if checkpoint_exists:
-        return ("a checkpoint exists: resuming it compares the run identity, which "
-                "binds every unit's inputs, before any row is adopted")
     return None
 
 
@@ -208,6 +224,7 @@ class RowStream:
         self._live: dict[str, _Entry] = {}
         self._inflight: dict = {}
         self._first: dict[str, dict] = {}
+        self._expected: dict[str, dict] | None = None
         self._batches: list[list[str]] = []
         self._closed = False
         self._lock = threading.Lock()
@@ -262,6 +279,8 @@ class RowStream:
                       count=entry.count, max_abs=entry.max_abs)
         first = self._first.get(name)
         if first is None:
+            if self._expected is not None:
+                self._require_expected(entry)
             self._first[name] = record
         else:
             self.stats["rereads"] += 1
@@ -272,6 +291,41 @@ class RowStream:
                     "read's receipts, so the unit's inputs changed during this run")
         self._live[name] = entry
         return entry
+
+    def expect_identities(self, receipts):
+        """Require each entry's first read to reproduce ``receipts[name]``.
+
+        A resumed checkpoint's manifest records every unit's W, X and H
+        receipts (``RECEIPT_FIELDS``). Armed before any read, so no entry
+        reaches the consumer, and no shard is written for its unit, unless its
+        receipts are the ones the checkpoint was priced on.
+        """
+        if self._first or self._inflight or self._live:
+            raise RuntimeError("expected receipts must be armed before the first read")
+        if set(receipts) != set(self._names):
+            raise ValueError("expected receipts must cover exactly the stream's units")
+        self._expected = {name: {field: receipts[name][field] for field in RECEIPT_FIELDS}
+                          for name in self._names}
+
+    def _require_expected(self, entry):
+        """Refuse, by unit and field, a first read the checkpoint did not record."""
+        from .digests import canonical_json
+        expected = self._expected[entry.name]
+        observed = entry.identities if isinstance(entry.identities, dict) else {}
+        if set(observed) != set(RECEIPT_FIELDS):
+            differing = sorted(set(observed) ^ set(RECEIPT_FIELDS))
+        else:
+            where = f"{entry.name} receipts"
+            differing = [field for field in RECEIPT_FIELDS
+                         if canonical_json(observed[field], where=where)
+                         != canonical_json(expected[field], where=where)]
+        if differing:
+            self._close_entry(entry)
+            raise RuntimeError(
+                f"{entry.name}: this run's read of its capture entry gives a "
+                f"{', '.join(differing)} receipt the resumed checkpoint's manifest did not "
+                "record, so the checkpoint was priced on other inputs; refusing to adopt "
+                "or encode the unit")
 
     # -- consumer ----------------------------------------------------------
     def plan(self, batches):
@@ -420,6 +474,7 @@ class RowStream:
 
     def execution_record(self, *, dependency=None):
         return dict(schema=EXECUTION_SCHEMA, row_head=ROW_HEAD_STREAM, dependency=dependency,
+                    memory_plan=MEMORY_PLANS[ROW_HEAD_STREAM],
                     reader_threads=self.threads, window_units=2 * self.batch_size,
                     batches=len(self._batches), units=len(self._names),
                     identity_bound_writes=list(IDENTITY_BOUND_WRITES),

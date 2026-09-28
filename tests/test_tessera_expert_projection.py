@@ -126,11 +126,13 @@ def test_lane_spec_declares_the_producer_projection_tool(tmp_path):
     from prismaquant.lane_spec import load_lane_spec
 
     spec = load_lane_spec("tessera")
-    declared = {tool.path for tool in spec.producer_tools}
+    # #1587: the projection tool is a campaign dependency, declared on the
+    # campaign_tools roster, not an export producer tool
+    declared = {tool.path for tool in spec.campaign_tools}
     assert tep.PRODUCER_PLAN_TOOL in declared, (
         "the packed-expert bridge shells out to the producer's projection tool; "
         "an undeclared external dependency is one nobody can check for")
-    for tool in spec.producer_tools:
+    for tool in (*spec.producer_tools, *spec.campaign_tools):
         (tmp_path / tool.path).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / tool.path).write_text("# stub\n")
     assert producer_plan_tool(env={"TESSERA_REPO": str(tmp_path)}) == (
@@ -144,7 +146,11 @@ def test_request_runs_the_declared_tool_once_and_keeps_the_request(tmp_path):
     from prismaquant.lane_spec import load_lane_spec
 
     repo = tmp_path / "repo"
-    for tool in load_lane_spec("tessera").producer_tools:
+    spec = load_lane_spec("tessera")
+    # the campaign's projection tool lives on the campaign_tools roster
+    # (#1587); stub every declared tool on both rosters so the resolver
+    # finds what it needs either way
+    for tool in (*spec.producer_tools, *spec.campaign_tools):
         (repo / tool.path).parent.mkdir(parents=True, exist_ok=True)
         (repo / tool.path).write_text("# stub\n")
     tool = repo / tep.PRODUCER_PLAN_TOOL
@@ -176,7 +182,11 @@ def test_request_runs_the_tool_as_a_script_under_the_container_safe_path(tmp_pat
     from prismaquant.lane_spec import load_lane_spec
 
     repo = tmp_path / "repo"
-    for tool in load_lane_spec("tessera").producer_tools:
+    spec = load_lane_spec("tessera")
+    # the campaign's projection tool lives on the campaign_tools roster
+    # (#1587); stub every declared tool on both rosters so the resolver
+    # finds what it needs either way
+    for tool in (*spec.producer_tools, *spec.campaign_tools):
         (repo / tool.path).parent.mkdir(parents=True, exist_ok=True)
         (repo / tool.path).write_text("# stub\n")
     tool = repo / tep.PRODUCER_PLAN_TOOL
