@@ -231,9 +231,10 @@ def test_replay_refuses_a_moved_shape_table(tmp_path, monkeypatch):
 ])
 def test_pact_refuses_budgets_it_cannot_price(tmp_path, monkeypatch, capsys, extra, diagnostic):
     case = _fixture(tmp_path, monkeypatch)
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as refused:
         prefill_frontier.main(["--output", str(tmp_path / "h.json"), "--", *case.argv, *extra])
-    assert diagnostic in capsys.readouterr().err
+    # argparse prints its refusal; a SystemExit raised with a message carries it.
+    assert diagnostic in capsys.readouterr().err + str(refused.value.code)
 
 
 def test_a_whole_artifact_card_binds_the_hull_and_stamps_the_replay(tmp_path, monkeypatch):
