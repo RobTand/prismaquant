@@ -731,6 +731,13 @@ class ReadStream:
         # consumer's work interval (``consumer_work_s``, PQ #1533).
         self._returned_at = None
         self._worked = False
+        # Exposed-wait sink (PQ #1292): ``wait_sink(kind, start_unix, end_unix,
+        # info)``, called once per take with the interval the consumer sat
+        # blocked and the rates the wait bound derives from. None costs nothing.
+        self.wait_sink = None
+        # Monotonic start of the current interval with a read in flight;
+        # ``read_wall_s`` sums those intervals (union, not thread-seconds).
+        self._read_wall_from = None
         # The lowest index still pending: everything before it is being
         # read, read, or delivered. A reclaimed entry moves it back.
         self._cursor = 0
@@ -739,6 +746,7 @@ class ReadStream:
             "entries": len(entries), "groups": len(groups),
             "pool_width": engine.width,
             "entries_read": 0, "bytes_read": 0, "read_s": 0.0,
+            "read_wall_s": 0.0,
             "rereads": 0, "evictions": 0, "evicted_bytes": 0,
             "ahead_deferrals": 0, "ahead_failures": 0,
             "peak_held_bytes": 0, "peak_workers": 0, "peak_workers_consumer_busy": 0,
@@ -842,10 +850,12 @@ class ReadStream:
             if self._taken >= len(self._groups) or self._groups[self._taken] != group:
                 raise RuntimeError(f"io stream group {group!r} is not the next in order")
             now = time.monotonic()
+            work_before = None
             if self._returned_at is not None:
                 # Take to take, whether or not the consumer released early:
                 # the time it spent outside the engine (PQ #1533).
-                self.counters["consumer_work_s"] += now - self._returned_at
+                work_before = now - self._returned_at
+                self.counters["consumer_work_s"] += work_before
                 self._returned_at = None
                 self._worked = True
             if self._took_at is not None:
@@ -854,6 +864,8 @@ class ReadStream:
             if self._group_state[group] == "deferred":
                 self._group_state[group] = "closed"
             started = now
+            started_unix = time.time()
+            first_fill = not self._worked
             self._consumer_waiting = True
             try:
                 self._pump()
@@ -866,7 +878,14 @@ class ReadStream:
             finally:
                 self._consumer_waiting = False
             waited = time.monotonic() - started
+            ended_unix = time.time()
             nbytes = sum(self._entries[i].size for i in indices)
+            wall = self.counters["read_wall_s"]
+            if self._read_wall_from is not None:
+                # A read still in flight: its interval counts toward the rate
+                # (bytes_read holds only finished reads, so this errs low).
+                wall += time.monotonic() - self._read_wall_from
+            load_rate = self.counters["bytes_read"] / wall if wall > 0 else None
             self.counters["consumer_wait_s"] += waited
             if self._worked:
                 # The first take waits for the stream to fill whatever the
@@ -876,7 +895,15 @@ class ReadStream:
             self.counters["groups_taken"].append(
                 {"group": _jsonable(group), "wait_s": waited, "bytes": nbytes,
                  "entries": len(indices),
-                 "reread_entries": sum(1 for i in indices if self._reads[i] > 1)})
+                 "reread_entries": sum(1 for i in indices if self._reads[i] > 1),
+                 "at_unix": started_unix, "first_fill": first_fill,
+                 "work_before_s": work_before, "load_bytes_per_s": load_rate})
+            sink = self.wait_sink
+            if sink is not None:
+                sink("window-load", started_unix, ended_unix,
+                     {"bytes": nbytes, "first_fill": first_fill,
+                      "work_before_s": work_before,
+                      "load_bytes_per_s": load_rate})
             for i in indices:
                 if self._state[i] == _FAILED:
                     raise EntryError(self._entries[i].key, self._errors[i])
@@ -1069,6 +1096,8 @@ class ReadStream:
             if not demanded and not self._fits(entry):
                 return
             self._state[index] = _READING
+            if self._active == 0:
+                self._read_wall_from = time.monotonic()
             self._active += 1
             self.counters["peak_workers"] = max(self.counters["peak_workers"], self._active)
             if not self._consumer_waiting:
@@ -1158,6 +1187,9 @@ class ReadStream:
         with self._cond:
             group = entry.group
             self._active -= 1
+            if self._active == 0 and self._read_wall_from is not None:
+                self.counters["read_wall_s"] += time.monotonic() - self._read_wall_from
+                self._read_wall_from = None
             self._inflight_raw -= entry.raw_bytes
             self._inflight_charge -= entry.raw_bytes + entry.held_bytes
             self._outstanding[group] -= 1
