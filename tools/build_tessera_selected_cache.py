@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.footprint import whole_artifact_budget_from_assignment_payload
+from prismaquant.schemas import strict_json_loads
 from prismaquant.layer_config import (
     canonicalize_assignment, layer_config_metadata, validate_layer_config_payload)
 from prismaquant.tessera_export_lane import (read_cached_unit_bundle,
@@ -67,6 +68,69 @@ def _bind_selected_assignment(assignment_path: str, expected_digest: str
     return stamp, assignment, layer_config_metadata(payload)
 
 
+def _bind_plan_encoder_reuse(plan_path: str | None, plan_sha256: str | None,
+                             joint: dict):
+    """The original plan's historical encoder allowance, or None (#1488).
+
+    The loader refuses a recorded encoder seal the installed package cannot
+    re-derive unless the plan that priced the checkpoint named it. This reads
+    that plan by digest and admits it only when it is the plan the handoff
+    was joined under -- the same digest and the same original inputs -- as
+    the allocation handoff does (``tessera_joint_allocation``). Nothing is
+    inferred: without ``--plan`` the loader's strict default holds.
+    """
+    if plan_path is None:
+        return None
+    plan = json.loads(_bound(plan_path, plan_sha256, "joint plan"))
+    if joint.get("plan_sha256") != plan_sha256:
+        raise ValueError(
+            f"joint handoff was joined under plan {joint.get('plan_sha256')}, "
+            f"not the supplied plan {plan_sha256}")
+    if plan.get("inputs") != joint.get("inputs"):
+        raise ValueError(
+            "joint plan original inputs differ from the handoff's bound inputs")
+    return plan.get("historical_encoder_reuse")
+
+
+def _split_child_units(assignment: dict[str, str], child_path: str | None,
+                       child_sha256: str | None) -> tuple[dict[str, str], dict | None]:
+    """Leave out the selected units a byte-bound child cache supplies (#1641).
+
+    A handoff's census roster covers only the units its campaign measured; a
+    selection may also name units whose wires live in another cached-units
+    child (GLM-5.3's MTP layer 45). Those units are removed here and composed
+    back by ``tools/compose_tessera_cached_units.py``, so the census rule
+    still judges everything the handoff supplies. A child must name only
+    selected, non-BF16 units: a passthrough has no wire to supply. Format and
+    identity are verified at export intake (``verify_cached_unit``), as for
+    every other cached unit. Returns ``(handoff_assignment, child_binding)``.
+    """
+    if child_path is None:
+        return assignment, None
+
+    def duplicate(key):
+        return ValueError(f"child manifest repeats key {key!r}")
+
+    document = strict_json_loads(_bound(child_path, child_sha256, "child manifest"),
+                                 duplicate=duplicate)
+    units = document.get("units") if isinstance(document, dict) else None
+    if not isinstance(units, dict) or not units:
+        raise ValueError(f"child manifest {child_path} names no units")
+    missing = sorted(set(units) - set(assignment))
+    if missing:
+        raise ValueError(
+            f"child manifest names {len(missing)} unit(s) not in the selected "
+            f"assignment (first: {missing[0]})")
+    passthrough = sorted(name for name in units if assignment[name] == "BF16")
+    if passthrough:
+        raise ValueError(
+            f"child manifest supplies {len(passthrough)} BF16 passthrough "
+            f"unit(s), which have no wire (first: {passthrough[0]})")
+    remainder = {name: fmt for name, fmt in assignment.items() if name not in units}
+    return remainder, {"path": str(Path(child_path).resolve()), "sha256": child_sha256,
+                       "units": len(units)}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--handoff", required=True)
@@ -80,6 +144,12 @@ def main(argv=None) -> int:
     parser.add_argument("--catalog-extension-sha256")
     parser.add_argument("--producer-packages", help="bound JSON mapping exact encoder seals to archived packages")
     parser.add_argument("--producer-packages-sha256")
+    parser.add_argument("--plan", default=None,
+                        help="the original joint plan the handoff was joined under; only its historical_encoder_reuse is read")
+    parser.add_argument("--plan-sha256", default=None)
+    parser.add_argument("--child-manifest", default=None,
+                        help="a cached-units child supplying selected units outside the handoff roster; compose it afterwards")
+    parser.add_argument("--child-manifest-sha256", default=None)
     parser.add_argument("--research-proposal", default=None,
                         help="explicit sampled-pilot research proposal for validation export")
     parser.add_argument("--research-proposal-sha256", default=None)
@@ -88,7 +158,9 @@ def main(argv=None) -> int:
         raise ValueError('research proposal path and SHA-256 must be supplied together')
     extension = None
     packages = None
-    for name in ("catalog_extension", "producer_packages"):
+    if args.plan and args.research_proposal:
+        raise ValueError("a research proposal binds its own pilot plan; do not also pass --plan")
+    for name in ("plan", "child_manifest", "catalog_extension", "producer_packages"):
         if bool(getattr(args, name)) != bool(getattr(args, name + "_sha256")):
             raise ValueError(name + " path and SHA-256 must be supplied together")
     if bool(args.catalog_extension) != bool(args.producer_packages):
@@ -122,15 +194,19 @@ def main(argv=None) -> int:
             raise ValueError('selected cache assignment lacks exact research proposal marker')
     elif 'sampled_joint_proposal' in metadata:
         raise ValueError('selected cache pilot assignment requires explicit research proposal')
+    assignment, child = _split_child_units(
+        assignment, args.child_manifest, args.child_manifest_sha256)
     provenance = handoff.get("provenance", {})
     joint = provenance.get("tessera_joint_anchors", {})
     inputs = joint.get("inputs")
     if not isinstance(inputs, dict):
         raise ValueError("joint handoff has no bound original campaign inputs")
+    reuse = _bind_plan_encoder_reuse(args.plan, args.plan_sha256, joint)
     # A reader, not the synthesis stage: it declares no PrismaBuild phase, so
     # it reports under none rather than under a name nothing declared (#678).
     data = load_measured_anchor_input(inputs, verify_payloads=False,
                                       require_existing_renders=True,
+                                      historical_encoder_reuse=reuse,
                                       progress_phase=None)
     manifest = selected_cached_units_manifest(
         assignment, metadata, handoff, data,
@@ -159,6 +235,8 @@ def main(argv=None) -> int:
                       "manifest_sha256": hashlib.sha256(raw).hexdigest(),
                       "assignment_sha256": args.assignment_sha256,
                       "handoff_sha256": args.handoff_sha256,
+                      "plan_sha256": args.plan_sha256,
+                      "child_manifest": child,
                       "research_proposal_sha256": args.research_proposal_sha256,
                       "catalog_extension": extension,
                       "producer_packages_sha256": args.producer_packages_sha256,

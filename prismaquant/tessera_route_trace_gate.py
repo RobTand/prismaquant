@@ -802,7 +802,42 @@ def compare_route_traces(
     formats: Mapping[str, Mapping[str, Any]],
     serving_source_sha256: Any = _TRACKED_PIN,
 ) -> dict[str, Any]:
-    """The whole gate. Returns a verdict whose ``status`` is one of three.
+    """One serve's traces against the WHOLE price.
+
+    This is the per-serve verdict. An artifact whose price names a module that
+    a single serve never dispatches (an MTP draft layer under a non-speculative
+    serve) can never pass it; :func:`compare_artifact_route_traces` is the
+    artifact-level gate, and judges the union of the serve phases (#1626).
+    """
+    return _compare_route_traces(
+        traces, expected_ranks=expected_ranks, config=config, platform=platform,
+        executes_by_platform=executes_by_platform, formats=formats,
+        serving_source_sha256=serving_source_sha256, stop_before_price=False)
+
+
+#: ``status`` of a verdict that read every observation cleanly and stopped
+#: before comparing it with the price (an artifact-level caller compares it).
+_PENDING = "PENDING"
+
+
+def _compare_route_traces(
+    traces: Sequence[tuple[str, Any]],
+    *,
+    expected_ranks: int,
+    config: Mapping[str, Any],
+    platform: str,
+    executes_by_platform: Mapping[str, Mapping[str, "str | None"]],
+    formats: Mapping[str, Mapping[str, Any]],
+    serving_source_sha256: Any = _TRACKED_PIN,
+    stop_before_price: bool,
+) -> dict[str, Any]:
+    """The whole per-serve gate. Returns a verdict whose ``status`` is one of three.
+
+    ``stop_before_price`` returns ``status == "PENDING"`` instead of comparing
+    the served modules with the price, once every check that concerns the
+    serve alone (files, ranks, code digest, identity, platform, rank
+    agreement) has passed on an exact-grade trace; a histogram-grade trace is
+    NOT VERIFIED there, since no per-module claim can be read from it.
 
     ``traces`` is ``[(rank_label, payload_or_None), ...]`` in rank order; a
     ``None`` payload is a rank whose trace file does not exist. The priced side
@@ -965,6 +1000,15 @@ def compare_route_traces(
         return _finish(REFUSED, (
             "REFUSED: ranks served different module histograms; tensor "
             "parallelism shards a module and never splits it: " + "; ".join(parts)))
+    if stop_before_price:
+        if grade != EXACT:
+            return _finish(NOT_VERIFIED, (
+                "NOT VERIFIED: the trace is histogram grade, not per-module; "
+                "the artifact gate compares module names, which it does not "
+                "carry (#509)"))
+        verdict["status"] = _PENDING
+        verdict["detail"] = ""
+        return verdict
     if grade == EXACT:
         for label in labels:
             difference = _module_difference(
@@ -1001,6 +1045,165 @@ def compare_route_traces(
         + ", ".join(f"{key}={count}" for key, count in served.items())
         + "), but the file names no modules, so which module rode which "
         "contract is not something it can support (#509)"))
+
+
+#: Schema of :func:`compare_artifact_route_traces`' verdict.
+ARTIFACT_VERDICT_SCHEMA = "prismaquant.tessera_route_trace_artifact_verdict/1"
+
+
+def compare_artifact_route_traces(
+    phases: Mapping[str, Sequence[tuple[str, Any]]],
+    *,
+    expected_ranks: int,
+    config: Mapping[str, Any],
+    platform: str,
+    executes_by_platform: Mapping[str, Mapping[str, "str | None"]],
+    formats: Mapping[str, Mapping[str, Any]],
+    serving_source_sha256: Any = _TRACKED_PIN,
+) -> dict[str, Any]:
+    """The ARTIFACT's route gate: its price against the union of its serve phases (#1626).
+
+    ``phases`` is ``{phase name: [(rank_label, payload_or_None), ...]}``, the
+    serves the caller CLAIMS observed this artifact. Nothing is inferred from
+    which files exist: a claimed phase whose trace is missing, empty or short
+    is NOT VERIFIED, and a phase nobody claims is not consulted. A module the
+    price names but no claimed phase dispatches (an MTP draft layer whose
+    only dispatcher is the speculative serve) is REFUSED; so is a module some
+    phase serves that the price does not name, and a module served on a
+    contract other than its priced one in ANY phase that dispatches it.
+
+    Each phase is first read with every check that concerns that serve alone
+    (:func:`compare_route_traces` minus the price comparison). The per-phase
+    whole-price verdict is kept under ``phases`` and labelled ``diagnostic``:
+    it is not the gate, and a phase that legitimately dispatches a subset of
+    the price is REFUSED there. A REFUSED phase outranks a NOT VERIFIED one.
+    """
+    if not isinstance(phases, Mapping):
+        raise TesseraRouteTraceError(
+            "phases must be a mapping {phase name: [(rank label, trace), ...]}: "
+            "the serves this artifact claims are stated, never inferred")
+    common = dict(
+        expected_ranks=expected_ranks, config=config, platform=platform,
+        executes_by_platform=executes_by_platform, formats=formats,
+        serving_source_sha256=serving_source_sha256)
+    priced = priced_histogram(
+        config, platform=platform,
+        executes_by_platform=executes_by_platform, formats=formats)
+    priced_modules, renamed, profile_name = served_namespace(config, priced["owners"])
+    checkpoint_of = {served: owner for owner, served in renamed.items()}
+    verdict: dict[str, Any] = {
+        "schema": ARTIFACT_VERDICT_SCHEMA,
+        "granularity": GRANULARITY,
+        "exact_module_qualified": False,
+        "platform": platform,
+        "expected_ranks": expected_ranks,
+        "phase_names": list(phases),
+        "phases": {},
+        "priced": priced["histogram"],
+        "priced_owners": priced["owners"],
+        "served_union": None,
+        "served_by_phase": {},
+        "not_served_in_every_phase": {},
+    }
+    if renamed:
+        verdict["served_namespace"] = {"profile": profile_name, "renamed": renamed}
+
+    def _finish(status: str, detail: str) -> dict[str, Any]:
+        verdict["status"] = status
+        verdict["detail"] = detail
+        return verdict
+
+    if not phases:
+        return _finish(NOT_VERIFIED, (
+            "NOT VERIFIED: no serve phase was claimed; the artifact gate "
+            "judges the phases it is given and infers none"))
+
+    refused: list[str] = []
+    unverified: list[str] = []
+    served_by_phase: dict[str, dict[str, str]] = {}
+    for name, traces in phases.items():
+        if isinstance(traces, (str, bytes)) or not isinstance(traces, Sequence):
+            raise TesseraRouteTraceError(
+                f"phase {name!r}: traces must be a list of (rank label, trace)")
+        diagnostic = _compare_route_traces(traces, stop_before_price=False, **common)
+        diagnostic["diagnostic"] = True
+        verdict["phases"][name] = diagnostic
+        observed = _compare_route_traces(traces, stop_before_price=True, **common)
+        if observed["status"] == REFUSED:
+            refused.append(f"phase {name!r}: {observed['detail']}")
+            continue
+        if observed["status"] == NOT_VERIFIED:
+            unverified.append(f"phase {name!r}: {observed['detail']}")
+            continue
+        per_rank = observed["served_modules"]
+        first, *rest = list(per_rank)
+        modules = per_rank[first]
+        odd = [label for label in rest if per_rank[label] != modules]
+        if odd:
+            refused.append(
+                f"phase {name!r}: ranks {first} and {odd} served different modules; "
+                "tensor parallelism shards a module and never splits it")
+            continue
+        if not modules:
+            unverified.append(f"phase {name!r}: NOT VERIFIED: the trace records no dispatch")
+            continue
+        served_by_phase[name] = dict(modules)
+    verdict["served_by_phase"] = served_by_phase
+    if refused:
+        return _finish(REFUSED, "REFUSED: " + "; ".join(refused))
+    union: dict[str, str] = {}
+    problems: list[str] = []
+    for name, modules in served_by_phase.items():
+        # Only the modules this phase dispatched: what it did not dispatch is
+        # the union's business, not a defect of the phase.
+        difference = _module_difference(
+            {module: priced_modules[module] for module in modules if module in priced_modules},
+            modules, checkpoint_of)
+        problems.extend(f"phase {name!r}: {line}" for line in difference)
+        union.update(modules)
+    if unverified:
+        # A refusal outranks a missing observation: a contract that already
+        # disagrees in an observed phase does not wait for the missing one.
+        # "Priced but served by no phase" is not judged here, because a phase
+        # nobody could read may be the one that serves it.
+        if problems:
+            return _finish(REFUSED, (
+                "REFUSED: the observed phases already disagree with the price on "
+                "platform " + repr(platform) + ": " + "; ".join(problems)
+                + "; unobserved: " + "; ".join(
+                    u.replace("NOT VERIFIED: ", "", 1) for u in unverified)))
+        return _finish(NOT_VERIFIED, "NOT VERIFIED: " + "; ".join(
+            u.replace("NOT VERIFIED: ", "", 1) for u in unverified)
+            + "; a claimed phase with no observation is not a pass")
+    verdict["served_union"] = dict(sorted(union.items()))
+    unserved = sorted(set(priced_modules) - set(union))
+    for module in _sample(unserved):
+        label = (f"{module} (priced as {checkpoint_of[module]})"
+                 if module in checkpoint_of else module)
+        if module in priced_modules:
+            problems.append(
+                f"{label}: priced {priced_modules[module]}, served by no phase "
+                f"({', '.join(map(repr, served_by_phase))} claimed)")
+        else:  # the sample's own overflow marker
+            problems.append(label)
+    verdict["not_served_in_every_phase"] = {
+        module: sorted(n for n, modules in served_by_phase.items() if module not in modules)
+        for module in sorted(union)
+        if any(module not in modules for modules in served_by_phase.values())}
+    if problems:
+        return _finish(REFUSED, (
+            "REFUSED: the priced activation contracts and the modules the "
+            "claimed phases served differ on platform " + repr(platform)
+            + ": " + "; ".join(problems)))
+    verdict["granularity"] = EXACT_GRANULARITY
+    verdict["exact_module_qualified"] = True
+    late = verdict["not_served_in_every_phase"]
+    return _finish(AGREE, (
+        f"exact per-module: {len(priced_modules)} priced module(s), every one "
+        f"served on its priced contract in each phase that dispatches it, across "
+        f"{len(served_by_phase)} phase(s) ({', '.join(map(repr, served_by_phase))})"
+        + (f"; {len(late)} module(s) not dispatched in every phase: "
+           + ", ".join(_sample(list(late), limit=4)) if late else "")))
 
 
 def load_trace_contract() -> tuple[dict[str, dict[str, "str | None"]], dict[str, dict[str, Any]]]:

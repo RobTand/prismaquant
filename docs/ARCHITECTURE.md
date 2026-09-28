@@ -48,6 +48,50 @@ Gate: `tests/test_tessera_row_stream.py`. The resume's measured peak of
 resident capture X and H is at most the window, not the population. No
 pipeline default, stage, format, lane or ship gate changes.
 
+Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
+TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
+opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
+with `enforce_eager` off and one declared `--compilation-config` that states
+exactly `mode`, `cudagraph_mode` and `cudagraph_capture_sizes`
+(`cudagraph_mode` NONE refuses; sizes are strictly ascending within 1..2049,
+the scorer's batch). The coordinator's and every worker's resolved mode,
+graph mode and capture sizes must equal the declared ones, so the pinned
+vLLM's silent switch to compilation mode NONE on GLM-5.3 refuses instead of
+scoring. Speculative decoding stays refused in both modes. Only a compiled
+run's `runtime_binding` gains `execution_mode: "compiled"` and
+`engine_kwargs.compilation_config`; an eager run's engine kwargs, binding and
+worker RPC are unchanged, so every eager qualification still replays.
+`gold_engine_options.headless_peer_argv` spells the config
+`--compilation-config` and states `--no-enforce-eager` only beside it, so the
+other gold tools' peer argv and serve fingerprints are unchanged. Under
+FULL_DECODE_ONLY the scorer's one prefill per window runs outside the captured
+graphs: a compiled receipt measures the engine a compiled serve builds, not
+its graph-replayed decode. Measurement-tool contract only; no default, stage,
+format, lane or ship gate changes. Gates: `tests/test_glm_tr3_full_vocab.py`,
+`tests/test_gold_engine_options.py`.
+
+Re-stamped 2026-09-28 (PQ #1626, `claude/pq-route-trace-union`): **the
+`route.trace` gate judges an ARTIFACT against the union of its serve phases**
+(§8.2, §9.4). A phase compared against the whole price can never pass for an MTP
+artifact: the draft layer is priced, and a non-speculative serve never
+dispatches it. `tessera_route_trace_gate.compare_artifact_route_traces` takes
+the caller's claimed phases explicitly (`{"nonspec": [rank traces], "spec":
+[rank traces]}`; phases are never inferred from which files exist) and
+requires, per module: a priced module is dispatched in at least one claimed
+phase, a served Tessera module is priced, and its activation contract equals
+the priced one in EVERY phase that dispatches it. A claimed phase with a
+missing or empty trace is NOT VERIFIED, ranks that name different module sets
+are REFUSED, and a REFUSED finding in an observed phase outranks a NOT
+VERIFIED one from a missing phase. Per-phase verdicts stay in the result,
+labelled diagnostic; only the artifact verdict is the gate. There is no
+exclusion list: a module unserved in every claimed phase is REFUSED by name.
+`compare_route_traces` (one phase against the whole price) is unchanged.
+The draft layer's served name is the attested draft namespace
+(`model.layers.45.mlp.experts`, #1490). Gates:
+`tests/test_tessera_route_trace_gate_artifact.py` on fixtures cut from the real
+A8 traces (`tests/fixtures/tessera_route_trace_union/`, see its
+`PROVENANCE.md`). No pipeline default, stage, format or lane changes.
+
 Re-stamped 2026-09-28 (PQ #1618, `claude/pq-1618-routed-rates`): the lane
 roster mirror learns Tessera v45's structure-scoped `column_rates_routed_moe`
 requirement. `lane_eligibility.parse_lane_claim` reads it (an ascending subset
@@ -3927,6 +3971,17 @@ can emit the export's PB read paths. The v1 single-root path is unchanged. The
 reader is the pinned Tessera (`acf9eafa6a…`, #966); see "Selected cached wires
 from an additive historical catalog". No format, default, stage or ship gate
 changes.
+Its `--plan`/`--plan-sha256` (2026-09-28, PQ #1488) read the original joint
+plan by digest, admit it only when the handoff was joined under that digest
+with the same inputs, and pass only its `historical_encoder_reuse` to the
+anchor loader, as the allocation handoff does. Without `--plan` the loader's
+strict encoder check is unchanged.
+Its `--child-manifest`/`--child-manifest-sha256` (2026-09-28, PQ #1641) bind a
+cached-units child by bytes and leave the selected units it names out of the
+handoff manifest, refusing a child unit that is unselected or BF16
+passthrough; `tools/compose_tessera_cached_units.py` then composes the two
+(the GLM-5.3 release's MTP layer 45 rides the A16 MTP child this way). The
+census roster rule still judges every unit the handoff supplies.
 
 Tessera pin (2026-09-22, `ws-j2/tessera-pin-v34`, Refs #944 #939): the
 serving-runtime pin and the reader dev pin move from `cc739a5516…` (contract
@@ -4252,6 +4307,15 @@ Stamps follow, newest first, each recording its own branch and date.
 Re-stamped (2026-09-28, `claude/1613-streaming-resume`) for **a checkpoint
 resumed on the stream head under its window plan** (PQ #1613); see the stamp
 at the top of this document.
+
+As of: 2026-09-28 · `claude/tr3-compiled-1634`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-28, `claude/tr3-compiled-1634`) for **the TR3 scorer's
+compiled execution mode** (PQ #1634): `--execution-mode compiled` with a
+declared compilation config, observed on every rank; the headless peer states
+`--no-enforce-eager` only beside a compilation config; see the stamp at the
+top of this document.
 
 Re-stamped (2026-09-28, `claude/pact-1584-hull`) for **the PACT hull's exact
 binding-budget probe** (PQ #1584): `prismaquant/exact_mckp.py` replaces the
@@ -9390,8 +9454,9 @@ route's E4M3/BF16 semantics and its separate source/cache/geometry/runtime
 checks remain required. Gate: `tests/test_glm_packed_research_profile.py`.
 
 Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
-GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer has always
-forced eager execution and already carries the selected stock MP topology,
+GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer then always
+forced eager execution (PQ #1634 added an opt-in compiled mode on 2026-09-28;
+see that re-stamp) and already carries the selected stock MP topology,
 including `moe_backend`; it now accepts the explicit stock-vLLM `CUSTOM`
 attention backend and a JSON-object kernel configuration, then records both in
 `runtime_binding.engine_kwargs`. The one-window hook qualification and the
@@ -23932,6 +23997,10 @@ from the coordinator's own engine kwargs by
 `gold_engine_options.headless_peer_argv`, which **refuses** a kwarg it has no
 published stock spelling for rather than dropping it, and a multi-node receipt
 stamps that argv so the launcher can be checked against the engine rank 0 built.
+A coordinator that declares a `compilation_config` (the TR3 scorer's compiled
+mode, PQ #1634) states `--no-enforce-eager` beside `--compilation-config`; no
+other caller's argv carries either, so the two gold tools' stamped argv is
+unchanged.
 
 **Served-artifact vLLM KL-vs-BF16** — `tools/measure_vllm_full_kl.py` retains the
 exact-full-vocabulary path for teachers that fit its ordinary vLLM two-pass
@@ -25939,7 +26008,11 @@ artifact's `config.json` prices, and stays unfilled when any rank's trace is
 missing. The priced targets are checkpoint names, so the gate first names each
 one in the serve's namespace through `ModelProfile.served_module_name` (§8.2,
 PQ #1490); GLM-5.3 serves its body as `language_model.model.…` and its MTP
-draft as `model.layers.N.…`. The eighth is `uniform_control`, which `required_slots` adds because
+draft as `model.layers.N.…`. A single phase is diagnostic: an artifact is judged
+by `compare_artifact_route_traces` against the union of its explicitly claimed
+serve phases (PQ #1626), so a non-speculative phase that never dispatches the
+priced draft layer no longer refuses an MTP artifact that a speculative phase
+does serve. The eighth is `uniform_control`, which `required_slots` adds because
 the artifact has a rate axis, not because any lane asked for it (#121, §7.1).
 `open_lane_shipcard` stamps `export_container` into the card's build block so
 that second obligation rests on the card as well as on the checkpoint's
