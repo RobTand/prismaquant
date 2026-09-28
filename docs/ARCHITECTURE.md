@@ -29,7 +29,7 @@ prefix. `format_registry`, `production_weight_cache`, `perturbed_x_cache`,
 `weight_session`, `aura_cost`, `select_validated_frontier`, `serving_profiles`
 and `autoscale` import no lane module; `is_tessera_format_name` is gone from
 core, and `FormatSpec` gains `render_owner` and `requires_production_render`.
-The core-boundary allowlist loses 21 lines. A recorded GLM-5.3 allocation
+The core-boundary allowlist loses 22 lines. A recorded GLM-5.3 allocation
 reproduces every output byte for byte on main and on the branch, except the
 wall-clock `solve_diagnostics.<target>.solver_seconds` stamp in
 `layer_config.json` and `selection.json`, which differs between any two runs
