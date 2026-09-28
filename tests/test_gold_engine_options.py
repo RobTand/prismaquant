@@ -454,6 +454,59 @@ def test_peer_argv_round_trips_to_the_coordinators_engine_kwargs():
             assert back[key] == str(value), key
 
 
+def test_a_compiled_coordinator_states_eager_off_and_its_compilation_config():
+    """PQ #1634: the peer builds the compiled engine rank 0 built rather than a
+    default, and its argv parses back to the coordinator's kwargs."""
+    from tools.gold_engine_options import headless_peer_argv, parse_headless_peer_argv
+
+    compilation = {"mode": "NONE", "cudagraph_mode": "FULL_DECODE_ONLY",
+                   "cudagraph_capture_sizes": [1, 2, 3, 4]}
+    kwargs = {**_glm_tr3_scorer_kwargs(), "enforce_eager": False, "compilation_config": compilation}
+    argv = headless_peer_argv(kwargs, node_rank=1)
+    assert "--no-enforce-eager" in argv and "--enforce-eager" not in argv
+    assert argv[argv.index("--compilation-config") + 1] == (
+        '{"cudagraph_capture_sizes":[1,2,3,4],"cudagraph_mode":"FULL_DECODE_ONLY","mode":"NONE"}')
+    _, _, back = parse_headless_peer_argv(argv)
+    assert back["enforce_eager"] is False and back["compilation_config"] == compilation
+
+
+@pytest.mark.parametrize("runner", RUNNERS)
+def test_a_gold_tools_default_engine_states_nothing_for_eager_off(monkeypatch, runner):
+    """PQ #1634 review: only a coordinator that declares a compilation config
+    states eager off. A gold tool's own default (no `--enforce-eager`, so
+    `enforce_eager` False, and no compilation config) emits the peer argv it
+    emitted before #1634, so the argv its receipt stamps and its fingerprint
+    do not move."""
+    from tools.gold_engine_options import headless_peer_argv
+
+    module = importlib.import_module(runner)
+    seen = {}
+    monkeypatch.setitem(sys.modules, "vllm", types.SimpleNamespace(LLM=lambda **kw: seen.update(kw)))
+    monkeypatch.setattr(module, "refuse_if_spec_decode", lambda **kw: False)
+    args = _args(enforce_eager=False)
+    if runner.endswith("full_kl"):
+        module._load_llm(args, max_model_len=513)
+    else:
+        module._load_llm(args)
+    assert seen["enforce_eager"] is False and "compilation_config" not in seen
+    argv = headless_peer_argv(seen, node_rank=1)
+    assert "--no-enforce-eager" not in argv and "--enforce-eager" not in argv
+    assert argv == headless_peer_argv(
+        {k: v for k, v in seen.items() if k != "enforce_eager"}, node_rank=1)
+
+
+def test_the_peer_parser_refuses_eager_off_without_a_compilation_config():
+    """The parser stays the exact inverse: headless_peer_argv never states
+    `--no-enforce-eager` without `--compilation-config`, so an argv that does
+    was not derived from a coordinator's kwargs."""
+    from tools.gold_engine_options import headless_peer_argv, parse_headless_peer_argv
+
+    argv = headless_peer_argv({**_glm_tr3_scorer_kwargs(), "enforce_eager": False}, node_rank=1)
+    assert "--no-enforce-eager" not in argv
+    with pytest.raises(ValueError, match="--no-enforce-eager without --compilation-config"):
+        parse_headless_peer_argv(argv + ["--no-enforce-eager"])
+
+
 def test_kernel_config_must_be_a_json_object():
     from tools.gold_engine_options import headless_peer_argv
 

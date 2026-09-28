@@ -1,5 +1,27 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
+TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
+opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
+with `enforce_eager` off and one declared `--compilation-config` that states
+exactly `mode`, `cudagraph_mode` and `cudagraph_capture_sizes`
+(`cudagraph_mode` NONE refuses; sizes are strictly ascending within 1..2049,
+the scorer's batch). The coordinator's and every worker's resolved mode,
+graph mode and capture sizes must equal the declared ones, so the pinned
+vLLM's silent switch to compilation mode NONE on GLM-5.3 refuses instead of
+scoring. Speculative decoding stays refused in both modes. Only a compiled
+run's `runtime_binding` gains `execution_mode: "compiled"` and
+`engine_kwargs.compilation_config`; an eager run's engine kwargs, binding and
+worker RPC are unchanged, so every eager qualification still replays.
+`gold_engine_options.headless_peer_argv` spells the config
+`--compilation-config` and states `--no-enforce-eager` only beside it, so the
+other gold tools' peer argv and serve fingerprints are unchanged. Under
+FULL_DECODE_ONLY the scorer's one prefill per window runs outside the captured
+graphs: a compiled receipt measures the engine a compiled serve builds, not
+its graph-replayed decode. Measurement-tool contract only; no default, stage,
+format, lane or ship gate changes. Gates: `tests/test_glm_tr3_full_vocab.py`,
+`tests/test_gold_engine_options.py`.
+
 Re-stamped 2026-09-28 (PQ #1626, `claude/pq-route-trace-union`): **the
 `route.trace` gate judges an ARTIFACT against the union of its serve phases**
 (§8.2, §9.4). A phase compared against the whole price can never pass for an MTP
@@ -4220,8 +4242,14 @@ resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
-As of: 2026-09-28 · `claude/pact-1584-hull`.
+As of: 2026-09-28 · `claude/tr3-compiled-1634`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-28, `claude/tr3-compiled-1634`) for **the TR3 scorer's
+compiled execution mode** (PQ #1634): `--execution-mode compiled` with a
+declared compilation config, observed on every rank; the headless peer states
+`--no-enforce-eager` only beside a compilation config; see the stamp at the
+top of this document.
 
 Re-stamped (2026-09-28, `claude/pact-1584-hull`) for **the PACT hull's exact
 binding-budget probe** (PQ #1584): `prismaquant/exact_mckp.py` replaces the
@@ -9360,8 +9388,9 @@ route's E4M3/BF16 semantics and its separate source/cache/geometry/runtime
 checks remain required. Gate: `tests/test_glm_packed_research_profile.py`.
 
 Re-stamped (2026-09-13, `codex/glm-tr3-runtime-flags`) for the opt-in
-GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer has always
-forced eager execution and already carries the selected stock MP topology,
+GLM-5.3 TR3 full-vocabulary scorer runtime binding. The scorer then always
+forced eager execution (PQ #1634 added an opt-in compiled mode on 2026-09-28;
+see that re-stamp) and already carries the selected stock MP topology,
 including `moe_backend`; it now accepts the explicit stock-vLLM `CUSTOM`
 attention backend and a JSON-object kernel configuration, then records both in
 `runtime_binding.engine_kwargs`. The one-window hook qualification and the
@@ -23901,6 +23930,10 @@ from the coordinator's own engine kwargs by
 `gold_engine_options.headless_peer_argv`, which **refuses** a kwarg it has no
 published stock spelling for rather than dropping it, and a multi-node receipt
 stamps that argv so the launcher can be checked against the engine rank 0 built.
+A coordinator that declares a `compilation_config` (the TR3 scorer's compiled
+mode, PQ #1634) states `--no-enforce-eager` beside `--compilation-config`; no
+other caller's argv carries either, so the two gold tools' stamped argv is
+unchanged.
 
 **Served-artifact vLLM KL-vs-BF16** — `tools/measure_vllm_full_kl.py` retains the
 exact-full-vocabulary path for teachers that fit its ordinary vLLM two-pass
