@@ -202,7 +202,6 @@
   "hashlib:prismaquant/select_validated_frontier.py::main",
   "hashlib:prismaquant/sensitivity_card.py::CardProvenance.fingerprint",
   "hashlib:prismaquant/sensitivity_card_build.py::_calib_hash",
-  "hashlib:prismaquant/serving_runtime_patches/glm53_mtp_mapper/patch_glm5next_mtp_mapper.py::<module>",
   "hashlib:prismaquant/shard_layout.py::tensor_payload_identity",
   "hashlib:prismaquant/shipcard.py::_file_content_sha256",
   "hashlib:prismaquant/shipcard.py::_verify_open_safetensors_fd",
