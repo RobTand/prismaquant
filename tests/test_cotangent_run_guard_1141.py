@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from prismaquant import joint_cost_quantum, joint_stageb_resources
+from prismaquant import joint_adjoint_checkpoints, joint_stageb_resources
 from prismaquant.joint_stageb_resources import COTANGENT_SCRATCH_ENV
 from prismaquant.production_weight_cache import ProductionWeightCache
 
@@ -31,7 +31,7 @@ _POLICY = {
 
 def test_a_plane_the_host_cannot_hold_refuses_before_the_checkpoint_load(tmp_path, monkeypatch):
     loads = []
-    monkeypatch.setattr(joint_cost_quantum, "load_adjoint_checkpoint",
+    monkeypatch.setattr(joint_adjoint_checkpoints, "load_adjoint_checkpoint",
                         lambda *a, **k: loads.append(1))
     for name in COTANGENT_SCRATCH_ENV:
         monkeypatch.delenv(name, raising=False)
@@ -60,7 +60,7 @@ def test_with_the_guard_neutralised_the_same_launch_reaches_the_load(tmp_path, m
         loads.append(1)
         raise _Stop("checkpoint load reached")
 
-    monkeypatch.setattr(joint_cost_quantum, "load_adjoint_checkpoint", load)
+    monkeypatch.setattr(joint_adjoint_checkpoints, "load_adjoint_checkpoint", load)
     single, receipt, output_root = _campaign(tmp_path, monkeypatch)
     with pytest.raises(_Stop):
         runtime._run_quantum(
@@ -83,7 +83,7 @@ def test_a_scratch_pair_that_covers_the_plane_passes_the_guard(tmp_path, monkeyp
         loads.append(1)
         raise _Stop("checkpoint load reached")
 
-    monkeypatch.setattr(joint_cost_quantum, "load_adjoint_checkpoint", load)
+    monkeypatch.setattr(joint_adjoint_checkpoints, "load_adjoint_checkpoint", load)
     single, receipt, output_root = _campaign(tmp_path, monkeypatch)
     with pytest.raises(_Stop):
         runtime._run_quantum(
