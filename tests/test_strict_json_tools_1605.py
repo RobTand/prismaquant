@@ -1,11 +1,13 @@
-"""Tools strict-JSON loaders speak through the shared owner (issue #1605).
+"""Tools strict-JSON loaders and their refusal vocabularies (issue #1605).
 
-Five loaders restated ``prismaquant/schemas.py::strict_json_loads`` with
-identical ``json.loads`` options; each now delegates with its own error
-builders preserved. These tmp_path tests pin the refusal vocabulary per
-site -- the error type and the message fragment a caller matches on --
-plus one acceptance each, so the delegation cannot widen or narrow a
-refusal unnoticed.
+Only the host-side ``dsv4_wikitext_inputs`` loader delegates to
+``prismaquant/schemas.py::strict_json_loads``. The serving-container tools
+(``serve_fingerprint``, ``prismaquant_runtime_snapshot``) and
+``container_runtime_identity`` keep local hooks: they run with no installed
+package (see ``test_stdlib_tools_no_package_1605.py``). These tmp_path
+tests pin the refusal vocabulary per site -- the error type and the message
+fragment a caller matches on -- plus one acceptance each, so a refusal
+cannot widen or narrow unnoticed.
 """
 
 from __future__ import annotations

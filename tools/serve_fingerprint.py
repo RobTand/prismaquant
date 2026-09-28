@@ -245,6 +245,17 @@ TESSERA_SERVING_RUNTIME_PIN_RELATIVE = Path(
     "prismaquant") / "tessera_runtime" / "tessera_serving_runtime_pin.json"
 
 
+def _reject_duplicate_pin_keys(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"serving pin repeats JSON key {key!r}")
+        result[key] = value
+    return result
+
+
 def _read_tessera_serving_pin_payload(
     path: str | os.PathLike,
 ) -> dict[str, Any]:
@@ -270,12 +281,9 @@ def _read_tessera_serving_pin_payload(
             f"Tessera serving pin must be one real file, not a symlink: {where}"
         )
     try:
-        from prismaquant.schemas import strict_json_loads
-
-        payload = strict_json_loads(
+        payload = json.loads(
             raw,
-            duplicate=lambda key: ValueError(
-                f"serving pin repeats JSON key {key!r}"),
+            object_pairs_hook=_reject_duplicate_pin_keys,
         )
     except ValueError as exc:
         raise ValueError(
@@ -1918,6 +1926,15 @@ def _models_endpoint_url(value: str) -> str:
     return canonical_origin + "/v1/models"
 
 
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"models response repeats JSON key {key!r}")
+        result[key] = value
+    return result
+
+
 def models_endpoint_binding_from_bytes(
     raw: bytes,
     *,
@@ -1932,14 +1949,12 @@ def models_endpoint_binding_from_bytes(
     if not isinstance(expected_served_model, str) or not expected_served_model:
         raise ValueError("expected served model must be non-empty")
     try:
-        from prismaquant.schemas import strict_json_loads
-
-        payload = strict_json_loads(
+        payload = json.loads(
             raw.decode("utf-8", "strict"),
-            duplicate=lambda key: ValueError(
-                f"models response repeats JSON key {key!r}"),
-            constant=lambda value: ValueError(
-                f"models response contains non-finite number {value}"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"models response contains non-finite number {value}")
+            ),
         )
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("models endpoint did not return valid UTF-8 JSON") from exc
