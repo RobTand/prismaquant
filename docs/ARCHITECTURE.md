@@ -1,5 +1,94 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1141, `sonnet/1141-cotangent-guards`): **a Stage B
+row that loads the whole cotangent plane refuses before the load when the host
+cannot hold it.** Without the cotangent scratch pair the checkpoint load holds
+the entire `(probe, batch)` plane on the host, a cost the sealed resource
+policy did not price and the container's 28 GiB cap then enforced by kill.
+`derive_policy` takes an optional `cotangent = {"host_plane_bytes": N}` block
+(`joint_stageb_resources.cotangent_policy`, rederived by `verify_policy`) that
+subtracts N from the retained-render host bound
+(`derive_retained_window_budget(host_cotangent_bytes=...)`), so a plan whose
+render window plus plane exceeds the host refuses at planning. The one shared
+check `verify_cotangent_plane_fits(plane_bytes, policy, environ)` is applied
+twice: by `tools/dispatch_joint_quanta.quantum_argv` against the sealed spec's
+`env` (a band row with no handoff, before the container wraps), and by
+`joint_cost_quantum` before the checkpoint/handoff load against `os.environ`.
+With the scratch pair declared the ceiling must cover the plane (the pair is
+parsed once, by `joint_stageb_resources.cotangent_scratch`, which
+`cost_streaming.checkpoint_cotangent_sink` also calls); without it the
+plane plus the host owners and the render cap must fit the policy's host bound.
+A handoff row with the one-pass spill streams its incoming plane (#1143) and is
+not checked. No format, default, stage or ship gate changes; a policy without
+the `cotangent` block derives and verifies as before. Gates:
+`tests/test_joint_stageb_resources.py`, `tests/test_dispatch_joint_quanta.py`.
+
+Re-stamped 2026-09-28 (PQ #1431, `sonnet/1431-reclaim-declarations`): the
+Stage B render stream and spill replay reclaimers now declare that their
+frees lower `MemAvailable` as well as committed bytes
+(`RENDER_STREAM_RECLAIM_LOWERS`, `SPILL_REPLAY_RECLAIM_LOWERS`,
+`joint_statistics_replay.py:377,386`). The GB10 probe measured both frees
+returning about the bytes freed to the host; the declaration of `committed`
+alone was wrong. The probe's midpoint criterion stays, but its host reading is
+the rise of the host reading the guard acts on: `MemAvailable` plus the pages
+on the per-CPU free lists (`io_spans.host_memory`, read by
+`CaptureMemoryGuard._observe` through `memory_management._host_memory_info`,
+and by the probe). The same free read +755 MB in `MemAvailable` on one run and
+-1 MB on the next, with the pages parked on per-CPU lists that `MemAvailable`
+does not count until the kernel trims them; the sum does not depend on where
+they land. A host-term shortfall now asks all three reclaimers, in
+refill-cost order. See the
+reclaim bullet in the Stage B replay section. No pipeline default, stage,
+format or lane changes.
+
+Re-stamped 2026-09-28 (PQ #1613, `claude/1613-streaming-resume`): **a
+selected-source row resumes a checkpoint on the stream head**, and is admitted
+against the window plan it was declared with. Before this change, a
+checkpoint that an earlier attempt left sent the row to the load-all head,
+which holds every selected X and H at once. For GLM-5.3 w03 row-0053 (864
+routed units), that plan is 113.79 GB, more than a GB10 box holds, against a
+69 GiB window demand. So no checkpointed full-routed row could resume, and the
+dispatcher's demand could not cover the head the row then chose.
+`tessera_row_stream.stream_head_dependency` no longer names a checkpoint.
+- The manifest binds every unit's W, X and H receipts
+  (`tessera_row_stream.RECEIPT_FIELDS`), which the stream head can only
+  re-derive one entry at a time. The row takes them from the manifest
+  (`cost_stage_checkpoint.stored_manifest_identity`,
+  `_manifest_unit_receipts`), and `prepare_journal` compares every other field
+  of the run identity by name before the first entry is read. A receipt that
+  the manifest does not record reads as `CHECKPOINT_RECEIPT_ABSENT` and is
+  refused by field.
+- `RowStream.expect_identities` then requires each entry's first read to
+  reproduce its unit's recorded receipts before the consumer sees it. A
+  mismatch refuses by unit and field. A journalled unit is not adopted, and a
+  pending unit is not encoded.
+- Journalled units are adopted through the window, one `--anchor-batch-size`
+  chunk at a time, through the same `adopt_state` gates as a load-all resume.
+  Their shards are not rewritten. Only the rest is encoded. Wire receipts are
+  verified inline, one blob at a time, as the stream journal's adoption
+  verifies them. A verification holds its whole blob, and no plan charges a
+  pool of them, so threading it first needs a `stream_phases` term.
+- One invariant changes: the journal is open from before the first read, so a
+  newly encoded unit's shard lands under the checkpoint's identity before
+  finalize re-checks the whole identity. Each such unit's own receipts were
+  checked when its entry was read. Finalize still compares the full run
+  identity, built from this run's own receipts.
+- A complete row that is relaunched reads every entry once and encodes
+  nothing. Every file it writes is the clean run's, except that the cost
+  payload's `provenance.selected_source_preparation` has no
+  `anchor_batch_growth_bytes`: no round plans an encode step. There is no
+  separate `cost.pkl` short-circuit: the receipts are content digests, so a
+  verified adoption must read each entry anyway.
+- The row's admission and the dispatcher's demand read one mapping,
+  `tessera_row_stream.MEMORY_PLANS`. `row-head-execution.json` records the plan
+  each head is admitted against as `memory_plan`.
+- `<checkpoint>.stream` is not consulted when a checkpoint exists. A unit that
+  only that journal holds is encoded again.
+
+Gate: `tests/test_tessera_row_stream.py`. The resume's measured peak of
+resident capture X and H is at most the window, not the population. No
+pipeline default, stage, format, lane or ship gate changes.
+
 Re-stamped 2026-09-28 (PQ #1275, `sonnet/1275-research-override`): the
 Tessera export lane gains an explicit per-run research-route override.
 `tessera_export_lane.preflight --research-route-override REASON` (driver knob
@@ -934,7 +1023,7 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   never less than the two chunk buffers the replay phase reserves.
 - **One pool, one reclaim order, and each step read (PQ #1383).** On a GB10
   the host and the device share one pool, so a shortfall can have several
-  reclaimers. `register_replay_reclaimers` (`joint_statistics_replay.py:386`,
+  reclaimers. `register_replay_reclaimers` (`joint_statistics_replay.py:389`,
   called at `joint_cost_quantum.py:2383`) registers them in order of refill
   cost: spill chunks read ahead (`reclaim_replay`,
   `joint_replay_spill.py:1024`, which also hands the pinned allocator's idle
@@ -949,10 +1038,23 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
     committed bytes, and the device envelope only the reservation.
   - Measured on the GB10, read at once after the free: the spill chunks and
     the renders read ahead lower committed bytes, since pinned buffers and
-    sealed memfds are both shmem charged to the cgroup. The renders kept on
-    the device lower the reservation and `MemAvailable`. `MemAvailable` does
-    not show a shmem free at once (805 MB of memfds freed, `MemAvailable`
-    moved by -28 MB), so a host-term shortfall asks only the render cache.
+    sealed memfds are both shmem charged to the cgroup. They also lower
+    `MemAvailable`: the pages go back to the host, which shares one pool
+    with the device (805 MB of memfds freed: committed -807 MB,
+    `MemAvailable` +755 MB; 805 MB of pinned chunks: committed -808 MB,
+    `MemAvailable` +863 MB; PQ #1431). The renders kept on the device lower
+    the reservation and `MemAvailable`. So a host-term shortfall asks all
+    three reclaimers, in refill-cost order, and the guard's re-read after
+    each ask ends the pass once the term clears. A reading counts as lowered
+    when it moves by more than half of what was freed. The host reading is one
+    quantity everywhere: `MemAvailable` plus the per-CPU free-list pages
+    (`io_spans.host_memory`, `memory_management._host_memory_info`). The guard
+    reads it and the probe takes its rise, because a freed page can sit on a
+    per-CPU list that `MemAvailable` skips until the kernel trims it (the same
+    805 MB memfd free read +755 MB and -1 MB in `MemAvailable` on different
+    runs). Reading `/proc/zoneinfo` costs 0.085 ms against 0.0088 ms for
+    `/proc/meminfo`; a check runs per operator or allocation, not per token. The earlier declaration that shmem frees leave
+    `MemAvailable` alone (a -28 MB reading) was that second case.
   - A check that would refuse makes one pass in order
     (`CaptureMemoryGuard._reclaim`, `:702`). A reclaimer is asked only while
     a term that reads one of its readings is exceeded, and for the largest
@@ -3996,6 +4098,8 @@ on local disk. The existing boundary owner preallocates the exact tensor-byte
 extent in a private disposable file, loads authenticated checkpoint entries
 through the existing strict pinned reader in leased windows under its
 resident budget (PQ #1142), and owns cleanup.
+A row that declares no scratch pair holds the whole plane on the host; the
+dispatcher and the run refuse it when the sealed host bound cannot (PQ #1141).
 Every coordinate has a fixed dtype/shape slot; replay reads owned CPU tensors
 and overwrites the same slot. A Stage B capture pass reads slots into its
 held staging buffer instead (`read_into`, PQ #1246), and writes them from it.
@@ -4280,6 +4384,13 @@ re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
 resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
+
+As of: 2026-09-28 · `claude/1613-streaming-resume`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-28, `claude/1613-streaming-resume`) for **a checkpoint
+resumed on the stream head under its window plan** (PQ #1613); see the stamp
+at the top of this document.
 
 As of: 2026-09-28 · `claude/tr3-compiled-1634`.
 Stamps follow, newest first, each recording its own branch and date.
@@ -9163,8 +9274,8 @@ seconds two runs never share are set aside: the gate
 (`tests/test_tessera_row_stream.py`) pins the clock and compares bytes, and on
 GLM-5.3 row 0055 the two heads differ only in per-anchor `encode_seconds`,
 inside `cost.pkl` and the unit shards. A row runs `--row-head load-all`, and prints
-the dependency, when it needs the whole set first: a present checkpoint (a
-resume) or `--seed-checkpoint`, `--max-rounds` other than 1, no
+the dependency, when it needs the whole set first: `--seed-checkpoint`,
+`--max-rounds` other than 1, no
 `--capture-load-policy`, or no `--export-hessian-reference-policy`. The
 selected-source plan adds `stream_phases` and `stream_memory_bytes`; a stream
 row's admission and the dispatcher's demand use them, and `memory_bytes` still
@@ -20615,8 +20726,9 @@ selected X/H entries, one at a time on reader threads sized to the CPUs it was
 admitted with, verifies each entry before the encoder sees it, and starts the
 first batch as soon as that batch's entries are resident. It holds at most two
 batches of entries and defers the six writes that cite the run identity to
-finalize. `--row-head load-all`, or any named dependency (a resume, a seed
-checkpoint, more than one round, no verified load policy, or the legacy
+finalize. A resume of a checkpoint streams too (PQ #1613).
+`--row-head load-all`, or any named dependency (a seed checkpoint, more than
+one round, no verified load policy, or the legacy
 `hessian_capture.pt` export), prefetches every selected X/H artifact before
 encoding instead and prints why. Cost provenance retains the same
 manifest; selected-wire materialization derives reuse from that provenance.

@@ -30,6 +30,7 @@ from prismaquant.layer_streaming import (
     _get_final_norm,
 )
 from .digests import DIRECT_ASCII_LAX, file_sha256hex
+from .joint_stageb_resources import cotangent_scratch
 
 
 STREAMED_MODEL_IDENTITY_SCHEMA = "prismaquant.streamed_model.identity.v1"
@@ -872,17 +873,15 @@ class StreamedBoundaryArtifacts:
 
     def checkpoint_cotangent_sink(self, records):
         """Optional sealed local workspace for one quantum's cotangent plane."""
-        root = os.environ.get("PRISMAQUANT_STAGE_B_COTANGENT_ROOT")
-        ceiling = os.environ.get("PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
-        if root is None and ceiling is None:
+        scratch = cotangent_scratch(os.environ)
+        if scratch is None:
             return {}
-        if not root or not ceiling or not ceiling.isdecimal() or int(ceiling) <= 0:
-            raise ValueError("cotangent scratch requires explicit root and positive max bytes")
+        root, ceiling = scratch
         if self._cotangent_scratch is not None:
             raise RuntimeError("boundary owner already holds cotangent scratch")
         from .perturbed_x_cache import ExactCotangentScratch
         self._cotangent_scratch = ExactCotangentScratch(
-            records, directory=root, max_bytes=int(ceiling),
+            records, directory=root, max_bytes=ceiling,
             max_tensor_bytes=self.config["max_resident_bytes"])
         return self._cotangent_scratch
 

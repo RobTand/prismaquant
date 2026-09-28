@@ -599,7 +599,8 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
                                   footprint_scope='pwc_serialized_upper_bound',
                                   measured=None, capture_batch=None,
                                   chain_regime=None, chain_workspace=None,
-                                  chain_device_limit_bytes=None):
+                                  chain_device_limit_bytes=None,
+                                  host_cotangent_bytes=0):
     """Derive every demand-driven cap from the roster the budget must admit.
 
     An operator declares the physical bound and the reserves that belong to
@@ -647,6 +648,10 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
     is its first active one. A capture that does not fit refuses here, before
     any run pays for finding it. With neither, the derivation and its record
     are exactly the ones before #1151.
+
+    ``host_cotangent_bytes`` (PQ #1141) is the cotangent plane a checkpoint
+    load holds on the host, subtracted from the render bound beside the host
+    owners; ``derive_policy`` passes it from the policy's ``cotangent`` block.
 
     ``chain_regime``, ``chain_workspace`` and ``chain_device_limit_bytes``
     (PQ #1163) plan the Stage B chain phase, all three or none. Each chain
@@ -711,10 +716,15 @@ def derive_retained_window_budget(targets_by_layer, *, declared, source_bytes,
         candidate_delta_bytes=candidate_delta_bytes, statistics_cap_bytes=1,
         retained_render_cap_bytes=1, max_windows_per_layer=1)
     available = probe.available_window_bytes(source_bytes)
-    host_render_bound = host_cap_bytes - sum(getattr(probe, name)
-                                             for name in HOST_RESIDENT_BUDGET_FIELDS)
+    # The cotangent plane a checkpoint load holds on the host (PQ #1141) is a
+    # host owner the fields above do not carry: it is a property of the slice
+    # being loaded, not of the roster, so it is priced here and not stored.
+    host_render_bound = host_cap_bytes - host_cotangent_bytes - sum(
+        getattr(probe, name) for name in HOST_RESIDENT_BUDGET_FIELDS)
     if host_render_bound <= 0:
-        raise RuntimeError('retained COST host owners exhaust the container cap before renders')
+        raise RuntimeError('retained COST host owners exhaust the container cap before renders'
+                           + (f' (the {host_cotangent_bytes}-byte cotangent plane is held on the host)'
+                              if host_cotangent_bytes else ''))
     open_budget = replace(probe, statistics_cap_bytes=available,
                           retained_render_cap_bytes=min(available, host_render_bound),
                           max_windows_per_layer=max(len(tuple(targets))
