@@ -698,7 +698,7 @@ def _mtp_rung_attestation(serving_target, profile):
     from .tessera_serving_scope import unit_structure_from_profile
 
     def eligible(unit, rung):
-        if not fr.is_tessera_format_name(fr.canonical_format_name(rung)):
+        if fr.format_family_of(fr.canonical_format_name(rung)) is None:
             return True
         if serving_target is None:
             return fr.format_is_producer_eligible(rung)

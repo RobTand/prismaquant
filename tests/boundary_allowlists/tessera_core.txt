@@ -3,7 +3,6 @@
 # TESSERA_* settings.
 # One line per occurrence: path<TAB>kind<TAB>value. Delete lines; never add.
 # CI refuses a pull request that adds a line here.
-prismaquant/allocator.py	call	is_tessera_format_name
 prismaquant/allocator.py	import	.tessera_expert_projection
 prismaquant/allocator.py	import	.tessera_formats
 prismaquant/allocator.py	import	.tessera_materialization
@@ -36,35 +35,15 @@ prismaquant/allocator_solver.py	import	.tessera_formats
 prismaquant/allocator_solver.py	import	.tessera_formats
 prismaquant/allocator_solver.py	import	.tessera_menu
 prismaquant/allocator_solver.py	import	.tessera_menu
-prismaquant/aura_cost.py	call	is_tessera_format_name
-prismaquant/aura_cost.py	import	.tessera_joint_eval_panel
-prismaquant/autoscale.py	import	.tessera_calibration_cache
 prismaquant/cost_currency.py	import	.tessera_campaign
 prismaquant/cost_currency.py	import	.tessera_formats
 prismaquant/cost_currency.py	import	.tessera_formats
-prismaquant/cost_currency.py	import	.tessera_joint_eval_panel
-prismaquant/format_registry.py	call	is_tessera_format_name
-prismaquant/format_registry.py	call	is_tessera_format_name
-prismaquant/format_registry.py	import	.tessera_menu
-prismaquant/format_registry.py	import	.tessera_render
-prismaquant/format_registry.py	literal	TESSERA_
-prismaquant/perturbed_x_cache.py	call	is_tessera_format_name
 prismaquant/pipeline.py	literal	TESSERA_EXECUTION_MODE
 prismaquant/pipeline.py	literal	TESSERA_PLATFORM
 prismaquant/pipeline.py	literal	TESSERA_RESIDENCY
 prismaquant/pipeline.py	literal	TESSERA_RUNTIME_IMAGE
 prismaquant/pipeline.py	literal	TESSERA_TARGET_PROFILE
 prismaquant/prepriced_cost.py	import	.tessera_menu
-prismaquant/production_weight_cache.py	call	is_tessera_format_name
-prismaquant/production_weight_cache.py	import	prismaquant.tessera_render
-prismaquant/select_validated_frontier.py	call	is_tessera_format_name
-prismaquant/serving_profiles.py	call	is_tessera_format_name
-prismaquant/serving_profiles.py	import	.tessera_formats
-prismaquant/serving_profiles.py	import	.tessera_formats
-prismaquant/serving_profiles.py	import	.tessera_menu
-prismaquant/serving_profiles.py	import	.tessera_runtime_contract
-prismaquant/serving_profiles.py	import	.tessera_serving_runtime_pin
-prismaquant/serving_profiles.py	literal	TESSERA_
 prismaquant/shipcard.py	import	prismaquant.tessera_route_receipt
 prismaquant/shipcard.py	import	prismaquant.tessera_route_receipt
 prismaquant/shipcard.py	import	prismaquant.tessera_route_receipt
@@ -76,4 +55,3 @@ prismaquant/shipcard_cli.py	import	prismaquant.tessera_route_receipt
 prismaquant/shipcard_cli.py	import	prismaquant.tessera_route_trace_gate
 prismaquant/shipcard_cli.py	import	prismaquant.tessera_runtime_contract
 prismaquant/unit_topology_restamp.py	import	.tessera_serving_scope
-prismaquant/weight_session.py	call	is_tessera_format_name

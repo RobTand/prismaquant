@@ -757,11 +757,12 @@ def _delta_w(
                 f"require_production_cache: production-rendered weight missing "
                 f"for ({name!r}, {fmt!r}); refusing silent RTN fallback. Build the "
                 f"cache for this (Linear, format) or drop --require-production-cache.")
-    # Ahead of ``get_format``, which imports the ``tessera`` package to
-    # synthesize a Tessera spec: the refusal is about the name, not the spec.
-    if fr.is_tessera_format_name(fmt):
+    # Ahead of ``get_format``, which imports the owning lane's package to
+    # synthesize its spec: the refusal is about the name, not the spec.
+    if fr.requires_production_render(fmt):
         raise RuntimeError(
-            f"{name}={fmt}: AURA Tessera delta requires a production-cache "
+            f"{name}={fmt}: AURA {fr.format_owner_label(fmt)} delta "
+            "requires a production-cache "
             "render. The registry fallback is a weights-only reconstruction, "
             "not the decoded wire and not the H-aware encode that ships, so "
             "it would price a different dW under the same format name -- and "
@@ -2623,7 +2624,7 @@ def compute_aura_cost_streamed(
                 raise RuntimeError("joint AURA incomplete unit coverage")
             payload["costs"] = joint_rows
             if observation_counts is not None:
-                from .tessera_joint_eval_panel import observation_status
+                from .joint_eval_observation import observation_status
                 if set(observation_counts) != set(names):
                     raise RuntimeError('joint pilot observation roster differs')
                 for name in names:

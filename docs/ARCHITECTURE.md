@@ -20,6 +20,21 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Re-stamped 2026-09-28 (PQ #1551, decoupling step 6 part 1): core reaches
+the Tessera lane's format code through lane data and a plugin, not imports
+(§8.10). `lane_specs/tessera.json` declares `plugin:
+prismaquant.tessera_lane`, the `tessera` format family (`TESSERA_`, with
+`requires_production_render` and `rate_axis`) and the `tessera_` metadata
+prefix. `format_registry`, `production_weight_cache`, `perturbed_x_cache`,
+`weight_session`, `aura_cost`, `select_validated_frontier`, `serving_profiles`
+and `autoscale` import no lane module; `is_tessera_format_name` is gone from
+core, and `FormatSpec` gains `render_owner` and `requires_production_render`.
+The core-boundary allowlist loses 22 lines. A recorded GLM-5.3 allocation
+reproduces every output byte for byte on main and on the branch, except the
+wall-clock `solve_diagnostics.<target>.solver_seconds` stamp in
+`layer_config.json` and `selection.json`, which differs between any two runs
+of one commit. No format, default, stage, stored byte or ship gate changes.
+
 Stage A rows adopt the campaign's source proof (2026-09-27,
 `claude/pq-1497-stage-a-adopt-identity`, PQ #1497): a selected-source
 `tessera_campaign` row hashed every source shard it read, whole, through its
@@ -19725,10 +19740,12 @@ the same format name, and the seam refuses rather than downgrade silently:
 * **The predicate does not import Tessera.** All four sites below are on the
   hot path of every *non*-Tessera format, and `tessera_formats` /
   `tessera_render` both require the `tessera` package at import. So the
-  question "is this mine?" is `format_registry.is_tessera_format_name` — the
-  family's name grammar anchored at the start, the same line `get_format`
-  already drew — and `tessera_render` is imported inside the Tessera branch
-  only. Pinned by a subprocess test that blocks the `tessera` import.
+  question "is this mine?" is `format_registry.format_family_of` (since
+  2026-09-28, PQ #1551; it replaced `is_tessera_format_name`) — the
+  family's name prefix, declared in `lane_specs/tessera.json`, the same line
+  `get_format` already drew — and `tessera_render` is reached through the
+  lane plugin inside the family's branch only (§8.10). Pinned by a subprocess
+  test that blocks the `tessera` import.
 * **All three cache-miss RTN fallbacks refuse Tessera** —
   `weight_session._format_weight` and `perturbed_x_cache` (both gated by
   `PRISMAQUANT_STRICT_PRODUCTION_CACHE`, default refuse) and `aura_cost`'s
@@ -24702,6 +24719,54 @@ shared by both probe backends):
   still refuses grouped-BMM semantics, and Gridbook's pinned contract declares
   no grouped structure lane. "Priced, kept on FP8_SOURCE" is now an honest
   allocator decision where silence used to be.
+
+### 8.10 Lane plugins: how core reaches a lane's code (decoupling step 6, 2026-09-28)
+
+Core modules do not import lane modules (`tessera_*`) and do not test a
+lane's name. They reach a lane through `prismaquant/lane_spec.py`, the one
+lane registry, and the step-0 gate (`tests/test_tessera_core_boundary.py`)
+holds them to it with a shrink-only allowlist. A fourth lane is a lane spec
+plus a plugin module.
+
+- **Declared as data** (`lane_specs/<lane>.json`): `plugin`, the dotted
+  module that holds the lane's hooks; `format_families`, each with an `id`, a
+  `label`, an upper-case `name_prefix` and the capabilities
+  `requires_production_render` and `rate_axis`; and
+  `layer_config_meta_prefixes`, the metadata keys the lane's allocation
+  writes. `LaneSpec.from_dict` refuses a family with no plugin, and
+  `lane_spec.format_families()` refuses two families whose prefixes overlap.
+  Tessera declares one family (`TESSERA_`), both capabilities, the plugin
+  `prismaquant.tessera_lane` and the prefix `tessera_`.
+- **Resolved without the plugin.** `format_registry.format_family_of(name)`
+  is a prefix match over the declared families. It imports neither the plugin
+  nor the lane's package, so the render path and the three cache-miss
+  fallbacks can ask it for every stock format
+  (`tests/test_lane_format_families.py` blocks both imports in a
+  subprocess). `requires_production_render(name)`, `rate_axis_format(name)`
+  and `format_owner_label(name)` answer the family's capabilities for a bare
+  name. A synthesized spec carries the same two capabilities as
+  `FormatSpec.render_owner` and `FormatSpec.requires_production_render`.
+- **Hooks bind at call time.** `lane_spec.family_hook(family, name)` returns
+  the hook on the owning lane's plugin and raises when a declared family's
+  plugin lacks it. `lane_spec.single_lane_plugin(name)` returns the one plugin
+  that provides a run-level hook, and refuses when two do. The plugin imports
+  nothing from the lane at module scope; each hook imports its lane function
+  when called, so substituting that function in a test still reaches every
+  caller.
+- **Family hooks today:** `synthesize_format` (`get_format`'s miss path),
+  `format_admitted_in_contexts` (`format_is_producer_eligible` under serving
+  contexts), `render_production` (`render_production_weight`),
+  `resolved_serving_lane` (`serving_profiles.serving_lane_route`),
+  `require_canonical_subfamily` and `format_subfamily` (a serving profile's
+  `allow_tessera_families`). **Run-level hooks:** the pinned serving runtime's
+  `serving_runtime_pin_path`, `load_serving_runtime_pin`,
+  `ServingRuntimePinError` and `serving_runtime_contract_path`, which
+  `serving_profiles._load_pinned_lane_tables` reads.
+- **Neutral homes for shared helpers.** `digests.SOURCE_HASH_BLOCK_BYTES`
+  (the guarded source hash's read block, which admission charges) and
+  `joint_eval_observation` (the pilot panel's `STATUS` and
+  `observation_status`) moved out of `tessera_calibration_cache` and
+  `tessera_joint_eval_panel`, which re-export them.
 
 ## 9. Serving lanes
 

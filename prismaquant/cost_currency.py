@@ -219,7 +219,7 @@ def require_sampled_joint_run_currency(cost_data):
     This entry point is for the atomic research proposal adapter only.  The
     ordinary ``require_run_currency`` retains its unconditional pilot refusal.
     """
-    from .tessera_joint_eval_panel import STATUS, observation_status
+    from .joint_eval_observation import STATUS, observation_status
     provenance = cost_data.get("provenance", {})
     panel = provenance.get("joint_eval")
     anchors = provenance.get("tessera_joint_anchors", {})

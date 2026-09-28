@@ -4760,12 +4760,13 @@ def _format_executes_static_activation_contract(format_name: str) -> bool:
     row.
     """
     from . import format_registry as fr
+    from .tessera_lane import is_tessera_format_name
 
     canonical = fr.canonical_format_name(format_name)
     row = fr.REGISTRY.get(canonical)
     if row is not None:
         return row.static_activation_contract is not None
-    if not fr.is_tessera_format_name(canonical):
+    if not is_tessera_format_name(canonical):
         fr.get_format(canonical)  # raises the registry's KeyError
     from .tessera_formats import route_static_activation_contract
 

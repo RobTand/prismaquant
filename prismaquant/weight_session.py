@@ -289,12 +289,13 @@ class WeightSession:
         # every non-BF16 format.
         self._rtn_fallbacks.append((qname, fmt_canon))
         # Ahead of ``get_format``, whose failure path here is ``return None``:
-        # on a box without the ``tessera`` package that would turn the refusal
-        # below into a silent None, which is the shape of the bug it exists to
-        # stop.
-        if fr.is_tessera_format_name(fmt_canon):
+        # on a box without the owning lane's package that would turn the
+        # refusal below into a silent None, which is the shape of the bug it
+        # exists to stop.
+        if fr.requires_production_render(fmt_canon):
             raise RuntimeError(
-                f"production_weight_cache is required for Tessera "
+                f"production_weight_cache is required for "
+                f"{fr.format_owner_label(fmt_canon)} "
                 f"({qname!r}, {fmt_canon!r}) in WeightSession; the registry "
                 "render is a weights-only reconstruction, not the decoded "
                 "wire and not the H-aware encode that ships, so this "

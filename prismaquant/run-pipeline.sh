@@ -510,6 +510,7 @@ from prismaquant.fixed_head import (
 )
 from prismaquant.model_profiles import detect_profile
 from prismaquant.serving_profiles import load_serving_profile
+from prismaquant.tessera_lane import is_tessera_format_name
 from prismaquant.tessera_serving_scope import (
     add_serving_scope_arguments,
     serving_target_from_args,
@@ -533,7 +534,7 @@ except Exception as exc:
     print(f"[pipeline] ERROR: invalid LM_HEAD_FORMAT: {exc}", file=sys.stderr)
     raise SystemExit(2) from None
 head_context = None
-if target is not None and fr.is_tessera_format_name(canonical):
+if target is not None and is_tessera_format_name(canonical):
     head_context = {"lm_head": target.context(unit_structure_from_profile("lm_head", profile))}
 if not fr.format_is_producer_eligible(canonical, **(
         {"context_by_unit": head_context} if head_context is not None else {})):
@@ -574,7 +575,7 @@ for raw in os.environ["PQ_BODY_FORMATS"].split(","):
             formats.append(value)
         continue
     fmt = fr.get_format(value).name
-    if target is not None and fr.is_tessera_format_name(fmt):
+    if target is not None and is_tessera_format_name(fmt):
         from prismaquant.tessera_render import tessera_rung_is_serialisable
 
         # No unit topology exists at this name-only boundary. Check bytes can
