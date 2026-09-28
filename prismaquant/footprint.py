@@ -987,11 +987,36 @@ def assignment_artifact_bytes(
     # a passthrough is charged the measured span itself, and cross-check the
     # closed form against it below rather than trusting either alone.
     passthrough_spans: dict[str, int] = {}
+    # Per-call memos (#1623). A whole-artifact assignment has ~10^4-10^5
+    # members but only a few hundred distinct (format, shape) pairs, and
+    # ``fr.get_format`` re-synthesizes a Tessera rung's spec on every call
+    # (a REGISTRY miss), so an un-memoized loop spent ~16 s per call on
+    # re-deriving the same answers. Both memos live only for THIS call, so
+    # they cannot go stale across a registry / menu change, and the values
+    # are the very numbers the loop computed before.
+    canonical_memo: dict[str, str] = {}
+    bytes_memo: dict[tuple[str, tuple[int, ...]], int] = {}
+
+    def _canonical(fmt: str) -> str:
+        if not canonicalize:
+            return fmt
+        name = canonical_memo.get(fmt)
+        if name is None:
+            name = canonical_memo[fmt] = fr.canonical_format_name(fmt)
+        return name
+
+    def _format_bytes(name: str, shape: tuple[int, ...]) -> int:
+        key = (name, shape)
+        nbytes = bytes_memo.get(key)
+        if nbytes is None:
+            nbytes = bytes_memo[key] = fr.get_format(
+                name).memory_bytes_for_shape(shape)
+        return nbytes
+
     if source_manifest is not None:
         passthrough_names = [
             qname for qname, fmt in assignment.items()
-            if (fr.canonical_format_name(fmt) if canonicalize else fmt)
-            in SOURCE_PASSTHROUGH_FORMATS
+            if _canonical(fmt) in SOURCE_PASSTHROUGH_FORMATS
         ]
         if passthrough_names:
             passthrough_spans = resolve_reencoded_source_bytes(
@@ -1004,10 +1029,10 @@ def assignment_artifact_bytes(
             missing_stats.append(qname)
             continue
         shape = _shape_from_stats(entry)
-        name = fr.canonical_format_name(fmt) if canonicalize else fmt
+        name = _canonical(fmt)
         if name in SOURCE_PASSTHROUGH_FORMATS and qname in passthrough_spans:
             span = int(passthrough_spans[qname])
-            closed_form = int(fr.get_format(name).memory_bytes_for_shape(shape))
+            closed_form = int(_format_bytes(name, shape))
             if span != closed_form:
                 raise ValueError(
                     f"[footprint] {context}: {qname} is assigned the "
@@ -1021,7 +1046,7 @@ def assignment_artifact_bytes(
                 )
             body_quant += span
         else:
-            body_quant += fr.get_format(name).memory_bytes_for_shape(shape)
+            body_quant += _format_bytes(name, shape)
         if name == "NVFP4":
             body_quant += nvfp4_global_sidecar_bytes(
                 qname,
