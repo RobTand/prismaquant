@@ -48,6 +48,33 @@ Gate: `tests/test_tessera_row_stream.py`. The resume's measured peak of
 resident capture X and H is at most the window, not the population. No
 pipeline default, stage, format, lane or ship gate changes.
 
+Re-stamped 2026-09-28 (PQ #1275, `sonnet/1275-research-override`): the
+Tessera export lane gains an explicit per-run research-route override.
+`tessera_export_lane.preflight --research-route-override REASON` (driver knob
+`TESSERA_RESEARCH_ROUTE_OVERRIDE`) admits units whose selected route fails the
+device-qualified-and-native gate, but only for a serving profile that is
+`emulation_only` (today `glm_packed_research_sm121`) and only with a non-empty
+reason, an allocation and a route histogram. The override, its reason, the
+target platform and the admitted units (route status and qualifications) are
+stamped on the card as `build.research_route_override`, which `shipcard.verify`
+replays. Without the flag the gate is unchanged and refuses. No default, stage,
+format or byte changes; `tessera_route_trace_gate` is untouched.
+
+Re-stamped 2026-09-28 (PQ #1587, `astra/pq-writes-plan-1587`): PrismaQuant
+writes the Tessera serving plan itself
+(`prismaquant/tessera_plan_writer.py`, against
+`tessera.serving_plan.v1` as RobTand/tessera#687 defines it) and the export
+arm calls only Tessera's supported `python -m tessera.export_serving` with
+the pin-verified checkout first on its PYTHONPATH; the producer's expert
+projection stays a named dependency on the lane spec's new `campaign_tools`
+roster. `lane_specs/tessera.json` `producer_tools` is now exactly the
+supported exporter, so the arm's `unsupported_producer_tools` report is
+empty; a contract whose `producer_interface` block does not list the driver
+refuses rather than silently dropping `--producer-authority`. (Rebased onto
+PQ #1616's v44 pin, Tessera master's #687 merge: the writer is live against
+the pinned package; it stays fail-closed with a named refusal on any older
+pin whose package lacks `tessera.serving_plan` (§9.4, export arm).)
+
 Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
 TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
 opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
@@ -842,8 +869,9 @@ unchanged. This is code coverage, not a recorded 42-layer GPU pass.
 
 The Tessera export preflight joins a GLM allocation in the source namespace
 (2026-09-26, `ws-serve/glm-source-unit-shapes`, PQ #1388). The allocation,
-Tessera's `plan_from_layer_config.py` and its exporter all name units by
-source checkpoint tensor. On glm5_next that is `model.language_model.layers.N…`,
+PrismaQuant's own plan writer (`prismaquant/tessera_plan_writer.py`, #1587;
+previously Tessera's `plan_from_layer_config.py`) and the exporter all name
+units by source checkpoint tensor. On glm5_next that is `model.language_model.layers.N…`,
 and the recipe namespace folds it to `model.layers.N…`. Three joins in
 `tessera_export_lane.py` failed on the real GLM allocation:
 
@@ -20894,7 +20922,9 @@ so in its own `annotations`: the exporter is Tessera's
 declared is the selected cells' wires and the source extents of the units the
 assignment leaves on the source precision, in the artifact's layer order, with
 `read_order_attested: false` and tensors outside the campaign roster --
-embeddings, norms, the LM head -- named as not declared.
+embeddings, norms, the LM head -- named as not declared. (Since #1587 the
+exporter named here is Tessera's supported `python -m tessera.export_serving`
+entry point, RobTand/tessera#687, not the old `experiments/` script path.)
 
 The AQUA manifest declares the A-side's own reads: the sensitivity card, the
 cost payload the merge writes into, the joint plan, the model's
@@ -23254,6 +23284,28 @@ route statuses summing to `units_total`, and the contract counts summing to no
 more. `no_declared_lane` units (the plain-BF16 picks no lane declares) are
 carried as counted. A native card owes no histogram yet, because a native
 allocation writes no `serving_lane_provenance` (#1387).
+
+**`build.research_route_override` (Tessera cards; PrismaQuant #1275).** The
+one admission for a route the pinned runtime does not back natively. Principle 9
+fails export closed when a selected unit's route is not device-qualified and
+native; a research profile (`emulation_only: true`, no export lane, e.g.
+`glm_packed_research_sm121`) may still be exported, but only through an
+explicit per-run override: `tessera_export_lane.preflight
+--research-route-override REASON`, reached from the driver as
+`EXPORT_CONTAINER=tessera TESSERA_RESEARCH_ROUTE_OVERRIDE=REASON`. It refuses
+when the reason is blank, when there is no `--assignment` or route histogram to
+stamp, or when the resolved profile is not `emulation_only`; a production
+profile has no override path. The driver skips its lane-support check only when
+the override is set and the profile is `emulation_only`. The admitted units
+(route status and their regime qualifications, read from `resolve_unit_route`,
+never prose) go through `shipcard.research_route_override_claim` into
+`build.research_route_override` beside `build.route_histogram`, and
+`shipcard.verify` replays it: the schema, a non-empty reason, a profile that
+loads and is `emulation_only`, and route status plus qualifications on every
+admitted row. A card without the key owes nothing. The serve-side comparison
+(`tessera_route_trace_gate`) is unchanged and a missing rank trace stays not
+verified. `TESSERA_RESEARCH_ROUTE_OVERRIDE` is part of the `tessera-plan`
+settings hash.
 
 **`route.sweep` (compressed-tensors-lane cards; PrismaQuant #631).** The
 serve-side leg of principle 14 on the default lane. The record carries every
@@ -25754,12 +25806,15 @@ check three layers up.
 
 **The arm calls out; it does not vendor in.** `export_native_compressed.py` still
 has no Tessera codec and is not getting one: the layer_config → plan translation
-(`experiments/plan_from_layer_config.py`) and the encode
-(`experiments/export_tessera_serving.py`) both live in the Tessera repository and
-are NAMED by the arm under `TESSERA_REPO`, the same boundary the lane spec already
-uses for the serve script and the route census. A second copy of either here would
-be a second place a wire recipe can drift, which is the failure principle 14
-exists to prevent. `TESSERA_PLAN_COVER` (`as-allocated` by default) decides whether
+is PrismaQuant's own `prismaquant/tessera_plan_writer.py` (#1587 -- the spelling
+and the charged-bits accounting are the producer's records, so the translation
+lives on this side of the boundary; previously Tessera's
+`experiments/plan_from_layer_config.py`) and the encode is Tessera's supported
+`python -m tessera.export_serving` (RobTand/tessera#687), NAMED by the arm under
+`TESSERA_REPO` with the pin-verified checkout first on its PYTHONPATH, the same
+boundary the lane spec already uses for the serve script and the route census.
+A second copy of the encode here would be a second place a wire recipe can
+drift, which is the failure principle 14 exists to prevent. `TESSERA_PLAN_COVER` (`as-allocated` by default) decides whether
 a partial allocation is planned as-is with every other body Linear spelled BF16, or
 broadcast by role and stamped as the extrapolation it is; silence must never become
 a 4-bit rung.
@@ -25809,6 +25864,13 @@ Beside these the arm also checks, in the same up-front block, that
 values — not left to the translator's own `argparse` `choices`, which does not
 run until stage 4, because the point of this block is to refuse before GPU
 hours rather than after them.
+
+**Research profiles need an explicit override (#1275).** A profile marked
+`emulation_only` with no declared Tessera export lane (`glm_packed_research_sm121`)
+is refused by the lane-support check. `TESSERA_RESEARCH_ROUTE_OVERRIDE=<reason>`
+is the only admission: it is refused for any other profile, and the override and
+the admitted-unit route rows are stamped on the card (§7,
+`build.research_route_override`).
 
 **The runtime is Tessera's.** Package `tessera.serving` in the Tessera
 repository: a `vllm.general_plugins` entry point

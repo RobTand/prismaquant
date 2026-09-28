@@ -1,0 +1,23 @@
+{
+  "ppl0": {
+    "sha": "689d006273d584eb83dda7fa5b6f722004cb078dda376727d07cc3785f40c71f"
+  },
+  "ppl1": {
+    "sha": "32c76047634ee8d61aeb727dee6fcb2507b60cc4fe6ecce96d04274d6a9c8c03"
+  },
+  "ppl2": {
+    "sha": "5a7394d5e70ccb7c7f47621d420b788b147f35d2737c975c4f3a6b6a306ff909"
+  },
+  "ship0": {
+    "sha": "e9607ff820039f28d14ef4b608796aa29c4c191758d511a43ef1271fa05f127f",
+    "text": "{\"quant\":{\"bits\":4},\"tags\":[\"a\",\"b\"]}"
+  },
+  "ship1": {
+    "sha": "32c76047634ee8d61aeb727dee6fcb2507b60cc4fe6ecce96d04274d6a9c8c03",
+    "text": "{\"9\":\"b\",\"10\":\"a\"}"
+  },
+  "ship2": {
+    "sha": "42fab7785c90b7599346b1b4783602b25971cef3ecd403d61305b2ce0eaea9dd",
+    "text": "{\"nan\":NaN,\"u\":\"h\\u00e9llo\\u2713\"}"
+  }
+}
