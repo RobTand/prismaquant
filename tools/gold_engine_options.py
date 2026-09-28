@@ -204,18 +204,28 @@ _PEER_JSON_SPELLING = {
 
 #: Boolean kwargs whose stock spelling is a bare flag when true. `False` emits
 #: the negated spelling where vLLM publishes one, so "off" is stated rather
-#: than left to the peer's default. The pinned vLLM publishes `--no-enforce-eager`
-#: (its boolean engine fields use argparse's BooleanOptionalAction), so a
-#: compiled coordinator states eager off to its peer (#1634).
+#: than left to the peer's default.
 _PEER_BOOLEAN_SPELLING = {
     "trust_remote_code": ("--trust-remote-code", None),
-    "enforce_eager": ("--enforce-eager", "--no-enforce-eager"),
+    "enforce_eager": ("--enforce-eager", None),
     "disable_log_stats": ("--disable-log-stats", None),
     "language_model_only": ("--language-model-only", None),
     "enable_prefix_caching": (
         "--enable-prefix-caching", "--no-enable-prefix-caching"),
     "enable_chunked_prefill": (
         "--enable-chunked-prefill", "--no-enable-chunked-prefill"),
+}
+
+#: Boolean kwargs stated off only by a coordinator that declares a
+#: `compilation_config`, the TR3 scorer's compiled mode (#1634). vLLM applies a
+#: compilation config only with `enforce_eager` off, so that peer's argv names
+#: the engine it must build instead of leaving it to the default. The pinned
+#: vLLM publishes `--no-enforce-eager` (argparse's BooleanOptionalAction). Every
+#: other caller's argv is unchanged: `False` without a compilation config still
+#: emits nothing, so the gold tools' recorded peer argv and fingerprints stay
+#: as they were.
+_PEER_COMPILED_OFF_SPELLING = {
+    "enforce_eager": "--no-enforce-eager",
 }
 
 #: Kwargs that are rank 0's alone and must never be forwarded: the model is a
@@ -246,6 +256,7 @@ def headless_peer_argv(
         raise ValueError("peer argv requires the coordinator's model path")
 
     argv = ["serve", model, "--node-rank", str(node_rank), "--headless"]
+    compiled = kwargs.get("compilation_config") is not None
     for name in sorted(kwargs):
         if name in _PEER_POSITIONAL_OR_LOCAL:
             continue
@@ -260,6 +271,8 @@ def headless_peer_argv(
                 argv.append(on)
             elif off is not None:
                 argv.append(off)
+            elif compiled and name in _PEER_COMPILED_OFF_SPELLING:
+                argv.append(_PEER_COMPILED_OFF_SPELLING[name])
             continue
         if name in _PEER_JSON_SPELLING:
             if not isinstance(value, dict):
@@ -294,6 +307,8 @@ def parse_headless_peer_argv(argv: list[str]) -> tuple[str, int, dict[str, Any]]
     json_flags = {flag: name for name, flag in _PEER_JSON_SPELLING.items()}
     bool_on = {on: name for name, (on, _off) in _PEER_BOOLEAN_SPELLING.items()}
     bool_off = {off: name for name, (_on, off) in _PEER_BOOLEAN_SPELLING.items() if off}
+    compiled_off = {off: name for name, off in _PEER_COMPILED_OFF_SPELLING.items()}
+    bool_off.update(compiled_off)
     kwargs: dict[str, Any] = {}
     rest, i = argv[5:], 0
     while i < len(rest):
@@ -313,6 +328,11 @@ def parse_headless_peer_argv(argv: list[str]) -> tuple[str, int, dict[str, Any]]
         if name in kwargs:
             raise ValueError(f"peer argv states {name!r} twice")
         kwargs[name] = value
+    stated = sorted(token for token in compiled_off if token in rest)
+    if stated and "compilation_config" not in kwargs:
+        raise ValueError(
+            f"peer argv states {', '.join(stated)} without --compilation-config: "
+            "headless_peer_argv states it only for a declared compilation config")
     return model, node_rank, kwargs
 
 
