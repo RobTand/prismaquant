@@ -379,7 +379,12 @@ def test_all_six_readers_admit_fields_through_the_one_helper(monkeypatch, tmp_pa
     real = record_fields.admit_fields
 
     def spy(*args, **kwargs):
-        callers.add(sys._getframe(1).f_globals["__name__"])
+        # The native panels share one thin wrapper (``_admit``/``_executed``);
+        # the reader is the frame that called it.
+        frame = sys._getframe(1)
+        while frame.f_code.co_name in ("_admit", "_executed"):
+            frame = frame.f_back
+        callers.add(frame.f_globals["__name__"])
         return real(*args, **kwargs)
 
     monkeypatch.setattr(record_fields, "admit_fields", spy)
