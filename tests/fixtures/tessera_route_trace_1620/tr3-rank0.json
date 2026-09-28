@@ -1,0 +1,363 @@
+{
+ "entries": [
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 3,
+   "module_names": [
+    "language_model.model.layers.0.mlp.gate_up_proj",
+    "language_model.model.layers.1.mlp.gate_up_proj",
+    "language_model.model.layers.2.mlp.gate_up_proj"
+   ],
+   "modules": 3,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N12288:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_moe_compact",
+   "dispatches_without_prefix": 0,
+   "kind": "moe",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.experts",
+    "language_model.model.layers.11.mlp.experts",
+    "language_model.model.layers.12.mlp.experts",
+    "language_model.model.layers.13.mlp.experts"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N2048:K4096",
+   "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.11.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.12.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.13.mlp.shared_experts.gate_up_proj"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N2048:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.down_proj",
+    "language_model.model.layers.11.mlp.shared_experts.down_proj",
+    "language_model.model.layers.12.mlp.shared_experts.down_proj",
+    "language_model.model.layers.13.mlp.shared_experts.down_proj"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N4096:K1024",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 3,
+   "module_names": [
+    "language_model.model.layers.0.mlp.down_proj",
+    "language_model.model.layers.1.mlp.down_proj",
+    "language_model.model.layers.2.mlp.down_proj"
+   ],
+   "modules": 3,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N4096:K6144",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 75,
+   "module_names": [
+    "language_model.model.layers.0.mlp.gate_up_proj",
+    "language_model.model.layers.1.mlp.gate_up_proj",
+    "language_model.model.layers.2.mlp.gate_up_proj"
+   ],
+   "modules": 3,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N12288:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_moe_compact",
+   "dispatches_without_prefix": 0,
+   "kind": "moe",
+   "launches": 100,
+   "module_names": [
+    "language_model.model.layers.10.mlp.experts",
+    "language_model.model.layers.11.mlp.experts",
+    "language_model.model.layers.12.mlp.experts",
+    "language_model.model.layers.13.mlp.experts"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N2048:K4096",
+   "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 100,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.11.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.12.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.13.mlp.shared_experts.gate_up_proj"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N2048:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 100,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.down_proj",
+    "language_model.model.layers.11.mlp.shared_experts.down_proj",
+    "language_model.model.layers.12.mlp.shared_experts.down_proj",
+    "language_model.model.layers.13.mlp.shared_experts.down_proj"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N4096:K1024",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 75,
+   "module_names": [
+    "language_model.model.layers.0.mlp.down_proj",
+    "language_model.model.layers.1.mlp.down_proj",
+    "language_model.model.layers.2.mlp.down_proj"
+   ],
+   "modules": 3,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N4096:K6144",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 3,
+   "module_names": [
+    "language_model.model.layers.0.mlp.gate_up_proj",
+    "language_model.model.layers.1.mlp.gate_up_proj",
+    "language_model.model.layers.2.mlp.gate_up_proj"
+   ],
+   "modules": 3,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2049:N12288:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_moe_compact",
+   "dispatches_without_prefix": 0,
+   "kind": "moe",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.experts",
+    "language_model.model.layers.11.mlp.experts",
+    "language_model.model.layers.12.mlp.experts",
+    "language_model.model.layers.13.mlp.experts"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2049:N2048:K4096",
+   "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.11.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.12.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.13.mlp.shared_experts.gate_up_proj"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2049:N2048:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.down_proj",
+    "language_model.model.layers.11.mlp.shared_experts.down_proj",
+    "language_model.model.layers.12.mlp.shared_experts.down_proj",
+    "language_model.model.layers.13.mlp.shared_experts.down_proj"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2049:N4096:K1024",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 3,
+   "module_names": [
+    "language_model.model.layers.0.mlp.down_proj",
+    "language_model.model.layers.1.mlp.down_proj",
+    "language_model.model.layers.2.mlp.down_proj"
+   ],
+   "modules": 3,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2049:N4096:K6144",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 3,
+   "module_names": [
+    "language_model.model.layers.0.mlp.gate_up_proj",
+    "language_model.model.layers.1.mlp.gate_up_proj",
+    "language_model.model.layers.2.mlp.gate_up_proj"
+   ],
+   "modules": 3,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2:N12288:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_moe_compact",
+   "dispatches_without_prefix": 0,
+   "kind": "moe",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.experts",
+    "language_model.model.layers.11.mlp.experts",
+    "language_model.model.layers.12.mlp.experts",
+    "language_model.model.layers.13.mlp.experts"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2:N2048:K4096",
+   "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.11.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.12.mlp.shared_experts.gate_up_proj",
+    "language_model.model.layers.13.mlp.shared_experts.gate_up_proj"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2:N2048:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 4,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.down_proj",
+    "language_model.model.layers.11.mlp.shared_experts.down_proj",
+    "language_model.model.layers.12.mlp.shared_experts.down_proj",
+    "language_model.model.layers.13.mlp.shared_experts.down_proj"
+   ],
+   "modules": 4,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2:N4096:K1024",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  },
+  {
+   "contract": "fp8_per_token_dynamic",
+   "decoder": "native_window_gemm",
+   "dispatches_without_prefix": 0,
+   "kind": "dense",
+   "launches": 3,
+   "module_names": [
+    "language_model.model.layers.0.mlp.down_proj",
+    "language_model.model.layers.1.mlp.down_proj",
+    "language_model.model.layers.2.mlp.down_proj"
+   ],
+   "modules": 3,
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2:N4096:K6144",
+   "symbol": "tessera::window_gemm_dense",
+   "unnamed_modules": 0
+  }
+ ],
+ "identity_version": 1,
+ "platform": "sm_121",
+ "rank": 0,
+ "rank_conflict": null,
+ "rank_source": "torch.distributed",
+ "schema": "tessera.route_trace/1",
+ "world_size": 2
+}

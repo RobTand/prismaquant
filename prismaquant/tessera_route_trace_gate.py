@@ -513,9 +513,13 @@ def exact_served_modules(
             continue
         differing = [name for name in sorted(set(reference) | set(other))
                      if reference.get(name) != other.get(name)]
-        detail = ", ".join(
+        shown, rest = _sample(differing)
+        items = [
             f"{name}: M={reference_m} {reference.get(name)}, M={m} {other.get(name)}"
-            for name in _sample(differing))
+            for name in shown]
+        if rest is not None:
+            items.append(rest)
+        detail = ", ".join(items)
         raise TesseraRouteTraceError(
             f"{where}: the served modules differ between token counts: {detail}; "
             "every forward dispatches every quantized module once, so a module "
@@ -633,11 +637,19 @@ def _histogram_difference(priced: Mapping[str, int], served: Mapping[str, int]) 
     return lines
 
 
-def _sample(names: Sequence[str], *, limit: int = 8) -> list[str]:
-    """At most ``limit`` names, so one bad shard cannot fill a receipt."""
+def _sample(names: Sequence[str], *, limit: int = 8) -> tuple[list[str], str | None]:
+    """``(shown, rest)``: at most ``limit`` real names, so one bad shard cannot
+    fill a receipt, and the count of the others as text.
+
+    ``rest`` is the gate's own words, not a module. It is returned apart from
+    ``shown`` so no caller can look it up as a name: a receipt once read
+    ``(257 further module(s)): served None but the price names no such module``
+    and sent a campaign after a naming bug that did not exist (#1620).
+    ``rest`` is ``None`` when every name is shown.
+    """
     if len(names) <= limit:
-        return list(names)
-    return [*names[:limit], f"({len(names) - limit} further module(s))"]
+        return list(names), None
+    return list(names[:limit]), f"({len(names) - limit} further module(s) not shown)"
 
 
 def served_namespace(
@@ -715,7 +727,8 @@ def _module_difference(
     differing = [name for name in sorted(set(priced) | set(served))
                  if priced.get(name) != served.get(name)]
     lines = []
-    for name in _sample(differing):
+    shown, rest = _sample(differing)
+    for name in shown:
         want, got = priced.get(name), served.get(name)
         label = (f"{name} (priced as {checkpoint[name]})"
                  if name in checkpoint else name)
@@ -725,6 +738,8 @@ def _module_difference(
             lines.append(f"{label}: priced {want}, served by no module")
         else:
             lines.append(f"{label}: priced {want} but served {got}")
+    if rest is not None:
+        lines.append(rest)
     return lines
 
 
