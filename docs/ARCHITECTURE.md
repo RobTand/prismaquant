@@ -5,9 +5,13 @@ Stage B render stream and spill replay reclaimers now declare that their
 frees lower `MemAvailable` as well as committed bytes
 (`RENDER_STREAM_RECLAIM_LOWERS`, `SPILL_REPLAY_RECLAIM_LOWERS`,
 `joint_statistics_replay.py:377,386`). The GB10 probe measured both frees
-raising `MemAvailable` by about the bytes freed, read at once; the declaration
-of `committed` alone was wrong, not the probe's midpoint criterion. A host-term
-shortfall now asks all three reclaimers, in refill-cost order. See the
+returning about the bytes freed to the host; the declaration of `committed`
+alone was wrong. The probe's midpoint criterion stays, but its host reading is
+now the larger of the `MemAvailable` rise and the per-CPU free-list rise: the
+same free read +755 MB in `MemAvailable` on one run and -1 MB on the next,
+with the pages parked on per-CPU lists that `MemAvailable` does not count until
+the kernel trims them. A host-term shortfall now asks all three reclaimers, in
+refill-cost order. See the
 reclaim bullet in the Stage B replay section. No pipeline default, stage,
 format or lane changes.
 
@@ -939,10 +943,13 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
     `MemAvailable` +863 MB; PQ #1431). The renders kept on the device lower
     the reservation and `MemAvailable`. So a host-term shortfall asks all
     three reclaimers, in refill-cost order, and the guard's re-read after
-    each ask ends the pass once the term clears. The probe's criterion is
-    unchanged: a reading counts as lowered when it moves by more than half
-    of what was freed. The earlier declaration that shmem frees leave
-    `MemAvailable` alone (a -28 MB reading) did not repeat.
+    each ask ends the pass once the term clears. A reading counts as lowered
+    when it moves by more than half of what was freed. The host reading is the
+    larger of the `MemAvailable` rise and the per-CPU free-list rise, because a
+    freed page can sit on a per-CPU list that `MemAvailable` skips until the
+    kernel trims it (the same 805 MB memfd free read +755 MB and -1 MB on
+    different runs). The earlier declaration that shmem frees leave
+    `MemAvailable` alone (a -28 MB reading) was that second case.
   - A check that would refuse makes one pass in order
     (`CaptureMemoryGuard._reclaim`, `:702`). A reclaimer is asked only while
     a term that reads one of its readings is exceeded, and for the largest
