@@ -86,12 +86,12 @@ def _read(path, expected=None):
 def _sdk():
     from .staged_lease import sdk_submodule
     return {name: sdk_submodule(name) for name in
-            ('pool', 'reader_lease', 'produced_output', 'produced_spool', 'core')}
+            ('pool', 'reader_lease', 'produced_output', 'produced_spool', 'core', 'client')}
 
 
 def require_contained(queue, instance, sdk):
     owner = instance['owner_action_key']
-    if sdk['pool']._read_json(queue.item_path(sdk['pool'].CLAIMED, owner)) is not None:
+    if sdk['client'].read_claimed_record(queue, owner) is not None:
         raise ForwardRecoveryRefused('original forward owner is still claimed')
     ok, reason = sdk['reader_lease'].containment_certificate_ok(queue, {
         'action_key': owner, **instance['owner_attempt']})
@@ -99,7 +99,7 @@ def require_contained(queue, instance, sdk):
         raise ForwardRecoveryRefused('original forward owner is not contained: ' + reason)
 
 
-def _checked_group(group, *, queue, instance, template, commitments, sdk):
+def _checked_group(group, *, queue, instance, template, sdk):
     manifest, receipt, record = (group[k] for k in ('manifest', 'receipt', 'record'))
     if set(record) != {'export_key', 'manifest_sha256', 'batch_id', 'action'}:
         raise ForwardRecoveryRefused('export record has an invalid shape')
@@ -121,8 +121,8 @@ def _checked_group(group, *, queue, instance, template, commitments, sdk):
         raise ForwardRecoveryRefused('export action does not seal this group')
     sdk['produced_spool']._check_receipt(receipt, manifest, record)
     try:
-        _filed, descriptors = sdk['produced_output']._load_batch_record(
-            queue.root, instance, template, commitments['batches'][batch], batch)
+        descriptors = sdk['produced_output'].batch_record(
+            queue, instance, template, batch_id=batch)['entries']
     except (KeyError, ValueError) as exc:
         raise ForwardRecoveryRefused('group has no complete immutable PB descriptor') from exc
     by_path = {item['path']: item for item in descriptors
@@ -339,13 +339,12 @@ def _verified_chain_records(document, sdk):
         directory = sdk['produced_output'].instance_dir(queue.root, instance)
         if _read(directory / 'instance.json')[0] != instance:
             raise ForwardRecoveryRefused('original PB instance changed')
-        commitments = _read(directory / 'commitments.json')[0]
         if 'imported' in segment:
             _require_imported_by_owner(segment, sdk)
         entries = []
         for group in segment['groups']:
             entries.extend(_checked_group(group, queue=queue, instance=instance,
-                template=template, commitments=commitments, sdk=sdk))
+                template=template, sdk=sdk))
         parts.append(_records(segment, entries))
     return _merge(document, parts)
 

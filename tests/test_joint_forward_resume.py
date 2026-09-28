@@ -77,12 +77,12 @@ def test_live_or_uncontained_owner_refuses():
     from prismaquant.joint_forward_resume import require_contained, ForwardRecoveryRefused
     queue = SimpleNamespace(item_path=lambda *args: 'claim')
     instance = {'owner_action_key': 'a' * 64, 'owner_attempt': {'nonce': 'n', 'scope_id': 's'}}
-    pool = SimpleNamespace(CLAIMED='claimed', _read_json=lambda path: {'live': True})
-    sdk = {'pool': pool, 'reader_lease': SimpleNamespace(
+    client = SimpleNamespace(read_claimed_record=lambda queue, key: {'live': True})
+    sdk = {'client': client, 'reader_lease': SimpleNamespace(
         containment_certificate_ok=lambda *a: (False, 'scope-not-empty-retain'))}
     with pytest.raises(ForwardRecoveryRefused, match='still claimed'):
         require_contained(queue, instance, sdk)
-    pool._read_json = lambda path: None
+    client.read_claimed_record = lambda queue, key: None
     with pytest.raises(ForwardRecoveryRefused, match='not contained'):
         require_contained(queue, instance, sdk)
 
@@ -127,7 +127,7 @@ def test_export_action_must_seal_the_exact_manifest_input():
         'export_key': 'c'*64, 'manifest_sha256': sha, 'batch_id': 'b', 'action': action}}
     sdk = {'core': SimpleNamespace(validate_action=lambda value: value)}
     with pytest.raises(ForwardRecoveryRefused, match='does not seal'):
-        _checked_group(group, queue=None, instance=instance, template={}, commitments={}, sdk=sdk)
+        _checked_group(group, queue=None, instance=instance, template={}, sdk=sdk)
 
 
 def test_recovered_tail_and_reverse_checkpoints_equal_uninterrupted(tmp_path, monkeypatch):
@@ -253,16 +253,18 @@ def _chain_sdk():
     from pathlib import Path
     ns = SimpleNamespace
     return {
-        'pool': ns(CLAIMED='claimed', _read_json=lambda path: None,
-                   PoolQueue=lambda root: ns(root=Path(root),
+        'pool': ns(PoolQueue=lambda root: ns(root=Path(root),
                                              item_path=lambda state, key: Path(root) / state / key)),
         'reader_lease': ns(containment_certificate_ok=lambda queue, cert: (True, 'fixture')),
         'produced_output': ns(
             validate_instance=lambda value: value, validate_template=lambda value: value,
             instance_dir=lambda root, instance: Path(root) / 'instances' / instance['owner_action_key'],
-            _load_batch_record=lambda root, instance, template, entry, batch: (entry, entry['descriptors'])),
+            batch_record=lambda queue, instance, template, *, batch_id: {'entries': json.loads(
+                (Path(queue.root) / 'instances' / instance['owner_action_key']
+                 / 'commitments.json').read_text())['batches'][batch_id]['descriptors']}),
         'produced_spool': ns(_check_receipt=lambda receipt, manifest, record: None),
-        'core': ns(validate_action=lambda value: value)}
+        'core': ns(validate_action=lambda value: value),
+        'client': ns(read_claimed_record=lambda queue, key: None)}
 
 
 def _owner_spool(root, owner_key, refs):

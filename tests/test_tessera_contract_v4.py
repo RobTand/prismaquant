@@ -61,7 +61,7 @@ def test_the_reviewed_development_answer_is_the_installed_contracts(monkeypatch)
         cell["structure"] for cell in _packaged()["lane_eligibility"]["cells"]
     }
     pin = release.load_tessera_serving_runtime_pin()
-    assert contract.TESSERA_DEV_PIN_COMMIT == pin.commit
+    assert contract.TESSERA_DEV_PIN_COMMIT == pin.producer_commit
     assert contract.TESSERA_DEV_PIN_CONTRACT_SHA256 == pin.contract_sha256
 
 

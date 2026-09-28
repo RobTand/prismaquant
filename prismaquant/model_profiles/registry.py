@@ -173,21 +173,25 @@ def detect_profile(model_path: str, *, config: dict | None = None) -> ModelProfi
     cfg_path = root / "config.json"
     model_type = ""
     archs: list[str] = []
+    document: dict | None = None
     if config is not None:
         if not isinstance(config, dict):
             raise ValueError(
                 f"the config.json given for {model_path} is not a JSON object")
         model_type = config.get("model_type") or ""
         archs = list(config.get("architectures") or [])
+        document = config
     elif cfg_path.exists():
         try:
             with open(cfg_path) as f:
                 cfg = json.load(f)
             model_type = cfg.get("model_type") or ""
             archs = list(cfg.get("architectures") or [])
+            document = cfg if isinstance(cfg, dict) else None
         except (json.JSONDecodeError, OSError):
             pass
     profile = _resolve(model_type, archs)
+    profile._declare_config_document(document)
     # Config-only resolution chooses the architecture family and serving
     # entrypoint. Keep the concrete checkpoint root as separate private intake
     # evidence: some staged text-only checkpoints intentionally retain their
@@ -255,7 +259,11 @@ def profile_from_config(cfg) -> ModelProfile:
     else:
         model_type = getattr(cfg, "model_type", "") or ""
         archs = list(getattr(cfg, "architectures", []) or [])
-    return _resolve(model_type, archs)
+    profile = _resolve(model_type, archs)
+    # Only a parsed config.json is declared; a live HF config object is not
+    # the document a profile reads layer counts from.
+    profile._declare_config_document(cfg if isinstance(cfg, dict) else None)
+    return profile
 
 
 def profile_from_model(model) -> ModelProfile:
