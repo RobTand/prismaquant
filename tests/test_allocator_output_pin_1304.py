@@ -60,6 +60,14 @@ layer.json. Three things change, all inside
 ``native_extensions`` gains the two fused routed rows v42 publishes. The
 allocation, the applicability file and the Pareto outputs are
 byte-identical.
+
+Re-taken 2026-09-28 for PQ #1616's v44 pin (Tessera a5f3b232cb). PB receipts
+c9dc357bb01d (before: origin/main e6eb87f3 under the 38e96012 interpreter)
+and a01e39b687a2 (after: the a5f3b232 interpreter) capture the normalised
+layer.json. Exactly two fields change, both inside
+``__prismaquant__.tessera_dev_pin``: ``contract_version`` (42 to 44) and
+``reviewed_contract_sha256`` (4aeba5dc to 47b01355). The allocation, the
+applicability file and the Pareto outputs are byte-identical.
 """
 from __future__ import annotations
 
@@ -104,7 +112,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "fb8f2cd5ebc346d1fc9ccc725ab687aa0b24cb5e84910746d08a2f7d77db5d7f"
+        "510823f101c90a30515b783f3bb60a52cb948fed3527aa7a63333d6df2de7acd"
     ),
     "pareto.csv": (
         "0abb6a82a89d9cd9686c6a250368bb77603d3904dc2707ccb69a13c9eec70c5a"

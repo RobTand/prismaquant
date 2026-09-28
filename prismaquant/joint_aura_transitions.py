@@ -16,13 +16,14 @@ literal table, so a type nobody taught it refuses instead of defaulting.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
 from . import joint_aura_retained_budget_transition as _budget
 from . import joint_aura_run_transition as _run
 from . import joint_aura_source_transition as _resume
+from .digests import bytes_sha256hex
+from .joint_aura_transition_base import _require
 
 _LOADERS = {_resume.VERSION: _resume, _run.VERSION: _run, _budget.VERSION: _budget}
 _VERIFIED = ((_resume.VerifiedTransition, _resume), (_run.VerifiedRunTransition, _run),
@@ -36,11 +37,6 @@ _PREPARED_PLAN = {
 }
 
 
-def _require(ok, message):
-    if not ok:
-        raise ValueError(f"joint source transition: {message}")
-
-
 def receipt_version(bound_receipt):
     """The version a bound receipt names, read only after its bytes match the binding."""
     _require(isinstance(bound_receipt, dict) and set(bound_receipt) == {"path", "sha256"},
@@ -48,7 +44,7 @@ def receipt_version(bound_receipt):
     path = Path(bound_receipt["path"])
     _require(path.is_file(), "transition receipt is missing")
     raw = path.read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == bound_receipt["sha256"], "transition receipt bytes changed")
+    _require(bytes_sha256hex(raw) == bound_receipt["sha256"], "transition receipt bytes changed")
     try:
         receipt = json.loads(raw)
     except ValueError:
