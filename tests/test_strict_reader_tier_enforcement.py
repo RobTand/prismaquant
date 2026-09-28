@@ -113,10 +113,20 @@ def _pb():
     """
     require_prismabuild_sdk()
     from prismaquant.staged_lease import inject_installed_sdk_for_tests
+    # The client SDK (PB #1254) is what the code under test calls, so it is
+    # the module a test patches. Fixtures that act as PB's mover use
+    # ``_writer()``: the writer half is not part of the client.
     module = inject_installed_sdk_for_tests()
     import prismabuild.pool as pool_mod
     import prismabuild.residency_map as map_mod
     return module, pool_mod, map_mod
+
+
+def _writer():
+    """PB's reader-lease module, for fixtures that write material as a mover."""
+
+    import prismabuild.reader_lease as module
+    return module
 
 
 def _pb_queue(tmp_path, pool_mod, consumer):
@@ -158,14 +168,14 @@ def _pb_publish(rl, map_mod, root, stage, consumer, mover, manifest, entries):
                              "offset": int(key.split(":", 1)[0])}
         mat_entries[key] = {"stage_path": str(staged), "bytes": len(blob),
                             "sha256": digest,
-                            "file_id": rl.stat_identity(str(staged))}
+                            "file_id": _writer().stat_identity(str(staged))}
     map_mod.write_fragment(root, {
         "schema": map_mod.RESIDENCY_MAP_FRAGMENT_SCHEMA_V1,
         "consumer_action_key": consumer, "mover_action_key": mover,
         "tier_id": STAGE_TIER, "stage_root": str(stage),
         "manifest_sha256": manifest, "entries": frag_entries})
-    generation = rl.mint_generation()
-    rl.write_material(
+    generation = _writer().mint_generation()
+    _writer().write_material(
         root, consumer_action_key=consumer, mover_action_key=mover,
         tier_id=STAGE_TIER, stage_root=str(stage), manifest_sha256=manifest,
         generation=generation, entries=mat_entries)
@@ -185,15 +195,15 @@ def _pb_publish_ram(rl, map_mod, root, ram_root, consumer, mover, manifest,
                              "offset": int(key.split(":", 1)[0])}
         mat_entries[key] = {"stage_path": str(ram_file), "bytes": len(blob),
                             "sha256": digest,
-                            "file_id": rl.stat_identity(str(ram_file))}
+                            "file_id": _writer().stat_identity(str(ram_file))}
     map_mod.write_fragment(root, {
         "schema": map_mod.RESIDENCY_MAP_FRAGMENT_SCHEMA_V1,
         "consumer_action_key": consumer, "mover_action_key": mover,
         "tier_id": RAM_TIER, "stage_root": str(ram_root),
         "manifest_sha256": manifest, "epoch": epoch,
         "entries": frag_entries})
-    generation = rl.mint_generation()
-    rl.write_material(
+    generation = _writer().mint_generation()
+    _writer().write_material(
         root, consumer_action_key=consumer, mover_action_key=mover,
         tier_id=RAM_TIER, stage_root=str(ram_root),
         manifest_sha256=manifest, generation=generation,
@@ -612,7 +622,7 @@ def test_strict_source_stale_ram_falls_to_allowed_stage(tmp_path, monkeypatch):
     assert _pins_live(tmp_path, consumer) == []
 
 
-def test_strict_ram_only_with_dead_epoch_refuses(tmp_path, monkeypatch):
+def test_strict_ram_only_with_dead_epoch_refuses(tmp_path, monkeypatch, installed_client_sdk):
     path, _ = _shard(tmp_path)
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
@@ -627,7 +637,7 @@ def test_strict_ram_only_with_dead_epoch_refuses(tmp_path, monkeypatch):
     assert resolver.report()['bytes_from_pool'] == 0
 
 
-def test_strict_source_corrupt_range_refuses(tmp_path, monkeypatch):
+def test_strict_source_corrupt_range_refuses(tmp_path, monkeypatch, installed_client_sdk):
     path, _ = _shard(tmp_path)
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
@@ -658,7 +668,7 @@ def test_strict_get_slice_proxy_metadata_then_staged_payload(tmp_path, monkeypat
     assert _pins_live(tmp_path, consumer) == []
 
 
-def test_strict_empty_tensor_built_locally(tmp_path, monkeypatch):
+def test_strict_empty_tensor_built_locally(tmp_path, monkeypatch, installed_client_sdk):
     path, tensors = _shard(tmp_path)
     root = _stage_root(tmp_path)
     staged = _stage_whole(root, path)
@@ -876,7 +886,7 @@ def test_strict_verified_activation_from_stage_never_opens_pool(tmp_path, monkey
     assert _pins_live(tmp_path, consumer) == []
 
 
-def test_strict_verified_activation_unmapped_refuses(tmp_path, monkeypatch):
+def test_strict_verified_activation_unmapped_refuses(tmp_path, monkeypatch, installed_client_sdk):
     from prismaquant.perturbed_x_cache import load_verified_activation_cache_entry
     pool = tmp_path / 'pool'
     pool.mkdir(parents=True, exist_ok=True)
@@ -921,7 +931,7 @@ def test_strict_exact_entry_from_stage(tmp_path, monkeypatch):
     assert _pins_live(tmp_path, consumer) == []
 
 
-def test_strict_exact_entry_unmapped_refuses(tmp_path, monkeypatch):
+def test_strict_exact_entry_unmapped_refuses(tmp_path, monkeypatch, installed_client_sdk):
     from prismaquant.perturbed_x_cache import (
         prefetch_exact_activation_cache_entries, write_exact_activation_cache_entry)
     entries = tmp_path / 'pool' / 'entries'
@@ -1048,7 +1058,9 @@ def test_release_failure_retains_retry_state_then_releases_exactly(tmp_path, mon
 def _one_published_window(tmp_path, monkeypatch, token):
     """A published stage window over one blob, and its lease window."""
     from prismaquant.staged_lease import LeaseWindow, covers_for_leads
-    _pb()
+    # The window calls PB through the client SDK (PB #1254), so the client is
+    # the module a caller patches; the publication below is the mover's half.
+    client = _pb()[0]
     consumer = _hex64(f"consumer-{tmp_path}")
     import prismabuild.pool as pool_mod
     import prismabuild.residency_map as map_mod
@@ -1072,7 +1084,7 @@ def _one_published_window(tmp_path, monkeypatch, token):
             "covers": covers_for_leads([mover], MANIFEST),
             "expected": {key: {"bytes": len(blob), "sha256": digest}},
             "span": {"start_bytes": 0, "end_bytes": len(blob)}}
-    return rl, consumer, LeaseWindow(spec, acquire_token=token)
+    return client, consumer, LeaseWindow(spec, acquire_token=token)
 
 
 def test_a_transient_release_failure_is_retried_and_releases(tmp_path, monkeypatch, capsys):
@@ -1083,12 +1095,12 @@ def test_a_transient_release_failure_is_retried_and_releases(tmp_path, monkeypat
     the pin showed, and the window exits released."""
     require_prismabuild_sdk()
     import prismaquant.staged_lease as staged_lease_mod
-    rl, consumer, window = _one_published_window(
+    client, consumer, window = _one_published_window(
         tmp_path, monkeypatch, "token-transient")
     monkeypatch.setattr(staged_lease_mod, "release_retry_horizon_s",
                         lambda path, mountinfo=None: 10.0,
                         raising=False)
-    real_release = rl.release
+    real_release = client.release
     calls = []
 
     def flaky_release(*args, **kwargs):
@@ -1097,7 +1109,7 @@ def test_a_transient_release_failure_is_retried_and_releases(tmp_path, monkeypat
             return False
         return real_release(*args, **kwargs)
 
-    monkeypatch.setattr(rl, "release", flaky_release)
+    monkeypatch.setattr(client, "release", flaky_release)
     with window:
         assert len(_pins_live(tmp_path, consumer)) == 1
     assert window._released is True
@@ -1117,13 +1129,13 @@ def test_a_release_failing_past_the_horizon_refuses_with_what_the_pin_showed(
     require_prismabuild_sdk()
     from prismaquant.staged_lease import LeaseRefused
     import prismaquant.staged_lease as staged_lease_mod
-    rl, consumer, window = _one_published_window(
+    client, consumer, window = _one_published_window(
         tmp_path, monkeypatch, "token-persistent")
     monkeypatch.setattr(staged_lease_mod, "release_retry_horizon_s",
                         lambda path, mountinfo=None: 0.3,
                         raising=False)
-    real_release = rl.release
-    monkeypatch.setattr(rl, "release", lambda *args, **kwargs: False)
+    real_release = client.release
+    monkeypatch.setattr(client, "release", lambda *args, **kwargs: False)
     with window:
         with pytest.raises(LeaseRefused, match="this ref held"):
             window.__exit__(None, None, None)
@@ -1132,7 +1144,7 @@ def test_a_release_failing_past_the_horizon_refuses_with_what_the_pin_showed(
         said = capsys.readouterr().out
         assert "not retrying" in said
         assert said.count("[staged-lease] release of pin") >= 2
-        monkeypatch.setattr(rl, "release", real_release)
+        monkeypatch.setattr(client, "release", real_release)
     assert _pins_live(tmp_path, consumer) == []
 
 
@@ -1347,7 +1359,7 @@ def test_lease_pin_module_reports_approved_commit():
     from prismaquant.staged_lease import (
         PINNED_SDK_COMMIT, PB_READER_LEASE_PIN_COMMIT)
     assert PINNED_SDK_COMMIT == PB_READER_LEASE_PIN_COMMIT
-    assert PINNED_SDK_COMMIT == "461728e4dcc08123d5fdb410eb2f18772fdb3fe0"
+    assert PINNED_SDK_COMMIT == "059953bc3793f539600d333cd3311773e592b0e6"
 
 
 # -- window enter/exit contract: single-shot, no leaks ------------------------
@@ -1722,7 +1734,7 @@ def test_strict_checkpoint_shared_state_altered_refuses(tmp_path, monkeypatch):
     assert resolver.report()['bytes_from_stage'] == manifest_bytes + entry_bytes
 
 
-def test_strict_checkpoint_shared_state_unmapped_refuses(tmp_path, monkeypatch):
+def test_strict_checkpoint_shared_state_unmapped_refuses(tmp_path, monkeypatch, installed_client_sdk):
     from prismaquant.joint_adjoint_checkpoints import (
         adjoint_space, load_adjoint_checkpoint)
     record, _tensor, _state = _write_checkpoint(tmp_path)
@@ -1754,8 +1766,10 @@ def test_lease_helper_env_without_helper_refuses(tmp_path, monkeypatch):
     resolver = _strict(monkeypatch, _write_map(
         tmp_path, {'s': (path, staged, None)}))
     monkeypatch.setenv(HELPER_ROOT_ENV_VAR, str(tmp_path / 'no-such-root'))
-    with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
-        with pytest.raises(LeaseRefused, match="lease-helper-divergent"):
+    # The map is validated by the SDK (PB #1254), so the divergent root
+    # refuses at the first map read, when the shard opens.
+    with pytest.raises(LeaseRefused, match="lease-helper-divergent"):
+        with layer_streaming._source_safe_open(str(path), framework='pt') as reader:
             reader.get_tensor('f32')
     assert resolver.report()['bytes_from_pool'] == 0
 
@@ -1785,12 +1799,12 @@ def test_stage_epoch_convention_is_exact_absence(tmp_path, monkeypatch):
         "manifest_sha256": MANIFEST, "epoch": "stage-epoch-01",
         "entries": {key: {"stage_path": str(staged), "bytes": len(blob),
                           "sha256": digest, "offset": 0}}})
-    rl.write_material(
+    _writer().write_material(
         root, consumer_action_key=consumer, mover_action_key=mover,
         tier_id=STAGE_TIER, stage_root=str(stage), manifest_sha256=MANIFEST,
-        generation=rl.mint_generation(),
+        generation=_writer().mint_generation(),
         entries={key: {"stage_path": str(staged), "bytes": len(blob),
-                       "sha256": digest, "file_id": rl.stat_identity(str(staged))}})
+                       "sha256": digest, "file_id": _writer().stat_identity(str(staged))}})
     _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
     spec = {"tier_id": STAGE_TIER, "epoch": "",
@@ -1833,16 +1847,16 @@ def test_equal_sized_files_never_serve_each_others_bytes(tmp_path, monkeypatch):
         frag_entries[key] = {"stage_path": str(staged_of[name]),
                              "bytes": len(blob), "sha256": digest, "offset": 0}
         mat_entries[key] = dict(frag_entries[key],
-                                file_id=rl.stat_identity(str(staged_of[name])))
+                                file_id=_writer().stat_identity(str(staged_of[name])))
     map_mod.write_fragment(root, {
         "schema": map_mod.RESIDENCY_MAP_FRAGMENT_SCHEMA_V1,
         "consumer_action_key": consumer, "mover_action_key": mover,
         "tier_id": STAGE_TIER, "stage_root": str(stage),
         "manifest_sha256": MANIFEST, "entries": frag_entries})
-    rl.write_material(
+    _writer().write_material(
         root, consumer_action_key=consumer, mover_action_key=mover,
         tier_id=STAGE_TIER, stage_root=str(stage), manifest_sha256=MANIFEST,
-        generation=rl.mint_generation(), entries=mat_entries)
+        generation=_writer().mint_generation(), entries=mat_entries)
     _launch_env(monkeypatch, consumer)
     monkeypatch.setenv(ENV_VAR, str(tmp_path / 'residency' / 'd.map.json'))
 
@@ -2981,7 +2995,7 @@ def test_a_window_reread_one_entry_at_a_time_counts_each_tier(tmp_path, monkeypa
     assert _pins_live(tmp_path, consumer) == []
 
 
-def test_a_refused_exact_read_counts_no_bytes(tmp_path, monkeypatch):
+def test_a_refused_exact_read_counts_no_bytes(tmp_path, monkeypatch, installed_client_sdk):
     refs, _tensors = _exact_entries(tmp_path, 2)
     root = _stage_root(tmp_path)
     resolver = _strict(monkeypatch, _write_map(

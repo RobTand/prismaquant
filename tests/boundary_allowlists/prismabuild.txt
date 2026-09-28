@@ -2,24 +2,11 @@
 # internals). Step 2 (the PB client SDK) empties it.
 # One line per occurrence: path<TAB>kind<TAB>value. Delete lines; never add.
 # CI refuses a pull request that adds a line here.
-prismaquant/glm_capture_compatibility.py	literal	prismaquant.prismabuild.cas_receipt.v3
-prismaquant/glm_capture_compatibility.py	literal	prismaquant.prismabuild.pool_outcome.v1
-prismaquant/glm_capture_compatibility.py	literal	prismaquant.prismabuild.worker_attestation.v2
 prismaquant/joint_forward_resume.py	import	prismabuild.*
 prismaquant/produced_output_spool.py	import	prismabuild.produced_spool
 prismaquant/residency_map.py	literal	prismaquant.prismabuild.residency_map.v1
 prismaquant/residency_map.py	literal	prismaquant.prismabuild.residency_map_fragment.v1
-prismaquant/stage_a_produced_output.py	import	prismabuild.pool
-prismaquant/stage_a_produced_output.py	import	prismabuild.produced_output
-prismaquant/stage_a_produced_output.py	import	prismabuild.reader_lease
-prismaquant/stage_a_produced_output.py	import	prismabuild.residency_map
-prismaquant/stage_a_produced_output.py	private	_read_json
 prismaquant/staged_lease.py	import	prismabuild.*
-prismaquant/staged_lease.py	import	prismabuild.core
-prismaquant/staged_lease.py	import	prismabuild.pool
-prismaquant/staged_lease.py	import	prismabuild.reader_lease
-prismaquant/staged_lease.py	import	prismabuild.reader_lease
-prismaquant/staged_lease.py	import	prismabuild.storage_tiers
 tools/audit_produced_window_tokens.py	import	prismabuild.pool
 tools/audit_produced_window_tokens.py	import	prismabuild.pool
 tools/audit_produced_window_tokens.py	import	prismabuild.pool

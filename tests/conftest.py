@@ -245,6 +245,20 @@ def legacy_v5_contract() -> dict:
                                    "tessera.lane-eligibility.v5")
 
 
+@pytest.fixture
+def installed_client_sdk(monkeypatch):
+    """The reviewed installed ``prismabuild.client``, bound for this test.
+
+    Not autouse: a test about the unbound state must be able to see it.
+    See ``fleet_sdk.installed_client_bound``.
+    """
+
+    from fleet_sdk import installed_client_bound
+
+    with installed_client_bound(monkeypatch) as module:
+        yield module
+
+
 @pytest.fixture(autouse=True)
 def _restore_profile_detection_globals():
     """Snapshot and restore the process-global state ``detect_profile`` reads.
@@ -406,6 +420,21 @@ def _no_prismabuild_import_carried_between_tests():
     from fleet_sdk import prismabuild_imports_restored
     with prismabuild_imports_restored():
         yield
+
+
+@pytest.fixture(autouse=True)
+def _no_launching_queue_root_from_the_test_shard(monkeypatch):
+    """No test reads the queue that launched its pbtest shard.
+
+    A pbtest shard is itself a PrismaBuild action, and the pool launcher
+    publishes that action's queue root as ``PRISMABUILD_QUEUE_ROOT``
+    (PB #961). ``reader_lease.injected_context`` prefers it to the queue a
+    test's residency map names, so a test that fakes an action context in a
+    ``tmp_path`` queue would look for its claim in the live fleet queue and
+    refuse ``no-claim-context``. A test that wants the variable sets it.
+    """
+    monkeypatch.delenv("PRISMABUILD_QUEUE_ROOT", raising=False)
+    yield
 
 
 @pytest.fixture(autouse=True)
