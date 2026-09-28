@@ -454,6 +454,22 @@ def test_peer_argv_round_trips_to_the_coordinators_engine_kwargs():
             assert back[key] == str(value), key
 
 
+def test_a_compiled_coordinator_states_eager_off_and_its_compilation_config():
+    """PQ #1634: the peer builds the compiled engine rank 0 built rather than a
+    default, and its argv parses back to the coordinator's kwargs."""
+    from tools.gold_engine_options import headless_peer_argv, parse_headless_peer_argv
+
+    compilation = {"mode": "NONE", "cudagraph_mode": "FULL_DECODE_ONLY",
+                   "cudagraph_capture_sizes": [1, 2, 3, 4]}
+    kwargs = {**_glm_tr3_scorer_kwargs(), "enforce_eager": False, "compilation_config": compilation}
+    argv = headless_peer_argv(kwargs, node_rank=1)
+    assert "--no-enforce-eager" in argv and "--enforce-eager" not in argv
+    assert argv[argv.index("--compilation-config") + 1] == (
+        '{"cudagraph_capture_sizes":[1,2,3,4],"cudagraph_mode":"FULL_DECODE_ONLY","mode":"NONE"}')
+    _, _, back = parse_headless_peer_argv(argv)
+    assert back["enforce_eager"] is False and back["compilation_config"] == compilation
+
+
 def test_kernel_config_must_be_a_json_object():
     from tools.gold_engine_options import headless_peer_argv
 

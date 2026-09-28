@@ -196,16 +196,20 @@ _PEER_FLAG_SPELLING = {
 #: written as compact, key-sorted JSON so one kwargs dict has exactly one
 #: spelling; vLLM parses the flag back into the same dict. GLM-5.3 NoPE needs
 #: `kernel_config={"enable_flashinfer_autotune": false}` on every rank (#1473).
+#: The TR3 scorer's compiled mode declares its `compilation_config` (#1634).
 _PEER_JSON_SPELLING = {
     "kernel_config": "--kernel-config",
+    "compilation_config": "--compilation-config",
 }
 
 #: Boolean kwargs whose stock spelling is a bare flag when true. `False` emits
 #: the negated spelling where vLLM publishes one, so "off" is stated rather
-#: than left to the peer's default.
+#: than left to the peer's default. The pinned vLLM publishes `--no-enforce-eager`
+#: (its boolean engine fields use argparse's BooleanOptionalAction), so a
+#: compiled coordinator states eager off to its peer (#1634).
 _PEER_BOOLEAN_SPELLING = {
     "trust_remote_code": ("--trust-remote-code", None),
-    "enforce_eager": ("--enforce-eager", None),
+    "enforce_eager": ("--enforce-eager", "--no-enforce-eager"),
     "disable_log_stats": ("--disable-log-stats", None),
     "language_model_only": ("--language-model-only", None),
     "enable_prefix_caching": (

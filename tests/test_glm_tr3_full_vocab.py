@@ -1,5 +1,6 @@
 """CPU contracts only; native stock-vLLM hook qualification is separate."""
 import copy
+import enum
 import hashlib
 import io
 import json
@@ -929,3 +930,262 @@ def test_arm_capture_teacher_tensor_matches_the_previous_two_copy_path(tmp_path)
     previous = torch.from_numpy(np.load(io.BytesIO(path.read_bytes()), allow_pickle=False)).to("cuda")
     assert armed["teacher"].device.type == "cuda" and armed["teacher"].dtype == torch.float32
     assert torch.equal(armed["teacher"], previous)
+
+
+# --- compiled execution mode (PQ #1634) ---------------------------------------
+
+class _CompilationMode(enum.IntEnum):
+    """The member names of the pinned vLLM's CompilationMode."""
+    NONE = 0
+    STOCK_TORCH_COMPILE = 1
+    DYNAMO_TRACE_ONCE = 2
+    VLLM_COMPILE = 3
+
+
+class _CUDAGraphMode(enum.Enum):
+    """The member names of the pinned vLLM's CUDAGraphMode."""
+    NONE = 0
+    PIECEWISE = 1
+    FULL = 2
+    FULL_DECODE_ONLY = (2, 0)
+    FULL_AND_PIECEWISE = (2, 1)
+
+
+_FDO = {"mode": "NONE", "cudagraph_mode": "FULL_DECODE_ONLY", "cudagraph_capture_sizes": [1, 2, 3, 4]}
+
+
+def _scorer_args(**overrides):
+    from types import SimpleNamespace as S
+    values = dict(kv_cache_dtype="fp8_ds_mla", gpu_memory_utilization=.9, attention_backend="CUSTOM",
+                  kernel_config='{"enable_flashinfer_autotune": false}', quantization=None)
+    values.update(overrides)
+    return S(**values)
+
+
+def _resolved_config(*, enforce_eager=False, mode=_CompilationMode.NONE,
+                     cudagraph_mode=_CUDAGraphMode.FULL_DECODE_ONLY, sizes=(1, 2, 3, 4)):
+    from types import SimpleNamespace as S
+    return S(model_config=S(enforce_eager=enforce_eager, max_model_len=2049, logprobs_mode="raw_logprobs",
+                            multimodal_config=S(language_model_only=True)),
+             cache_config=S(enable_prefix_caching=False, cache_dtype="fp8_ds_mla"),
+             scheduler_config=S(enable_chunked_prefill=False, max_num_seqs=1, max_num_batched_tokens=2049),
+             parallel_config=S(pipeline_parallel_size=1, data_parallel_size=1), speculative_config=None,
+             compilation_config=S(mode=mode, cudagraph_mode=cudagraph_mode,
+                                  cudagraph_capture_sizes=list(sizes)))
+
+
+def test_eager_engine_kwargs_are_unchanged_by_the_compiled_mode():
+    """An eager run, stated or not, builds the engine it always built: eager on
+    and no compilation config, so every eager qualification still replays."""
+    topology = {"tensor_parallel_size": 2, "moe_backend": "triton"}
+    legacy = served.scorer_engine_kwargs(_scorer_args(), model="candidate", topology=topology)
+    stated = served.scorer_engine_kwargs(_scorer_args(execution_mode="eager", compilation_config=None),
+                                         model="candidate", topology=topology)
+    assert legacy == stated
+    assert legacy["enforce_eager"] is True and "compilation_config" not in legacy
+
+
+def test_compiled_engine_kwargs_turn_eager_off_and_carry_the_declared_config():
+    kwargs = served.scorer_engine_kwargs(
+        _scorer_args(execution_mode="compiled", compilation_config=json.dumps(_FDO)),
+        model="candidate", topology={"tensor_parallel_size": 2})
+    assert kwargs["enforce_eager"] is False
+    assert kwargs["compilation_config"] == _FDO
+    assert kwargs["max_num_seqs"] == 1 and kwargs["enable_chunked_prefill"] is False
+
+
+@pytest.mark.parametrize("text", [
+    "not json",
+    "[1, 2]",
+    json.dumps({k: v for k, v in _FDO.items() if k != "mode"}),
+    json.dumps({**_FDO, "max_cudagraph_capture_size": 4}),
+    json.dumps({**_FDO, "mode": "none"}),
+    json.dumps({**_FDO, "mode": 0}),
+    json.dumps({**_FDO, "cudagraph_mode": "NONE"}),
+    json.dumps({**_FDO, "cudagraph_capture_sizes": []}),
+    json.dumps({**_FDO, "cudagraph_capture_sizes": [2, 1]}),
+    json.dumps({**_FDO, "cudagraph_capture_sizes": [1, 1, 2]}),
+    json.dumps({**_FDO, "cudagraph_capture_sizes": [0, 1]}),
+    json.dumps({**_FDO, "cudagraph_capture_sizes": [True, 2]}),
+    json.dumps({**_FDO, "cudagraph_capture_sizes": [1, 2050]}),
+    json.dumps({**_FDO, "cudagraph_capture_sizes": 4}),
+])
+def test_a_compilation_config_is_refused_unless_every_field_is_stated_canonically(text):
+    """LLM() drops an unknown compilation key silently, and the engine may
+    resolve a loose value to something else; both refuse before any load."""
+    with pytest.raises(ValueError, match="compilation config|cudagraph"):
+        served.parse_compilation_config(text)
+
+
+@pytest.mark.parametrize("mode, text, match", [
+    ("eager", json.dumps(_FDO), "applies only to --execution-mode compiled"),
+    ("compiled", None, "requires --compilation-config"),
+    ("graph", None, "execution mode must be one of"),
+])
+def test_the_declared_mode_and_the_config_must_agree(mode, text, match):
+    with pytest.raises(ValueError, match=match):
+        served.declared_compilation(_scorer_args(execution_mode=mode, compilation_config=text))
+
+
+def test_compiled_observation_records_the_resolved_config():
+    observed = served.observed_configuration(_resolved_config(), expected_kv_cache_dtype="fp8_ds_mla",
+                                             compilation=_FDO)
+    assert observed["model_config"]["enforce_eager"] is False
+    assert observed["compilation_config"] == _FDO
+    eager = served.observed_configuration(_resolved_config(enforce_eager=True),
+                                          expected_kv_cache_dtype="fp8_ds_mla")
+    assert "compilation_config" not in eager and eager["model_config"]["enforce_eager"] is True
+
+
+@pytest.mark.parametrize("declared, resolved, match", [
+    # Breakable CUDA graphs force mode NONE on GLM-5.3: a declared VLLM_COMPILE
+    # would otherwise score an engine that never compiled.
+    ({**_FDO, "mode": "VLLM_COMPILE"}, {}, "differs from the declared compiled contract: mode"),
+    (_FDO, dict(cudagraph_mode=_CUDAGraphMode.PIECEWISE), "contract: cudagraph_mode"),
+    (_FDO, dict(sizes=(1, 2, 4)), "contract: cudagraph_capture_sizes"),
+    (_FDO, dict(enforce_eager=True), "model_config"),
+])
+def test_compiled_observation_refuses_a_config_the_engine_did_not_resolve(declared, resolved, match):
+    with pytest.raises(ValueError, match=match):
+        served.observed_configuration(_resolved_config(**resolved), expected_kv_cache_dtype="fp8_ds_mla",
+                                      compilation=declared)
+
+
+def test_the_eager_contract_still_refuses_an_engine_that_is_not_eager():
+    with pytest.raises(ValueError, match="model_config"):
+        served.observed_configuration(_resolved_config(), expected_kv_cache_dtype="fp8_ds_mla")
+
+
+def test_compiled_observation_still_refuses_speculative_decoding():
+    config = _resolved_config()
+    config.speculative_config = object()
+    with pytest.raises(ValueError, match="speculative"):
+        served.observed_configuration(config, expected_kv_cache_dtype="fp8_ds_mla", compilation=_FDO)
+
+
+def test_a_worker_that_resolved_another_graph_mode_refuses():
+    """The model runner resolves the CUDA-graph mode against its attention
+    backends after the coordinator's snapshot; the worker's own config is read."""
+    from types import SimpleNamespace as S
+    worker = S(vllm_config=_resolved_config(cudagraph_mode=_CUDAGraphMode.NONE),
+               cache_config=S(cache_dtype="fp8_ds_mla"),
+               model_runner=S(cache_config=S(cache_dtype="fp8_ds_mla"), kv_cache_dtype=torch.uint8,
+                              model=S(_tr3_capture=S(rank=1))))
+    with pytest.raises(ValueError, match="cudagraph_mode"):
+        served.observed_worker_configuration(worker, expected_kv_cache_dtype="fp8_ds_mla", compilation=_FDO)
+    worker.vllm_config.compilation_config.cudagraph_mode = _CUDAGraphMode.FULL_DECODE_ONLY
+    row = served.observed_worker_configuration(worker, expected_kv_cache_dtype="fp8_ds_mla", compilation=_FDO)
+    assert row["configuration"]["compilation_config"] == _FDO
+
+
+def _scorer_argv(*extra):
+    return ["measure_glm_tr3_vllm.py", "--model", "candidate",
+            "--candidate-digest-cache", "cache", "--panel", "panel",
+            "--teacher", "teacher.json", "--teacher-sha256", "a" * 64,
+            "--serve-image", "image@sha256:" + "b" * 64, "--output", "result.json",
+            "--kv-cache-dtype", "fp8_ds_mla", "--expected-kv-cache-dtype", "fp8_ds_mla",
+            "--qualify-hook", *extra]
+
+
+def test_scorer_cli_takes_the_compiled_mode_and_its_config(monkeypatch):
+    parsed = {}
+    monkeypatch.setattr(served, "measure", lambda args: parsed.update(vars(args)))
+    monkeypatch.setattr(sys, "argv", _scorer_argv("--execution-mode", "compiled",
+                                                  "--compilation-config", json.dumps(_FDO)))
+    served.main()
+    assert parsed["execution_mode"] == "compiled"
+    assert served.declared_compilation(types.SimpleNamespace(**parsed)) == _FDO
+    parsed.clear()
+    monkeypatch.setattr(sys, "argv", _scorer_argv())
+    served.main()
+    assert parsed["execution_mode"] == "eager" and parsed["compilation_config"] is None
+
+
+@pytest.mark.parametrize("extra", [
+    ("--compilation-config", json.dumps(_FDO)),
+    ("--execution-mode", "compiled"),
+    ("--execution-mode", "compiled", "--compilation-config", json.dumps({**_FDO, "extra": 1})),
+    ("--execution-mode", "graph"),
+])
+def test_scorer_cli_refuses_a_mode_and_config_that_disagree(monkeypatch, extra):
+    monkeypatch.setattr(served, "measure", lambda args: pytest.fail("must refuse before measuring"))
+    monkeypatch.setattr(sys, "argv", _scorer_argv(*extra))
+    with pytest.raises(SystemExit):
+        served.main()
+
+
+def test_compiled_peer_argv_states_eager_off_and_the_declared_config():
+    """The headless peer must build the same compiled engine as rank 0."""
+    from tools.gold_engine_options import headless_peer_argv, parse_headless_peer_argv
+    kwargs = served.scorer_engine_kwargs(
+        _scorer_args(execution_mode="compiled", compilation_config=json.dumps(_FDO)),
+        model="candidate", topology={"tensor_parallel_size": 2, "nnodes": 2, "node_rank": 0,
+                                     "master_addr": "192.0.2.1", "master_port": 29531})
+    argv = headless_peer_argv(kwargs, node_rank=1)
+    assert "--no-enforce-eager" in argv and "--enforce-eager" not in argv
+    assert json.loads(argv[argv.index("--compilation-config") + 1]) == _FDO
+    _, _, back = parse_headless_peer_argv(argv)
+    assert back["enforce_eager"] is False and back["compilation_config"] == _FDO
+
+
+def _record_observations(monkeypatch):
+    calls = {"engine": [], "worker": []}
+
+    def engine(llm, **kw):
+        calls["engine"].append(kw.get("compilation"))
+        return {"observed": kw.get("compilation")}
+
+    def rpc(self, fn, kwargs=None):
+        calls["worker"].append(dict(kwargs or {}))
+        return [{"rank": 1}, {"rank": 0}]
+
+    monkeypatch.setattr(served, "observed_engine_configuration", engine)
+    monkeypatch.setattr(_FakeLLM, "collective_rpc", rpc)
+    return calls
+
+
+def test_compiled_binding_is_stamped_and_threads_the_config_to_every_observation(fake_measure, monkeypatch):
+    args, _ = fake_measure
+    calls = _record_observations(monkeypatch)
+    args.execution_mode, args.compilation_config = "compiled", json.dumps(_FDO)
+    result = served.measure(args)
+    binding = result["runtime_binding"]
+    assert binding["execution_mode"] == "compiled"
+    assert binding["engine_kwargs"]["enforce_eager"] is False
+    assert binding["engine_kwargs"]["compilation_config"] == _FDO
+    # The initial observation and every recheck see the declared config, so a
+    # compiled run is not refused at the end as a "changed" configuration.
+    assert len(calls["engine"]) >= 2 and all(c == _FDO for c in calls["engine"])
+    assert [c.get("compilation") for c in calls["worker"]] == [_FDO]
+
+
+def test_an_eager_run_binds_exactly_as_before(fake_measure, monkeypatch):
+    args, _ = fake_measure
+    calls = _record_observations(monkeypatch)
+    result = served.measure(args)
+    assert "execution_mode" not in result["runtime_binding"]
+    assert "compilation_config" not in result["runtime_binding"]["engine_kwargs"]
+    assert all(c is None for c in calls["engine"])
+    assert all("compilation" not in c for c in calls["worker"])
+
+
+@pytest.mark.parametrize("qualified_mode", ["eager", "compiled"])
+def test_a_qualification_from_the_other_mode_refuses(fake_measure, qualified_mode):
+    """A compiled KL receipt never replays an eager qualification, nor the reverse."""
+    args, _ = fake_measure
+
+    def set_mode(mode):
+        args.execution_mode = mode
+        args.compilation_config = json.dumps(_FDO) if mode == "compiled" else None
+
+    args.qualify_then_score, args.qualify_hook = None, True
+    set_mode(qualified_mode)
+    served.measure(args)
+    raw = Path(args.output).read_bytes()
+    args.qualify_hook = False
+    args.qualification, args.qualification_sha256 = args.output, hashlib.sha256(raw).hexdigest()
+    args.output = str(Path(args.output).with_name("panel.json"))
+    set_mode("compiled" if qualified_mode == "eager" else "eager")
+    with pytest.raises(ValueError, match="native qualification differs"):
+        served.measure(args)
+    assert not Path(args.output).exists()
