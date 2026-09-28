@@ -27,7 +27,7 @@ def test_the_catalog_fence_keeps_its_sealed_wire_format(tmp_path):
     # The dict #1519 sealed into catalogs, spelled as it was then.
     sealed = {"inode": value.st_ino, "bytes": value.st_size,
               "mtime_ns": value.st_mtime_ns, "ctime_ns": value.st_ctime_ns}
-    fence = jce._catalog_fence(value)
+    fence = jce.catalog_stat_fence(value)
     assert fence == sealed
     assert list(fence) == list(sealed)
     assert json.dumps(fence) == json.dumps(sealed)

@@ -3812,8 +3812,13 @@ read-ahead failure. Every file stat fence now reads one identity,
 `_stat_fence` helpers and the private copies in `perturbed_x_cache`,
 `residency_shard_reader` and `tessera_calibration_cache` are gone. The sealed
 overlay catalog projects its four persisted keys from it
-(`joint_catalog_extension._catalog_fence`), byte-identical to the dict #1519
-sealed. Gates: `tests/test_duplication_baseline.py`,
+(`joint_catalog_extension.catalog_stat_fence`), byte-identical to the dict #1519
+sealed. The overlay catalog tools (`build_t4_overlay_catalog`,
+`qualify_t4_overlay`) read that projection instead of their own `stamp`; two
+tensor-bit digests read one `tensor_digests.tensor_sha256`; and the Tessera
+fleet drivers (PQ #1547) share one `atomic_json` (the standard-library
+worker's) and one `common.gb10_row`. The duplication baseline shrinks by two
+groups. Gates: `tests/test_duplication_baseline.py`,
 `tests/test_file_identity.py`.
 
 Gates: `tests/test_io_site_freeze.py`, `tests/test_overlay_fence_pool_1519.py`,

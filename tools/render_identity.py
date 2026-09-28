@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import hashlib
 import json
 import os
 import pathlib
@@ -44,16 +43,6 @@ os.environ.setdefault("PYTHONHASHSEED", "0")
 
 MODEL = "/mnt/shared/models/GLM-5.3-Flash-4layer"
 LEVERS = {"gptq": True, "static_act_order": True, "joint_scale_opt": True}
-
-
-def digest(t) -> str:
-    # view as uint8 to hash the exact bits: bfloat16 has no numpy dtype, and
-    # casting to float32 would hide a low-bit difference, which is the entire
-    # thing this script exists to detect.
-    import torch
-
-    flat = t.detach().cpu().contiguous().view(torch.uint8)
-    return hashlib.sha256(flat.numpy().tobytes()).hexdigest()
 
 
 def main(argv=None) -> int:
@@ -68,6 +57,7 @@ def main(argv=None) -> int:
     import torch
     from safetensors import safe_open
     from prismaquant.production_weight_cache import render_production_weight
+    from prismaquant.tensor_digests import tensor_sha256
 
     torch.manual_seed(0)
     shards = sorted(glob.glob(f"{args.model}/*.safetensors"))
@@ -95,7 +85,7 @@ def main(argv=None) -> int:
                         out = render_production_weight(
                             W, fmt, qname=key, activations=acts, levers=LEVERS
                         )
-                        rows.append({"qname": key, "fmt": fmt, "digest": digest(out),
+                        rows.append({"qname": key, "fmt": fmt, "digest": tensor_sha256(out),
                                      "shape": list(out.shape), "dtype": str(out.dtype)})
                     except Exception as exc:
                         rows.append({"qname": key, "fmt": fmt, "error": repr(exc)[:200]})
@@ -103,7 +93,7 @@ def main(argv=None) -> int:
                     # Prove the levers changed the bytes.  If this comes back equal,
                     # the render fell through to RTN and the identity result below
                     # would be measuring the wrong code path.
-                    rtn = digest(render_production_weight(
+                    rtn = tensor_sha256(render_production_weight(
                         W, "NVFP4", qname=key, activations=acts, levers={}))
                     levered = next(r["digest"] for r in rows
                                    if r["qname"] == key and r["fmt"] == "NVFP4")
@@ -125,7 +115,7 @@ def main(argv=None) -> int:
     payload = json.dumps({"host": socket.gethostname(),
                       "torch": torch.__version__,
                       "device": torch.cuda.get_device_name(0),
-                      "input_digest": digest(X),
+                      "input_digest": tensor_sha256(X),
                       "lever_proof": lever_proof,
                       "rows": rows}, indent=1)
     args.out.write_text(payload)

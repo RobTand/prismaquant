@@ -14,15 +14,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 from typing import Iterable, Mapping
-import uuid
 
 from prismaquant.pbwait_table import DONE_STATUSES, parse_pbwait_table
+# The standard-library worker owns the one atomic JSON write; the drivers
+# import it rather than keep a second copy (epic #1295).
+from tools.tessera_fleet.model_worker import atomic_json
 
 #: The published PrismaBuild client. A stale checkout must not become a stale
 #: submission client, so the drivers use the generation the fleet runs.
@@ -31,17 +32,6 @@ PUBLISHED_TOOLS = Path("/mnt/shared/prismabuild-fleet/repo/tools")
 #: The per-workspace directory the drivers write their own records into. The
 #: workspace's Git exclude keeps it out of every sealed snapshot.
 STATE = ".pb-state"
-
-
-def atomic_json(path: Path, value) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temporary.write_text(json.dumps(value, sort_keys=True, indent=1) + "\n")
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def shard_range(of_shards: int):
@@ -102,6 +92,12 @@ def initialize_git(workspace: Path, *, message: str) -> None:
                     "-c", "user.email=prismaquant@localhost", "commit",
                     "--allow-empty", "-qm", message], check=True)
     (Path(workspace) / ".git" / "info" / "exclude").write_text(f"/{STATE}/\n")
+
+
+def gb10_row(workspace: Path, argv: list, *, demand: Mapping, env: Mapping) -> dict:
+    """One ``pbcampaign`` row over ``workspace``, placed on either GB10."""
+    return {"cwd": str(workspace), "argv": list(argv), "demand": dict(demand),
+            "tags": ["gb10"], "env": dict(env)}
 
 
 def pbcampaign_command(manifest: Path, *, wait_s: float, detach: bool,

@@ -144,7 +144,7 @@ def check_stamps(source, snapshots):
             raise ValueError(f'source changed during export: {name}')
 
 
-def verify_record(path, expected=None):
+def verify_output_record(path, expected=None):
     path = Path(path)
     record = read_json(path / 'pb-result.json')
     if expected is not None and record != expected:
@@ -203,7 +203,7 @@ def inside(spec, mode, index, destination):
             if record['contract'] != spec['contract']:
                 raise ValueError('assembly contract mismatch')
             path = Path(spec['parts']) / f'part-{part_index:05d}'
-            verify_record(path, record)
+            verify_output_record(path, record)
             paths.append(path)
         parts.merge_serving_parts(paths, Path(destination), source)
     check_stamps(source, snapshots)
@@ -220,12 +220,12 @@ def verify_image(image):
     return observed['Id']
 
 
-def execute(spec, mode, index):
+def run_export_action(spec, mode, index):
     if mode == 'encode' and not 0 <= index < spec['count']:
         raise ValueError('invalid partition index')
     final = Path(spec['parts']) / f'part-{index:05d}' if mode == 'encode' else Path(spec['out'])
     if final.exists():
-        record = verify_record(final)
+        record = verify_output_record(final)
         if record['contract'] != spec['contract'] or record['index'] != (index if mode == 'encode' else None):
             raise ValueError('existing output belongs to another export')
         return record
@@ -253,7 +253,7 @@ def execute(spec, mode, index):
     argv += [image, 'worker.py', 'inside', '--mode', mode, '--index', str(index), '--destination', str(temporary)]
     try:
         subprocess.run(argv, check=True)
-        record = verify_record(temporary)
+        record = verify_output_record(temporary)
         if final.exists():
             raise ValueError('output appeared during export; refusing to replace it')
         os.rename(temporary, final)
@@ -297,7 +297,7 @@ def main(argv=None):
         inside(spec, args.mode, args.index, args.destination)
         return 0
     else:
-        result = execute(spec, args.command, args.index)
+        result = run_export_action(spec, args.command, args.index)
     print(RESULT_PREFIX + json.dumps(result, sort_keys=True), flush=True)
     return 0
 

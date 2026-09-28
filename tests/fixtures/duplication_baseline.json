@@ -646,10 +646,6 @@
    "prismaquant/joint_served_activation.py",
    "prismaquant/joint_stageb_resources.py"
   ],
-  "digest": [
-   "tools/nvfp4_served_qdq_bench.py",
-   "tools/qualify_t4_overlay.py"
-  ],
   "drop_client_cache": [
    "tools/staged_exact_read_bench.py",
    "tools/staged_read_stream_ab.py"
@@ -755,10 +751,6 @@
   "stage_multimodal": [
    "prismaquant/build_rtn_cache.py",
    "prismaquant/sensitivity_probe.py"
-  ],
-  "stamp": [
-   "tools/build_t4_overlay_catalog.py",
-   "tools/qualify_t4_overlay.py"
   ],
   "submit": [
    "tools/dispatch_stage_a_split.py",
