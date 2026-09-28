@@ -16,7 +16,14 @@ import threading
 from types import MappingProxyType
 
 from .cost_stage_checkpoint import atomic_write_bytes, prepare_journal, write_unit
-from .digests import SOURCE_HASH_BLOCK_BYTES
+from .digests import (
+    DIRECT_ASCII_LAX,
+    DIRECT_ASCII_STRICT,
+    SOURCE_HASH_BLOCK_BYTES,
+    bytes_sha256hex,
+    hex_chain_sha256hex,
+    indent2_json_file_bytes,
+)
 from .file_identity import file_stat_signature
 from .memory_management import reserve_allocation
 
@@ -75,8 +82,7 @@ def sha256(path, *, resource_check=None, release_read_pages=False, file_descript
 
 
 def _json(path, value):
-    atomic_write_bytes(Path(path), (json.dumps(value, sort_keys=True, indent=2,
-                                              allow_nan=False) + '\n').encode())
+    atomic_write_bytes(Path(path), indent2_json_file_bytes(value))
 
 
 def capture_identity(census_path, *, calibration, max_act_rows,
@@ -94,7 +100,7 @@ def capture_identity(census_path, *, calibration, max_act_rows,
     census_path = Path(census_path)
     census_raw = census_path.read_bytes()
     census = json.loads(census_raw)
-    census_digest = hashlib.sha256(census_raw).hexdigest()
+    census_digest = bytes_sha256hex(census_raw)
     if type(max_act_rows) is not int or max_act_rows < 1:
         raise ValueError('capture scoring prefix must have positive max_act_rows')
     from prismaquant import validate_source_initialization_contract
@@ -294,7 +300,7 @@ class CaptureSourceAuthentication:
         after = path.stat()
         if file_stat_signature(before) != file_stat_signature(after):
             raise RuntimeError('streamed source identity cache changed while reading')
-        if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
+        if expected_sha256 is not None and bytes_sha256hex(raw) != expected_sha256:
             raise RuntimeError('streamed source identity cache differs from its declared SHA256')
         checked_cache, identity = _read_streamed_model_identity_cache(
             path, source_model=str(self.root))
@@ -337,7 +343,7 @@ class CaptureSourceAuthentication:
         for _name, state, digest in candidate:
             state['sha256'] = digest
             state['sha256_source'] = 'verified_streamed_identity_cache'
-        self._adopted_cache_sha256 = hashlib.sha256(raw).hexdigest()
+        self._adopted_cache_sha256 = bytes_sha256hex(raw)
         return len(candidate)
 
     def adopt_identity_proof_or_hash(self, cache_path, expected_sha256):
@@ -386,7 +392,7 @@ class CaptureSourceAuthentication:
         """
         raw = Path(census_path).read_bytes()
         census = json.loads(raw)
-        digest = hashlib.sha256(raw).hexdigest()
+        digest = bytes_sha256hex(raw)
         producer = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
         if (not isinstance(census.get('model'), str) or
                 Path(os.path.abspath(census['model'])) != self.root or
@@ -628,10 +634,7 @@ def _load_execution(policy, identity, output=None, *, identity_sha256=None):
     if identity_sha256 is None:
         descriptor = dict(schema='prismaquant.capture_load_execution.v1', policy=policy,
                           capture_identity=identity)
-        hasher = hashlib.sha256()
-        for chunk in json.JSONEncoder(sort_keys=True, separators=(',', ':')).iterencode(descriptor):
-            hasher.update(chunk.encode())
-        identity_sha256 = hasher.hexdigest()
+        identity_sha256 = DIRECT_ASCII_LAX.sha256_streamed(descriptor)
     elif (not isinstance(identity_sha256, str) or len(identity_sha256) != 64 or
           any(c not in '0123456789abcdef' for c in identity_sha256)):
         raise ValueError('capture load execution needs a SHA256 identity')
@@ -639,7 +642,7 @@ def _load_execution(policy, identity, output=None, *, identity_sha256=None):
                  identity_sha256=identity_sha256,
                  loaded_entries=0, source_read_bytes=0, peak_buffer_bytes=0,
                  peak_archive_storage_bytes=0, live_buffer_bytes=0,
-                 ordered_load_identities_sha256=hashlib.sha256(b'').hexdigest())
+                 ordered_load_identities_sha256=bytes_sha256hex(b''))
     if output is not None:
         if not isinstance(output, dict) or output:
             raise ValueError('capture load execution receipt must be an empty dictionary')
@@ -655,8 +658,8 @@ def merge_load_execution(total, partial):
         total[key] += partial[key]
     for key in ('peak_buffer_bytes', 'peak_archive_storage_bytes'):
         total[key] = max(total[key], partial[key])
-    total['ordered_load_identities_sha256'] = hashlib.sha256((
-        total['ordered_load_identities_sha256'] + partial['ordered_load_identities_sha256']).encode()).hexdigest()
+    total['ordered_load_identities_sha256'] = hex_chain_sha256hex(
+        total['ordered_load_identities_sha256'], partial['ordered_load_identities_sha256'])
 
 
 def preflight_verified_capture_entries(root, entries, *, names, policy, census, max_rows):
@@ -726,8 +729,8 @@ def fold_load_receipt(execution, receipt):
     execution['peak_buffer_bytes'] = max(execution['peak_buffer_bytes'], receipt['file_bytes'])
     execution['peak_archive_storage_bytes'] = max(execution['peak_archive_storage_bytes'],
                                                   receipt['archive_storage_bytes'])
-    execution['ordered_load_identities_sha256'] = hashlib.sha256((
-        execution['ordered_load_identities_sha256'] + receipt['identity_sha256']).encode()).hexdigest()
+    execution['ordered_load_identities_sha256'] = hex_chain_sha256hex(
+        execution['ordered_load_identities_sha256'], receipt['identity_sha256'])
 
 
 def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
@@ -933,7 +936,7 @@ def require_capture_contract(path, expected_sha256=None):
     """Validate a complete canonical capture before downstream preparation."""
     path = Path(path)
     raw = path.read_bytes()
-    if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
+    if expected_sha256 is not None and bytes_sha256hex(raw) != expected_sha256:
         raise RuntimeError('priced calibration capture manifest changed')
     manifest = json.loads(raw)
     return validate_capture_contract(manifest)
@@ -979,17 +982,15 @@ class CaptureMetadataOwner:
             raise RuntimeError('canonical capture manifest changed while its metadata was read')
         if len(raw) > MAX_CAPTURE_METADATA_BYTES:
             raise RuntimeError('canonical capture manifest exceeds bounded metadata budget')
-        self.sha256 = hashlib.sha256(raw).hexdigest()
+        self.sha256 = bytes_sha256hex(raw)
         if self.sha256 != expected_sha256:
             raise RuntimeError('priced calibration capture manifest changed')
         try:
             manifest = validate_capture_contract(json.loads(raw))
         except (TypeError, ValueError) as error:
             raise RuntimeError('canonical capture manifest is not valid JSON') from error
-        expected = json.dumps(expected_identity, sort_keys=True, separators=(',', ':'),
-                              allow_nan=False)
-        identity = json.dumps(manifest['identity'], sort_keys=True, separators=(',', ':'),
-                              allow_nan=False)
+        expected = DIRECT_ASCII_STRICT.text(expected_identity)
+        identity = DIRECT_ASCII_STRICT.text(manifest['identity'])
         if identity != expected:
             raise RuntimeError('calibration capture identity, completeness or scope mismatch')
         self._stat = after
@@ -1011,7 +1012,7 @@ class CaptureMetadataOwner:
             # replacement with identical bytes still violates the held-path
             # mutation fence.  It tells a caller whether content changed while
             # preserving that fail-closed rule.
-            changed = hashlib.sha256(candidate.read_bytes()).hexdigest() != self.sha256
+            changed = bytes_sha256hex(candidate.read_bytes()) != self.sha256
             raise RuntimeError('canonical capture manifest metadata changed'
                                + (' and content differs' if changed else ''))
 
@@ -1024,7 +1025,7 @@ class CaptureMetadataOwner:
         policy = normalize_verified_activation_load(policy)
         if policy is None:
             return None
-        policy_json = json.dumps(policy, sort_keys=True, separators=(',', ':'), allow_nan=False)
+        policy_json = DIRECT_ASCII_STRICT.text(policy)
         digest = self._execution_digests.get(policy_json)
         if digest is None:
             # This is byte-for-byte the old sorted JSON descriptor, assembled
@@ -1032,7 +1033,7 @@ class CaptureMetadataOwner:
             # for every singleton prefetch.
             raw = ('{"capture_identity":' + self._identity_json + ',"policy":' +
                    policy_json + ',"schema":"prismaquant.capture_load_execution.v1"}').encode()
-            digest = hashlib.sha256(raw).hexdigest()
+            digest = bytes_sha256hex(raw)
             if len(self._execution_digests) >= MAX_CAPTURE_EXECUTION_POLICIES:
                 self._execution_digests.pop(next(iter(self._execution_digests)))
             self._execution_digests[policy_json] = digest

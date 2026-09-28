@@ -1,0 +1,108 @@
+{
+ "inputs": {
+  "blobs_hex": [
+   "",
+   "63656e7375732062797465730a",
+   "6e61c3af766520e29c932063656e737573",
+   "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+  ],
+  "chain_hex": [
+   "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "abababababababababababababababababababababababababababababababab",
+   "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+  ],
+  "identities": [
+   {
+    "census_sha256": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+    "model": "/models/glm-4.5",
+    "note": "na\u00efve \u2713",
+    "schema": "prismaquant.capture_identity.v1",
+    "source_files": {
+     "a.bin": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "units": [
+     "u1",
+     "u2"
+    ]
+   },
+   {
+    "empty_dict": {},
+    "empty_list": [],
+    "identity": {
+     "nested": {
+      "a": [
+       2,
+       3.5,
+       null,
+       true
+      ],
+      "b": 1
+     }
+    }
+   }
+  ],
+  "json_file_values": [
+   {
+    "a": {
+     "\u00fc": [
+      1,
+      2
+     ]
+    },
+    "n": null,
+    "z": 1
+   },
+   [
+    1,
+    "two",
+    3.5
+   ],
+   {}
+  ],
+  "policies": [
+   {
+    "max_buffer_bytes": 1073741824,
+    "max_scratch_bytes": 8388608,
+    "schema": "prismaquant.verified_activation_load.v1"
+   },
+   {
+    "max_buffer_bytes": 2097152,
+    "max_scratch_bytes": 1048576,
+    "schema": "prismaquant.verified_activation_load.v1"
+   }
+  ]
+ },
+ "old_rows": {
+  "A0": {
+   "hex": "7b0a20202261223a207b0a20202020225c7530306663223a205b0a202020202020312c0a202020202020320a202020205d0a20207d2c0a2020226e223a206e756c6c2c0a2020227a223a20310a7d0a"
+  },
+  "A1": {
+   "hex": "5b0a2020312c0a20202274776f222c0a2020332e350a5d0a"
+  },
+  "A2": {
+   "hex": "7b7d0a"
+  },
+  "B0": "{\"census_sha256\":\"0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f\",\"model\":\"/models/glm-4.5\",\"note\":\"na\\u00efve \\u2713\",\"schema\":\"prismaquant.capture_identity.v1\",\"source_files\":{\"a.bin\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"units\":[\"u1\",\"u2\"]}",
+  "B1": "{\"empty_dict\":{},\"empty_list\":[],\"identity\":{\"nested\":{\"a\":[2,3.5,null,true],\"b\":1}}}",
+  "C0": "{\"max_buffer_bytes\":1073741824,\"max_scratch_bytes\":8388608,\"schema\":\"prismaquant.verified_activation_load.v1\"}",
+  "C1": "{\"max_buffer_bytes\":2097152,\"max_scratch_bytes\":1048576,\"schema\":\"prismaquant.verified_activation_load.v1\"}",
+  "D0": "111f62b05ab69e9a985b21b2c2d18b8258a7f04c1e13692e10afbe5bf0b17098",
+  "D0_as_text": "{\"capture_identity\":{\"census_sha256\":\"0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f\",\"model\":\"/models/glm-4.5\",\"note\":\"na\\u00efve \\u2713\",\"schema\":\"prismaquant.capture_identity.v1\",\"source_files\":{\"a.bin\":\"1111111111111111111111111111111111111111111111111111111111111111\"},\"units\":[\"u1\",\"u2\"]},\"policy\":{\"max_buffer_bytes\":1073741824,\"max_scratch_bytes\":8388608,\"schema\":\"prismaquant.verified_activation_load.v1\"},\"schema\":\"prismaquant.capture_load_execution.v1\"}",
+  "D1": "cb657cea1a7f68207db0407d02fac6a3088f59a6ed94c4fe191b3a50afa444c9",
+  "D1_as_text": "{\"capture_identity\":{\"empty_dict\":{},\"empty_list\":[],\"identity\":{\"nested\":{\"a\":[2,3.5,null,true],\"b\":1}}},\"policy\":{\"max_buffer_bytes\":2097152,\"max_scratch_bytes\":1048576,\"schema\":\"prismaquant.verified_activation_load.v1\"},\"schema\":\"prismaquant.capture_load_execution.v1\"}",
+  "D2": "dc55a8563df37b964cd53f753036b2f62945499a027e94cd2c2289b4a6a2bb41",
+  "D2_as_text": {
+   "error": "ValueError"
+  },
+  "E0": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "E1": "6821b79070d19e40205329e7cc4e0fadacb8106c9110de5abc77295b52a5e398",
+  "E2": "2cb80d88d39441dca399fee543241af42ae73682339c58a5810b88cc79fe0782",
+  "E3": "fdeab9acf3710362bd2658cdc9a29e8f9c757fcf9811603a8c447cd1d9151108",
+  "F_fold0": "33788fc734af2e1a60e274a8ded2b2dad7ab888aaec2c26e40fd39030af3f942",
+  "F_fold1": "7304583507f96e623d2d459cf01298cc033eee77a97189888f7eaaebafa3e852",
+  "F_identity": "b464e1bcf683995b8e4ff2447b216768ee582b35f159f4496d41a3186118cd3a",
+  "F_merge": "c6d546d61e88f6d5eb22381f28a7e5c7f3fe6ac81933339d82870488b01edebb",
+  "F_seed": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+ },
+ "schema": "prismaquant.digest_calibration_cache_1512.v1"
+}

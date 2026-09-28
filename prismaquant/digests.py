@@ -229,6 +229,25 @@ class JsonProfile:
     def sha256(self, value: object) -> str:
         return hashlib.sha256(self.encoded(value)).hexdigest()
 
+    def sha256_streamed(self, value: object) -> str:
+        """Hash this profile's encoding without materializing the full text.
+
+        Byte-identical to ``sha256`` for values this profile accepts: the
+        encoder options are the profile's own, streamed chunk by chunk in
+        UTF-8 exactly as a caller feeding ``iterencode`` into a hasher does.
+        """
+        digest = hashlib.sha256()
+        encoder = json.JSONEncoder(
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=self.ensure_ascii,
+            allow_nan=self.allow_nan,
+            default=self.default,
+        )
+        for chunk in encoder.iterencode(value):
+            digest.update(chunk.encode("utf-8"))
+        return digest.hexdigest()
+
 
 DIRECT_UTF8_STRICT = JsonProfile("direct-utf8-strict", ensure_ascii=False, allow_nan=False)
 DIRECT_ASCII_STRICT = JsonProfile("direct-ascii-strict", ensure_ascii=True, allow_nan=False)
@@ -303,3 +322,20 @@ def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTE
         while block := handle.read(block_size):
             digest.update(block)
     return digest.hexdigest()
+
+
+#: The pretty capture-file JSON spelling: sorted keys, two-space indent,
+#: strict about non-finite numbers, default separators, one trailing LF.
+def indent2_json_file_bytes(value: object) -> bytes:
+    """The ``sort_keys=True, indent=2, allow_nan=False`` file form plus LF."""
+    return (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode(
+        "utf-8")
+
+
+def hex_chain_sha256hex(left: str, right: str) -> str:
+    """The ordered hex-identity chain: concatenate two hex strings, hash once.
+
+    ``merge_load_execution``/``fold_load_receipt`` fold receipts in load order;
+    the concatenated ASCII hex string hashed as UTF-8 is the whole recipe.
+    """
+    return text_sha256hex(left + right)
