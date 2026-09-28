@@ -208,6 +208,50 @@ def test_run_pipeline_passes_the_authority_only_through_the_helper():
     assert '"${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"' in gate
 
 
+def _run_pipeline_authority_gate() -> str:
+    """The ``run-pipeline.sh`` lines that decide the exporter's authority argv."""
+    script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
+    gate = script[:script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')]
+    gate = gate[gate.rindex("  if ! TESSERA_AUTHORITY_LINES=$("):]
+    return gate[:gate.index("\n  fi\n")] + "\n  fi\n"
+
+
+@pytest.mark.parametrize("contract, expected", [
+    (OLD_PIN_CONTRACT, []),
+    (NEW_PIN_CONTRACT, ["--producer-authority",
+                        str(ROOT / "prismaquant" / "tessera_reuse_authority.py")]),
+])
+def test_run_pipeline_reads_the_contract_without_importing_prismaquant(
+        tmp_path, contract, expected):
+    """The run-pipeline gate reads one JSON block, so it imports no torch.
+
+    The gate runs once per Tessera export, beside the preflight. Importing the
+    ``prismaquant`` package to read the contract costs the torch and
+    transformers imports every time, which on a small runner pushed the
+    tessera-arm tests past their 30 s bound. ``-X importtime`` names every
+    module the gate's interpreter imports.
+    """
+    import subprocess
+    checkout = _checkout(tmp_path / "tessera", contract)
+    driver = (
+        'set -euo pipefail\n'
+        'python3() { "$PYTEST_PYTHON" -X importtime "$@"; }\n'
+        + _run_pipeline_authority_gate()
+        + 'printf "%s" "$TESSERA_AUTHORITY_LINES"\n')
+    import os
+    env = {**os.environ, "PYTEST_PYTHON": sys.executable, "PYTHONPATH": str(ROOT),
+           "PIPELINE_SCRIPT_DIR": str(ROOT / "prismaquant"),
+           "TESSERA_REPO": str(checkout)}
+    done = subprocess.run(
+        ["bash", "-c", driver], cwd=ROOT, capture_output=True, text=True,
+        timeout=120, check=False, env=env)
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert done.stdout.splitlines() == expected
+    imported = {line.rsplit("|", 1)[-1].strip().split(".")[0]
+                for line in done.stderr.splitlines() if line.startswith("import time:")}
+    assert not imported & {"prismaquant", "torch", "transformers", "numpy"}, sorted(imported)
+
+
 def test_the_packaged_pin_attests_the_option():
     """The pin this tree admits publishes the block, so run-pipeline passes it."""
     from prismaquant import tessera_render as tr
