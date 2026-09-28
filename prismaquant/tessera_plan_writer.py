@@ -71,21 +71,21 @@ from __future__ import annotations
 import argparse
 import collections
 import json
-import re
 import sys
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
 from .digests import indent2_json_file_bytes
-
-#: ``TESSERA_<BASE>_K<arity>_R<rung>`` -- the allocator's format spelling.
-FORMAT = re.compile(r"^TESSERA_(?P<base>[A-Z0-9]+)_K(?P<arity>\d+)_R(?P<rung>\d+)$")
-FAMILY = re.compile(r"^TESSERA_(?P<base>[A-Z0-9]+)_K(?P<arity>\d+)$")
-#: ``TESSERA_<BASE>_K<arity>_G<n>`` -- a whole fused GROUP at one family with a
-#: rung per member, the option PrismaQuant's group knapsack builds.  Not a
-#: rung and no rate it could stand for, so it is refused by name.
-GROUP = re.compile(r"^TESSERA_(?P<base>[A-Z0-9]+)_K(?P<arity>\d+)_G(?P<option>\d+)$")
+from .tessera_expert_projection import (
+    CARRIED_PROJECTION_SCHEMA,
+    PROJECTION_KEY,
+)
+from .tessera_formats import (
+    TesseraFormatError,
+    is_tessera_group_option,
+    parse_tessera_format_name,
+)
 
 #: What the allocator may pick that is not a Tessera wire and is still fine.
 BF16_CHOICES = {"BF16", "bfloat16", "bf16"}
@@ -144,15 +144,6 @@ def tessera_surface() -> SimpleNamespace:
         source_roster_identity=source_roster_identity)
 
 
-def grid_of(family: str) -> str:
-    """``TESSERA_E4M3_K1 -> "E4M3"``, ``TESSERA_E2M1_K2 -> "E2M1x2"``."""
-    match = FAMILY.fullmatch(family)
-    if not match:
-        raise PlanError(f"not a Tessera family name: {family!r}")
-    arity = int(match.group("arity"))
-    return match.group("base") + ("" if arity == 1 else f"x{arity}")
-
-
 def parse_entry(qname: str, entry) -> tuple:
     """``(kind, payload)``: ``("tessera", (grid, rung, family))``, ``("bf16", None)`` or ``("other", label)``."""
     if isinstance(entry, str):
@@ -165,7 +156,12 @@ def parse_entry(qname: str, entry) -> tuple:
         raise PlanError(f"{qname}: unreadable layer_config entry {entry!r}")
     fmt = entry.get("tessera_format")
     if fmt:
-        if GROUP.fullmatch(fmt):
+        # The spelling is owned by tessera_formats: the GROUP refusal, the
+        # (family, rung) parse and the illegal-rung refusal all live there.
+        # What stays here is the writer's own contract on top: the GROUP
+        # expansion refusal, the tessera_family/body-rate cross-checks, and
+        # the PlanError envelope the CLI prints.
+        if is_tessera_group_option(fmt):
             raise PlanError(
                 f"{qname}: {fmt!r} is a whole-GROUP option (one family, a rung per member), "
                 "not a rung, and there is no single rate it could stand for -- the members "
@@ -174,18 +170,22 @@ def parse_entry(qname: str, entry) -> tuple:
                 "in expand_fused_sibling_assignment before writing an assignment; a plan that "
                 "still carries the group name means that expansion did not run.  Re-export "
                 "the layer_config from an allocator that expands it.")
-        match = FORMAT.fullmatch(fmt)
-        if not match:
+        try:
+            parsed = parse_tessera_format_name(fmt)
+        except TesseraFormatError as exc:
+            raise PlanError(f"{qname}: {fmt!r} names a rung no Tessera grid serves -- {exc}") from exc
+        if parsed is None:
             raise PlanError(f"{qname}: {fmt!r} is not the TESSERA_<BASE>_K<arity>_R<rung> spelling")
-        family = f"TESSERA_{match.group('base')}_K{match.group('arity')}"
+        spec, rung = parsed
+        family = spec.name
+        grid = spec.base + ("" if spec.arity == 1 else f"x{spec.arity}")
         declared = entry.get("tessera_family")
         if declared and declared != family:
             raise PlanError(f"{qname}: tessera_family {declared!r} disagrees with tessera_format {fmt!r}")
-        rung = int(match.group("rung"))
         body_q256 = entry.get("tessera_body_rate_q256")
         if body_q256 is not None and int(body_q256) != rung:
             raise PlanError(f"{qname}: tessera_body_rate_q256 {body_q256} disagrees with {fmt!r}")
-        return ("tessera", (grid_of(family), rung, family))
+        return ("tessera", (grid, rung, family))
     label = entry.get("data_type") or entry.get("format") or entry.get("bits")
     if str(label) in BF16_CHOICES:
         return ("bf16", None)
@@ -207,11 +207,16 @@ def refuse_non_tessera_choices(other: dict) -> None:
 
 
 def read_carried_projection(config: dict):
-    """The carried expert projection, schema-checked, or ``None`` without one."""
-    carried = (config.get("__prismaquant__") or {}).get("tessera_expert_projection")
+    """The carried expert projection, schema-checked, or ``None`` without one.
+
+    The key and the schema are owned by ``tessera_expert_projection``; the
+    binding checks against this checkpoint stay here, beside the plan they
+    gate.
+    """
+    carried = (config.get("__prismaquant__") or {}).get(PROJECTION_KEY)
     if carried is None:
         return None
-    if not isinstance(carried, dict) or carried.get("schema") != "prismaquant.tessera_expert_projection.v1":
+    if not isinstance(carried, dict) or carried.get("schema") != CARRIED_PROJECTION_SCHEMA:
         raise PlanError("unreadable carried Tessera expert projection")
     producer = carried.get("producer", {})
     request = carried.get("request")
