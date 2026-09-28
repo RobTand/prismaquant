@@ -60,7 +60,6 @@ import math
 import os
 from pathlib import Path
 import re
-import struct
 import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple

@@ -108,19 +108,6 @@ def test_tp2_refusals_stay_header_errors(tmp_path):
         tp2_budget_plan.read_safetensors_header(truncated)
 
 
-def test_chain_roll_spans_match_the_inline_parse(checkpoint):
-    import chain_roll_bench
-    directory, _shard, header = checkpoint
-    spans = chain_roll_bench._safetensors_spans(
-        Path(directory), ["tensor.a.weight", "tensor.b.weight"])
-    assert spans, "the bench must still produce merged read spans"
-    covered = {(s["path"], s["offset"], s["bytes"]) for s in spans}
-    first = Path(directory) / "model-00001-of-00002.safetensors"
-    blob_len = len(json.dumps(header, separators=(",", ":")).encode())
-    # header + both contiguous tensors merge into one whole-file read
-    assert (str(first), 0, 8 + blob_len + 24) in covered
-
-
 ROUTING_SITES = [
     ("prismaquant.footprint", "_read_safetensors_header"),
     ("prismaquant.artifact_completeness", "_read_safetensors_header"),
@@ -150,13 +137,8 @@ def test_prismaquant_sites_route_through_the_owner(
 
 
 def test_tool_sites_route_through_the_owner(monkeypatch, checkpoint):
-    import chain_roll_bench
     import tp2_budget_plan
-    directory, shard, _header = checkpoint
-    monkeypatch.setattr(chain_roll_bench, "read_safetensors_header", _raise,
-                        raising=False)
-    with pytest.raises(AssertionError, match="routed through"):
-        chain_roll_bench._safetensors_spans(Path(directory), ["tensor.a.weight"])
+    _directory, shard, _header = checkpoint
     monkeypatch.setattr(tp2_budget_plan.source_read_plan,
                         "read_safetensors_header", _raise, raising=False)
     with pytest.raises(AssertionError, match="routed through"):

@@ -993,9 +993,10 @@ def _shard_resident_bytes(path: Path, dtype_bytes: int,
     dtype per on-disk byte (a 4x undercount at bf16 if sized verbatim).
     Other non-float dtypes stay verbatim.
 
-    Parses the safetensors JSON header directly (stdlib-only; no tensor
-    data is read). Raises on malformed files; the caller falls back to
-    the raw file size."""
+    Reads the safetensors JSON header through the repository's owning
+    reader (prismaquant.source_read_plan.read_safetensors_header; no
+    tensor data is read). Raises on malformed files; the caller falls
+    back to the raw file size."""
     header, _base, _size = read_safetensors_header(str(path))
     total = 0
     for key, meta in header.items():
