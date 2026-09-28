@@ -70,11 +70,13 @@ def _surface(*, dense=None, routed=None, stacks=None, scheme=None):
         return ([], dict(dense), {}, dict(routed))
 
     def expert_stacks(routed_shapes):
-        return {stack: {0: {name: shape for name, shape in tensors.items()}}
+        # {stack: {expert: {projection: (name, shape)}}}, as the exporter returns.
+        return {stack: {0: {name: (name, shape)
+                             for name, shape in tensors.items()}}
                 for stack, tensors in stacks.items()}
 
     return SimpleNamespace(
-        MOE_ROUTER=re.compile(r"\.mlp\.gate\.weight$"),
+        MOE_ROUTER=re.compile(r"^.*\.mlp\.(?:gate|router)\.weight$"),
         MOE_SOURCE_UNPACKED="unpacked_per_expert",
         TesseraError=type("TesseraError", (Exception,), {}),
         quantizable=quantizable,
@@ -297,6 +299,8 @@ def _stack_surface():
 def test_a_routed_stack_is_planned_at_one_exact_rung(tmp_path, monkeypatch):
     surface = _stack_surface()
     monkeypatch.setattr(writer, "tessera_surface", lambda: surface)
+    # a planned stack revalidates its geometry against the model config.
+    (tmp_path / "config.json").write_text("{}")
     fmt = {"tessera_format": "TESSERA_E4M3_K1_R1024"}
     config = {
         "model.layers.0.self_attn.q_proj": fmt,
@@ -400,7 +404,7 @@ def test_carried_projection_disagreement_with_the_producer_refuses(
                 "request": {"stacks": [STACK]},
                 "producer": {
                     "schema": "tessera.expert_projection.v1",
-                    "source": {"config_sha256": "c" * 64},
+                    "source": dict(ROSTER_IDENTITY),
                     "stacks": {"OTHER": {"units": []}}},
                 "stacks": {}},
         },
@@ -429,7 +433,7 @@ def test_the_sidecar_carries_prismaquant_wire_accounting(tmp_path, monkeypatch):
                                     control_rule="nearest", with_control=True,
                                     surface=surface)
     units = {u["qname"]: u for u in provenance["units"]}
-    expected = Fraction(artifact_bpp("TESSERA_E4M3", 1024, shape=(32, 32))) * 32 * 32
+    expected = Fraction(artifact_bpp("TESSERA_E4M3_K1", 1024, shape=(32, 32))) * 32 * 32
     assert units["model.layers.0.self_attn.q_proj"]["prismaquant_charged_bits_exact"] == \
         [expected.numerator, expected.denominator]
     assert units["model.layers.0.self_attn.q_proj"]["prismaquant_charged_bpp"] == \
@@ -455,7 +459,8 @@ def test_the_plan_and_provenance_schemas_are_named(tmp_path, monkeypatch):
     assert provenance["schema"] == "prismaquant.tessera_plan.v1"
     assert provenance["plan_schema"] == "tessera.serving_plan.v1"
     assert provenance["uniform_control"]["built"] is True
-    assert provenance["selection"]["requires_validation"] is True
+    # one distinct (grid, rung) pair: no unvalidated selection sits in this plan.
+    assert provenance["selection"]["requires_validation"] is False
 
 
 def test_main_writes_the_plan_and_the_sidecar(tmp_path, monkeypatch):
