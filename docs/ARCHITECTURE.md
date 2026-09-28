@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1587, `astra/pq-writes-plan-1587`): PrismaQuant
+writes the Tessera serving plan itself
+(`prismaquant/tessera_plan_writer.py`, against
+`tessera.serving_plan.v1` as RobTand/tessera#687 defines it) and the export
+arm calls only Tessera's supported `python -m tessera.export_serving` with
+the pin-verified checkout first on its PYTHONPATH; the producer's expert
+projection stays a named dependency on the lane spec's new `campaign_tools`
+roster. `lane_specs/tessera.json` `producer_tools` is now exactly the
+supported exporter, so the arm's `unsupported_producer_tools` report is
+empty; a contract whose `producer_interface` block does not list the driver
+refuses rather than silently dropping `--producer-authority`. (Rebased onto
+PQ #1616's v44 pin, Tessera master's #687 merge: the writer is live against
+the pinned package; it stays fail-closed with a named refusal on any older
+pin whose package lacks `tessera.serving_plan` (§9.4, export arm).)
+
 Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
 TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
 opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
@@ -794,8 +809,9 @@ unchanged. This is code coverage, not a recorded 42-layer GPU pass.
 
 The Tessera export preflight joins a GLM allocation in the source namespace
 (2026-09-26, `ws-serve/glm-source-unit-shapes`, PQ #1388). The allocation,
-Tessera's `plan_from_layer_config.py` and its exporter all name units by
-source checkpoint tensor. On glm5_next that is `model.language_model.layers.N…`,
+PrismaQuant's own plan writer (`prismaquant/tessera_plan_writer.py`, #1587;
+previously Tessera's `plan_from_layer_config.py`) and the exporter all name
+units by source checkpoint tensor. On glm5_next that is `model.language_model.layers.N…`,
 and the recipe namespace folds it to `model.layers.N…`. Three joins in
 `tessera_export_lane.py` failed on the real GLM allocation:
 
@@ -20838,7 +20854,9 @@ so in its own `annotations`: the exporter is Tessera's
 declared is the selected cells' wires and the source extents of the units the
 assignment leaves on the source precision, in the artifact's layer order, with
 `read_order_attested: false` and tensors outside the campaign roster --
-embeddings, norms, the LM head -- named as not declared.
+embeddings, norms, the LM head -- named as not declared. (Since #1587 the
+exporter named here is Tessera's supported `python -m tessera.export_serving`
+entry point, RobTand/tessera#687, not the old `experiments/` script path.)
 
 The AQUA manifest declares the A-side's own reads: the sensitivity card, the
 cost payload the merge writes into, the joint plan, the model's
@@ -25698,12 +25716,15 @@ check three layers up.
 
 **The arm calls out; it does not vendor in.** `export_native_compressed.py` still
 has no Tessera codec and is not getting one: the layer_config → plan translation
-(`experiments/plan_from_layer_config.py`) and the encode
-(`experiments/export_tessera_serving.py`) both live in the Tessera repository and
-are NAMED by the arm under `TESSERA_REPO`, the same boundary the lane spec already
-uses for the serve script and the route census. A second copy of either here would
-be a second place a wire recipe can drift, which is the failure principle 14
-exists to prevent. `TESSERA_PLAN_COVER` (`as-allocated` by default) decides whether
+is PrismaQuant's own `prismaquant/tessera_plan_writer.py` (#1587 -- the spelling
+and the charged-bits accounting are the producer's records, so the translation
+lives on this side of the boundary; previously Tessera's
+`experiments/plan_from_layer_config.py`) and the encode is Tessera's supported
+`python -m tessera.export_serving` (RobTand/tessera#687), NAMED by the arm under
+`TESSERA_REPO` with the pin-verified checkout first on its PYTHONPATH, the same
+boundary the lane spec already uses for the serve script and the route census.
+A second copy of the encode here would be a second place a wire recipe can
+drift, which is the failure principle 14 exists to prevent. `TESSERA_PLAN_COVER` (`as-allocated` by default) decides whether
 a partial allocation is planned as-is with every other body Linear spelled BF16, or
 broadcast by role and stamped as the extrapolation it is; silence must never become
 a 4-bit rung.

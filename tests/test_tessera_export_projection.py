@@ -687,13 +687,13 @@ def test_the_build_anchor_carries_which_path_produced_the_routed_bytes(case, tmp
 
 def test_shell_hands_the_exporter_the_bundle_the_preflight_wrote():
     driver = (Path(__file__).parents[1] / "prismaquant" / "run-pipeline.sh").read_text()
-    translator = driver.index('python3 "${TESSERA_REPO%/}/experiments/plan_from_layer_config.py"')
+    translator = driver.index('python3 -m prismaquant.tessera_plan_writer')
     gate = driver.rfind("python3 -m prismaquant.tessera_export_lane", 0, translator)
     invocation = driver[gate:driver.index("; then", gate)]
     assert '"${TESSERA_PREFLIGHT_CACHE_ARGS[@]}"' in invocation
     assert 'TESSERA_PREFLIGHT_CACHE_ARGS=(--write-cached-expert-units)' in driver
     assert 'TESSERA_PREFLIGHT_CACHE_ARGS=(--cached-units "$TESSERA_CACHED_UNITS")' in driver
-    exporter = driver.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')
+    exporter = driver.index('python3 -m tessera.export_serving')
     encode = driver[exporter:driver.index("tee", exporter)]
     assert '"${TESSERA_CACHED_UNIT_ARGS[@]}"' in encode
     assert "--cached-expert-units" in driver[translator:exporter]

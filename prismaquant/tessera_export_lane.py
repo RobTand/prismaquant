@@ -13,10 +13,13 @@ plugin packages (``tessera/serving/runtime_contract.json``) -- and the lane
 spec's established pattern for everything else is to NAME a Tessera-repository
 tool rather than copy it (``lane_specs/tessera.json`` already names the serve
 script and the route census that way).  The arm follows it: the layer_config
-to plan translation is Tessera's ``experiments/plan_from_layer_config.py`` and
-the encode is Tessera's ``experiments/export_tessera_serving.py``.  Copying
-either here would make this repository the second place a wire recipe lives,
-which is the failure mode principle 14 exists to prevent.
+to plan translation is PrismaQuant's own ``prismaquant.tessera_plan_writer``
+(#1587 -- the spelling and the charged-bits accounting are the producer's
+records, so the translation lives on this side of the boundary) and the
+encode is Tessera's supported ``python -m tessera.export_serving``
+(RobTand/tessera#687).  Copying the encode here would make this repository
+the second place a wire recipe lives, which is the failure mode principle
+14 exists to prevent.
 
 **Independent fail-closed gates, before encoding.**
 
@@ -431,11 +434,15 @@ def require_producer_tools(
 
     Now the roster lives in ``lane_specs/tessera.json``'s ``producer_tools``,
     where the reader who touches the lane sees it, and this gate iterates it.
-    A tool declared ``unsupported_experiments`` is not refused -- the honest
-    state today is that both Tessera tools live under ``experiments/`` with no
-    stability promise -- but it must name a tracking issue, which
-    ``LaneProducerTool.from_dict`` enforces, and it is echoed on every run so
-    the debt is visible where it is being incurred (RobTand/prismaquant#119).
+    Since #1587 that roster holds only the supported package entry point
+    ``src/tessera/export_serving.py`` (RobTand/tessera#687): the plan
+    translation moved in-tree (``prismaquant.tessera_plan_writer``) and the
+    campaign-side projection tool moved to the ``campaign_tools`` roster,
+    resolved by :func:`require_campaign_tools`.  A tool declared
+    ``unsupported_experiments`` is not refused, but it must name a tracking
+    issue, which ``LaneProducerTool.from_dict`` enforces, and it is echoed
+    on every run so the debt is visible where it is being incurred
+    (RobTand/prismaquant#119).
     """
     import os
 
@@ -471,6 +478,72 @@ def require_producer_tools(
             )
         resolved.append(str(path))
     return tuple(resolved)
+
+
+def require_campaign_tools(
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Refuse unless every tool on the lane's ``campaign_tools`` roster exists.
+
+    The same existence check as :func:`require_producer_tools`, over the
+    second roster (PrismaQuant #1587): dependencies the campaign shells out
+    to that the export arm does not call.  Today that is only the
+    producer's expert projection (``experiments/tessera_producer_plan.py``,
+    tracked by #183), resolved for ``tessera_expert_projection``.  A
+    separate gate rather than a flag on the first one, so the export arm's
+    ``unsupported`` report -- which reads ``producer_tools`` only -- stays a
+    statement about what the arm calls, while the campaign dependency stays
+    named and checked instead of becoming a bare path again.
+    """
+    import os
+
+    from .lane_spec import load_lane_spec
+
+    env = os.environ if env is None else env
+    spec = load_lane_spec("tessera")
+    if not spec.campaign_tools:
+        raise TesseraExportLaneError(
+            "lane_specs/tessera.json declares no `campaign_tools`, but the "
+            "campaign shells out to the producer's expert projection. An "
+            "undeclared external dependency is one nobody can check for"
+        )
+    resolved: list[str] = []
+    for tool in spec.campaign_tools:
+        root = str(env.get(tool.repo_env, "") or "").strip()
+        if not root:
+            raise TesseraExportLaneError(
+                f"{tool.repo_env} is unset, so {tool.path} cannot be located. "
+                "This repository NAMES Tessera's tools instead of vendoring "
+                f"them; point {tool.repo_env} at the checkout of the pinned "
+                "release."
+            )
+        path = Path(root.rstrip("/")) / tool.path
+        if not path.is_file():
+            raise TesseraExportLaneError(
+                f"{path} does not exist. It is declared in "
+                f"lane_specs/tessera.json's campaign_tools as "
+                f"stability={tool.stability!r}"
+                + (f" ({tool.tracking_issue})" if tool.tracking_issue else "")
+                + f": {tool.description}"
+            )
+        resolved.append(str(path))
+    return tuple(resolved)
+
+
+def unsupported_producer_tool_lines(spec) -> list[str]:
+    """The arm's producer-tool debt, one line per unstable tool it calls.
+
+    Since #1587 the export arm calls only the supported package entry
+    point, so this is ``[]`` -- and the test that pins it
+    (``test_lane_gate_recording``) fails the day a second, unstable tool is
+    added to ``producer_tools`` without moving the campaign dependency back
+    out.  The campaign roster's own debt is reported where it is incurred,
+    not here: this is a statement about what the arm calls.
+    """
+    return [
+        f"${{{tool.repo_env}}}/{tool.path} ({tool.tracking_issue})"
+        for tool in spec.producer_tools if tool.stability != "supported"
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -2562,10 +2635,7 @@ def preflight(model_path: str | Path, *, target=None,
         "executes": list(executes),
         "producer_tools": list(producer_tools),
         "producer_repos": list(producer_repos),
-        "unsupported_producer_tools": [
-            f"${{{tool.repo_env}}}/{tool.path} ({tool.tracking_issue})"
-            for tool in spec.producer_tools if tool.stability != "supported"
-        ],
+        "unsupported_producer_tools": unsupported_producer_tool_lines(spec),
         "shipcard_slots": list(lane_gate_slots("tessera")),
         "unrecorded_gates": [
             {"gate": g.id, "reason": g.unrecorded_reason}

@@ -267,7 +267,7 @@ def test_cli_passes_explicit_target_and_assignment_to_preflight(case, monkeypatc
 
 def test_shell_gates_selected_scope_before_the_external_translator():
     driver = (Path(__file__).parents[1] / "prismaquant" / "run-pipeline.sh").read_text()
-    translator = driver.index('python3 "${TESSERA_REPO%/}/experiments/plan_from_layer_config.py"')
+    translator = driver.index('python3 -m prismaquant.tessera_plan_writer')
     gate = driver.rfind("python3 -m prismaquant.tessera_export_lane", 0, translator)
     invocation = driver[gate:driver.index("; then", gate)]
     assert '--assignment "${WORK_DIR}/artifacts/layer_config.json"' in invocation

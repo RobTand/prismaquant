@@ -703,13 +703,12 @@ def test_the_shipping_arm_hands_the_priced_inputs_to_the_exporter():
     array that the preflight validates first.
     """
     driver = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
-    exporter = driver.index("experiments/export_tessera_serving.py")
+    exporter = driver.index("python3 -m tessera.export_serving")
     invocation = driver[exporter:driver.index("2>&1 | tee", exporter)]
     assert '"${TESSERA_PRICED_INPUT_ARGS[@]}"' in invocation
     assert '--priced-inputs "$TESSERA_BUILD_JSON"' in invocation
     assert '--priced-inputs-sha256 "$TESSERA_BUILD_SHA256"' in invocation
-    translator = driver.index(
-        'python3 "${TESSERA_REPO%/}/experiments/plan_from_layer_config.py"')
+    translator = driver.index("python3 -m prismaquant.tessera_plan_writer")
     preflight = driver.rfind(
         "python3 -m prismaquant.tessera_export_lane", 0, translator)
     gate = driver[preflight:driver.index("; then", preflight)]

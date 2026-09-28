@@ -1,12 +1,14 @@
 """The reuse authority reaches Tessera's exporter only when its pin attests it.
 
-Tessera#599 step 2 gave ``experiments/export_tessera_serving.py`` a
-``--producer-authority`` option, and Tessera contract v40 publishes that as
-data (``producer_interface.reuse_authority``). An exporter from before v40
+Tessera#599 step 2 gave the serving exporter a ``--producer-authority``
+option, and Tessera contract v40 publishes that as data
+(``producer_interface.reuse_authority``). An exporter from before v40
 refuses the option as an unknown argument, and the live campaign pins one
 (``tessera-a3e83875``), so every PrismaQuant export argv asks the checkout's
 own contract first (principle 14: read what the pinned runtime attests, never
-assert it).
+assert it). Since #1587 the named driver is the supported package entry
+point ``src/tessera/export_serving.py`` (tessera#687); a contract whose block
+does not list it refuses rather than silently dropping the option.
 
 These tests drive the real builders:
 
@@ -46,8 +48,8 @@ V40_PRODUCER_INTERFACE = {
         "canonical_capture_attribute": "canonical_hessian_capture",
         "drivers": ["experiments/bf16_reach_roster.py",
                     "experiments/export_glm53_tessera.py",
-                    "experiments/export_tessera_serving.py",
                     "experiments/glm_routed_owner_inputs.py",
+                    "src/tessera/export_serving.py",
                     "tools/glm_cpu_cached_pack_probe.py"]}}
 
 #: A pre-v40 contract: it publishes no producer interface at all.
@@ -56,14 +58,15 @@ NEW_PIN_CONTRACT = {"contract_version": 40, "formats": [],
                     "producer_interface": V40_PRODUCER_INTERFACE}
 
 CONTAINER_TESSERA = "/tessera-pin"
-EXPORTER = CONTAINER_TESSERA + "/experiments/export_tessera_serving.py"
-INNER = ["python3", EXPORTER, "/models/glm", "/out/exported",
+EXPORTER_MODULE = "tessera.export_serving"
+INNER = ["python3", "-m", EXPORTER_MODULE, "/models/glm", "/out/exported",
          "--plan-json", "/out/plan.json", "--device", "cuda"]
 
 
 def _checkout(root: Path, contract: dict) -> Path:
-    (root / "experiments").mkdir(parents=True)
-    (root / "experiments" / "export_tessera_serving.py").write_text("# exporter\n")
+    exporter = root / "src" / "tessera" / "export_serving.py"
+    exporter.parent.mkdir(parents=True)
+    exporter.write_text("# exporter\n")
     contract_path = root / "src" / "tessera" / "serving" / "runtime_contract.json"
     contract_path.parent.mkdir(parents=True)
     contract_path.write_text(json.dumps(contract))
@@ -148,8 +151,8 @@ def test_an_old_pin_submits_the_argv_it_submitted_before_the_gate(tmp_path, monk
 
 def test_a_v40_pin_gets_the_authority_after_the_exporter(tmp_path, monkeypatch):
     gated, manifest_argv = _submit(tmp_path, monkeypatch, NEW_PIN_CONTRACT)
-    expected = [INNER[0], EXPORTER, "--producer-authority",
-                "/workspace/prismaquant/tessera_reuse_authority.py", *INNER[2:]]
+    expected = [INNER[0], "-m", EXPORTER_MODULE, "--producer-authority",
+                "/workspace/prismaquant/tessera_reuse_authority.py", *INNER[3:]]
     assert gated[-len(expected):] == expected
     assert manifest_argv == expected
     before, _ = _submit(tmp_path, monkeypatch, NEW_PIN_CONTRACT, gate=False)
@@ -187,7 +190,11 @@ def test_the_helper_reads_the_contract_not_a_constant(tmp_path):
     assert lane.producer_authority_argv(new, "/a.py") == ["--producer-authority", "/a.py"]
     unlisted = json.loads(json.dumps(NEW_PIN_CONTRACT))
     unlisted["producer_interface"]["reuse_authority"]["drivers"].remove(lane.EXPORTER_DRIVER)
-    assert lane.producer_authority_argv(_checkout(tmp_path / "unlisted", unlisted), "/a.py") == []
+    # #1587 (tessera#691 review item 1): a block that does not list the
+    # driver refuses -- silently dropping the option hands the exporter an
+    # argv whose cached-unit bundle refuses downstream instead of here.
+    with pytest.raises(lane.ProducerInterfaceError, match="does not include"):
+        lane.producer_authority_argv(_checkout(tmp_path / "unlisted", unlisted), "/a.py")
     renamed = json.loads(json.dumps(NEW_PIN_CONTRACT))
     renamed["producer_interface"]["reuse_authority"]["option"] = "--authority"
     with pytest.raises(lane.ProducerInterfaceError, match="does not publish"):
@@ -196,13 +203,73 @@ def test_the_helper_reads_the_contract_not_a_constant(tmp_path):
         lane.producer_authority_argv(tmp_path / "missing", "/a.py")
 
 
+def _both_drivers_contract():
+    """The v44 shape: the package exporter beside the legacy shim."""
+    contract = json.loads(json.dumps(NEW_PIN_CONTRACT))
+    drivers = contract["producer_interface"]["reuse_authority"]["drivers"]
+    assert campaign.LEGACY_EXPORTER_SCRIPT not in drivers
+    return contract
+
+
+def test_a_legacy_shim_inner_keeps_the_authority(tmp_path):
+    """No silent drop: the shim is still a listed driver at v44, so an
+    inner naming ``experiments/export_tessera_serving.py`` gets the option
+    (checked against the spelling it uses), not a downstream
+    MISSING_REUSE_AUTHORITY."""
+    contract = _both_drivers_contract()
+    contract["producer_interface"]["reuse_authority"]["drivers"].append(
+        campaign.LEGACY_EXPORTER_SCRIPT)
+    checkout = _checkout(tmp_path / "tessera", contract)
+    shim = checkout / campaign.LEGACY_EXPORTER_SCRIPT
+    shim.parent.mkdir(parents=True, exist_ok=True)
+    shim.write_text("# shim\n")
+    inner = ["python3", f"{CONTAINER_TESSERA}/{campaign.LEGACY_EXPORTER_SCRIPT}",
+             "/models/glm", "/out/exported", "--plan-json", "/out/plan.json"]
+    spec = {"container": {"mounts": [{"source": str(checkout),
+                                          "target": CONTAINER_TESSERA}]}}
+    # No declared mount holds a PrismaQuant package, so the sealed checkout
+    # (cwd) is the tree to run: the adopter lives beside the test's cwd.
+    adopter = tmp_path / "prismaquant" / "tessera_reuse_authority.py"
+    adopter.parent.mkdir(parents=True)
+    adopter.write_text("# adopter\n")
+    got = campaign.export_inner_with_authority(inner, spec, cwd=str(tmp_path))
+    assert got == [*inner[:2], "--producer-authority",
+                   "/workspace/prismaquant/tessera_reuse_authority.py",
+                   *inner[2:]]
+
+
+def test_a_legacy_shim_inner_refuses_when_only_the_new_driver_is_listed(tmp_path):
+    """The check names the spelling the inner uses: a contract attesting
+    only the package exporter refuses the shim up front."""
+    checkout = _checkout(tmp_path / "tessera", _both_drivers_contract())
+    shim = checkout / campaign.LEGACY_EXPORTER_SCRIPT
+    shim.parent.mkdir(parents=True, exist_ok=True)
+    shim.write_text("# shim\n")
+    inner = ["python3", f"{CONTAINER_TESSERA}/{campaign.LEGACY_EXPORTER_SCRIPT}"]
+    spec = {"container": {"mounts": [{"source": str(checkout),
+                                          "target": CONTAINER_TESSERA}]}}
+    with pytest.raises(lane.ProducerInterfaceError, match="does not include"):
+        campaign.export_inner_with_authority(inner, spec, cwd=str(tmp_path))
+
+
+def test_module_checkout_honours_a_relative_mount_source(tmp_path):
+    """``_module_checkout`` takes ``cwd``: a relative mount source resolves
+    against it instead of the process cwd."""
+    checkout = tmp_path / "rel" / "tessera"
+    exporter = checkout / "src" / "tessera" / "export_serving.py"
+    exporter.parent.mkdir(parents=True)
+    exporter.write_text("# exporter\n")
+    mounts = [{"source": "rel/tessera", "target": CONTAINER_TESSERA}]
+    assert campaign._module_checkout(mounts, cwd=str(tmp_path)) == checkout
+
+
 def test_run_pipeline_passes_the_authority_only_through_the_helper():
     script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
-    call = script[script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"'):]
+    call = script[script.index("python3 -m tessera.export_serving"):]
     call = call[:call.index("2>&1 | tee")]
     assert "--producer-authority" not in call
     assert '"${TESSERA_AUTHORITY_ARGS[@]}"' in call
-    gate = script[:script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')]
+    gate = script[:script.index("python3 -m tessera.export_serving")]
     gate = gate[gate.rindex("TESSERA_AUTHORITY_LINES=$("):]
     assert '"${PIPELINE_SCRIPT_DIR}/tessera_producer_interface.py"' in gate
     assert '"${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"' in gate
@@ -230,7 +297,7 @@ def test_the_producer_interface_reader_stands_alone():
 def _run_pipeline_authority_gate() -> str:
     """The ``run-pipeline.sh`` lines that decide the exporter's authority argv."""
     script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
-    gate = script[:script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')]
+    gate = script[:script.index("python3 -m tessera.export_serving")]
     gate = gate[gate.rindex("  if ! TESSERA_AUTHORITY_LINES=$("):]
     return gate[:gate.index("\n  fi\n")] + "\n  fi\n"
 
@@ -271,10 +338,19 @@ def test_run_pipeline_reads_the_contract_without_importing_prismaquant(
     assert not imported & {"prismaquant", "torch", "transformers", "numpy"}, sorted(imported)
 
 
-def test_the_packaged_pin_attests_the_option():
-    """The pin this tree admits publishes the block, so run-pipeline passes it."""
+def test_the_packaged_pin_attests_the_new_driver(tmp_path):
+    """Flipped by the PQ #1616 pin move to tessera#691: the admitted v44
+    contract attests ``src/tessera/export_serving.py`` beside the shim, so
+    the reader passes the authority through instead of refusing.  Before the
+    bump this test asserted the refusal (the v42 contract attested the old
+    shim path only); the refusal path itself is still pinned by
+    ``test_the_helper_reads_the_contract_not_a_constant`` on fixture
+    contracts."""
     from prismaquant import tessera_render as tr
     from importlib.resources import as_file
     with as_file(tr.tessera_serving_contract_path()) as path:
         contract = json.loads(Path(path).read_text())
     assert lane.advertises_producer_authority(contract)
+    checkout = _checkout(tmp_path / "tessera", contract)
+    assert lane.producer_authority_argv(checkout, "/a.py") == [
+        "--producer-authority", "/a.py"]

@@ -26,9 +26,13 @@ to Robert.
 **So a gate with no slot is enforced by nothing**, and until 2026-09-03 that
 was indistinguishable from a gate someone had simply not filled in.
 `LaneGate.from_dict` now refuses a null `shipcard_slot` that carries no
-`unrecorded_reason`, and `LaneSpec.wired_architectures` / `producer_tools` put
-the lane's architecture roster and its external build-tool dependencies in the
-same declaration instead of in a test constant and a bash loop. The chain a
+`unrecorded_reason`, and `LaneSpec.wired_architectures` / `producer_tools` /
+`campaign_tools` put the lane's architecture roster and its external
+build-tool dependencies in the same declaration instead of in a test constant
+and a bash loop. `campaign_tools` (PrismaQuant #1587) is the second roster:
+dependencies the campaign shells out to that the export arm does not call --
+the producer's expert projection -- so the arm's ``unsupported`` report stays
+truthful while the dependency stays named and checked. The chain a
 reader should be able to follow is: gate declared here -> slot opened by
 `prismaquant.lane_shipcard` in the lane's driver arm -> refused by
 `publish_artifact`. Where any link is missing, the gate is a confession log
@@ -142,9 +146,10 @@ class LaneProducerTool:
     ``stability`` is the field that matters.  ``supported`` means the tool is
     a console entry point or a public module of its package.
     ``unsupported_experiments`` means it lives under that repository's
-    ``experiments/`` with no stability promise -- true today of both Tessera
-    tools -- and REQUIRES ``tracking_issue``, so the debt is named on the
-    artifact's own lane declaration rather than only in an issue tracker.
+    ``experiments/`` with no stability promise -- true today only of the
+    campaign-roster projection tool; the export arm calls nothing unstable
+    since #1587 -- and REQUIRES ``tracking_issue``, so the debt is named on
+    the artifact's own lane declaration rather than only in an issue tracker.
     """
 
     repo_env: str
@@ -372,6 +377,14 @@ class LaneSpec:
     serve_command: tuple[str, ...] = ()
     gates: tuple[LaneGate, ...] = ()
     producer_tools: tuple[LaneProducerTool, ...] = ()
+    #: Campaign-side external tools: the same ``LaneProducerTool`` shape as
+    #: ``producer_tools``, but for dependencies the campaign shells out to
+    #: that the export arm does not call (PrismaQuant #1587: the producer's
+    #: expert projection, tracked by #183).  Splitting the roster is what
+    #: lets the arm's ``unsupported`` report stay truthful -- the arm calls
+    #: only supported entry points -- while the campaign dependency stays
+    #: named, resolved, and checked rather than becoming a bare path again.
+    campaign_tools: tuple[LaneProducerTool, ...] = ()
     serving_profiles: tuple[str, ...] = ()
     advisory_gates: bool = True
     notes: tuple[str, ...] = field(default=())
@@ -431,6 +444,9 @@ class LaneSpec:
             producer_tools=tuple(
                 LaneProducerTool.from_dict(t)
                 for t in payload.get("producer_tools", ())),
+            campaign_tools=tuple(
+                LaneProducerTool.from_dict(t)
+                for t in payload.get("campaign_tools", ())),
             wired_architectures=_wired_architectures(payload),
             serving_profiles=tuple(
                 str(p) for p in payload.get("serving_profiles", ())),
@@ -761,6 +777,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"        reason: {row['unrecorded_reason']}")
         for tool in spec.producer_tools:
             print(f"    [producer tool] ${{{tool.repo_env}}}/{tool.path} "
+                  f"stability={tool.stability}"
+                  + (f" tracking={tool.tracking_issue}"
+                     if tool.tracking_issue else ""))
+        for tool in spec.campaign_tools:
+            print(f"    [campaign tool] ${{{tool.repo_env}}}/{tool.path} "
                   f"stability={tool.stability}"
                   + (f" tracking={tool.tracking_issue}"
                      if tool.tracking_issue else ""))
