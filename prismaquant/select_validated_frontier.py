@@ -1008,7 +1008,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--sat-z", type=float, default=2.0,
                         help="Significance multiplier on the combined per-bpp "
-                             "stderr for --mode saturation (2.0 ~= 95%).")
+                             "stderr for --mode saturation (2.0 ~= 95%%).")
     parser.add_argument("--practical-rel-eps", type=float, default=0.005)
     parser.add_argument("--practical-abs-eps", type=float, default=0.0)
     parser.add_argument("--knee-tolerance-bpp", type=float, default=0.1)
