@@ -285,6 +285,30 @@ def test_a_whole_artifact_card_binds_the_hull_and_stamps_the_replay(tmp_path, mo
     assert stamp["selection_non_tensor_reserve_bytes"] == reserve
 
 
+def test_the_exact_probe_bounds_are_flags_recorded_and_replayed(tmp_path, monkeypatch, capsys):
+    case = _fixture(tmp_path, monkeypatch)
+    frontier, doc = _hull(tmp_path, [*case.argv, "--pact-max-states", "250000",
+                                     "--pact-max-transitions", "9000000"],
+                          "--bootstrap-draws", "50")
+    assert (doc["max_states"], doc["max_transitions"]) == (250000, 9000000)
+    rss = doc["hull_peak_rss_kib"]
+    assert 0 < rss["before_hull"] <= rss["after_hull"]
+    output = tmp_path / "replayed.json"
+    assert _replay(frontier, doc["vertices"][0]["assignment_sha256"], output) == 0
+    # The defaults are the solver's own, stated.
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    _, plain = _hull(plain_dir, case.argv, "--bootstrap-draws", "50")
+    from prismaquant import pact_hull
+    assert (plain["max_states"], plain["max_transitions"]) == (
+        pact_hull.DEFAULT_MAX_STATES, pact_hull.DEFAULT_MAX_TRANSITIONS)
+    for flag in ("--pact-max-states", "--pact-max-transitions"):
+        with pytest.raises(SystemExit):
+            prefill_frontier.main(["--output", str(tmp_path / "x.json"), "--",
+                                   *case.argv, flag, "0"])
+        assert "must be a positive integer" in capsys.readouterr().err
+
+
 def test_pact_refuses_a_grid_and_a_missing_regime(tmp_path, monkeypatch, capsys):
     case = _fixture(tmp_path, monkeypatch)
     with pytest.raises(SystemExit):

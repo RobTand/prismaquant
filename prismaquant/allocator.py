@@ -1759,6 +1759,10 @@ class PactHullSweep:
     tensor_parallel: int
     time_ceiling_ms: float | None
     max_memory_bytes: int
+    #: The exact probe's bounds (``--pact-max-states`` / ``--pact-max-transitions``);
+    #: a replay re-runs its probe under the same ones.
+    max_states: int
+    max_transitions: int
     #: ``None`` when the budget is ``--target-bits``; with ``--target-disk-gb``
     #: the card, the reserve, the payload outside the units, and the unit budget.
     whole_artifact_budget: dict | None
@@ -2192,11 +2196,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     help="A REPORT bound on operator-sum time: hull vertices above "
                          "it are flagged, never removed. The constrained set's own "
                          "boundary vertex is not generated.")
+    ap.add_argument("--pact-max-states", type=int, default=None,
+                    help="The exact hull probe's max_states bound (default: the "
+                         "solver's own, pact_hull.DEFAULT_MAX_STATES). A probe over "
+                         "it is refused, never truncated.")
+    ap.add_argument("--pact-max-transitions", type=int, default=None,
+                    help="The exact hull probe's max_transitions bound (default: "
+                         "the solver's own, pact_hull.DEFAULT_MAX_TRANSITIONS).")
     args = ap.parse_args(argv)
 
     pact_flags = (("--pact-regime", args.pact_regime),
                   ("--pact-tensor-parallel", args.pact_tensor_parallel),
-                  ("--pact-time-ceiling-ms", args.pact_time_ceiling_ms))
+                  ("--pact-time-ceiling-ms", args.pact_time_ceiling_ms),
+                  ("--pact-max-states", args.pact_max_states),
+                  ("--pact-max-transitions", args.pact_max_transitions))
     if args.pact_shape_table is None:
         for flag, value in pact_flags:
             if value is not None:
@@ -2212,6 +2225,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         if args.pact_tensor_parallel is None or args.pact_tensor_parallel < 1:
             ap.error("--pact-shape-table requires a positive --pact-tensor-parallel (no "
                      "default: the table is admitted only at the world it was measured at)")
+        for flag, value in (("--pact-max-states", args.pact_max_states),
+                            ("--pact-max-transitions", args.pact_max_transitions)):
+            if value is not None and value < 1:
+                ap.error(f"{flag} must be a positive integer")
         if args.pact_time_ceiling_ms is not None and (
                 not math.isfinite(args.pact_time_ceiling_ms) or args.pact_time_ceiling_ms <= 0):
             ap.error("--pact-time-ceiling-ms must be positive and finite")
@@ -4557,7 +4574,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # selection objective reads λ, and no layer config, Pareto CSV or
         # selection is written here. A replay writes one vertex.
         from .allocator_solver import RuntimeFrontierLimitError
-        from .pact_hull import PactHullError, dichotomic_lower_hull, probe_assignment
+        from .pact_hull import (
+            DEFAULT_MAX_STATES, DEFAULT_MAX_TRANSITIONS, PactHullError,
+            dichotomic_lower_hull, probe_assignment,
+        )
         pact_time_ms = {key: float(r.prefill_ms) for key, r in pact_pricing.resources.items()}
         pact_options = {(unit, c.fmt): c for unit, cs in pact_candidates.items() for c in cs}
 
@@ -4650,15 +4670,29 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             record.update({"feasible": feasible, "reason": None if feasible else reason})
             return record
 
+        pact_limits = {"max_states": int(args.pact_max_states or DEFAULT_MAX_STATES),
+                       "max_transitions": int(args.pact_max_transitions
+                                              or DEFAULT_MAX_TRANSITIONS)}
+
         def _pact_build_hull() -> dict:
+            import resource
+            rss_before_kib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             start = _time.perf_counter()
             try:
                 hull = dichotomic_lower_hull(pact_candidates, pact_time_ms,
-                                         max_memory_bytes=pact_budget)
+                                             max_memory_bytes=pact_budget, **pact_limits)
             except (PactHullError, RuntimeFrontierLimitError) as exc:
+                sizes = (getattr(exc, "diagnostics", None) or {}).get("frontier_sizes")
+                if sizes:
+                    print(f"[alloc] PACT hull refused after {len(sizes)} unit(s); "
+                          f"frontier sizes by unit: {sizes}", flush=True)
                 raise SystemExit(f"[alloc] ERROR: PACT hull: {exc}") from None
             seconds = _time.perf_counter() - start
-            return {"hull": hull, "seconds": seconds,
+            # ru_maxrss is the process peak: the hull raised it only if the
+            # after-reading exceeds the before-reading (PQ #1584, principle 15).
+            return {"hull": hull, "seconds": seconds, "peak_rss_kib": {
+                        "before_hull": rss_before_kib,
+                        "after_hull": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},
                     "vertices": [_pact_vertex_record(v.assignment) for v in hull.vertices]}
 
         def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
@@ -4666,7 +4700,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 raise ValueError("PACT replay requires materialized wires, not a selection request")
             try:
                 assign = probe_assignment(pact_candidates, pact_time_ms, weights,
-                                          max_memory_bytes=pact_budget)
+                                          max_memory_bytes=pact_budget, **pact_limits)
             except (PactHullError, RuntimeFrontierLimitError) as exc:
                 raise ValueError(f"PACT replay probe refused: {exc}") from None
             record = _pact_vertex_record(assign)
@@ -4698,6 +4732,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             tensor_parallel=int(args.pact_tensor_parallel),
             time_ceiling_ms=args.pact_time_ceiling_ms,
             max_memory_bytes=int(pact_budget),
+            **pact_limits,
             whole_artifact_budget=pact_disk,
             fixed_members=tuple(sorted(fixed_format_assignment)),
             n_units=len(pact_candidates),

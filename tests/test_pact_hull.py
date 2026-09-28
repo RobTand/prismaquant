@@ -145,3 +145,24 @@ def test_the_resolution_is_the_float64_sum_bound():
                           + abs(w_t * time_ms[(u, f)]) for u, f in a.assignment.items())
         assert p.resolution >= (n + 1) * 2.0 ** -53 * scale
         assert p.lambda_dloss_per_ms == pytest.approx(w_t / w_d)
+
+
+def test_a_live_probe_over_its_state_bound_is_refused_with_its_measured_growth():
+    candidates, time_ms = _problem(3, n_units=6)
+    budget = sum(min(c.memory_bytes for c in row) for row in candidates.values()) + 3_000
+    exact = pact_hull.dichotomic_lower_hull(candidates, time_ms, max_memory_bytes=budget)
+    assert exact.byte_axis == pact_hull.BYTE_AXIS_LIVE
+    with pytest.raises(pact_hull.RuntimeFrontierLimitError) as refused:
+        pact_hull.dichotomic_lower_hull(candidates, time_ms, max_memory_bytes=budget,
+                                        max_states=3)
+    sizes = refused.value.diagnostics["frontier_sizes"]
+    assert refused.value.diagnostics["refusal"] == "max_states"
+    assert refused.value.diagnostics["frontier_size_lower_bound"] > 3
+    assert all(size <= 3 for size in sizes)
+    # A raised bound returns the same exact hull.
+    raised = pact_hull.dichotomic_lower_hull(
+        candidates, time_ms, max_memory_bytes=budget,
+        max_states=10 * pact_hull.DEFAULT_MAX_STATES,
+        max_transitions=10 * pact_hull.DEFAULT_MAX_TRANSITIONS)
+    assert [dict(v.assignment) for v in raised.vertices] == \
+        [dict(v.assignment) for v in exact.vertices]

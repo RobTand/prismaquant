@@ -18884,7 +18884,13 @@ document.
   constraint is vacuous, so each probe is the per-unit minimiser, with the
   exact solver's tie rule. When the budget binds, each probe is one call to
   the unchanged `solve_runtime_frontier`, and its `max_states` refusal
-  stands. `solve_allocation` is not used, because its bin rounding is a
+  stands. `--pact-max-states` and `--pact-max-transitions` raise the solver's
+  own bounds (`pact_hull.DEFAULT_MAX_STATES` = 100,000,
+  `DEFAULT_MAX_TRANSITIONS` = 8,000,000 when unset). The hull document records
+  both, a replay re-runs its probe under them, and a refusal prints the
+  per-unit frontier sizes it measured before the refused unit. The document
+  also records the process peak RSS (`ru_maxrss`) before and after the hull, in
+  `hull_peak_rss_kib`. `solve_allocation` is not used, because its bin rounding is a
   projection with bounded overshoot and so is not exact at a binding budget.
 - **Inputs and exact checks.** The shape table is admitted against the
   tracked pin and the serving target (`tessera_lane.allocation_shape_price_scope`).

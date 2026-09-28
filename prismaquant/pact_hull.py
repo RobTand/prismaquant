@@ -66,13 +66,18 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import Mapping, Sequence
 
-from .allocator_solver import Candidate, solve_runtime_frontier
+from .allocator_solver import Candidate, RuntimeFrontierLimitError, solve_runtime_frontier
 from .measured_runtime_prices import RuntimeResources
 
 SCHEMA = "prismaquant.pact_hull.v1"
 CANDIDATE_GENERATOR = "lower_convex_hull_dichotomic"
 #: Unit roundoff of IEEE-754 binary64, the dtype every cost and time here is.
 FLOAT64_UNIT_ROUNDOFF = 2.0 ** -53
+#: The exact solver's own bounds (``solve_runtime_frontier``); a caller may
+#: raise them (``--pact-max-states`` / ``--pact-max-transitions``).
+DEFAULT_MAX_STATES = 100_000
+DEFAULT_MAX_TRANSITIONS = 8_000_000
+
 BYTE_AXIS_SLACK = "slack_flattened"
 BYTE_AXIS_LIVE = "live"
 
@@ -216,10 +221,16 @@ def _solve_weighted(candidates, time_ms, w_d: float, w_t: float, *, byte_axis: s
                 resident_bytes=0, peak_scratch_bytes=0, activation_bytes=0)
         probe_candidates[unit] = row
     diag: dict = {}
-    frontier = solve_runtime_frontier(
-        probe_candidates, resources, max_memory_bytes=int(max_memory_bytes),
-        max_prefill_ms=0.0, max_states=max_states, max_transitions=max_transitions,
-        diagnostics=diag)
+    try:
+        frontier = solve_runtime_frontier(
+            probe_candidates, resources, max_memory_bytes=int(max_memory_bytes),
+            max_prefill_ms=0.0, max_states=max_states, max_transitions=max_transitions,
+            diagnostics=diag)
+    except RuntimeFrontierLimitError as exc:
+        # The refusal stands; its measured growth (per-unit frontier sizes up
+        # to the refused unit) travels with it so a caller can report it.
+        exc.diagnostics = diag
+        raise
     if not frontier:
         raise PactHullError(
             f"no assignment fits max_memory_bytes={int(max_memory_bytes)} "
@@ -230,8 +241,8 @@ def _solve_weighted(candidates, time_ms, w_d: float, w_t: float, *, byte_axis: s
 
 def probe_assignment(candidates: Mapping[str, Sequence[Candidate]],
                      time_ms: Mapping[tuple[str, str], float], weights: Sequence[float], *,
-                     max_memory_bytes: int, max_states: int = 100_000,
-                     max_transitions: int = 8_000_000) -> dict[str, str]:
+                     max_memory_bytes: int, max_states: int = DEFAULT_MAX_STATES,
+                     max_transitions: int = DEFAULT_MAX_TRANSITIONS) -> dict[str, str]:
     """Re-run ONE recorded probe: the assignment those weights select.
 
     A replay re-derives a hull vertex from the probe that found it rather than
@@ -250,8 +261,8 @@ def probe_assignment(candidates: Mapping[str, Sequence[Candidate]],
 
 def dichotomic_lower_hull(candidates: Mapping[str, Sequence[Candidate]],
                       time_ms: Mapping[tuple[str, str], float], *,
-                      max_memory_bytes: int, max_states: int = 100_000,
-                      max_transitions: int = 8_000_000) -> LowerHull:
+                      max_memory_bytes: int, max_states: int = DEFAULT_MAX_STATES,
+                      max_transitions: int = DEFAULT_MAX_TRANSITIONS) -> LowerHull:
     """Every vertex of the lower-left convex hull of feasible (time, Δloss).
 
     ``candidates`` are the priced options of each serving unit (unpriced ones
