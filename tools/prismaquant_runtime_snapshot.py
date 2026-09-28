@@ -67,23 +67,16 @@ def _resolve_identity(source: Path, commit: str) -> tuple[str, str]:
     return resolved, tree
 
 
-def _reject_duplicate_members(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise SnapshotError(f"duplicate manifest member {key!r}")
-        result[key] = value
-    return result
-
-
 def _load_manifest(path: Path) -> dict[str, Any]:
     try:
-        payload = json.loads(
+        from prismaquant.schemas import strict_json_loads
+
+        payload = strict_json_loads(
             path.read_text(encoding="utf-8"),
-            object_pairs_hook=_reject_duplicate_members,
-            parse_constant=lambda value: (_ for _ in ()).throw(
-                SnapshotError(f"non-finite JSON value {value}")
-            ),
+            duplicate=lambda key: SnapshotError(
+                f"duplicate manifest member {key!r}"),
+            constant=lambda value: SnapshotError(
+                f"non-finite JSON value {value}"),
         )
     except SnapshotError:
         raise

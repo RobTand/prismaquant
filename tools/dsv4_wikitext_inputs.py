@@ -107,23 +107,6 @@ def _tensor_sha256(value: torch.Tensor) -> str:
 def _strict_json_load(
     path: str | Path, *, expected_sha256: str | None = None,
 ) -> object:
-    def reject_constant(value: str) -> None:
-        raise DSv4WikiTextInputsError(
-            f"WikiText inputs contain non-JSON constant {value}"
-        )
-
-    def reject_duplicate_members(
-        pairs: list[tuple[str, object]],
-    ) -> dict[str, object]:
-        result: dict[str, object] = {}
-        for key, value in pairs:
-            if key in result:
-                raise DSv4WikiTextInputsError(
-                    f"WikiText inputs contain duplicate object member {key!r}"
-                )
-            result[key] = value
-        return result
-
     source = Path(path).resolve(strict=True)
     try:
         size = source.stat().st_size
@@ -141,10 +124,14 @@ def _strict_json_load(
             or hashlib.sha256(raw).hexdigest() != expected_sha256
         ):
             raise DSv4WikiTextInputsError("WikiText input file SHA256 differs")
-        return json.loads(
+        from prismaquant.schemas import strict_json_loads
+
+        return strict_json_loads(
             raw.decode("utf-8"),
-            parse_constant=reject_constant,
-            object_pairs_hook=reject_duplicate_members,
+            duplicate=lambda key: DSv4WikiTextInputsError(
+                f"WikiText inputs contain duplicate object member {key!r}"),
+            constant=lambda value: DSv4WikiTextInputsError(
+                f"WikiText inputs contain non-JSON constant {value}"),
         )
     except DSv4WikiTextInputsError:
         raise
