@@ -1578,10 +1578,10 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     if (receipt.get("schema") != "tessera.native_moe_operator_receipt.v1"
             or receipt.get("status") != "timing_admissible"):
         raise ValueError("native MoE receipt has no admitted whole-apply observation")
-    _admit(receipt, "MoE receipt", MOE_RECEIPT_FIELDS)
     if expected_panel.get("schema") != PANEL_SCHEMA:
         raise ValueError("native MoE receipt requires its independently frozen panel")
-    _equal(receipt["panel"], expected_panel, "receipt panel")
+    _equal(receipt.get("panel"), expected_panel, "receipt panel")
+    _admit(receipt, "MoE receipt", MOE_RECEIPT_FIELDS)
     _equal(receipt["panel_sha256"], identity_sha256(expected_panel), "receipt panel digest")
     _equal(receipt["runtime"], expected_panel["runtime"], "receipt runtime")
     _equal(receipt["runtime_sha256"], identity_sha256(expected_panel["runtime"]), "receipt runtime digest")
