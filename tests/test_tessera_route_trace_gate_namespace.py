@@ -8,14 +8,20 @@ A GLM artifact's ``config_groups`` targets are checkpoint names
 profile (``ModelProfile.served_module_name``) before the per-module
 comparison.
 
-Fixtures (``tests/fixtures/tessera_route_trace_1490``, see ``SOURCE.md``):
-``measured/`` is what the U4 BAL TP2 serves wrote, header-trimmed; ``named/``
-is SYNTHETIC -- the same traces with the 29 NVFP4 routed stacks named as
-Tessera #680 names them, since these serves predate #680 and traced them
-unnamed.
+Fixtures (``tests/fixtures/tessera_route_trace_1490``, see ``SOURCE.md``), all
+header-trimmed traces the U4 BAL TP2 serves wrote:
+
+* ``measured/mtp-r6-*`` -- MTP k=1 on Tessera f18f08b5 (with #680), run
+  ``u4-BAL-20260928T0540Z-2c-r6-2c``, census receipt VALID. Every module is
+  named, the draft as ``model.layers.45.mlp.experts``. Criterion (a) runs here.
+* ``measured/mtp-r5-*`` -- the same serve before #680: 29 NVFP4 routed stacks
+  unnamed at every M.
+* ``measured/tr3-*`` -- the non-speculative serve, pre-#680.
+* ``named/tr3-*`` -- SYNTHETIC: TR3 with the 29 stacks named by the rule r6
+  confirms. Kept only because no post-#680 non-speculative serve was traced.
 
 Fail-before on ``0ff167c1fad`` (origin/main): the gate compared the names
-verbatim, so ``named/mtp-rank*.json`` against the BAL config was REFUSED with
+verbatim, so a fully named MTP trace against the BAL config was REFUSED with
 "the price names no such module" for every served module
 (``test_without_a_profile_map_the_names_are_compared_verbatim`` keeps that
 behaviour visible for a config that resolves no profile map).
@@ -101,9 +107,8 @@ def _rewrite(traces, change):
 # ---------------------------------------------------------------------------
 # The fixture is the measured serve plus names, and nothing else
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("serve", ["mtp", "tr3"])
-def test_the_named_fixture_differs_from_the_measured_serve_only_in_the_filled_names(serve):
-    for (_, measured), (_, named) in zip(_traces("measured", serve), _traces("named", serve)):
+def test_the_synthetic_tr3_differs_from_the_measured_serve_only_in_the_filled_names():
+    for (_, measured), (_, named) in zip(_traces("measured", "tr3"), _traces("named", "tr3")):
         assert {k: v for k, v in measured.items() if k != "entries"} == {
             k: v for k, v in named.items() if k != "entries"}
         assert len(measured["entries"]) == len(named["entries"])
@@ -112,7 +117,7 @@ def test_the_named_fixture_differs_from_the_measured_serve_only_in_the_filled_na
             if not before["unnamed_modules"]:
                 assert after == before
                 continue
-            # The only unnamed entries the serves wrote are the NVFP4 routed stacks.
+            # The only unnamed entries the serve wrote are the NVFP4 routed stacks.
             assert (before["policy"], before["kind"], before["contract"]) == (
                 "TESSERA_NVFP4:resident", "moe", NVFP4)
             assert before["module_names"] == [] and before["unnamed_modules"] == 29
@@ -125,27 +130,46 @@ def test_the_named_fixture_differs_from_the_measured_serve_only_in_the_filled_na
         assert len(filled) == 29
 
 
-def test_every_name_the_serve_wrote_is_a_priced_target_in_the_profiles_namespace():
-    """The real evidence for the map: the measured, non-synthetic names."""
+def _mapped_price():
+    """``{served name: contract key}`` for the BAL price, through the profile."""
     profile = Glm5NextProfile()
     config = _config()
     executes, formats = _contract()
     owners = gate.priced_histogram(config, platform="sm_121",
                                    executes_by_platform=executes, formats=formats)["owners"]
-    mapped = {profile.served_module_name(target, config) for target in owners}
-    for _, trace in _traces("measured", "mtp"):
-        served = _names(trace)
-        assert DRAFT_SERVED in served
-        assert served <= mapped
-        # 133 priced; the 29 NVFP4 routed stacks are the ones the serve left unnamed.
-        assert len(mapped - served) == 29
+    return {profile.served_module_name(target, config): key for target, key in owners.items()}
+
+
+def test_every_name_the_serve_wrote_is_a_priced_target_in_the_profiles_namespace():
+    """The measured evidence for the map: r6 names all 133 priced targets."""
+    mapped = _mapped_price()
+    for _, trace in _traces("measured", "mtp-r6"):
+        assert _names(trace) == set(mapped)
+        assert DRAFT_SERVED in _names(trace)
+    for _, trace in _traces("measured", "mtp-r5"):
+        # Before #680 the serve named everything but the 29 NVFP4 routed stacks.
+        assert _names(trace) <= set(mapped)
+        assert len(set(mapped) - _names(trace)) == 29
+
+
+def test_r6_names_the_nvfp4_stacks_exactly_as_the_synthetic_tr3_rule_does():
+    """What keeps ``named/tr3`` honest: the rule it applies is what #680 writes."""
+    predicted = sorted(name for name, key in _mapped_price().items() if key == NVFP4_MOE)
+    assert len(predicted) == 29
+    for _, trace in _traces("measured", "mtp-r6"):
+        stacks = [entry for entry in trace["entries"]
+                  if (entry["policy"], entry["kind"]) == ("TESSERA_NVFP4:resident", "moe")]
+        assert stacks
+        for entry in stacks:
+            assert entry["module_names"] == predicted
+            assert entry["unnamed_modules"] == entry["dispatches_without_prefix"] == 0
 
 
 # ---------------------------------------------------------------------------
 # (a) (b) the MTP k=1 serve
 # ---------------------------------------------------------------------------
-def test_the_named_mtp_serve_agrees_per_module_on_both_ranks():
-    verdict = _compare(_traces("named", "mtp"))
+def test_the_measured_r6_mtp_serve_agrees_per_module_on_both_ranks():
+    verdict = _compare(_traces("measured", "mtp-r6"))
     assert verdict["status"] == gate.AGREE, verdict["detail"]
     assert verdict["exact_module_qualified"] is True
     assert verdict["granularity"] == gate.EXACT_GRANULARITY
@@ -160,8 +184,8 @@ def test_the_named_mtp_serve_agrees_per_module_on_both_ranks():
     assert "named in the serve's namespace by the glm5_next profile" in verdict["detail"]
 
 
-def test_the_measured_mtp_serve_with_unnamed_nvfp4_stacks_stays_not_verified():
-    verdict = _compare(_traces("measured", "mtp"))
+def test_the_measured_r5_mtp_serve_with_unnamed_nvfp4_stacks_stays_not_verified():
+    verdict = _compare(_traces("measured", "mtp-r5"))
     assert verdict["status"] == gate.NOT_VERIFIED, verdict["detail"]
     assert "no stable prefix" in verdict["detail"]
     assert "a count is not a name" in verdict["detail"]
@@ -177,7 +201,7 @@ def test_the_measured_mtp_serve_with_unnamed_nvfp4_stacks_stays_not_verified():
     pytest.param(DRAFT_SERVED, DRAFT_TARGET, id="draft"),
 ])
 def test_a_served_module_that_is_missing_is_refused_by_name(dropped, target):
-    traces = _rewrite(_traces("named", "mtp"),
+    traces = _rewrite(_traces("measured", "mtp-r6"),
                       lambda names: [name for name in names if name != dropped])
     verdict = _compare(traces)
     assert verdict["status"] == gate.REFUSED, verdict["detail"]
@@ -188,7 +212,7 @@ def test_a_served_module_that_is_missing_is_refused_by_name(dropped, target):
 
 def test_the_draft_module_traced_in_the_body_namespace_is_refused():
     wrong = "language_model.model.layers.45.mlp.experts"
-    traces = _rewrite(_traces("named", "mtp"),
+    traces = _rewrite(_traces("measured", "mtp-r6"),
                       lambda names: [wrong if name == DRAFT_SERVED else name for name in names])
     verdict = _compare(traces)
     assert verdict["status"] == gate.REFUSED, verdict["detail"]
@@ -233,7 +257,7 @@ def test_without_a_profile_map_the_names_are_compared_verbatim():
     """The fail-before behaviour, still what a config that resolves no map gets."""
     config = _config()
     del config["model_type"], config["architectures"]
-    verdict = _compare(_traces("named", "mtp"), config=config)
+    verdict = _compare(_traces("measured", "mtp-r6"), config=config)
     assert verdict["status"] == gate.REFUSED, verdict["detail"]
     assert "served_namespace" not in verdict
     assert "but the price names no such module" in verdict["detail"]
@@ -253,11 +277,11 @@ def test_a_draft_range_the_config_does_not_state_is_refused_on_the_price():
     config = _config()
     del config["text_config"]["num_nextn_predict_layers"]
     with pytest.raises(gate.TesseraRouteTraceError, match="num_nextn_predict_layers"):
-        _compare(_traces("named", "mtp"), config=config)
+        _compare(_traces("measured", "mtp-r6"), config=config)
 
 
 def test_two_targets_on_one_served_name_are_refused(monkeypatch):
     monkeypatch.setattr(Glm5NextProfile, "served_module_name",
                         lambda self, name, config: "language_model.model.layers.0.mlp.experts")
     with pytest.raises(gate.TesseraRouteTraceError, match="both map to the served module"):
-        _compare(_traces("named", "mtp"))
+        _compare(_traces("measured", "mtp-r6"))

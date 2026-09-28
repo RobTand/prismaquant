@@ -42,8 +42,12 @@ namespace is REFUSED by name, and a non-speculative serve against the full
 price stays REFUSED on the undispatched draft. The #509 fixture is regenerated
 with served prefixes: it had agreed only because both sides used the checkpoint
 namespace. Gates: `tests/test_tessera_route_trace_gate_namespace.py` on the
-U4 BAL traces (`tests/fixtures/tessera_route_trace_1490/`, measured plus a
-SYNTHETIC post-#680 naming) and `tests/test_glm5_next_served_namespace.py`.
+U4 BAL traces (`tests/fixtures/tessera_route_trace_1490/`): the MTP k=1 serve
+`u4-BAL-20260928T0540Z-2c-r6-2c` (Tessera `f18f08b5`, census receipt VALID)
+names all 133 priced modules and AGREEs per module on both ranks, the pre-#680
+r5 serve stays NOT VERIFIED on its 29 unnamed NVFP4 stacks, and the non-spec
+TR3 check uses a SYNTHETIC naming because no post-#680 TR3 trace exists; plus
+`tests/test_glm5_next_served_namespace.py`.
 The same range is now the one source for "which layers are MTP":
 `detect_profile` and `profile_from_config` declare the parsed `config.json` on
 the profile (`_declare_config_document`), and

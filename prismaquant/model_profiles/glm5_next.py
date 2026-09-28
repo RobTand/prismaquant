@@ -317,10 +317,12 @@ class Glm5NextProfile(ModelProfile):
         ``Glm5NextMTP.hf_to_vllm_mapper = WeightsMapper(orig_to_new_prefix=
         {"model.language_model.": "model."})``. The drafter builds its
         decoder layer under that bare prefix, and Tessera's trace records the
-        layer's ``prefix``. The measured MTP k=1 serve on that image (U4 BAL
-        2c-r5, 2026-09-28) traced the draft experts as
-        ``model.layers.45.mlp.experts``: no ``mtp_block`` segment, which is
-        the drafter's ``named_modules`` namespace and not the trace's.
+        layer's ``prefix``. The measured MTP k=1 serve on that image (run
+        ``u4-BAL-20260928T0540Z-2c-r6-2c``, Tessera ``f18f08b5``, census
+        receipt VALID, 2026-09-28) traced the draft experts as
+        ``model.layers.45.mlp.experts`` and all 133 priced modules under
+        this map: no ``mtp_block`` segment, which is the drafter's
+        ``named_modules`` namespace and not the trace's.
 
         Returns ``None`` for a name outside :meth:`mtp_draft_layer_range`:
         the body's namespace is :meth:`to_vllm_internal_name`'s. Only the

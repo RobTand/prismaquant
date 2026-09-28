@@ -8,30 +8,49 @@
   "flushed_utc",
   "flushes"
  ],
+ "runs": {
+  "mtp-r5": "u4-BAL-20260928T0540Z-2c-r5-2c (pre-#680; its census REFUSED)",
+  "mtp-r6": "u4-BAL-20260928T0540Z-2c-r6-2c (Tessera f18f08b5, census receipt VALID)",
+  "tr3": "u4-BAL-20260928T0540Z TR3 phase (pre-#680)"
+ },
  "traces": {
-  "mtp-rank0.json": {
+  "mtp-r5-rank0.json": {
    "entries": 78,
-   "names_filled": 174,
    "sha256": "a71253377238e1654f9920118a1df4c8c24c74afc6da8c6b20a4a9c5ba0dc9e5",
-   "source": "/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/BAL-2c-r5/run/2c-evidence/route-trace-rank0.json"
+   "source": "/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/BAL-2c-r5/run/2c-evidence/route-trace-rank0.json",
+   "unnamed_modules": 174
   },
-  "mtp-rank1.json": {
+  "mtp-r5-rank1.json": {
    "entries": 78,
-   "names_filled": 174,
    "sha256": "0fae2e3ac832812c6af61d2bdd18591663e63761a65f4a2ca25d9e107f4a9d05",
-   "source": "/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/BAL-2c-r5/run/2c-evidence/route-trace-rank1.json"
+   "source": "/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/BAL-2c-r5/run/2c-evidence/route-trace-rank1.json",
+   "unnamed_modules": 174
+  },
+  "mtp-r6-rank0.json": {
+   "entries": 78,
+   "sha256": "1fdd254e88d069fbd2613670617faf36bb8a900616de4a388a180b7577f1c8f3",
+   "source": "/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/BAL-2c-r6/run/2c-evidence/route-trace-rank0.json",
+   "unnamed_modules": 0
+  },
+  "mtp-r6-rank1.json": {
+   "entries": 78,
+   "sha256": "565018197d5ef3bfda4af583936d9fa6b44107772650494887bcb50caa6f06a2",
+   "source": "/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/BAL-2c-r6/run/2c-evidence/route-trace-rank1.json",
+   "unnamed_modules": 0
   },
   "tr3-rank0.json": {
    "entries": 52,
-   "names_filled": 116,
    "sha256": "432a5965a037d69e8a567f65463ebe4808b93dacf332e7ecdf33dbb18637c48a",
-   "source": "/home/rob/tmp/claude-campaign-20260926/pact/u4/runs/u4-BAL-20260928T0540Z/head/route/tr3-rank0.json"
+   "source": "/home/rob/tmp/claude-campaign-20260926/pact/u4/runs/u4-BAL-20260928T0540Z/head/route/tr3-rank0.json",
+   "synthetic_names_filled": 116,
+   "unnamed_modules": 116
   },
   "tr3-rank1.json": {
    "entries": 52,
-   "names_filled": 116,
    "sha256": "9680c3bd09c5a6160a8fb97ce133fe7f677173140d026d930fc1d398a4c040a0",
-   "source": "/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/BAL/run/route/tr3-rank1.json"
+   "source": "/mnt/shared/tessera-measurements/glm-pact-u4-20260927/results/BAL/run/route/tr3-rank1.json",
+   "synthetic_names_filled": 116,
+   "unnamed_modules": 116
   }
  }
 }

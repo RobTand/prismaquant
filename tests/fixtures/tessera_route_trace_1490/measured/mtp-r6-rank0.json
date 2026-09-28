@@ -233,7 +233,7 @@
    "decoder": "native_window_gemm_folded",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 1306,
+   "launches": 1317,
    "module_names": [
     "language_model.model.layers.1.mlp.gate_up_proj"
    ],
@@ -248,7 +248,7 @@
    "decoder": "native_window_moe_compact_folded",
    "dispatches_without_prefix": 0,
    "kind": "moe",
-   "launches": 13060,
+   "launches": 13160,
    "module_names": [
     "language_model.model.layers.10.mlp.experts",
     "language_model.model.layers.13.mlp.experts",
@@ -272,7 +272,7 @@
    "decoder": "native_window_gemm_folded",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 18284,
+   "launches": 18425,
    "module_names": [
     "language_model.model.layers.11.mlp.shared_experts.gate_up_proj",
     "language_model.model.layers.12.mlp.shared_experts.gate_up_proj",
@@ -300,7 +300,7 @@
    "decoder": "native_window_gemm_folded",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 23508,
+   "launches": 23688,
    "module_names": [
     "language_model.model.layers.10.mlp.shared_experts.down_proj",
     "language_model.model.layers.11.mlp.shared_experts.down_proj",
@@ -332,7 +332,7 @@
    "decoder": "native_window_gemm_folded",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 1306,
+   "launches": 1317,
    "module_names": [
     "language_model.model.layers.2.mlp.down_proj"
    ],
@@ -797,7 +797,7 @@
    "decoder": "native_window_moe_compact",
    "dispatches_without_prefix": 0,
    "kind": "moe",
-   "launches": 5224,
+   "launches": 5264,
    "module_names": [
     "language_model.model.layers.11.mlp.experts",
     "language_model.model.layers.18.mlp.experts",
@@ -815,7 +815,7 @@
    "decoder": "native_window_gemm",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 5224,
+   "launches": 5264,
    "module_names": [
     "language_model.model.layers.10.mlp.shared_experts.gate_up_proj",
     "language_model.model.layers.18.mlp.shared_experts.gate_up_proj",
@@ -833,7 +833,7 @@
    "decoder": "native_window_gemm",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 5224,
+   "launches": 5265,
    "module_names": [
     "language_model.model.layers.18.mlp.shared_experts.down_proj",
     "language_model.model.layers.25.mlp.shared_experts.down_proj",
@@ -1307,7 +1307,7 @@
    "decoder": "native_span2_gemm",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 2612,
+   "launches": 2634,
    "module_names": [
     "language_model.model.layers.0.mlp.gate_up_proj",
     "language_model.model.layers.2.mlp.gate_up_proj"
@@ -1323,7 +1323,7 @@
    "decoder": "native_span2_gemm",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 31344,
+   "launches": 31584,
    "module_names": [
     "language_model.model.layers.14.mlp.shared_experts.gate_up_proj",
     "language_model.model.layers.15.mlp.shared_experts.gate_up_proj",
@@ -1361,7 +1361,7 @@
    "decoder": "native_span2_grouped",
    "dispatches_without_prefix": 0,
    "kind": "moe",
-   "launches": 37874,
+   "launches": 38164,
    "module_names": [
     "language_model.model.layers.12.mlp.experts",
     "language_model.model.layers.21.mlp.experts",
@@ -1404,7 +1404,7 @@
    "decoder": "native_span2_gemm",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 26120,
+   "launches": 26320,
    "module_names": [
     "language_model.model.layers.13.mlp.shared_experts.down_proj",
     "language_model.model.layers.16.mlp.shared_experts.down_proj",
@@ -1438,7 +1438,7 @@
    "decoder": "native_span2_gemm",
    "dispatches_without_prefix": 0,
    "kind": "dense",
-   "launches": 2612,
+   "launches": 2634,
    "module_names": [
     "language_model.model.layers.0.mlp.down_proj",
     "language_model.model.layers.1.mlp.down_proj"
@@ -1893,7 +1893,7 @@
  ],
  "identity_version": 1,
  "platform": "sm_121",
- "rank": 1,
+ "rank": 0,
  "rank_conflict": null,
  "rank_source": "torch.distributed",
  "schema": "tessera.route_trace/1",
