@@ -146,11 +146,23 @@ def test_stalled_writer_reports_no_new_units(out, channel, monkeypatch):
 def test_watch_reports_while_child_runs_and_settles_after_exit(out, channel,
                                                                monkeypatch):
     monkeypatch.setattr(scp.os, "environ", channel.environ, raising=False)
+    # The child outlives the writer: it exits once the writer thread has
+    # finished, not after a fixed sleep a loaded runner can outrun (shard 4
+    # then lands after the settle and watch() reads 3). The sentinel sits
+    # outside the export directory, so the watcher never counts it.
+    finished = out.parent / "writer-finished"
     child = subprocess.Popen([sys.executable, "-c",
-                              "import time; time.sleep(0.5)"])
+                              "import pathlib, sys, time\n"
+                              "flag = pathlib.Path(sys.argv[1])\n"
+                              "deadline = time.monotonic() + 30\n"
+                              "while not flag.exists() and time.monotonic() < deadline:\n"
+                              "    time.sleep(0.01)\n",
+                              str(finished)])
     names = [f"model-{i:05d}-of-00004.safetensors" for i in range(1, 5)]
     stop = threading.Event()
-    steady_writer(out, names, interval=0.05, stop=stop)
+    writer = steady_writer(out, names, interval=0.05, stop=stop)
+    threading.Thread(target=lambda: (writer.join(), finished.touch()),
+                     daemon=True).start()
 
     def drive():
         watcher = scp.ShardCommitProgress(out, phase="export",
