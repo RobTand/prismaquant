@@ -1,0 +1,95 @@
+{
+  "schema": "prismaquant.serving_runtime_patch_set.v1",
+  "name": "glm53_kpool_tail_slot_mapping",
+  "purpose": "Keep the GLM-5.3 kpool-tail KV-cache group out of vLLM's V2 generic slot mapping (backport of vLLM #57317, upstream 70df48dc3d01), whose kernel reads that group's 32-entry block-table row by absolute position and faults once the read leaves its allocation (tessera#508).",
+  "attested": false,
+  "base_image": "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "base_image_local_name": "localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5",
+  "base_image_note": "The glm53_mtp_mapper derived image, the image the GLM Tessera cells name. Its MLA sparse-attention sources are stock, which Tessera's GLM53 NoPE backend requires; the MTP mapper edit is carried through unchanged.",
+  "base_vllm_version": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+  "base_flashinfer_version": "0.6.18",
+  "derived_image": "192.168.1.107/prismaquant/spark-vllm-nccl230@sha256:c2e75e03cfc52c15489b40fe58e65acb7347f6fa3ddf2e81afda86760698147b",
+  "derived_image_local_name": "localhost/prismaquant/spark-vllm-nccl230@sha256:c2e75e03cfc52c15489b40fe58e65acb7347f6fa3ddf2e81afda86760698147b",
+  "derived_image_registry_tag": "f8dbe1a0-kpooltail1",
+  "derived_image_local_id": null,
+  "derived_image_note": "The digest is the image manifest digest the registry reports (Docker-Content-Digest, 2026-09-28). The localhost name resolves on both Sparks through docker's RepoDigests and is the name a Tessera runtime cell uses: sparky (containerd image store) reports the digest as the image Id; sparklina (overlay2) holds it as a RepoDigest over config sha256:38ead3cab558d85c2261c43dccb76207f5b25c639281cf9a24714455f14a9dc4. Both Sparks give the PrismaBuild content reference below.",
+  "derived_image_container_content": "content:sha256:edab3a7c6755c913ba032c9a5e8869ff28c1a31febd7c76654c35797a41730ff",
+  "derived_image_built_on": "sparky",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "command": "DOCKER_BUILDKIT=0 docker build --build-arg BASE=localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5 -t 192.168.1.107/prismaquant/spark-vllm-nccl230:f8dbe1a0-kpooltail1 prismaquant/serving_runtime_patches/glm53_kpool_tail_slot_mapping/",
+    "builder_note": "The classic builder, because BuildKit resolves a digest FROM against the registry over HTTPS and the LAN registry is plain HTTP. The classic builder drops a RUN heredoc's body, so the self-check is a copied file rather than a heredoc.",
+    "push_note": "Pushed through an SSH tunnel to the registry's port 5000 on a loopback address (docker treats 127.0.0.0/8 as an insecure registry); sparklina pulled it as localhost/<repo>@sha256:<digest> through a loopback forwarder, which is why its RepoDigest carries the localhost name.",
+    "contents": "One Python source file edited; no compile, no new wheels, no vendored serving runtime.",
+    "self_check": "The patch refuses a model_runner.py whose sha256 is not the base's and asserts each edit lands once; selfcheck_kpool_tail_slot_mapping.py re-imports the V2 model runner, asserts it binds KpoolTailSpec, and asserts the edited runner, the carried mtp.py, the stock block_table.py and the four MLA sources hash to their recorded values."
+  },
+  "patches": [
+    {
+      "script": "patch_kpool_tail_slot_mapping.py",
+      "sha256": "18ea731b6dd74cd75b7045280c1e75a52f6bbd2ebfb19267a00d9b1256574f51",
+      "target_file": "vllm/v1/worker/gpu/model_runner.py",
+      "base_sha256": "39a5edd7b1e76b13c039be4b22a72dc512a17c3b78b9fa9aa34158ce9a7d78c3",
+      "patched_sha256": "1c30b8c0d3ffc96172cba57965cb7c3648156ce693ea6b3232edd2f36a9d1781",
+      "edits": [
+        {
+          "tag": "import_kpool_tail_spec",
+          "what": "from vllm.v1.kv_cache_interface import (CircularBufferSpec, KVCacheConfig, ...) gains KpoolTailSpec"
+        },
+        {
+          "tag": "kpool_tail_takes_no_generic_slot_mapping",
+          "what": "slot_mapping_enabled.append(not isinstance(layer_spec, CircularBufferSpec)) -> not isinstance(layer_spec, (CircularBufferSpec, KpoolTailSpec)); upstream spells the same decision KpoolTailSpec.uses_slot_mapping = False"
+        }
+      ]
+    }
+  ],
+  "self_check_script": "selfcheck_kpool_tail_slot_mapping.py",
+  "unchanged_stock_sources": {
+    "v1/worker/gpu/block_table.py": "61c004315d5af7e7eae4e2a9e6be92ea82c520327690a7f55a73bb9ce95f520a",
+    "v1/attention/backends/mla/flashinfer_mla_sparse_sm120.py": "a0023f72125cb0d5599b5bf940c86be1f0c9985bd62b0919f243a8fda76f4449",
+    "v1/attention/backends/mla/flashinfer_mla_sparse.py": "093181e4e0198b34075a3713fa62267c3f1fe74b1c96bb08298d553727d44478",
+    "v1/attention/backends/mla/sparse_utils.py": "20372237899fb0a0c9152e12eab40396119b76c1ac5f1c9bdfdbed53f8146559",
+    "v1/attention/backend.py": "8ddf8dd73c2b953a79f99e8de74db616b135590ac1f74e21e20b9ddc366b9994"
+  },
+  "carried_base_edits": {
+    "models/glm5next/nvidia/mtp.py": "45124573a928ecd76e6bd4f595aec3c3d98d81a71fc7a41fb32564ace560b7d1"
+  },
+  "qualification": {
+    "status": "measured_on_a_4_layer_stub",
+    "model": "/mnt/shared/tessera-runs/moe/glm53-4layer-a4-e2m1x2-q896-l2 (GLM-5.3-Flash 4-layer stub: KDA, MLA, KDA, MLA; A4 routed experts; no MTP layer)",
+    "model_layers": 4,
+    "full_model_layers": 45,
+    "dtype": "Tessera A4 stub (TESSERA_E2M1_K2 routed experts at q256 896)",
+    "tensor_parallel": 1,
+    "modes_ready": [
+      "eager",
+      "cuda_graph_full_decode_only",
+      "cuda_graph_piecewise",
+      "cuda_graph_full_and_piecewise"
+    ],
+    "checks_passed": [
+      "Dockerfile self-check on sparky, 2026-09-28: the runner binds KpoolTailSpec; the edited runner, the carried mtp.py, the stock block_table.py and the four MLA sources hash to the recorded values.",
+      "Kernel-level reproduction in the base image with the stub's block-table geometry (PrismaBuild action 1894e264, sparky): with the base rule the CUDA memcheck tool reports 98 invalid global reads in _compute_slot_mappings_kernel at block_table.py:344, all in program (1,0,0) (the kpool-tail group), the first at 0x420 bytes past the tail table's start, i.e. flat entry 264 = position 1056, past the 1 KiB table and the 32-byte allocation after it; with the tail opted out, 0 errors. Both rules write the same tail slots, 7*4 + position % 4, because the kpool-tail builder overwrites the generic row.",
+      "Serve-level memcheck pair on sparky, 2026-09-28 (eager, PYTORCH_NO_CUDA_MEMORY_CACHING=1 so the tail table is its own allocation, compute-sanitizer --tool memcheck --padding 8192 on _compute_slot_mappings_kernel, one 3649-token prompt): the base image reports 128 invalid 4-byte reads at block_table.py:344, all in program (1,0,0), 129 to 253 bytes past the 1 KiB tail table, and the engine core dies with 'unspecified launch failure'; this image reports 0 access errors and the prompt completes (arms memSn4 and memNn4). With the caching allocator on, the base image also reports 0 (memSn3): the overrun stays inside the allocator's segment, which is why eager serves of the base image have not faulted.",
+      "CUDA-graph serves on this image, FULL_DECODE_ONLY: 19 two-chunk 3649-token prefills (2048 + 1601 tokens) across four serves with no illegal memory access (fdoN8 10, fdoN2 4, fdoN1 3, fdoNmc3 2; fdoP1 5 more); fdoNmc3 ran under memcheck with 0 access errors.",
+      "Equality suite on this image (48 greedy completions with the top 20 logprobs, batches admitted paused): with every capture size 1 to 8, FULL_DECODE_ONLY (fdoN8 pass 2, digFN8), PIECEWISE (pwN2) and FULL_AND_PIECEWISE (fapN8, both passes) returned only outcomes that eager serves of this image also returned; fdoN8 pass 1 has one completion outside them whose difference starts in a prefill that ran eagerly.",
+      "Tessera's GLM53 NoPE gate tests inside this image: 68 passed, 0 skipped (PrismaBuild action 14cf4228, Tessera commit 64a8ff8298, tessera PR #699)."
+    ],
+    "not_qualified": [
+      "Stub only: the 45-layer body, TP2 and the MTP drafter are not measured on this image.",
+      "The drafter path (speculator, positions=None) now leaves the tail row at the pad slot, as upstream does; before the backport it wrote at the generic row's out-of-bounds slots. Drafter acceptance on this image is not measured.",
+      "vLLM's default (padded) capture sizes run another reduction order: vLLM's mHC TileLang op picks its split-K by token count, and a batch of 5 replayed in the 8-token graph moved top-20 logprobs by up to 0.98081 nats. A padded configuration's quality is not measured; only every size from 1 to the largest captured returns eager's outcomes.",
+      "Requests above 2048 tokens are not repeat-exact in any mode (stock top-k arrival order, sampler.cu:267); the equality results cover requests of at most 2048 tokens."
+    ],
+    "measured_on": "sparky (GB10, sm121)",
+    "measured_at": "2026-09-28"
+  },
+  "receipts": {
+    "issue": "https://github.com/RobTand/tessera/issues/508",
+    "upstream": "vLLM #57317 (70df48dc3d01, 2026-09-18)",
+    "kernel_reproduction": "/mnt/shared/tessera-runs/receipts/508-graphs-20260928/unit-f8dbe1a0-r2",
+    "serve_arms": "/mnt/shared/tessera-runs/receipts/508-graphs-20260928/serve-arms",
+    "gate_tests": "/mnt/shared/tessera-runs/receipts/508-graphs-20260928/intest-64a8ff8298/junit.xml",
+    "tessera_pr": "https://github.com/RobTand/tessera/pull/699",
+    "measurement_record": "tessera docs/measurements/2026-09-28-glm53-nope-graphs-508.md"
+  }
+}
