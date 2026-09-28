@@ -35,8 +35,8 @@ it is held only to the midpoint.
 
 Each line also records the free pages on the kernel's per-CPU lists, which
 MemAvailable does not count, and both host readings again two seconds later.
-Neither is held to anything: they say where freed pages went that
-MemAvailable did not show.
+Neither is held to anything: they say where freed pages went when
+MemAvailable did not show them at once.
 
 It needs CUDA and its own cgroup. A run that hides every GPU on purpose sets
 ``CUDA_VISIBLE_DEVICES`` to the empty string, as CI and PrismaBuild's CPU-only

@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1431, `sonnet/1431-reclaim-declarations`): the
+Stage B render stream and spill replay reclaimers now declare that their
+frees lower `MemAvailable` as well as committed bytes
+(`RENDER_STREAM_RECLAIM_LOWERS`, `SPILL_REPLAY_RECLAIM_LOWERS`,
+`joint_statistics_replay.py:377,386`). The GB10 probe measured both frees
+raising `MemAvailable` by about the bytes freed, read at once; the declaration
+of `committed` alone was wrong, not the probe's midpoint criterion. A host-term
+shortfall now asks all three reclaimers, in refill-cost order. See the
+reclaim bullet in the Stage B replay section. No pipeline default, stage,
+format or lane changes.
+
 Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
 TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
 opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
@@ -906,7 +917,7 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   never less than the two chunk buffers the replay phase reserves.
 - **One pool, one reclaim order, and each step read (PQ #1383).** On a GB10
   the host and the device share one pool, so a shortfall can have several
-  reclaimers. `register_replay_reclaimers` (`joint_statistics_replay.py:386`,
+  reclaimers. `register_replay_reclaimers` (`joint_statistics_replay.py:389`,
   called at `joint_cost_quantum.py:2383`) registers them in order of refill
   cost: spill chunks read ahead (`reclaim_replay`,
   `joint_replay_spill.py:1024`, which also hands the pinned allocator's idle
@@ -921,10 +932,17 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
     committed bytes, and the device envelope only the reservation.
   - Measured on the GB10, read at once after the free: the spill chunks and
     the renders read ahead lower committed bytes, since pinned buffers and
-    sealed memfds are both shmem charged to the cgroup. The renders kept on
-    the device lower the reservation and `MemAvailable`. `MemAvailable` does
-    not show a shmem free at once (805 MB of memfds freed, `MemAvailable`
-    moved by -28 MB), so a host-term shortfall asks only the render cache.
+    sealed memfds are both shmem charged to the cgroup. They also lower
+    `MemAvailable`: the pages go back to the host, which shares one pool
+    with the device (805 MB of memfds freed: committed -807 MB,
+    `MemAvailable` +755 MB; 805 MB of pinned chunks: committed -808 MB,
+    `MemAvailable` +863 MB; PQ #1431). The renders kept on the device lower
+    the reservation and `MemAvailable`. So a host-term shortfall asks all
+    three reclaimers, in refill-cost order, and the guard's re-read after
+    each ask ends the pass once the term clears. The probe's criterion is
+    unchanged: a reading counts as lowered when it moves by more than half
+    of what was freed. The earlier declaration that shmem frees leave
+    `MemAvailable` alone (a -28 MB reading) did not repeat.
   - A check that would refuse makes one pass in order
     (`CaptureMemoryGuard._reclaim`, `:702`). A reclaimer is asked only while
     a term that reads one of its readings is exceeded, and for the largest
