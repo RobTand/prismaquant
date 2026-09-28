@@ -3928,6 +3928,12 @@ plan by digest, admit it only when the handoff was joined under that digest
 with the same inputs, and pass only its `historical_encoder_reuse` to the
 anchor loader, as the allocation handoff does. Without `--plan` the loader's
 strict encoder check is unchanged.
+Its `--child-manifest`/`--child-manifest-sha256` (2026-09-28, PQ #1641) bind a
+cached-units child by bytes and leave the selected units it names out of the
+handoff manifest, refusing a child unit that is unselected or BF16
+passthrough; `tools/compose_tessera_cached_units.py` then composes the two
+(the GLM-5.3 release's MTP layer 45 rides the A16 MTP child this way). The
+census roster rule still judges every unit the handoff supplies.
 
 Tessera pin (2026-09-22, `ws-j2/tessera-pin-v34`, Refs #944 #939): the
 serving-runtime pin and the reader dev pin move from `cc739a5516…` (contract
