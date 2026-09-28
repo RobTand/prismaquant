@@ -28,6 +28,10 @@ from prismaquant.residency_map import (
 )
 from prismaquant.residency_shard_reader import staged_shard_opener
 
+#: The resolver validates maps with PrismaBuild's own validator, through the
+#: client SDK (PB #1254); bind the reviewed installed one for every test.
+pytestmark = pytest.mark.usefixtures("installed_client_sdk")
+
 
 MANIFEST = 'c' * 64
 LEAD = 'd' * 64

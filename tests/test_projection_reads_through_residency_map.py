@@ -22,6 +22,10 @@ from tests.test_residency_shard_reader import (
     _bind, _header, _stage_range, _stage_root, _write_map,
 )
 
+#: The resolver validates maps with PrismaBuild's own validator, through the
+#: client SDK (PB #1254); bind the reviewed installed one for every test.
+pytestmark = pytest.mark.usefixtures("installed_client_sdk")
+
 TENSOR = 'model.layers.0.mlp.experts.0.gate_proj.weight'
 ROWS, COLS = 16, 32
 

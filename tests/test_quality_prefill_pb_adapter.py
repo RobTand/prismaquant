@@ -1,6 +1,8 @@
 """The adapter's own half: what it emits, what it refuses, and what it will not do.
 
-Nothing here touches PrismaBuild.  These are the properties that have to hold
+Nothing here runs PrismaBuild.  The identifier grammar and the identity digest
+are PrismaBuild's own, read from its client SDK (PB #1254), so the module binds
+the reviewed installed SDK.  These are the properties that have to hold
 before a request is worth submitting at all -- that one frozen plan emits one
 set of bytes, that a plan missing a measured cost is refused rather than
 defaulted, that a child cannot answer for a task outside its own batch, and that
@@ -21,6 +23,10 @@ import pytest
 
 from prismaquant import quality_prefill_pb_adapter as adapter
 from prismaquant.schemas import SchemaValidationError
+
+#: The id grammar and the identity digest are PrismaBuild's, through its
+#: client SDK (PB #1254); bind the reviewed installed one for every test.
+pytestmark = pytest.mark.usefixtures("installed_client_sdk")
 
 
 EVIDENCE = "cas:sha256:" + "1e" * 32
@@ -328,16 +334,24 @@ def test_a_member_listed_twice_in_one_unit_is_refused() -> None:
 # The capability gap is named, not filled
 # --------------------------------------------------------------------------
 
-def _runtime_tree(root: Path, *, decomposition: bool, entry: bool) -> Path:
-    (root / "src" / "prismabuild").mkdir(parents=True)
-    (root / "tools" / "fleet").mkdir(parents=True)
-    if decomposition:
-        (root / "src" / "prismabuild" / "decomposition.py").write_text("x = 1\n")
-    body = "def submit_row(row):\n    return row\n"
-    if entry:
-        body += "def decompose(request, *, transport, priority):\n    return []\n"
-    (root / "tools" / "fleet" / "pbcampaign.py").write_text(body)
+def _runtime_tree(root: Path, *, tags: tuple[str, ...] | None) -> Path:
+    """A runtime tree whose client SDK (PB #1254) advertises ``tags``.
+
+    ``tags=None`` is a tree with no client at all: a generation older than
+    the SDK.
+    """
+
+    package = root / "src" / "prismabuild"
+    package.mkdir(parents=True)
+    if tags is not None:
+        (package / "__init__.py").write_text("")
+        (package / "client.py").write_text(
+            f"SDK_VERSION = 1\nCAPABILITIES = frozenset({sorted(tags)!r})\n")
     return root
+
+
+_WITHOUT = ("progress-v1", "reader-lease-v1")
+_WITH = _WITHOUT + (adapter.DECOMPOSITION_TAG,)
 
 
 def test_a_runtime_without_decomposition_is_reported_by_name(tmp_path: Path) -> None:
@@ -347,35 +361,36 @@ def test_a_runtime_without_decomposition_is_reported_by_name(tmp_path: Path) -> 
     fix is a merge and a runtime publication that no agent performs.
     """
 
-    root = _runtime_tree(tmp_path / "old", decomposition=False, entry=False)
+    root = _runtime_tree(tmp_path / "old", tags=_WITHOUT)
     support = adapter.decomposition_support(root)
     assert support["supported"] is False
+    assert support["sdk_error"] is None and support["capabilities"] == sorted(_WITHOUT)
     with pytest.raises(adapter.DecompositionUnavailable) as refusal:
         adapter.require_decomposition_support(root)
     message = str(refusal.value)
     assert "#517" in message and "#518" in message
     assert "runtime generation" in message and "published" in message
-    assert "decomposition.py" in message
+    assert repr(adapter.DECOMPOSITION_TAG) in message
 
 
-def test_a_merged_module_without_a_campaign_entry_is_still_unsupported(
+def test_a_runtime_without_a_client_sdk_is_unsupported_and_says_why(
     tmp_path: Path,
 ) -> None:
-    """Half a capability is not a capability.
+    """The capability is PrismaBuild's to advertise, through its client SDK.
 
-    A runtime carrying the module but no ``pbcampaign.decompose`` cannot publish
-    a plan's children, and a probe that answered "supported" there would send a
-    campaign at a fleet that drops it.
+    A generation older than the SDK advertises nothing, whatever files it
+    carries, and the refusal says the SDK could not be asked.
     """
 
-    root = _runtime_tree(tmp_path / "half", decomposition=True, entry=False)
-    assert adapter.decomposition_support(root)["supported"] is False
-    with pytest.raises(adapter.DecompositionUnavailable, match="pbcampaign"):
+    root = _runtime_tree(tmp_path / "pre-sdk", tags=None)
+    support = adapter.decomposition_support(root)
+    assert support["supported"] is False and support["sdk_error"]
+    with pytest.raises(adapter.DecompositionUnavailable, match="could not be asked"):
         adapter.require_decomposition_support(root)
 
 
-def test_a_runtime_with_both_halves_is_accepted(tmp_path: Path) -> None:
-    root = _runtime_tree(tmp_path / "new", decomposition=True, entry=True)
+def test_a_runtime_advertising_decomposition_is_accepted(tmp_path: Path) -> None:
+    root = _runtime_tree(tmp_path / "new", tags=_WITH)
     assert adapter.require_decomposition_support(root)["supported"] is True
     request = adapter.prepare_logical_request(phase_plan(), runtime_root=root)
     assert request == adapter.emit_logical_request(phase_plan())
@@ -392,7 +407,7 @@ def test_the_submission_boundary_refuses_instead_of_falling_back(
     PrismaQuant a second scheduler, which is what PB #517 exists to remove.
     """
 
-    root = _runtime_tree(tmp_path / "old", decomposition=False, entry=False)
+    root = _runtime_tree(tmp_path / "old", tags=_WITHOUT)
     with pytest.raises(adapter.DecompositionUnavailable):
         adapter.prepare_logical_request(phase_plan(), runtime_root=root)
 
@@ -431,8 +446,7 @@ def test_the_deployed_runtime_is_reported_rather_than_asserted() -> None:
 
     support = adapter.decomposition_support()
     assert set(support) == {
-        "runtime_root", "decomposition_module", "campaign_decompose_entry",
-        "supported",
+        "runtime_root", "sdk_version", "capabilities", "sdk_error", "supported",
     }
     assert support["runtime_root"] == str(adapter.DEPLOYED_RUNTIME_ROOT)
     assert isinstance(support["supported"], bool)
