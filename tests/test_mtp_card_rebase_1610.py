@@ -90,20 +90,47 @@ def test_a_manifest_that_disagrees_with_the_payload_is_refused():
 
 # --- through the real allocator ------------------------------------------------
 
+#: The default profile's live names (it maps ``model.language_model.`` to
+#: ``model.``), so the synthetic checkpoint resolves them as GLM's profile does.
+PREFIX = "model.layers.45.mlp."
+ROUTED = tuple(f"{PREFIX}experts.{e}.{p}" for e in range(2)
+               for p in ("gate_proj", "up_proj", "down_proj"))
+SHARED = tuple(f"{PREFIX}shared_experts.{p}" for p in ("gate_proj", "up_proj", "down_proj"))
+
+
+def _mtp_payload():
+    from test_glm_mtp_selection import E4M3_SHARED, PARAMS, R832, R1024, _probe, _row
+
+    probe = _probe()
+    costs, wire = {}, {}
+    for name in ROUTED:
+        costs[name] = {R1024: _row(name, R1024, [0.010, 0.012, 0.011, 0.009], probe),
+                       R832: _row(name, R832, [0.030, 0.028, 0.031, 0.029], probe)}
+        wire[name] = {R1024: 4 * PARAMS // 8 + 16, R832: 13 * PARAMS // 32 + 16}
+    for name in SHARED:
+        costs[name] = {E4M3_SHARED: _row(name, E4M3_SHARED, [0.020, 0.021, 0.019, 0.020], probe)}
+        wire[name] = {E4M3_SHARED: 4 * PARAMS // 8 + 16}
+    return {"schema": "prismaquant.glm_mtp_cost.v1", "mtp_layer": 45,
+            "groups": {"routed": list(ROUTED), "shared": list(SHARED)},
+            "params": {name: PARAMS for name in ROUTED + SHARED},
+            "source_dtype": {name: "bfloat16" for name in ROUTED + SHARED},
+            "costs": costs, "wire_bytes": wire}
+
+
 @pytest.fixture
 def mtp_case(tmp_path, monkeypatch):
     pytest.importorskip("torch")
     from test_allocator_byte_budget_selection import _fixture
-    from test_glm_mtp_selection import PARAMS, ROUTED, SHARED, _payload, _write_payload
+    from test_glm_mtp_selection import PARAMS, _write_payload
 
     from prismaquant import format_registry
 
     monkeypatch.setattr(format_registry, "format_is_producer_eligible", lambda name, **_: True)
     draft = {f"{name}.weight": ("BF16", (64, 128)) for name in ROUTED + SHARED}
     assert 64 * 128 == PARAMS
-    _, probe_p, cost_p, stats = _fixture(tmp_path, nvfp4_dloss=1.0, fp8_dloss=0.5,
-                                         extra_tensors=draft)
-    payload = _payload()
+    _, probe_p, cost_p, _stats = _fixture(tmp_path, nvfp4_dloss=1.0, fp8_dloss=0.5,
+                                          extra_tensors=draft)
+    payload = _mtp_payload()
     cost, constants = _write_payload(tmp_path, payload)
     return tmp_path, probe_p, cost_p, payload, cost, constants
 
@@ -118,7 +145,7 @@ def _run_mtp(monkeypatch, case, *extra):
 
 
 def test_the_card_prices_the_selected_mtp_bytes_not_the_source(mtp_case, monkeypatch):
-    from test_glm_mtp_selection import R1024, ROUTED, SHARED
+    from test_glm_mtp_selection import R1024
 
     payload, cost, constants = mtp_case[3:]
     plain, plain_meta = _run_mtp(monkeypatch, mtp_case)
@@ -139,17 +166,17 @@ def test_the_card_prices_the_selected_mtp_bytes_not_the_source(mtp_case, monkeyp
 
 
 def test_fixed_formats_pin_the_mtp_rung_the_card_charges(mtp_case, monkeypatch):
-    from test_glm_mtp_selection import R832, ROUTED, SHARED
+    from test_glm_mtp_selection import R832
 
     tmp_path, _probe, _cost_p, payload, cost, constants = mtp_case
     fixed = tmp_path / "fixed.json"
     fixed.write_text(json.dumps({"routed": R832, "shared": "BF16"}))
     plain, _ = _run_mtp(monkeypatch, mtp_case)
-    got, layer_cfg = _run_mtp(
+    got, meta = _run_mtp(
         monkeypatch, mtp_case, "--mtp-joint-cost", str(cost),
         "--mtp-byte-budget", str(10**9), "--mtp-serve-constants", str(constants),
         "--mtp-fixed-formats", str(fixed))
-    record = layer_cfg["__prismaquant__"]["mtp_selection"]
+    record = meta["mtp_selection"]
     assert record["rung"] == f"routed={R832}|shared=BF16"
     assert record["fixed_formats"] == {"routed": R832, "shared": "BF16"}
     selected = sum(payload["wire_bytes"][n][R832] for n in ROUTED) + \
