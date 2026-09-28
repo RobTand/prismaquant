@@ -549,12 +549,6 @@ def host_memory(meminfo: str | Path | None = None,
             values["MemTotal"])
 
 
-def host_available_bytes(meminfo: str | Path | None = None,
-                         zoneinfo: str | Path | None = None) -> int:
-    """The host's ``MemAvailable`` plus the per-CPU free pages, in bytes."""
-    return host_memory(meminfo, zoneinfo)[0]
-
-
 def read_mountstats(path: str | Path = "/proc/self/mountstats") -> dict[str, dict]:
     """Per mount point, the NFS client's ``bytes`` row and every per-op row.
 
