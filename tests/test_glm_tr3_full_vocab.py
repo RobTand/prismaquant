@@ -1063,6 +1063,40 @@ def test_compiled_observation_still_refuses_speculative_decoding():
         served.observed_configuration(config, expected_kv_cache_dtype="fp8_ds_mla", compilation=_FDO)
 
 
+def test_eager_observation_refuses_speculative_decoding():
+    """The eager counterpart: the same config observes clean, then refuses once
+    a speculative config is present."""
+    config = _resolved_config(enforce_eager=True)
+    served.observed_configuration(config, expected_kv_cache_dtype="fp8_ds_mla")
+    config.speculative_config = object()
+    with pytest.raises(ValueError, match="native engine has speculative decoding configured"):
+        served.observed_configuration(config, expected_kv_cache_dtype="fp8_ds_mla")
+
+
+@pytest.mark.parametrize("detected", [None, True])
+@pytest.mark.parametrize("mode", ["eager", "compiled"])
+def test_measure_refuses_an_engine_not_observed_without_speculative_decoding(
+        fake_measure, monkeypatch, mode, detected):
+    """measure() refuses unless the loaded engine is observed without
+    speculative decoding: undetermined (None) refuses as detected (True) does,
+    in either mode, before any observation or capture."""
+    args, _ = fake_measure
+    if mode == "compiled":
+        args.execution_mode, args.compilation_config = "compiled", json.dumps(_FDO)
+    asked = []
+    monkeypatch.setattr(served, "refuse_if_spec_decode",
+                        lambda llm, context: asked.append(context) or detected)
+    monkeypatch.setattr(served, "observed_engine_configuration",
+                        lambda llm, **kw: pytest.fail("observed an engine not shown free of a drafter"))
+    with pytest.raises(ValueError, match="speculative decoding must be observed disabled"):
+        served.measure(args)
+    (llm,) = _FakeLLM.instances
+    assert asked == ["TR3 full-vocabulary"]
+    assert llm.kwargs["enforce_eager"] is (mode == "eager")
+    assert llm.armed == [] and llm.generated == 0
+    assert not Path(args.output).exists() and not Path(args.qualify_then_score).exists()
+
+
 def test_a_worker_that_resolved_another_graph_mode_refuses():
     """The model runner resolves the CUDA-graph mode against its attention
     backends after the coordinator's snapshot; the worker's own config is read."""
