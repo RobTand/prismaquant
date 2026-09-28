@@ -50,11 +50,16 @@ def read_layer_config_metadata(path: str | Path) -> dict:
 
 
 def prefill_frontier_replay_claim(metadata: Mapping) -> dict:
-    """Validate and carry a replay's research standing into the build record.
+    """Validate and carry an allocation's research standing into the build record.
 
     The marker survives on the shipcard, whose verifier cannot read the
     build-machine recipe. Missing/false stamps are errors, never defaults.
-    A sweep's shorthand stub is not an exportable allocator config.
+    A sweep's shorthand stub is not an exportable allocator config. Three
+    allocations are research standing: a prefill-frontier or PACT-hull replay
+    (its replay.v1 block, which a PACT vertex's also names the candidate
+    generator and time claim inside), and a measured-runtime single solve (its
+    own ``measured_runtime_search.research_only``). A PACT stamp with no replay
+    block is refused: a hull vertex reaches a layer config only by replay.
     """
     if metadata.get("schema") == "prismaquant.prefill_frontier.assignment.v1":
         raise ValueError("prefill frontier assignment stub requires replay before export")
@@ -63,6 +68,14 @@ def prefill_frontier_replay_claim(metadata: Mapping) -> dict:
     if "prefill_frontier_replay" not in metadata:
         if isinstance(scope, Mapping) and scope.get("scope") == "shape-only":
             raise ValueError("shape-only config requires prefill_frontier_replay provenance")
+        if metadata.get("candidate_generator") is not None:
+            # A PACT hull vertex (PQ #1584) reaches a layer config only by replay.
+            raise ValueError("PACT hull config requires prefill_frontier_replay provenance")
+        search = metadata.get("measured_runtime_search")
+        if isinstance(search, Mapping) and search.get("research_only") is True:
+            # A measured-runtime single solve stamps its research standing in
+            # its own block; carry it, or the card would read as promotable.
+            return {"research_only": True}
         return {}
     if not isinstance(replay, Mapping) or replay.get("schema") != "prismaquant.prefill_frontier.replay.v1":
         raise ValueError("prefill_frontier_replay requires replay.v1 provenance")
