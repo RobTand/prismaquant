@@ -229,7 +229,8 @@ def _isolate_other_gates(monkeypatch):
     monkeypatch.setattr(export, "require_producer_tools", lambda: ())
     monkeypatch.setattr(export, "require_release_pin", lambda: None)
     monkeypatch.setattr(pin, "load_tessera_serving_runtime_pin",
-                        lambda: SimpleNamespace(version="fixture", commit="f" * 40))
+                        lambda: SimpleNamespace(version="fixture", commit="f" * 40,
+                                                serving_source_sha256=None))
 
 
 def test_early_preflight_refuses_v5_without_an_explicit_target(case, monkeypatch):

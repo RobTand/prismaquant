@@ -31,8 +31,6 @@ def inspect_owner(spec, spool_directory, *, sdk):
     if 'imported' in spec:
         _require_imported_by_owner(spec, sdk)
     segments = len(chain_documents(spec))
-    commitments = _read(sdk['produced_output'].instance_dir(queue.root, instance) /
-                        'commitments.json')[0]
     first = spec.get('first_boundary', 0)
     entries, groups = [], 0
     for path in sorted(Path(spool_directory).glob('*/manifest.json')):
@@ -45,7 +43,7 @@ def inspect_owner(spec, spool_directory, *, sdk):
                  'record': _read(path.parent / 'export.json')[0],
                  'receipt': _read(path.parent / 'receipt.json')[0]}
         entries.extend(_checked_group(group, queue=queue, instance=instance,
-            template=spec['template'], commitments=commitments, sdk=sdk))
+            template=spec['template'], sdk=sdk))
         groups += 1
     _records(spec, entries)
     return {'schema': SCHEMA, 'inspect_only': True, 'authority_to_resume': False,

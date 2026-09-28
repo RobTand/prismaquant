@@ -97,6 +97,31 @@ at the pinned commit -- never a check that reads whatever is installed.
 **``repository`` names the origin the pin was reviewed from.**  It is the
 reviewed identity of the runtime, not a reachability claim, and no gate here
 fetches from it.
+
+**Pin schema v3 splits the one commit into three facts (#1549, #1561).**  A
+v2 pin threads one Tessera commit through the producer venv, the serve and the
+contract.  A v3 pin names them separately:
+
+* ``producer_commit`` -- the Tessera the producer venv carries, and the only
+  field that names a venv.  It equals ``TESSERA_DEV_PIN_COMMIT``.
+* ``serving_commit`` -- the Tessera the serve installs.  It is identity for a
+  person, like the v2 ``commit``, and :attr:`TesseraServingRuntimePin.commit`
+  reads it.
+* ``serving_source_sha256`` -- ``tessera.serving.source_identity.
+  serving_source_sha256()`` of that tree (algorithm
+  ``tessera.package_source.v1``, Tessera contract v41).  It is the value
+  compared: a lane cell whose ``runtime.serving_source_sha256`` differs, or
+  which names no code, does not match
+  (``lane_eligibility.cell_serving_code_admits``), and every rank of a traced
+  serve must stamp it (``tessera_route_trace_gate``).
+* ``contract_sha256`` -- unchanged: the bytes every export and admission gate
+  reads.
+
+A v2 pin reads as the three commits being equal and as naming no code digest
+(``serving_source_sha256 is None``), so every code check is skipped and every
+gate answers exactly as it did before v3 existed.  A v3 pin admits a cell
+only once that cell was censused with the code fields stamped at
+``serving_commit``; until then it admits nothing, which is fail-closed.
 """
 from __future__ import annotations
 
@@ -116,6 +141,12 @@ from typing import Any
 #: refused rather than read as a v2 with a field missing.
 TESSERA_SERVING_RUNTIME_PIN_SCHEMA = (
     "prismaquant.tessera_serving_runtime_pin.v2"
+)
+#: v3 (#1561) replaces ``commit`` with ``producer_commit``, ``serving_commit``
+#: and ``serving_source_sha256``.  Both schemas are read; the tracked pin is
+#: v2 until a reviewed bump activates v3.
+TESSERA_SERVING_RUNTIME_PIN_SCHEMA_V3 = (
+    "prismaquant.tessera_serving_runtime_pin.v3"
 )
 TESSERA_SERVING_RUNTIME_REPOSITORY = (
     "https://github.com/RobTand/tessera.git"
@@ -305,6 +336,17 @@ TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
     "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
 )
+#: The v3 split (#1561).  ``TESSERA_SERVING_RUNTIME_PINNED_COMMIT`` above is
+#: the SERVING commit; the producer commit and the serving code digest are
+#: pinned separately.  Under the tracked v2 pin the producer commit is the one
+#: commit and there is no code digest (``None``), so no code check runs.  The
+#: producer commit must equal ``tessera_runtime_contract.TESSERA_DEV_PIN_COMMIT``,
+#: which names the venv; ``tests/test_tessera_serving_code_identity.py``
+#: enforces that, because this module imports nothing from the package.
+TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
+    "db5b6e23a06869e87d778cb223c1ac5a5154aec5"
+)
+TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 
 #: The vLLM plugin entry-point name the released runtime registers.  It is the
 #: value every packaged eligibility cell publishes in ``requires_plugin``, and
@@ -346,6 +388,16 @@ _REQUIRED_MEMBERS = {
     "plugin_entry_point",
     "serving_residency_env",
     "serving_native_extensions",
+}
+#: v3 carries the same members with ``commit`` split in three (#1561).
+_REQUIRED_MEMBERS_V3 = (_REQUIRED_MEMBERS - {"commit"}) | {
+    "producer_commit",
+    "serving_commit",
+    "serving_source_sha256",
+}
+_MEMBERS_BY_SCHEMA = {
+    TESSERA_SERVING_RUNTIME_PIN_SCHEMA: _REQUIRED_MEMBERS,
+    TESSERA_SERVING_RUNTIME_PIN_SCHEMA_V3: _REQUIRED_MEMBERS_V3,
 }
 _FULL_COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -487,6 +539,18 @@ class TesseraServingRuntimePin:
     #: JSON beside itself -- and refuses a missing or malformed one -- while
     #: ``tests/test_tessera_serve_fingerprint.py`` refuses any disagreement.
     serving_native_extensions: tuple[TesseraServingNativeExtension, ...]
+    #: The Tessera the producer venv carries (#1561).  Under v2 it is
+    #: ``commit``; under v3 it is the pin's ``producer_commit``, and ``commit``
+    #: is the ``serving_commit``.
+    producer_commit: str = ""
+    #: The serving code digest a v3 pin names; ``None`` under v2, which is
+    #: what makes every code check a skip.
+    serving_source_sha256: str | None = None
+
+    @property
+    def serving_commit(self) -> str:
+        """The Tessera the serve installs: v2's ``commit``, v3's ``serving_commit``."""
+        return self.commit
 
     def native_extension_rows(self) -> list[dict]:
         """Every row as the contract spells it, in the pin's order."""
@@ -518,13 +582,16 @@ def parse_tessera_serving_runtime_pin(
     :func:`require_exact_tessera_runtime_pin` is a gate, and it refuses
     every sentinel.
     """
-    if not isinstance(payload, Mapping) or set(payload) != _REQUIRED_MEMBERS:
+    schema = payload.get("schema") if isinstance(payload, Mapping) else None
+    members = (_MEMBERS_BY_SCHEMA.get(schema, _REQUIRED_MEMBERS)
+               if isinstance(schema, str) else _REQUIRED_MEMBERS)
+    if not isinstance(payload, Mapping) or set(payload) != members:
         observed = sorted(payload) if isinstance(payload, Mapping) else []
         raise TesseraServingRuntimePinError(
-            f"{where}: expected exactly {sorted(_REQUIRED_MEMBERS)}, "
+            f"{where}: expected exactly {sorted(members)}, "
             f"got {observed}"
         )
-    if payload["schema"] != TESSERA_SERVING_RUNTIME_PIN_SCHEMA:
+    if not isinstance(schema, str) or schema not in _MEMBERS_BY_SCHEMA:
         raise TesseraServingRuntimePinError(
             f"{where}: unsupported schema {payload['schema']!r}"
         )
@@ -532,7 +599,41 @@ def parse_tessera_serving_runtime_pin(
         raise TesseraServingRuntimePinError(
             f"{where}: repository differs from the reviewed Tessera origin"
         )
-    commit = payload["commit"]
+    serving_source_sha256: str | None = None
+    if schema == TESSERA_SERVING_RUNTIME_PIN_SCHEMA_V3:
+        # v3 has no PENDING story: the sentinels belong to the release-tag era
+        # v2 ended, and a v3 pin exists only to name exact code.  Every split
+        # field must be exact, or the pin is malformed.
+        for member in ("producer_commit", "serving_commit"):
+            value = payload[member]
+            if not isinstance(value, str) or _FULL_COMMIT_RE.fullmatch(value) is None:
+                raise TesseraServingRuntimePinError(
+                    f"{where}: {member} must be a full lowercase Git SHA, "
+                    f"got {value!r}"
+                )
+        serving_source_sha256 = payload["serving_source_sha256"]
+        if (not isinstance(serving_source_sha256, str)
+                or _SHA256_RE.fullmatch(serving_source_sha256) is None):
+            raise TesseraServingRuntimePinError(
+                f"{where}: serving_source_sha256 must be 64 lowercase hex "
+                "digits (tessera.serving.source_identity.serving_source_sha256 "
+                f"of serving_commit), got {serving_source_sha256!r}"
+            )
+        if _SHA256_RE.fullmatch(str(payload["contract_sha256"])) is None:
+            raise TesseraServingRuntimePinError(
+                f"{where}: a v3 pin names exact code, so contract_sha256 must "
+                "be 64 lowercase hex digits and not a pending sentinel"
+            )
+        if _VERSION_RE.fullmatch(str(payload["version"])) is None:
+            raise TesseraServingRuntimePinError(
+                f"{where}: a v3 pin names exact code, so version must be a "
+                "release version and not a pending sentinel"
+            )
+        commit = payload["serving_commit"]
+        producer_commit = payload["producer_commit"]
+    else:
+        commit = payload["commit"]
+        producer_commit = commit
     if not isinstance(commit, str) or (
         _FULL_COMMIT_RE.fullmatch(commit) is None
         and commit != TESSERA_SERVING_RUNTIME_COMMIT_PENDING
@@ -710,6 +811,8 @@ def parse_tessera_serving_runtime_pin(
         plugin_entry_point=entry_point,
         serving_residency_env=residency_env,
         serving_native_extensions=tuple(extensions),
+        producer_commit=producer_commit,
+        serving_source_sha256=serving_source_sha256,
     )
 
 
@@ -792,6 +895,30 @@ def installed_tessera_contract_sha256() -> str:
         ) from exc
 
 
+def _split_disagrees(pin: TesseraServingRuntimePin) -> bool:
+    """Whether the v3 split fields disagree with their constants.
+
+    Under a v2 pin the producer commit IS the commit already compared, so the
+    only v3 fact left is that no code digest is pinned: constants naming a
+    digest while the file is v2 are half a bump, and refuse.
+    """
+    if pin.schema != TESSERA_SERVING_RUNTIME_PIN_SCHEMA_V3:
+        return TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256 is not None
+    return (
+        pin.producer_commit != TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT
+        or pin.serving_source_sha256
+        != TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256
+    )
+
+
+def _split_suffix(producer_commit: str, digest: str | None,
+                  pin: TesseraServingRuntimePin) -> str:
+    """The v3 fields of a refusal line; empty under v2, whose message is unchanged."""
+    if pin.schema != TESSERA_SERVING_RUNTIME_PIN_SCHEMA_V3:
+        return ""
+    return f" / producer {producer_commit} / code {digest}"
+
+
 def require_exact_tessera_runtime_pin(
     pin: TesseraServingRuntimePin,
     *,
@@ -811,7 +938,9 @@ def require_exact_tessera_runtime_pin(
        or the digest.
     2. The pin EQUALS the module constants.  This is the "one reviewed change"
        rule: a JSON edit alone admits nothing and a constant edit alone admits
-       nothing.
+       nothing.  Since v3 the producer commit and the serving code digest are
+       compared too; under v2 they are the one commit and ``None``, so the
+       comparison is the one it always was.
     3. The INSTALLED contract hashes to the pinned digest.  This is the
        enforced binding, and the reason a stray Tessera checkout on
        ``PYTHONPATH`` is refused: the commit is a claim about another
@@ -834,6 +963,7 @@ def require_exact_tessera_runtime_pin(
         pin.commit != TESSERA_SERVING_RUNTIME_PINNED_COMMIT
         or pin.version != TESSERA_SERVING_RUNTIME_PINNED_VERSION
         or pin.contract_sha256 != TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
+        or _split_disagrees(pin)
     ):
         raise TesseraServingRuntimePinError(
             "the tracked Tessera pin file and this module's constants "
@@ -841,9 +971,14 @@ def require_exact_tessera_runtime_pin(
             "anything alone.\n"
             f"  constants: {TESSERA_SERVING_RUNTIME_PINNED_VERSION!r} / "
             f"{TESSERA_SERVING_RUNTIME_PINNED_COMMIT} / "
-            f"{TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256}\n"
+            f"{TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256}"
+            + _split_suffix(TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT,
+                            TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256,
+                            pin)
+            + "\n"
             f"  pin file:  {pin.version!r} / {pin.commit} / "
             f"{pin.contract_sha256}"
+            + _split_suffix(pin.producer_commit, pin.serving_source_sha256, pin)
         )
     if installed_contract_sha256 != pin.contract_sha256:
         raise TesseraServingRuntimePinError(
@@ -873,6 +1008,23 @@ def require_pinned_tessera_runtime(
         pin, installed_contract_sha256=installed_tessera_contract_sha256())
 
 
+def pinned_serving_source_sha256() -> str | None:
+    """The serving code digest the tracked pin names, or ``None`` (#1561).
+
+    ``None`` is the v2 answer: the pin names no code, so the cell matcher and
+    the route-trace gate skip the code check and answer exactly as they did
+    before v3 existed.  A string is a v3 pin: a cell that names other code,
+    or none, does not match, and a traced serve must stamp this digest on
+    every rank.  It is the DEFAULT of both checks, so a caller that passes
+    nothing is checked against the tracked pin rather than skipped.
+
+    Reads the tracked pin only.  It does not require the installed contract
+    to be the pinned one; :func:`require_pinned_tessera_runtime` does that,
+    and an unreadable pin raises here, which no caller reads as a pass.
+    """
+    return load_tessera_serving_runtime_pin().serving_source_sha256
+
+
 __all__ = [
     "MATCH_BASENAME_FNMATCH",
     "TESSERA_SERVING_PLUGIN_NAME",
@@ -883,8 +1035,11 @@ __all__ = [
     "TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING",
     "TESSERA_SERVING_RUNTIME_PINNED_COMMIT",
     "TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256",
+    "TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT",
+    "TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256",
     "TESSERA_SERVING_RUNTIME_PINNED_VERSION",
     "TESSERA_SERVING_RUNTIME_PIN_SCHEMA",
+    "TESSERA_SERVING_RUNTIME_PIN_SCHEMA_V3",
     "TESSERA_SERVING_RUNTIME_REPOSITORY",
     "TESSERA_SERVING_RUNTIME_VERSION_PENDING",
     "TesseraServingNativeExtension",
@@ -892,6 +1047,7 @@ __all__ = [
     "TesseraServingRuntimePinError",
     "load_tessera_serving_runtime_pin",
     "parse_tessera_serving_runtime_pin",
+    "pinned_serving_source_sha256",
     "installed_tessera_contract_sha256",
     "require_exact_tessera_runtime_pin",
     "require_pinned_tessera_runtime",

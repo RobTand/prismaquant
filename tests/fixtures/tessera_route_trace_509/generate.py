@@ -12,7 +12,7 @@ honest about the schema it actually has to read: the header stamps
 change there shows up as a fixture that no longer parses rather than as a
 synthetic document that quietly drifts from it.
 
-    /home/rob/venvs/pq-cpu312-tessera-4c384e60/bin/python \
+    python3 \
       tests/fixtures/tessera_route_trace_509/generate.py \
       --producer-src /home/rob/tmp/tessera-509-route-trace-identity/src \
       --producer-commit 8104dc6 --out-dir tests/fixtures/tessera_route_trace_509
@@ -57,12 +57,31 @@ SWAPPED = (
     "model.language_model.layers.1.mlp.shared_experts.down_proj",
 )
 
+#: The checkpoint-to-module prefix rule of the GLM body, so each stand-in
+#: layer carries the ``prefix`` a real serve records rather than the
+#: checkpoint target (PQ #1490). Measured: the U4 BAL TP2 serves (2026-09-28)
+#: traced every body module as ``language_model.model.layers.N.…`` for the
+#: target ``model.language_model.layers.N.…``. Written here as the literal
+#: rule, not imported from PrismaQuant, so this producer-side script stays
+#: independent of the consumer it tests.
+CHECKPOINT_BODY_PREFIX = "model.language_model."
+SERVED_BODY_PREFIX = "language_model.model."
+
+
+def served_prefix(target: str) -> str:
+    """The module prefix the serve records for a checkpoint target."""
+    if not target.startswith(CHECKPOINT_BODY_PREFIX):
+        raise SystemExit(f"{target!r} is not a GLM body checkpoint target")
+    return SERVED_BODY_PREFIX + target[len(CHECKPOINT_BODY_PREFIX):]
+
+
 TOKEN_COUNTS = (1, 178)
 WORLD_SIZE = 2
 
 
 class _Layer:
-    """A stand-in for a vLLM Linear: the trace reads only ``prefix``."""
+    """A stand-in for a vLLM Linear: the trace reads only ``prefix``, which
+    vLLM sets to the module's name in ITS namespace (see ``served_prefix``)."""
 
     def __init__(self, prefix):
         self.prefix = str(prefix)
@@ -119,7 +138,7 @@ def main(argv=None) -> int:
                 for token_count in TOKEN_COUNTS:
                     for target, family, structure, contract, shape, symbol, decoder in modules:
                         telemetry.emit_route(
-                            _Layer(target),
+                            _Layer(served_prefix(target)),
                             kind=telemetry_trace_kind(structure),
                             policy=f"{family}:resident", symbol=symbol,
                             shape=f"M{token_count}:{shape}", contract=contract,

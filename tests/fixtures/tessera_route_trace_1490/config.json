@@ -1,0 +1,4711 @@
+{
+ "architectures": [
+  "Glm5NextForConditionalGeneration"
+ ],
+ "model_type": "glm5_next",
+ "quantization_config": {
+  "config_groups": {
+   "tessera_model_language_model_layers_0_mlp_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 12288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 25167425
+    },
+    "targets": [
+     "model.language_model.layers.0.mlp.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_0_mlp_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       12288
+      ],
+      [
+       "up_proj",
+       12288
+      ]
+     ],
+     "rows": 24576,
+     "structure": "dense",
+     "wire_bytes": 50334326
+    },
+    "targets": [
+     "model.language_model.layers.0.mlp.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_10_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.10.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_10_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.10.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_10_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8431180
+    },
+    "targets": [
+     "model.language_model.layers.10.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_11_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4215596
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4219628
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.11.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_11_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.11.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_11_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.11.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_12_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.12.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_12_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.12.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_12_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.12.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_13_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.13.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_13_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.13.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_13_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.13.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_14_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.14.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_14_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.14.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_14_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.14.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_15_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.15.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_15_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.15.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_15_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.15.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_16_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.16.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_16_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.16.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_16_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.16.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_17_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.17.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_17_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.17.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_17_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.17.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_18_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4215596
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4219628
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.18.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_18_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4219628
+    },
+    "targets": [
+     "model.language_model.layers.18.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_18_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8431180
+    },
+    "targets": [
+     "model.language_model.layers.18.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_19_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4215596
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4219628
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.19.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_19_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.19.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_19_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.19.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_1_mlp_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 12288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 25167425
+    },
+    "targets": [
+     "model.language_model.layers.1.mlp.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_1_mlp_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       12288
+      ],
+      [
+       "up_proj",
+       12288
+      ]
+     ],
+     "rows": 24576,
+     "structure": "dense",
+     "wire_bytes": 50447957
+    },
+    "targets": [
+     "model.language_model.layers.1.mlp.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_20_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4215596
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4219628
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.20.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_20_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.20.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_20_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.20.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_21_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.21.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_21_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.21.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_21_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.21.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_22_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.22.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_22_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.22.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_22_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8431180
+    },
+    "targets": [
+     "model.language_model.layers.22.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_23_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.23.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_23_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.23.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_23_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.23.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_24_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.24.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_24_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.24.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_24_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.24.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_25_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.25.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_25_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4219628
+    },
+    "targets": [
+     "model.language_model.layers.25.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_25_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.25.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_26_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.26.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_26_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.26.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_26_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.26.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_27_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.27.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_27_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.27.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_27_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.27.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_28_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.28.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_28_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.28.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_28_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.28.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_29_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.29.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_29_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.29.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_29_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.29.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_2_mlp_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 12288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 25207856
+    },
+    "targets": [
+     "model.language_model.layers.2.mlp.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_2_mlp_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       12288
+      ],
+      [
+       "up_proj",
+       12288
+      ]
+     ],
+     "rows": 24576,
+     "structure": "dense",
+     "wire_bytes": 50334326
+    },
+    "targets": [
+     "model.language_model.layers.2.mlp.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_30_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.30.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_30_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.30.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_30_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.30.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_31_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.31.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_31_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.31.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_31_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.31.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_32_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.32.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_32_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.32.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_32_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.32.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_33_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.33.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_33_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.33.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_33_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.33.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_34_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.34.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_34_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.34.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_34_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.34.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_35_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.35.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_35_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.35.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_35_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.35.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_36_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.36.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_36_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.36.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_36_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.36.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_37_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.37.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_37_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.37.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_37_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.37.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_38_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.38.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_38_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.38.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_38_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.38.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_39_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.39.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_39_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.39.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_39_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.39.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_3_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.3.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_3_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4219628
+    },
+    "targets": [
+     "model.language_model.layers.3.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_3_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.3.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_40_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.40.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_40_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.40.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_40_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.40.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_41_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.41.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_41_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.41.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_41_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.41.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_42_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.42.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_42_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.42.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_42_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.42.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_43_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.43.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_43_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236016
+    },
+    "targets": [
+     "model.language_model.layers.43.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_43_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.43.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_44_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.44.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_44_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236016
+    },
+    "targets": [
+     "model.language_model.layers.44.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_44_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463956
+    },
+    "targets": [
+     "model.language_model.layers.44.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_45_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.45.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_4_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.4.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_4_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.4.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_4_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 4096,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8391248
+    },
+    "targets": [
+     "model.language_model.layers.4.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_5_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.5.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_5_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "columns": 2048,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "plane": "LUT",
+     "q256": 896,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4195583
+    },
+    "targets": [
+     "model.language_model.layers.5.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_5_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.5.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_6_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.6.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_6_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.6.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_6_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.6.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_7_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "TCQ",
+     "experts": 288,
+     "family": "TESSERA_NVFP4",
+     "grid": "E2M1x2",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 896,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195630
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 896,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4195583
+      }
+     },
+     "plane": "LUT",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.7.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_7_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4219629
+    },
+    "targets": [
+     "model.language_model.layers.7.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_7_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_FP8",
+     "grid": "E4M3",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8431182
+    },
+    "targets": [
+     "model.language_model.layers.7.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_8_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.8.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_8_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.8.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_8_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.8.mlp.shared_experts.gate_up_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_9_mlp_experts": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "experts": 288,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "groups": {
+      "w13": {
+       "columns": 4096,
+       "q256": 1024,
+       "roles": [
+        [
+         "gate_proj",
+         2048
+        ],
+        [
+         "up_proj",
+         2048
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4231984
+      },
+      "w2": {
+       "columns": 2048,
+       "q256": 1024,
+       "roles": [
+        [
+         "down_proj",
+         4096
+        ]
+       ],
+       "rows": 4096,
+       "wire_stride": 4236016
+      }
+     },
+     "plane": "CHANNEL",
+     "source_layout": "unpacked_per_expert",
+     "structure": "routed_moe"
+    },
+    "targets": [
+     "model.language_model.layers.9.mlp.experts"
+    ]
+   },
+   "tessera_model_language_model_layers_9_mlp_shared_experts_down_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 2048,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "down_proj",
+       4096
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 4236017
+    },
+    "targets": [
+     "model.language_model.layers.9.mlp.shared_experts.down_proj"
+    ]
+   },
+   "tessera_model_language_model_layers_9_mlp_shared_experts_gate_up_proj": {
+    "format": "TESSERA",
+    "scheme": {
+     "body": "WINDOW",
+     "columns": 4096,
+     "family": "TESSERA_BF16",
+     "grid": "BF16",
+     "plane": "CHANNEL",
+     "q256": 1024,
+     "roles": [
+      [
+       "gate_proj",
+       2048
+      ],
+      [
+       "up_proj",
+       2048
+      ]
+     ],
+     "rows": 4096,
+     "structure": "dense",
+     "wire_bytes": 8463958
+    },
+    "targets": [
+     "model.language_model.layers.9.mlp.shared_experts.gate_up_proj"
+    ]
+   }
+  },
+  "format": "mixed-precision",
+  "ignore": [
+   "lm_head",
+   "model.language_model.embed_tokens",
+   "model.language_model.layers.0.self_attn.b_proj",
+   "model.language_model.layers.0.self_attn.f_a_proj",
+   "model.language_model.layers.0.self_attn.f_b_proj",
+   "model.language_model.layers.0.self_attn.g_a_proj",
+   "model.language_model.layers.0.self_attn.g_b_proj",
+   "model.language_model.layers.0.self_attn.o_proj",
+   "model.language_model.layers.0.self_attn.qkv_proj",
+   "model.language_model.layers.1.self_attn.b_proj",
+   "model.language_model.layers.1.self_attn.f_a_proj",
+   "model.language_model.layers.1.self_attn.f_b_proj",
+   "model.language_model.layers.1.self_attn.g_a_proj",
+   "model.language_model.layers.1.self_attn.g_b_proj",
+   "model.language_model.layers.1.self_attn.o_proj",
+   "model.language_model.layers.1.self_attn.qkv_proj",
+   "model.language_model.layers.10.mlp.gate",
+   "model.language_model.layers.10.self_attn.b_proj",
+   "model.language_model.layers.10.self_attn.f_a_proj",
+   "model.language_model.layers.10.self_attn.f_b_proj",
+   "model.language_model.layers.10.self_attn.g_a_proj",
+   "model.language_model.layers.10.self_attn.g_b_proj",
+   "model.language_model.layers.10.self_attn.o_proj",
+   "model.language_model.layers.10.self_attn.qkv_proj",
+   "model.language_model.layers.11.mlp.gate",
+   "model.language_model.layers.11.self_attn.indexer.weights_proj",
+   "model.language_model.layers.11.self_attn.indexer.wk",
+   "model.language_model.layers.11.self_attn.indexer.wq_b",
+   "model.language_model.layers.11.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.11.self_attn.kv_b_proj",
+   "model.language_model.layers.11.self_attn.o_proj",
+   "model.language_model.layers.11.self_attn.q_a_proj",
+   "model.language_model.layers.11.self_attn.q_b_proj",
+   "model.language_model.layers.12.mlp.gate",
+   "model.language_model.layers.12.self_attn.b_proj",
+   "model.language_model.layers.12.self_attn.f_a_proj",
+   "model.language_model.layers.12.self_attn.f_b_proj",
+   "model.language_model.layers.12.self_attn.g_a_proj",
+   "model.language_model.layers.12.self_attn.g_b_proj",
+   "model.language_model.layers.12.self_attn.o_proj",
+   "model.language_model.layers.12.self_attn.qkv_proj",
+   "model.language_model.layers.13.mlp.gate",
+   "model.language_model.layers.13.self_attn.b_proj",
+   "model.language_model.layers.13.self_attn.f_a_proj",
+   "model.language_model.layers.13.self_attn.f_b_proj",
+   "model.language_model.layers.13.self_attn.g_a_proj",
+   "model.language_model.layers.13.self_attn.g_b_proj",
+   "model.language_model.layers.13.self_attn.o_proj",
+   "model.language_model.layers.13.self_attn.qkv_proj",
+   "model.language_model.layers.14.mlp.gate",
+   "model.language_model.layers.14.self_attn.b_proj",
+   "model.language_model.layers.14.self_attn.f_a_proj",
+   "model.language_model.layers.14.self_attn.f_b_proj",
+   "model.language_model.layers.14.self_attn.g_a_proj",
+   "model.language_model.layers.14.self_attn.g_b_proj",
+   "model.language_model.layers.14.self_attn.o_proj",
+   "model.language_model.layers.14.self_attn.qkv_proj",
+   "model.language_model.layers.15.mlp.gate",
+   "model.language_model.layers.15.self_attn.indexer.weights_proj",
+   "model.language_model.layers.15.self_attn.indexer.wk",
+   "model.language_model.layers.15.self_attn.indexer.wq_b",
+   "model.language_model.layers.15.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.15.self_attn.kv_b_proj",
+   "model.language_model.layers.15.self_attn.o_proj",
+   "model.language_model.layers.15.self_attn.q_a_proj",
+   "model.language_model.layers.15.self_attn.q_b_proj",
+   "model.language_model.layers.16.mlp.gate",
+   "model.language_model.layers.16.self_attn.b_proj",
+   "model.language_model.layers.16.self_attn.f_a_proj",
+   "model.language_model.layers.16.self_attn.f_b_proj",
+   "model.language_model.layers.16.self_attn.g_a_proj",
+   "model.language_model.layers.16.self_attn.g_b_proj",
+   "model.language_model.layers.16.self_attn.o_proj",
+   "model.language_model.layers.16.self_attn.qkv_proj",
+   "model.language_model.layers.17.mlp.gate",
+   "model.language_model.layers.17.self_attn.b_proj",
+   "model.language_model.layers.17.self_attn.f_a_proj",
+   "model.language_model.layers.17.self_attn.f_b_proj",
+   "model.language_model.layers.17.self_attn.g_a_proj",
+   "model.language_model.layers.17.self_attn.g_b_proj",
+   "model.language_model.layers.17.self_attn.o_proj",
+   "model.language_model.layers.17.self_attn.qkv_proj",
+   "model.language_model.layers.18.mlp.gate",
+   "model.language_model.layers.18.self_attn.b_proj",
+   "model.language_model.layers.18.self_attn.f_a_proj",
+   "model.language_model.layers.18.self_attn.f_b_proj",
+   "model.language_model.layers.18.self_attn.g_a_proj",
+   "model.language_model.layers.18.self_attn.g_b_proj",
+   "model.language_model.layers.18.self_attn.o_proj",
+   "model.language_model.layers.18.self_attn.qkv_proj",
+   "model.language_model.layers.19.mlp.gate",
+   "model.language_model.layers.19.self_attn.indexer.weights_proj",
+   "model.language_model.layers.19.self_attn.indexer.wk",
+   "model.language_model.layers.19.self_attn.indexer.wq_b",
+   "model.language_model.layers.19.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.19.self_attn.kv_b_proj",
+   "model.language_model.layers.19.self_attn.o_proj",
+   "model.language_model.layers.19.self_attn.q_a_proj",
+   "model.language_model.layers.19.self_attn.q_b_proj",
+   "model.language_model.layers.2.self_attn.b_proj",
+   "model.language_model.layers.2.self_attn.f_a_proj",
+   "model.language_model.layers.2.self_attn.f_b_proj",
+   "model.language_model.layers.2.self_attn.g_a_proj",
+   "model.language_model.layers.2.self_attn.g_b_proj",
+   "model.language_model.layers.2.self_attn.o_proj",
+   "model.language_model.layers.2.self_attn.qkv_proj",
+   "model.language_model.layers.20.mlp.gate",
+   "model.language_model.layers.20.self_attn.b_proj",
+   "model.language_model.layers.20.self_attn.f_a_proj",
+   "model.language_model.layers.20.self_attn.f_b_proj",
+   "model.language_model.layers.20.self_attn.g_a_proj",
+   "model.language_model.layers.20.self_attn.g_b_proj",
+   "model.language_model.layers.20.self_attn.o_proj",
+   "model.language_model.layers.20.self_attn.qkv_proj",
+   "model.language_model.layers.21.mlp.gate",
+   "model.language_model.layers.21.self_attn.b_proj",
+   "model.language_model.layers.21.self_attn.f_a_proj",
+   "model.language_model.layers.21.self_attn.f_b_proj",
+   "model.language_model.layers.21.self_attn.g_a_proj",
+   "model.language_model.layers.21.self_attn.g_b_proj",
+   "model.language_model.layers.21.self_attn.o_proj",
+   "model.language_model.layers.21.self_attn.qkv_proj",
+   "model.language_model.layers.22.mlp.gate",
+   "model.language_model.layers.22.self_attn.b_proj",
+   "model.language_model.layers.22.self_attn.f_a_proj",
+   "model.language_model.layers.22.self_attn.f_b_proj",
+   "model.language_model.layers.22.self_attn.g_a_proj",
+   "model.language_model.layers.22.self_attn.g_b_proj",
+   "model.language_model.layers.22.self_attn.o_proj",
+   "model.language_model.layers.22.self_attn.qkv_proj",
+   "model.language_model.layers.23.mlp.gate",
+   "model.language_model.layers.23.self_attn.indexer.weights_proj",
+   "model.language_model.layers.23.self_attn.indexer.wk",
+   "model.language_model.layers.23.self_attn.indexer.wq_b",
+   "model.language_model.layers.23.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.23.self_attn.kv_b_proj",
+   "model.language_model.layers.23.self_attn.o_proj",
+   "model.language_model.layers.23.self_attn.q_a_proj",
+   "model.language_model.layers.23.self_attn.q_b_proj",
+   "model.language_model.layers.24.mlp.gate",
+   "model.language_model.layers.24.self_attn.b_proj",
+   "model.language_model.layers.24.self_attn.f_a_proj",
+   "model.language_model.layers.24.self_attn.f_b_proj",
+   "model.language_model.layers.24.self_attn.g_a_proj",
+   "model.language_model.layers.24.self_attn.g_b_proj",
+   "model.language_model.layers.24.self_attn.o_proj",
+   "model.language_model.layers.24.self_attn.qkv_proj",
+   "model.language_model.layers.25.mlp.gate",
+   "model.language_model.layers.25.self_attn.b_proj",
+   "model.language_model.layers.25.self_attn.f_a_proj",
+   "model.language_model.layers.25.self_attn.f_b_proj",
+   "model.language_model.layers.25.self_attn.g_a_proj",
+   "model.language_model.layers.25.self_attn.g_b_proj",
+   "model.language_model.layers.25.self_attn.o_proj",
+   "model.language_model.layers.25.self_attn.qkv_proj",
+   "model.language_model.layers.26.mlp.gate",
+   "model.language_model.layers.26.self_attn.b_proj",
+   "model.language_model.layers.26.self_attn.f_a_proj",
+   "model.language_model.layers.26.self_attn.f_b_proj",
+   "model.language_model.layers.26.self_attn.g_a_proj",
+   "model.language_model.layers.26.self_attn.g_b_proj",
+   "model.language_model.layers.26.self_attn.o_proj",
+   "model.language_model.layers.26.self_attn.qkv_proj",
+   "model.language_model.layers.27.mlp.gate",
+   "model.language_model.layers.27.self_attn.indexer.weights_proj",
+   "model.language_model.layers.27.self_attn.indexer.wk",
+   "model.language_model.layers.27.self_attn.indexer.wq_b",
+   "model.language_model.layers.27.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.27.self_attn.kv_b_proj",
+   "model.language_model.layers.27.self_attn.o_proj",
+   "model.language_model.layers.27.self_attn.q_a_proj",
+   "model.language_model.layers.27.self_attn.q_b_proj",
+   "model.language_model.layers.28.mlp.gate",
+   "model.language_model.layers.28.self_attn.b_proj",
+   "model.language_model.layers.28.self_attn.f_a_proj",
+   "model.language_model.layers.28.self_attn.f_b_proj",
+   "model.language_model.layers.28.self_attn.g_a_proj",
+   "model.language_model.layers.28.self_attn.g_b_proj",
+   "model.language_model.layers.28.self_attn.o_proj",
+   "model.language_model.layers.28.self_attn.qkv_proj",
+   "model.language_model.layers.29.mlp.gate",
+   "model.language_model.layers.29.self_attn.b_proj",
+   "model.language_model.layers.29.self_attn.f_a_proj",
+   "model.language_model.layers.29.self_attn.f_b_proj",
+   "model.language_model.layers.29.self_attn.g_a_proj",
+   "model.language_model.layers.29.self_attn.g_b_proj",
+   "model.language_model.layers.29.self_attn.o_proj",
+   "model.language_model.layers.29.self_attn.qkv_proj",
+   "model.language_model.layers.3.mlp.gate",
+   "model.language_model.layers.3.self_attn.indexer.weights_proj",
+   "model.language_model.layers.3.self_attn.indexer.wk",
+   "model.language_model.layers.3.self_attn.indexer.wq_b",
+   "model.language_model.layers.3.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.3.self_attn.kv_b_proj",
+   "model.language_model.layers.3.self_attn.o_proj",
+   "model.language_model.layers.3.self_attn.q_a_proj",
+   "model.language_model.layers.3.self_attn.q_b_proj",
+   "model.language_model.layers.30.mlp.gate",
+   "model.language_model.layers.30.self_attn.b_proj",
+   "model.language_model.layers.30.self_attn.f_a_proj",
+   "model.language_model.layers.30.self_attn.f_b_proj",
+   "model.language_model.layers.30.self_attn.g_a_proj",
+   "model.language_model.layers.30.self_attn.g_b_proj",
+   "model.language_model.layers.30.self_attn.o_proj",
+   "model.language_model.layers.30.self_attn.qkv_proj",
+   "model.language_model.layers.31.mlp.gate",
+   "model.language_model.layers.31.self_attn.indexer.weights_proj",
+   "model.language_model.layers.31.self_attn.indexer.wk",
+   "model.language_model.layers.31.self_attn.indexer.wq_b",
+   "model.language_model.layers.31.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.31.self_attn.kv_b_proj",
+   "model.language_model.layers.31.self_attn.o_proj",
+   "model.language_model.layers.31.self_attn.q_a_proj",
+   "model.language_model.layers.31.self_attn.q_b_proj",
+   "model.language_model.layers.32.mlp.gate",
+   "model.language_model.layers.32.self_attn.b_proj",
+   "model.language_model.layers.32.self_attn.f_a_proj",
+   "model.language_model.layers.32.self_attn.f_b_proj",
+   "model.language_model.layers.32.self_attn.g_a_proj",
+   "model.language_model.layers.32.self_attn.g_b_proj",
+   "model.language_model.layers.32.self_attn.o_proj",
+   "model.language_model.layers.32.self_attn.qkv_proj",
+   "model.language_model.layers.33.mlp.gate",
+   "model.language_model.layers.33.self_attn.b_proj",
+   "model.language_model.layers.33.self_attn.f_a_proj",
+   "model.language_model.layers.33.self_attn.f_b_proj",
+   "model.language_model.layers.33.self_attn.g_a_proj",
+   "model.language_model.layers.33.self_attn.g_b_proj",
+   "model.language_model.layers.33.self_attn.o_proj",
+   "model.language_model.layers.33.self_attn.qkv_proj",
+   "model.language_model.layers.34.mlp.gate",
+   "model.language_model.layers.34.self_attn.b_proj",
+   "model.language_model.layers.34.self_attn.f_a_proj",
+   "model.language_model.layers.34.self_attn.f_b_proj",
+   "model.language_model.layers.34.self_attn.g_a_proj",
+   "model.language_model.layers.34.self_attn.g_b_proj",
+   "model.language_model.layers.34.self_attn.o_proj",
+   "model.language_model.layers.34.self_attn.qkv_proj",
+   "model.language_model.layers.35.mlp.gate",
+   "model.language_model.layers.35.self_attn.indexer.weights_proj",
+   "model.language_model.layers.35.self_attn.indexer.wk",
+   "model.language_model.layers.35.self_attn.indexer.wq_b",
+   "model.language_model.layers.35.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.35.self_attn.kv_b_proj",
+   "model.language_model.layers.35.self_attn.o_proj",
+   "model.language_model.layers.35.self_attn.q_a_proj",
+   "model.language_model.layers.35.self_attn.q_b_proj",
+   "model.language_model.layers.36.mlp.gate",
+   "model.language_model.layers.36.self_attn.b_proj",
+   "model.language_model.layers.36.self_attn.f_a_proj",
+   "model.language_model.layers.36.self_attn.f_b_proj",
+   "model.language_model.layers.36.self_attn.g_a_proj",
+   "model.language_model.layers.36.self_attn.g_b_proj",
+   "model.language_model.layers.36.self_attn.o_proj",
+   "model.language_model.layers.36.self_attn.qkv_proj",
+   "model.language_model.layers.37.mlp.gate",
+   "model.language_model.layers.37.self_attn.b_proj",
+   "model.language_model.layers.37.self_attn.f_a_proj",
+   "model.language_model.layers.37.self_attn.f_b_proj",
+   "model.language_model.layers.37.self_attn.g_a_proj",
+   "model.language_model.layers.37.self_attn.g_b_proj",
+   "model.language_model.layers.37.self_attn.o_proj",
+   "model.language_model.layers.37.self_attn.qkv_proj",
+   "model.language_model.layers.38.mlp.gate",
+   "model.language_model.layers.38.self_attn.b_proj",
+   "model.language_model.layers.38.self_attn.f_a_proj",
+   "model.language_model.layers.38.self_attn.f_b_proj",
+   "model.language_model.layers.38.self_attn.g_a_proj",
+   "model.language_model.layers.38.self_attn.g_b_proj",
+   "model.language_model.layers.38.self_attn.o_proj",
+   "model.language_model.layers.38.self_attn.qkv_proj",
+   "model.language_model.layers.39.mlp.gate",
+   "model.language_model.layers.39.self_attn.indexer.weights_proj",
+   "model.language_model.layers.39.self_attn.indexer.wk",
+   "model.language_model.layers.39.self_attn.indexer.wq_b",
+   "model.language_model.layers.39.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.39.self_attn.kv_b_proj",
+   "model.language_model.layers.39.self_attn.o_proj",
+   "model.language_model.layers.39.self_attn.q_a_proj",
+   "model.language_model.layers.39.self_attn.q_b_proj",
+   "model.language_model.layers.4.mlp.gate",
+   "model.language_model.layers.4.self_attn.b_proj",
+   "model.language_model.layers.4.self_attn.f_a_proj",
+   "model.language_model.layers.4.self_attn.f_b_proj",
+   "model.language_model.layers.4.self_attn.g_a_proj",
+   "model.language_model.layers.4.self_attn.g_b_proj",
+   "model.language_model.layers.4.self_attn.o_proj",
+   "model.language_model.layers.4.self_attn.qkv_proj",
+   "model.language_model.layers.40.mlp.gate",
+   "model.language_model.layers.40.self_attn.b_proj",
+   "model.language_model.layers.40.self_attn.f_a_proj",
+   "model.language_model.layers.40.self_attn.f_b_proj",
+   "model.language_model.layers.40.self_attn.g_a_proj",
+   "model.language_model.layers.40.self_attn.g_b_proj",
+   "model.language_model.layers.40.self_attn.o_proj",
+   "model.language_model.layers.40.self_attn.qkv_proj",
+   "model.language_model.layers.41.mlp.gate",
+   "model.language_model.layers.41.self_attn.b_proj",
+   "model.language_model.layers.41.self_attn.f_a_proj",
+   "model.language_model.layers.41.self_attn.f_b_proj",
+   "model.language_model.layers.41.self_attn.g_a_proj",
+   "model.language_model.layers.41.self_attn.g_b_proj",
+   "model.language_model.layers.41.self_attn.o_proj",
+   "model.language_model.layers.41.self_attn.qkv_proj",
+   "model.language_model.layers.42.mlp.gate",
+   "model.language_model.layers.42.self_attn.b_proj",
+   "model.language_model.layers.42.self_attn.f_a_proj",
+   "model.language_model.layers.42.self_attn.f_b_proj",
+   "model.language_model.layers.42.self_attn.g_a_proj",
+   "model.language_model.layers.42.self_attn.g_b_proj",
+   "model.language_model.layers.42.self_attn.o_proj",
+   "model.language_model.layers.42.self_attn.qkv_proj",
+   "model.language_model.layers.43.mlp.gate",
+   "model.language_model.layers.43.self_attn.indexer.weights_proj",
+   "model.language_model.layers.43.self_attn.indexer.wk",
+   "model.language_model.layers.43.self_attn.indexer.wq_b",
+   "model.language_model.layers.43.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.43.self_attn.kv_b_proj",
+   "model.language_model.layers.43.self_attn.o_proj",
+   "model.language_model.layers.43.self_attn.q_a_proj",
+   "model.language_model.layers.43.self_attn.q_b_proj",
+   "model.language_model.layers.44.mlp.gate",
+   "model.language_model.layers.44.self_attn.b_proj",
+   "model.language_model.layers.44.self_attn.f_a_proj",
+   "model.language_model.layers.44.self_attn.f_b_proj",
+   "model.language_model.layers.44.self_attn.g_a_proj",
+   "model.language_model.layers.44.self_attn.g_b_proj",
+   "model.language_model.layers.44.self_attn.o_proj",
+   "model.language_model.layers.44.self_attn.qkv_proj",
+   "model.language_model.layers.45.eh_proj",
+   "model.language_model.layers.45.mlp.gate",
+   "model.language_model.layers.45.mlp.shared_experts.down_proj",
+   "model.language_model.layers.45.mlp.shared_experts.gate_up_proj",
+   "model.language_model.layers.45.self_attn.indexer.weights_proj",
+   "model.language_model.layers.45.self_attn.indexer.wk",
+   "model.language_model.layers.45.self_attn.indexer.wq_b",
+   "model.language_model.layers.45.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.45.self_attn.kv_b_proj",
+   "model.language_model.layers.45.self_attn.o_proj",
+   "model.language_model.layers.45.self_attn.q_a_proj",
+   "model.language_model.layers.45.self_attn.q_b_proj",
+   "model.language_model.layers.5.mlp.gate",
+   "model.language_model.layers.5.self_attn.b_proj",
+   "model.language_model.layers.5.self_attn.f_a_proj",
+   "model.language_model.layers.5.self_attn.f_b_proj",
+   "model.language_model.layers.5.self_attn.g_a_proj",
+   "model.language_model.layers.5.self_attn.g_b_proj",
+   "model.language_model.layers.5.self_attn.o_proj",
+   "model.language_model.layers.5.self_attn.qkv_proj",
+   "model.language_model.layers.6.mlp.gate",
+   "model.language_model.layers.6.self_attn.b_proj",
+   "model.language_model.layers.6.self_attn.f_a_proj",
+   "model.language_model.layers.6.self_attn.f_b_proj",
+   "model.language_model.layers.6.self_attn.g_a_proj",
+   "model.language_model.layers.6.self_attn.g_b_proj",
+   "model.language_model.layers.6.self_attn.o_proj",
+   "model.language_model.layers.6.self_attn.qkv_proj",
+   "model.language_model.layers.7.mlp.gate",
+   "model.language_model.layers.7.self_attn.indexer.weights_proj",
+   "model.language_model.layers.7.self_attn.indexer.wk",
+   "model.language_model.layers.7.self_attn.indexer.wq_b",
+   "model.language_model.layers.7.self_attn.kv_a_proj_with_mqa",
+   "model.language_model.layers.7.self_attn.kv_b_proj",
+   "model.language_model.layers.7.self_attn.o_proj",
+   "model.language_model.layers.7.self_attn.q_a_proj",
+   "model.language_model.layers.7.self_attn.q_b_proj",
+   "model.language_model.layers.8.mlp.gate",
+   "model.language_model.layers.8.self_attn.b_proj",
+   "model.language_model.layers.8.self_attn.f_a_proj",
+   "model.language_model.layers.8.self_attn.f_b_proj",
+   "model.language_model.layers.8.self_attn.g_a_proj",
+   "model.language_model.layers.8.self_attn.g_b_proj",
+   "model.language_model.layers.8.self_attn.o_proj",
+   "model.language_model.layers.8.self_attn.qkv_proj",
+   "model.language_model.layers.9.mlp.gate",
+   "model.language_model.layers.9.self_attn.b_proj",
+   "model.language_model.layers.9.self_attn.f_a_proj",
+   "model.language_model.layers.9.self_attn.f_b_proj",
+   "model.language_model.layers.9.self_attn.g_a_proj",
+   "model.language_model.layers.9.self_attn.g_b_proj",
+   "model.language_model.layers.9.self_attn.o_proj",
+   "model.language_model.layers.9.self_attn.qkv_proj",
+   "model.visual.blocks.0.attn.proj",
+   "model.visual.blocks.0.attn.qkv",
+   "model.visual.blocks.0.attn.qkv_proj",
+   "model.visual.blocks.0.mlp.down_proj",
+   "model.visual.blocks.0.mlp.gate_up_proj",
+   "model.visual.blocks.1.attn.proj",
+   "model.visual.blocks.1.attn.qkv",
+   "model.visual.blocks.1.attn.qkv_proj",
+   "model.visual.blocks.1.mlp.down_proj",
+   "model.visual.blocks.1.mlp.gate_up_proj",
+   "model.visual.blocks.10.attn.proj",
+   "model.visual.blocks.10.attn.qkv",
+   "model.visual.blocks.10.attn.qkv_proj",
+   "model.visual.blocks.10.mlp.down_proj",
+   "model.visual.blocks.10.mlp.gate_up_proj",
+   "model.visual.blocks.11.attn.proj",
+   "model.visual.blocks.11.attn.qkv",
+   "model.visual.blocks.11.attn.qkv_proj",
+   "model.visual.blocks.11.mlp.down_proj",
+   "model.visual.blocks.11.mlp.gate_up_proj",
+   "model.visual.blocks.12.attn.proj",
+   "model.visual.blocks.12.attn.qkv",
+   "model.visual.blocks.12.attn.qkv_proj",
+   "model.visual.blocks.12.mlp.down_proj",
+   "model.visual.blocks.12.mlp.gate_up_proj",
+   "model.visual.blocks.13.attn.proj",
+   "model.visual.blocks.13.attn.qkv",
+   "model.visual.blocks.13.attn.qkv_proj",
+   "model.visual.blocks.13.mlp.down_proj",
+   "model.visual.blocks.13.mlp.gate_up_proj",
+   "model.visual.blocks.14.attn.proj",
+   "model.visual.blocks.14.attn.qkv",
+   "model.visual.blocks.14.attn.qkv_proj",
+   "model.visual.blocks.14.mlp.down_proj",
+   "model.visual.blocks.14.mlp.gate_up_proj",
+   "model.visual.blocks.15.attn.proj",
+   "model.visual.blocks.15.attn.qkv",
+   "model.visual.blocks.15.attn.qkv_proj",
+   "model.visual.blocks.15.mlp.down_proj",
+   "model.visual.blocks.15.mlp.gate_up_proj",
+   "model.visual.blocks.16.attn.proj",
+   "model.visual.blocks.16.attn.qkv",
+   "model.visual.blocks.16.attn.qkv_proj",
+   "model.visual.blocks.16.mlp.down_proj",
+   "model.visual.blocks.16.mlp.gate_up_proj",
+   "model.visual.blocks.17.attn.proj",
+   "model.visual.blocks.17.attn.qkv",
+   "model.visual.blocks.17.attn.qkv_proj",
+   "model.visual.blocks.17.mlp.down_proj",
+   "model.visual.blocks.17.mlp.gate_up_proj",
+   "model.visual.blocks.18.attn.proj",
+   "model.visual.blocks.18.attn.qkv",
+   "model.visual.blocks.18.attn.qkv_proj",
+   "model.visual.blocks.18.mlp.down_proj",
+   "model.visual.blocks.18.mlp.gate_up_proj",
+   "model.visual.blocks.19.attn.proj",
+   "model.visual.blocks.19.attn.qkv",
+   "model.visual.blocks.19.attn.qkv_proj",
+   "model.visual.blocks.19.mlp.down_proj",
+   "model.visual.blocks.19.mlp.gate_up_proj",
+   "model.visual.blocks.2.attn.proj",
+   "model.visual.blocks.2.attn.qkv",
+   "model.visual.blocks.2.attn.qkv_proj",
+   "model.visual.blocks.2.mlp.down_proj",
+   "model.visual.blocks.2.mlp.gate_up_proj",
+   "model.visual.blocks.20.attn.proj",
+   "model.visual.blocks.20.attn.qkv",
+   "model.visual.blocks.20.attn.qkv_proj",
+   "model.visual.blocks.20.mlp.down_proj",
+   "model.visual.blocks.20.mlp.gate_up_proj",
+   "model.visual.blocks.21.attn.proj",
+   "model.visual.blocks.21.attn.qkv",
+   "model.visual.blocks.21.attn.qkv_proj",
+   "model.visual.blocks.21.mlp.down_proj",
+   "model.visual.blocks.21.mlp.gate_up_proj",
+   "model.visual.blocks.22.attn.proj",
+   "model.visual.blocks.22.attn.qkv",
+   "model.visual.blocks.22.attn.qkv_proj",
+   "model.visual.blocks.22.mlp.down_proj",
+   "model.visual.blocks.22.mlp.gate_up_proj",
+   "model.visual.blocks.23.attn.proj",
+   "model.visual.blocks.23.attn.qkv",
+   "model.visual.blocks.23.attn.qkv_proj",
+   "model.visual.blocks.23.mlp.down_proj",
+   "model.visual.blocks.23.mlp.gate_up_proj",
+   "model.visual.blocks.3.attn.proj",
+   "model.visual.blocks.3.attn.qkv",
+   "model.visual.blocks.3.attn.qkv_proj",
+   "model.visual.blocks.3.mlp.down_proj",
+   "model.visual.blocks.3.mlp.gate_up_proj",
+   "model.visual.blocks.4.attn.proj",
+   "model.visual.blocks.4.attn.qkv",
+   "model.visual.blocks.4.attn.qkv_proj",
+   "model.visual.blocks.4.mlp.down_proj",
+   "model.visual.blocks.4.mlp.gate_up_proj",
+   "model.visual.blocks.5.attn.proj",
+   "model.visual.blocks.5.attn.qkv",
+   "model.visual.blocks.5.attn.qkv_proj",
+   "model.visual.blocks.5.mlp.down_proj",
+   "model.visual.blocks.5.mlp.gate_up_proj",
+   "model.visual.blocks.6.attn.proj",
+   "model.visual.blocks.6.attn.qkv",
+   "model.visual.blocks.6.attn.qkv_proj",
+   "model.visual.blocks.6.mlp.down_proj",
+   "model.visual.blocks.6.mlp.gate_up_proj",
+   "model.visual.blocks.7.attn.proj",
+   "model.visual.blocks.7.attn.qkv",
+   "model.visual.blocks.7.attn.qkv_proj",
+   "model.visual.blocks.7.mlp.down_proj",
+   "model.visual.blocks.7.mlp.gate_up_proj",
+   "model.visual.blocks.8.attn.proj",
+   "model.visual.blocks.8.attn.qkv",
+   "model.visual.blocks.8.attn.qkv_proj",
+   "model.visual.blocks.8.mlp.down_proj",
+   "model.visual.blocks.8.mlp.gate_up_proj",
+   "model.visual.blocks.9.attn.proj",
+   "model.visual.blocks.9.attn.qkv",
+   "model.visual.blocks.9.attn.qkv_proj",
+   "model.visual.blocks.9.mlp.down_proj",
+   "model.visual.blocks.9.mlp.gate_up_proj",
+   "model.visual.merger.down_proj",
+   "model.visual.merger.gate_up_proj",
+   "model.visual.merger.proj"
+  ],
+  "quant_method": "tessera",
+  "schema_minor": 7,
+  "tp_agnostic": true
+ },
+ "text_config": {
+  "model_type": "glm5_next_text",
+  "num_hidden_layers": 45,
+  "num_nextn_predict_layers": 1
+ }
+}
