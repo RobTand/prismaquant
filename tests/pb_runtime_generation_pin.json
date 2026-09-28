@@ -1,25 +1,26 @@
 {
   "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
-  "bundle_root": "/mnt/shared/prismabuild-fleet/runtime-generations/68cd6233b179-1790347882-953848afb6b9",
-  "candidate_commit": "68cd6233b179fad4b2ff50fa411ca4a9dd5edbb6",
-  "runtime_generation": "68cd6233b179-1790347882-953848afb6b9",
-  "qualification": "PUBLISHED RUNTIME GENERATION 68cd6233b179-1790347882-953848afb6b9",
+  "bundle_root": "/mnt/shared/prismabuild-fleet/runtime-generations/b2d12097cd53-1790564012-4cd6608d3052",
+  "candidate_commit": "b2d12097cd530be0a808a1a1fb91ff53d1436b28",
+  "runtime_generation": "b2d12097cd53-1790564012-4cd6608d3052",
+  "qualification": "PUBLISHED RUNTIME GENERATION b2d12097cd53-1790564012-4cd6608d3052",
   "files": {
     "src/prismabuild/action_edges.py": "ab4ae4347403b609470fe45943dc2730496c11c6fb226d59affb33547a479d50",
-    "src/prismabuild/adaptive_cpu.py": "52ad857f4907f635aeae5be95c0495c54ca9dfcc48bf2ad4109c7ca2296f1e64",
-    "src/prismabuild/core.py": "06a4591af15c022a14ab8f104197fb7b750e869cb83ced981784b72b933e3183",
+    "src/prismabuild/adaptive_cpu.py": "c756ee54bd103df4d86ddee94c8eb79c3c54a0335d934eef4f24e1b7718a073e",
+    "src/prismabuild/client.py": "8c01ed48491de4ece403e77647c8ced06d1dcce0e4659aad5d4f9bba8ddb96af",
+    "src/prismabuild/core.py": "20980e226e1e91cb4942e3f1e6f6c20160dfc56c79680987b9b1d1dd338a510d",
     "src/prismabuild/movement_actions.py": "30ef5dfb3014e39ea3c99a47c942e28a188098df9ace2de24579a62c678b94f5",
-    "src/prismabuild/pool.py": "ac3742666901025a2cefe9df98556af7bfeb49bbdb9daa2f7ccfd7f7b850c644",
-    "src/prismabuild/produced_output.py": "10586f680acdcae38fe591c331e09ffdfbb1de979e8722646ecc176c5c897b3a",
-    "src/prismabuild/produced_spool.py": "c82e36fdfe4458c32fc5f02008306e5838035753bf4350adb8416bfba532e8e0",
+    "src/prismabuild/pool.py": "7b8a58f40724a41a7c337aa4f9153e85eb6ecd6a2e5affa090a5dc40ede0ed64",
+    "src/prismabuild/produced_output.py": "4ca4ab5107f7d18722b76d961fec7f7ca475e0e5fac9c140393643514117c789",
+    "src/prismabuild/produced_spool.py": "c10f876f26a66c409d88da3a5dc611a62900582dda2865c5ea6db5175792fbf7",
     "src/prismabuild/reader_lease.py": "c10be75030f40cab09416695f4442a41b279b066a173faf6b1c19f279d579699",
     "src/prismabuild/residency_map.py": "10ce7f4f654fab46d45f64ffa5a85768df5dafa12bd8343a61b5abb0363d7b99",
     "src/prismabuild/resource_scope.py": "49a6f78e0c20cc68f3b6cd002e51b7dbe5943d5d21d4ba1dbca18b5d2563898c",
-    "src/prismabuild/storage_tiers.py": "e0c4a99195966fd1eb6ae6b33714ab873de4b9618dcd75f6e2c694401b83088d",
-    "tools/fleet/prewarm_loop.py": "d4e886aaf8da7983545a944252f031e8b9822e59d85e15a038a1a17088726cc4",
+    "src/prismabuild/storage_tiers.py": "e37471df5c43be54a98596d59d587a9c7c636d25a98066c864426cf71a4eadd6",
+    "tools/fleet/prewarm_loop.py": "2c038e546222bbbbfb110249853399dc04cdd0aa5c6e84e6579fe9f45dfa62fc",
     "tools/fleet/produced_export.py": "0bc4159cf5d4d4955bc83c10d6676df42108a281a4b0b6e9024d5c4c73a30efc",
-    "tools/fleet/stage_move.py": "bf7a7d72fbd0b84dd6679f8090afb3aa8482abadcf415921a5f9c2d784a83279",
-    "tools/fleet/stage_release.py": "76ad8d52cb5752a7394205c9572c6676f1656035e7f6391c9f5aad8ee6f3b9d1",
+    "tools/fleet/stage_move.py": "0563ac11c38e43af32b90053c0edb3e1dc51792fb9b9304dbde9a36980e3b312",
+    "tools/fleet/stage_release.py": "bd3f306f289b50ea0ddc05ec17bc7d6aef2c98823753ab45ba8b12366024d78f",
     "tools/prismabuild_worker.py": "9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418"
   },
   "search_paths": [
@@ -27,14 +28,15 @@
       "env": "PRISMAQUANT_PB_GENERATION_SRC"
     },
     {
-      "path": "/mnt/shared/prismabuild-fleet/runtime-generations/68cd6233b179-1790347882-953848afb6b9"
+      "path": "/mnt/shared/prismabuild-fleet/runtime-generations/b2d12097cd53-1790564012-4cd6608d3052"
     }
   ],
   "consumers": [
     "tests/test_band_serial_handoff_produced.py",
     "tests/test_band_serial_handoff_spool_real_pb.py",
+    "tests/test_produced_output_spool_real_pb.py",
     "tests/test_stage_a_retirement_pb_1073.py",
     "tests/test_stage_b_prep_produced_1070.py"
   ],
-  "note": "The one published PrismaBuild runtime generation the write-only produced-output tests run against (PQ #1084): write-only produced-output templates and origin batches (PB #912), their lifetime and retirement (PB #914) and the local spool's origin commit. The Stage B preparation's write-only publication (PQ #1070), the Stage A retirement against it (PQ #1073) and the band-serial handoff (PQ #1075) all read this file, so bumping it once moves every one of them; tests/test_pb_generation_pin_1084.py refuses a second pin file naming the same generation. The files are the union the suites need. The older bundles the Stage A pins name (stagea_produced_pb_pin.json, stagea_local_spool_pb_pin.json) reject a write-only template, so those suites keep their own pins. The bundle is read-only under runtime-generations; the digests below are what the tests check, and the tests skip loudly when nothing resolves against them."
+  "note": "The one published PrismaBuild runtime generation the write-only produced-output tests run against (PQ #1084): write-only produced-output templates and origin batches (PB #912), their lifetime and retirement (PB #914) and the local spool's origin commit. The Stage B preparation's write-only publication (PQ #1070), the Stage A retirement against it (PQ #1073) and the band-serial handoff (PQ #1075) all read this file, so bumping it once moves every one of them; tests/test_pb_generation_pin_1084.py refuses a second pin file naming the same generation. The files are the union the suites need. The local-spool suite (tests/test_produced_output_spool_real_pb.py) moved onto this pin with PQ #1545: its old bundle predates prismabuild.client, which PQ now binds, and every file it pinned is in this union. The Stage A produced-output pin (stagea_produced_pb_pin.json) keeps its own candidate bundle. The bundle is read-only under runtime-generations; the digests below are what the tests check, and the tests skip loudly when nothing resolves against them."
 }

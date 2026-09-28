@@ -37,7 +37,7 @@ from prismaquant.staged_tier_policy import (  # noqa: E402
     activate_staged_tier_policy, deactivate_staged_tier_policy_for_tests)
 
 from test_strict_reader_tier_enforcement import (  # noqa: E402
-    MANIFEST, STAGE_TIER, _hex64, _launch_env, _pb, _pb_queue, _write_map)
+    MANIFEST, STAGE_TIER, _hex64, _launch_env, _pb, _pb_queue, _write_map, _writer)
 
 HEADER = b"\x01header-entry" * 32
 BODY = b"\x02body-entry\x00\x00" * 512
@@ -80,7 +80,7 @@ class _Mover:
             source.write_bytes(blob)
             staged.write_bytes(blob)
             self.files[name] = (source, staged)
-        self.generation = self.rl.mint_generation()
+        self.generation = _writer().mint_generation()
         _launch_env(monkeypatch, self.consumer)
 
     def _documents(self, names):
@@ -92,7 +92,7 @@ class _Mover:
                    "sha256": hashlib.sha256(blob).hexdigest()}
             key = residency_map_key(str(source), 0)
             fragment[key] = dict(row, offset=0)
-            material[key] = dict(row, file_id=self.rl.stat_identity(str(staged)))
+            material[key] = dict(row, file_id=_writer().stat_identity(str(staged)))
         return fragment, material
 
     def write_fragment(self, names):
@@ -106,7 +106,7 @@ class _Mover:
 
     def write_material(self, names):
         _fragment, material = self._documents(names)
-        self.rl.write_material(
+        _writer().write_material(
             self.root, consumer_action_key=self.consumer,
             mover_action_key=self.mover, tier_id=STAGE_TIER,
             stage_root=str(self.stage), manifest_sha256=MANIFEST,

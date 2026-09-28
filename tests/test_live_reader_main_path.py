@@ -35,7 +35,9 @@ SCOPE = "s1"
 def _fixture(tmp_path):
     require_prismabuild_sdk()
     from prismaquant.staged_lease import inject_installed_sdk_for_tests
-    rl = inject_installed_sdk_for_tests()
+    inject_installed_sdk_for_tests()
+    # The fixture acts as PB's mover, so it uses the writer half directly.
+    import prismabuild.reader_lease as rl
     import prismabuild.pool as pool_mod
     import prismabuild.residency_map as map_mod
     queue = pool_mod.PoolQueue(tmp_path / "queue")

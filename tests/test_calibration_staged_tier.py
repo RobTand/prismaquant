@@ -165,7 +165,7 @@ def _stage_calibration(tmp_path, monkeypatch, path):
 
 # -- RED: the pool-reading hole ----------------------------------------------
 
-def test_strict_unmapped_calibration_refuses_without_pool_bytes(tmp_path, monkeypatch):
+def test_strict_unmapped_calibration_refuses_without_pool_bytes(tmp_path, monkeypatch, installed_client_sdk):
     """Active policy, calibration absent from the readset: refuse, no pool.
 
     Fails on the pool-reading main (the load succeeds off the pool path);
@@ -292,7 +292,7 @@ def test_strict_calibration_stale_ram_falls_to_allowed_stage(tmp_path, monkeypat
 
 # -- refusals: forbidden tier, corruption, wrong pin -----------------------------
 
-def test_strict_calibration_ram_only_refuses_before_payload(tmp_path, monkeypatch):
+def test_strict_calibration_ram_only_refuses_before_payload(tmp_path, monkeypatch, installed_client_sdk):
     from prismaquant.calibration_data import load_calibration_input
 
     path, sha, _ids = _artifact(tmp_path)
@@ -326,7 +326,7 @@ def test_strict_calibration_corrupt_stage_fails_clear(tmp_path, monkeypatch):
     assert _pins_live(tmp_path, consumer) == []
 
 
-def test_strict_calibration_wrong_pin_refuses_without_pool_bytes(tmp_path, monkeypatch):
+def test_strict_calibration_wrong_pin_refuses_without_pool_bytes(tmp_path, monkeypatch, installed_client_sdk):
     from prismaquant.calibration_data import load_calibration_input
 
     path, _sha, _ids = _artifact(tmp_path)

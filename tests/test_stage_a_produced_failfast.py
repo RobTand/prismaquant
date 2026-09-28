@@ -120,11 +120,12 @@ def _publish_one_group(storage):
             storage._produced_publish(key, group)
             return group
     raise AssertionError("no unpublished group to publish")
-def test_real_spent_ready_still_waits(tmp_path):
-    # R5 shape on the current runtime: one failed claim consumes funding
-    # and the mover returns READY unfundable (PB848 owns the terminal
-    # disposition). This lane must NOT infer failure from READY: it keeps
-    # the bounded wait. Failing fast here would claim PB848's fix.
+def test_real_spent_mover_is_terminal_and_fails_fast(tmp_path):
+    # R5 shape: one failed claim consumes the mover's funding. Before PB
+    # #852 (PB #848) the mover returned READY unfundable and this lane kept
+    # its bounded wait; since #852 PB disposes of it as terminal FAILED, so
+    # the lane fails fast on PB's own verdict instead of waiting the budget.
+    # The pin moved past #852 with the client SDK (PQ #1541).
     from prismaquant.stage_a_produced_output import BoundaryStagingTimeout
     storage, publication, q, _env, _pb = chain._bound_owner(tmp_path)
     chain._write_group(storage)
@@ -137,14 +138,16 @@ def test_real_spent_ready_still_waits(tmp_path):
     q.finish(mover, status="failed")
     state = publication.materialization_state(batch_id=batch_id)
     assert state.get("ok") is True, state
-    assert state.get("mover_queue_state") == "ready", state
+    assert state.get("mover_queue_state") == "failed", state
     assert state.get("mover_receipt_complete") is not True, state
+    started = time.monotonic()
     with pytest.raises(BoundaryStagingTimeout) as caught:
-        publication.await_materialized(batch_id=batch_id, timeout_s=1.0,
-                                       poll_s=0.1)
+        publication.await_materialized(batch_id=batch_id, timeout_s=900.0)
+    assert time.monotonic() - started < 30.0
     text = str(caught.value)
-    assert "was not staged within" in text, text
-    assert "will not stage" not in text, text
+    assert "will not stage" in text and "failed" in text, text
+
+
 def test_real_withdrawn_mover_fails_fast(tmp_path):
     from prismaquant.stage_a_produced_output import BoundaryStagingTimeout
     storage, publication, q, _env, _pb = chain._bound_owner(tmp_path)

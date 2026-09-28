@@ -14,7 +14,7 @@ from prismaquant.staged_lease import LeaseRefused, acquire_entry_window
 from test_strict_reader_tier_enforcement import (
     EPOCH, MANIFEST, _announce, _forget_state, _header_spans, _hex64,
     _launch_env, _pb, _pb_publish, _pb_publish_ram, _pb_queue, _pins_live,
-    _shard, _stage_whole, _strict, _write_map,
+    _shard, _stage_whole, _strict, _write_map, _writer,
 )
 
 
@@ -53,7 +53,7 @@ def overlap(tmp_path, monkeypatch):
     held, key = acquire_entry_window(resolver, declared, body['entries'][head_key])
     held.__enter__()
     held.open(key)
-    sdk.write_retiring(root / 'leases', consumer_action_key=consumer,
+    _writer().write_retiring(root / 'leases', consumer_action_key=consumer,
                        mover_action_key=head, generation=head_generation)
     try:
         yield dict(sdk=sdk, queue=queue, root=root, consumer=consumer,
@@ -74,7 +74,7 @@ def test_retiring_head_uses_live_overlap_with_its_own_pin(overlap, tmp_path):
         assert reader._bound[0][0] == ctx['start']
         assert len(_pins_live(tmp_path, ctx['consumer'])) == 2
         # Closing to NEW pins does not end the already admitted descriptor.
-        ctx['sdk'].write_retiring(
+        _writer().write_retiring(
             ctx['root'] / 'leases', consumer_action_key=ctx['consumer'],
             mover_action_key=ctx['own'], generation=ctx['own_generation'])
         assert torch.equal(reader.get_tensor('f32'), got)
@@ -91,7 +91,7 @@ def test_no_admissible_overlap_refuses_without_pool_reads(overlap, tmp_path, own
     if own_state == 'absent':
         ctx['own_file'].unlink()
     else:
-        ctx['sdk'].write_retiring(
+        _writer().write_retiring(
             ctx['root'] / 'leases', consumer_action_key=ctx['consumer'],
             mover_action_key=ctx['own'], generation=ctx['own_generation'])
     with layer_streaming._source_safe_open(str(ctx['declared']), framework='pt') as reader:
