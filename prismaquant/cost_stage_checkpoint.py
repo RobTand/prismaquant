@@ -307,6 +307,23 @@ def _drive_ordered_units(roster, walk, commit, *, workers):
             raise
 
 
+def stored_manifest_identity(manifest_path: str | Path) -> Mapping[str, object] | None:
+    """The identity a journal manifest stores, or ``None`` when there is none to read.
+
+    For a caller that must take some fields of its expected identity from the
+    manifest itself -- receipts it can only re-derive one entry at a time --
+    before ``prepare_journal`` compares every other field. ``None`` is not a
+    verdict: ``prepare_journal`` refuses a missing, unreadable or malformed
+    manifest by field.
+    """
+    try:
+        manifest = json.loads(Path(manifest_path).read_text())
+    except (OSError, ValueError):
+        return None
+    identity = manifest.get("identity") if isinstance(manifest, Mapping) else None
+    return identity if isinstance(identity, Mapping) else None
+
+
 def prepare_journal(
     checkpoint_dir: str | Path,
     *,

@@ -1,5 +1,53 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1613, `claude/1613-streaming-resume`): **a
+selected-source row resumes a checkpoint on the stream head**, and is admitted
+against the window plan it was declared with. Before this change, a
+checkpoint that an earlier attempt left sent the row to the load-all head,
+which holds every selected X and H at once. For GLM-5.3 w03 row-0053 (864
+routed units), that plan is 113.79 GB, more than a GB10 box holds, against a
+69 GiB window demand. So no checkpointed full-routed row could resume, and the
+dispatcher's demand could not cover the head the row then chose.
+`tessera_row_stream.stream_head_dependency` no longer names a checkpoint.
+- The manifest binds every unit's W, X and H receipts
+  (`tessera_row_stream.RECEIPT_FIELDS`), which the stream head can only
+  re-derive one entry at a time. The row takes them from the manifest
+  (`cost_stage_checkpoint.stored_manifest_identity`,
+  `_manifest_unit_receipts`), and `prepare_journal` compares every other field
+  of the run identity by name before the first entry is read. A receipt that
+  the manifest does not record reads as `CHECKPOINT_RECEIPT_ABSENT` and is
+  refused by field.
+- `RowStream.expect_identities` then requires each entry's first read to
+  reproduce its unit's recorded receipts before the consumer sees it. A
+  mismatch refuses by unit and field. A journalled unit is not adopted, and a
+  pending unit is not encoded.
+- Journalled units are adopted through the window, one `--anchor-batch-size`
+  chunk at a time, through the same `adopt_state` gates as a load-all resume.
+  Their shards are not rewritten. Only the rest is encoded. Wire receipts are
+  verified inline, one blob at a time, as the stream journal's adoption
+  verifies them. A verification holds its whole blob, and no plan charges a
+  pool of them, so threading it first needs a `stream_phases` term.
+- One invariant changes: the journal is open from before the first read, so a
+  newly encoded unit's shard lands under the checkpoint's identity before
+  finalize re-checks the whole identity. Each such unit's own receipts were
+  checked when its entry was read. Finalize still compares the full run
+  identity, built from this run's own receipts.
+- A complete row that is relaunched reads every entry once and encodes
+  nothing. Every file it writes is the clean run's, except that the cost
+  payload's `provenance.selected_source_preparation` has no
+  `anchor_batch_growth_bytes`: no round plans an encode step. There is no
+  separate `cost.pkl` short-circuit: the receipts are content digests, so a
+  verified adoption must read each entry anyway.
+- The row's admission and the dispatcher's demand read one mapping,
+  `tessera_row_stream.MEMORY_PLANS`. `row-head-execution.json` records the plan
+  each head is admitted against as `memory_plan`.
+- `<checkpoint>.stream` is not consulted when a checkpoint exists. A unit that
+  only that journal holds is encoded again.
+
+Gate: `tests/test_tessera_row_stream.py`. The resume's measured peak of
+resident capture X and H is at most the window, not the population. No
+pipeline default, stage, format, lane or ship gate changes.
+
 Re-stamped 2026-09-28 (PQ #1275, `sonnet/1275-research-override`): the
 Tessera export lane gains an explicit per-run research-route override.
 `tessera_export_lane.preflight --research-route-override REASON` (driver knob
@@ -4280,6 +4328,13 @@ re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
 resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
+
+As of: 2026-09-28 · `claude/1613-streaming-resume`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-28, `claude/1613-streaming-resume`) for **a checkpoint
+resumed on the stream head under its window plan** (PQ #1613); see the stamp
+at the top of this document.
 
 As of: 2026-09-28 · `claude/tr3-compiled-1634`.
 Stamps follow, newest first, each recording its own branch and date.
@@ -9163,8 +9218,8 @@ seconds two runs never share are set aside: the gate
 (`tests/test_tessera_row_stream.py`) pins the clock and compares bytes, and on
 GLM-5.3 row 0055 the two heads differ only in per-anchor `encode_seconds`,
 inside `cost.pkl` and the unit shards. A row runs `--row-head load-all`, and prints
-the dependency, when it needs the whole set first: a present checkpoint (a
-resume) or `--seed-checkpoint`, `--max-rounds` other than 1, no
+the dependency, when it needs the whole set first: `--seed-checkpoint`,
+`--max-rounds` other than 1, no
 `--capture-load-policy`, or no `--export-hessian-reference-policy`. The
 selected-source plan adds `stream_phases` and `stream_memory_bytes`; a stream
 row's admission and the dispatcher's demand use them, and `memory_bytes` still
@@ -20615,8 +20670,9 @@ selected X/H entries, one at a time on reader threads sized to the CPUs it was
 admitted with, verifies each entry before the encoder sees it, and starts the
 first batch as soon as that batch's entries are resident. It holds at most two
 batches of entries and defers the six writes that cite the run identity to
-finalize. `--row-head load-all`, or any named dependency (a resume, a seed
-checkpoint, more than one round, no verified load policy, or the legacy
+finalize. A resume of a checkpoint streams too (PQ #1613).
+`--row-head load-all`, or any named dependency (a seed checkpoint, more than
+one round, no verified load policy, or the legacy
 `hessian_capture.pt` export), prefetches every selected X/H artifact before
 encoding instead and prints why. Cost provenance retains the same
 manifest; selected-wire materialization derives reuse from that provenance.
