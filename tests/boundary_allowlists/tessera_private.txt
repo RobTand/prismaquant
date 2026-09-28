@@ -1,0 +1,49 @@
+# Shrink-only allowlist for tests/test_tessera_core_boundary.py (rule 2: private lane helpers
+# imported outside the lane). Step 7 (generic helpers out of the lane modules)
+# empties it.
+# One line per occurrence: path<TAB>kind<TAB>value. Delete lines; never add.
+# CI refuses a pull request that adds a line here.
+prismaquant/glm_mtp_capture.py	private-import	.tessera_campaign._checked_projected_units
+prismaquant/glm_mtp_capture.py	private-import	.tessera_campaign._collect_activations
+prismaquant/glm_mtp_capture.py	private-import	.tessera_campaign._require_campaign_population
+prismaquant/glm_mtp_capture.py	private-import	.tessera_campaign._require_campaign_population
+prismaquant/glm_mtp_quantum.py	private-import	.tessera_joint_aura._prepare_source_owner
+prismaquant/glm_mtp_selection.py	private-import	.tessera_joint_allocation._read_bound
+prismaquant/glm_routing_capture.py	private-import	.tessera_expert_projection._require_source_identity
+prismaquant/glm_routing_replay.py	private-import	.tessera_expert_projection._require_source_identity
+prismaquant/joint_catalog_extension.py	private-import	.tessera_joint_allocation._bound_stat_fence
+prismaquant/joint_catalog_extension.py	private-import	.tessera_joint_allocation._read_bound
+prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._bound
+prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._load_plan
+prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._planned_source_window
+prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._preflight_run_prepared
+prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._prepare_file_read_bound
+prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._same
+prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._seed_source_identity_cache
+prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._source_prefetch
+prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._bound
+prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._load_plan
+prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._pb_commit
+prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._preflight_run_prepared
+prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._same
+prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._seed_source_identity_cache
+prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._source_prefetch
+prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._source_prefetch
+prismaquant/joint_forward_campaign.py	private-import	.tessera_joint_aura._bound
+prismaquant/joint_served_activation.py	private-import	.tessera_joint_allocation._bound_stat_fence
+prismaquant/joint_served_activation.py	private-import	.tessera_joint_allocation._read_bound
+prismaquant/joint_served_activation.py	private-import	.tessera_joint_allocation._read_bound
+prismaquant/joint_served_activation.py	private-import	.tessera_joint_allocation._read_bound
+prismaquant/joint_stage_b_head.py	private-import	.tessera_joint_aura._pb_commit
+prismaquant/joint_stage_b_head.py	private-import	.tessera_joint_aura._prepare_file_read_bound
+prismaquant/joint_stage_b_head.py	private-import	.tessera_joint_aura._prepared_digest_recorded
+prismaquant/joint_stage_b_head.py	private-import	.tessera_joint_aura._prepared_digest_recorded
+prismaquant/joint_stageb_resources.py	private-import	.tessera_joint_allocation._bound_stat_fence
+prismaquant/joint_stageb_resources.py	private-import	.tessera_joint_allocation._read_bound
+prismaquant/native_moe_panel.py	private-import	.tessera_expert_projection._require_source_identity
+prismaquant/native_moe_panel.py	private-import	.tessera_expert_projection._require_source_identity
+prismaquant/native_moe_panel.py	private-import	.tessera_joint_allocation._bound_stat_fence
+prismaquant/native_moe_panel.py	private-import	.tessera_joint_allocation._read_bound
+prismaquant/native_moe_panel.py	private-import	.tessera_joint_allocation._read_bound
+prismaquant/stage_a_head.py	private-import	.tessera_joint_aura._require
+prismaquant/stage_a_head.py	private-import	.tessera_joint_aura._same

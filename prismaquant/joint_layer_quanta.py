@@ -60,6 +60,7 @@ from collections.abc import Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
+from .digests import newline_utf8_sha256
 
 
 LAYER_QUANTUM_SCHEMA = "prismaquant.joint_layer_quanta.v1"
@@ -177,7 +178,7 @@ def roster_digest(qnames: Sequence[str]) -> str:
         raise ValueError("a unit roster holds nonempty qname strings")
     if len(set(ordered)) != len(ordered):
         raise ValueError("a unit roster holds unique qnames")
-    return hashlib.sha256("\n".join(ordered).encode("utf-8")).hexdigest()
+    return newline_utf8_sha256(ordered)
 
 
 def qname_layer(qname: object) -> int | None:

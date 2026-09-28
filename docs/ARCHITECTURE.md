@@ -1,5 +1,99 @@
 # PrismaQuant Architecture
 
+## Offline release receipt ingestion (PQ #1487)
+
+The Tessera lane names its existing external `uniform_control.py verify` and
+`shipcard_cli fill-control` runner, closing the already required byte-matched
+control slot. The control family, integer-bit rule and byte slack are declared
+before measurement; uniform A4/A8 labels alone do not establish a byte match.
+
+`python -m prismaquant.release_receipts` is a dry-by-default, offline adapter.
+Producer slot records retain their exact artifact/provenance fields. U4's
+explicit full-config TP2 trace phase is replayed from both raw rank files by
+the existing trace constructor; body-only verdicts never substitute. All
+proposed records pass the unchanged verifier (including build/identity checks)
+before `--apply` uses the existing slot writer. Final verification still lists
+every missing slot. No serve, measurement, upload or manifest fabrication runs.
+Raw TR3 output is not gold-slot-shaped and lacks serialized shipcard identity
+and speculative-decoding observation; unsupported output remains a refusal,
+not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
+measurements must come from their existing producers. See
+`docs/operations/release_receipts.md` for inputs and failure semantics.
+
+Stage A rows adopt the campaign's source proof (2026-09-27,
+`claude/pq-1497-stage-a-adopt-identity`, PQ #1497): a selected-source
+`tessera_campaign` row hashed every source shard it read, whole, through its
+held descriptor before its first encode, on its GPU reservation (41% of a
+dense row in the #1479 A/B). A row may now take `--source-identity-cache`
+with `--source-identity-cache-sha256`, a
+`prismaquant.streamed_model.identity_cache.v1` proof bound by digest, and
+`dispatch_tessera_campaign.py plan --source-identity-cache` binds one into
+every row and into `plan.json`. The row hands it to the capture owner's
+existing `adopt_streamed_identity_cache` (the #1374 joint-pass check: the
+proof's own digest, full checkpoint index and shard coverage, every shard's
+SHA against the hash-bound canonical capture, and the one six-field stat
+predicate against the held descriptor) before the runner is built.
+`adopt_identity_proof_or_hash` differs from the joint pass in one way: a
+proof that refuses changes no held state and the row continues, hashing each
+shard it reads as before, with the refusal in the
+`selected_source_authentication.v1` receipt
+(`streamed_identity_cache_refused`). Byte integrity is unchanged either way.
+A plan without a proof prints a warning; producing a proof for a source
+that has none is not automated here. No default, stage, stored format or
+ship gate changes. Tests: `tests/test_stage_a_identity_proof_adoption.py`.
+
+SHA-256 lexical validation (2026-09-27, `astra/dedup-hex-1457`, PQ #1457):
+`digests.is_sha256hex` and its compiled `SHA256_HEX` pattern own the exact
+regex acceptance used by artifact collection, prepriced cost and PrismaSnap
+bindings. Callers retain their own errors, coercions and returned objects.
+`tests/test_digest_hex_1457.py` freezes the old wrappers and pattern behavior,
+including string subclasses. No digest bytes, schema, default or gate changes.
+Inventory: `docs/design/digest_hex_1457.md`.
+
+Canonical pickle identity (2026-09-27, `astra/pickle-protocol-1450`, PQ #1450):
+`digests.canonical_pickle_bytes` explicitly selects protocol 4, the historical
+Python 3.12 producer encoding, rather than the interpreter's default. Python
+3.14 must not silently select protocol 5 for the same value. The existing
+`9a7567…` golden is unchanged, and `tests/test_digest_profiles_1301.py` checks
+both the explicit argument and the wire protocol. This preserves the campaign
+`cost.pkl` identity; no migration, stage, serving lane or ship gate change.
+
+Roster digest consolidation (2026-09-26, `astra/dedup-digests-1301`, PQ #1446):
+`digests.py` owns the ordered and sorted LF-delimited UTF-8 roster encodings,
+with no added final newline. The layer-quantum roster keeps its existing
+validation; the head-walk roster and descriptor slices use the shared encoding.
+`tests/test_digest_rosters_1446.py` compares the exact hash input bytes and
+outcomes with the pre-change PB-recorded table. The domain-framed replay roster
+and JSON candidate roster are different identities and remain unchanged.
+No arithmetic, schema, pipeline default, serving lane or ship gate changes.
+Inventory and remaining scope: `docs/design/digest_rosters_1446.md`.
+
+Re-stamped 2026-09-27 for the approved PACT M3 TP2 report protocol
+(PQ #1463, Tessera #650). The pure-artifact reader in
+`prismaquant/full_engine_resource_report.py` accepts v1/v2 and the distinct
+`tessera.full_engine_resource_report.v3`: v3 requires world size two, each
+rank's actual host/device identity, a shared `observations.rank_world` roster,
+and content-addressed raw-reference descriptors. It does not import Tessera.
+`consume_full_engine_rank_reports` checks each rank's recomputed captured Torch
+peak against **that rank's own** supplied device ceiling, never an average or
+redistribution of the world's capacity. Being below that ceiling is not a
+complete memory bound: unobserved allocations remain owed. V3's null
+`cuda_argument_domains` means that observer did not run; the reader preserves
+it and reports the missing observation as an admission blocker.
+
+The whole off-step Torch peak is independently swept from allocation lifetimes
+and carried observer views for the reference assignment. It is observation
+only, never an invariant fixed charge or a candidate placement certificate.
+V3 requires null `placement_obligation`, permits only false
+`certifies_placement`, and always returns a placement refusal. All existing
+fixed-observation, ownership, runtime-world equality and served-family gates
+remain; shape-only table emission still exits 3. Raw references are validated
+as descriptors here, not promoted to an admitted runtime closure. V1/v2 retain
+their separate schema rules; unknown schemas still refuse. Producer-path CPU
+fixtures demonstrate protocol compatibility, not a GPU capture or resource
+qualification. No runtime pin, contract cell, format menu or serving default
+changes.
+
 Re-stamped 2026-09-27 for dense TP2 panel freezing (PQ #1429, Tessera #639).
 Both the joint-cost and pre-cost execution freezers share one bytes-only
 execution binding in `native_operator_panel.require_native_execution`. Legacy
@@ -15,6 +109,69 @@ joint rows before this metadata-only join. No GPU execution, new cache, format
 menu, runtime pin or serving admission changes. Table world equality, native
 numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
+
+Re-stamped 2026-09-27 (PQ #1527): the exact Tessera pin is
+`20bf53464f9113f3115f454f8fa80453e71c0308`, master after Tessera #669 (closing
+tessera#668). At a mixed-rate window rung, the batched LDLQ encode now runs a
+window span's rate calls on per-rate CUDA streams. Every blob and
+`EncodedUnit` field matches `a3e83875d`, and a 16-unit batch of the G2 w01b
+expert shapes encodes 18.5-22.4 % faster on GB10 (Tessera
+`docs/measurements/tessera668-window-rate-streams-2026-09-27.md`). Only
+`encode.py` and Tessera's docs move: the packaged contract (v39, `f2f90948…`),
+the reviewed admission answer, `grammar.py` and `export.py` are byte-identical
+to `a3e83875d`, so the legal inventory keeps the `reader-pin-f94929de`
+byte-state and no legal rate count moves. This pin supersedes the PQ #1524 pin
+below. Its PB interpreters are `/home/rob/venvs/pq-pb461728e4-tessera-20bf5346`
+on dl380g10 (PB build `68bdb80acd8d`), sparky and sparklina, with a `-tf516`
+sibling on each Spark (PB builds sparky `6940c8f1c592`, sparklina
+`062be8b71f67`); the `a3e83875` interpreters stay in place.
+
+Re-stamped 2026-09-27 (PQ #1524): the exact Tessera pin is
+`a3e83875d20f54c685307da13a34992d70256f02`, master after Tessera #671 (closing
+tessera#670). The rooted cached-unit reader now accepts
+`prismaquant.joint_catalog_extension.v3`, the schema the real Stage B catalog
+extension carries; at `f94929def` it refused that extension in
+`read_cached_unit_bundle`. The packaged contract (v39, `f2f90948…`), the
+reviewed admission answer, `grammar.py` and `export.py` are byte-identical to
+`f94929def`, so the legal inventory keeps the `reader-pin-f94929de` byte-state
+and no legal rate count moves. This pin supersedes the PQ #1502 pin described
+below. Its PB interpreters are `/home/rob/venvs/pq-pb461728e4-tessera-a3e83875`
+on dl380g10 (PB build `0b441d56627a`), sparky and sparklina, with a `-tf516`
+sibling on each Spark (PB builds sparky `1020e04f6516`, sparklina `03baf1e3adbc`).
+
+Re-stamped 2026-09-27 (PQ #1502): the exact Tessera pin is
+`f94929defd9fa00b8726160a2cd436f02733b6dc`, master after Tessera #663 (closing tessera#662). The packaged
+contract is unchanged: v39, SHA-256
+`f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb`. The
+reviewed admission answer does not move. `tessera.export` gains
+`served_recipe(grid, q256, structure)`, and the cached-unit identities take the
+structure. `wire_recipe`, `_window_bits_for` and the WINDOW constants are
+byte-identical, so the new `export.py` bytes join the legal inventory as the
+additive byte-state `reader-pin-f94929de`, and no legal rate count moves.
+This pin supersedes the PQ #1456 pin described below. Its PB interpreter is
+`/home/rob/venvs/pq-pb461728e4-tessera-f94929de/bin/python` on dl380g10
+(PB build `b150ef6bd55d`). The Spark copies and their `-tf516` siblings follow
+the same recipe once their GPU fence lifts.
+
+The Tessera campaign now encodes the served wire per (family, rung,
+structure). A routed `TESSERA_E2M1_K2` stack below the cap is encoded, priced
+and stamped on span-2 TCQ, the wire the contract's `attested_wire` states. Its
+research WINDOW recipe was a wire the routed decoder cannot read. The
+structure comes from `--family-restriction`'s map, else the serving context.
+Every projected expert unit is `routed_moe`. A run that declares no structure
+keeps the research recipe for its dense units. K1 rungs and E2M1 q896 encode
+the same bytes as before. Planning reads two contract facts. First, a rung
+whose served wire for the member's structure differs from the attested
+template, with no cell of that structure attesting the rung. Dense E2M1 below
+the cap is that case. Second, a routed unit with no producer projection, where
+the routed wire differs. That rung stays in the menu, isn't measured, and is
+recorded under cost-table `provenance.route_refused` with the contract's
+reason. `provenance.encode_structure` counts the structures used. A model whose
+routed experts are separate Linear modules with no projection loses its E2M1
+sub-cap anchors this way. A resumed row stamped on a wire its structure isn't
+served on goes to `provenance.unservable` with a reason, and is re-priced. The
+byte accountants still price the research wire for routed sub-cap units
+(PQ #1504).
 
 Re-stamped 2026-09-27 (PQ #1456): the exact Tessera pin is
 `4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253`, master after Tessera #646.
@@ -3539,8 +3696,173 @@ unverified or corrupt suffix contributes to replay progress. Journal loading
 and fence validation remain unchanged, including their existing watchdog
 allowance. This is progress-write coalescing, not relaxed authentication.
 
-As of: 2026-09-27 · `astra/pq-pin-tessera-644` (PQ #1456), including the Stage B multiformat retake.
+Head-resume progress cadence (2026-09-27, PQ #1518): a caller that passes
+`progress_allowance_s` gets progress from the replay itself. The value is the
+stall allowance its submission declared for `progress_phase`. PrismaBuild
+exports phase names to the action (`PRISMABUILD_ACTION_PROGRESS_PHASES`) but
+not their allowances, so only the caller knows it. The replay commits its
+cumulative verified prefix on the first verified unit, then at most once per
+`allowance / PROGRESS_CADENCE_SAFETY_FACTOR` (factor 4). The derivation is in
+`tessera_joint_aura._ProgressCadence`: the watchdog sees at most `cadence` plus
+one unit's latency plus one 30 s poll of quiet. The final cumulative record is
+unchanged. Writes stay O(1) per window and never happen per unit. Without an
+allowance the replay behaves exactly as #822 left it.
+
+Overlay fence pool (2026-09-27, PQ #1519): `attach_candidate_overlay` no longer
+re-hashes stat-drifted overlay wires serially inside its admission loop.
+`_fence_drift` still refuses a size change, and a drift with no recorded digest,
+before anything is hashed. Every other drift is hashed on a bounded pool
+(`_bounded_hash_pool`, sized by `_fence_hash_workers` to the PrismaBuild-assigned
+CPU set, which the loader passes as its walk worker count). Work streams in row
+order with at most twice the pool size of files in flight. A digest is accepted
+only while the file's stat holds through the read. The refusal names the file.
+Cells enter `data` in catalog order and only after their job resolves. With
+`verify_payloads`, the same job also verifies every wire and, unless
+`defer_render_hashes`, every render, so each file is read once. The loader
+passes its own `verify_payloads` and `defer_render_hashes` through, and its
+`verify_files` pass covers only the walk's base cells. Admitted overlay cells
+continue the loader's cumulative progress count on the #1518 cadence. The
+synchronous `_artifact_fence` keeps its serial form for
+`tools/assemble_t4_overlay.py` and for a `require_selected_catalog_cell` call
+without a fence stream, and gains the same stat check around the read and the
+file's name in the refusal.
+
+Selected-cache fence stream (2026-09-27, PQ #1522): the rooted
+(`tessera.cached_units.v2`) selected cache rebinds every selected overlay cell
+with `require_selected_catalog_cell`, and A4 selects every drifted overlay
+wire. `selected_cached_units_manifest` now opens one `streamed_fences()` for
+the walk and passes it in. The stat check stays on the walking thread, so a
+size change or an undigested drift refuses before anything is hashed. A drifted
+wire's `_rehash_drifted` goes to the same `_bounded_hash_pool`, sized by
+`_fence_hash_workers`, with at most twice the pool size of files in flight.
+Every re-hash resolves before the block exits, so the manifest is never built
+over an unproven wire. The v1 selected cache never calls the rebind and is
+unchanged.
+
+As of: 2026-09-27 · `claude/selected-fence-pool`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-27, `claude/selected-fence-pool`) for **the selected-cache
+fence stream** (PQ #1522): the rooted selected cache re-hashes drifted overlay
+wires on the #1519 pool instead of the walking thread.
+
+Gates: `tests/test_selected_fence_pool_1522.py`,
+`tests/test_tessera_selected_cache.py`.
+
+Re-stamped (2026-09-27, `claude/a4-silent-phases`) for **replay progress on a
+derived cadence** (PQ #1518). `load_measured_anchor_input` takes an optional
+`progress_allowance_s`. With it, a `--head-resume` replay reports its verified
+prefix during the drive. Without it, the progress stream is byte-identical to
+before.
+
+Also for **the overlay fence pool** (PQ #1519): drifted overlay wires are
+re-hashed on a PB-sized bounded pool and streamed with admission in catalog
+order. Each file is hashed once per load, and the fence reports progress.
+
+Gates: `tests/test_head_resume_progress_822.py`,
+`tests/test_overlay_fence_pool_1519.py`, `tests/test_joint_catalog_extension.py`.
+
+Re-stamped (2026-09-27, `claude/planner-charge-1491`) for **the selected-row
+source-validation charge** (PQ #1491). The Stage A planner
+(`autoscale.selected_anchor_resources`) now charges source authentication in the
+phase that runs it, and charges the projection check for the bytes that the
+check reads.
+
+- **The hash runs in `source_preparation`.** The first payload read of a
+  source file hashes the whole file, once per row, under that file's own lock
+  (`CaptureSourceAuthentication._authenticate`). The selected row builds its
+  owner with `release_read_pages=True`, so `tessera_calibration_cache.sha256`
+  holds one `SOURCE_HASH_BLOCK_BYTES` (16 MiB) block and that block's pages at
+  a time. The phase gains `source_authentication_window_bytes`: two blocks for
+  each distinct file that the row's selected tensors live in.
+  `streamed_calibration_resources` reports those files as `body_source_shards`,
+  read through `artifact_completeness.read_artifact_shard_headers`. Kernel
+  readahead past the hashed offset is a mount property and is not charged.
+- **`source_validation_bytes` charges the selected tensors.** The term stays in
+  `resident_anchors` and `stream_projection`, where the only source read is
+  `_checked_projected_units`: the measured routed-expert tensors, with their
+  pages released after the loop. The term is the selected tensors' stored bytes,
+  plus two BF16 copies of the widest weight, plus one serial hash window. It
+  used to charge every tensor of every selected layer, about 13.8 GiB for each
+  GLM-5.3 MoE layer. Under `whole-layer-v1` the selected tensors are the whole
+  layer, so that policy's charge changes only by the hash window.
+- **Effect on GLM-5.3 rows.** A four-layer shared-expert row (#1479 A/B
+  `row-0006`) goes from 84 to 43 GiB of demand, against a measured box peak of
+  11.12 and 15.17 GiB. The three-layer `w02d` `row-0001` goes from 70 to
+  43 GiB, against 12.65 GiB measured. The routed `ab3` `row-0045` stays at
+  69 GiB, against 63.81 GiB measured. Across 352 planned rows (`w02d`, `d2`
+  and the four #1479 arms), no row is charged more, and all 132 routed rows of
+  the `ab3` plan keep their charge. Authentication itself is unchanged: every
+  file that a row reads is still hashed in full, once per row.
+
+Gates: `tests/test_selected_source_validation_charge.py`,
+`tests/test_selected_snapshot_scope.py` and the existing selected-anchor,
+row-stream, publication and verified-capture admission tests.
+
+Re-stamped (2026-09-27, `claude/campaign-bind-served-quantizer-1481`) for **the
+Stage A campaign's served-quantiser binding and failure contract** (PQ #1481,
+#1482). Two changes:
+
+- **Binding.** `tessera_campaign._prepare_anchor` is the per-unit gate that both
+  the campaign and `tessera_materialization` price through. It now binds the
+  served activation quantiser by calling the owner Stage B already uses,
+  `joint_cost_quantum.bind_joint_served_quantizer`, which gains a `context`
+  argument. Until now nothing on the Stage A path bound it, so every
+  `TESSERA_E2M1_K2` rung raised `ServedQuantizerUnboundError`.
+  - A process that already holds a binding keeps it. That binding comes from an
+    earlier rung of the same run, or from a CPU screen that declared the model.
+  - A8 and A16 rungs bind nothing and never import the serving extension.
+  - A table that priced a served-contract rung stamps the bound record as
+    `provenance.served_quantizer`. An A8 or A16 table's bytes are unchanged.
+- **Failure contract.** A rung that fails to price now fails the row.
+  - The loop still prints `FAILED` and keeps pricing, so the round's successes
+    are journalled and a later adaptive round may still price the rung.
+  - After the loop, any rung whose last attempt failed raises. The row exits
+    nonzero, writes no `cost.pkl`, and PrismaBuild's retry encodes only the
+    missing anchors.
+  - A `ServedQuantizerUnboundError` stops the row at once, like the Hessian,
+    activation-scale and publication refusals, because it refuses every A4
+    rung of the row.
+  - Before this change the rung was printed and skipped. A row whose every rung
+    failed published an empty table with rc 0.
+  - A failed rung no longer reaches a cost table as a `no_successful_anchor`
+    unit in `population.unpriced`. The reason stays for a unit with a menu and
+    no anchor for any other cause, such as a deadline stop, and older tables
+    carry it. `tessera_expert_projection` still accepts it and retains such
+    units at BF16. `no_admitted_menu` is admission, not failure, and is
+    unchanged.
+
+No format, default, stage or ship gate changes. Gates:
+`tests/test_campaign_served_quantizer_binding.py` and
+`tests/test_tessera_campaign_packed.py::test_main_reports_unpriced_targets_without_claiming_coverage`.
+
+Re-stamped (2026-09-27, `tooling/publish-license-gate-1268-20260927`) for the
+approved **new-upload weights-license and auto-approve access gate** (PQ #1268).
+The publisher requires the repository-filled canonical LICENSE and model-card
+license metadata/TL;DR before evidence overrides and again on frozen bytes.
+Real publication sets and reads back `gated="auto"` before LFS preupload,
+then rechecks before reporting success. Dry-run makes no Hub requests. LICENSE
+remains in artifact identity and must be staged before authoritative evidence;
+no existing cards or remote repositories are migrated. The shipcard verifier,
+serving pin, formats, pipeline graph and numerical gates are unchanged.
+
+Re-stamped (2026-09-27, `tooling/release-window-slots-20260927`) for the
+approved Tessera uniform-control runner declaration and offline receipt
+adapter (PQ #1487). Existing record constructors, artifact identity and
+`shipcard.verify` remain unchanged. No measurement, numerical default,
+serving runtime or publication override is introduced.
+
+Re-stamped (2026-09-27, `claude/dense-same-shape-batching`) for **same-shape
+dense anchor batches** (PQ #1479). `_anchor_batches` now keys every unit, dense
+or projected expert, by `(family, rung, shape, dtype, device)`. Dense units were
+keyed by `(unit, family, rung)`, so every dense anchor encoded at batch one, even
+in a row that merges several dense groups. The measured result was about 25 W of
+the 140 W envelope. The wire recipe and Hessian requirement derive from
+`(family, rung)` alone, so the batches are uniform, and `_measure_anchor_batch`
+refuses a batch whose prepared recipes differ. The resource plan already charges
+`--anchor-batch-size` times the widest unit. No format, default, stage or ship
+gate changes. `--anchor-batch-size` still defaults to 1, and batch width is still
+excluded from input identity. Gate: `tests/test_tessera_campaign_batch.py`.
 
 Re-stamped (2026-09-27, `claude/pact-gamut-stageb-multiformat`) for **Stage B
 inputs over a several-format catalog** (PQ #1437). The Stage B control
@@ -10193,7 +10515,7 @@ every run. The 864-unit row now fits a 256 MiB reservation.
 
 Anchor batches are emitted unit-major (`_anchor_batches`): the chunks of one
 `(family, shape, dtype, device)` key are ordered by chunk position first and
-rung second, so consecutive batches encode the same expert units at successive
+rung second, so consecutive batches encode the same units at successive
 rungs and the encoder memo -- sized to the batch width by the plan -- reuses
 each unit's block-LDL factorization across its rungs instead of refactorizing
 once per (unit, rung) with every other unit's batches in between
@@ -10270,13 +10592,15 @@ Forward installation and full source-initialization attestation are refused.
 The selected source keys are compared with the admitted plan before reading
 and recorded in the source receipt. Source shard SHA256 authentication and
 held-descriptor mutation fences remain unchanged: consuming one tensor still
-authenticates its entire shard once per row. The initial policy supports
+authenticates its entire shard once per row, unless the row adopted a planned
+source proof (PQ #1497; see that stamp). The initial policy supports
 unscaled floating checkpoints; scaled FP8/FP4 sources fail closed.
 
 Admission excludes unconsumed source tensors and nonbody materialization,
-retains selected H/X, encoder, packing and publication charges and the existing
-full-layer source-validation allowance, and preserves
-the full-header identity and decoder coverage check. Snapshot policy is an
+retains selected H/X, encoder, packing and publication charges, and preserves
+the full-header identity and decoder coverage check. (This stamp also retained a
+full-layer source-validation allowance. PQ #1491 replaced it with the selected
+tensors' bytes and a per-file hash window; see that stamp.) Snapshot policy is an
 execution choice outside cost identity, like compatible batch width: source
 weight bytes, calibration, encoder policy, wire format and shipping gates do
 not change. Qualification requires selected weight parity and a complete
@@ -20840,7 +21164,10 @@ fallback:
   subtraction); the rate axis is continuous at a 1/256-bpp quantum and
   `validate_body_rate_q256` (`:850`) / `realisable_rungs` (`:866`) say which
   rungs encode; `tessera_wire_recipe` (`:197`) is the one source of body and
-  scale plane per grid and rung; `artifact_bpp` (`:883`) and
+  scale plane per grid and rung for the research table, and
+  `tessera_served_wire_recipe` resolves the wire a unit of a given serving
+  structure is served on (`tessera.export.served_recipe`; PQ #1502), refusing
+  a structure the pinned contract attests no wire for; `artifact_bpp` (`:883`) and
   `wire_overhead_q256` (`:376`) are the byte accountant, and **both require a
   shape** (below); `tessera_serving_route` (`:1049`) is the fifth axis.
 - `tessera_render.py` — the render adapter. `render_tessera_weight` (`:408`)
@@ -20863,6 +21190,12 @@ fallback:
   consumer that resolves a format by name — candidates, the production-cache
   render, the KL validator — works unchanged, and nothing else in the pipeline
   imports the seam.
+  That is the intent, not yet the code: 17 core modules still import lane
+  modules or branch on Tessera names. `tests/test_tessera_core_boundary.py`
+  (PQ #1534) freezes those sites and the private lane helpers other modules
+  import, `tests/test_prismabuild_boundary.py` freezes PQ's reach into
+  PrismaBuild internals, and their allowlists under `tests/boundary_allowlists/`
+  only shrink.
 
 **Exact pricing, or refusal.** `FormatSpec.bits_for_shape_fn` (added on this
 branch) is a format's own accountant. A Tessera spec has no scalar bpp:
@@ -21864,7 +22197,7 @@ re-render, it is the render the gate declined to keep.
 | DSv4 CB matched-budget performance | `python -m prismaquant.validate_cb_performance` | no — operator-run after export | **blocking paired prefill/decode/mixed parity against the exact displaced container** |
 | DSv4 paired DSpark claim | `python -m prismaquant.dspark_matched_performance_collector {declare-policy,start-sampler,collect-arm}` → `python -m prismaquant.validate_dspark_target_draft attest` | no — lifecycle-owned collection around both exact operator-started serves; the collector does not launch or patch vLLM | **blocking only when `mtp.dspark` is claimed: source-closed/no-clobber arm reports, exact acceptance/routes plus matched no-MTP throughput non-regression, 256K KV, and 110/8/4-GiB headroom; target-only publication remains valid without the optional claim** |
 | Ship record | `exported/shipcard.json` — native lane: `export_native_compressed._write_shipcard`; Tessera lane: `python -m prismaquant.lane_shipcard open --lane tessera` → `python -m prismaquant.shipcard_cli verify` | opened by the native and Tessera lanes; **the GGUF arm opens none** | **refuses** until every serve-lane slot is closed |
-| **Publication** | `tools/publish_artifact.py` | no — operator-run | **BLOCKING**: refuses to upload (or even print the upload command) unless `shipcard.verify` passes |
+| **Publication** | `tools/publish_artifact.py` | no — operator-run | **BLOCKING**: shipcard evidence gate plus non-overrideable repository-specific LICENSE/card policy; real uploads require read-back-verified `gated="auto"` |
 
 Nothing in the ordinary quantization pipeline blocks on an artifact-quality number — and it
 should not: `vllm` is not
@@ -22001,9 +22334,26 @@ canonical tensor payload identity, and exact shard index; it does not reopen mut
 paths or invoke the independent path-based content scanner. Generic artifacts retain their
 historical freeze behavior, and the post-upload held-descriptor replay above is unchanged.
 
+**New-upload license/access policy (PQ #1268; approved 2026-09-27).** Every
+new publisher invocation requires an ordinary in-tree `LICENSE` exactly equal
+to `licenses/PRISMAQUANT-WEIGHTS-LICENSE-1.0.md` with `<repository>` filled for
+the destination `rdtand/<repository>`. `README.md` must have unambiguous YAML
+front matter with `license: other`, `license_name: prismaquant-weights-license-1.0`,
+and `license_link: https://huggingface.co/<repo-id>/blob/main/LICENSE`, plus the
+canonical license TL;DR in its body (ordinary Markdown reflow is permitted).
+Duplicate/merge YAML keys, nonregular/symlinked policy files, malformed UTF-8
+and policy files over 16 MiB refuse. This structural gate runs before any
+force stamp and replays from the existing frozen-byte reader; an evidence
+override cannot waive it. LICENSE remains part of `model_sha`: stage it before
+opening the authoritative card and collecting measurements, never exclude it
+or inject it after verification. The existing 25 cards remain untouched;
+there is no retroactive migration or remote bulk action. `--dry-run` performs
+only local validation and makes no Hub request.
+
 Remote replacement uses the low-level Hub commit API rather than `upload_folder`. The publisher
 resolves an explicit destination revision to one full parent commit, enumerates the remote file
-set at that immutable commit, pre-uploads the frozen LFS objects with ignore rules disabled,
+set at that immutable commit, sets `gated="auto"` and verifies it by reading
+repository metadata back **before any upload**, then pre-uploads the frozen LFS objects with ignore rules disabled,
 then submits every local addition plus every stale-file deletion in one `create_commit` with
 both `revision` and `parent_commit`. Identical additions are deliberately retained in the
 payload so the Hub client's no-op shortcut cannot bypass CAS. A concurrent head change is a
@@ -22016,8 +22366,14 @@ preserve these guarantees; a missing compatible `huggingface_hub` is a refusal, 
 deliberately expensive: `--force-unverified` requires the
 operator to **re-type the artifact directory's basename** (interactively, or `--confirm-name`
 for scripts) and stamps `forced_unverified: true` plus the overridden problems into the
-shipcard, so the artifact itself carries the record that it shipped ungated. Tests:
-`tests/test_publish_artifact.py`.
+shipcard, so the artifact itself carries the record that it shipped with an
+evidence override (never an access-gate or licensing bypass). Before reporting
+success, the publisher reads the access setting back again; a missing/manual/
+false setting or API error refuses. A post-commit failure names the existing
+commit and requires inspection before announcement. Publication output records
+`gated="auto"` as read-back verified alongside the snapshot and commit identities.
+Only an explicitly authorized real publish changes Hub settings; tests mock
+the Hub. Tests: `tests/test_publish_artifact.py`, `tests/test_publish_license.py`.
 
 **`uniform_control` (rate-axis artifacts only; PrismaQuant #121).** The
 shipcard of a Tessera artifact carries one more required slot: the verdict of

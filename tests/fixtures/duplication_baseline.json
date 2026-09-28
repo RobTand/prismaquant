@@ -727,10 +727,6 @@
    "prismaquant/native_execution_binding.py",
    "prismaquant/native_moe_execution_binding.py"
   ],
-  "roster_digest": [
-   "prismaquant/joint_head_walk_quanta.py",
-   "prismaquant/joint_layer_quanta.py"
-  ],
   "roster_sha256": [
    "prismaquant/joint_replay_frontier.py",
    "prismaquant/joint_stage_b_head.py"

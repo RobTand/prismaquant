@@ -86,6 +86,9 @@ __all__ = [
     "tessera_wire_defaults",
     "clear_recipe_cache",
     "tessera_wire_recipe",
+    "tessera_served_route_refusal",
+    "tessera_served_wire_recipe",
+    "TesseraRouteRefused",
     "wire_overhead_q256",
     "SUPERBLOCK_WEIGHTS",
     "TesseraFamily",
@@ -396,6 +399,8 @@ def clear_recipe_cache() -> None:
 
     _recipe_for.cache_clear()
     _tcq_body_is_reachable.cache_clear()
+    _served_recipe_for.cache_clear()
+    _packaged_contract.cache_clear()
 
 
 def tessera_wire_recipe(
@@ -425,6 +430,127 @@ def tessera_wire_recipe(
     """
     spec = get_tessera_family(family)
     return _recipe_for(spec.base, spec.base_size, spec.arity, rung)
+
+
+class TesseraRouteRefused(TesseraFormatError):
+    """The pinned contract attests no served wire for a (family, rung, structure)."""
+
+
+def tessera_served_wire_recipe(
+    family: "str | TesseraFamily", rung: int, *, structure: "str | None",
+    refuse_unattested: bool = True,
+) -> "WireRecipe":
+    """The wire a served unit of ``structure`` carries for ``family`` at ``rung``.
+
+    ``tessera.export.served_recipe`` is Tessera's one statement of the served
+    wire per ``(grid, q256, structure)``: its exporter encodes it, its
+    cached-unit receipt stamps it and its export intake adopts it
+    (tessera#662). Below the E2M1x2 cap a ``routed_moe`` stack is served on
+    span-2 TCQ, the only body its decoder reads, where ``tessera_wire_recipe``
+    (the research table) says WINDOW. A campaign that prices a routed unit on
+    the research wire prices bytes the serve cannot read (#1502).
+
+    ``structure=None`` is a campaign that declares no serving structure; it
+    gets the research recipe it always got.
+
+    A dense unit at a rung whose served wire is not the one the pinned
+    contract attests is refused (:class:`TesseraRouteRefused`), as a fact read
+    off the contract rather than a ban (principle 9): the E2M1 dense spelling
+    below the cap is WINDOW, the contract's ``attested_wire`` for the family
+    is TCQ span 2, and no dense cell attests those rungs, so the pinned route
+    has no attested reading of the bytes. The rung stays in the menu; the
+    campaign records the refusal instead of pricing it
+    (:func:`tessera_served_route_refusal`).
+
+    ``refuse_unattested=False`` resolves the same wire without the refusal,
+    for a reader that recomputes an existing receipt's identity rather than
+    planning a new encode: the receipt is checked against the wire it was
+    stamped on, and whether that wire serves is the planner's question.
+    """
+    spec = get_tessera_family(family)
+    if structure is None:
+        return tessera_wire_recipe(spec, rung)
+    recipe = _served_recipe_for(spec.base, spec.base_size, spec.arity, int(rung),
+                                _require_structure(structure))
+    if refuse_unattested:
+        refusal = _served_route_refusal(spec, int(rung), structure, recipe)
+        if refusal is not None:
+            raise TesseraRouteRefused(refusal)
+    return recipe
+
+
+def tessera_served_route_refusal(
+    family: "str | TesseraFamily", rung: int, *, structure: "str | None"
+) -> "str | None":
+    """Why ``structure`` has no attested served wire at ``rung``, or ``None``.
+
+    The planning half of :func:`tessera_served_wire_recipe`: the same
+    contract read, returned as a reason to record rather than raised, so a
+    campaign can keep the rung in its menu and stamp the refusal in its
+    provenance. ``structure=None`` declares no structure and is never refused.
+    """
+    if structure is None:
+        return None
+    spec = get_tessera_family(family)
+    recipe = _served_recipe_for(spec.base, spec.base_size, spec.arity, int(rung),
+                                _require_structure(structure))
+    return _served_route_refusal(spec, int(rung), structure, recipe)
+
+
+def _require_structure(structure: str) -> str:
+    if structure not in _STRUCTURES:
+        raise TesseraFormatError(
+            f"structure {structure!r} is not one of {_STRUCTURES}")
+    return structure
+
+
+_STRUCTURES = ("dense", "routed_moe")
+
+
+@lazily_sized_cache(recipe_cache_bound)
+def _served_recipe_for(base: str, base_size: int, arity: int, rung: int,
+                       structure: str) -> "WireRecipe":
+    return _tessera_export.served_recipe(_build_grid(base, base_size, arity), rung, structure)
+
+
+@lru_cache(maxsize=1)
+def _packaged_contract() -> dict:
+    from .tessera_legal_domain import packaged_contract_payload
+
+    return packaged_contract_payload()
+
+
+def _served_route_refusal(spec, rung: int, structure: str, recipe) -> "str | None":
+    """Why the pinned contract attests no served wire here, or ``None``.
+
+    Two contract facts, both read, neither restated: the family row's
+    ``attested_wire`` template (``joint_catalog_extension.added_format_recipe``,
+    the one reader of it) and the ``structure`` cells' ``rungs_q256``. A rung
+    the family row publishes no template for is not refused here: the export
+    route gate owns the reader range.
+    """
+    from .joint_catalog_extension import added_format_recipe
+
+    contract = _packaged_contract()
+    fmt = f"{spec.name}_R{int(rung)}"
+    try:
+        attested = dict(added_format_recipe(fmt, contract=contract))
+    except ValueError:
+        return None
+    attested.pop("grid")
+    attested.pop("q256")
+    served = recipe.to_config()
+    if served == attested:
+        return None
+    cells = sorted(
+        cell.get("id") for cell in (contract.get("lane_eligibility") or {}).get("cells", ())
+        if cell.get("family") == spec.name and cell.get("structure") == structure
+        and int(rung) in (cell.get("rungs_q256") or ()))
+    return (f"{fmt} served as {structure}: the served wire {served} is not the wire the "
+            f"pinned contract attests for {spec.name} ({attested}), and "
+            + (f"the {structure} cells {cells} disagree with it" if cells else
+               f"no {structure} lane_eligibility cell attests q256={int(rung)}")
+            + ". The rung stays in the menu; this structure cannot serve it on this pin.")
 
 
 # ``recipe_is_shape_free(recipe) -> bool`` used to live here, and it answered

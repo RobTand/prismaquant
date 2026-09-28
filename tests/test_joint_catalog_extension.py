@@ -4,7 +4,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import pickle
+import time
 from pathlib import Path
 
 import pytest
@@ -781,6 +783,46 @@ def test_overlay_intake_preserves_base_and_consumes_only_bound_measured_addition
         assert len(result.cells) == 12
         assert all(ADDED_FORMAT in row for row in result.formats_by_qname.values())
         assert result.payload['costs'] == case.scalar_costs
+
+
+def _touch_ctime(path):
+    """Move only ctime, the way a hard link staged and dropped does (PQ #1495)."""
+    link = Path(str(path) + '.hl')
+    os.link(path, link)
+    os.unlink(link)
+
+
+@pytest.mark.parametrize('drift', ['wire_ctime_only', 'wire_same_size_rewrite', 'render_ctime_only'])
+def test_overlay_fence_rehashes_a_wire_whose_stat_drifted(tmp_path, campaign, probe, drift):
+    """PQ #1495: a ctime-only drift on a byte-identical wire is proven by its recorded
+    digest, not refused; changed bytes and an undigested render still refuse."""
+    from prismaquant import joint_catalog_extension as jce
+    case = _overlay_case(tmp_path, campaign, probe)
+    data, bound = case.bind(lambda rows, scalar_costs: None)
+    wire, render = Path(case.rows[0]['wire']), Path(case.rows[0]['render'])
+    before = wire.stat()
+    time.sleep(0.01)
+    if drift == 'wire_ctime_only':
+        _touch_ctime(wire)
+    elif drift == 'wire_same_size_rewrite':
+        body = bytearray(wire.read_bytes())
+        body[-1] ^= 1
+        wire.write_bytes(bytes(body))
+        os.utime(wire, ns=(before.st_atime_ns, before.st_mtime_ns))
+    else:
+        _touch_ctime(render)
+    if drift == 'wire_ctime_only':  # the drift is real and metadata-only
+        after = wire.stat()
+        assert after.st_ctime_ns != before.st_ctime_ns
+        assert (after.st_ino, after.st_size, after.st_mtime_ns) == (before.st_ino, before.st_size, before.st_mtime_ns)
+    getattr(jce, 'FENCE_REHASHED', {}).clear()
+    if drift == 'wire_ctime_only':
+        result = jce.attach_candidate_overlay(data, bound, verify_payloads=False)
+        assert len(result.cells) == 12
+        assert getattr(jce, 'FENCE_REHASHED', None) == {'overlay current wire fence': 1}
+    else:
+        with pytest.raises(ValueError, match='fence'):
+            jce.attach_candidate_overlay(data, bound, verify_payloads=False)
 
 
 # Two workspaces commit Hessians from one canonical capture: the overlay's cost

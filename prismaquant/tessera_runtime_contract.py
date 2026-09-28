@@ -362,7 +362,18 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: contract bytes and the admission answer below remain unchanged.
 #: Re-pinned 2026-09-27 to 4c4ff1c2e after Tessera #646. This adopts #641's
 #: v39 admission scopes as well as the cached reader, under PQ #1456.
-TESSERA_DEV_PIN_COMMIT = "4c4ff1c2eb68d4ffc3f8e0d3fcf9e019db5ab253"
+#: Re-pinned 2026-09-27 to f94929def after Tessera #663 (tessera#662): the
+#: served recipe moves into ``tessera.export`` and the cached-unit receipts
+#: stamp it per structure, under PQ #1502. The packaged v39 contract and the
+#: admission answer below are unchanged.
+#: Re-pinned 2026-09-27 to a3e83875d after Tessera #671 (tessera#670): the
+#: rooted cached-unit reader accepts the v3 catalog extension, under PQ
+#: #1524. The packaged v39 contract and the admission answer are unchanged.
+#: Re-pinned 2026-09-27 to 20bf5346 after Tessera #669 (tessera#668): a
+#: mixed-rate window span runs its rate calls on per-rate CUDA streams, bit
+#: for bit, under PQ #1527. The packaged v39 contract and the admission answer
+#: are unchanged.
+TESSERA_DEV_PIN_COMMIT = "20bf53464f9113f3115f454f8fa80453e71c0308"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
