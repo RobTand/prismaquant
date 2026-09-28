@@ -1736,6 +1736,7 @@ def verify(
     # The rest of the forensic block is replayed here (#158).
     problems.extend(_verify_build_block(card))
     problems.extend(_verify_route_histogram(card, model_dir=model_dir))
+    problems.extend(_verify_research_route_override(card))
 
     if required is None:
         required = required_slots(card, model_dir=model_dir)
@@ -3216,6 +3217,89 @@ def required_slots(
 #: ``build.route_histogram``: the recipe's route-status and activation-contract
 #: counts, copied onto the card beside ``achieved_bpp`` (principle 12, #1377).
 ROUTE_HISTOGRAM_SCHEMA = "prismaquant.route_histogram.v1"
+
+#: The explicit per-run admission of a research export route (#1275): the
+#: Tessera lane's route gate refuses a unit whose route is not backed and
+#: device_qualified, and this record is the ONLY way past it.  It names the
+#: emulation-only serving profile, the operator's reason, the target platform
+#: and exactly the units the override admitted, so a card can never claim a
+#: route the gate did not see (principle 9: an unbacked route is a serving
+#: gap, reported on the card, never silently served).
+RESEARCH_ROUTE_OVERRIDE_SCHEMA = "prismaquant.research_route_override/1"
+
+
+def research_route_override_claim(
+    *, profile: str, reason: str, target_platform: str | None,
+    admitted_units: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """The build anchor's record of one research-route override."""
+    return {
+        "schema": RESEARCH_ROUTE_OVERRIDE_SCHEMA,
+        "profile": profile,
+        "reason": reason,
+        "target_platform": target_platform,
+        "admitted_units": {name: dict(row) for name, row in sorted(admitted_units.items())},
+    }
+
+
+def verify_research_route_override(build: Any) -> list[str]:
+    """Problems with ``build.research_route_override``; [] when absent or sound.
+
+    Sound means: the schema matches, the reason is non-empty, the profile
+    loads and is ``emulation_only`` (an override is only ever legitimate for
+    a research profile; a shipping profile's route gate stays strict), and
+    every admitted unit row carries a route status and the qualifications the
+    gate saw.
+    """
+    if not isinstance(build, Mapping) or "research_route_override" not in build:
+        return []
+    override = build["research_route_override"]
+    if not isinstance(override, Mapping):
+        return ["build.research_route_override is not an object"]
+    if override.get("schema") != RESEARCH_ROUTE_OVERRIDE_SCHEMA:
+        return [f"build.research_route_override schema {override.get('schema')!r} "
+                f"!= {RESEARCH_ROUTE_OVERRIDE_SCHEMA!r}"]
+    problems: list[str] = []
+    reason = override.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        problems.append("build.research_route_override.reason is empty")
+    profile_id = override.get("profile")
+    try:
+        from .serving_profiles import load_serving_profile
+
+        profile = load_serving_profile(profile_id)
+    except Exception as exc:  # unknown or unreadable profile
+        problems.append(f"build.research_route_override.profile {profile_id!r} "
+                        f"does not load: {exc}")
+    else:
+        if not getattr(profile, "emulation_only", False):
+            problems.append(
+                f"build.research_route_override.profile {profile_id!r} is not "
+                "emulation_only: only a research profile may carry a route override")
+    admitted = override.get("admitted_units")
+    if not isinstance(admitted, Mapping):
+        problems.append("build.research_route_override.admitted_units is not an object")
+    else:
+        for name, row in admitted.items():
+            if (not isinstance(row, Mapping) or not isinstance(row.get("route_status"), str)
+                    or not isinstance(row.get("qualifications"), list)):
+                problems.append(f"build.research_route_override.admitted_units[{name!r}] "
+                                "lacks route_status/qualifications")
+                break
+    return problems
+
+
+def _verify_research_route_override(card: Mapping[str, Any]) -> list[str]:
+    """Card-level: a sound override, and the route histogram beside it."""
+    build = card.get("build")
+    if not isinstance(build, Mapping) or "research_route_override" not in build:
+        return []
+    problems = verify_research_route_override(build)
+    if build.get("route_histogram") is None:
+        problems.append("build.research_route_override without build.route_histogram: "
+                        "an admitted research route carries its route histogram on the "
+                        "same card (principle 12)")
+    return problems
 
 
 def route_histogram_claim(provenance: Mapping[str, Any] | None) -> dict[str, Any] | None:
