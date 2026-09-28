@@ -16,7 +16,8 @@ from prismaquant.allocator_candidates import selection_serving_lane_provenance
 from prismaquant.allocator import _mtp_rung_attestation
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.footprint import (
-    recursive_regular_file_bytes, whole_artifact_budget_from_assignment_payload,
+    mtp_selection_rebased_bytes, recursive_regular_file_bytes,
+    whole_artifact_budget_from_assignment_payload,
     whole_artifact_budget_stamp,
 )
 from prismaquant.glm_mtp_selection import (
@@ -103,10 +104,12 @@ def main() -> int:
     if observed_overhead < 0 or args.new_metadata_allowance_bytes < 0:
         parser.error("observed export overhead and new metadata allowance must be nonnegative")
     reserve_bytes = observed_overhead + args.new_metadata_allowance_bytes
-    mtp_source_bytes = sum(2 * int(value) for value in payload["params"].values())
     selected_bytes = int(record["resident_bytes"])
-    payload_bytes = (original_budget["selection_tensor_payload_bytes"]
-                     - mtp_source_bytes + selected_bytes)
+    rebase = mtp_selection_rebased_bytes(
+        original_budget["selection_tensor_payload_bytes"], payload, selected_bytes,
+        context="MTP reselect", assigned_names=body_assignment)
+    mtp_source_bytes = rebase["mtp_source_bytes"]
+    payload_bytes = rebase["total_bytes"]
     complete_assignment = {name: canonicalize_format(value) for name, value
                            in result.items() if name != "__prismaquant__"}
     body_scope = body_meta.get("tessera_serving_scope")
