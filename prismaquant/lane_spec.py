@@ -312,6 +312,11 @@ class LaneFormatFamily:
     #: The currency every priced row of this family must carry, or ``None``
     #: when the family's rows carry none.
     cost_currency: str | None = None
+    #: The schema of the byte-matched uniform control block this family's
+    #: producer emits.  A rate-axis artifact owes that control's verdict on
+    #: its ship record, so a rate-axis family must name the schema the record
+    #: accepts; ``shipcard`` replays every number in the block itself.
+    uniform_control_schema: str | None = None
 
     def claims(self, name: object) -> bool:
         """Is ``name`` spelled as a member of this family?
@@ -333,6 +338,14 @@ class LaneFormatFamily:
                 "declare an upper-case `name_prefix`; format names are "
                 "canonicalized upper-case before a family is looked up")
         currency = payload.get("cost_currency")
+        rate_axis = bool(payload.get("rate_axis", False))
+        control = _opt_str(payload.get("uniform_control_schema"))
+        if rate_axis and control is None:
+            raise ValueError(
+                f"lane {lane!r} format family {payload.get('id')!r} declares "
+                "a rate axis and no `uniform_control_schema`; a rate-axis "
+                "artifact owes a byte-matched uniform control, and its ship "
+                "record must know which control block to accept")
         return cls(
             id=str(payload["id"]),
             lane=lane,
@@ -340,8 +353,9 @@ class LaneFormatFamily:
             label=str(payload.get("label") or payload["id"]),
             requires_production_render=bool(
                 payload.get("requires_production_render", False)),
-            rate_axis=bool(payload.get("rate_axis", False)),
+            rate_axis=rate_axis,
             cost_currency=None if currency is None else str(currency),
+            uniform_control_schema=control,
         )
 
 
@@ -371,6 +385,14 @@ class LaneSpec:
     #: writes. A reader that must know whether a recipe carries lane state
     #: asks here instead of spelling the lane's name.
     layer_config_meta_prefixes: tuple[str, ...] = ()
+    #: The ``quantization_config.quant_method`` a checkpoint of this lane
+    #: declares to select its serving runtime, or ``None`` when the container
+    #: declares none.  The ship record reads an artifact's lane from it.
+    quant_method: str | None = None
+    #: Every allocation for this lane writes ``serving_lane_provenance`` into
+    #: its recipe, so the lane's ship record owes that provenance's route
+    #: histogram (``build.route_histogram``, principle 12).
+    route_histogram_required: bool = False
 
     #: ``wired_architectures`` value meaning "every architecture", used by the
     #: default lane: every model profile ships through compressed-tensors, so
@@ -425,6 +447,9 @@ class LaneSpec:
                 for f in payload.get("format_families", ())),
             layer_config_meta_prefixes=tuple(
                 str(p) for p in payload.get("layer_config_meta_prefixes", ())),
+            quant_method=_opt_str(payload.get("quant_method")),
+            route_histogram_required=bool(
+                payload.get("route_histogram_required", False)),
         )
 
     def gate(self, gate_id: str) -> LaneGate | None:
@@ -656,6 +681,12 @@ def single_lane_plugin(name: str):
             f"lanes {[lane for lane, _ in found]} all provide {name!r}; the "
             "caller asks a question with one answer per process")
     return lane_plugin(found[0][0]) if found else None
+
+
+def rate_axis_lanes() -> tuple[LaneSpec, ...]:
+    """Every lane that declares a rate-axis format family."""
+    return tuple(spec for spec in _declared_lane_specs()
+                 if any(family.rate_axis for family in spec.format_families))
 
 
 def layer_config_meta_prefixes() -> tuple[str, ...]:
