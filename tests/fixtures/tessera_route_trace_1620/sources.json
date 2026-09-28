@@ -1,0 +1,70 @@
+{
+ "config_groups_dropped": 115,
+ "config_groups_kept": 18,
+ "config_sha256": "a0e206dbb207f418ae95d36b84c0f95a44f29cfcba622dd989dae8bd6eee44ad",
+ "config_source": "/mnt/shared/tessera-runs/moe/glm53-pact-uniform-arms-20260927/a8/body-mtp-v39/exported-r2/config.json",
+ "dropped_header_fields": [
+  "note",
+  "pid",
+  "started_utc",
+  "flushed_utc",
+  "flushes"
+ ],
+ "keep_per_entry": 4,
+ "traces": {
+  "tr3-rank0.json": {
+   "entries": 20,
+   "modules_per_entry": [
+    3,
+    4,
+    4,
+    4,
+    3,
+    3,
+    4,
+    4,
+    4,
+    3,
+    3,
+    4,
+    4,
+    4,
+    3,
+    3,
+    4,
+    4,
+    4,
+    3
+   ],
+   "sha256": "56b8f57be7eb8145b49342837db79849ccb97513eac911baf771949761aff7a6",
+   "source": "/home/rob/tmp/claude-campaign-20260926/pact/u4/runs/u4-A8-20260928T1809Z/head/route/tr3-rank0.json"
+  },
+  "tr3-rank1.json": {
+   "entries": 20,
+   "modules_per_entry": [
+    3,
+    4,
+    4,
+    4,
+    3,
+    3,
+    4,
+    4,
+    4,
+    3,
+    3,
+    4,
+    4,
+    4,
+    3,
+    3,
+    4,
+    4,
+    4,
+    3
+   ],
+   "sha256": "3f20c35232f6d2f9b532e301d4c8f9b4b5cf95d6ac5e47105b28af2f41fe7806",
+   "source": "/home/rob/tmp/claude-campaign-20260926/pact/u4/runs/u4-A8-20260928T1809Z/route/tr3-rank1.json"
+  }
+ }
+}
