@@ -1092,7 +1092,13 @@ def _glm_cli_fixture(tmp_path, *, budgets=GLM_CLI_BUDGETS):
              for member in inputs["members"]}
     model_dir = tmp_path / "glm-model"
     model_dir.mkdir()
-    (model_dir / "config.json").write_text(json.dumps({"model_type": "glm5_next"}))
+    # The layer counts are GLM-5.3-Flash's own, in the place its config states
+    # them (``text_config``; source config sha256 33e63ec7…f943): the profile
+    # derives the MTP draft layer from them and refuses to guess without them.
+    (model_dir / "config.json").write_text(json.dumps({
+        "model_type": "glm5_next",
+        "text_config": {"model_type": "glm5_next_text", "num_hidden_layers": 45,
+                        "num_nextn_predict_layers": 1}}))
     probe_path.write_bytes(pickle.dumps({"stats": stats, "meta": {"model": str(model_dir)}}))
     cost_path.write_bytes(pickle.dumps({
         "costs": cost_payload["costs"], "meta": {"formats": [FORMAT]},

@@ -80,6 +80,43 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Re-stamped 2026-09-28 (PQ #1490, `claude/route-trace-namespace-1490`): **the
+`route.trace` gate compares module names in the serve's namespace** (§8.2,
+§9.4). `config_groups` targets are checkpoint names, and Tessera's trace
+records each layer's `prefix`, the name vLLM built the module under. For GLM-5.3
+those differ: the body serves as `language_model.model.layers.N.…` and the MTP
+draft as the bare `model.layers.N.…`. `tessera_route_trace_gate.served_namespace`
+now maps every priced target through the new profile hook
+`ModelProfile.served_module_name(checkpoint_name, config)` before the
+per-module comparison. The base hook is the identity, so a profile that attests
+no map compares names verbatim and its verdict is unchanged. `Glm5NextProfile`
+maps its draft range (`mtp_draft_layer_range`, from `text_config`
+`num_hidden_layers` and `num_nextn_predict_layers`) through the
+`glm53_mtp_mapper` image's `Glm5NextMTP.hf_to_vllm_mapper`
+(`model.language_model.` → `model.`) and the rest through
+`to_vllm_internal_name`. The verdict gains `served_namespace` (profile plus
+renamed targets) only when a name changed. Unchanged: an unnamed module is
+still NOT VERIFIED, the per-M module-set rule holds (the measured MTP k=1 serve
+names one set at every M on both ranks), a draft module traced in the body's
+namespace is REFUSED by name, and a non-speculative serve against the full
+price stays REFUSED on the undispatched draft. The #509 fixture is regenerated
+with served prefixes: it had agreed only because both sides used the checkpoint
+namespace. Gates: `tests/test_tessera_route_trace_gate_namespace.py` on the
+U4 BAL traces (`tests/fixtures/tessera_route_trace_1490/`): the MTP k=1 serve
+`u4-BAL-20260928T0540Z-2c-r6-2c` (Tessera `f18f08b5`, census receipt VALID)
+names all 133 priced modules and AGREEs per module on both ranks, the pre-#680
+r5 serve stays NOT VERIFIED on its 29 unnamed NVFP4 stacks, and the non-spec
+TR3 check uses a SYNTHETIC naming because no post-#680 TR3 trace exists; plus
+`tests/test_glm5_next_served_namespace.py`.
+The same range is now the one source for "which layers are MTP":
+`detect_profile` and `profile_from_config` declare the parsed `config.json` on
+the profile (`_declare_config_document`), and
+`Glm5NextProfile.is_mtp_checkpoint_key` (the streamed loader's drop rule in
+`checkpoint_to_live_name`) reads the range from it. Only a profile built by
+hand, with no config declared, falls back to the GLM-5.3-Flash literal
+`_MTP_LAYER_RE` (layer 45). `specs/glm5_next.json` `passthrough_prefixes`
+still names layer 45 as spec data.
+
 Re-stamped 2026-09-28 (PQ #1571, prismabuild#1076): Stage A retirement and
 the forward-recovery loader read PrismaBuild batch records, claimed records
 and file identity through published names (`produced_output.batch_record`
@@ -24275,6 +24312,14 @@ lazily at `:76-84`, `None` permitted):
 | `fused_sibling_leaf_mapping()` | `packed_modules_mapping` | `:120-164` | same |
 | `to_vllm_internal_name()` | `hf_to_vllm_mapper.orig_to_new_prefix` | `:290-319` | `spec.recipe_to_vllm` rules take **precedence** `:314-318` |
 
+`served_module_name(checkpoint_name, config)` is deliberately NOT derived from the vLLM class.
+It names a priced `config_groups` target the way route telemetry records it (the layer's
+`prefix`), for the Tessera `route.trace` gate (PQ #1490). The base is the identity, and it never
+falls back to `to_vllm_internal_name()`, which imports the vLLM class. A profile overrides it only
+with a map it cites to the pinned serving image: `Glm5NextProfile` sends its MTP draft range
+(`mtp_draft_layer_range`, read from `config.json`) to `model.layers.N.…` and the body through
+`to_vllm_internal_name()`.
+
 **One profile, one spec, more than one serving class.** A family can ship a multimodal wrapper
 and a text-only carve-out that share every structural rule *except* the namespace vLLM builds
 them under — Qwen3.5/3.6 dense is the case in tree. `Qwen3_5ForConditionalGeneration` puts the
@@ -25453,7 +25498,10 @@ seven declared gates close seven slots (`lane_gate_slots("tessera")` —
 `python -m prismaquant.shipcard_cli fill-route-trace`, which compares every
 rank's served `TESSERA_ROUTE_TRACE` contract histogram with the one the
 artifact's `config.json` prices, and stays unfilled when any rank's trace is
-missing. The eighth is `uniform_control`, which `required_slots` adds because
+missing. The priced targets are checkpoint names, so the gate first names each
+one in the serve's namespace through `ModelProfile.served_module_name` (§8.2,
+PQ #1490); GLM-5.3 serves its body as `language_model.model.…` and its MTP
+draft as `model.layers.N.…`. The eighth is `uniform_control`, which `required_slots` adds because
 the artifact has a rate axis, not because any lane asked for it (#121, §7.1).
 `open_lane_shipcard` stamps `export_container` into the card's build block so
 that second obligation rests on the card as well as on the checkpoint's

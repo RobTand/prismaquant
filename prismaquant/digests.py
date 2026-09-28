@@ -179,6 +179,19 @@ def _require_normalized_json(value: object, *, where: str) -> None:
             "JSON encoding")
 
 
+def _stream_sha256(encoder: json.JSONEncoder, value: object) -> str:
+    """Stream ``encoder.iterencode`` chunks, as UTF-8, into one SHA-256.
+
+    The one streaming recipe for every digest owner: chunks arrive as
+    ``str`` in the encoder's own spelling and are UTF-8-encoded exactly as a
+    caller feeding ``iterencode`` into a hasher does.
+    """
+    digest = hashlib.sha256()
+    for chunk in encoder.iterencode(value):
+        digest.update(chunk.encode("utf-8"))
+    return digest.hexdigest()
+
+
 def canonical_json_sha256_normalized(value: object, *, where: str) -> str:
     """``canonical_json_sha256``, for input that is already normalized JSON.
 
@@ -198,10 +211,7 @@ def canonical_json_sha256_normalized(value: object, *, where: str) -> str:
     use ``canonical_json_sha256``; a tuple key is refused by ``json`` in both.
     """
     _require_normalized_json(value, where=where)
-    digest = hashlib.sha256()
-    for chunk in _CANONICAL_ENCODER.iterencode(value):
-        digest.update(chunk.encode("utf-8"))
-    return digest.hexdigest()
+    return _stream_sha256(_CANONICAL_ENCODER, value)
 
 
 @dataclass(frozen=True)
@@ -213,15 +223,18 @@ class JsonProfile:
     allow_nan: bool
     default: Callable[[object], object] | None = None
 
-    def text(self, value: object) -> str:
-        return json.dumps(
-            value,
+    def _encoder(self) -> json.JSONEncoder:
+        """The stdlib encoder with exactly this profile's options."""
+        return json.JSONEncoder(
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=self.ensure_ascii,
             allow_nan=self.allow_nan,
             default=self.default,
         )
+
+    def text(self, value: object) -> str:
+        return self._encoder().encode(value)
 
     def encoded(self, value: object) -> bytes:
         return self.text(value).encode("utf-8")
@@ -236,17 +249,7 @@ class JsonProfile:
         encoder options are the profile's own, streamed chunk by chunk in
         UTF-8 exactly as a caller feeding ``iterencode`` into a hasher does.
         """
-        digest = hashlib.sha256()
-        encoder = json.JSONEncoder(
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=self.ensure_ascii,
-            allow_nan=self.allow_nan,
-            default=self.default,
-        )
-        for chunk in encoder.iterencode(value):
-            digest.update(chunk.encode("utf-8"))
-        return digest.hexdigest()
+        return _stream_sha256(self._encoder(), value)
 
 
 DIRECT_UTF8_STRICT = JsonProfile("direct-utf8-strict", ensure_ascii=False, allow_nan=False)
@@ -324,10 +327,12 @@ def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTE
     return digest.hexdigest()
 
 
-#: The pretty capture-file JSON spelling: sorted keys, two-space indent,
-#: strict about non-finite numbers, default separators, one trailing LF.
 def indent2_json_file_bytes(value: object) -> bytes:
-    """The ``sort_keys=True, indent=2, allow_nan=False`` file form plus LF."""
+    """The pretty capture-file JSON spelling plus one trailing LF.
+
+    Sorted keys, two-space indent, strict about non-finite numbers, default
+    separators, UTF-8, and exactly one LF after the text.
+    """
     return (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode(
         "utf-8")
 

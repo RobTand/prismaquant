@@ -203,8 +203,8 @@ def _commit_unit(inputs, name, root: Path, identity_sha256: str, timings: dict |
                                     state=state)
         return
     # The writer's steps, timed one by one (the same calls, in its order).
-    from prismaquant.aura_cost import (AURA_CHECKPOINT_UNIT_SCHEMA, _atomic_write_bytes,
-                                       _aura_unit_checkpoint_path)
+    from prismaquant.aura_cost import AURA_CHECKPOINT_UNIT_SCHEMA, _aura_unit_checkpoint_path
+    from prismaquant.cost_stage_checkpoint import atomic_write_bytes
     state_bytes = pickle.dumps(dict(state), protocol=pickle.HIGHEST_PROTOCOL)
     pickled = time.perf_counter()
     digest = hashlib.sha256(state_bytes).hexdigest()
@@ -214,7 +214,7 @@ def _commit_unit(inputs, name, root: Path, identity_sha256: str, timings: dict |
                             "payload_sha256": digest, "payload": state_bytes},
                            protocol=pickle.HIGHEST_PROTOCOL)
     enveloped = time.perf_counter()
-    _atomic_write_bytes(_aura_unit_checkpoint_path(root, name), encoded)
+    atomic_write_bytes(_aura_unit_checkpoint_path(root, name), encoded)
     written = time.perf_counter()
     for key, seconds in (("entries_s", entries - started), ("state_s", built - entries),
                          ("pickle_s", pickled - built), ("sha256_s", hashed - pickled),
@@ -418,7 +418,7 @@ def _spy_main(path: Path) -> dict:
             continue
         frames = [frame.split(" (")[0] for frame in stack.split(";")[1:]]
         leaf = next((frame for frame in reversed(frames) if frame in (
-            "_write_aura_unit_checkpoint", "_atomic_write_bytes", "make_joint_aura_entry",
+            "_write_aura_unit_checkpoint", "atomic_write_bytes", "make_joint_aura_entry",
             "_aura_unit_state", "_read_ballast", "_load_sample", "_unit_inputs")), "other")
         counts[leaf] = counts.get(leaf, 0) + int(count)
         total += int(count)

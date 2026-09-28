@@ -6,9 +6,9 @@
  "rank_source": "torch.distributed",
  "rank_conflict": null,
  "platform": "sm_121",
- "pid": 1589949,
- "started_utc": "2026-09-16T18:31:34.013204+00:00",
- "flushed_utc": "2026-09-16T18:31:34.013444+00:00",
+ "pid": 4158279,
+ "started_utc": "2026-09-28T08:07:37.861987+00:00",
+ "flushed_utc": "2026-09-28T08:07:37.862091+00:00",
  "flushes": 0,
  "note": "launches counted per module per served dispatch; a shape of M* means the record was written while torch.compile was tracing, where one graph serves every M and a count is not a launch count.  Since identity_version 1 each entry also names the modules it counted (module_names, sorted).  module_names holds real prefixes ONLY: a layer with no usable prefix is unnamed, reported as the count unnamed_modules (with dispatches_without_prefix for how many dispatches came from them) and never given a made-up name.  'modules' is len(module_names) + unnamed_modules, which is the same number it carried before this version.  A complete per-module identity needs unnamed_modules == 0; otherwise the names present are exact and the rest are honestly unknown.",
  "entries": [
@@ -22,7 +22,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.1.mlp.shared_experts.down_proj"
+    "language_model.model.layers.1.mlp.shared_experts.down_proj"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -37,7 +37,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.1.mlp.shared_experts.down_proj"
+    "language_model.model.layers.1.mlp.shared_experts.down_proj"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -52,7 +52,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.0.mlp.gate_up_proj"
+    "language_model.model.layers.0.mlp.gate_up_proj"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -67,7 +67,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.0.mlp.gate_up_proj"
+    "language_model.model.layers.0.mlp.gate_up_proj"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -82,7 +82,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.1.mlp.experts"
+    "language_model.model.layers.1.mlp.experts"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -97,7 +97,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.0.mlp.down_proj"
+    "language_model.model.layers.0.mlp.down_proj"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -112,7 +112,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.1.mlp.shared_experts.gate_up_proj"
+    "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -127,7 +127,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.1.mlp.experts"
+    "language_model.model.layers.1.mlp.experts"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -142,7 +142,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.0.mlp.down_proj"
+    "language_model.model.layers.0.mlp.down_proj"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
@@ -157,7 +157,7 @@
    "launches": 1,
    "modules": 1,
    "module_names": [
-    "model.language_model.layers.1.mlp.shared_experts.gate_up_proj"
+    "language_model.model.layers.1.mlp.shared_experts.gate_up_proj"
    ],
    "unnamed_modules": 0,
    "dispatches_without_prefix": 0
