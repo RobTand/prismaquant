@@ -36,8 +36,13 @@ from .joint_head_walk_quanta import check_quantum_for_roster
 from .residency_map import (
     bind_residency_manifest, residency_report, residency_resolver,
 )
-from .schemas import Contract
 from .digests import file_sha256hex
+from .file_identity import file_stat_signature
+from .prismabuild_progress import commit as _pb_commit
+from .stage_inputs import (
+    bound as _bound, require as _require, same as _same,
+    source_prefetch as _source_prefetch,
+)
 
 SCHEMA = "prismaquant.tessera_joint_aura.plan.v1"
 PREPARED_SCHEMA = "prismaquant.tessera_joint_aura.prepared.v3"
@@ -148,16 +153,12 @@ HEAD_WALK_RECLAIM_GAP_BYTES = 2 * 1024 ** 3
 _HEAD_WALK_SYNTHESIS_LOCK = threading.Lock()
 
 
-_require = Contract(ValueError).require
-
-
 _sha = file_sha256hex
 
 
 def _stat_signature(value):
     """The identity fence for a wire byte read, including its file type."""
-    return (value.st_mode, value.st_dev, value.st_ino, value.st_size,
-            value.st_mtime_ns, value.st_ctime_ns)
+    return (value.st_mode, *file_stat_signature(value))
 
 
 def _read_verified_wire_blob(cell):
@@ -329,18 +330,6 @@ def _read_wire_bytes(wire, size, *, expected, staged):
         raise _StagedWireCorrupt('staged wire bytes differ from the receipt digest')
     _same(digest, expected, f"{wire}: wire checksum")
     return blob, digest
-
-
-def _bound(record, label):
-    _require(isinstance(record, dict) and set(record) == {"path", "sha256"},
-             f"{label}: independently bound path/SHA256 required")
-    path = Path(record["path"])
-    _require(_sha(path) == record["sha256"], f"{label}: artifact checksum changed")
-    return path
-
-
-def _same(actual, expected, label):
-    _require(actual == expected, f"{label}: identity mismatch")
 
 
 def _json(path, value):
@@ -540,67 +529,6 @@ def _decode_wire(blob, *, reader, device="cpu"):
 #: under. ``execute`` overrides it with the joint prepare's own ``head``:
 #: this loader spells no phase its caller has not declared.
 SYNTHESIS_PHASE = "synthesize"
-
-
-_DEV_SOURCE_SHA256_MEMO: str | None = None
-
-
-def _progress_dev_source_sha256():
-    """The executing package's actual tree digest, for the dev stamps.
-
-    Lazy so importing this module never pulls ``aura_cost``; only a dev-mode
-    progress commit that opted into the stamp pays for the hash -- and it pays
-    it **once**: the digest is memoized after the first commit because a
-    progress line fires per durable unit and a walk commits tens of thousands
-    of them. Measured live
-    on stage A (2026-09-20, action 398c81b4): the un-memoized form re-walked
-    and re-hashed the whole package tree on every unit, holding the head
-    walk to ~0.3 units/s of pure pathlib with zero IO -- the dev stamp is an
-    identity, and the executing tree's identity does not change mid-run.
-    """
-    global _DEV_SOURCE_SHA256_MEMO
-    if _DEV_SOURCE_SHA256_MEMO is None:
-        from .aura_cost import _aura_source_sha256
-        _DEV_SOURCE_SHA256_MEMO = _aura_source_sha256()
-    return _DEV_SOURCE_SHA256_MEMO
-
-
-def _pb_commit(units, phase, unit=None):
-    """Report cumulative durable units to PrismaBuild; a no-op elsewhere.
-
-    Held byte for byte against the published submission skill's snippet
-    (``skills/prismabuild/SKILL.md``, ``pb-progress-snippet``) so an action
-    inside a container that cannot import PrismaBuild still reports. It is a
-    no-op when the action was not admitted under the progress contract, so it
-    is called unconditionally rather than by testing how we were launched.
-
-    Under ``PRISMAQUANT_DEV_MODE=1`` the record may carry the dev stamp in
-    its metadata -- **opt-in** via ``PRISMAQUANT_DEV_PROGRESS_STAMP=1``.
-    The stamp is provenance ceremony; Rob's standing campaign directive
-    (2026-09-13) is that dev-mode campaign runs incur no sealing overhead,
-    and the per-line stamp measurably did: before the memo it re-hashed the
-    whole executing tree on every durable unit (2026-09-20, #826). The
-    run's identity is already recorded where it belongs -- once, in the
-    results record's top-level dev stamp and the startup implementation
-    line -- so the default progress record stays byte-identical to the
-    certified shape. The worker's ``ProgressWatch`` reads the fields it
-    knows and ignores the rest either way.
-    """
-    path = os.environ.get("PRISMABUILD_ACTION_PROGRESS_PATH")
-    token = os.environ.get("PRISMABUILD_ACTION_PROGRESS_TOKEN")
-    if not path or not token:
-        return False
-    record = {"schema": "prismabuild.action_progress.v1", "token": token,
-              "phase": phase, "units_completed": units, "unit": unit,
-              "reported_unix": time.time()}
-    if (dev_mode_enabled()
-            and os.environ.get("PRISMAQUANT_DEV_PROGRESS_STAMP") == "1"):
-        record.update(dev_stamp(_progress_dev_source_sha256()))
-    temporary = f"{path}.{os.getpid()}.tmp"
-    with open(temporary, "w") as handle:
-        handle.write(json.dumps(record, sort_keys=True) + "\n")
-    os.replace(temporary, path)
-    return True
 
 
 class _ProgressCadence:
@@ -2244,27 +2172,6 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     return cache
 
 
-def _source_prefetch(config):
-    prefetch = config.get("source_prefetch")
-    fields = {"max_cache_slots", "prefetch_workers", "prefetch_lookahead",
-              "cache_headroom_gb", "prefetch_min_available_gb",
-              "require_prefetched_residency"}
-    _require(isinstance(prefetch, dict) and set(prefetch) == fields,
-             "explicit complete source_prefetch settings required")
-    _require(prefetch["require_prefetched_residency"] is True,
-             "source_prefetch must require prefetched residency")
-    for name in ("max_cache_slots", "prefetch_workers", "prefetch_lookahead"):
-        _require(type(prefetch[name]) is int and prefetch[name] > 0,
-                 f"source_prefetch requires positive {name}")
-    _require(prefetch["prefetch_lookahead"] < prefetch["max_cache_slots"],
-             "source_prefetch lookahead must fit the declared cache slots")
-    for name in ("cache_headroom_gb", "prefetch_min_available_gb"):
-        _require(type(prefetch[name]) in (int, float) and
-                 math.isfinite(prefetch[name]) and prefetch[name] > 0,
-                 f"source_prefetch requires positive finite {name}")
-    return dict(prefetch)
-
-
 def _planned_source_window(config):
     """The prefetch note's bound from the sealed plan (PQ #1134), as kwargs.
 
@@ -2296,7 +2203,7 @@ def recommend_source_prefetch(*, cache_bytes, layer_bytes, cpu_count,
     up to four readers bounded by CPUs and slots, with the lookahead the
     slot count fits. The headroom and minimum-available floors stay operator
     policy: they are passed through, not derived. The result is validated
-    through :func:`_source_prefetch`, so a recommendation that cannot run
+    through :func:`stage_inputs.source_prefetch`, so a recommendation that cannot run
     refuses here instead of inside the action.
     """
     for label, value in (("cache_bytes", cache_bytes), ("layer_bytes", layer_bytes),
@@ -2346,7 +2253,7 @@ def _admit_candidate_phase(command, config, data, layer_bytes):
     return policy
 
 
-def _load_plan(path, digest, *, projection_runtime=True, defer_pool_reads=False):
+def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_reads=False):
     """Load and admit a joint anchor plan.
 
     ``defer_pool_reads`` is for a caller whose readset is not bound yet (a
@@ -2644,7 +2551,7 @@ def check_prepared_completion(completion, *, plan_sha256, implementation_sha256,
 def _config_device_envelope(config, command):
     """The device envelope a joint command declares, read before any device.
 
-    ``max_gpu_bytes`` is what ``_load_plan`` requires of every admitted plan,
+    ``max_gpu_bytes`` is what ``load_joint_anchor_plan`` requires of every admitted plan,
     and the envelope is the FIRST thing a command does that reaches the CUDA
     allocator. Reading it with ``config["max_gpu_bytes"]`` therefore turned a
     config the admission gate would have refused into a ``KeyError`` raised
@@ -2682,7 +2589,7 @@ def _restores_activation_scale_env(function):
     ``execute`` sets ``PRISMAQUANT_PROD_ACT_SCALES`` from the admitted plan so
     the render path it drives reads the campaign's value.  As a process entry
     point that is right; called in-process it leaves the value behind.  Every
-    admitted plan carries ``"0"`` (``_load_plan``), and that is the input
+    admitted plan carries ``"0"`` (``load_joint_anchor_plan``), and that is the input
     which turns the render scorer's activation clip OFF for everything that
     runs afterwards (``production_weight_cache.py``, in
     ``_local_forward_render_score``).  Plenty of code outside ``execute``
@@ -3352,7 +3259,7 @@ def main(argv=None):
     # identical across x86/aarch64 and CPU/CUDA. It is the one command that
     # does not need the projection runtime, and refusing it here would refuse
     # the stage that exists to run off the qualified box.
-    config = _load_plan(args.plan, args.plan_sha256,
+    config = load_joint_anchor_plan(args.plan, args.plan_sha256,
                         projection_runtime=args.command != "synthesize")
     if args.command == "synthesize":
         record = synthesize_renders(config, plan_sha256=args.plan_sha256, units=args.units,

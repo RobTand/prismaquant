@@ -264,7 +264,7 @@ def test_the_reuse_grammar_has_no_wildcard_or_duplicate_spelling():
 
 def test_a_plan_that_names_a_malformed_reuse_block_is_refused_at_load(tmp_path):
     """The plan grammar is where a reuse is admitted, so it is checked there."""
-    from prismaquant.tessera_joint_aura import SCHEMA, _load_plan
+    from prismaquant.tessera_joint_aura import SCHEMA, load_joint_anchor_plan as _load_plan
 
     path = tmp_path / "plan.json"
     path.write_text(json.dumps({"schema": SCHEMA,

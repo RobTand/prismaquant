@@ -315,7 +315,7 @@ def test_bounded_wire_read_fences_symlinks_size_and_actual_bytes(tmp_path):
 @pytest.mark.parametrize("field,value", [("probe_microbatch", 0), ("n_probes", 1),
     ("token_scope", "last"), ("production_act_scales", "1"), ("temperature", 2.0)])
 def test_plan_refuses_unqualified_probe_or_activation_policies(tmp_path, field, value):
-    from prismaquant.tessera_joint_aura import _load_plan, SCHEMA
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan, SCHEMA
     config = {"schema": SCHEMA, "execution": {"n_calib_samples": 512,
         "calib_seqlen": 512, "probe_microbatch": 1, "n_probes": 4,
         "seed_base": 7000, "token_scope": "all", "temperature": 1.0,
@@ -527,7 +527,7 @@ def test_bound_source_identity_seed_refuses_changed_or_conflicting_bytes(tmp_pat
 @pytest.mark.parametrize("defect", ["missing", "disabled", "auto_slots", "zero_workers",
     "oversize_lookahead", "nonfinite_headroom", "extra_field"])
 def test_source_prefetch_refuses_implicit_or_nonresident_settings(defect):
-    from prismaquant.tessera_joint_aura import _source_prefetch
+    from prismaquant.stage_inputs import source_prefetch as _source_prefetch
     prefetch = dict(max_cache_slots=24, prefetch_workers=4, prefetch_lookahead=4,
         cache_headroom_gb=4.0, prefetch_min_available_gb=2.0,
         require_prefetched_residency=True)

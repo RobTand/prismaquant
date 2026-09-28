@@ -1476,7 +1476,8 @@ def build_quantum_source_runner(config, *, offload_folder,
     """
     from .cost_streaming import build_streamed_causal_lm
     from .model_profiles import detect_profile
-    from .tessera_joint_aura import _planned_source_window, _source_prefetch
+    from .stage_inputs import source_prefetch as _source_prefetch
+    from .tessera_joint_aura import _planned_source_window
 
     return build_streamed_causal_lm(
         config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
@@ -3465,12 +3466,11 @@ def run_layer_quantum(
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache
     from .residency_map import bind_residency_manifest, residency_report
+    from .stage_inputs import bound as _bound, same as _same
     from .tessera_joint_aura import (
         ACTIVATION_SCALE_ENV,
-        _bound,
         _prepare_file_read_bound,
         _preflight_run_prepared,
-        _same,
         _seed_source_identity_cache,
         load_measured_anchor_input,
         require_prepared_digests,
@@ -3979,7 +3979,7 @@ def main(argv=None) -> int:
     except QuantumIdentityRefused as exc:
         print(f"{IDENTITY_REFUSED_MARKER}: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
-    from .tessera_joint_aura import _load_plan
+    from .tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
     # The readset is bound inside run_layer_quantum; until then the plan
     # itself is the only input read (PQ #1024).

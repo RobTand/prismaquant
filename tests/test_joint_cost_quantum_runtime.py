@@ -749,7 +749,7 @@ def test_stage_a_cli_threads_the_override_flag(tmp_path, monkeypatch):
 
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     monkeypatch.setattr(stage_a, "require_dev_mode", lambda *a, **k: None)
-    monkeypatch.setattr(aura, "_load_plan", lambda *a, **k: {})
+    monkeypatch.setattr(aura, "load_joint_anchor_plan", lambda *a, **k: {})
     monkeypatch.setattr(stage_a, "run_adjoint_capture", fake_capture)
 
     override = _override_document(tmp_path, _prefetch_budget(prefetch_workers=8))

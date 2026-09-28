@@ -223,6 +223,20 @@ carry PrismaBuild's `059953bc` pin (PQ #1541), on dl380g10 (PB build
 `27b513d61205`/`ddd47cb807ed`); the `43da1c39` and `cadc200c` interpreters
 (#675's heads, never a merged pin) and the `20bf5346` ones stay in place.
 
+Re-stamped 2026-09-27 (PQ #1555, decoupling step 7): the generic Stage A/B
+input checks leave the Tessera lane modules for the neutral
+`prismaquant/stage_inputs.py`: `require`, `same`, `bound`,
+`bound_stat_fence` (now `(st_mode, *file_identity.file_stat_signature)`),
+`read_bound` with its `BOUND_READER` hook, `source_prefetch`, and
+`require_source_identity` with `SOURCE_IDENTITY_KEYS` and
+`ExpertProjectionError`. The progress commit is
+`prismabuild_progress.commit`, beside `report`. The joint anchor plan loader
+stays in the lane, because it admits the lane's own plan schema, and is now
+public as `tessera_joint_aura.load_joint_anchor_plan`. Every refusal message
+is unchanged. `tests/boundary_allowlists/tessera_private.txt` drops from 44
+to 14 entries and the duplication baseline from 149 to 147 same-name groups.
+No format, pipeline default, stage or lane changes.
+
 Re-stamped 2026-09-27 (PQ #1541, decoupling step 2): PrismaQuant reaches
 PrismaBuild through `prismabuild.client`, PB's versioned client SDK
 (`SDK_VERSION = 1`, RobTand/prismabuild#1254), and `staged_lease.client_sdk`
@@ -2671,7 +2685,7 @@ declared input is then read through a lifetime-pinned lease window
 - the JSON controls (`_load_json`);
 - the production pickle;
 - the Stage A proofs;
-- the catalog pair's bound documents (`tessera_joint_allocation._read_bound`,
+- the catalog pair's bound documents (`stage_inputs.read_bound`,
   through its `BOUND_READER` hook);
 - the checkpoint index and each safetensors header range
   (`layer_streaming.streaming_source_plan(source_reads=)`, PQ #1095);
@@ -7888,7 +7902,7 @@ default, stage, format, lane, pin or ship gate changes, and no cache is added.
   window that disagrees with the qualified wire's declared window is refused.
 - **The qualification is read, never asserted.** `_qualified_quality_members`
   authenticates the prepared completion and the `ProductionWeightCache` it
-  names through `tessera_joint_allocation._read_bound`, then checks source
+  names through `stage_inputs.read_bound`, then checks source
   model, calibration draw, plan/reader/backend identity, candidate roster, wire
   digest, encoder identity (through the producer's own canonical-JSON grammar)
   and render comparison before it returns a single render identity. The
@@ -9748,7 +9762,7 @@ Three changes, none of them to what is compared:
   bit-exact warm -- before `load_measured_anchor_input`, so an unqualified
   runtime is refused in seconds rather than after the head phase. The error
   strings are unchanged.
-* **Plan preflight.** `_load_plan` runs `require_qualified_environment()` for a
+* **Plan preflight.** `load_joint_anchor_plan` runs `require_qualified_environment()` for a
   fused selector, so the chain's Step 3a container dry-run refuses an
   unqualified image before the plan is sealed. The joint plan carries no
   container spec of its own -- Step 3a already loads it inside the campaign's
@@ -9757,7 +9771,7 @@ Three changes, none of them to what is compared:
   (`torch.cuda.get_device_properties` needs a device); it is compared when CUDA
   is present and otherwise left to the now-first gate in `execute`. The
   standalone `synthesize` stage is exempt and says so
-  (`_load_plan(..., projection_runtime=False)`): it constructs no lease and
+  (`load_joint_anchor_plan(..., projection_runtime=False)`): it constructs no lease and
   loads no backend, and its canonical CPU BF16 shard is measured identical
   across x86/aarch64, so holding it to the projection runtime would refuse the
   stage that exists to run off the qualified box.
