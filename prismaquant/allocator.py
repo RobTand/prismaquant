@@ -90,7 +90,7 @@ import pickle
 import re
 import time as _time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -712,6 +712,11 @@ class _StockAllocationLane:
     @staticmethod
     def allocation_runtime_identity() -> dict:
         return {}
+
+    @staticmethod
+    def allocation_shape_price_scope(serving_target, *, tensor_parallel):
+        raise LookupError("no lane publishes a pinned runtime contract, so no shape-time "
+                          "table can be admitted")
 
     @staticmethod
     def allocation_menu(fmt_names, priced_formats, *, context_by_unit):
@@ -1730,6 +1735,39 @@ class MeasuredRuntimeSweep:
     emit_replay: Callable[[float, float, dict, dict], None] | None = None
 
 
+@dataclass(frozen=True)
+class PactHullSweep:
+    """What ``main(measured_runtime_sweep=...)`` hands its caller in PACT mode.
+
+    ``build_hull()`` runs the exact dichotomic hull (``pact_hull``) over the
+    shape-priced candidate set under this run's byte budget and returns
+    ``{"hull": LowerHull, "vertices": [record, ...]}``, one record per vertex
+    after the same exact checks a measured solve applies (promotion identity,
+    exact payload bpp <= target). ``emit_replay(weights, assignment,
+    provenance)`` re-runs the ONE probe that found a vertex and writes it
+    through the allocator's only layer-config writer. Nothing here certifies
+    time or placement: every time is an operator-sum proposal at one regime M.
+    """
+
+    build_hull: Callable[[], dict]
+    emit_replay: Callable[[Sequence[float], dict, dict], None]
+    #: ``shape_runtime_prices.ShapePricing``: bootstrap, gap report, identity.
+    pricing: object
+    table_identity: dict
+    scope: dict
+    regime_m: int
+    tensor_parallel: int
+    time_ceiling_ms: float | None
+    max_memory_bytes: int
+    #: Assignment members outside every DP unit (their format is fixed); the
+    #: operator sum prices none of them, and the curve adds nothing for them.
+    fixed_members: tuple[str, ...]
+    n_units: int
+    target_bits: float
+    cost_path: str
+    probe_path: str
+
+
 def require_no_research_exact_member_scalar(cost_data: dict) -> None:
     """An exact-member endpoint is a scalar observation, not an allocation table."""
     if cost_data.get("provenance", {}).get("research_exact_member_scope") is not None:
@@ -2129,12 +2167,80 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "it. It requires the prefill frontier sweep and no "
                          "--serve-device-budget-bytes, and it certifies no "
                          "placement.")
+    # ---- PACT: the shape-time price table and its exact hull (PQ #1584) ----
+    ap.add_argument("--pact-shape-table", default=None,
+                    help="Research-only shape-time price table "
+                         "(prismaquant.shape_runtime_prices.v1). Prices every option "
+                         "by its served operator's rank-local shape at one regime M "
+                         "and hands the exact lower convex hull of (operator-sum "
+                         "time, predicted Δloss) to the prefill_frontier caller. "
+                         "Available only through prismaquant.prefill_frontier; a "
+                         "single solve refuses it.")
+    ap.add_argument("--pact-regime", type=int, default=None,
+                    help="The regime M (tokens per prefill step) the table's rows "
+                         "are read at. Required with --pact-shape-table; there is "
+                         "no default, because the regime is the workload's.")
+    ap.add_argument("--pact-tensor-parallel", type=int, default=None,
+                    help="The serving world size the table was measured at. "
+                         "Required with --pact-shape-table; it is part of the scope "
+                         "the table must equal and sets each routed member's "
+                         "rank-local cut.")
+    ap.add_argument("--pact-time-ceiling-ms", type=float, default=None,
+                    help="A REPORT bound on operator-sum time: hull vertices above "
+                         "it are flagged, never removed. The constrained set's own "
+                         "boundary vertex is not generated.")
     args = ap.parse_args(argv)
+
+    pact_flags = (("--pact-regime", args.pact_regime),
+                  ("--pact-tensor-parallel", args.pact_tensor_parallel),
+                  ("--pact-time-ceiling-ms", args.pact_time_ceiling_ms))
+    if args.pact_shape_table is None:
+        for flag, value in pact_flags:
+            if value is not None:
+                ap.error(f"{flag} requires --pact-shape-table")
+    else:
+        if measured_runtime_sweep is None:
+            ap.error("--pact-shape-table is available only to prismaquant.prefill_frontier, "
+                     "whose hull vertices are research-only; a single solve would write a "
+                     "layer config from an operator-sum proposal")
+        if args.pact_regime is None or args.pact_regime < 1:
+            ap.error("--pact-shape-table requires a positive --pact-regime (no default: "
+                     "the regime M is the workload's, not the allocator's)")
+        if args.pact_tensor_parallel is None or args.pact_tensor_parallel < 1:
+            ap.error("--pact-shape-table requires a positive --pact-tensor-parallel (no "
+                     "default: the table is admitted only at the world it was measured at)")
+        if args.pact_time_ceiling_ms is not None and (
+                not math.isfinite(args.pact_time_ceiling_ms) or args.pact_time_ceiling_ms <= 0):
+            ap.error("--pact-time-ceiling-ms must be positive and finite")
+        if args.serve_device_budget_bytes is not None or args.rank_device_budget_bytes is not None:
+            ap.error("--pact-shape-table prices no device residency, scratch or activation, "
+                     "so no device budget is evaluated in PACT mode; the resident-bytes "
+                     "table is Tessera's (RobTand/tessera#624)")
+        for flag, value in (("--measured-runtime-table", args.measured_runtime_table),
+                            ("--measured-runtime-context", args.measured_runtime_context),
+                            ("--measured-runtime-rank-partition",
+                             args.measured_runtime_rank_partition),
+                            ("--serve-dispatch-table", args.serve_dispatch_table),
+                            ("--serve-workload-mix", args.serve_workload_mix),
+                            ("--slo-prefill-p95-ttft-ms", args.slo_prefill_p95_ttft_ms),
+                            ("--slo-decode-p95-itl-ms", args.slo_decode_p95_itl_ms),
+                            ("--slo-decode-p05-tps", args.slo_decode_p05_tps)):
+            if value is not None:
+                ap.error(f"--pact-shape-table is mutually exclusive with {flag}: the hull "
+                         "is the candidate set, and no budget on its time axis is a "
+                         "solver constraint")
+        if args.measured_runtime_fixed_scope != "admitted":
+            ap.error("--measured-runtime-fixed-scope belongs to --measured-runtime-table")
+        if args.target_disk_gb is not None:
+            ap.error("--target-disk-gb is not read in PACT mode: the hull's byte budget is "
+                     "--target-bits over the mutable parameters (the measured solve's "
+                     "budget); state a whole-artifact cap as that target")
 
     if args.measured_runtime_context and not args.measured_runtime_table:
         ap.error("--measured-runtime-context requires --measured-runtime-table")
-    if measured_runtime_sweep is not None and not args.measured_runtime_table:
-        ap.error("a measured runtime sweep requires --measured-runtime-table")
+    if (measured_runtime_sweep is not None and not args.measured_runtime_table
+            and args.pact_shape_table is None):
+        ap.error("a measured runtime sweep requires --measured-runtime-table or --pact-shape-table")
     if args.measured_runtime_table:
         if args.serve_dispatch_table or args.serve_workload_mix:
             ap.error("--measured-runtime-table is mutually exclusive with "
@@ -2210,6 +2316,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # table / no SLOs) makes every downstream call a no-op that only stamps
     # "constraints were absent" — the pre-P5c behaviour, byte for byte.
     measured_runtime_table = None
+    # PACT keeps the same candidate rows the measured search keeps: an option
+    # a byte-and-loss screen would drop can still be the faster one.
+    runtime_frontier_candidates = (args.measured_runtime_table is not None
+                                   or args.pact_shape_table is not None)
     serve_slos = ServeSLOs(
         p95_ttft_ms=args.slo_prefill_p95_ttft_ms,
         p95_itl_ms=args.slo_decode_p95_itl_ms,
@@ -2889,7 +2999,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
         defer_menu_reduction=packed_members_deferred | fused_members_deferred,
-        **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}),
+        **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
     )
     print(f"[alloc] candidates built for {len(candidates)} Linears"
           + (f" ({len(packed_members_deferred)} packed-group and "
@@ -3264,7 +3374,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats, costs, specs_sorted, candidates, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
-            **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}))
+            **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
         packed_groups = sum(
             1 for n in candidates if _PACKED_GROUP_MARKER in n)
         packed_member_rows = sum(
@@ -3297,7 +3407,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats, costs, specs_sorted, candidates, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
-            **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}))
+            **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
         sib_groups = sum(1 for n in candidates if _FUSED_SIBLING_MARKER in n)
         print(f"[alloc] fused-sibling aggregation: {sib_groups} groups "
               f"(qkv_proj / gate_up_proj / ...)")
@@ -3342,7 +3452,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         candidates, stats,
         bit_precision=float(args.bit_precision),
         report=tessera_menu_report_agg,
-        **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}),
+        **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
     )
 
     post_aggregation_availability = {
@@ -3541,6 +3651,53 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 expected_bindings=expected_bindings)
         except (ValueError, KeyError) as exc:
             raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
+
+    # PACT (PQ #1584): price each DP option by its served operator's shape from
+    # the admitted shape-time table. Every option expands to its members exactly
+    # as the measured path expands it; an option the table does not price is
+    # left out of the time-aware candidate set and reported as a gap.
+    pact_pricing = None
+    pact_candidates = None
+    pact_option_members = {}
+    pact_scope = None
+    if args.pact_shape_table is not None:
+        from .shape_runtime_prices import (
+            ShapeRuntimeError, admit_shape_table, build_shape_runtime_resources, load_shape_table,
+        )
+        try:
+            pact_scope, pact_eligibility, pact_formats = lane.allocation_shape_price_scope(
+                tessera_serving_target, tensor_parallel=args.pact_tensor_parallel)
+        except (LookupError, ValueError) as exc:
+            raise SystemExit(f"[alloc] ERROR: PACT shape table scope: {exc}") from None
+        try:
+            shape_table = admit_shape_table(load_shape_table(args.pact_shape_table),
+                                            scope=pact_scope, eligibility=pact_eligibility)
+            member_shapes, member_structure = {}, {}
+            for unit, options in sorted(candidates.items()):
+                for option in options:
+                    members = expand_fused_sibling_assignment(
+                        expand_packed_group_assignment({unit: option.fmt}, stats), stats)
+                    pact_option_members[(unit, option.fmt)] = members
+                    for name in members:
+                        if name in member_shapes:
+                            continue
+                        entry = _stats_entry_for_assignment_name(name)
+                        if entry is None:
+                            raise ValueError(f"{name}: PACT has no independent shape")
+                        member_shapes[name] = _shape_from_stats(entry)
+                        member_structure[name] = lane.allocation_unit_context(
+                            tessera_serving_target, name, model_profile).structure
+            pact_pricing = build_shape_runtime_resources(
+                shape_table, candidates, option_members=pact_option_members,
+                member_shapes=member_shapes, member_structure=member_structure,
+                regime_m=args.pact_regime, published_formats=pact_formats)
+            pact_candidates = pact_pricing.time_candidates(candidates)
+        except (ShapeRuntimeError, ValueError, KeyError, LookupError) as exc:
+            raise SystemExit(f"[alloc] ERROR: PACT shape table: {exc}") from None
+        gaps = pact_pricing.gap_report()
+        print(f"[alloc] PACT shape table ACTIVE (research): {gaps['priced_options']} options "
+              f"priced at M={args.pact_regime}, {gaps['unpriced_options']} unpriced "
+              f"({gaps['by_kind']}); operator sums are proposals, not placements", flush=True)
 
     _serve_lane_cache: dict[tuple, object] = {}
 
@@ -4214,6 +4371,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "certifies_placement": False,
                 "prefill_frontier_replay": replay,
                 "fixed_resource_scope": fixed_resource_scope_stamp,
+                # A PACT vertex also names how it was generated and what its
+                # time is (PQ #1584); the replay block carries both too, so
+                # the claim that reaches the build record keeps them.
+                **({"candidate_generator": replay["candidate_generator"],
+                    "time_claim": replay["time_claim"]}
+                   if "candidate_generator" in replay else {}),
             })
         # What this allocation carries about the priced expert population
         # (PrismaQuant #183): the campaign's population statement (which units
@@ -4274,6 +4437,83 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
 
 
     pareto_seed_records: list[dict] = []
+
+    if pact_pricing is not None:
+        # PACT (PQ #1584): the exact lower convex hull of (operator-sum time,
+        # predicted Δloss) is the candidate set. λ only generates it; no
+        # selection objective reads λ, and no layer config, Pareto CSV or
+        # selection is written here. A replay writes one vertex.
+        from .allocator_solver import RuntimeFrontierLimitError
+        from .pact_hull import PactHullError, dichotomic_lower_hull, probe_assignment
+        pact_time_ms = {key: float(r.prefill_ms) for key, r in pact_pricing.resources.items()}
+        pact_budget = math.floor(float(args.target_bits) * mutable_total_params / 8)
+
+        def _pact_vertex_record(assignment: Mapping[str, str]) -> dict:
+            raw_expanded = {}
+            for unit, fmt in assignment.items():
+                raw_expanded.update(pact_option_members[(unit, fmt)])
+            raw_expanded.update(fixed_format_assignment)
+            expanded = _expand_assignment_for_seed_json(dict(assignment))
+            if expanded != raw_expanded:
+                return {"feasible": False, "reason": "serving_promotion_changed_the_vertex"}
+            exact = _assignment_payload_totals(
+                {name: fmt for name, fmt in expanded.items()
+                 if name not in fixed_format_assignment}, require_all_stats=True)
+            achieved = float(exact["bits_per_param"])
+            feasible = achieved <= float(args.target_bits)
+            return {"feasible": feasible,
+                    "reason": None if feasible else "exact_assignment_payload_over_target",
+                    "assignment": dict(expanded), "achieved_bits": achieved,
+                    "payload_bytes": int(exact["bits_total"]) // 8,
+                    "quantizable_params": int(exact["quantizable_params"])}
+
+        def _pact_build_hull() -> dict:
+            start = _time.perf_counter()
+            try:
+                hull = dichotomic_lower_hull(pact_candidates, pact_time_ms,
+                                         max_memory_bytes=pact_budget)
+            except (PactHullError, RuntimeFrontierLimitError) as exc:
+                raise SystemExit(f"[alloc] ERROR: PACT hull: {exc}") from None
+            seconds = _time.perf_counter() - start
+            return {"hull": hull, "seconds": seconds,
+                    "vertices": [_pact_vertex_record(v.assignment) for v in hull.vertices]}
+
+        def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
+            if lane.allocation_selection_request_path(args):
+                raise ValueError("PACT replay requires materialized wires, not a selection request")
+            try:
+                assign = probe_assignment(pact_candidates, pact_time_ms, weights,
+                                          max_memory_bytes=pact_budget)
+            except (PactHullError, RuntimeFrontierLimitError) as exc:
+                raise ValueError(f"PACT replay probe refused: {exc}") from None
+            record = _pact_vertex_record(assign)
+            if not record["feasible"] or record["assignment"] != expected_assignment:
+                raise ValueError("PACT replay: the recorded probe re-derives a different "
+                                 "assignment than the hull vertex")
+            options = {(unit, c.fmt): c for unit, cs in pact_candidates.items() for c in cs}
+            dloss = math.fsum(float(options[(unit, fmt)].predicted_dloss)
+                              for unit, fmt in assign.items())
+            # Replay owns only its explicit output, never sweep-side attribution files.
+            args.bit_attribution_json = args.bit_attribution_csv = None
+            _write_layer_config(assign, record["achieved_bits"], dloss, dloss, replay=provenance)
+
+        measured_runtime_sweep(PactHullSweep(
+            build_hull=_pact_build_hull,
+            emit_replay=_pact_emit_replay,
+            pricing=pact_pricing,
+            table_identity=dict(pact_pricing.table_identity),
+            scope=dict(vars(pact_scope)),
+            regime_m=int(args.pact_regime),
+            tensor_parallel=int(args.pact_tensor_parallel),
+            time_ceiling_ms=args.pact_time_ceiling_ms,
+            max_memory_bytes=int(pact_budget),
+            fixed_members=tuple(sorted(fixed_format_assignment)),
+            n_units=len(pact_candidates),
+            target_bits=float(args.target_bits),
+            cost_path=str(args.costs),
+            probe_path=str(args.probe),
+        ))
+        return
 
     if measured_runtime_sweep is not None:
         # Prefill frontier sweep (prismaquant.prefill_frontier): several

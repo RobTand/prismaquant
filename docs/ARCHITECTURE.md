@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
+gains a research-only PACT mode, reached only through
+`prismaquant.prefill_frontier` (`--pact-shape-table`, `--pact-regime`,
+`--pact-tensor-parallel`, `--pact-time-ceiling-ms`). It builds the exact lower
+convex hull of (operator-sum time, predicted Δloss) with
+`prismaquant/pact_hull.py`, and a replay writes one vertex as a research-only
+layer config. `layer_config.prefill_frontier_replay_claim` also carries a
+measured-runtime single solve's research stamp to the build record. No
+default, stage, format, lane or ship gate changes. See §4.5, "PACT hull".
+
 Re-stamped 2026-09-28 (PQ #1583, `claude/pact-shape-table`): PACT's
 shape-time price table, `prismaquant/shape_runtime_prices.py`
 (`prismaquant.shape_runtime_prices.v1`), lands as a library. Nothing in the
@@ -18779,6 +18789,67 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
   until tessera#688 publishes that schema.
 
 CPU gates: `tests/test_shape_runtime_prices.py`.
+
+**PACT hull (2026-09-28, PQ #1584).** `prismaquant/pact_hull.py` generates
+PACT's candidates, and `prefill_frontier` drives it when the allocator argv
+names `--pact-shape-table`. The output is a `prismaquant.pact_frontier.v1`
+document.
+
+- **Why a hull loses no pick.** Every PACT selection rule maximises an affine
+  function of (time, Δloss): argmin Δloss, argmin time, and
+  `select_development_point`'s chord distance in coordinates normalised by the
+  two endpoints. An affine maximum over a finite set is attained at a vertex
+  of its convex hull, so the exact lower hull holds every pick those rules can
+  make.
+- **Generation.** Dichotomic parametric search (Aneja–Nair): probe min Δloss
+  and min time, then for each adjacent pair (A, B) probe
+  `w_d·Δloss + w_t·time` with `(w_d, w_t) = (t_A − t_B, d_B − d_A)` under the
+  byte budget. A result strictly below AB is a new vertex, and the search
+  recurses on both halves. Otherwise AB is an edge. "Strictly below" is
+  judged against the float64 sum bound `(n + 1)·2⁻⁵³·(S_probe + S_segment)`,
+  never a chosen epsilon. λ = `w_t/w_d` is recorded per edge as a diagnostic
+  and never enters a selection objective.
+- **Probe.** When every unit's largest option fits the budget, the byte
+  constraint is vacuous, so each probe is the per-unit minimiser, with the
+  exact solver's tie rule. When the budget binds, each probe is one call to
+  the unchanged `solve_runtime_frontier`, and its `max_states` refusal
+  stands. `solve_allocation` is not used, because its bin rounding is a
+  projection with bounded overshoot and so is not exact at a binding budget.
+- **Inputs and exact checks.** The shape table is admitted against the
+  tracked pin and the serving target (`tessera_lane.allocation_shape_price_scope`).
+  Options it does not price are absent and reported as gaps. Each vertex must
+  pass the measured solve's checks: promotion identity, and exact payload bpp
+  at or below `--target-bits`. The byte budget is
+  `floor(target_bits × mutable_params / 8)`.
+- **Refusals.** A lone allocator run refuses the flags. PACT also refuses the
+  measured table, dispatch table, workload mix, every `--slo-*`, and
+  `--target-disk-gb`. It refuses every device budget, because the table prices
+  no residency (tessera#624 owns that table).
+- **Menu.** A family restriction, such as E4M3-only, is the declared
+  `--formats` menu. It is not a ban applied after allocation.
+- **Time axis.** Fixed prefill is 0. Members with a fixed format, and every
+  operator outside the table, are neither priced nor added. The document
+  reports them as the `remainder`.
+- **Replay.** `prefill_frontier replay` re-runs the one probe that found a
+  vertex and writes it through the allocator's only layer-config writer. The
+  config carries `research_only: true`, `certifies_placement: false`,
+  `candidate_generator: lower_convex_hull_dichotomic` and
+  `time_claim: operator_sum_proposal`, inside a replay.v1 block, which
+  `prefill_frontier_replay_claim` carries to `build.research_only`.
+
+Limits:
+
+- `--pact-time-ceiling-ms` is a report bound. It flags vertices above the
+  ceiling and does not generate the constrained set's own boundary vertex.
+- `select_development_point`'s top-two min_separation test sees hull
+  vertices, not every point of the exact frontier (PQ #1585).
+
+On GLM-5.3's 132 units × 3 rungs at M=2048, the hull has 139 vertices, found
+with 277 probes in 0.13 s.
+
+CPU gates: `tests/test_pact_hull.py` (exact against brute force, 8 units ×
+3 options, 6,561 assignments, slack and binding budgets) and
+`tests/test_pact_allocator_replay.py`.
 
 ### 4.6 Selection
 
