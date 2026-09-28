@@ -441,8 +441,9 @@ def scorer_engine_kwargs(args, *, model, topology):
 def measure(args):
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
-    teacher2 = (load_teacher(args.teacher2, args.teacher2_sha256, panel)
-                if args.teacher2 is not None else None)
+    t2_path = getattr(args, "teacher2", None)  # absent on legacy single-teacher callers
+    t2_sha = getattr(args, "teacher2_sha256", None)
+    teacher2 = load_teacher(t2_path, t2_sha, panel) if t2_path is not None else None
     model = Path(args.model).resolve(strict=True)
     if sha256(model / "tokenizer.json") != TOKENIZER_SHA256:
         raise ValueError("candidate tokenizer.json differs from sealed reference vocabulary")
@@ -502,7 +503,7 @@ def measure(args):
         if teacher2 is not None:
             # Added only with a second teacher, so single-teacher bindings (and the
             # qualification records compared against them) are unchanged.
-            runtime_binding["teacher2_sha256"] = args.teacher2_sha256
+            runtime_binding["teacher2_sha256"] = t2_sha
         observation = write_runtime_observation(args.output, runtime_binding)
         print(f"[tr3-full-kl] initialized runtime observation {observation}", flush=True)
         if qualification is not None:
@@ -516,7 +517,7 @@ def measure(args):
             if (tokenizer_identity(model) != token_identity or producer_identity() != producer
                     or bound_json(args.teacher, args.teacher_sha256) != teacher):
                 raise ValueError("teacher/tokenizer/producer changed while scoring")
-            if teacher2 is not None and bound_json(args.teacher2, args.teacher2_sha256) != teacher2:
+            if teacher2 is not None and bound_json(t2_path, t2_sha) != teacher2:
                 raise ValueError("teacher2 changed while scoring")
             load_panel(args.panel, arrays_root=args.arrays_root)
             after = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
@@ -543,7 +544,7 @@ def measure(args):
                     "summary": summarize_panel({"windows": panel["windows"][:scored]}, vectors[:scored])}
             if teacher2 is not None:
                 # Same schema as the first teacher's block, keyed by the teacher2 sha.
-                result["second_teacher_full_vocabulary_kl"] = {args.teacher2_sha256: {
+                result["second_teacher_full_vocabulary_kl"] = {t2_sha: {
                     "estimator": result["estimator"],
                     "per_position_kl": vectors2[:scored],
                     "teacher_source_execution": teacher2["source_execution"],
@@ -556,7 +557,7 @@ def measure(args):
             tokens = inputs[index][0].tolist()
             second = ({} if teacher2 is None else
                       {"descriptor2": teacher2["windows"][index],
-                       "teacher2_root": str(Path(args.teacher2).resolve().parent)})
+                       "teacher2_root": str(Path(t2_path).resolve().parent)})
             armed = llm.apply_model(partial(arm_capture, index=index, window_id=window["window_id"],
                                            descriptor=row, teacher_root=str(Path(args.teacher).resolve().parent),
                                            target_ids=tokens[1:], **second))
