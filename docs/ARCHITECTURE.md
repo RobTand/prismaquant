@@ -111,7 +111,7 @@ numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
 
 Re-stamped 2026-09-27 (PQ #1537, tessera#599 step 2): the exact Tessera pin is
-`cadc200c9e705d02766cfce15e40284923f29242`, the head of Tessera #675, pinned
+`43da1c3969175caa6afba6cb1c3826e3e5ff62d1`, the head of Tessera #675, pinned
 before that PR merges so both halves land together (re-pin to its merge
 commit). Tessera no longer names PrismaQuant records. The rooted cached-unit
 reader (`tessera.cached_units.v2`) takes a `ReuseAuthority` from its caller:
@@ -122,17 +122,24 @@ authority is `prismaquant/tessera_reuse_authority.py` (stdlib-only; the checks
 moved verbatim, and a 346-construction differential over Tessera's own
 fixtures matched every decision and reason string). `read_cached_unit_bundle`,
 `open_hessian_reference`, `tessera_hessian` and
-`tools/build_tessera_hessian_collection.py` pass it in process;
-`run-pipeline.sh` hands the exporter its path as `--producer-authority`. A new
-PQ record version is now a change to that file alone. The packaged contract
-(v39, `f2f90948…`), the admission answer and `grammar.py` are unchanged.
-`export.py` moves to `e54f3f1b…` (`from_capture` gains `canonical_capture`)
+`tools/build_tessera_hessian_collection.py` pass it in process. Tessera's
+export drivers take its path as `--producer-authority`, and the packaged
+contract **v40** (`d6768313…`, additive over v39) publishes which drivers do in
+`producer_interface.reuse_authority`. PQ reads that block, never asserts it:
+`run-pipeline.sh` and `dispatch_tessera_campaign.py submit-export` add the
+option only when the Tessera checkout the export runs from publishes it
+(`tessera_export_lane.producer_authority_argv`), so an older pin -- the live
+campaign's `a3e83875` is v39 -- gets byte-identical argv
+(`tests/test_tessera_export_authority_gate.py`). A new PQ record version is now
+a change to that file alone. The reviewed admission answer and `grammar.py` are
+unchanged. `export.py` moves to `e54f3f1b…` (`from_capture` gains `canonical_capture`)
 with the wire functions byte-identical, so the legal inventory adds the
-equivalent `reader-pin-cadc200c` byte-state and no rate count moves. Its PB
-interpreters are `/home/rob/venvs/pq-pb461728e4-tessera-cadc200c` on dl380g10
-(PB build `054917049841`), sparky and sparklina, with a `-tf516` sibling on
-each Spark (PB builds sparky `932e0727851f`/`0c0421031a4b`, sparklina
-`e4bb44c990c7`/`93d85bea1147`); the `20bf5346` interpreters stay in place.
+equivalent `reader-pin-43da1c39` byte-state and no rate count moves. Its PB
+interpreters are `/home/rob/venvs/pq-pb461728e4-tessera-43da1c39` on dl380g10
+(PB build `6311aee82816`), sparky and sparklina, with a `-tf516` sibling on
+each Spark (PB builds sparky `cd407ffba31a`/`f6655667593e`, sparklina
+`cfdf59f7f2a6`/`cc4e0e0786c1`); the `cadc200c` (#675's first head, never a
+merged pin) and `20bf5346` interpreters stay in place.
 
 Re-stamped 2026-09-27 (PQ #1527): the exact Tessera pin is
 `20bf53464f9113f3115f454f8fa80453e71c0308`, master after Tessera #669 (closing
@@ -3648,8 +3655,9 @@ required. Tessera's rooted reader no longer judges these PQ records itself
 `ReuseAuthority` from its caller and refuses a rooted bundle by name without
 one, and PQ's authority is `prismaquant/tessera_reuse_authority.py` (the
 checks moved there verbatim; `read_cached_unit_bundle` passes it, and
-`run-pipeline.sh` hands the exporter its path as `--producer-authority`). That
-authority still requires a covering reseal proof for every adoption in strict
+`run-pipeline.sh` and `submit-export` hand the exporter its path as
+`--producer-authority` when the pinned contract says the exporter takes it).
+That authority still requires a covering reseal proof for every adoption in strict
 mode (permissive mode admits it with a warning) and reads the v1 R896 and v2
 served activation policies, so a strict rooted selection with an unproven
 added cell refuses there.

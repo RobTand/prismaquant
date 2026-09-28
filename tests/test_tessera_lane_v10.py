@@ -104,7 +104,7 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v39_at_the_pinned_digest():
+def test_the_packaged_contract_is_v40_at_the_pinned_digest():
     """v24 through v39 fit the v10 grammar, despite changed admission scopes.
 
     The contract version and the lane schema are two different clocks, and
@@ -117,7 +117,8 @@ def test_the_packaged_contract_is_v39_at_the_pinned_digest():
     (a per-image quantiser list and four re-minted dense cells), and v35-v38
     (an fp4 quantiser row, the BF16 R1792 dense withdrawal, and eight cells
     on the GLM image -- two of them re-using the routed E4M3 ids for a new
-    claim); none moved the lane schema.  A bump that changed what
+    claim), and v40 (a top-level ``producer_interface`` block naming the
+    drivers that take ``--producer-authority``); none moved the lane schema.  A bump that changed what
     a field MEANS would move the schema string and fail this reader closed, as
     v10 itself did to v9 below.
     """
@@ -127,7 +128,7 @@ def test_the_packaged_contract_is_v39_at_the_pinned_digest():
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 39
+    assert payload["contract_version"] == 40
     assert (payload["lane_eligibility"]["schema"]
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10)
 

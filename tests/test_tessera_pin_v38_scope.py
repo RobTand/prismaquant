@@ -58,10 +58,12 @@ def _resolve(facts, image):
         runtime_image=image, execution_mode="eager")
 
 
-def test_the_installed_contract_is_the_v39_pin():
+def test_the_installed_contract_is_the_v40_pin():
+    # v40 (Tessera #675) adds only the producer_interface block; the admission
+    # scopes this module pins are v39's and do not move.
     raw = _packaged_bytes()
     assert hashlib.sha256(raw).hexdigest() == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
-    assert json.loads(raw)["contract_version"] == 39
+    assert json.loads(raw)["contract_version"] == 40
 
 
 @pytest.mark.parametrize("rung", [832, 864, 896, 928, 944, 960, 1024, 1088])

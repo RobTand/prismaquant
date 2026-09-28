@@ -373,19 +373,21 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: mixed-rate window span runs its rate calls on per-rate CUDA streams, bit
 #: for bit, under PQ #1527. The packaged v39 contract and the admission answer
 #: are unchanged.
-#: Re-pinned 2026-09-27 to cadc200c (Tessera #675, tessera#599 step 2): the
+#: Re-pinned 2026-09-27 to 43da1c39 (Tessera #675, tessera#599 step 2): the
 #: rooted cached-unit reader and the Hessian reference reader take PrismaQuant's
 #: record checks from ``prismaquant/tessera_reuse_authority.py`` instead of
-#: naming PQ schemas, under PQ #1537. The packaged v39 contract and the
-#: admission answer are unchanged.
-TESSERA_DEV_PIN_COMMIT = "cadc200c9e705d02766cfce15e40284923f29242"
+#: naming PQ schemas, under PQ #1537. Contract v40 adds only the
+#: ``producer_interface`` block (which export drivers take
+#: ``--producer-authority``), so the SHA-256 below moves and the admission
+#: answer does not.
+TESSERA_DEV_PIN_COMMIT = "43da1c3969175caa6afba6cb1c3826e3e5ff62d1"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
+    "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION

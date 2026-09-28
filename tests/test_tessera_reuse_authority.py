@@ -66,10 +66,12 @@ def test_the_authority_file_stands_alone_for_the_exporter():
 
 
 def test_run_pipeline_hands_the_exporter_this_authority():
+    # Gated on the pinned checkout's contract; the gate itself is held by
+    # tests/test_tessera_export_authority_gate.py.
     script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
-    call = script[script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"'):]
-    call = call[:call.index("2>&1 | tee")]
-    assert '--producer-authority "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"' in call
+    call = script[:script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')]
+    call = call[call.rindex("TESSERA_AUTHORITY_LINES=$("):]
+    assert '"${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"' in call
 
 
 # -- a rooted bundle of PrismaQuant's records ------------------------------------
