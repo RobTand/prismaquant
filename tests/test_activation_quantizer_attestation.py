@@ -148,10 +148,14 @@ def test_unit_length_does_not_coerce_an_invalid_contract(length):
         _table(payload)
 
 
-def test_an_unknown_member_is_a_review_not_a_skip():
+def test_an_unknown_member_is_read_by_nothing_unless_marked():
+    """An added member moves no attested value (#1548). The producer forces a
+    review by marking it must-understand, and then this reader refuses."""
     payload = _payload()
     _contract_block(payload)["detail"] = "the kernel rounds to nearest even"
-    with pytest.raises(trc.TesseraContractError, match="does not know"):
+    assert _table(payload) == _table()
+    _contract_block(payload)["must_understand"] = ["detail"]
+    with pytest.raises(trc.TesseraContractError, match="must-understand"):
         _table(payload)
 
 
@@ -347,7 +351,7 @@ def test_a_stored_scale_outside_a_byte_is_refused():
 def test_a_missing_vector_member_is_refused():
     payload = _payload()
     del _vectors(payload)[0]["boundary"]
-    with pytest.raises(trc.TesseraContractError, match="must publish exactly"):
+    with pytest.raises(trc.TesseraContractError, match="missing field"):
         _table(payload)
 
 
@@ -517,18 +521,19 @@ def test_v1_does_not_accept_the_v2_list():
         _table(payload)
 
 
-def test_an_unknown_member_of_a_list_entry_is_a_review():
+def test_an_unknown_member_of_a_list_entry_is_read_only_when_marked():
     payload = _v34()
     _entries(payload)[1]["notes"] = "fine"
-    with pytest.raises(trc.TesseraContractError,
-                       match="which this reader does not know"):
+    assert _table(payload) == _table(_v34())
+    _entries(payload)[1]["must_understand"] = ["notes"]
+    with pytest.raises(trc.TesseraContractError, match="must-understand"):
         _table(payload)
 
 
 def test_a_half_written_scope_in_the_second_entry_is_refused():
     payload = _v34()
     _entries(payload)[1]["generated"].pop("driver")
-    with pytest.raises(trc.TesseraContractError, match="must publish exactly"):
+    with pytest.raises(trc.TesseraContractError, match="missing field"):
         _table(payload)
 
 

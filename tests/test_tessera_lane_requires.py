@@ -314,7 +314,9 @@ def _mutate(payload, **changes):
     ({"requires.rotation": []}, ("rotation", "non-empty")),
     ({"requires.body": "trellis"}, ("body", "trellis")),
     ({"requires.plane": "lut"}, ("plane", "lut")),
-    ({"kernel": "gemv"}, ("unknown field", "kernel")),
+    # An added field beside decoder/requires is read by nothing (#1548); the
+    # producer forces a refusal by marking it must-understand.
+    ({"kernel": "gemv", "must_understand": ["kernel"]}, ("must-understand", "kernel")),
     ({"lane": {"requires": {"column_rates": [4]}}}, ("missing field", "decoder")),
     ({"lane": "window_gemv"}, ("lane", "object")),
 ])

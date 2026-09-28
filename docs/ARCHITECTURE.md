@@ -78,6 +78,30 @@ wall-clock `solve_diagnostics.<target>.solver_seconds` stamp in
 `layer_config.json` and `selection.json`, which differs between any two runs
 of one commit. No format, default, stage, stored byte or ship gate changes.
 
+Tessera record readers accept additive fields (re-stamped 2026-09-27,
+`claude/decouple3-tolerant-readers`, PQ #1548, decoupling step 3a). The four
+readers of Tessera-published records -- `lane_eligibility.py`,
+`tessera_runtime_contract.py`, `full_engine_resource_report.py` and the native
+runtime record in `native_receipt_table.py` -- no longer refuse a field or block
+they do not know. Each object goes through one helper,
+`record_fields.admit_fields`: consumed fields are required and still type- and
+value-checked where read, an unknown field is accepted and never read, and a
+field the producer lists in that object's `must_understand` array that the
+reader does not know refuses the record. That list is how a producer forces a
+refusal on a change an old reader may not skip. Keyed tables whose keys are
+conditions or recomputed values stay exact: a lane's `requires` predicate, a
+tensor-parallel unit's `loader_axes`, a platform's `executes`, and the report's
+domain, term and owner-category tables. The schema name still decides the
+grammar, so a new schema version is refused by name as before. The breakage
+shapes this removes are #926 (an added activation-quantizer member), #958
+(v34 cells carrying words the reader over-read) and #927 (an unregistered
+report observation). `contract_answer` reads only named values, so an additive
+contract field moves no dev-pin answer. Nothing produces `must_understand`
+yet; the convention is generic and carries no PrismaQuant name. The running
+GLM rows use pinned venvs, so this does not reach them. No default, stage,
+format, serving lane or ship gate changes. Tests:
+`tests/test_tolerant_tessera_readers.py`.
+
 Stage A rows adopt the campaign's source proof (2026-09-27,
 `claude/pq-1497-stage-a-adopt-identity`, PQ #1497): a selected-source
 `tessera_campaign` row hashed every source shard it read, whole, through its
@@ -13285,7 +13309,8 @@ reader (`lane_eligibility.parse_cell_evidence`) parses both closed at the
 table's own schema — vocabularies transcribed from Tessera's validator,
 attribution re-derived from the control exactly as the grade is re-derived
 from the KL entries, an `identical` payload with a non-`equal` weight error
-refused, a v7 field on a v6 table refused as unknown — and carries them into
+refused; a v7 field on a v6 table was refused as unknown until PQ #1548, and
+is now an additive field the v6 grammar accepts and never reads — and carries them into
 the refusal text, into `RegimeRoute` provenance (`evidence_attribution`,
 `evidence_artifact`) and into the reviewed dev-pin answer. **What the reader
 does NOT do:** Tessera's v18 changelog states the consumer rule it expects
