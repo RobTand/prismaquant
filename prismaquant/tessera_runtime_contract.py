@@ -21,6 +21,14 @@ its launches. Both readers retain those fields and reject malformed or
 overlapping claims through the shared parser. Neither accepts a Gridbook
 schema; that serving lane was retired on 2026-09-02.
 
+**Additive fields** (#1548).  Every object this reader walks goes through
+:func:`prismaquant.record_fields.admit_fields`: a field or block it does not
+know is accepted and never read, so a Tessera release that only adds one needs
+no reader change and moves no value in :func:`contract_answer`.  A field the
+producer lists in an object's ``must_understand`` array, and this reader does
+not know, refuses the contract.  Keyed tables whose keys are conditions (a
+lane's ``requires``, a unit's ``loader_axes``) stay closed.
+
 **The dev pin.** This reader provides an explicit development answer pin.
 Serving and export separately require the exact commit and packaged contract
 digest in ``tessera_serving_runtime_pin``; that gate does not require a release
@@ -95,6 +103,7 @@ from .lane_eligibility import (
     cell_matches_serving_context,
     parse_lane_claim,
 )
+from . import record_fields
 from .tessera_serving_runtime_pin import native_extension_contract_row
 
 __all__ = [
@@ -360,14 +369,51 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: the existing v38 BF16 routed R1024 cell; MTP serving qualification is still
 #: pending. The packaged
 #: contract bytes and the admission answer below remain unchanged.
-TESSERA_DEV_PIN_COMMIT = "09d6559d7f386c94d69cf61f080cc7fac5bf0eb0"
+#: Re-pinned 2026-09-27 to 4c4ff1c2e after Tessera #646. This adopts #641's
+#: v39 admission scopes as well as the cached reader, under PQ #1456.
+#: Re-pinned 2026-09-27 to f94929def after Tessera #663 (tessera#662): the
+#: served recipe moves into ``tessera.export`` and the cached-unit receipts
+#: stamp it per structure, under PQ #1502. The packaged v39 contract and the
+#: admission answer below are unchanged.
+#: Re-pinned 2026-09-27 to a3e83875d after Tessera #671 (tessera#670): the
+#: rooted cached-unit reader accepts the v3 catalog extension, under PQ
+#: #1524. The packaged v39 contract and the admission answer are unchanged.
+#: Re-pinned 2026-09-27 to 20bf5346 after Tessera #669 (tessera#668): a
+#: mixed-rate window span runs its rate calls on per-rate CUDA streams, bit
+#: for bit, under PQ #1527. The packaged v39 contract and the admission answer
+#: are unchanged.
+#: Re-pinned 2026-09-27 to db5b6e23, the merge of Tessera #675 (tessera#599
+#: step 2; its tree equals the PR head 43da1c39): the
+#: rooted cached-unit reader and the Hessian reference reader take PrismaQuant's
+#: record checks from ``prismaquant/tessera_reuse_authority.py`` instead of
+#: naming PQ schemas, under PQ #1537. Contract v40 adds only the
+#: ``producer_interface`` block (which export drivers take
+#: ``--producer-authority``), so the SHA-256 below moves and the admission
+#: answer does not.
+#: Re-pinned 2026-09-28 to 38e96012, Tessera master after #678, #685 and
+#: #686, under PQ #1274. Contract v41 lets a cell name its serving code
+#: (no packaged cell does); v42 (tessera#640) adds the fused routed window
+#: MoE lane. The answer moves in two places, both additive for admission:
+#: two NEW ``native_extensions`` rows, and one more launch pair in the four
+#: window routed cells' ``executes``. ``export.py`` and ``grammar.py`` did not
+#: move.
+#: Re-pinned 2026-09-28 to a5f3b232cb, Tessera master's merge of #691
+#: (tessera#687), on top of #693, under PQ #1616. v43 (#693) names the fused
+#: window kernel's dense identity as a second launch in the six dense window
+#: cells; v44 (#691) moves the supported exporter into the installed package
+#: and publishes the serving plan schema, moving no answer. (PQ #1616.)
+#: The literal below
+#: is ``pprint.pformat(contract_answer(c), width=79, sort_dicts=False)`` on
+#: the v44 contract, and its diff against the v42 literal is exactly the 24
+#: executes paths of those six cells.
+TESSERA_DEV_PIN_COMMIT = "a5f3b232cb3c424b537a06713c728c86153d55fb"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+    "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -453,63 +499,16 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #:
 #: A column added on either tuple is a WIDENED projection, and the rule above
 #: applies to it: it re-stales this pin even when no published value moved.
+#: v39 review: GLM-image cells use f8dbe1a0, routed E4M3 admits q1024
+#: again on that image, and dense/routed family scopes follow the packaged
+#: rungs. The vanilla dense E4M3 q1024 pair remains; withdrawn-image
+#: claims do not. Route-only evidence is not a new KL measurement.
+#: Earlier pin reviews inside the literal remain historical.
+#: v43/v44 review: the six dense window cells name the fused dense
+#: launch beside the window-GEMM one (v43, tessera#693); v44
+#: (tessera#687) moves no answer -- same rows, same columns, the
+#: fused pair first, the window pair second, in every widened cell.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
- # Against the v38 contract (v35-v38) the review is six moves, and one of
- # them SHRINKS admission.
- # (1) v35/#607 adds a third sm_121 fp4 activation-quantiser row, for the
- # spark-vllm-nccl230@a5424378 image the routed E2M1_K2 cells name.
- # (2) v37/#614 WITHDRAWS tessera_bf16_k1_dense_sm121_{batch,decode} (q1792,
- # epilogue arithmetic).  No cell carries TESSERA_BF16_K1 R1792 any more, so
- # that dense rung answers unattested/no_cell on every platform and image.
- # (3) v38/#604 mints dense _resident cells for E4M3_K1 and BF16_K1 at q832,
- # q1024 and q1088 on spark-vllm-nccl230@f8dbe1a0 (eager, resident,
- # route_only, smoke not_recorded).  The family rows' attested rungs widen to
- # match.  The v34 E4M3 R1024 dense pair on the stock image is unchanged.
- # (4) v38 mints the routed BF16_K1 pair at q1024 on the same image.
- # (5) v38 REUSES the two routed E4M3_K1 ids for a different claim.  At v34
- # they meant q1024 on eugr/spark-vllm@0afec8d4, launched through the
- # materialising modular kernel, with smoke recorded.  At v38 they mean q896
- # on spark-vllm-nccl230@f8dbe1a0, launched through the compact window MoE
- # adapter, route_only and not_recorded.  The old claim was withdrawn because
- # the build cannot make that launch.  Routed E4M3 R1024 is now unattested
- # under every scope, and the answer keys cells by id, so this row's diff
- # below is the whole review of that change (tests/test_tessera_pin_v38_scope.py).
- # (6) Nothing else moved: lane schema v10, native extensions, the quant
- # method and the fused-module rule are byte-identical.
- # The v34 review follows, as history.
- # Against the v34 contract the review is five additions and no removals.
- # (1) v33/#568 publishes the sm_121 fp4 activation-quantiser table as a list
- # of per-image attestations; the stock-image row below is byte-identical to
- # v32's, and a second row for the glm53-nope-sm121 serving image arrives
- # with the same rounding vectors.  (2)-(5) v34/#579 attests the fused window
- # GEMM and mints four dense sm_121 cells on tessera::window_gemm_dense:
- # TESSERA_BF16_K1 q1792 and TESSERA_E4M3_K1 q1024, batch and decode, graded
- # route_only with smoke.status not_recorded, which the status-only evidence
- # gate does not refuse.  Accepting this answer therefore ADMITS those two
- # dense rungs on sm_121 (backed_with_serve_flag, TESSERA_SERVE_MODE) where
- # the v32 pin answered unattested/no_cell.  Every other row is unchanged.
- # The v32 review follows, as history; its 'only cells' count is superseded.
- # Against the v32 contract the review is exactly four moves, and the
- # WITHDRAWALS are the headline, not the widenings.  Tessera master (its #538
- # and the A4 retirement) withdrew all eight dense cells that were not
- # E2M1_K2: the four TESSERA_BF16_K1 rows -- which carried ``recorded``
- # evidence and were the only cells on gfx1201 -- and the four TESSERA_E4M3_K1
- # dense rows, resident and streamed.  Accepting this answer therefore admits
- # STRICTLY LESS than the v29 pin did on dense routes: TESSERA_BF16_K1_R1792
- # answers ``unattested``/``no_cell`` on every platform again, as it did
- # before 2026-09-13, and the lane's only cells are the six sm_121 rows below.
- # The routed-MoE ``recorded`` pair (E4M3_K1, rung 1024) is byte-identical,
- # so the status-only evidence gate admits the same scope it did at v29 --
- # the routed E2M1_K2 widen ([896] -> the full trellis domain [128..896]
- # step 128, receipted by the seven-rung green load) rides the two
- # ``not_recorded``/``route_only`` cells as before and is Rob's #198 call,
- # flagged here rather than decided by this literal.  D2b scopes the dense
- # batch cell's KL receipts to the rung they measured (``@q896`` in the kl
- # token -- the reader's widened projection, first exercised by this pin),
- # and the retired span-2 CUDA decoder leaves ``native_extensions`` with the
- # one window-GEMV row.  Nothing else moved: lane schema stays v10, the TP
- # ceiling stays 2 on the same receipt, and the quantiser table is
- # byte-identical.
  'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
  'quant_method': 'tessera',
@@ -524,7 +523,41 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                              'structure': 'shared'},
                   'sidecar_q256': 'int_or_per_role_list',
                   'mixed_rung_receipt': False},
- 'native_extensions': [{'module_name_prefix': 'tessera_window_gemv',
+ 'native_extensions': [{'module_name_prefix': 'tessera_routed_fused_e4m3',
+                        'filename_glob': 'tessera_routed_fused_e4m3*.so',
+                        'match': 'basename_fnmatch',
+                        'routes': ['TESSERA_FP8'],
+                        'when_unavailable': {'resident': {'status': 'substituted',
+                                                          'decoder': 'native_window_moe_compact'},
+                                             'streamed': {'status': 'substituted',
+                                                          'decoder': 'native_window_moe_compact'}},
+                        'lane': {'decoder': 'native_routed_fused_window',
+                                 'requires': {'column_rates': [4],
+                                              'window_bits': [14],
+                                              'body': 'window',
+                                              'plane': 'channel',
+                                              'release_overrides': False,
+                                              'diagonals': False,
+                                              'rotation': ['none'],
+                                              'grid_arities': [1]}}},
+                       {'module_name_prefix': 'tessera_routed_fused_value',
+                        'filename_glob': 'tessera_routed_fused_value*.so',
+                        'match': 'basename_fnmatch',
+                        'routes': ['TESSERA_BF16'],
+                        'when_unavailable': {'resident': {'status': 'substituted',
+                                                          'decoder': 'native_window_moe_compact_folded'},
+                                             'streamed': {'status': 'substituted',
+                                                          'decoder': 'native_window_moe_compact_folded'}},
+                        'lane': {'decoder': 'native_routed_fused_window_folded',
+                                 'requires': {'column_rates': [4],
+                                              'window_bits': [14],
+                                              'body': 'window',
+                                              'plane': 'channel',
+                                              'release_overrides': False,
+                                              'diagonals': False,
+                                              'rotation': ['none'],
+                                              'grid_arities': [1]}}},
+                       {'module_name_prefix': 'tessera_window_gemv',
                         'filename_glob': 'tessera_window_gemv*.so',
                         'match': 'basename_fnmatch',
                         'routes': ['TESSERA_BF16', 'TESSERA_FP8'],
@@ -1756,9 +1789,419 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                0,
                                0,
                                0,
+                               0]]]],
+                           ['sm_121',
+                            'e2m1_group16_ue4m3_static',
+                            'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
+                            'torch.ops._C.scaled_fp4_quant',
+                            'group',
+                            16,
+                            'E2M1',
+                            'UE4M3',
+                            'static_per_module',
+                            [['midpoint_dyadic',
+                              'e2m1_midpoint_dyadic',
+                              1065353216,
+                              [16576,
+                               16000,
+                               16192,
+                               16288,
+                               16352,
+                               16416,
+                               16480,
+                               16544,
+                               48768,
+                               48960,
+                               49056,
+                               49120,
+                               49184,
+                               49248,
+                               49312,
+                               0],
+                              56,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['code_identity',
+                              'e2m1_code_identity',
+                              1065353216,
+                              [0,
+                               32768,
+                               16128,
+                               16256,
+                               16320,
+                               16384,
+                               16448,
+                               16512,
+                               16576,
+                               48896,
+                               49024,
+                               49088,
+                               49152,
+                               49216,
+                               49280,
+                               49344],
+                              56,
+                              [0,
+                               8,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               7,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               15]],
+                             ['midpoint_reciprocal',
+                              'e2m1_midpoint_reciprocal',
+                              1065353216,
+                              [16656,
+                               16064,
+                               16272,
+                               16368,
+                               16424,
+                               16496,
+                               16552,
+                               16624,
+                               48832,
+                               49040,
+                               49136,
+                               49192,
+                               49264,
+                               49320,
+                               49392,
+                               0],
+                              60,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_global_scale',
+                              'e2m1_midpoint_global_scale',
+                              1069547520,
+                              [16656,
+                               16064,
+                               16272,
+                               16368,
+                               16424,
+                               16496,
+                               16552,
+                               16624,
+                               48832,
+                               49040,
+                               49136,
+                               49192,
+                               49264,
+                               49320,
+                               49392,
+                               0],
+                              65,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_seven_fourths',
+                              'e2m1_midpoint_reciprocal',
+                              1065353216,
+                              [16680,
+                               16096,
+                               16296,
+                               16396,
+                               16452,
+                               16524,
+                               16580,
+                               16652,
+                               48864,
+                               49064,
+                               49164,
+                               49220,
+                               49292,
+                               49348,
+                               49420,
+                               0],
+                              62,
+                              [7,
+                               0,
+                               2,
+                               2,
+                               4,
+                               4,
+                               6,
+                               6,
+                               8,
+                               10,
+                               10,
+                               12,
+                               12,
+                               14,
+                               14,
+                               0]],
+                             ['midpoint_reciprocal_ulp_below',
+                              'e2m1_midpoint_ulp_below',
+                              1065353216,
+                              [16656,
+                               16063,
+                               16271,
+                               16367,
+                               16423,
+                               16495,
+                               16551,
+                               16623,
+                               48831,
+                               49039,
+                               49135,
+                               49191,
+                               49263,
+                               49319,
+                               49391,
+                               0],
+                              60,
+                              [7,
+                               0,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               8,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               0]],
+                             ['midpoint_reciprocal_ulp_above',
+                              'e2m1_midpoint_ulp_above',
+                              1065353216,
+                              [16656,
+                               16065,
+                               16273,
+                               16369,
+                               16425,
+                               16497,
+                               16553,
+                               16625,
+                               48833,
+                               49041,
+                               49137,
+                               49193,
+                               49265,
+                               49321,
+                               49393,
+                               0],
+                              60,
+                              [7,
+                               1,
+                               2,
+                               3,
+                               4,
+                               5,
+                               6,
+                               7,
+                               9,
+                               10,
+                               11,
+                               12,
+                               13,
+                               14,
+                               15,
+                               0]],
+                             ['element_saturation',
+                              'e2m1_saturation',
+                              1065353216,
+                              [16584,
+                               49352,
+                               16580,
+                               49348,
+                               16576,
+                               49344,
+                               16574,
+                               49342,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              56,
+                              [7,
+                               15,
+                               7,
+                               15,
+                               7,
+                               15,
+                               7,
+                               15,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_underflow_tie',
+                              'block_scale_underflow_tie',
+                              1065353216,
+                              [15296,
+                               48064,
+                               15168,
+                               47936,
+                               15040,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              0,
+                              [0,
+                               8,
+                               0,
+                               8,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_underflow_above',
+                              'block_scale_underflow_above',
+                              1065353216,
+                              [15297,
+                               48065,
+                               15168,
+                               47936,
+                               15040,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              1,
+                              [5,
+                               13,
+                               3,
+                               11,
+                               2,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0]],
+                             ['block_scale_overflow',
+                              'block_scale_overflow',
+                              1065353216,
+                              [17728,
+                               50496,
+                               17600,
+                               50368,
+                               17472,
+                               17344,
+                               16128,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0],
+                              126,
+                              [7,
+                               15,
+                               5,
+                               13,
+                               3,
+                               2,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
+                               0,
                                0]]]]],
  'families': {'TESSERA_BF16_K1': {'reader_rate_range_q256': [256, 4096],
                                   'attested_rungs_q256': [832,
+                                                          864,
+                                                          880,
+                                                          896,
+                                                          928,
+                                                          960,
                                                           1024,
                                                           1088,
                                                           1792],
@@ -1766,19 +2209,17 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}},
               'TESSERA_E2M1_K2': {'reader_rate_range_q256': [128, 896],
-                                  'attested_rungs_q256': [128,
-                                                          256,
-                                                          384,
-                                                          512,
-                                                          640,
-                                                          768,
-                                                          896],
+                                  'attested_rungs_q256': [896],
                                   'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}},
               'TESSERA_E4M3_K1': {'reader_rate_range_q256': [256, 2048],
                                   'attested_rungs_q256': [832,
+                                                          864,
                                                           896,
+                                                          928,
+                                                          944,
+                                                          960,
                                                           1024,
                                                           1088],
                                   'max_world_size': 2,
@@ -1789,13 +2230,15 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_BF16_K1',
             'dense',
             'batch',
-            [832, 1024, 1088],
+            [832, 864, 880, 896, 928, 960, 1024, 1088],
             'bf16_unquantized',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['tessera::window_gemm_dense', 'native_window_gemm_folded']],
+            [['tessera::fused_window_dense',
+              'native_fused_window_dense_folded'],
+             ['tessera::window_gemm_dense', 'native_window_gemm_folded']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -1813,13 +2256,15 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_BF16_K1',
             'dense',
             'decode',
-            [832, 1024, 1088],
+            [832, 864, 880, 896, 928, 960, 1024, 1088],
             'bf16_unquantized',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['tessera::window_gemm_dense', 'native_window_gemm_folded']],
+            [['tessera::fused_window_dense',
+              'native_fused_window_dense_folded'],
+             ['tessera::window_gemm_dense', 'native_window_gemm_folded']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -1844,7 +2289,9 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
             [['tessera.native_window_moe.NativeWindowMoE.__call__',
-              'native_window_moe_compact_folded']],
+              'native_window_moe_compact_folded'],
+             ['tessera.routed_fused.FusedRoutedWindowMoE.__call__',
+              'native_routed_fused_window_folded']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -1869,7 +2316,9 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
             [['tessera.native_window_moe.NativeWindowMoE.__call__',
-              'native_window_moe_compact_folded']],
+              'native_window_moe_compact_folded'],
+             ['tessera.routed_fused.FusedRoutedWindowMoE.__call__',
+              'native_routed_fused_window_folded']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -1882,7 +2331,7 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
              None,
              None,
              None]],
-           ['tessera_e2m1_k2_dense_sm121_batch',
+           ['tessera_e2m1_k2_dense_sm121_batch_resident',
             'sm_121',
             'TESSERA_E2M1_K2',
             'dense',
@@ -1892,21 +2341,21 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
-            ['TESSERA_SERVE_MODE=resident|streamed'],
-            [['torch._scaled_mm', 'native_span2']],
-            ['resident', 'streamed'],
-            {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
-             'execution_modes': ['compiled', 'eager']},
-            '0.28.0',
+            ['TESSERA_SERVE_MODE=resident'],
+            [['tessera.kernel_a4.a4_span2_gemm', 'native_span2_gemm']],
+            ['resident'],
+            {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
+             'execution_modes': ['eager']},
+            '0.28.1rc1.dev397+gfd4a15126.d20260904',
             '2.13.0+cu130',
-            ['kl_lower_bound',
+            ['route_only',
              'not_recorded',
-             ['topk_intersection_lower_bound@1024@q896'],
+             [],
              'unattributed',
              None,
              None,
              None]],
-           ['tessera_e2m1_k2_dense_sm121_decode',
+           ['tessera_e2m1_k2_dense_sm121_decode_resident',
             'sm_121',
             'TESSERA_E2M1_K2',
             'dense',
@@ -1916,12 +2365,12 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
-            ['TESSERA_SERVE_MODE=resident|streamed'],
-            [['torch._scaled_mm', 'native_span2']],
-            ['resident', 'streamed'],
-            {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
-             'execution_modes': ['compiled', 'eager']},
-            '0.28.0',
+            ['TESSERA_SERVE_MODE=resident'],
+            [['tessera.kernel_a4.a4_span2_gemm', 'native_span2_gemm']],
+            ['resident'],
+            {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
+             'execution_modes': ['eager']},
+            '0.28.1rc1.dev397+gfd4a15126.d20260904',
             '2.13.0+cu130',
             ['route_only',
              'not_recorded',
@@ -1935,15 +2384,16 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_E2M1_K2',
             'routed_moe',
             'batch',
-            [128, 256, 384, 512, 640, 768, 896],
+            [896],
             'e2m1_group16_ue4m3_static',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['vllm.fused_moe.modular_kernel', 'torch_materialize_stock']],
+            [['tessera.kernel_a4.a4_span2_grouped_gemm',
+              'native_span2_grouped']],
             ['resident'],
-            {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb',
+            {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
             '0.28.1rc1.dev397+gfd4a15126.d20260904',
             '2.13.0+cu130',
@@ -1959,15 +2409,16 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_E2M1_K2',
             'routed_moe',
             'decode',
-            [128, 256, 384, 512, 640, 768, 896],
+            [896],
             'e2m1_group16_ue4m3_static',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['vllm.fused_moe.modular_kernel', 'torch_materialize_stock']],
+            [['tessera.kernel_a4.a4_span2_grouped_gemm',
+              'native_span2_grouped']],
             ['resident'],
-            {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:a5424378322071f4c33e63d1372a2bb028e46b03f0da0e5edb0cdd7418e2cebb',
+            {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
             '0.28.1rc1.dev397+gfd4a15126.d20260904',
             '2.13.0+cu130',
@@ -1989,7 +2440,8 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident|streamed'],
-            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            [['tessera::fused_window_dense', 'native_fused_window_dense'],
+             ['tessera::window_gemm_dense', 'native_window_gemm']],
             ['resident', 'streamed'],
             {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
              'execution_modes': ['eager']},
@@ -2007,13 +2459,14 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_E4M3_K1',
             'dense',
             'batch',
-            [832, 1024, 1088],
+            [832, 864, 896, 928, 960, 1024, 1088],
             'fp8_per_token_dynamic',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            [['tessera::fused_window_dense', 'native_fused_window_dense'],
+             ['tessera::window_gemm_dense', 'native_window_gemm']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2037,7 +2490,8 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident|streamed'],
-            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            [['tessera::fused_window_dense', 'native_fused_window_dense'],
+             ['tessera::window_gemm_dense', 'native_window_gemm']],
             ['resident', 'streamed'],
             {'image': 'vllm/vllm-openai@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14',
              'execution_modes': ['eager']},
@@ -2055,13 +2509,14 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_E4M3_K1',
             'dense',
             'decode',
-            [832, 1024, 1088],
+            [832, 864, 896, 928, 960, 1024, 1088],
             'fp8_per_token_dynamic',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
-            [['tessera::window_gemm_dense', 'native_window_gemm']],
+            [['tessera::fused_window_dense', 'native_fused_window_dense'],
+             ['tessera::window_gemm_dense', 'native_window_gemm']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2079,14 +2534,16 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_E4M3_K1',
             'routed_moe',
             'batch',
-            [896],
+            [832, 864, 896, 928, 944, 960, 1024, 1088],
             'fp8_per_token_dynamic',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
             [['tessera.native_window_moe.NativeWindowMoE.__call__',
-              'native_window_moe_compact']],
+              'native_window_moe_compact'],
+             ['tessera.routed_fused.FusedRoutedWindowMoE.__call__',
+              'native_routed_fused_window']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2104,14 +2561,16 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'TESSERA_E4M3_K1',
             'routed_moe',
             'decode',
-            [896],
+            [832, 864, 896, 928, 944, 960, 1024, 1088],
             'fp8_per_token_dynamic',
             'backed_with_serve_flag',
             'device_qualified',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
             [['tessera.native_window_moe.NativeWindowMoE.__call__',
-              'native_window_moe_compact']],
+              'native_window_moe_compact'],
+             ['tessera.routed_fused.FusedRoutedWindowMoE.__call__',
+              'native_routed_fused_window']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2258,6 +2717,13 @@ class TesseraRouteCell:
     runtime_vllm: str = ""
     runtime_torch: str = ""
     evidence: "CellEvidence | None" = None
+    #: The Tessera code the evidence was taken on (contract v41, #1561), as
+    #: ``lane_eligibility.EligibilityCell`` parses it; empty when the cell
+    #: names none. ``cell_matches_serving_context`` compares the digest with
+    #: the pinned serving code. Not part of :func:`contract_answer` yet: the
+    #: reviewed answer gains this column at the bump that activates a v3 pin.
+    runtime_tessera_commit: str = ""
+    runtime_serving_source_sha256: str = ""
 
     @property
     def native(self) -> bool:
@@ -2812,6 +3278,38 @@ def _require(block: Mapping[str, Any], key: str, where: str) -> Any:
     return block[key]
 
 
+def _admit(block: Any, where: str, *, required: Sequence[str] = (),
+           optional: Sequence[str] = ()) -> Mapping[str, Any]:
+    """One contract object through the shared tolerant rule (#1548).
+
+    A field this reader does not know is accepted and never read; one the
+    producer marks ``must_understand`` that this reader does not know refuses
+    the contract.  See :mod:`prismaquant.record_fields`.
+    """
+    return record_fields.admit_fields(block, where, required=required,
+                                      optional=optional, error=TesseraContractError)
+
+
+#: The top-level members PrismaQuant reads somewhere, by any reader of this
+#: contract.  ``construction`` and ``changelog`` are published and read by no
+#: one here, so a producer that marks either ``must_understand`` is refused.
+_CONTRACT_MEMBERS_READ = (
+    "schema", "contract_version", "quant_method", "versions", "native_extensions",
+    "formats", "lane_eligibility", "tensor_parallel", "expert_parallel",
+    "fused_module", "activation_quantizers", "producer_interface",
+)
+
+#: The ``formats[]`` row members PrismaQuant reads somewhere.  The rows travel
+#: as whole mappings into several consumers (``lane_eligibility`` and the
+#: Tessera export lane among them), so this is their union.
+_FORMAT_ROW_MEMBERS_READ = (
+    "kind", "family", "grid", "name_pattern", "activation_contract",
+    "reader_rate_range_q256", "reader_rate_step_q256", "attested_rungs_q256",
+    "candidate_rungs_q256", "attested_wire", "residency_modes", "structures",
+    "mode", "n_sub", "rungs",
+)
+
+
 #: The one ``native_extensions[].match`` rule this reader implements.  A
 #: contract naming another rule is REFUSED rather than read with this one:
 #: the whole reason ``match`` is a value is that the predicate is not
@@ -2850,8 +3348,7 @@ def _parse_native_extensions(
         at = f"{where}[{i}]"
         if not isinstance(entry, Mapping):
             raise TesseraContractError(f"{at} must be a JSON object")
-        for member in _NATIVE_EXTENSION_MEMBERS:
-            _require(entry, member, at)
+        _admit(entry, at, required=_NATIVE_EXTENSION_MEMBERS)
         prefix = str(entry["module_name_prefix"])
         if not prefix:
             raise TesseraContractError(
@@ -2890,8 +3387,8 @@ def _parse_native_extensions(
             if not isinstance(behaviour, Mapping):
                 raise TesseraContractError(
                     f"{at}.when_unavailable[{mode!r}] must be an object")
-            _require(behaviour, "status", f"{at}.when_unavailable[{mode!r}]")
-            _require(behaviour, "decoder", f"{at}.when_unavailable[{mode!r}]")
+            _admit(behaviour, f"{at}.when_unavailable[{mode!r}]",
+                   required=("status", "decoder"))
             behaviours[str(mode)] = {
                 "status": str(behaviour["status"]),
                 "decoder": (None if behaviour["decoder"] is None
@@ -3030,13 +3527,14 @@ _ACTIVATION_CONTRACT_MEMBERS = (
 _ACTIVATION_VECTOR_MEMBERS = (
     "id", "boundary", "global_scale", "input", "stored_scale", "codes",
 )
-#: The vocabulary of ``platforms[p]``.  ``generated`` is the scope the table
-#: was taken under and is read here (RobTand/prismaquant#715); a third member
-#: is a review, for the same reason a contract entry's is.
+#: The members of ``platforms[p]`` this reader reads.  ``generated`` is the
+#: scope the table was taken under (RobTand/prismaquant#715).  A further member
+#: is accepted and never read unless the producer marks it ``must_understand``
+#: (#1548).
 _ACTIVATION_PLATFORM_MEMBERS = ("contracts", "generated")
-#: Every field of ``platforms[p].generated``.  All of them, exactly: a table
-#: that names its box but not its build, or its build but not its image, does
-#: not say what a consumer has to compare against.
+#: The fields of ``platforms[p].generated`` this reader requires.  All of them:
+#: a table that names its box but not its build, or its build but not its
+#: image, does not say what a consumer has to compare against.
 _ACTIVATION_GENERATED_MEMBERS = (
     "image", "vllm", "torch", "device", "compute_capability", "driver",
     "generator_sha256",
@@ -3197,6 +3695,7 @@ def _parse_activation_quantizers(payload: Mapping[str, Any], path: str
             f"{list(ACTIVATION_QUANTIZER_SCHEMAS)}. A quantiser table in a "
             "grammar this reader has not been taught is a review, not a thing "
             "to read with the grammar it happens to have.")
+    _admit(block, where, required=("schema",), optional=("platforms",))
     platforms = _require(block, "platforms", where)
     if not isinstance(platforms, Mapping):
         raise TesseraContractError(f"{where}.platforms must be a JSON object")
@@ -3266,13 +3765,9 @@ def _parse_activation_platform_entry(entry: Any, *, platform: str, where: str
     """
     if not isinstance(entry, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
-    unknown = sorted(set(entry) - set(_ACTIVATION_PLATFORM_MEMBERS))
-    if unknown:
-        raise TesseraContractError(
-            f"{where} publishes {unknown} which this reader does not know. "
-            "A field beside a platform's quantiser tables that nothing "
-            "here reads is either a value a gate should decide on or "
-            "prose that does not belong; either way it is a review.")
+    # A member beside the quantiser tables that nothing here reads is
+    # accepted; one the producer says a reader may not skip is refused.
+    _admit(entry, where, optional=_ACTIVATION_PLATFORM_MEMBERS)
     contracts = _require(entry, "contracts", where)
     if not isinstance(contracts, Mapping):
         raise TesseraContractError(f"{where}.contracts must be a JSON object")
@@ -3312,19 +3807,18 @@ def _parse_activation_generated(entry: Any, where: str
     :func:`native_operator_panel.require_panel_execution_scope` -- so a
     missing scope can never become a silent pass.
 
-    A PRESENT block is read strictly: exactly the published vocabulary, every
-    value a non-empty string.  A half-written scope is worse than none,
-    because it looks like an answer.
+    A PRESENT block is read strictly: every member this reader compares must
+    be present, and each a non-empty string.  A half-written scope is worse
+    than none, because it looks like an answer.  A member added beside them
+    is accepted and never read (#1548).
     """
     if entry is None:
         return None
     if not isinstance(entry, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
-    if set(entry) != set(_ACTIVATION_GENERATED_MEMBERS):
-        raise TesseraContractError(
-            f"{where} must publish exactly "
-            f"{sorted(_ACTIVATION_GENERATED_MEMBERS)}, got {sorted(entry)}")
-    for field, value in entry.items():
+    _admit(entry, where, required=_ACTIVATION_GENERATED_MEMBERS)
+    for field in _ACTIVATION_GENERATED_MEMBERS:
+        value = entry[field]
         if not isinstance(value, str) or not value.strip():
             raise TesseraContractError(
                 f"{where}.{field} must be a non-empty string, got {value!r}")
@@ -3338,13 +3832,10 @@ def _parse_activation_contract(entry: Any, *, platform: str, name: str,
                                ) -> ActivationQuantizerAttestation:
     if not isinstance(entry, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
-    unknown = sorted(set(entry) - set(_ACTIVATION_CONTRACT_MEMBERS))
-    if unknown:
-        raise TesseraContractError(
-            f"{where} publishes {unknown} which this reader does not know. A "
-            "field in a quantiser attestation that nothing here reads is "
-            "either a value a gate should decide on or prose that does not "
-            "belong; either way it is a review, not a thing to skip.")
+    # Each member here is a fact about what the vectors MEAN, so each is
+    # required and compared.  A member added beside them is accepted and
+    # never read, unless the producer marks it must-understand (#1548).
+    _admit(entry, where, required=_ACTIVATION_CONTRACT_MEMBERS)
     length = _require(entry, "unit_length", where)
     if type(length) is not int or length < 1:
         raise TesseraContractError(
@@ -3358,10 +3849,7 @@ def _parse_activation_contract(entry: Any, *, platform: str, name: str,
         spot = f"{where}.vectors[{i}]"
         if not isinstance(vector, Mapping):
             raise TesseraContractError(f"{spot} must be a JSON object")
-        if set(vector) != set(_ACTIVATION_VECTOR_MEMBERS):
-            raise TesseraContractError(
-                f"{spot} must publish exactly "
-                f"{sorted(_ACTIVATION_VECTOR_MEMBERS)}, got {sorted(vector)}")
+        _admit(vector, spot, required=_ACTIVATION_VECTOR_MEMBERS)
         inputs = vector["input"]
         codes = vector["codes"]
         for field, value in (("input", inputs), ("codes", codes)):
@@ -3759,6 +4247,11 @@ def _parse_fused_module(payload: Mapping[str, Any], path: str
     block = _require(payload, "fused_module", path)
     if not isinstance(block, Mapping):
         raise TesseraContractError(f"{where} must be a JSON object")
+    # ``container`` and the ``*_note`` prose are published and not read, so
+    # they are not in the understood set: a producer that marks one
+    # must-understand is refused rather than skipped.
+    _admit(block, where, optional=("schema", "fields", "sidecar_q256",
+                                   "mixed_rung_receipt"))
     schema = block.get("schema")
     if schema != FUSED_MODULE_SCHEMA:
         raise TesseraContractError(
@@ -3847,6 +4340,7 @@ def _parse_loader_axes(block: Any, where: str) -> dict[str, str]:
                 f"{where}.loader_axes.{axis} must be an object carrying a "
                 f"'status', got {entry!r}"
             )
+        _admit(entry, f"{where}.loader_axes.{axis}", required=("status",))
         status = str(_require(entry, "status", f"{where}.loader_axes.{axis}"))
         if status not in TP_LOADER_AXIS_STATUSES:
             raise TesseraContractError(
@@ -3870,7 +4364,9 @@ def _parse_tensor_parallel(
     read together here so a unit row cannot be half-read: a family with a
     ceiling and no axis claim is a table this reader refuses.
     """
-    tp = _require(payload, "tensor_parallel", path)
+    tp = _admit(_require(payload, "tensor_parallel", path),
+                f"{path}.tensor_parallel",
+                optional=("semantics", "units", "world_size_receipts"))
     if str(tp.get("semantics")) != "closed_world":
         raise TesseraContractError(
             f"{path}.tensor_parallel.semantics is "
@@ -3883,6 +4379,8 @@ def _parse_tensor_parallel(
     axes: dict[str, dict[str, str]] = {}
     for i, unit in enumerate(tp.get("units", ())):
         where = f"{path}.tensor_parallel.units[{i}]"
+        _admit(unit, where, required=("unit", "max_world_size"),
+               optional=("world_size_receipt", "loader_axes"))
         name = str(_require(unit, "unit", where))
         declared = int(_require(unit, "max_world_size", where))
         if declared > 1:
@@ -3912,6 +4410,7 @@ def _parse_world_size_receipts(
     receipts: dict[str, tuple[int, frozenset[str]]] = {}
     for i, row in enumerate(rows):
         where = f"{where_block}[{i}]"
+        _admit(row, where, required=("id", "world_size", "executed_units"))
         receipt_id = str(_require(row, "id", where))
         if receipt_id in receipts:
             raise TesseraContractError(
@@ -4018,6 +4517,10 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             f"{schema!r}. An older contract is not a subset of this one, so it "
             "is refused rather than partially read."
         )
+    # Top-level blocks this reader does not know are accepted and never
+    # read (#1548); presence of each block it needs is checked where it is
+    # read, by name.
+    _admit(payload, path, optional=_CONTRACT_MEMBERS_READ)
     reader_range: dict[str, tuple[int, int]] = {}
     attested: dict[str, frozenset[int]] = {}
     formats = _require(payload, "formats", path)
@@ -4027,6 +4530,7 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
         if not isinstance(entry, Mapping):
             raise TesseraContractError(f"{path}.formats[{i}] must be an object")
         where = f"{path}.formats[{i}]"
+        _admit(entry, where, optional=_FORMAT_ROW_MEMBERS_READ)
         kind = str(_require(entry, "kind", where))
         if kind != "tessera_wire":
             raise TesseraContractError(
@@ -4110,6 +4614,8 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             runtime_vllm=cell.runtime_vllm,
             runtime_torch=cell.runtime_torch,
             evidence=cell.evidence,
+            runtime_tessera_commit=cell.runtime_tessera_commit,
+            runtime_serving_source_sha256=cell.runtime_serving_source_sha256,
         ))
 
     world, loader_axes = _parse_tensor_parallel(payload, path)

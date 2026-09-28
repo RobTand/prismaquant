@@ -88,7 +88,7 @@ def past_the_gate(monkeypatch):
     def stop(*_args, **_kwargs):
         raise _GatePassed()
 
-    monkeypatch.setattr(aura_mod, "_load_plan", stop)
+    monkeypatch.setattr(aura_mod, "load_joint_anchor_plan", stop)
 
 
 def test_sealed_digest_follows_the_dispatcher_rule(identity_files):

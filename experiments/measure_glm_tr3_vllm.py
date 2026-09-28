@@ -30,7 +30,7 @@ import torch
 
 from experiments.glm_tr3_full_vocab import (
     CONTEXT_LENGTH, LOGITS_LAYOUTS, PANEL_SHA256, TOKENIZER_SHA256, VOCAB_SIZE,
-    PromptLogitsCapture, bound_json, cached_checkpoint_identity, collect_tp_result, load_panel, sha256, summarize_panel,
+    PromptLogitsCapture, bound_json, cached_checkpoint_identity, collect_tp_result, collect_tp_result2, load_panel, sha256, summarize_panel,
 )
 from experiments.build_glm_tr3_teacher import producer_identity
 from tools.full_kl_teacher_payload import atomic_json_write, canonical_sha256, tokenizer_identity
@@ -124,21 +124,67 @@ def install_capture(model, *, tile_rows, logits_layout="legacy_single"):
                              "gpu_model_runner": sha256(inspect.getfile(gpu_runner))}}
 
 
-def arm_capture(model, *, index, window_id, descriptor, teacher_root, target_ids):
-    state = model._tr3_capture
-    teacher = targets = None
-    if state.rank == 0:
-        path = Path(teacher_root) / descriptor["path"]
-        raw = path.read_bytes()
-        if len(raw) != descriptor["bytes"] or hashlib.sha256(raw).hexdigest() != descriptor["sha256"]:
+def load_teacher_window(path, descriptor):
+    """One read of a sealed ``.npy`` window: hash the buffer, then view it.
+
+    ``np.load(io.BytesIO(path.read_bytes()))`` holds the window twice on the
+    host; on unified memory that second 1.18 GiB copy counts against the GPU.
+    The array returned here is a view into the single buffer that was hashed.
+    """
+    size = descriptor["bytes"]
+    buffer = bytearray(size)
+    with open(path, "rb") as handle:
+        view = memoryview(buffer)
+        filled = 0
+        while filled < size:
+            count = handle.readinto(view[filled:])
+            if not count:
+                break
+            filled += count
+        if filled != size or handle.read(1):
             raise ValueError("teacher window bytes changed before GPU preload")
-        a = np.load(io.BytesIO(raw), allow_pickle=False)
-        if a.dtype != np.float32 or list(a.shape) != descriptor["shape"]:
-            raise ValueError("teacher array geometry/dtype mismatch")
-        teacher = torch.from_numpy(a).to("cuda")
+    if hashlib.sha256(buffer).hexdigest() != descriptor["sha256"]:
+        raise ValueError("teacher window bytes changed before GPU preload")
+    header = io.BytesIO(memoryview(buffer)[:65536])  # header bytes only; small copy
+    version = np.lib.format.read_magic(header)
+    readers = {(1, 0): np.lib.format.read_array_header_1_0, (2, 0): np.lib.format.read_array_header_2_0}
+    if version not in readers:
+        raise ValueError("teacher array has an unsupported .npy version")
+    shape, fortran_order, dtype = readers[version](header)
+    offset = header.tell()
+    count = int(np.prod(shape, dtype=np.int64))
+    if dtype.hasobject or offset + count * dtype.itemsize != size:
+        raise ValueError("teacher array geometry/dtype mismatch")
+    array = np.frombuffer(buffer, dtype=dtype, count=count, offset=offset)
+    return array.reshape(shape[::-1]).transpose() if fortran_order else array.reshape(shape)
+
+
+def _resident_window(teacher_root, descriptor):
+    a = load_teacher_window(Path(teacher_root) / descriptor["path"], descriptor)
+    if a.dtype != np.float32 or list(a.shape) != descriptor["shape"]:
+        raise ValueError("teacher array geometry/dtype mismatch")
+    resident = torch.from_numpy(a).to("cuda")
+    del a  # the host staging buffer of this window is released before the next window loads
+    return resident
+
+
+def arm_capture(model, *, index, window_id, descriptor, teacher_root, target_ids,
+                descriptor2=None, teacher2_root=None):
+    state = model._tr3_capture
+    teacher = teacher2 = targets = None
+    if state.rank == 0:
+        teacher = _resident_window(teacher_root, descriptor)
+        if descriptor2 is not None:
+            # Optional second teacher: streamed one window at a time, resident on
+            # the GPU only until finish() drops it. Host staging is sequential
+            # with teacher 1's (freed above), so host peak stays one window.
+            teacher2 = _resident_window(teacher2_root, descriptor2)
         targets = torch.tensor(target_ids, dtype=torch.long, device="cuda")
         torch.cuda.synchronize()
-    state.arm(index, window_id, teacher, targets)
+    if descriptor2 is None:
+        state.arm(index, window_id, teacher, targets)
+    else:
+        state.arm(index, window_id, teacher, targets, teacher2=teacher2)
     return {"rank": state.rank, "window_id": window_id, "teacher_resident": state.rank == 0}
 
 
@@ -395,12 +441,17 @@ def scorer_engine_kwargs(args, *, model, topology):
 def measure(args):
     panel, inputs = load_panel(args.panel, arrays_root=args.arrays_root)
     teacher = load_teacher(args.teacher, args.teacher_sha256, panel)
+    t2_path = getattr(args, "teacher2", None)  # absent on legacy single-teacher callers
+    t2_sha = getattr(args, "teacher2_sha256", None)
+    teacher2 = load_teacher(t2_path, t2_sha, panel) if t2_path is not None else None
     model = Path(args.model).resolve(strict=True)
     if sha256(model / "tokenizer.json") != TOKENIZER_SHA256:
         raise ValueError("candidate tokenizer.json differs from sealed reference vocabulary")
     token_identity = tokenizer_identity(model)
     if token_identity != teacher["tokenizer_identity"]:
         raise ValueError("candidate tokenizer files differ from teacher")
+    if teacher2 is not None and token_identity != teacher2["tokenizer_identity"]:
+        raise ValueError("candidate tokenizer files differ from teacher2")
     candidate_identity = cached_checkpoint_identity(model, args.candidate_digest_cache)
     producer = producer_identity()
     topology = gold_engine_kwargs(args)
@@ -449,11 +500,15 @@ def measure(args):
                            "logits_layout": args.logits_layout}
         diagnostics_before = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
         runtime_binding["require_exl3_diag"] = args.require_exl3_diag
+        if teacher2 is not None:
+            # Added only with a second teacher, so single-teacher bindings (and the
+            # qualification records compared against them) are unchanged.
+            runtime_binding["teacher2_sha256"] = t2_sha
         observation = write_runtime_observation(args.output, runtime_binding)
         print(f"[tr3-full-kl] initialized runtime observation {observation}", flush=True)
         if qualification is not None:
             require_native_qualification(qualification, runtime_binding)
-        vectors, alignment, rank_calls = [], [], []
+        vectors, vectors2, alignment, rank_calls = [], [], [], []
         count = 1 if args.qualify_hook else len(inputs)
 
         def recheck_identities():
@@ -462,6 +517,8 @@ def measure(args):
             if (tokenizer_identity(model) != token_identity or producer_identity() != producer
                     or bound_json(args.teacher, args.teacher_sha256) != teacher):
                 raise ValueError("teacher/tokenizer/producer changed while scoring")
+            if teacher2 is not None and bound_json(t2_path, t2_sha) != teacher2:
+                raise ValueError("teacher2 changed while scoring")
             load_panel(args.panel, arrays_root=args.arrays_root)
             after = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
             if args.require_exl3_diag:
@@ -477,7 +534,7 @@ def measure(args):
             manifest = self_manifest(image=args.serve_image,
                                      extra={"measurement_tool": "experimental_glm_tr3_full_vocabulary",
                                             "runtime_binding": runtime_binding})
-            return {"schema": schema,
+            result = {"schema": schema,
                     "passed": True, "runtime_binding": runtime_binding, "serve_manifest": manifest,
                     "estimator": "KL(reference||candidate), raw logits normalized and summed in FP64 over full vocabulary",
                     "per_position_kl": vectors[:scored], "prompt_alignment": alignment[:scored],
@@ -485,13 +542,25 @@ def measure(args):
                     "route_diagnostics": {"before": diagnostics_before, "after": diagnostics_after},
                     "teacher_source_execution": teacher["source_execution"],
                     "summary": summarize_panel({"windows": panel["windows"][:scored]}, vectors[:scored])}
+            if teacher2 is not None:
+                # Same schema as the first teacher's block, keyed by the teacher2 sha.
+                result["second_teacher_full_vocabulary_kl"] = {t2_sha: {
+                    "estimator": result["estimator"],
+                    "per_position_kl": vectors2[:scored],
+                    "teacher_source_execution": teacher2["source_execution"],
+                    "summary": summarize_panel({"windows": panel["windows"][:scored]},
+                                               vectors2[:scored])}}
+            return result
 
         for index in range(count):
             window, row = panel["windows"][index], teacher["windows"][index]
             tokens = inputs[index][0].tolist()
+            second = ({} if teacher2 is None else
+                      {"descriptor2": teacher2["windows"][index],
+                       "teacher2_root": str(Path(t2_path).resolve().parent)})
             armed = llm.apply_model(partial(arm_capture, index=index, window_id=window["window_id"],
                                            descriptor=row, teacher_root=str(Path(args.teacher).resolve().parent),
-                                           target_ids=tokens[1:]))
+                                           target_ids=tokens[1:], **second))
             if sum(r["teacher_resident"] for r in armed) != 1:
                 raise ValueError("resident teacher must have exactly one TP owner")
             outputs = llm.generate([{"prompt_token_ids": tokens}],
@@ -505,6 +574,8 @@ def measure(args):
                                             world_size=topology["tensor_parallel_size"],
                                             rows=CONTEXT_LENGTH - 1, vocab_size=VOCAB_SIZE,
                                             logits_layout=args.logits_layout))
+            if teacher2 is not None:
+                vectors2.append(collect_tp_result2(reports, rows=CONTEXT_LENGTH - 1))
             alignment.append(verify_prompt_alignment(outputs[0], tokens, reports))
             rank_calls.append([{k: r[k] for k in ("rank", "world_size", "window_id", "calls", "logits_layout")} for r in reports])
             print(f"[tr3-full-kl] measured {window['window_id']}", flush=True)
@@ -537,6 +608,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("model", "candidate-digest-cache", "panel", "teacher", "teacher-sha256", "serve-image", "output"):
         p.add_argument("--" + name, required=True)
+    p.add_argument("--teacher2", help="optional second raw teacher.json; scored in the same pass")
+    p.add_argument("--teacher2-sha256", help="required with --teacher2")
     p.add_argument("--arrays-root")
     p.add_argument("--quantization")
     p.add_argument("--kv-cache-dtype", choices=("auto", "bfloat16", "fp8_ds_mla"), required=True)
@@ -559,6 +632,10 @@ def main():
                         "then score the whole panel in the same engine")
     add_gold_engine_arguments(p)
     args = p.parse_args()
+    if (args.teacher2 is None) != (args.teacher2_sha256 is None):
+        p.error("--teacher2 and --teacher2-sha256 go together")
+    if args.teacher2_sha256 is not None and args.teacher2_sha256 == args.teacher_sha256:
+        p.error("teacher2 must differ from teacher")
     if args.tile_rows <= 0 or args.tile_rows > 64:
         p.error("tile rows must be 1..64")
     if args.kernel_config is not None:

@@ -510,6 +510,7 @@ from prismaquant.fixed_head import (
 )
 from prismaquant.model_profiles import detect_profile
 from prismaquant.serving_profiles import load_serving_profile
+from prismaquant.tessera_lane import is_tessera_format_name
 from prismaquant.tessera_serving_scope import (
     add_serving_scope_arguments,
     serving_target_from_args,
@@ -533,7 +534,7 @@ except Exception as exc:
     print(f"[pipeline] ERROR: invalid LM_HEAD_FORMAT: {exc}", file=sys.stderr)
     raise SystemExit(2) from None
 head_context = None
-if target is not None and fr.is_tessera_format_name(canonical):
+if target is not None and is_tessera_format_name(canonical):
     head_context = {"lm_head": target.context(unit_structure_from_profile("lm_head", profile))}
 if not fr.format_is_producer_eligible(canonical, **(
         {"context_by_unit": head_context} if head_context is not None else {})):
@@ -574,7 +575,7 @@ for raw in os.environ["PQ_BODY_FORMATS"].split(","):
             formats.append(value)
         continue
     fmt = fr.get_format(value).name
-    if target is not None and fr.is_tessera_format_name(fmt):
+    if target is not None and is_tessera_format_name(fmt):
         from prismaquant.tessera_render import tessera_rung_is_serialisable
 
         # No unit topology exists at this name-only boundary. Check bytes can
@@ -2473,6 +2474,11 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   elif [[ -n "$TESSERA_CACHED_EXPERT_UNITS" ]]; then
     TESSERA_CACHED_UNIT_ARGS+=(--cached-expert-units "$TESSERA_CACHED_EXPERT_UNITS")
   fi
+  if [[ -n "$TESSERA_CACHED_UNITS" || -n "$TESSERA_CACHED_EXPERT_UNITS" ]]; then
+    # Preflight owns the producer's mode; the reader never reads our environment.
+    TESSERA_CACHED_PROOF_MODE=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1])).get("cached_encoder_source_proof_mode", "strict"))' "$TESSERA_BUILD_JSON")
+    TESSERA_CACHED_UNIT_ARGS+=(--cached-encoder-source-proof-mode "$TESSERA_CACHED_PROOF_MODE")
+  fi
   if [[ -n "${TESSERA_SOURCE_DIGEST_CACHE:-}" ]]; then
     TESSERA_CACHED_UNIT_ARGS+=(--source-digest-cache "$TESSERA_SOURCE_DIGEST_CACHE")
   fi
@@ -2487,11 +2493,25 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   # accepted an H-free/scale-free allocation is the weights-only lane and
   # correct; omitting them on an H-aware allocation is unreachable -- the
   # preflight exits 2 above before this line runs.
+  # The reuse authority rides only when the checkout's contract attests the
+  # exporter takes it (Tessera contract v40); an older pin gets today's argv.
+  # The reader is stdlib-only and runs by path, so this JSON read does not
+  # import the prismaquant package (torch, transformers) first.
+  if ! TESSERA_AUTHORITY_LINES=$(python3 -c 'import runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name="__main__")' \
+      "${PIPELINE_SCRIPT_DIR}/tessera_producer_interface.py" \
+      "${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"); then
+    exit 2
+  fi
+  TESSERA_AUTHORITY_ARGS=()
+  if [[ -n "$TESSERA_AUTHORITY_LINES" ]]; then
+    mapfile -t TESSERA_AUTHORITY_ARGS <<< "$TESSERA_AUTHORITY_LINES"
+  fi
   python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py" \
     "$MODEL_PATH" "${WORK_DIR}/exported" \
     --plan-json "$TESSERA_PLAN" \
     --priced-inputs "$TESSERA_BUILD_JSON" \
     --priced-inputs-sha256 "$TESSERA_BUILD_SHA256" \
+    "${TESSERA_AUTHORITY_ARGS[@]}" \
     --device "$EXPORT_DEVICE" \
     "${TESSERA_PRICED_INPUT_ARGS[@]}" \
     "${TESSERA_CACHED_UNIT_ARGS[@]}" \

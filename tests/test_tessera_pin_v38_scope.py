@@ -1,30 +1,15 @@
-"""Contract v38 reuses two cell ids for a different claim; admission follows the claim.
+"""Admission follows the v39 scope, not the cell ids inherited from v38.
 
-Tessera contract v38 (tessera#604) withdrew the routed ``TESSERA_E4M3_K1``
-cells ``tessera_e4m3_k1_routed_moe_sm121_{decode,batch}_resident``, which
-attested q1024 on ``eugr/spark-vllm@sha256:0afec8d4…`` through the
-materialising modular kernel, and minted new cells under the SAME ids for q896
-on ``spark-vllm-nccl230@sha256:f8dbe1a0…`` through the compact window MoE
-adapter.  Cell ids are derived from ``family_structure_platform_regime
-[_residency]``; neither the image nor the rung is part of the id, so a reader
-that keyed anything on the id alone would carry the old claim onto the new
-cell.
-
-These tests pin that nothing here does:
-
-* the route resolver admits routed E4M3 at q896 under the new image's scope and
-  names the reused id;
-* routed E4M3 at q1024 is unattested under the new image, even though the
-  ``TESSERA_E4M3_K1`` family row now lists 1024 among its attested rungs (that
-  1024 is the dense cells');
-* routed E4M3 at q1024 is unattested under the old image, whose claim is gone;
-* the reviewed-answer drift check, which keys cells by id, reports a same-id
-  cell whose scope moved as a changed row, not as unchanged.
+The GLM image now carries all six family/structure combinations; routed
+E4M3 includes q1024 again on that image, not on the withdrawn v34 image.
+Vanilla vLLM retains its dense E4M3 q1024 cells. These are packaged route
+claims, not new served-quality measurements. Keep this regression's filename
+as the v38 origin of the same-id/scope-drift check.
 """
 from __future__ import annotations
 
 import copy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import struct
@@ -43,6 +28,8 @@ NEW_IMAGE = ("localhost/prismaquant/spark-vllm-nccl230@sha256:"
              "f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5")
 OLD_IMAGE = ("eugr/spark-vllm@sha256:"
              "0afec8d4f79f44685a1ddf758659d33aef3b0f3ec9068e5a7cd1108d30e5581c")
+VANILLA_IMAGE = ("vllm/vllm-openai@sha256:"
+                 "61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14")
 REUSED = {"decode": "tessera_e4m3_k1_routed_moe_sm121_decode_resident",
           "batch": "tessera_e4m3_k1_routed_moe_sm121_batch_resident"}
 
@@ -71,46 +58,66 @@ def _resolve(facts, image):
         runtime_image=image, execution_mode="eager")
 
 
-def test_the_installed_contract_is_the_v38_pin():
+def test_the_installed_contract_is_the_v44_pin():
+    # v40 (Tessera #675) adds only the producer_interface block, v41 optional
+    # serving-code fields no cell stamps, v42 the fused routed launches, v43
+    # the fused dense second launch in the six dense cells, and v44 the
+    # supported exporter move; the admission scopes this module pins are
+    # v39's and do not move.
     raw = _packaged_bytes()
     assert hashlib.sha256(raw).hexdigest() == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
-    assert json.loads(raw)["contract_version"] == 38
+    assert json.loads(raw)["contract_version"] == 44
 
 
-def test_the_reused_ids_now_attest_q896_on_the_new_image():
-    route = _resolve(_routed(896), NEW_IMAGE)
+@pytest.mark.parametrize("rung", [832, 864, 896, 928, 944, 960, 1024, 1088])
+def test_the_reused_ids_attest_the_v39_routed_rungs_on_the_glm_image(rung):
+    route = _resolve(_routed(rung), NEW_IMAGE)
     assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
     assert {r.regime: r.cell_id for r in route.regimes} == REUSED
     assert route.requires_serve_flags == ("TESSERA_SERVE_MODE=resident",)
 
 
-@pytest.mark.parametrize("image", [NEW_IMAGE, OLD_IMAGE], ids=["new_image", "old_image"])
-def test_routed_q1024_is_attested_under_neither_image(image):
-    """The id survived; the q1024 claim did not, under any scope."""
-    route = _resolve(_routed(1024), image)
+@pytest.mark.parametrize("image,rung", [(OLD_IMAGE, 1024), (NEW_IMAGE, 800)])
+def test_a_withdrawn_image_or_unattested_rung_still_refuses(image, rung):
+    route = _resolve(_routed(rung), image)
     assert route.route_status == lane.ROUTE_STATUS_UNATTESTED, route.as_dict()
     assert not [r.cell_id for r in route.regimes if r.cell_id]
 
 
-def test_the_family_row_lists_1024_for_the_dense_cells_not_the_routed_ones():
-    """The family's attested rungs are a union over structures; the routed
-    question is answered by the routed cells, which carry 896 only."""
-    table = _table()
-    routed = [c for c in table.cells
-              if c.family == "TESSERA_E4M3_K1" and c.structure == "routed_moe"]
-    assert sorted(c.id for c in routed) == sorted(REUSED.values())
-    assert {tuple(c.rungs_q256) for c in routed} == {(896,)}
-    dense_1024 = [c.id for c in table.cells if c.family == "TESSERA_E4M3_K1"
-                  and c.structure == "dense" and 1024 in c.rungs_q256]
-    assert dense_1024, "the family row's 1024 must come from a dense cell"
-    rows = json.loads(_packaged_bytes())["formats"]
-    e4m3 = next(r for r in rows if r.get("family") == "TESSERA_E4M3_K1") \
-        if isinstance(rows, list) else rows["TESSERA_E4M3_K1"]
-    assert 1024 in e4m3["attested_rungs_q256"]
+@pytest.mark.parametrize("residency", ["resident", "streamed"])
+def test_vanilla_retains_dense_e4m3_q1024(residency):
+    facts = replace(_routed(1024), structure="dense", qname="model.layers.3.mlp.down_proj")
+    route = lane.resolve_unit_route(
+        facts, _table(), platform="sm_121", residency=residency,
+        runtime_image=VANILLA_IMAGE, execution_mode="eager")
+    assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
+    assert {r.cell_id for r in route.regimes} == {
+        "tessera_e4m3_k1_dense_sm121_decode", "tessera_e4m3_k1_dense_sm121_batch"}
+
+
+def test_glm_image_carries_all_six_family_structure_combinations():
+    """Pin the v39 admission decision; derive each cell's rates from its bytes."""
+    cells = json.loads(_packaged_bytes())["lane_eligibility"]["cells"]
+    glm = [c for c in cells if c["runtime"]["image"] == NEW_IMAGE]
+    assert {(c["family"], c["structure"], c["regime"]) for c in glm} == {
+        (family, structure, regime)
+        for family in ("TESSERA_E4M3_K1", "TESSERA_BF16_K1", "TESSERA_E2M1_K2")
+        for structure in ("dense", "routed_moe") for regime in ("decode", "batch")}
+    for cell in glm:
+        for rung in cell["rungs_q256"]:
+            facts = replace(_routed(rung, cell["family"]), structure=cell["structure"])
+            route = _resolve(facts, NEW_IMAGE)
+            assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
+            assert cell["id"] in {r.cell_id for r in route.regimes}
+    for cell in cells:
+        if cell not in glm:
+            assert cell["runtime"]["image"] == VANILLA_IMAGE
+            assert (cell["family"], cell["structure"], cell["rungs_q256"]) == (
+                "TESSERA_E4M3_K1", "dense", [1024])
 
 
 def test_answer_drift_reports_a_reused_id_whose_scope_moved():
-    """Mutation: rewind the reused cells to their v34 scope in a copy of the
+    """Mutation: rewind the reused cells to their v38 scope in a copy of the
     installed answer, and the id-keyed drift must name each as changed."""
     raw = _packaged_bytes()
     with as_file(tr.tessera_serving_contract_path()) as path:
@@ -121,8 +128,7 @@ def test_answer_drift_reports_a_reused_id_whose_scope_moved():
     rewound = 0
     for row in reviewed["cells"]:
         if row[0] in REUSED.values():
-            row[5] = [1024]
-            row[13] = {"execution_modes": ["eager"], "image": OLD_IMAGE}
+            row[5] = [896]
             rewound += 1
     assert rewound == 2
     drift = contract._answer_drift(reviewed, installed)
@@ -132,7 +138,7 @@ def test_answer_drift_reports_a_reused_id_whose_scope_moved():
 
 
 # ---------------------------------------------------------------------------
-# GLM layer 43's pick, through the export gate, on the packaged v38 table
+# GLM layer 43's pick, through the export gate, on the packaged v39 table
 # ---------------------------------------------------------------------------
 LAYER43_EXPERT = "model.layers.43.mlp.experts.0.down_proj"
 
@@ -175,31 +181,47 @@ def _layer43_case(tmp_path, fmt):
     return model, assignment
 
 
-def test_layer43s_routed_e4m3_r896_pick_passes_the_export_scope_gate(tmp_path):
+@pytest.mark.parametrize("rung", [896, 1024])
+def test_layer43s_routed_e4m3_pick_passes_the_export_scope_gate(tmp_path, rung):
     """The real gate, the real packaged table, no contract substitution.
 
     ``require_assignment_scope`` resolves the unit on the reused cells; each
-    of them admits q896 through ``cell_lane_admits``, whose only gated lane
-    (``window_gemv``) these cells do not launch through.
+    of them admits q896 through ``cell_lane_admits``.  Since contract v42 the
+    cells also launch through the fused routed lane, whose predicate reads
+    rate-4 columns only: at q1024 the route records the fused pair beside the
+    compact one, and at q896 the lane refuses the plan and the route records
+    the compact pair alone -- the stack the dispatch keeps on the compact
+    adapter (PQ #1274).
     """
     from prismaquant import tessera_export_lane as export
 
-    model, assignment = _layer43_case(tmp_path, "TESSERA_E4M3_K1_R896")
+    model, assignment = _layer43_case(tmp_path, f"TESSERA_E4M3_K1_R{rung}")
     report = export.require_assignment_scope(model, assignment, target=_Target())
     route = report["by_unit"][LAYER43_EXPERT]
     assert route["route_status"] == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route
     assert {row["cell_id"] for row in route["regime_routes"]} == set(REUSED.values())
     table = _table()
+    compact = ("tessera.native_window_moe.NativeWindowMoE.__call__",
+               "native_window_moe_compact")
+    fused = ("tessera.routed_fused.FusedRoutedWindowMoE.__call__",
+             "native_routed_fused_window")
+    want = [compact, fused] if rung == 1024 else [compact]
+    for row in route["regime_routes"]:
+        assert sorted((pair["symbol"], pair["decoder"])
+                      for pair in row["executes"]) == sorted(want), row
     for cell_id in REUSED.values():
         cell = next(c for c in table.cells if c.id == cell_id)
-        assert lane.lane_claim_for_cell(cell, table.lanes) is None
-        assert lane.cell_lane_admits(cell, 896, table.lanes) == (True, "")
+        claim = lane.lane_claim_for_cell(cell, table.lanes)
+        assert claim is not None and claim.extension == "tessera_routed_fused_e4m3"
+        assert lane.cell_lane_admits(cell, rung, table.lanes) == (True, "")
+        admits, _why, launches = lane.cell_rung_launches(cell, rung, table.lanes)
+        assert admits and sorted(launches) == sorted(want)
 
 
-def test_layer43_at_the_withdrawn_q1024_is_refused_by_the_export_scope_gate(tmp_path):
-    """And the gate is reading the rung: the old routed claim does not pass."""
+def test_layer43_at_unattested_q800_is_refused_by_the_export_scope_gate(tmp_path):
+    """The broader v39 claim is still bounded by its exact rung set."""
     from prismaquant import tessera_export_lane as export
 
-    model, assignment = _layer43_case(tmp_path, "TESSERA_E4M3_K1_R1024")
+    model, assignment = _layer43_case(tmp_path, "TESSERA_E4M3_K1_R800")
     with pytest.raises(export.TesseraExportLaneError, match="unattested"):
         export.require_assignment_scope(model, assignment, target=_Target())

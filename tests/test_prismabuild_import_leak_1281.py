@@ -23,11 +23,12 @@ from fleet_sdk import (
 def _foreign_tree(tmp_path: Path) -> Path:
     """A ``src`` holding a ``prismabuild`` package, as a generation has.
 
-    Its ``reader_lease`` carries every name the injection checks for, so
-    only the check on where the module came from can refuse it.
+    Its ``client`` (PB #1254) carries every name and the SDK version the
+    injection checks for, so only the check on where the module came from
+    can refuse it.
     """
 
-    from prismaquant.staged_lease import _REQUIRED_NAMES
+    from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION, _REQUIRED_NAMES
 
     src = tmp_path / "generation" / "src"
     package = src / "prismabuild"
@@ -35,6 +36,9 @@ def _foreign_tree(tmp_path: Path) -> Path:
     (package / "__init__.py").write_text("FOREIGN = True\n")
     (package / "reader_lease.py").write_text("FOREIGN = True\n" + "".join(
         f"{name} = None\n" for name in _REQUIRED_NAMES))
+    (package / "client.py").write_text(
+        f"FOREIGN = True\nSDK_VERSION = {PB_CLIENT_SDK_VERSION}\n" + "".join(
+            f"{name} = None\n" for name in _REQUIRED_NAMES))
     (package / "pool.py").write_text("FOREIGN = True\n")
     return src
 
@@ -91,7 +95,7 @@ def test_injection_refuses_a_prismabuild_it_did_not_install(tmp_path):
             _import_from(src)
             with pytest.raises(RuntimeError, match="PQ #1281") as refused:
                 staged_lease.inject_installed_sdk_for_tests()
-            foreign = (src / "prismabuild" / "reader_lease.py").resolve()
+            foreign = (src / "prismabuild" / "client.py").resolve()
             assert str(foreign) in str(refused.value)
             assert staged_lease._INJECTED is saved[0]
         finally:

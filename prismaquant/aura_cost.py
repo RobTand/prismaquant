@@ -64,7 +64,7 @@ from prismaquant.routed_experts import (
     refresh_packed_expert_projections,
     resolve_routed_expert_profile,
 )
-from .cost_stage_checkpoint import unit_path
+from .cost_stage_checkpoint import atomic_write_bytes, unit_path
 from .digests import DIRECT_UTF8_STRICT, canonical_json
 
 SCHEMA = "prismaquant.aura_cost.v1"
@@ -152,24 +152,6 @@ def _canonical_json_sha256(value: object, *, where: str) -> str:
     return DIRECT_UTF8_STRICT.sha256(_canonical_json(value, where=where))
 
 
-def _atomic_write_bytes(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    with tmp.open("wb") as handle:
-        handle.write(payload)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.replace(tmp, path)
-    # fsync the containing directory so the rename itself is durable across a
-    # host reset. Failure is load-bearing and must not be mistaken for a
-    # durable checkpoint.
-    directory_fd = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(directory_fd)
-    finally:
-        os.close(directory_fd)
-
-
 _aura_unit_checkpoint_path = unit_path
 
 
@@ -230,7 +212,7 @@ def _write_aura_checkpoint_manifest(
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
-    _atomic_write_bytes(checkpoint_dir / "manifest.json", encoded)
+    atomic_write_bytes(checkpoint_dir / "manifest.json", encoded)
     return identity_sha256
 
 
@@ -335,7 +317,7 @@ def _write_aura_unit_checkpoint(
         "payload": state_bytes,
     }
     encoded = pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL)
-    _atomic_write_bytes(
+    atomic_write_bytes(
         _aura_unit_checkpoint_path(checkpoint_dir, qname),
         encoded,
     )
@@ -757,11 +739,12 @@ def _delta_w(
                 f"require_production_cache: production-rendered weight missing "
                 f"for ({name!r}, {fmt!r}); refusing silent RTN fallback. Build the "
                 f"cache for this (Linear, format) or drop --require-production-cache.")
-    # Ahead of ``get_format``, which imports the ``tessera`` package to
-    # synthesize a Tessera spec: the refusal is about the name, not the spec.
-    if fr.is_tessera_format_name(fmt):
+    # Ahead of ``get_format``, which imports the owning lane's package to
+    # synthesize its spec: the refusal is about the name, not the spec.
+    if fr.requires_production_render(fmt):
         raise RuntimeError(
-            f"{name}={fmt}: AURA Tessera delta requires a production-cache "
+            f"{name}={fmt}: AURA {fr.format_owner_label(fmt)} delta "
+            "requires a production-cache "
             "render. The registry fallback is a weights-only reconstruction, "
             "not the decoded wire and not the H-aware encode that ships, so "
             "it would price a different dW under the same format name -- and "
@@ -2623,7 +2606,7 @@ def compute_aura_cost_streamed(
                 raise RuntimeError("joint AURA incomplete unit coverage")
             payload["costs"] = joint_rows
             if observation_counts is not None:
-                from .tessera_joint_eval_panel import observation_status
+                from .joint_eval_observation import observation_status
                 if set(observation_counts) != set(names):
                     raise RuntimeError('joint pilot observation roster differs')
                 for name in names:

@@ -254,12 +254,12 @@ MERGED_PROVENANCE = {
     "wire_dir", "cache_dir", "hessian", "activation_static_scales", "surfaces",
     "anchor_groups", "unservable", "unit_selection", "unit_selection_sample",
     "no_admitted_rung", "tessera_serving_scope", "stopped_early", "wall_seconds",
-    "rounds_run", POPULATION_KEY, "campaign_fanout",
+    "rounds_run", POPULATION_KEY, "campaign_fanout", "route_refused",
 }
 #: Provenance keys that legitimately differ per table: kept at top level when
 #: equal, otherwise only under ``union.tables`` (``rate_band`` becomes None).
 PER_TABLE_PROVENANCE = {"rate_band", "family_restriction", "seed_checkpoint",
-                        "selected_source_preparation", "coverage"}
+                        "selected_source_preparation", "coverage", "encode_structure"}
 #: Identity keys that legitimately differ per table.
 PER_TABLE_IDENTITY = ("settings", "family_restriction")
 HESSIAN_REFERENCE_EQUAL = ("schema", "canonical_capture", "provenance", "counts", "load_policy")
@@ -870,6 +870,8 @@ def _union_provenance(tables: list[Table], *, costs, menu_sizes, capture_path: P
                                            same=_same_price)
     provenance["unservable"] = _merge_nested("provenance.unservable",
                                              {n: p.get("unservable") for n, p in provs.items()})
+    provenance["route_refused"] = _merge_nested("provenance.route_refused",
+                                                {n: p.get("route_refused") for n, p in provs.items()})
     provenance["anchor_groups"] = dict(sorted(_merge_keyed(
         "provenance.anchor_groups", {n: p.get("anchor_groups") for n, p in provs.items()}).items()))
 

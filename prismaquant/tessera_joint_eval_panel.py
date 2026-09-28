@@ -11,18 +11,10 @@ import re
 from .calibration_data import load_calibration_input
 from .cluster_campaign import _atomic_write_new_bytes
 
+from .joint_eval_observation import STATUS, observation_status  # noqa: F401  (re-exported)
+
 SCHEMA = 'prismaquant.tessera_joint_eval_panel.v1'
-STATUS = 'diagnostic_pilot'
 ALGORITHM = 'python_random_permutation_prefix_v1'
-
-
-def observation_status(count):
-    """An invocation with zero token rows does not observe that expert."""
-    if (not isinstance(count, dict) or not {'tokens', 'calls'} <= set(count)
-            or any(type(count[key]) is not int or count[key] < 0 for key in ('tokens', 'calls'))
-            or (count['tokens'] > 0 and count['calls'] == 0)):
-        raise ValueError('joint evaluation observation counts are invalid')
-    return 'observed' if count['tokens'] > 0 else 'unknown_unobserved'
 
 
 def _sha_ids(ids):

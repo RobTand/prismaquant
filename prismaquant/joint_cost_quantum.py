@@ -1434,12 +1434,17 @@ def await_retained_window_read(window_index: int, *, record: Mapping,
 # --------------------------------------------------------------------------
 
 
-def bind_joint_served_quantizer(formats_by_qname):
-    """Require the actual served static-A4 operator before Stage B pricing.
+def bind_joint_served_quantizer(formats_by_qname, *,
+                                context="joint Stage B activation pricing"):
+    """Require the actual served static-A4 operator before activation pricing.
 
     A registered binding includes the inspected image and extension build.
     A missing operator refuses; the Torch arithmetic model is never a price.
     A16/dynamic-only rosters do not load the serving extension.
+
+    This is the one owner of the rule. Stage B calls it, and so does the
+    Stage A campaign seam (``tessera_campaign._bind_served_quantizer``,
+    RobTand/prismaquant#1481), naming its own ``context``.
     """
     from . import format_registry as fr
     from .nvfp4_activation_contract import bind_served_quantizer_identity
@@ -1449,10 +1454,9 @@ def bind_joint_served_quantizer(formats_by_qname):
     for fmt in sorted({fmt for formats in formats_by_qname.values() for fmt in formats}):
         contract = fr.get_format(fmt).static_activation_contract
         if contract is not None and (contract.measured_as_served or served_override):
-            identity = bind_served_quantizer_identity(
-                require=True, context="joint Stage B activation pricing")
+            identity = bind_served_quantizer_identity(require=True, context=context)
             if contract.served_quantizer is not None and contract.served_quantizer != identity:
-                raise RuntimeError("joint Stage B format overrides the served quantizer binding")
+                raise RuntimeError(f"{context}: format overrides the served quantizer binding")
             return identity.as_record()
     return None
 
@@ -1472,7 +1476,8 @@ def build_quantum_source_runner(config, *, offload_folder,
     """
     from .cost_streaming import build_streamed_causal_lm
     from .model_profiles import detect_profile
-    from .tessera_joint_aura import _planned_source_window, _source_prefetch
+    from .stage_inputs import source_prefetch as _source_prefetch
+    from .tessera_joint_aura import _planned_source_window
 
     return build_streamed_causal_lm(
         config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
@@ -3461,12 +3466,11 @@ def run_layer_quantum(
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache
     from .residency_map import bind_residency_manifest, residency_report
+    from .stage_inputs import bound as _bound, same as _same
     from .tessera_joint_aura import (
         ACTIVATION_SCALE_ENV,
-        _bound,
         _prepare_file_read_bound,
         _preflight_run_prepared,
-        _same,
         _seed_source_identity_cache,
         load_measured_anchor_input,
         require_prepared_digests,
@@ -3975,7 +3979,7 @@ def main(argv=None) -> int:
     except QuantumIdentityRefused as exc:
         print(f"{IDENTITY_REFUSED_MARKER}: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
-    from .tessera_joint_aura import _load_plan
+    from .tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
     # The readset is bound inside run_layer_quantum; until then the plan
     # itself is the only input read (PQ #1024).

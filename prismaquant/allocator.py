@@ -90,20 +90,11 @@ import pickle
 import re
 import time as _time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import format_registry as fr
-from .tessera_menu import (
-    expand_menu_tokens_report,
-    menu_mode,
-    menu_width_report,
-    partition_attested,
-    surrogate_selection_caveat,
-    tessera_refusal_cause,
-    unattested_diagnosis,
-)
 from .allocator_solver import (
     Candidate,
     _shape_from_stats,
@@ -172,10 +163,6 @@ from .decision_units import block_id_from_qname
 from .layer_config import LAYER_CONFIG_META_KEY
 from .saturation_select import log_error_values as _log_error_values
 from .schemas import validate_cost_payload, validate_probe_payload
-from .tessera_expert_projection import (
-    ExpertProjectionError,
-    allocation_expert_projection_block,
-)
 
 
 _KNEE_DIAGNOSTIC_MIN_LOG_SPAN_DECADES = 1.0
@@ -688,6 +675,90 @@ def apply_mtp_format_override(
     return out
 
 
+class _StockAllocationLane:
+    """The allocation protocol's answers when no lane plugin provides it.
+
+    Each method is the stock half of a step a lane plugin can take over
+    (``lane_specs/<lane>.json`` ``plugin``; for Tessera,
+    ``prismaquant.tessera_lane``): no lane flags, no serving target, a menu
+    the registry resolves as given, and no lane metadata. It is also the
+    protocol's one written statement, so a fourth lane knows what to provide.
+    """
+
+    @staticmethod
+    def allocation_arguments(parser) -> None:
+        return None
+
+    @staticmethod
+    def allocation_serving_target(args, *, target_platform):
+        return None
+
+    @staticmethod
+    def allocation_contexts(serving_target, stats, profile):
+        return None
+
+    @staticmethod
+    def allocation_unit_context(serving_target, unit, profile):
+        raise LookupError("no lane provides a serving target, so no unit has a serving context")
+
+    @staticmethod
+    def allocation_scope_meta(serving_target, context_by_unit) -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_hessian_identity(costs, cost_data) -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_runtime_identity() -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_shape_price_scope(serving_target, *, tensor_parallel):
+        raise LookupError("no lane publishes a pinned runtime contract, so no shape-time "
+                          "table can be admitted")
+
+    @staticmethod
+    def allocation_menu(fmt_names, priced_formats, *, context_by_unit):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(formats=fmt_names, widths={}, refusal_cause="")
+
+    @staticmethod
+    def allocation_layer_config_meta(**_blocks) -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_selection_meta(**_blocks) -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_selection_request_path(args):
+        return None
+
+    @staticmethod
+    def write_allocation_selection_request(path, **_outputs) -> None:
+        raise LookupError("no lane writes a selection request")
+
+    @staticmethod
+    def allocation_expert_projection(cost_data, assignment) -> dict:
+        return {}
+
+
+def _allocation_lane():
+    """The lane plugin that scopes, expands and stamps an allocation.
+
+    The one plugin providing ``allocation_menu`` (``lane_spec`` refuses two),
+    or :class:`_StockAllocationLane` when no lane does. The allocator imports
+    no lane module; everything a lane adds to an allocation -- its flags, its
+    serving scope, its menu token, its cost-table identity checks, its
+    metadata blocks and its selection side outputs -- arrives through here.
+    """
+    from .lane_spec import single_lane_plugin
+
+    return single_lane_plugin("allocation_menu") or _StockAllocationLane
+
+
 def _mtp_rung_attestation(serving_target, profile):
     """``eligible(unit, rung)`` from the pinned runtime's contract (principle 14).
 
@@ -695,25 +766,26 @@ def _mtp_rung_attestation(serving_target, profile):
     about one unit's serving context when a Tessera scope is declared. BF16
     passthrough is not a Tessera route and is always offered.
     """
-    from .tessera_serving_scope import unit_structure_from_profile
+    lane = _allocation_lane()
 
     def eligible(unit, rung):
-        if not fr.is_tessera_format_name(fr.canonical_format_name(rung)):
+        if fr.format_family_of(fr.canonical_format_name(rung)) is None:
             return True
         if serving_target is None:
             return fr.format_is_producer_eligible(rung)
-        context = serving_target.context(unit_structure_from_profile(unit, profile))
+        context = lane.allocation_unit_context(serving_target, unit, profile)
         return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
     return eligible
 
 
-def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping, *,
-                         serving_target=None, profile=None) -> None:
-    """Add the MTP layer's selected rungs to ``layer_cfg`` (PQ #1346).
+def _select_mtp(args, *, serving_target=None, profile=None) -> tuple[dict, dict]:
+    """The MTP payload and its selection record under ``--mtp-byte-budget`` (PQ #1346).
 
-    The selection runs after the body is final, on its own payload and its own
-    declared sub-budget, so it moves no body byte and no body bpp. A unit the
-    body also assigned is refused: one unit cannot be priced in two currencies.
+    Runs BEFORE any whole-artifact card is priced (PQ #1610): the card must
+    charge the selected MTP rungs, not the layer's source bytes, and the
+    selection reads only its own payload and sub-budget, never the body.
+    ``--mtp-fixed-formats`` pins named groups to one rung each, intersected
+    with the same attested menu (``select_mtp_rungs(fixed_formats=)``).
     """
     from .glm_mtp_selection import load_mtp_cost, select_mtp_rungs
 
@@ -725,11 +797,28 @@ def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping, *,
         constants = json.loads(Path(args.mtp_serve_constants).read_text())
         points = (json.loads(Path(args.mtp_acceptance_points).read_text())
                   if args.mtp_acceptance_points else [])
+        fixed = (json.loads(Path(args.mtp_fixed_formats).read_text())
+                 if getattr(args, "mtp_fixed_formats", None) else None)
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
                                   constants=constants, acceptance_points=points,
-                                  eligible=_mtp_rung_attestation(serving_target, profile))
+                                  eligible=_mtp_rung_attestation(serving_target, profile),
+                                  fixed_formats=fixed)
     except ValueError as exc:
         raise SystemExit(f"[alloc] ERROR: MTP selection: {exc}") from exc
+    return payload, record
+
+
+def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
+                         record: Mapping) -> None:
+    """Add the MTP layer's selected rungs (``_select_mtp``) to ``layer_cfg``.
+
+    The selection moves no body bpp: it is chosen on its own payload and its
+    own declared sub-budget. Under a whole-artifact card it DOES move the body's
+    byte room, because the card prices the selected MTP bytes in place of the
+    layer's source bytes (PQ #1610). A unit the body also assigned is refused:
+    one unit cannot be priced in two currencies.
+    """
+    record = dict(record)
     assignment = record.pop("assignment")
     clash = sorted(set(assignment) & (set(body_assignment) | set(layer_cfg)))
     if clash:
@@ -760,9 +849,7 @@ def _canonical_candidate_format(fmt: str) -> str:
     the identity comparisons below stay exact without asking the registry a
     question it should refuse.
     """
-    from .tessera_formats import is_tessera_group_option
-
-    if is_tessera_group_option(fmt):
+    if fr.is_whole_group_option(fmt):
         return str(fmt)
     return fr.get_format(fmt).name
 
@@ -1666,6 +1753,46 @@ class MeasuredRuntimeSweep:
     emit_replay: Callable[[float, float, dict, dict], None] | None = None
 
 
+@dataclass(frozen=True)
+class PactHullSweep:
+    """What ``main(measured_runtime_sweep=...)`` hands its caller in PACT mode.
+
+    ``build_hull()`` runs the exact dichotomic hull (``pact_hull``) over the
+    shape-priced candidate set under this run's byte budget and returns
+    ``{"hull": LowerHull, "vertices": [record, ...]}``, one record per vertex
+    after the same exact checks a measured solve applies (promotion identity,
+    exact payload bpp <= target). ``emit_replay(weights, assignment,
+    provenance)`` re-runs the ONE probe that found a vertex and writes it
+    through the allocator's only layer-config writer. Nothing here certifies
+    time or placement: every time is an operator-sum proposal at one regime M.
+    """
+
+    build_hull: Callable[[], dict]
+    emit_replay: Callable[[Sequence[float], dict, dict], None]
+    #: ``shape_runtime_prices.ShapePricing``: bootstrap, gap report, identity.
+    pricing: object
+    table_identity: dict
+    scope: dict
+    regime_m: int
+    tensor_parallel: int
+    time_ceiling_ms: float | None
+    max_memory_bytes: int
+    #: The exact probe's bounds (``--pact-max-states`` / ``--pact-max-transitions``);
+    #: a replay re-runs its probe under the same ones.
+    max_states: int
+    max_transitions: int
+    #: ``None`` when the budget is ``--target-bits``; with ``--target-disk-gb``
+    #: the card, the reserve, the payload outside the units, and the unit budget.
+    whole_artifact_budget: dict | None
+    #: Assignment members outside every DP unit (their format is fixed); the
+    #: operator sum prices none of them, and the curve adds nothing for them.
+    fixed_members: tuple[str, ...]
+    n_units: int
+    target_bits: float
+    cost_path: str
+    probe_path: str
+
+
 def require_no_research_exact_member_scalar(cost_data: dict) -> None:
     """An exact-member endpoint is a scalar observation, not an allocation table."""
     if cost_data.get("provenance", {}).get("research_exact_member_scope") is not None:
@@ -1685,13 +1812,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     selection. ``None`` -- every existing caller -- is the unchanged
     single-solve path.
     """
-    from .tessera_serving_scope import (
-        add_serving_scope_arguments, serving_target_from_args,
-        context_by_unit_from_stats, scope_provenance,
-    )
     from .measured_runtime_prices import FIXED_RESOURCE_SCOPES, SHAPE_ONLY_SCOPE
+    lane = _allocation_lane()
     ap = argparse.ArgumentParser()
-    add_serving_scope_arguments(ap)
+    lane.allocation_arguments(ap)
     ap.add_argument("--probe", required=True, help="sensitivity_probe pickle")
     ap.add_argument("--costs", required=True, help="measure_quant_cost pickle")
     ap.add_argument(
@@ -1814,9 +1938,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--layer-config", required=True,
                     help="Output AutoRound layer_config JSON")
     ap.add_argument("--pareto-csv", required=True, help="Output Pareto CSV")
-    ap.add_argument("--tessera-materialization-plan", default=None,
-                    help="Write a non-exportable selected-wire request here instead of layer-config; "
-                         "finalize through prismaquant.tessera_materialization after selected wires exist")
     ap.add_argument("--knee-refine-tol", type=float, default=0.03,
                     help="Golden-section knee refinement tolerance in bpp "
                          "(default 0.03). The coarse Pareto grid only lands the "
@@ -1957,6 +2078,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "c_ms_per_bit and their source (required with "
                          "--mtp-joint-cost; recorded, and inert without "
                          "acceptance points).")
+    ap.add_argument("--mtp-fixed-formats", default=None,
+                    help="Optional JSON file mapping MTP group names to one format "
+                         "each; the selector keeps only that rung for the group, "
+                         "intersected with the attested menu.")
     ap.add_argument("--mtp-acceptance-points", default=None,
                     help="Optional JSON list of served acceptance points "
                          "({measured_acceptance, rung_name|bits}) for the MTP "
@@ -2071,12 +2196,89 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "it. It requires the prefill frontier sweep and no "
                          "--serve-device-budget-bytes, and it certifies no "
                          "placement.")
+    # ---- PACT: the shape-time price table and its exact hull (PQ #1584) ----
+    ap.add_argument("--pact-shape-table", default=None,
+                    help="Research-only shape-time price table "
+                         "(prismaquant.shape_runtime_prices.v1). Prices every option "
+                         "by its served operator's rank-local shape at one regime M "
+                         "and hands the exact lower convex hull of (operator-sum "
+                         "time, predicted Δloss) to the prefill_frontier caller. "
+                         "Available only through prismaquant.prefill_frontier; a "
+                         "single solve refuses it.")
+    ap.add_argument("--pact-regime", type=int, default=None,
+                    help="The regime M (tokens per prefill step) the table's rows "
+                         "are read at. Required with --pact-shape-table; there is "
+                         "no default, because the regime is the workload's.")
+    ap.add_argument("--pact-tensor-parallel", type=int, default=None,
+                    help="The serving world size the table was measured at. "
+                         "Required with --pact-shape-table; it is part of the scope "
+                         "the table must equal and sets each routed member's "
+                         "rank-local cut.")
+    ap.add_argument("--pact-time-ceiling-ms", type=float, default=None,
+                    help="A REPORT bound on operator-sum time: hull vertices above "
+                         "it are flagged, never removed. The constrained set's own "
+                         "boundary vertex is not generated.")
+    ap.add_argument("--pact-max-states", type=int, default=None,
+                    help="The exact hull probe's max_states bound (default: the "
+                         "solver's own, pact_hull.DEFAULT_MAX_STATES). A probe over "
+                         "it is refused, never truncated.")
+    ap.add_argument("--pact-max-transitions", type=int, default=None,
+                    help="The exact hull probe's max_transitions bound (default: "
+                         "the solver's own, pact_hull.DEFAULT_MAX_TRANSITIONS).")
     args = ap.parse_args(argv)
+
+    pact_flags = (("--pact-regime", args.pact_regime),
+                  ("--pact-tensor-parallel", args.pact_tensor_parallel),
+                  ("--pact-time-ceiling-ms", args.pact_time_ceiling_ms),
+                  ("--pact-max-states", args.pact_max_states),
+                  ("--pact-max-transitions", args.pact_max_transitions))
+    if args.pact_shape_table is None:
+        for flag, value in pact_flags:
+            if value is not None:
+                ap.error(f"{flag} requires --pact-shape-table")
+    else:
+        if measured_runtime_sweep is None:
+            ap.error("--pact-shape-table is available only to prismaquant.prefill_frontier, "
+                     "whose hull vertices are research-only; a single solve would write a "
+                     "layer config from an operator-sum proposal")
+        if args.pact_regime is None or args.pact_regime < 1:
+            ap.error("--pact-shape-table requires a positive --pact-regime (no default: "
+                     "the regime M is the workload's, not the allocator's)")
+        if args.pact_tensor_parallel is None or args.pact_tensor_parallel < 1:
+            ap.error("--pact-shape-table requires a positive --pact-tensor-parallel (no "
+                     "default: the table is admitted only at the world it was measured at)")
+        for flag, value in (("--pact-max-states", args.pact_max_states),
+                            ("--pact-max-transitions", args.pact_max_transitions)):
+            if value is not None and value < 1:
+                ap.error(f"{flag} must be a positive integer")
+        if args.pact_time_ceiling_ms is not None and (
+                not math.isfinite(args.pact_time_ceiling_ms) or args.pact_time_ceiling_ms <= 0):
+            ap.error("--pact-time-ceiling-ms must be positive and finite")
+        if args.serve_device_budget_bytes is not None or args.rank_device_budget_bytes is not None:
+            ap.error("--pact-shape-table prices no device residency, scratch or activation, "
+                     "so no device budget is evaluated in PACT mode; the resident-bytes "
+                     "table is Tessera's (RobTand/tessera#624)")
+        for flag, value in (("--measured-runtime-table", args.measured_runtime_table),
+                            ("--measured-runtime-context", args.measured_runtime_context),
+                            ("--measured-runtime-rank-partition",
+                             args.measured_runtime_rank_partition),
+                            ("--serve-dispatch-table", args.serve_dispatch_table),
+                            ("--serve-workload-mix", args.serve_workload_mix),
+                            ("--slo-prefill-p95-ttft-ms", args.slo_prefill_p95_ttft_ms),
+                            ("--slo-decode-p95-itl-ms", args.slo_decode_p95_itl_ms),
+                            ("--slo-decode-p05-tps", args.slo_decode_p05_tps)):
+            if value is not None:
+                ap.error(f"--pact-shape-table is mutually exclusive with {flag}: the hull "
+                         "is the candidate set, and no budget on its time axis is a "
+                         "solver constraint")
+        if args.measured_runtime_fixed_scope != "admitted":
+            ap.error("--measured-runtime-fixed-scope belongs to --measured-runtime-table")
 
     if args.measured_runtime_context and not args.measured_runtime_table:
         ap.error("--measured-runtime-context requires --measured-runtime-table")
-    if measured_runtime_sweep is not None and not args.measured_runtime_table:
-        ap.error("a measured runtime sweep requires --measured-runtime-table")
+    if (measured_runtime_sweep is not None and not args.measured_runtime_table
+            and args.pact_shape_table is None):
+        ap.error("a measured runtime sweep requires --measured-runtime-table or --pact-shape-table")
     if args.measured_runtime_table:
         if args.serve_dispatch_table or args.serve_workload_mix:
             ap.error("--measured-runtime-table is mutually exclusive with "
@@ -2152,6 +2354,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # table / no SLOs) makes every downstream call a no-op that only stamps
     # "constraints were absent" — the pre-P5c behaviour, byte for byte.
     measured_runtime_table = None
+    # PACT keeps the same candidate rows the measured search keeps: an option
+    # a byte-and-loss screen would drop can still be the faster one.
+    runtime_frontier_candidates = (args.measured_runtime_table is not None
+                                   or args.pact_shape_table is not None)
     serve_slos = ServeSLOs(
         p95_ttft_ms=args.slo_prefill_p95_ttft_ms,
         p95_itl_ms=args.slo_decode_p95_itl_ms,
@@ -2396,8 +2602,16 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         raise SystemExit(f"[alloc] ERROR: unknown target profile {target_profile!r}")
     print(f"[alloc] target profile: {target_profile}", flush=True)
     from .serving_profiles import load_serving_profile
-    tessera_serving_target = serving_target_from_args(
+    tessera_serving_target = lane.allocation_serving_target(
         args, target_platform=load_serving_profile(target_profile).target_platform)
+    _mtp_selection_memo: list = []
+
+    def _mtp_selection():
+        """``(payload, record)``, selected once: the card and the stamp read one choice."""
+        if not _mtp_selection_memo:
+            _mtp_selection_memo.append(_select_mtp(
+                args, serving_target=tessera_serving_target, profile=model_profile))
+        return _mtp_selection_memo[0]
 
     with open(args.probe, "rb") as f:
         probe = pickle.load(f)
@@ -2463,50 +2677,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     costs = cost_data["costs"]
     print(f"[alloc] stats: {len(stats)} Linears, costs: {len(costs)} Linears")
 
-    # One Hessian identity per cost table, or refuse. The Tessera encoder's
-    # shipping default consumes a per-unit XtX, so rows priced with and
-    # without one describe different bytes at the same format name, and the
-    # DP would trade them against each other. Raises on a mix; reports what
-    # it found otherwise, so "no claim" stays distinguishable from "a
-    # matching claim" (principle 14).
-    # A joined table whose overlay rows carry another reference file's seal
-    # over the same per-unit H is one identity (RobTand/prismaquant#1270);
-    # the files are found through the table's own hash-bound inputs, and only
-    # when a second seal appears.
-    from .tessera_menu import (assert_uniform_hessian_identity, priced_static_scales,
-                               project_hessian_identity)
-    from .joint_catalog_extension import hessian_references
-    tessera_hessian_identity = assert_uniform_hessian_identity(
-        costs, references=lambda: hessian_references(cost_data))
-    if tessera_hessian_identity.get("stamped_rows") or \
-            tessera_hessian_identity.get("unstamped_rows"):
-        print(f"[alloc] tessera hessian identity: "
-              f"supplied={tessera_hessian_identity['supplied']} "
-              f"tokens={tessera_hessian_identity['token_count']} "
-              f"sha={str(tessera_hessian_identity['text_sha'])[:12]} "
-              f"({tessera_hessian_identity['stamped_rows']} stamped, "
-              f"{tessera_hessian_identity['unstamped_rows']} unstamped rows)")
-        if tessera_hessian_identity.get("captures"):
-            print("[alloc] tessera hessian captures (per-unit content equal): "
-                  + ", ".join(f"{digest[:12]}={n}" for digest, n in
-                              tessera_hessian_identity["captures"].items())
-                  + f"; export binds {str(tessera_hessian_identity['capture_sha256'])[:12]}")
+    # One Hessian identity per cost table, or refuse: the lane whose rungs
+    # consume a per-unit XtX owns the rule and reports what it found, so "no
+    # claim" stays distinguishable from "a matching claim" (principle 14).
+    tessera_hessian_identity = lane.allocation_hessian_identity(costs, cost_data)
 
-    # Which runtime contract answered this run's Tessera route queries, if any.
-    # The block names the exact Tessera commit and consumed contract digest;
-    # its presence does not by itself identify a development override or prove
-    # that every candidate route was attested for the requested context.
-    # Read through tessera_menu's ONE read, not through load_tessera_contract
-    # directly: the menu's every attestation goes through that function, and
-    # a provenance block that read the pin a second time could name a table
-    # the menu never consulted (or, as it did, name none while the menu had
-    # one). "Which table answered" is one fact per run, so it is read once.
-    from .tessera_menu import tessera_runtime_contract
-    _tessera_contract = tessera_runtime_contract()
-    tessera_dev_pin = {} if _tessera_contract is None else _tessera_contract.identity()
-    if tessera_dev_pin:
-        from .tessera_runtime_contract import describe_dev_pin
-        print(f"[alloc] tessera dev pin: {describe_dev_pin(tessera_dev_pin)}")
+    # Which runtime contract answered this run's route queries, if any: one
+    # fact per run, read once through the lane's one contract read.
+    tessera_dev_pin = lane.allocation_runtime_identity()
 
     # ---- Fisher renormalization ----
     # One shared denominator (the global calib token count) recomputed
@@ -2608,96 +2786,21 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         )
     stats = _mark_weight_only_nvfp4_stats(stats, model_profile)
     accounting_stats = dict(stats)
-    tessera_context_by_unit = context_by_unit_from_stats(
+    tessera_context_by_unit = lane.allocation_contexts(
         tessera_serving_target, accounting_stats, model_profile)
 
     if args.formats:
         fmt_names = [s.strip() for s in args.formats.split(",") if s.strip()]
     else:
         fmt_names = cost_data["formats"]
-    # ``TESSERA`` is a menu TOKEN, not a format. It cannot expand to a fixed
-    # list the way ``NVFP4`` names one rung: a Tessera family addresses a
-    # continuous rate axis, the realisable set depends on the unit's column
-    # count, and one 0.6B Linear carries thousands of legal rungs across the
-    # four families. So the token expands to exactly the rungs THIS RUN PRICED --
-    # the cost table's own Tessera columns -- which is both the widest menu
-    # the DP could honestly consider and a set that needs no second copy of
-    # the campaign's legality decisions. A rung the campaign did not price
-    # would be dropped by ``build_candidates`` anyway (no cost row); naming it
-    # here would only have ``require_producer_formats`` refuse the whole run.
-    # The expansion is intersected with what the pinned runtime attests, so a
-    # research-priced table read back on the default path allocates over the
-    # backed axis instead of refusing wholesale. The narrowing is printed, not
-    # inferred: an allocation over 2 rungs and one over 3060 must not look the
-    # same in a log (P9, P12).
-    priced_tessera = [
-        n for n in cost_data.get("formats", ())
-        if isinstance(n, str) and n.startswith("TESSERA_")
-    ]
-    fmt_names, unattested = expand_menu_tokens_report(
+    # A lane's menu TOKEN (``TESSERA``) is not a format: the lane expands it to
+    # the rungs this run priced that its pinned runtime attests, prints the
+    # narrowing, and refuses a token that expands to nothing.
+    menu = lane.allocation_menu(
         fmt_names, cost_data.get("formats", ()),
-        **({"context_by_unit": tessera_context_by_unit}
-           if tessera_context_by_unit is not None else {}))
-    tessera_menu_widths: dict = {}
-    tessera_diagnosis: dict | None = None
-    if priced_tessera:
-        kept = [n for n in fmt_names if n.startswith("TESSERA_")]
-        # The count is the admission predicate's, not the caller's: an
-        # explicitly named rung stays on the menu so the eligibility gate can
-        # refuse it out loud, and it is not "attested" until then (#278).
-        admitted, explicit_unattested = partition_attested(
-            kept, **({"context_by_unit": tessera_context_by_unit}
-                     if tessera_context_by_unit is not None else {}))
-        # A refusal that cannot name its own cause costs an investigation
-        # (#572: "0 of 16" was read three ways at once). Both causes the
-        # contract can tell apart are structured -- whether it needs a serving
-        # scope, and which rungs it attests instead -- so the report reads
-        # them rather than leaving the reader to guess. It admits nothing:
-        # `admitted` above is already the predicate's answer.
-        tessera_diagnosis = (unattested_diagnosis(
-            list(unattested) + list(explicit_unattested), priced=priced_tessera,
-            context_by_unit=tessera_context_by_unit)
-            if (unattested or explicit_unattested) else None)
-        widths, line = menu_width_report(
-            priced_tessera, admitted, unattested, explicit_unattested, menu_mode(),
-            diagnosis=tessera_diagnosis)
-        if kept:
-            tessera_menu_widths = widths
-        print(line, flush=True)
-        # The measured status of the ranking this DP is about to do. Printed
-        # here rather than at the end because it governs how the whole run's
-        # output is to be read, and stamped into provenance below because a
-        # terminal line is not a property of the artifact (P12).
-        if kept:
-            print(
-                "[alloc] WARNING: Tessera rungs are on this menu and the DP "
-                "ranks them on a surrogate MEASURED to mis-rank them at "
-                "matched bytes -- served KL 2.00x worse than a byte-matched "
-                "uniform arm at 4.0 bpp (2.33x at 3.0, 2.88x at 5.0), and "
-                "1.93x on the priced units alone. See "
-                "tessera_menu.surrogate_selection_caveat() and "
-                "docs/measurements/tessera-allocated-served-2026-09-02.md. "
-                "This assignment is a CANDIDATE, not a selection: promote it "
-                "only through SELECTION_MODE=validated-surrogate with a "
-                "byte-matched uniform arm served beside it.",
-                flush=True,
-            )
-        if unattested and not kept:
-            raise SystemExit(
-                "[alloc] ERROR: the cost table prices "
-                f"{len(priced_tessera)} Tessera rungs and the pinned runtime "
-                "attests none of them, so the TESSERA menu token expands to "
-                "nothing. Either widen the runtime's attested rungs "
-                "(attested_rungs_q256 in the packaged runtime_contract.json) "
-                "or price a table under the attested menu; "
-                "PRISMAQUANT_TESSERA_MENU=readable allocates over the rungs "
-                "the pinned decoder accepts and "
-                "PRISMAQUANT_TESSERA_MENU=research over the whole realisable "
-                "axis -- both for research runs that do not export."
-                # "attests none of them" is only true if the contract was asked
-                # under a scope it can answer; say which case this is.
-                + tessera_refusal_cause(tessera_diagnosis)
-            )
+        context_by_unit=tessera_context_by_unit)
+    fmt_names = menu.formats
+    tessera_menu_widths = menu.widths
     try:
         specs = fr.require_producer_formats(
             fmt_names, where="new allocator assignment menu",
@@ -2709,7 +2812,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # rides on it too rather than only on the menu line above it: a list of
         # refused names with no cause is the confession log P9 warns about.
         raise SystemExit(
-            f"[alloc] ERROR: {exc}" + tessera_refusal_cause(tessera_diagnosis)
+            f"[alloc] ERROR: {exc}" + menu.refusal_cause
         ) from None
     specs_sorted, serialized_rates = _sort_specs_by_serialized_rate(
         specs,
@@ -2942,7 +3045,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
         defer_menu_reduction=packed_members_deferred | fused_members_deferred,
-        **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}),
+        **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
     )
     print(f"[alloc] candidates built for {len(candidates)} Linears"
           + (f" ({len(packed_members_deferred)} packed-group and "
@@ -3317,7 +3420,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats, costs, specs_sorted, candidates, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
-            **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}))
+            **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
         packed_groups = sum(
             1 for n in candidates if _PACKED_GROUP_MARKER in n)
         packed_member_rows = sum(
@@ -3350,7 +3453,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats, costs, specs_sorted, candidates, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
-            **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}))
+            **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
         sib_groups = sum(1 for n in candidates if _FUSED_SIBLING_MARKER in n)
         print(f"[alloc] fused-sibling aggregation: {sib_groups} groups "
               f"(qkv_proj / gate_up_proj / ...)")
@@ -3395,7 +3498,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         candidates, stats,
         bit_precision=float(args.bit_precision),
         report=tessera_menu_report_agg,
-        **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}),
+        **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
     )
 
     post_aggregation_availability = {
@@ -3594,6 +3697,53 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 expected_bindings=expected_bindings)
         except (ValueError, KeyError) as exc:
             raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
+
+    # PACT (PQ #1584): price each DP option by its served operator's shape from
+    # the admitted shape-time table. Every option expands to its members exactly
+    # as the measured path expands it; an option the table does not price is
+    # left out of the time-aware candidate set and reported as a gap.
+    pact_pricing = None
+    pact_candidates = None
+    pact_option_members = {}
+    pact_scope = None
+    if args.pact_shape_table is not None:
+        from .shape_runtime_prices import (
+            ShapeRuntimeError, admit_shape_table, build_shape_runtime_resources, load_shape_table,
+        )
+        try:
+            pact_scope, pact_eligibility, pact_formats = lane.allocation_shape_price_scope(
+                tessera_serving_target, tensor_parallel=args.pact_tensor_parallel)
+        except (LookupError, ValueError) as exc:
+            raise SystemExit(f"[alloc] ERROR: PACT shape table scope: {exc}") from None
+        try:
+            shape_table = admit_shape_table(load_shape_table(args.pact_shape_table),
+                                            scope=pact_scope, eligibility=pact_eligibility)
+            member_shapes, member_structure = {}, {}
+            for unit, options in sorted(candidates.items()):
+                for option in options:
+                    members = expand_fused_sibling_assignment(
+                        expand_packed_group_assignment({unit: option.fmt}, stats), stats)
+                    pact_option_members[(unit, option.fmt)] = members
+                    for name in members:
+                        if name in member_shapes:
+                            continue
+                        entry = _stats_entry_for_assignment_name(name)
+                        if entry is None:
+                            raise ValueError(f"{name}: PACT has no independent shape")
+                        member_shapes[name] = _shape_from_stats(entry)
+                        member_structure[name] = lane.allocation_unit_context(
+                            tessera_serving_target, name, model_profile).structure
+            pact_pricing = build_shape_runtime_resources(
+                shape_table, candidates, option_members=pact_option_members,
+                member_shapes=member_shapes, member_structure=member_structure,
+                regime_m=args.pact_regime, published_formats=pact_formats)
+            pact_candidates = pact_pricing.time_candidates(candidates)
+        except (ShapeRuntimeError, ValueError, KeyError, LookupError) as exc:
+            raise SystemExit(f"[alloc] ERROR: PACT shape table: {exc}") from None
+        gaps = pact_pricing.gap_report()
+        print(f"[alloc] PACT shape table ACTIVE (research): {gaps['priced_options']} options "
+              f"priced at M={args.pact_regime}, {gaps['unpriced_options']} unpriced "
+              f"({gaps['by_kind']}); operator sums are proposals, not placements", flush=True)
 
     _serve_lane_cache: dict[tuple, object] = {}
 
@@ -4172,7 +4322,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         layer_cfg[LAYER_CONFIG_META_KEY] = {
             "schema": "prismaquant.layer_config_meta.v1",
             "target_profile": target_profile,
-            **({"tessera_serving_scope": scope_provenance(
+            **({**lane.allocation_scope_meta(
                     tessera_serving_target, tessera_context_by_unit),
                 "serving_lane_provenance": selection_serving_lane_provenance(
                     assignment_expanded, candidates, target_profile,
@@ -4206,54 +4356,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "additive_candidate_proposal_then_exact_assignment_filter"
             ),
             "global_optimality_claimed": False,
-            # Continuous-menu provenance, written on EVERY run rather than only on
-            # the byte-budget path: how wide the Tessera menu was before the DP saw
-            # it, which of the two exact reductions shrank it (per-Linear and, for
-            # aggregated super items, again after aggregation), and what the solve
-            # cost in wall time. On a menu of thousands of rungs those are the
-            # numbers that say whether a coarse-looking result is the allocator's
-            # answer or the menu's. Absent keys mean no Tessera rung was on the
-            # menu, so a stock run's metadata is unchanged.
-            **({"tessera_menu": {
-                    "per_linear": dict(tessera_menu_report),
-                    "aggregated": dict(tessera_menu_report_agg),
-                    **tessera_menu_widths,
-                    **({"selection_caveat": surrogate_selection_caveat()}
-                       if tessera_menu_widths else {}),
-                }} if (tessera_menu_report or tessera_menu_report_agg
-                       or tessera_menu_widths) else {}),
-            **({"tessera_group_knapsack": dict(tessera_group_menu_report)}
-               if tessera_group_menu_report else {}),
-            # Per selection: a content-equal second seal names only the selected
-            # units priced under it (``unit_capture_sha256``), never the whole
-            # table's row map (RobTand/prismaquant#1270).
-            **({"tessera_hessian": project_hessian_identity(
-                    tessera_hessian_identity, assignment_expanded)}
-               if (tessera_hessian_identity.get("stamped_rows")
-                   or tessera_hessian_identity.get("unstamped_rows")) else {}),
-            # The static A-side scale VALUE each selected Tessera unit was priced
-            # under, read from its own cost row (RobTand/prismaquant#204). The
-            # export gate compares the exporter's --input-scales file against
-            # this, value for value; until it existed the gate could only check
-            # that a key was present. Absent when no Tessera unit is selected, so
-            # a stock run's metadata is unchanged. Read from the unfiltered table
-            # (`cost_data["costs"]`): every selected unit's row is there whatever
-            # the lm_head / visual filters removed from the DP's view.
-            **({"tessera_activation_static_scales": priced_static_scales(
-                    {name: fmt for name, fmt in assignment_expanded.items()
-                     if str(fmt).startswith("TESSERA_")},
-                    cost_data["costs"],
-                    # The FORMULA those values came out of, read from the table
-                    # that priced them and never from this process's environment:
-                    # a legacy value under a full-E4M3 label is a scale nothing
-                    # served (RobTand/prismaquant#624).
-                    policy=(cost_data.get("provenance", {})
-                            .get("activation_static_scales", {})
-                            .get("policy")),
-                    served_activation_policy=cost_data.get("provenance", {}).get("served_activation_policy"))}
-               if any(str(fmt).startswith("TESSERA_")
-                      for fmt in assignment_expanded.values()) else {}),
-            **({"tessera_dev_pin": dict(tessera_dev_pin)} if tessera_dev_pin else {}),
+            # The lane's blocks: its menu widths and reductions (per-Linear and
+            # after aggregation), its group knapsack, the Hessian identity and
+            # static activation scales of the selected units, and the runtime
+            # contract that answered. Absent when no lane rung is on the menu,
+            # so a stock run's metadata is unchanged.
+            **lane.allocation_layer_config_meta(
+                menu_report=tessera_menu_report,
+                menu_report_agg=tessera_menu_report_agg,
+                menu_widths=tessera_menu_widths,
+                group_menu_report=tessera_group_menu_report,
+                hessian_identity=tessera_hessian_identity,
+                dev_pin=tessera_dev_pin,
+                assignment=assignment_expanded,
+                cost_data=cost_data),
             **({"solve_diagnostics": {
                     str(k): {
                         "solver_seconds": v.get("solver_seconds"),
@@ -4301,6 +4417,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "certifies_placement": False,
                 "prefill_frontier_replay": replay,
                 "fixed_resource_scope": fixed_resource_scope_stamp,
+                # A PACT vertex also names how it was generated and what its
+                # time is (PQ #1584); the replay block carries both too, so
+                # the claim that reaches the build record keeps them.
+                **({"candidate_generator": replay["candidate_generator"],
+                    "time_claim": replay["time_claim"]}
+                   if "candidate_generator" in replay else {}),
             })
         # What this allocation carries about the priced expert population
         # (PrismaQuant #183): the campaign's population statement (which units
@@ -4313,20 +4435,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # no keys, and a table carrying a population but no projection carries
         # only the population.
         if args.mtp_joint_cost:
-            _stamp_mtp_selection(args, layer_cfg, assignment_expanded,
-                                 serving_target=tessera_serving_target, profile=model_profile)
-        if args.tessera_materialization_plan:
-            from .tessera_materialization import write_selection_request
-            write_selection_request(args.tessera_materialization_plan,
+            _stamp_mtp_selection(args, layer_cfg, assignment_expanded, _mtp_selection()[1])
+        selection_request = lane.allocation_selection_request_path(args)
+        if selection_request:
+            lane.write_allocation_selection_request(selection_request,
                 layer_config=layer_cfg, assignment=assignment_expanded,
                 cost_path=args.costs, cost_payload=cost_data, output_path=args.layer_config)
-            print(f"[alloc] non-exportable selected-wire request → {args.tessera_materialization_plan}")
             return
-        try:
-            layer_cfg[LAYER_CONFIG_META_KEY].update(
-                allocation_expert_projection_block(cost_data, assignment_expanded))
-        except ExpertProjectionError as exc:
-            raise SystemExit(f"[alloc] ERROR: expert projection: {exc}") from exc
+        layer_cfg[LAYER_CONFIG_META_KEY].update(
+            lane.allocation_expert_projection(cost_data, assignment_expanded))
 
         out = Path(args.layer_config)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -4364,7 +4481,322 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         )
 
 
+    # --- deterministic tensor payload + conservative artifact bound --------
+    # The byte budget is the CONSTRAINT and measured KL is the OBJECTIVE, but
+    # `select_validated_frontier` cannot see the card: it reads only the
+    # per-point KL rows. Pricing each candidate here — through the SAME
+    # footprint.assignment_artifact_bytes the allocator's own byte-budget
+    # selector uses.  That function prices safetensors tensor-data spans, not
+    # a directory.  Under a whole-artifact budget we add the explicit operator
+    # reserve; the exporter later measures every regular file and hard-fails.
+    _footprint_ctx: dict[str, object] = {}
+
+    def _partition_source_total(_fp, src_total, src_manifest, *, where,
+                                assigned_names=()):
+        """Apply --exclude-source-prefix and the MTP selection's bytes (PQ #1610).
+
+        Raises SystemExit (not ValueError) on a bad prefix ON PURPOSE: both
+        callers of the pricing scalars sit behind `except Exception` clauses
+        that degrade to "pricing unavailable", and a prefix that silently
+        excluded nothing is the exact failure this flag exists to prevent —
+        it under-fills the budget by the excluded mass and every downstream
+        number stays self-consistent. SystemExit is a BaseException, so it
+        passes through those clauses to the operator.
+        """
+        total, part = _excluded_source_total(
+            _fp, src_total, src_manifest, where=where, assigned_names=assigned_names)
+        if not args.mtp_joint_cost:
+            return total, part
+        # PQ #1610: the MTP layer ships its selected rungs, not its source
+        # bytes; the floor must hold what ships.
+        payload, record = _mtp_selection()
+        excluded = tuple(getattr(args, "exclude_source_prefix", None) or ())
+        overlap = sorted(n for n in payload["params"] if n.startswith(excluded)) \
+            if excluded else []
+        if overlap:
+            raise SystemExit(f"[alloc] ERROR: --exclude-source-prefix also removes "
+                             f"{len(overlap)} selected MTP unit(s): {overlap[:4]}")
+        try:
+            rebase = _fp.mtp_selection_rebased_bytes(
+                total, payload, record["resident_bytes"], context=where,
+                manifest=src_manifest, assigned_names=assigned_names)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: {exc}") from None
+        print(
+            f"[alloc] MTP rebase ({where}): {rebase['n_units']} MTP units priced "
+            f"at the selected {rebase['mtp_resident_bytes']:,} B instead of "
+            f"their source {rebase['mtp_source_bytes']:,} B", flush=True)
+        return rebase["total_bytes"], part
+
+    def _excluded_source_total(_fp, src_total, src_manifest, *, where,
+                               assigned_names=()):
+        if not getattr(args, "exclude_source_prefix", None):
+            return int(src_total), None
+        try:
+            part = _fp.partitioned_source_total_bytes(
+                src_manifest, int(src_total), args.exclude_source_prefix,
+                context=where, assigned_names=assigned_names)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: {exc}") from None
+        print(
+            f"[alloc] source partition ({where}): excluding "
+            f"{', '.join(part['excluded_prefixes'])} removes "
+            f"{part['n_excluded']} source tensors / "
+            f"{part['excluded_source_bytes'] / 1e9:.3f} GB; this artifact is "
+            f"priced against {part['source_total_bytes'] / 1e9:.3f} GB of "
+            f"{int(src_total) / 1e9:.3f} GB",
+            flush=True)
+        return int(part["source_total_bytes"]), part
+
+    def _footprint_scalars():
+        if _footprint_ctx or not probe_model_path:
+            return _footprint_ctx or None
+        from . import footprint as _fp
+        try:
+            src_total, src_by_dtype = _fp.source_checkpoint_bytes(probe_model_path)
+            src_manifest = _fp.source_tensor_bytes_manifest(
+                probe_model_path,
+                name_map=getattr(model_profile, "checkpoint_to_live_name", None),
+                expert_parent_for_projection=getattr(
+                    model_profile, "packed_expert_parent_for_projection", None),
+            )
+            priced_total, _part = _partition_source_total(
+                _fp, src_total, src_manifest,
+                where="pareto candidate footprint",
+                assigned_names={**accounting_stats, **fixed_stats, **stats})
+            _footprint_ctx.update({
+                "fp": _fp,
+                "source_total_bytes": priced_total,
+                "regime": _fp.source_regime(src_by_dtype),
+                "source_manifest": src_manifest,
+                "stats": {**accounting_stats, **fixed_stats, **stats},
+            })
+        except Exception as exc:  # pricing is additive; never break allocation
+            print(f"[alloc] WARNING: Pareto footprint pricing unavailable: {exc}",
+                  flush=True)
+            return None
+        return _footprint_ctx
+
+    def _artifact_size_for(expanded_assignment):
+        ctx = _footprint_scalars()
+        if not ctx:
+            return None
+        try:
+            info = ctx["fp"].assignment_artifact_bytes(
+                expanded_assignment, ctx["stats"],
+                source_total_bytes=ctx["source_total_bytes"],
+                source_manifest=ctx["source_manifest"],
+                regime=ctx["regime"],
+                context="pareto candidate footprint",
+            )
+            if info["n_missing_stats"]:
+                sample = ", ".join(info["missing_stats_names"][:10])
+                raise ValueError(
+                    f"{info['n_missing_stats']} assigned Linear(s) have no "
+                    f"shape stats and cannot receive an exact artifact price: "
+                    f"{sample}"
+                )
+            tensor_payload_bytes = int(info["artifact_payload_bytes"])
+            reserve_bytes = int(args.artifact_overhead_reserve_bytes or 0)
+            return {
+                "artifact_tensor_payload_bytes": tensor_payload_bytes,
+                "artifact_tensor_payload_scope": info["artifact_byte_scope"],
+                **({
+                    "whole_artifact_upper_bound_bytes": (
+                        tensor_payload_bytes + reserve_bytes
+                    ),
+                    "artifact_bytes": tensor_payload_bytes + reserve_bytes,
+                    "artifact_byte_scope": (
+                        "selection_upper_bound_tensor_payload_plus_"
+                        "operator_non_tensor_reserve"
+                    ),
+                } if args.target_disk_gb is not None else {}),
+            }
+        except Exception as exc:
+            if args.target_disk_gb is not None:
+                raise SystemExit(
+                    "[alloc] ERROR: exact Pareto artifact pricing failed "
+                    f"under --target-disk-gb: {exc}"
+                ) from None
+            print(f"[alloc] WARNING: could not price a Pareto candidate: {exc}",
+                  flush=True)
+            return None
+
     pareto_seed_records: list[dict] = []
+
+    if pact_pricing is not None:
+        # PACT (PQ #1584): the exact lower convex hull of (operator-sum time,
+        # predicted Δloss) is the candidate set. λ only generates it; no
+        # selection objective reads λ, and no layer config, Pareto CSV or
+        # selection is written here. A replay writes one vertex.
+        from .allocator_solver import RuntimeFrontierLimitError
+        from .pact_hull import (
+            DEFAULT_MAX_STATES, DEFAULT_MAX_TRANSITIONS, PactHullError,
+            dichotomic_lower_hull, probe_assignment,
+        )
+        pact_time_ms = {key: float(r.prefill_ms) for key, r in pact_pricing.resources.items()}
+        pact_options = {(unit, c.fmt): c for unit, cs in pact_candidates.items() for c in cs}
+
+        def _pact_unit_bytes(assignment: Mapping[str, str]) -> int:
+            return sum(int(pact_options[(unit, fmt)].memory_bytes)
+                       for unit, fmt in assignment.items())
+
+        def _pact_payload_bytes(expanded: Mapping[str, str]) -> int:
+            """Whole-artifact tensor payload of one expanded assignment (footprint.py)."""
+            ctx = _footprint_scalars()
+            if not ctx:
+                raise SystemExit(
+                    "[alloc] ERROR: --target-disk-gb in PACT mode prices the bytes outside "
+                    "the DP units from the source checkpoint (probe meta.model or "
+                    "--model-override), and that checkpoint could not be priced")
+            try:
+                info = ctx["fp"].assignment_artifact_bytes(
+                    dict(expanded), ctx["stats"], source_total_bytes=ctx["source_total_bytes"],
+                    source_manifest=ctx["source_manifest"], regime=ctx["regime"],
+                    context="PACT whole-artifact budget")
+            except ValueError as exc:
+                raise SystemExit(f"[alloc] ERROR: {exc}") from None
+            if info["n_missing_stats"]:
+                raise SystemExit(
+                    f"[alloc] ERROR: {info['n_missing_stats']} allocated Linear(s) have no "
+                    "stats, so the PACT whole-artifact budget cannot price them: "
+                    + ", ".join(info["missing_stats_names"][:10]))
+            return int(info["artifact_payload_bytes"])
+
+        # The byte budget. Without --target-disk-gb it is the measured solve's:
+        # target bpp over the mutable parameters. With it, it is the on-disk
+        # whole-artifact cap (footprint.py), less the operator reserve, less the
+        # bytes outside the DP units. That last term is read off the exact
+        # accountant at the smallest and the largest unit assignment and must be
+        # one constant; every vertex is then re-priced exactly against the cap.
+        pact_disk = None
+        if args.target_disk_gb is not None:
+            from . import footprint as _pact_fp
+            ends = {
+                "smallest": {u: min(cs, key=lambda c: (c.memory_bytes, c.fmt)).fmt
+                             for u, cs in pact_candidates.items()},
+                "largest": {u: max(cs, key=lambda c: (c.memory_bytes, c.fmt)).fmt
+                            for u, cs in pact_candidates.items()},
+            }
+            outside = {name: _pact_payload_bytes(_expand_assignment_for_seed_json(dict(a)))
+                       - _pact_unit_bytes(a) for name, a in ends.items()}
+            if outside["smallest"] != outside["largest"]:
+                raise SystemExit(
+                    "[alloc] ERROR: PACT --target-disk-gb: the whole-artifact payload is not "
+                    "the units' candidate bytes plus one constant (the smallest assignment "
+                    f"leaves {outside['smallest']} bytes outside the units, the largest "
+                    f"{outside['largest']}), so no unit byte budget states the cap exactly")
+            cap_bytes = int(math.floor(float(args.target_disk_gb) * _pact_fp.GB))
+            reserve_bytes = int(args.artifact_overhead_reserve_bytes)
+            pact_budget = cap_bytes - reserve_bytes - outside["smallest"]
+            pact_disk = {"budget_bytes": cap_bytes, "reserve_bytes": reserve_bytes,
+                         "non_unit_payload_bytes": int(outside["smallest"]),
+                         "unit_budget_bytes": int(pact_budget)}
+            print(f"[alloc] PACT byte budget: card {cap_bytes} B - reserve {reserve_bytes} B - "
+                  f"{outside['smallest']} B outside the units = {pact_budget} B for the units",
+                  flush=True)
+        else:
+            pact_budget = math.floor(float(args.target_bits) * mutable_total_params / 8)
+
+        def _pact_vertex_record(assignment: Mapping[str, str]) -> dict:
+            raw_expanded = {}
+            for unit, fmt in assignment.items():
+                raw_expanded.update(pact_option_members[(unit, fmt)])
+            raw_expanded.update(fixed_format_assignment)
+            expanded = _expand_assignment_for_seed_json(dict(assignment))
+            if expanded != raw_expanded:
+                return {"feasible": False, "reason": "serving_promotion_changed_the_vertex"}
+            exact = _assignment_payload_totals(
+                {name: fmt for name, fmt in expanded.items()
+                 if name not in fixed_format_assignment}, require_all_stats=True)
+            achieved = float(exact["bits_per_param"])
+            record = {"assignment": dict(expanded), "achieved_bits": achieved,
+                      "payload_bytes": int(exact["bits_total"]) // 8,
+                      "quantizable_params": int(exact["quantizable_params"])}
+            if pact_disk is None:
+                feasible = achieved <= float(args.target_bits)
+                reason = "exact_assignment_payload_over_target"
+            else:
+                artifact = _pact_payload_bytes(expanded)
+                upper = artifact + pact_disk["reserve_bytes"]
+                feasible = upper <= pact_disk["budget_bytes"]
+                reason = "whole_artifact_upper_bound_over_card"
+                record.update({"artifact_tensor_payload_bytes": artifact,
+                               "whole_artifact_upper_bound_bytes": upper})
+            record.update({"feasible": feasible, "reason": None if feasible else reason})
+            return record
+
+        pact_limits = {"max_states": int(args.pact_max_states or DEFAULT_MAX_STATES),
+                       "max_transitions": int(args.pact_max_transitions
+                                              or DEFAULT_MAX_TRANSITIONS)}
+
+        def _pact_build_hull() -> dict:
+            import resource
+            rss_before_kib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            start = _time.perf_counter()
+            try:
+                hull = dichotomic_lower_hull(pact_candidates, pact_time_ms,
+                                             max_memory_bytes=pact_budget, **pact_limits)
+            except (PactHullError, RuntimeFrontierLimitError) as exc:
+                sizes = (getattr(exc, "diagnostics", None) or {}).get("frontier_sizes")
+                if sizes:
+                    print(f"[alloc] PACT hull refused after {len(sizes)} unit(s); "
+                          f"frontier sizes by unit: {sizes}", flush=True)
+                raise SystemExit(f"[alloc] ERROR: PACT hull: {exc}") from None
+            seconds = _time.perf_counter() - start
+            # ru_maxrss is the process peak: the hull raised it only if the
+            # after-reading exceeds the before-reading (PQ #1584, principle 15).
+            return {"hull": hull, "seconds": seconds, "peak_rss_kib": {
+                        "before_hull": rss_before_kib,
+                        "after_hull": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},
+                    "vertices": [_pact_vertex_record(v.assignment) for v in hull.vertices]}
+
+        def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
+            if lane.allocation_selection_request_path(args):
+                raise ValueError("PACT replay requires materialized wires, not a selection request")
+            try:
+                assign = probe_assignment(pact_candidates, pact_time_ms, weights,
+                                          max_memory_bytes=pact_budget, **pact_limits)
+            except (PactHullError, RuntimeFrontierLimitError) as exc:
+                raise ValueError(f"PACT replay probe refused: {exc}") from None
+            record = _pact_vertex_record(assign)
+            if not record["feasible"] or record["assignment"] != expected_assignment:
+                raise ValueError("PACT replay: the recorded probe re-derives a different "
+                                 "assignment than the hull vertex")
+            dloss = math.fsum(float(pact_options[(unit, fmt)].predicted_dloss)
+                              for unit, fmt in assign.items())
+            budget_stamp = None
+            if pact_disk is not None:
+                budget_stamp = whole_artifact_budget_stamp(
+                    budget_bytes=pact_disk["budget_bytes"],
+                    selection_tensor_payload_bytes=record["artifact_tensor_payload_bytes"],
+                    selection_non_tensor_reserve_bytes=pact_disk["reserve_bytes"],
+                    selection_assignment=record["assignment"],
+                    excluded_source_prefixes=getattr(args, "exclude_source_prefix", None) or ())
+            # Replay owns only its explicit output, never sweep-side attribution files.
+            args.bit_attribution_json = args.bit_attribution_csv = None
+            _write_layer_config(assign, record["achieved_bits"], dloss, dloss, replay=provenance,
+                                selected_whole_artifact_budget_stamp=budget_stamp)
+
+        measured_runtime_sweep(PactHullSweep(
+            build_hull=_pact_build_hull,
+            emit_replay=_pact_emit_replay,
+            pricing=pact_pricing,
+            table_identity=dict(pact_pricing.table_identity),
+            scope=dict(vars(pact_scope)),
+            regime_m=int(args.pact_regime),
+            tensor_parallel=int(args.pact_tensor_parallel),
+            time_ceiling_ms=args.pact_time_ceiling_ms,
+            max_memory_bytes=int(pact_budget),
+            **pact_limits,
+            whole_artifact_budget=pact_disk,
+            fixed_members=tuple(sorted(fixed_format_assignment)),
+            n_units=len(pact_candidates),
+            target_bits=float(args.target_bits),
+            cost_path=str(args.costs),
+            probe_path=str(args.probe),
+        ))
+        return
 
     if measured_runtime_sweep is not None:
         # Prefill frontier sweep (prismaquant.prefill_frontier): several
@@ -4417,7 +4849,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return record
 
         def _emit_replay(slo_ms, target_bits, expected_assignment, provenance):
-            if args.tessera_materialization_plan:
+            if lane.allocation_selection_request_path(args):
                 raise ValueError("prefill frontier replay requires materialized wires, not a selection request")
             record = _solve_at_prefill_slo(slo_ms, target_bits)
             if not record["feasible"] or record["assignment"] != expected_assignment:
@@ -4565,120 +4997,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
               f"{_c['achieved_bits']:.3f} → refined achieved={_r['achieved_bits']:.3f} "
               f"(target={_r['target_bits']:.3f}, {_r['evals']} DP evals, "
               f"±{_r['tol_bits']}b)")
-
-    # --- deterministic tensor payload + conservative artifact bound --------
-    # The byte budget is the CONSTRAINT and measured KL is the OBJECTIVE, but
-    # `select_validated_frontier` cannot see the card: it reads only the
-    # per-point KL rows. Pricing each candidate here — through the SAME
-    # footprint.assignment_artifact_bytes the allocator's own byte-budget
-    # selector uses.  That function prices safetensors tensor-data spans, not
-    # a directory.  Under a whole-artifact budget we add the explicit operator
-    # reserve; the exporter later measures every regular file and hard-fails.
-    _footprint_ctx: dict[str, object] = {}
-
-    def _partition_source_total(_fp, src_total, src_manifest, *, where,
-                                assigned_names=()):
-        """Apply --exclude-source-prefix, or pass the total through.
-
-        Raises SystemExit (not ValueError) on a bad prefix ON PURPOSE: both
-        callers of the pricing scalars sit behind `except Exception` clauses
-        that degrade to "pricing unavailable", and a prefix that silently
-        excluded nothing is the exact failure this flag exists to prevent —
-        it under-fills the budget by the excluded mass and every downstream
-        number stays self-consistent. SystemExit is a BaseException, so it
-        passes through those clauses to the operator.
-        """
-        if not getattr(args, "exclude_source_prefix", None):
-            return int(src_total), None
-        try:
-            part = _fp.partitioned_source_total_bytes(
-                src_manifest, int(src_total), args.exclude_source_prefix,
-                context=where, assigned_names=assigned_names)
-        except ValueError as exc:
-            raise SystemExit(f"[alloc] ERROR: {exc}") from None
-        print(
-            f"[alloc] source partition ({where}): excluding "
-            f"{', '.join(part['excluded_prefixes'])} removes "
-            f"{part['n_excluded']} source tensors / "
-            f"{part['excluded_source_bytes'] / 1e9:.3f} GB; this artifact is "
-            f"priced against {part['source_total_bytes'] / 1e9:.3f} GB of "
-            f"{int(src_total) / 1e9:.3f} GB",
-            flush=True)
-        return int(part["source_total_bytes"]), part
-
-    def _footprint_scalars():
-        if _footprint_ctx or not probe_model_path:
-            return _footprint_ctx or None
-        from . import footprint as _fp
-        try:
-            src_total, src_by_dtype = _fp.source_checkpoint_bytes(probe_model_path)
-            src_manifest = _fp.source_tensor_bytes_manifest(
-                probe_model_path,
-                name_map=getattr(model_profile, "checkpoint_to_live_name", None),
-                expert_parent_for_projection=getattr(
-                    model_profile, "packed_expert_parent_for_projection", None),
-            )
-            priced_total, _part = _partition_source_total(
-                _fp, src_total, src_manifest,
-                where="pareto candidate footprint",
-                assigned_names={**accounting_stats, **fixed_stats, **stats})
-            _footprint_ctx.update({
-                "fp": _fp,
-                "source_total_bytes": priced_total,
-                "regime": _fp.source_regime(src_by_dtype),
-                "source_manifest": src_manifest,
-                "stats": {**accounting_stats, **fixed_stats, **stats},
-            })
-        except Exception as exc:  # pricing is additive; never break allocation
-            print(f"[alloc] WARNING: Pareto footprint pricing unavailable: {exc}",
-                  flush=True)
-            return None
-        return _footprint_ctx
-
-    def _artifact_size_for(expanded_assignment):
-        ctx = _footprint_scalars()
-        if not ctx:
-            return None
-        try:
-            info = ctx["fp"].assignment_artifact_bytes(
-                expanded_assignment, ctx["stats"],
-                source_total_bytes=ctx["source_total_bytes"],
-                source_manifest=ctx["source_manifest"],
-                regime=ctx["regime"],
-                context="pareto candidate footprint",
-            )
-            if info["n_missing_stats"]:
-                sample = ", ".join(info["missing_stats_names"][:10])
-                raise ValueError(
-                    f"{info['n_missing_stats']} assigned Linear(s) have no "
-                    f"shape stats and cannot receive an exact artifact price: "
-                    f"{sample}"
-                )
-            tensor_payload_bytes = int(info["artifact_payload_bytes"])
-            reserve_bytes = int(args.artifact_overhead_reserve_bytes or 0)
-            return {
-                "artifact_tensor_payload_bytes": tensor_payload_bytes,
-                "artifact_tensor_payload_scope": info["artifact_byte_scope"],
-                **({
-                    "whole_artifact_upper_bound_bytes": (
-                        tensor_payload_bytes + reserve_bytes
-                    ),
-                    "artifact_bytes": tensor_payload_bytes + reserve_bytes,
-                    "artifact_byte_scope": (
-                        "selection_upper_bound_tensor_payload_plus_"
-                        "operator_non_tensor_reserve"
-                    ),
-                } if args.target_disk_gb is not None else {}),
-            }
-        except Exception as exc:
-            if args.target_disk_gb is not None:
-                raise SystemExit(
-                    "[alloc] ERROR: exact Pareto artifact pricing failed "
-                    f"under --target-disk-gb: {exc}"
-                ) from None
-            print(f"[alloc] WARNING: could not price a Pareto candidate: {exc}",
-                  flush=True)
-            return None
 
     if args.pareto_output_dir:
         for record in pareto_seed_records:
@@ -5549,24 +5867,19 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "serving_lane_provenance": selection_serving_lane_provenance(
                 chosen_info["assignment"], candidates, target_profile,
                 context_by_unit=tessera_context_by_unit),
-            **({"tessera_serving_scope": scope_provenance(
-                tessera_serving_target, tessera_context_by_unit)}
+            **(lane.allocation_scope_meta(
+                tessera_serving_target, tessera_context_by_unit)
                if tessera_serving_target is not None else {}),
-            # How big the per-unit menu was BEFORE the DP saw it, and which
-            # of the two reductions shrank it (see reduce_continuous_menu).
-            # Empty on a run with no Tessera rung on the menu. Without this a
-            # coarse-looking set of selected rates cannot be attributed: a
-            # campaign that priced few rungs and a bin width that swallowed
-            # many look identical in the output.
-            "tessera_group_knapsack": dict(tessera_group_menu_report),
-            **({"tessera_dev_pin": dict(tessera_dev_pin)} if tessera_dev_pin else {}),
-            "tessera_menu": {
-                "per_linear": dict(tessera_menu_report),
-                "aggregated": dict(tessera_menu_report_agg),
-                **tessera_menu_widths,
-                **({"selection_caveat": surrogate_selection_caveat()}
-                   if tessera_menu_widths else {}),
-            },
+            # The lane's menu widths and reductions before the DP saw them (see
+            # reduce_continuous_menu), its group knapsack and the runtime
+            # contract that answered: without them a coarse-looking set of
+            # selected rates cannot be attributed.
+            **lane.allocation_selection_meta(
+                menu_report=tessera_menu_report,
+                menu_report_agg=tessera_menu_report_agg,
+                menu_widths=tessera_menu_widths,
+                group_menu_report=tessera_group_menu_report,
+                dev_pin=tessera_dev_pin),
             # DP wall time per solved target, summed over the tightening
             # retries that target needed. `_solve_diagnostics` was previously
             # read only by the infeasibility message, so the cost of a solve

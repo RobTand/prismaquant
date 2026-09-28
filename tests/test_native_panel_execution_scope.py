@@ -239,14 +239,18 @@ def test_a_half_written_scope_is_refused_by_the_reader():
     """A block that names the box but not the build is worse than none."""
     payload = json.loads(TABLE.read_text())
     payload["activation_quantizers"]["platforms"][PLATFORM]["generated"].pop("vllm")
-    with pytest.raises(trc.TesseraContractError, match="must publish exactly"):
+    with pytest.raises(trc.TesseraContractError, match="missing field"):
         trc._parse_activation_quantizers(payload, "<fixture>")
 
 
-def test_an_unknown_field_beside_the_platform_tables_is_a_review():
+def test_an_unknown_field_beside_the_platform_tables_is_a_review_only_when_marked():
+    """Accepted and read by nothing (#1548); refused once the producer marks it."""
+    base = trc._parse_activation_quantizers(json.loads(TABLE.read_text()), "<fixture>")
     payload = json.loads(TABLE.read_text())
     payload["activation_quantizers"]["platforms"][PLATFORM]["notes"] = "fine"
-    with pytest.raises(trc.TesseraContractError, match="which this reader does not know"):
+    assert trc._parse_activation_quantizers(payload, "<fixture>") == base
+    payload["activation_quantizers"]["platforms"][PLATFORM]["must_understand"] = ["notes"]
+    with pytest.raises(trc.TesseraContractError, match="must-understand"):
         trc._parse_activation_quantizers(payload, "<fixture>")
 
 

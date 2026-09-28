@@ -76,6 +76,17 @@ contract's ``lane_eligibility.platforms[<platform>].executes`` says that
 payload family executes on the artifact's declared platform. Nothing here is
 a local table.
 
+The targets are CHECKPOINT names; the trace records each layer's ``prefix``,
+the name vLLM built the module under. Before the exact comparison every
+target is mapped into that namespace by the artifact's model profile
+(``ModelProfile.served_module_name``, resolved from the same ``config.json``;
+PQ #1490). GLM-5.3 serves its body under ``language_model.model.…`` and its
+MTP draft layers under ``model.layers.N.…``, so a draft module traced under
+the body's namespace is a module the price does not name. A profile that
+declares no map compares the checkpoint names verbatim, and its verdict is
+unchanged. A map is a name, never a count: an unnamed module stays NOT
+VERIFIED whatever the map says.
+
 The grade is one fact about the serve, not one per rank: a set in which some
 ranks name their modules and others do not cannot be read as either. It is
 compared as a histogram and, whatever it says, it cannot agree: the histogram
@@ -100,6 +111,22 @@ What this does not see
 * Fallback and error dispatches. Only served dispatches are counted, so a
   module that fell back is ABSENT from the trace; the count comparison is
   what makes that absence a refusal.
+
+The serving code (#1561)
+========================
+
+Since Tessera contract v41 the header also stamps ``serving_source_sha256``:
+the ``tessera.package_source.v1`` digest of the Tessera tree the serve
+started on. It is the check of the serving image's code against the code the
+pin names, and an editable install cannot evade it. Under a v3 pin every
+rank must stamp exactly the pinned digest: a different digest is REFUSED
+naming both, an absent or null one is NOT VERIFIED, and a malformed one is
+REFUSED. The verdict then carries ``serving_source_sha256`` with the pinned
+and the served digests. Under a v2 pin the pin names no code, the key is
+never read, and the verdict is exactly what it was before v41. The header
+field is read beside :data:`_HEADER_FIELDS`, not in it, so a v2 verdict's
+``header`` block does not change for a trace that carries it. The check
+rides this gate, so it is eager-only like the rest of it.
 
 Three outcomes, never two. ``agree`` needs the exact grade AND every module
 match. ``refused`` is a conflict: the observation disagrees with the price,
@@ -613,24 +640,141 @@ def _sample(names: Sequence[str], *, limit: int = 8) -> list[str]:
     return [*names[:limit], f"({len(names) - limit} further module(s))"]
 
 
-def _module_difference(priced: Mapping[str, str], served: Mapping[str, str]) -> list[str]:
+def served_namespace(
+    config: Mapping[str, Any], owners: Mapping[str, str],
+) -> tuple[dict[str, str], dict[str, str], str]:
+    """The priced owners in the namespace the serve's trace names them in.
+
+    Returns ``(priced modules, renamed, profile name)``. ``priced modules`` is
+    ``{served module prefix: contract key}``, the price keyed the way the
+    trace keys it. ``renamed`` holds ``{checkpoint target: served name}`` for
+    every target whose name changed, and is empty for a profile that attests
+    no runtime namespace.
+
+    ``config_groups`` targets are checkpoint names; Tessera records each
+    layer's ``prefix``, which is the name vLLM built the module under. The two
+    differ wherever the model class declares an ``hf_to_vllm_mapper`` (PQ
+    #1490). The map is the model profile's
+    (``ModelProfile.served_module_name``), resolved from this ``config.json``,
+    and nothing about it is restated here. A profile that declares no map
+    keeps the checkpoint names, so the comparison is the verbatim one this
+    gate always made.
+
+    A map the profile cannot apply, and two targets that land on one served
+    name, are refused: either would let one served module stand for a price
+    it does not carry.
+    """
+    # Function scope: model_profiles imports torch, and this module stays
+    # stdlib-only at import (the shipcard replays it at publication).
+    from prismaquant.model_profiles.registry import profile_from_config
+
+    try:
+        profile = profile_from_config(config)
+    except (RuntimeError, ValueError) as exc:
+        raise TesseraRouteTraceError(
+            f"no model profile resolves this config.json ({exc}); the priced "
+            "targets cannot be named in the serve's namespace") from exc
+    modules: dict[str, str] = {}
+    renamed: dict[str, str] = {}
+    source: dict[str, str] = {}
+    for owner, key in sorted(owners.items()):
+        try:
+            name = profile.served_module_name(owner, config)
+        except ValueError as exc:
+            raise TesseraRouteTraceError(
+                f"priced target {owner!r}: the {profile.name} profile cannot "
+                f"name it in the serve's namespace: {exc}") from exc
+        if not isinstance(name, str) or not name:
+            raise TesseraRouteTraceError(
+                f"priced target {owner!r}: the {profile.name} profile maps it "
+                f"to {name!r}, not a module name")
+        if name in modules:
+            raise TesseraRouteTraceError(
+                f"priced targets {source[name]!r} and {owner!r} both map to the "
+                f"served module {name!r} under the {profile.name} profile; one "
+                "served module cannot carry two prices")
+        modules[name] = key
+        source[name] = owner
+        if name != owner:
+            renamed[owner] = name
+    return dict(sorted(modules.items())), dict(sorted(renamed.items())), profile.name
+
+
+def _module_difference(
+    priced: Mapping[str, str], served: Mapping[str, str],
+    checkpoint: Mapping[str, str] | None = None,
+) -> list[str]:
     """``priced`` and ``served`` are ``{module prefix: contract key}``.
 
     The whole point of the exact grade: a contract that moved from one module
-    to another leaves the counts alone and shows up here.
+    to another leaves the counts alone and shows up here. ``checkpoint`` is
+    ``{served name: checkpoint target}`` for priced names the profile renamed,
+    so a refusal names both spellings.
     """
+    checkpoint = checkpoint or {}
     differing = [name for name in sorted(set(priced) | set(served))
                  if priced.get(name) != served.get(name)]
     lines = []
     for name in _sample(differing):
         want, got = priced.get(name), served.get(name)
+        label = (f"{name} (priced as {checkpoint[name]})"
+                 if name in checkpoint else name)
         if want is None:
-            lines.append(f"{name}: served {got} but the price names no such module")
+            lines.append(f"{label}: served {got} but the price names no such module")
         elif got is None:
-            lines.append(f"{name}: priced {want}, served by no module")
+            lines.append(f"{label}: priced {want}, served by no module")
         else:
-            lines.append(f"{name}: priced {want} but served {got}")
+            lines.append(f"{label}: priced {want} but served {got}")
     return lines
+
+
+#: The header key Tessera v41 stamps with the serving tree's digest.
+SERVING_SOURCE_FIELD = "serving_source_sha256"
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+#: The default of :func:`compare_route_traces`' code check: the tracked pin.
+_TRACKED_PIN = object()
+
+
+def serving_source_refusal(
+    traces: Sequence[tuple[str, Any]], pinned: str, *, where: str = "trace",
+) -> tuple[str, str, dict[str, Any]] | None:
+    """Compare every rank's header digest with the pinned one (#1561).
+
+    Returns ``None`` when every rank stamps ``pinned``; otherwise ``(status,
+    detail, served)``. A malformed or different digest on any rank is a
+    conflict (REFUSED, both digests named); an absent or null one on any
+    rank, with no conflict elsewhere, is NOT VERIFIED. ``served`` maps each
+    rank label to what its header stamps (``None`` when absent).
+    """
+    served: dict[str, Any] = {}
+    conflicts: list[str] = []
+    absent: list[str] = []
+    for label, payload in traces:
+        document = _decode(payload, where=f"{where}[{label}]")
+        value = document.get(SERVING_SOURCE_FIELD)
+        served[label] = value
+        if value is None:
+            absent.append(label)
+        elif not isinstance(value, str) or _SHA256.match(value) is None:
+            conflicts.append(
+                f"rank {label} stamps a malformed {SERVING_SOURCE_FIELD} "
+                f"{value!r} (not 64 lowercase hex digits)")
+        elif value != pinned:
+            conflicts.append(
+                f"rank {label} served code {value}, and the pin names {pinned}")
+    if conflicts:
+        return REFUSED, (
+            "REFUSED: the serve ran other Tessera code than the pin names: "
+            + "; ".join(conflicts)
+            + "; a route observed on other code attests nothing about the "
+            "pinned code (#1561)"), served
+    if absent:
+        return NOT_VERIFIED, (
+            f"NOT VERIFIED: rank(s) {absent} stamp no {SERVING_SOURCE_FIELD}, "
+            f"so which Tessera code served is unknown; the pin names {pinned} "
+            "and an absent digest is never a match (#1561)"), served
+    return None
 
 
 def compare_route_traces(
@@ -641,6 +785,7 @@ def compare_route_traces(
     platform: str,
     executes_by_platform: Mapping[str, Mapping[str, "str | None"]],
     formats: Mapping[str, Mapping[str, Any]],
+    serving_source_sha256: Any = _TRACKED_PIN,
 ) -> dict[str, Any]:
     """The whole gate. Returns a verdict whose ``status`` is one of three.
 
@@ -648,12 +793,27 @@ def compare_route_traces(
     ``None`` payload is a rank whose trace file does not exist. The priced side
     is computed first, so a malformed or unbacked price raises
     :class:`TesseraRouteTraceError` whatever the traces say.
+
+    ``serving_source_sha256`` is the pinned serving code digest (#1561). The
+    default reads the tracked pin, so a caller that passes nothing is checked
+    against it. ``None`` (a v2 pin) skips the check and adds nothing to the
+    verdict.
     """
+    if serving_source_sha256 is _TRACKED_PIN:
+        from . import tessera_serving_runtime_pin
+
+        pinned = tessera_serving_runtime_pin.pinned_serving_source_sha256()
+    else:
+        pinned = serving_source_sha256
+    if pinned is not None and (not isinstance(pinned, str) or _SHA256.match(pinned) is None):
+        raise TesseraRouteTraceError(
+            f"the pinned serving_source_sha256 must be 64 lowercase hex digits, got {pinned!r}")
     if type(expected_ranks) is not int or expected_ranks < 1:
         raise TesseraRouteTraceError("expected_ranks must be a positive integer")
     priced = priced_histogram(
         config, platform=platform,
         executes_by_platform=executes_by_platform, formats=formats)
+    priced_modules, renamed, profile_name = served_namespace(config, priced["owners"])
     verdict: dict[str, Any] = {
         "schema": VERDICT_SCHEMA,
         "granularity": GRANULARITY,
@@ -668,6 +828,11 @@ def compare_route_traces(
         "served_modules": None,
         "header": {},
     }
+    if renamed:
+        # Only when a name changed, so a profile that declares no map leaves
+        # the verdict exactly as it was before the map existed.
+        verdict["served_namespace"] = {"profile": profile_name, "renamed": renamed}
+    checkpoint_of = {served: owner for owner, served in renamed.items()}
 
     def _finish(status: str, detail: str) -> dict[str, Any]:
         verdict["status"] = status
@@ -706,6 +871,17 @@ def compare_route_traces(
         return _finish(REFUSED, f"REFUSED: {exc}")
     verdict["header"] = headers
     verdict["served_by_rank"] = served_by_rank
+    if pinned is not None:
+        # Every trace has parsed, so a missing observation is already
+        # reported; what is left is whether each rank ran the pinned code.
+        code = serving_source_refusal(traces, pinned)
+        verdict[SERVING_SOURCE_FIELD] = {
+            "pinned": pinned,
+            "served": (code[2] if code is not None else
+                       {label: pinned for label in labels}),
+        }
+        if code is not None:
+            return _finish(code[0], code[1])
 
     grade = set(grades.values())
     if len(grade) > 1:
@@ -777,7 +953,7 @@ def compare_route_traces(
     if grade == EXACT:
         for label in labels:
             difference = _module_difference(
-                priced["owners"], served_modules[label])
+                priced_modules, served_modules[label], checkpoint_of)
             if difference:
                 return _finish(REFUSED, (
                     "REFUSED: the priced and served activation contracts differ "
@@ -787,11 +963,14 @@ def compare_route_traces(
         # per-module claim is what actually passed.
         verdict["exact_module_qualified"] = True
         total = len(priced["owners"])
+        mapped = (f"; {len(renamed)} priced target(s) named in the serve's "
+                  f"namespace by the {profile_name} profile" if renamed else "")
         return _finish(AGREE, (
             f"exact per-module: {total} named module(s) on every rank served "
             f"the activation contract they were priced on, across "
             f"{len(labels)} rank(s): "
-            + ", ".join(f"{key}={count}" for key, count in served.items())))
+            + ", ".join(f"{key}={count}" for key, count in served.items())
+            + mapped))
     difference = _histogram_difference(priced["histogram"], served)
     if difference:
         return _finish(REFUSED, (

@@ -848,3 +848,84 @@ def test_qualify_then_score_refuses_a_second_qualification_mode(fake_measure, ot
     with pytest.raises(ValueError, match="qualif|distinct paths"):
         served.measure(args)
     assert _FakeLLM.instances == []
+
+
+def _npy_window(tmp_path, array, name="window.npy"):
+    path = tmp_path / name
+    np.save(path, array, allow_pickle=False)
+    raw = path.read_bytes()
+    return path, {"path": name, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+                  "shape": list(array.shape)}
+
+
+@pytest.mark.parametrize("order", ["C", "F"])
+def test_teacher_window_single_read_matches_np_load_bitwise(tmp_path, order):
+    source = np.asarray(np.random.default_rng(3).standard_normal((33, 257)), dtype=np.float32, order=order)
+    source[0, :4] = [np.inf, -np.inf, -0.0, np.float32(1e-45)]
+    path, descriptor = _npy_window(tmp_path, source)
+    got = served.load_teacher_window(path, descriptor)
+    want = np.load(io.BytesIO(path.read_bytes()), allow_pickle=False)
+    assert got.dtype == want.dtype and got.shape == want.shape
+    assert got.tobytes(order="C") == want.tobytes(order="C")
+    base = got
+    while isinstance(base, np.ndarray) and base.base is not None:
+        base = base.base
+    owner = base.obj if isinstance(base, memoryview) else base
+    assert isinstance(owner, bytearray) and len(owner) == descriptor["bytes"]
+    assert got.flags.writeable  # torch.from_numpy takes it without a copy or warning
+
+
+def test_teacher_window_single_read_holds_one_window_on_the_host(tmp_path):
+    import tracemalloc
+    path, descriptor = _npy_window(tmp_path, np.ones((256, 4096), dtype=np.float32))
+    size = descriptor["bytes"]
+
+    def peak(load):
+        tracemalloc.start()
+        try:
+            value = load()
+            return tracemalloc.get_traced_memory()[1], value
+        finally:
+            tracemalloc.stop()
+
+    single, _ = peak(lambda: served.load_teacher_window(path, descriptor))
+    double, _ = peak(lambda: np.load(io.BytesIO(path.read_bytes()), allow_pickle=False))
+    assert single < 1.1 * size < 1.9 * size < double
+
+
+@pytest.mark.parametrize("mutation", ["flip", "truncate", "extend", "descriptor_bytes"])
+def test_teacher_window_single_read_refuses_changed_bytes(tmp_path, mutation):
+    path, descriptor = _npy_window(tmp_path, np.zeros((8, 16), dtype=np.float32))
+    raw = bytearray(path.read_bytes())
+    if mutation == "flip":
+        raw[-1] ^= 1
+    elif mutation == "truncate":
+        raw = raw[:-4]
+    elif mutation == "extend":
+        raw += b"\0\0\0\0"
+    else:
+        descriptor = {**descriptor, "bytes": descriptor["bytes"] - 4}
+    path.write_bytes(bytes(raw))
+    with pytest.raises(ValueError, match="teacher window bytes changed|geometry"):
+        served.load_teacher_window(path, descriptor)
+
+
+def test_arm_capture_teacher_tensor_matches_the_previous_two_copy_path(tmp_path):
+    if not torch.cuda.is_available():
+        pytest.skip("arm_capture preloads the teacher on CUDA; run on a GB10 worker")
+    source = np.random.default_rng(7).standard_normal((31, 129)).astype(np.float32)
+    path, descriptor = _npy_window(tmp_path, source)
+    armed = {}
+
+    class State:
+        rank = 0
+
+        def arm(self, index, window_id, teacher, targets):
+            armed.update(teacher=teacher, targets=targets)
+
+    model = types.SimpleNamespace(_tr3_capture=State())
+    served.arm_capture(model, index=0, window_id="w0", descriptor=descriptor,
+                       teacher_root=str(tmp_path), target_ids=list(range(31)))
+    previous = torch.from_numpy(np.load(io.BytesIO(path.read_bytes()), allow_pickle=False)).to("cuda")
+    assert armed["teacher"].device.type == "cuda" and armed["teacher"].dtype == torch.float32
+    assert torch.equal(armed["teacher"], previous)

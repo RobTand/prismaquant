@@ -119,7 +119,8 @@ def down_convert_lane_table(payload: dict, schema: str) -> dict:
     return payload
 
 
-def lane_cells_on_one_image(payload: dict, image: str | None = None) -> dict:
+def lane_cells_on_one_image(payload: dict, image: str | None = None, *,
+                            family: str | None = None) -> dict:
     """The installed table's cells measured on ONE runtime image.
 
     Several fixtures flatten every cell's ``runtime`` onto one fixture image
@@ -132,11 +133,18 @@ def lane_cells_on_one_image(payload: dict, image: str | None = None) -> dict:
     which the reader correctly refuses. A fixture therefore keeps one real
     image's roster and never relabels a union.
 
-    ``image`` defaults to ``versions.default_serve_image``, whose roster
-    (the dense E2M1 and E4M3 pairs) is what these fixtures were written
-    against. A FIXTURE, never an attestation.
+    ``image`` defaults to ``versions.default_serve_image`` (dense E4M3 at
+    v39). A fixture needing a specific family can instead name ``family``;
+    its published cells must select exactly one image, never an arbitrary
+    first image. A FIXTURE, never an attestation.
     """
     payload = copy.deepcopy(payload)
+    if family is not None:
+        assert image is None, 'fixture must select image or family, not both'
+        images = {c['runtime']['image'] for c in payload['lane_eligibility']['cells']
+                  if c['family'] == family}
+        assert len(images) == 1, f'{family}: fixture needs exactly one image, got {images}'
+        image = images.pop()
     if image is None:
         image = payload["versions"]["default_serve_image"]
     lane = payload["lane_eligibility"]
@@ -235,6 +243,20 @@ def legacy_v5_contract() -> dict:
     """The installed contract expressed as a v5 lane table."""
     return down_convert_lane_table(_installed_contract(),
                                    "tessera.lane-eligibility.v5")
+
+
+@pytest.fixture
+def installed_client_sdk(monkeypatch):
+    """The reviewed installed ``prismabuild.client``, bound for this test.
+
+    Not autouse: a test about the unbound state must be able to see it.
+    See ``fleet_sdk.installed_client_bound``.
+    """
+
+    from fleet_sdk import installed_client_bound
+
+    with installed_client_bound(monkeypatch) as module:
+        yield module
 
 
 @pytest.fixture(autouse=True)
@@ -398,6 +420,21 @@ def _no_prismabuild_import_carried_between_tests():
     from fleet_sdk import prismabuild_imports_restored
     with prismabuild_imports_restored():
         yield
+
+
+@pytest.fixture(autouse=True)
+def _no_launching_queue_root_from_the_test_shard(monkeypatch):
+    """No test reads the queue that launched its pbtest shard.
+
+    A pbtest shard is itself a PrismaBuild action, and the pool launcher
+    publishes that action's queue root as ``PRISMABUILD_QUEUE_ROOT``
+    (PB #961). ``reader_lease.injected_context`` prefers it to the queue a
+    test's residency map names, so a test that fakes an action context in a
+    ``tmp_path`` queue would look for its claim in the live fleet queue and
+    refuse ``no-claim-context``. A test that wants the variable sets it.
+    """
+    monkeypatch.delenv("PRISMABUILD_QUEUE_ROOT", raising=False)
+    yield
 
 
 @pytest.fixture(autouse=True)

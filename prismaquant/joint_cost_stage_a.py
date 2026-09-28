@@ -279,13 +279,13 @@ def load_prefetch_override(path) -> dict:
     """Load and grammar-check one prefetch-override document.
 
     The ``source_prefetch`` block passes the plan's own completeness check
-    (:func:`prismaquant.tessera_joint_aura._source_prefetch`): the same six
+    (:func:`prismaquant.stage_inputs.source_prefetch`): the same six
     fields, the same positivity/finite/lookahead rules, prefetched residency
     still required. The document additionally carries a non-empty ``reason``
     -- an override without a recorded reason is silent by construction, and
     the deviation stamp quotes it verbatim.
     """
-    from .tessera_joint_aura import _source_prefetch
+    from .stage_inputs import source_prefetch as _source_prefetch
 
     path = Path(path)
     try:
@@ -320,7 +320,7 @@ def resolve_prefetch_override(config, cli_path=None, environ=None) -> dict:
     refuse (the #809 rule); neither source present is the plan's budget
     verbatim; there is no default override and no silent one.
     """
-    from .tessera_joint_aura import _source_prefetch
+    from .stage_inputs import source_prefetch as _source_prefetch
 
     environ = os.environ if environ is None else environ
     plan_budget = _source_prefetch(config)
@@ -2239,12 +2239,11 @@ def run_adjoint_capture(
     from .model_profiles import detect_profile
     from .residency_map import bind_residency_manifest, residency_report
     from .stage_a_head import prepared_head, stage_a_roster, walked_head
+    from .prismabuild_progress import commit as _pb_commit
+    from .stage_inputs import bound as _bound, same as _same
     from .tessera_joint_aura import (
         ACTIVATION_SCALE_ENV,
-        _bound,
-        _pb_commit,
         _preflight_run_prepared,
-        _same,
         _seed_source_identity_cache,
         load_measured_anchor_input,
     )
@@ -2760,7 +2759,7 @@ def main(argv=None) -> int:
         parser.error("--forward-recovery and --forward-recovery-sha256 must be paired")
     try:
         require_dev_mode("joint_cost_stage_a")
-        from .tessera_joint_aura import _load_plan
+        from .tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
         config = _load_plan(args.plan, args.plan_sha256)
         from .staged_tier_policy import activate_staged_tier_policy

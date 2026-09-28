@@ -33,6 +33,7 @@ import os
 import re
 from pathlib import Path
 from . import io_spans
+from prismaquant.source_read_plan import read_safetensors_header
 
 
 DEFAULT_SAFETY_GB = 20.0     # slack above the committed estimate. NEVER rely on
@@ -160,7 +161,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     validate_process_baseline_bytes(process_baseline_bytes)
     validate_process_baseline_policy(process_baseline_policy)
     import math
-    from .artifact_completeness import read_artifact_header
+    from .artifact_completeness import read_artifact_shard_headers
     from .model_profiles import detect_profile
     if capture_policy not in ('legacy', 'shared-inputs-release-v1', 'shared-inputs-bounded-v1'):
         raise ValueError('unknown streamed capture resource policy')
@@ -183,7 +184,14 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     hidden = _hidden_size(cfg)
     if layers < 1 or hidden < 1:
         raise ValueError('streamed calibration needs explicit decoder geometry')
-    header = read_artifact_header(model_path)
+    # Which file holds each tensor, beside the merged header: a selected
+    # source read authenticates the whole file it opens, once per row, so the
+    # admission charge for that hash is counted in files, not layers
+    # (RobTand/prismaquant#1491).
+    header, shard_of = {}, {}
+    for shard, shard_header in read_artifact_shard_headers(model_path).items():
+        header.update(shard_header)
+        shard_of.update(dict.fromkeys(shard_header, shard))
     # Price source tensors with the declared HF precision policy. GLM's
     # strict FP32 convolution is stored as three BF16 tensors, so on-disk
     # bytes alone undercount even the final resident layer.
@@ -222,8 +230,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             raise ValueError('selected tensor snapshots require unscaled floating source weights')
     body, fixed, pack, concat = {}, 0, {}, {}
     covered_layers = set()
-    validation_raw_body = {}
-    raw_body, max_element_bytes = {}, 4
+    raw_body, body_shards, max_element_bytes = {}, {}, 4
     packed_regex = profile.per_expert_moe_regex()
     packed_pattern = (re.compile(packed_regex.removeprefix('re:')) if packed_regex else None)
     def resident_element_bytes(name):
@@ -239,8 +246,6 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             if not index.isdigit() or not 0 <= int(index) < layers:
                 raise ValueError(f'out-of-body source tensor is still live: {name}')
             covered_layers.add(int(index))
-            begin, end = meta['data_offsets']
-            validation_raw_body[int(index)] = validation_raw_body.get(int(index), 0)+int(end)-int(begin)
         if selected_keys is not None and name not in selected_keys:
             continue
         if selected_keys is not None and str(meta['dtype']).upper() not in ('BF16', 'F16', 'F32', 'F64'):
@@ -269,6 +274,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         layer = int(index)
         body[layer] = body.get(layer, 0)+size
         raw_body[layer] = raw_body.get(layer, 0)+stored
+        body_shards.setdefault(layer, set()).add(shard_of[key])
         max_element_bytes = max(max_element_bytes, math.ceil(size/max(numel, 1)), floating or 0)
         leaf = name.removesuffix('.weight')
         if packed_pattern is not None and (packed_pattern.match(leaf) or
@@ -339,8 +345,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         # a caller that declares a reservation and gets a plan back with no
         # record of it has been told the opposite of the truth.
         **_baseline_fields(process_baseline_bytes, process_baseline_policy),
-        **({'source_tensor_keys': sorted(selected_keys),
-            'body_source_validation_bytes': {str(k): v for k, v in validation_raw_body.items()}}
+        **({'source_tensor_keys': sorted(selected_keys)}
            if selected_keys is not None else {}),
         source_header_sha256=hashlib.sha256(json.dumps(header, sort_keys=True,
             separators=(',', ':')).encode()).hexdigest(),
@@ -352,6 +357,9 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
             (size for key, size in concat.items() if key[0] == k), default=0)
             for k in range(layers)},
         body_source_file_bytes={str(k): v for k, v in sorted(raw_body.items())},
+        # The source files each layer's reads open, selected tensors only
+        # when a selection is given, like body_source_file_bytes.
+        body_source_shards={str(k): sorted(v) for k, v in sorted(body_shards.items())},
         live_layer_prefix=live_prefix,
         transient_status='conservative physical allocator bound for direct final-slab packer')
     if capture_policy != 'shared-inputs-bounded-v1':
@@ -527,13 +535,34 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         for name, shape in unit_shapes.items())
     memo_capacity = anchor_batch_size
     terms = source['terms']
+    # One whole-file source hash in flight, as the selected row runs it. The
+    # row builds its descriptor owner with release_read_pages=True (the
+    # selected-source authenticate_selected_capture_source call in
+    # tessera_campaign), so tessera_calibration_cache.sha256 holds one
+    # SOURCE_HASH_BLOCK_BYTES block (``block = handle.read(...)``) and that
+    # block's page-cache pages until the POSIX_FADV_DONTNEED that follows
+    # ``digest.update(block)``: two blocks. GAP: kernel readahead past the
+    # consumed offset is a property of the mount (its read_ahead_kb), not of
+    # any allocation here, and is not charged.
+    from .digests import SOURCE_HASH_BLOCK_BYTES
+    source_hash_window = 2*SOURCE_HASH_BLOCK_BYTES
+    source_shards = sorted({shard for k in layers for shard in source['body_source_shards'][k]})
     common = dict(selected_source_weight_bytes=weights,
                   declared_headroom_bytes=terms['declared_headroom_bytes'])
     preparation = dict(common, nonbody_source_bytes=terms['nonbody_source_bytes'],
         source_window_bytes=sum(sorted((source['body_layer_bytes'][k] for k in layers),
                                        reverse=True)[:cache_slots]),
         loader_transient_bytes=sum(sorted((source['body_loader_transient_bytes'][k] for k in layers),
-                                          reverse=True)[:min(prefetch_workers, cache_slots)]))
+                                          reverse=True)[:min(prefetch_workers, cache_slots)]),
+        # Source authentication runs HERE, in the snapshot: the first payload
+        # read of a file (_CaptureSourceSafeOpen._payload) hashes all of it
+        # through CaptureSourceAuthentication._authenticate, once per row,
+        # under that file's own lock. Two reads of one file therefore never
+        # hash together, and the hashes that can be in flight at once are
+        # bounded by the distinct files this row's selected tensors live in.
+        # Each holds the window above. The payload reads that follow hold no
+        # hash state (RobTand/prismaquant#1491).
+        source_authentication_window_bytes=len(source_shards)*source_hash_window)
     encoding = dict(common, selected_hessian_bytes=source['full_hessian_bytes'],
         selected_prefix_bytes=source['full_prefix_bytes'],
         # What one memo entry RETAINS, from the keywords
@@ -637,12 +666,34 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # whether that release is complete is the loader's contract, not a
         # term derivable from a shape.
         entry_validation_bytes=2*widest_capture_entry,
-        # Narrowing tensor reads does not narrow whole-shard authentication.
-        # Retain the existing full-layer raw-page allowance, even when most
-        # tensor materialization is excluded. Do not infer a smaller hash/page
-        # footprint merely from a selected tensor's shape.
-        source_validation_bytes=sum(source.get('body_source_validation_bytes',
-            source['body_source_file_bytes'])[k] for k in layers)+widest_weight,
+        # The producer projection's byte check, which is the only source read
+        # in this phase (and in stream_projection, which reuses this term).
+        # tessera_campaign._checked_projected_units reads each MEASURED
+        # routed-expert unit's source tensor (source_unit_weight) and compares
+        # it with the live view, then advises the consumed pages only after
+        # the loop. Its page window is therefore the stored bytes of the
+        # tensors it reads, all of them selected source tensors of this row's
+        # layers: body_source_file_bytes, which counts exactly the selected
+        # tensors (the whole layer under whole-layer-v1). A dense row measures
+        # no expert and reads nothing here; the sum still bounds it. Per unit
+        # it also holds the source tensor and a CPU copy of the live view, two
+        # BF16 copies of the widest weight, which widest_weight (four bytes an
+        # element) covers.
+        #
+        # The hash is NOT here. Every file this check opens was authenticated
+        # when the snapshot read it, and _authenticate returns at once for a
+        # hashed file. One serial hash window is still charged, because a
+        # producer roster that named a file the snapshot never opened would
+        # hash it inside this loop.
+        #
+        # This term used to charge every tensor of every selected layer (13.8
+        # GiB a GLM-5.3 MoE layer) as a "whole-shard authentication"
+        # allowance. That hash reads whole files, not layers; it runs in
+        # source_preparation, not here; and its pages are released a block at
+        # a time. A four-layer shared-expert row was charged 84 GiB against a
+        # measured 11-15 GiB box peak (RobTand/prismaquant#1491).
+        source_validation_bytes=sum(source['body_source_file_bytes'][k] for k in layers)
+            + widest_weight + source_hash_window,
         # tessera_publication.BoundedPublisher's own bound, charged as itself.
         # Staged artifacts are host bytes waiting to be written: the CPU BF16
         # render (_canonical_rendered_weight_tensor) and the wire blob, live
@@ -942,16 +993,11 @@ def _shard_resident_bytes(path: Path, dtype_bytes: int,
     dtype per on-disk byte (a 4x undercount at bf16 if sized verbatim).
     Other non-float dtypes stay verbatim.
 
-    Parses the safetensors JSON header directly (stdlib-only; no tensor
-    data is read). Raises on malformed files; the caller falls back to
-    the raw file size."""
-    with open(path, "rb") as f:
-        header_len = int.from_bytes(f.read(8), "little")
-        if header_len <= 0 or header_len > 512 * 1024 ** 2:
-            raise ValueError(
-                f"implausible safetensors header length {header_len} in {path}"
-            )
-        header = json.loads(f.read(header_len))
+    Reads the safetensors JSON header through the repository's owning
+    reader (prismaquant.source_read_plan.read_safetensors_header; no
+    tensor data is read). Raises on malformed files; the caller falls
+    back to the raw file size."""
+    header, _base, _size = read_safetensors_header(str(path))
     total = 0
     for key, meta in header.items():
         if key == "__metadata__":

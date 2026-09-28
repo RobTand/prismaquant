@@ -72,7 +72,6 @@ import json
 import math
 import os
 import re
-import struct
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -84,6 +83,7 @@ from .name_projection import (
     packed_expert_alias,
     strip_weight_leaf,
 )
+from prismaquant.source_read_plan import read_safetensors_header
 
 # safetensors header dtype -> bytes per element (header carries the source
 # dtype string; we only need it to derive source-bytes-per-param when the
@@ -169,9 +169,8 @@ def plain_source_dtype_tensor_payload_breakdown(
 
 def _read_safetensors_header(path: str) -> dict:
     """Return the JSON header of a .safetensors file (no weight load)."""
-    with open(path, "rb") as fh:
-        n = struct.unpack("<Q", fh.read(8))[0]
-        return json.loads(fh.read(n))
+    header, _base, _size = read_safetensors_header(path)
+    return header
 
 
 def source_checkpoint_bytes(model_path: str) -> tuple[int, dict[str, int]]:
@@ -620,6 +619,72 @@ def partitioned_source_total_bytes(
         "excluded_prefixes": prefixes,
         "excluded_names": tuple(matched),
         "n_excluded": len(matched),
+    }
+
+
+#: Source bytes per parameter of a dtype an MTP cost payload can name.
+_MTP_SOURCE_DTYPE_BYTES = {"bfloat16": 2, "float16": 2, "float32": 4}
+
+
+def mtp_selection_rebased_bytes(
+    total_bytes: int,
+    mtp_payload: Mapping,
+    resident_bytes: int,
+    *,
+    context: str,
+    manifest: Mapping[str, int] | None = None,
+    assigned_names: Iterable[str] = (),
+) -> dict:
+    """``total_bytes`` with the MTP units' source bytes swapped for the selection's.
+
+    A GLM MTP layer is chosen outside the body knapsack
+    (``glm_mtp_selection``), so its units never enter the body assignment and
+    :func:`assignment_artifact_bytes` leaves them in the floor at SOURCE
+    bytes. The artifact ships the selected rungs instead: 3,707,898,528 B
+    where the source holds 14,545,846,272 B on GLM-5.3 (PQ #1610). Any card
+    priced without this swap over-charges the MTP layer by the difference
+    and under-fills the body by the same amount.
+
+    The source bytes are the payload's own ``params`` x source-dtype width.
+    With a ``manifest`` (:func:`source_tensor_bytes_manifest`), every unit is
+    also resolved to its checkpoint spans, and a disagreement is refused: the
+    swap removes exactly the bytes the floor holds, or it removes nothing.
+    A unit the body can also assign (``assigned_names``) is refused, since
+    it would be subtracted twice.
+
+    Returns ``{total_bytes, mtp_source_bytes, mtp_resident_bytes, n_units}``.
+    """
+    params = mtp_payload.get("params")
+    dtypes = mtp_payload.get("source_dtype")
+    if not isinstance(params, Mapping) or not isinstance(dtypes, Mapping) or \
+            set(params) != set(dtypes) or not params:
+        raise ValueError(f"[footprint] {context}: MTP payload needs params and "
+                         "source_dtype over one unit roster")
+    clash = sorted(set(params) & set(assigned_names))
+    if clash:
+        raise ValueError(f"[footprint] {context}: {len(clash)} MTP unit(s) are also "
+                         f"body-assignable: {clash[:4]}")
+    unknown = sorted({str(d) for d in dtypes.values()} - set(_MTP_SOURCE_DTYPE_BYTES))
+    if unknown:
+        raise ValueError(f"[footprint] {context}: MTP source dtype(s) {unknown} have "
+                         "no per-parameter width")
+    source = sum(_MTP_SOURCE_DTYPE_BYTES[str(dtypes[name])] * int(params[name])
+                 for name in params)
+    if manifest is not None:
+        spans = sum(resolve_reencoded_source_bytes(
+            manifest, sorted(params), context=f"{context} (MTP source spans)").values())
+        if spans != source:
+            raise ValueError(
+                f"[footprint] {context}: the checkpoint holds {spans} B for the "
+                f"MTP units, but their params x source dtype read {source} B")
+    if int(resident_bytes) < 0 or source > int(total_bytes):
+        raise ValueError(f"[footprint] {context}: MTP rebase of {total_bytes} B "
+                         f"by -{source} +{resident_bytes} B is not a byte count")
+    return {
+        "total_bytes": int(total_bytes) - source + int(resident_bytes),
+        "mtp_source_bytes": source,
+        "mtp_resident_bytes": int(resident_bytes),
+        "n_units": len(params),
     }
 
 

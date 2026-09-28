@@ -61,7 +61,7 @@ def test_the_reviewed_development_answer_is_the_installed_contracts(monkeypatch)
         cell["structure"] for cell in _packaged()["lane_eligibility"]["cells"]
     }
     pin = release.load_tessera_serving_runtime_pin()
-    assert contract.TESSERA_DEV_PIN_COMMIT == pin.commit
+    assert contract.TESSERA_DEV_PIN_COMMIT == pin.producer_commit
     assert contract.TESSERA_DEV_PIN_CONTRACT_SHA256 == pin.contract_sha256
 
 
@@ -79,7 +79,10 @@ def test_launch_change_requires_development_pin_review():
 @pytest.mark.parametrize("bad_launches", [
     [],
     [{"symbol": "torch.mm"}],
-    [{"symbol": "torch.mm", "decoder": "torch_window", "unknown": True}],
+    # An unmarked extra member is accepted (#1548); a producer that marks it
+    # must-understand still forces the refusal.
+    [{"symbol": "torch.mm", "decoder": "torch_window", "unknown": True,
+      "must_understand": ["unknown"]}],
     [{"symbol": "", "decoder": "torch_window"}],
     [{"symbol": "torch.mm", "decoder": "torch_window"}] * 2,
 ])
@@ -88,6 +91,15 @@ def test_development_reader_uses_shared_v4_launch_refusals(bad_launches):
     payload["lane_eligibility"]["cells"][0]["executes"] = bad_launches
     with pytest.raises(contract.TesseraContractError, match="executes"):
         _parse(payload)
+
+
+def test_development_reader_skips_an_unmarked_additive_launch_member():
+    payload = _packaged()
+    cell = payload["lane_eligibility"]["cells"][0]
+    before = {c.cell_id: c.executes for c in _parse(copy.deepcopy(payload)).cells}
+    cell["executes"] = [dict(launch, unknown=True) for launch in cell["executes"]]
+    after = {c.cell_id: c.executes for c in _parse(payload).cells}
+    assert after == before
 
 
 def test_development_reader_refuses_overlapping_residency_cells():

@@ -155,7 +155,7 @@ def main(argv=None) -> int:
         print(f"{quantum.IDENTITY_REFUSED_MARKER}: {exc}", flush=True)
         return quantum.EXIT_IDENTITY_REFUSED
     from prismaquant.staged_tier_policy import activate_staged_tier_policy
-    from prismaquant.tessera_joint_aura import _load_plan
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
     config = _load_plan(args.plan, args.plan_sha256, defer_pool_reads=True)
     if Path(config["output_root"]).resolve() != campaign_root:

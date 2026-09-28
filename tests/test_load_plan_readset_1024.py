@@ -90,7 +90,7 @@ class _Touches:
 
 
 def test_deferred_plan_load_touches_nothing_on_the_pool(tmp_path, monkeypatch):
-    from prismaquant.tessera_joint_aura import _load_plan
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
     path, config, pool = _pool_plan(tmp_path)
     touches = _Touches(monkeypatch)
@@ -112,7 +112,7 @@ def test_deferred_plan_load_touches_nothing_on_the_pool(tmp_path, monkeypatch):
 
 def test_default_plan_load_still_binds_the_identity_cache(tmp_path):
     """Stage A, the prepare and the tools keep the eager digest check."""
-    from prismaquant.tessera_joint_aura import _load_plan
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
     path, _, _ = _pool_plan(tmp_path, identity_sha256="e" * 64)
     with pytest.raises(ValueError, match="source identity cache: artifact checksum"):
@@ -122,7 +122,7 @@ def test_default_plan_load_still_binds_the_identity_cache(tmp_path):
 
 
 def test_deferred_plan_load_still_refuses_a_malformed_identity_binding(tmp_path):
-    from prismaquant.tessera_joint_aura import _load_plan
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
     path, config, _ = _pool_plan(tmp_path)
     config["source_identity_cache"] = {"path": config["source_identity_cache"]["path"]}
@@ -133,7 +133,7 @@ def test_deferred_plan_load_still_refuses_a_malformed_identity_binding(tmp_path)
 
 def test_plan_load_never_stats_the_boundary_directory(tmp_path, monkeypatch):
     """The policy check discards its result, so it resolves nothing."""
-    from prismaquant.tessera_joint_aura import _load_plan
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
     path, config, pool = _pool_plan(tmp_path)
     config.pop("source_identity_cache")
@@ -179,7 +179,7 @@ def test_quantum_cli_loads_its_plan_deferred(identity_files, monkeypatch):
         seen.update(kwargs)
         raise _Stop()
 
-    monkeypatch.setattr(aura_mod, "_load_plan", spy)
+    monkeypatch.setattr(aura_mod, "load_joint_anchor_plan", spy)
     record = _executable(_valid_record(identity_files))
     with pytest.raises(_Stop):
         main(_argv(identity_files, record, "--data-manifest-sha256",

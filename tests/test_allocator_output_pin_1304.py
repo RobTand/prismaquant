@@ -34,6 +34,40 @@ the allocation is unchanged and exactly six keys leave
 ``route_status_attested: true``), ``units_without_declared_lane``,
 ``route_status_attested``, ``selected_rungs_fused_mid_m_backed`` and
 ``selected_rungs_on_fallback_route`` (PQ #1404).
+
+Re-taken 2026-09-27 for PQ #1456's v39 pin. PB receipts e6167bc0d679
+(before, 8fd6d931/09d6559d) and 9d2e1de243eb (after) capture the normalised
+outputs. Exactly eight metadata fields changed: contract_version and the
+reviewed digest, plus route detail/cell ids and requires_serve_flags for the
+three units. The v5 fixture now selects the A4/GLM image, not the default
+image that lost A4. Allocations, applicability and Pareto outputs are
+byte-identical; no allocator arithmetic changed.
+
+Re-taken 2026-09-28 for PQ #1542's v40 pin (Tessera #675, merged as
+db5b6e23). PB receipts a10255cf089e (before: c36c02e1e76 under the
+20bf5346 interpreter) and 21c7668c7738 (after: the db5b6e23 interpreter)
+capture the normalised layer.json. Exactly two fields change:
+``contract_version`` (39 to 40) and ``reviewed_contract_sha256``
+(f2f90948 to d6768313). The allocation, the applicability file and the
+Pareto outputs are byte-identical.
+
+Re-taken 2026-09-28 for PQ #1274's v42 pin (Tessera 38e96012). PB receipts
+f1be79e7d9f9 (before: origin/main 9ffe2e66 under the db5b6e23 interpreter)
+and ee97538e5b00 (after: the 38e96012 interpreter) capture the normalised
+layer.json. Three things change, all inside
+``__prismaquant__.tessera_dev_pin``: ``contract_version`` (40 to 42),
+``reviewed_contract_sha256`` (d6768313 to 4aeba5dc), and
+``native_extensions`` gains the two fused routed rows v42 publishes. The
+allocation, the applicability file and the Pareto outputs are
+byte-identical.
+
+Re-taken 2026-09-28 for PQ #1616's v44 pin (Tessera a5f3b232cb). PB receipts
+c9dc357bb01d (before: origin/main e6eb87f3 under the 38e96012 interpreter)
+and a01e39b687a2 (after: the a5f3b232 interpreter) capture the normalised
+layer.json. Exactly two fields change, both inside
+``__prismaquant__.tessera_dev_pin``: ``contract_version`` (42 to 44) and
+``reviewed_contract_sha256`` (4aeba5dc to 47b01355). The allocation, the
+applicability file and the Pareto outputs are byte-identical.
 """
 from __future__ import annotations
 
@@ -78,7 +112,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "8850afe16a4d2fd06cdcec50d3cd984907cb488270425992a185f752d77eb7d4"
+        "510823f101c90a30515b783f3bb60a52cb948fed3527aa7a63333d6df2de7acd"
     ),
     "pareto.csv": (
         "0abb6a82a89d9cd9686c6a250368bb77603d3904dc2707ccb69a13c9eec70c5a"

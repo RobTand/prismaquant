@@ -15,9 +15,25 @@ from prismaquant import pipeline
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = "example/runtime@sha256:" + "a" * 64
 
+#: The producer checkout's packaged contract, as the arm reads it for the
+#: ``--producer-authority`` decision. v40 publishes the option; v39 (the live
+#: campaign's ``a3e83875``) does not.
+V40_CONTRACT = {"contract_version": 40, "producer_interface": {
+    "schema": "tessera.producer-interface.v1",
+    "reuse_authority": {"option": "--producer-authority",
+                        "attribute": "PRODUCER_AUTHORITY",
+                        "protocol": "tessera.cached_unit.ReuseAuthority",
+                        "canonical_capture_attribute": "canonical_hessian_capture",
+                        "drivers": ["experiments/export_tessera_serving.py"]}}}
+V39_CONTRACT = {"contract_version": 39}
+
 
 def _run(tmp_path, *, changed=False, manifest="bound", mode="compiled",
-         derived=False, translate=False, corrupt_derived=False, extra_env=None):
+         derived=False, translate=False, corrupt_derived=False, extra_env=None,
+         contract=V40_CONTRACT):
+    producer = tmp_path / "producer tree" / "src" / "tessera" / "serving"
+    producer.mkdir(parents=True)
+    (producer / "runtime_contract.json").write_text(json.dumps(contract))
     work = tmp_path / "work with spaces"
     for sub in ("artifacts", "logs", "exported"):
         (work / sub).mkdir(parents=True)
@@ -84,7 +100,7 @@ python3() {
       previous="$argument"
     done
     # A preflight handed a composed bundle names it back in the anchor.
-    "$PYTEST_PYTHON" -c 'import json, os, sys; d = {}; p = os.environ.get("TEST_PLAN_ASSIGNMENT"); d.update(plan_assignment=p, plan_assignment_sha256=os.environ["TEST_PLAN_DIGEST"]) if p else None; d.update(cached_units=sys.argv[2]) if sys.argv[2] else None; open(sys.argv[1], "w").write(json.dumps(d))' "$build" "$cached"
+    "$PYTEST_PYTHON" -c 'import json, os, sys; from prismaquant.dev_mode import dev_mode_enabled; d = {"cached_encoder_source_proof_mode": "permissive" if dev_mode_enabled() else "strict"}; p = os.environ.get("TEST_PLAN_ASSIGNMENT"); d.update(plan_assignment=p, plan_assignment_sha256=os.environ["TEST_PLAN_DIGEST"]) if p else None; d.update(cached_units=sys.argv[2]) if sys.argv[2] else None; open(sys.argv[1], "w").write(json.dumps(d))' "$build" "$cached"
     return 0
   elif [[ "$1" == */plan_from_layer_config.py ]]; then
     echo "TEST_TRANSLATOR_REACHED:$2" >&2
@@ -211,6 +227,16 @@ def test_a_composed_cached_bundle_reaches_preflight_and_export(tmp_path):
     assert "--source-digest-cache" not in export
 
 
+@pytest.mark.parametrize("value,expected", [("0", "strict"), ("1", "permissive")])
+def test_cached_driver_forwards_the_producers_explicit_mode(tmp_path, value, expected):
+    result = _run(tmp_path, extra_env={"PRISMAQUANT_DEV_MODE": value,
+        "TESSERA_CACHED_UNITS": str(tmp_path / "cached.json")})
+    assert result.returncode == 0, result.stdout + result.stderr
+    line = next(line for line in result.stdout.splitlines()
+                if line.startswith("TEST_EXPORT_ARGS:"))
+    assert f"--cached-encoder-source-proof-mode {expected}" in line
+
+
 def test_without_a_bundle_the_preflight_writes_expert_units(tmp_path):
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -218,3 +244,25 @@ def test_without_a_bundle_the_preflight_writes_expert_units(tmp_path):
                      if line.startswith("TEST_PREFLIGHT_ARGS:"))
     assert "--write-cached-expert-units" in preflight
     assert "--cached-units" not in preflight
+
+
+def _export_line(result):
+    # The stub echoes ``$*``, so a path with spaces and the stub preflight's
+    # empty build digest are not recoverable as tokens; compare the line.
+    return next(line for line in result.stdout.splitlines()
+                if line.startswith("TEST_EXPORT_ARGS:"))
+
+
+def test_an_old_pin_export_gets_the_argv_it_got_before_the_authority(tmp_path):
+    """A v39 checkout's exporter would refuse the option as unknown."""
+    old = _run(tmp_path / "old", contract=V39_CONTRACT)
+    new = _run(tmp_path / "new")
+    assert old.returncode == 0 == new.returncode, old.stdout + old.stderr
+    old_line, new_line = _export_line(old), _export_line(new)
+    authority = str(ROOT / "prismaquant" / "tessera_reuse_authority.py")
+    inserted = f" --producer-authority {authority}"
+    assert "--producer-authority" not in old_line
+    assert new_line.count(inserted) == 1
+    assert f"{inserted} --device cuda" in new_line
+    assert (new_line.replace(inserted, "", 1).replace(str(tmp_path / "new"), "<run>").encode()
+            == old_line.replace(str(tmp_path / "old"), "<run>").encode())

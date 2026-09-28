@@ -72,8 +72,8 @@ MOE_BATCH = "tessera_e4m3_k1_routed_moe_sm121_batch_resident"
 #: contract at the 2026-09-15 pin (``4c384e604``, v29), where it was a REAL
 #: published fact -- onto the surviving dense E2M1 decode cell.
 RETIRED_DENSE_DECODE = "tessera_e4m3_k1_dense_sm121_decode_resident"
-DENSE_DECODE = "tessera_e2m1_k2_dense_sm121_decode"
-E2M1_DECODE = "tessera_e2m1_k2_dense_sm121_decode"
+DENSE_DECODE = "tessera_e2m1_k2_dense_sm121_decode_resident"
+E2M1_DECODE = DENSE_DECODE
 V29_ARTIFACT = {
     "id": "gbfam/qwen3-0.6b-tessera-e4m3-reach-gridbook",
     "encoder_commit": "8070ec6c4e0448826cda3f3f8d9401a125444e3b",
@@ -297,11 +297,14 @@ def test_a_control_this_reader_cannot_name_is_refused(payload, member, value, ex
         _table(broken)
 
 
-def test_a_control_with_a_field_this_reader_does_not_know_is_refused(payload):
-    broken = _with_v20_control(payload)
-    _cell(broken, MOE_DECODE)["evidence"]["smoke"]["control"]["scope"] = "same prompt"
-    with pytest.raises(lane.LaneEligibilityError, match="unknown field"):
-        _table(broken)
+def test_a_control_with_a_field_this_reader_does_not_know_is_refused_only_when_marked(payload):
+    """An added field is read by nothing (#1548); marked, it refuses."""
+    added = _with_v20_control(payload)
+    _cell(added, MOE_DECODE)["evidence"]["smoke"]["control"]["scope"] = "same prompt"
+    assert _table(added) == _table(_with_v20_control(payload))
+    _cell(added, MOE_DECODE)["evidence"]["smoke"]["control"]["must_understand"] = ["scope"]
+    with pytest.raises(lane.LaneEligibilityError, match="must-understand"):
+        _table(added)
 
 
 def test_a_smoke_block_without_the_v7_fields_is_refused_at_v8(payload):
@@ -374,11 +377,13 @@ def test_a_malformed_artifact_is_refused_by_name(payload, path, value, expect):
         _table(broken)
 
 
-def test_an_artifact_with_a_field_this_reader_does_not_know_is_refused(payload):
-    broken = _with_artifact(payload)
-    _cell(broken, DENSE_DECODE)["evidence"]["artifact"]["reencode"]["kl"] = 0.01
-    with pytest.raises(lane.LaneEligibilityError, match="unknown field"):
-        _table(broken)
+def test_an_artifact_with_a_field_this_reader_does_not_know_is_refused_only_when_marked(payload):
+    added = _with_artifact(payload)
+    _cell(added, DENSE_DECODE)["evidence"]["artifact"]["reencode"]["kl"] = 0.01
+    assert _table(added) == _table(_with_artifact(payload))
+    _cell(added, DENSE_DECODE)["evidence"]["artifact"]["reencode"]["must_understand"] = ["kl"]
+    with pytest.raises(lane.LaneEligibilityError, match="must-understand"):
+        _table(added)
 
 
 # ---------------------------------------------------------------------------
@@ -404,11 +409,14 @@ def test_a_v7_table_reads_with_no_artifact_and_a_v6_table_with_no_control(payloa
         "would put a v7 word into the mouth of a grammar that never spoke it")
 
 
-def test_a_v7_field_on_a_v6_table_is_refused(payload):
+def test_a_v7_field_on_a_v6_table_is_not_read(payload):
+    """The schema decides what is read: a v7 word on a v6 table is an additive
+    field the v6 grammar never reads (#1548), so the table still reads as v6."""
     v6 = down_convert_lane_table(payload, lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V6)
     _cell(v6, MOE_DECODE)["evidence"]["smoke"]["attribution"] = "unattributed"
-    with pytest.raises(lane.LaneEligibilityError, match="unknown field"):
-        _table(v6)
+    moe = _parsed_cell(_table(v6), MOE_DECODE).evidence
+    assert moe.smoke_attribution == ""
+    assert moe.smoke_control is None
 
 
 # ---------------------------------------------------------------------------

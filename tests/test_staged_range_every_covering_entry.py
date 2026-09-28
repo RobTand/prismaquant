@@ -27,6 +27,10 @@ from prismaquant.residency_map import (
     residency_map_key, residency_resolver, reset_residency_resolver_for_tests,
 )
 
+#: The resolver validates maps with PrismaBuild's own validator, through the
+#: client SDK (PB #1254); bind the reviewed installed one for every test.
+pytestmark = pytest.mark.usefixtures("installed_client_sdk")
+
 MANIFEST = 'c' * 64
 HEADER_BYTES = 4096
 OWN = (1000, 600)      # the layer's own entry, inside the header entry

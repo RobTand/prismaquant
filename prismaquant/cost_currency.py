@@ -26,7 +26,10 @@ Three rules, all fail-closed:
    than defaulted.
 
 Every usable Tessera-format row must carry the campaign's currency stamp;
-dropping that stamp cannot remove a price from this gate's jurisdiction.
+dropping that stamp cannot remove a price from this gate's jurisdiction. The
+currency is the one the lane declares on its format family
+(``lane_specs/tessera.json`` ``cost_currency``), so this gate imports no lane
+module (decoupling step 6, PQ #1552).
 Tables with neither a Tessera format nor a Tessera-currency row pass through
 untouched: legacy unstamped stock tables keep their behavior, and other gates
 own those rows. Diagnostic error rows are not prices.
@@ -110,23 +113,33 @@ def first_joint_probe_identity(costs):
     return None
 
 
-def tessera_campaign_currency() -> str:
-    """The currency string the Tessera campaign stamps, read from the module
-    that stamps it rather than restated here."""
-    from .tessera_campaign import CURRENCY
+def campaign_currency_families():
+    """The lane format families whose priced rows carry a declared currency.
 
-    return str(CURRENCY)
+    Each family declares its campaign's currency as data in its lane spec
+    (``format_families[].cost_currency``), so this gate reads the currency
+    without importing the lane that stamps it. A test holds the declaration
+    equal to the stamping module's constant.
+    """
+    from .lane_spec import format_families
+
+    return tuple(family for family in format_families()
+                 if family.cost_currency is not None)
 
 
-def _tessera_rows(costs: Mapping[str, Any]) -> list[tuple[str, str]]:
-    """``(unit, format)`` pairs priced in the Tessera campaign currency."""
-    from .tessera_formats import parse_tessera_format_name
+def _campaign_currency_rows(costs: Mapping[str, Any]) -> list[tuple[str, str, str]]:
+    """``(unit, format, currency)`` for rows priced in a family's campaign currency.
+
+    A usable row of a family's rung must carry that family's currency; a row
+    of any format that carries one of those currencies is counted too.
+    """
+    from . import format_registry as fr
 
     if not isinstance(costs, Mapping):
         return []
-    wanted = tessera_campaign_currency()
-    found: list[tuple[str, str]] = []
-    membership: dict[str, bool] = {}
+    currencies = {family.cost_currency for family in campaign_currency_families()}
+    found: list[tuple[str, str, str]] = []
+    membership: dict[str, tuple[str, str] | None] = {}
     for unit, rows in costs.items():
         if not isinstance(rows, Mapping):
             continue
@@ -134,17 +147,24 @@ def _tessera_rows(costs: Mapping[str, Any]) -> list[tuple[str, str]]:
             if not isinstance(entry, Mapping) or "error" in entry:
                 continue
             if fmt not in membership:
-                try:
-                    membership[fmt] = parse_tessera_format_name(fmt) is not None
-                except ValueError as exc:
-                    raise CostCurrencyError(f"cost row {unit}/{fmt}: {exc}") from exc
-            if membership[fmt] and entry.get("currency") != wanted:
+                family = fr.format_family_of(fmt)
+                if family is None or family.cost_currency is None:
+                    membership[fmt] = None
+                else:
+                    try:
+                        member = fr.parse_family_rung(fmt) is not None
+                    except ValueError as exc:
+                        raise CostCurrencyError(f"cost row {unit}/{fmt}: {exc}") from exc
+                    membership[fmt] = ((family.label, family.cost_currency)
+                                       if member else None)
+            owner = membership[fmt]
+            if owner is not None and entry.get("currency") != owner[1]:
                 raise CostCurrencyError(
-                    f"Tessera cost row {unit}/{fmt} has missing or unknown "
+                    f"{owner[0]} cost row {unit}/{fmt} has missing or unknown "
                     f"currency={entry.get('currency')!r}; its producer must "
-                    f"stamp the measured campaign currency {wanted!r}")
-            if entry.get("currency") == wanted:
-                found.append((str(unit), str(fmt)))
+                    f"stamp the measured campaign currency {owner[1]!r}")
+            if entry.get("currency") in currencies:
+                found.append((str(unit), str(fmt), str(entry.get("currency"))))
     return found
 
 
@@ -164,7 +184,7 @@ def require_run_currency(cost_data: Mapping[str, Any]) -> dict[str, Any]:
     joint = _require_joint_run_currency(cost_data, costs)
     if joint is not None:
         return joint
-    tessera = _tessera_rows(costs)
+    tessera = _campaign_currency_rows(costs)
     provenance = cost_data.get("provenance")
     cost_mode = (
         provenance.get("cost_mode")
@@ -182,7 +202,7 @@ def require_run_currency(cost_data: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(cost_mode, str) or not cost_mode:
         raise CostCurrencyError(
             f"cost table carries {len(tessera)} Tessera-currency rows "
-            f"({tessera_campaign_currency()!r}) but stamps no "
+            f"({tessera[0][2]!r}) but stamps no "
             f"provenance['cost_mode'], so the objective they were measured "
             f"under is unattested (e.g. {tessera[0][0]}/{tessera[0][1]}). An "
             f"unstamped table is refused rather than ranked against a "
@@ -200,7 +220,7 @@ def require_run_currency(cost_data: Mapping[str, Any]) -> dict[str, Any]:
         raise CostCurrencyError(
             f"cost table stamped COST_MODE={cost_mode!r} ranks in "
             f"{expected!r} but carries {len(tessera)} Tessera-currency rows "
-            f"priced in {tessera_campaign_currency()!r} (e.g. "
+            f"priced in {tessera[0][2]!r} (e.g. "
             f"{tessera[0][0]}/{tessera[0][1]}): two numbers in one knapsack "
             f"that are not the same kind of quantity. Price the campaign "
             f"under COST_MODE={RENDER_SCORE_COST_MODE} (the objective its "
@@ -219,7 +239,7 @@ def require_sampled_joint_run_currency(cost_data):
     This entry point is for the atomic research proposal adapter only.  The
     ordinary ``require_run_currency`` retains its unconditional pilot refusal.
     """
-    from .tessera_joint_eval_panel import STATUS, observation_status
+    from .joint_eval_observation import STATUS, observation_status
     provenance = cost_data.get("provenance", {})
     panel = provenance.get("joint_eval")
     anchors = provenance.get("tessera_joint_anchors", {})
@@ -293,7 +313,7 @@ def _require_joint_run_currency(cost_data, costs, *, sampled_research=False):
     if not claimed:
         return None
     from .joint_aura import JOINT_AURA_COST_CURRENCY, validate_joint_aura_entry
-    from .tessera_formats import parse_tessera_format_name
+    from . import format_registry as fr
 
     if (provenance.get("cost_mode") != "aura"
             or provenance.get("joint_activation") is not True
@@ -327,7 +347,7 @@ def _require_joint_run_currency(cost_data, costs, *, sampled_research=False):
                            same=False, refusal=refusal)
             probe_identity = current
             previous = entry["probe_identity"]
-            tessera_count += parse_tessera_format_name(fmt) is not None
+            tessera_count += fr.parse_family_rung(fmt) is not None
         except (ValueError, TypeError, KeyError) as exc:
             raise CostCurrencyError(f"joint AURA cost row {unit}/{fmt}: {exc}") from exc
     return {"cost_mode": "aura", "expected_currency": "aura-adjoint",

@@ -828,6 +828,14 @@ def tessera_quantize_dequantize(name: str, recipe=None):
     return _qdq
 
 
+def _lane_family():
+    """The ``tessera`` format family as ``lane_specs/tessera.json`` declares it."""
+    from .lane_spec import format_family_by_id
+    from .tessera_lane import FAMILY_ID
+
+    return format_family_by_id(FAMILY_ID)
+
+
 def _identity_activation(x: torch.Tensor) -> torch.Tensor:
     """A weight-only format's activation path: the kernel reads bf16."""
     return x
@@ -1008,6 +1016,10 @@ def synthesize_tessera_spec(
         quantize_dequantize=tessera_quantize_dequantize(name, wire),
         activation_quantize_dequantize=activation_qdq,
         static_activation_contract=static_activation_contract,
+        # The lane capabilities its family declares (``lane_specs/tessera.json``),
+        # carried on the spec so a resolved spec and a bare name answer alike.
+        render_owner=_lane_family().id,
+        requires_production_render=_lane_family().requires_production_render,
         # Producer-eligibility is the AND of two independent gates, and
         # conflating them is how a rung reaches the DP that cannot be written:
         #   (a) the wire can carry it -- the grid's digest is a permanent
@@ -1255,15 +1267,17 @@ def encode_tessera_unit(
     what the tests do.
 
     **The invariant that makes "the same recipe" true across the boundary:**
-    the only keywords forwarded to ``encode_linear`` are ``grid``/``q256``/
-    ``name``/``verify`` plus the set ``ActivationSource.for_unit`` emits, and
-    anything else is refused below by name.  No recipe axis -- ``span``,
-    ``scale_plane``, ``body``, ``window_bits`` -- can reach the encoder from
-    here, so Tessera resolves the recipe internally with no override and its
-    answer equals ``tessera_wire_recipe(family, rung)`` by value.  That
-    equality is what the refusal in ``for_unit`` is warning about, and it
-    holds because the whitelist is structural rather than because a caller
-    remembered.
+    the keywords forwarded to ``encode_linear`` are ``grid``/``q256``/
+    ``name``/``verify``, the resolved recipe's own wire fields
+    (:data:`RECIPE_ENCODE_KEYS`, from the one ``recipe`` object threaded
+    here), plus the set ``ActivationSource.for_unit`` emits; anything else is
+    refused below by name.  Until #1502 no recipe axis reached the encoder and
+    Tessera resolved the research recipe internally, which was right for every
+    wire except the one a routed E2M1x2 stack below the cap is served on
+    (span-2 TCQ, ``tessera.export.served_recipe``): a caller that resolved the
+    served wire encoded the research one.  Naming the fields makes the recipe
+    the caller priced the recipe the bytes carry, and wherever it is the
+    research recipe the bytes are unchanged.
 
     ``hessian_required=True`` is the default because a render that quietly
     drops its activation input prices a different tensor than the one that
@@ -1341,7 +1355,7 @@ def _tessera_unit_encode_kwargs(format_name, *, activation_kwargs,
         )
 
     kwargs = dict(grid=_grid_for(family), q256=int(rung), name=format_name,
-                  verify=bool(verify))
+                  verify=bool(verify), **_recipe_encode_kwargs(wire))
     if activation_kwargs:
         unknown = sorted(set(activation_kwargs) - set(required))
         if unknown:
@@ -1352,6 +1366,28 @@ def _tessera_unit_encode_kwargs(format_name, *, activation_kwargs,
             )
         kwargs.update(activation_kwargs)
     return kwargs
+
+
+#: The recipe fields forwarded to ``encode_linear``: every field of a
+#: ``WireRecipe``, which is what Tessera's own ``_recipe_kwargs`` forwards.
+#: ``encode_linear`` resolves a field left ``None`` from ``wire_recipe`` and
+#: lets a named one override it, so naming the research recipe's own values
+#: resolves the same recipe it resolves unaided.
+RECIPE_ENCODE_KEYS = ("body", "span", "scale_plane", "window_bits", "window_seed",
+                      "window_sigma", "channel_sigma")
+
+
+def _recipe_encode_kwargs(wire) -> dict:
+    """The resolved recipe, spelled as ``encode_linear``'s wire keywords.
+
+    Forwarded explicitly since #1502: the served wire of a routed E2M1x2 stack
+    below the cap (span-2 TCQ, ``tessera.export.served_recipe``) is not the
+    research recipe ``encode_linear`` resolves when left alone, so a recipe
+    that reached here only as a lookup key encoded the wrong bytes.  Wherever
+    the recipe IS the research one, naming its fields resolves exactly what
+    leaving them ``None`` resolves, so those bytes do not move.
+    """
+    return {key: getattr(wire, key) for key in RECIPE_ENCODE_KEYS}
 
 
 def require_tessera_batch_encoder():
@@ -1390,11 +1426,12 @@ def encode_tessera_units(weights, format_name: str, *, activation_kwargs=None,
         format_name, activation_kwargs=inputs,
         hessian_required=hessian_required, verify=verify, recipe=recipe)
         for inputs in per_unit]
-    common = {key: admitted[0][key] for key in ("grid", "q256", "verify")}
+    shared = ("grid", "q256", "verify", *RECIPE_ENCODE_KEYS)
+    common = {key: admitted[0][key] for key in shared}
     units = require_tessera_batch_encoder()(
         weights, names=[entry["name"] for entry in admitted],
         per_unit=[{key: value for key, value in entry.items()
-                   if key not in {"grid", "q256", "verify", "name"}}
+                   if key not in {*shared, "name"}}
                   for entry in admitted], **common)
     if len(units) != len(weights):
         raise RuntimeError("Tessera batch returned the wrong number of units")

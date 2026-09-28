@@ -1,0 +1,554 @@
+{
+  "capture": {
+    "allocator_backend": "native",
+    "errors": [],
+    "history_started_before_cuda_initialization": true,
+    "max_checkpoints": 3,
+    "max_history_entries": 1000
+  },
+  "checkpoints": [
+    {
+      "cupti_timestamp_ns": 203,
+      "history_prefix_sha256": "c6b96fb7058f017d8a30d608965d12a2d4788f102c7fd7fc627a8fa1ef40ddc9",
+      "label": "startup",
+      "owners": [
+        {
+          "address": 4096,
+          "bytes": 512,
+          "category": "fixed",
+          "device_id": 0,
+          "device_type": "cuda",
+          "dtype": "torch.uint8",
+          "owner_id": "embedding.weight",
+          "provenance": "synthetic CPU fixture owner",
+          "shape": [
+            512
+          ],
+          "storage_offset_bytes": 0,
+          "stride": [
+            1
+          ],
+          "view_extent_bytes": 512
+        },
+        {
+          "address": 4096,
+          "bytes": 512,
+          "category": "fixed",
+          "device_id": 0,
+          "device_type": "cuda",
+          "dtype": "torch.uint8",
+          "owner_id": "lm_head.weight",
+          "provenance": "synthetic CPU fixture owner",
+          "shape": [
+            512
+          ],
+          "storage_offset_bytes": 0,
+          "stride": [
+            1
+          ],
+          "view_extent_bytes": 512
+        }
+      ],
+      "segments": [
+        {
+          "active_size": 512,
+          "address": 4096,
+          "allocated_size": 512,
+          "blocks": [
+            {
+              "address": 4096,
+              "requested_size": 512,
+              "size": 512,
+              "state": "active_allocated"
+            },
+            {
+              "address": 4608,
+              "requested_size": 0,
+              "size": 3584,
+              "state": "inactive"
+            }
+          ],
+          "device": 0,
+          "segment_pool_id": [
+            0,
+            0
+          ],
+          "stream": 0,
+          "total_size": 4096
+        }
+      ],
+      "trace_index": 3
+    },
+    {
+      "cupti_timestamp_ns": 208,
+      "history_prefix_sha256": "df2c43697e5b262e9b2e93531021e08558a43aba80b2f787ae6bbcb607c83d25",
+      "label": "unit_end",
+      "owners": [
+        {
+          "address": 4096,
+          "bytes": 512,
+          "category": "fixed",
+          "device_id": 0,
+          "device_type": "cuda",
+          "dtype": "torch.uint8",
+          "owner_id": "embedding.weight",
+          "provenance": "synthetic CPU fixture owner",
+          "shape": [
+            512
+          ],
+          "storage_offset_bytes": 0,
+          "stride": [
+            1
+          ],
+          "view_extent_bytes": 512
+        },
+        {
+          "address": 4096,
+          "bytes": 512,
+          "category": "fixed",
+          "device_id": 0,
+          "device_type": "cuda",
+          "dtype": "torch.uint8",
+          "owner_id": "lm_head.weight",
+          "provenance": "synthetic CPU fixture owner",
+          "shape": [
+            512
+          ],
+          "storage_offset_bytes": 0,
+          "stride": [
+            1
+          ],
+          "view_extent_bytes": 512
+        },
+        {
+          "address": 4608,
+          "bytes": 1024,
+          "category": "candidate",
+          "device_id": 0,
+          "device_type": "cuda",
+          "dtype": "torch.uint8",
+          "owner_id": "unit.output",
+          "provenance": "synthetic CPU fixture owner",
+          "shape": [
+            1024
+          ],
+          "storage_offset_bytes": 0,
+          "stride": [
+            1
+          ],
+          "view_extent_bytes": 1024
+        }
+      ],
+      "segments": [
+        {
+          "active_size": 1536,
+          "address": 4096,
+          "allocated_size": 1536,
+          "blocks": [
+            {
+              "address": 4096,
+              "requested_size": 512,
+              "size": 512,
+              "state": "active_allocated"
+            },
+            {
+              "address": 4608,
+              "requested_size": 1024,
+              "size": 1024,
+              "state": "active_allocated"
+            },
+            {
+              "address": 5632,
+              "requested_size": 0,
+              "size": 2560,
+              "state": "inactive"
+            }
+          ],
+          "device": 0,
+          "segment_pool_id": [
+            0,
+            0
+          ],
+          "stream": 0,
+          "total_size": 4096
+        }
+      ],
+      "trace_index": 8
+    },
+    {
+      "cupti_timestamp_ns": 212,
+      "history_prefix_sha256": "4c0b3dae8b21fc92f5feb50e7f6cbed5980221e35cc76ba92ae5d59d0c649555",
+      "label": "capture_end",
+      "owners": [
+        {
+          "address": 4096,
+          "bytes": 512,
+          "category": "fixed",
+          "device_id": 0,
+          "device_type": "cuda",
+          "dtype": "torch.uint8",
+          "owner_id": "embedding.weight",
+          "provenance": "synthetic CPU fixture owner",
+          "shape": [
+            512
+          ],
+          "storage_offset_bytes": 0,
+          "stride": [
+            1
+          ],
+          "view_extent_bytes": 512
+        },
+        {
+          "address": 4096,
+          "bytes": 512,
+          "category": "fixed",
+          "device_id": 0,
+          "device_type": "cuda",
+          "dtype": "torch.uint8",
+          "owner_id": "lm_head.weight",
+          "provenance": "synthetic CPU fixture owner",
+          "shape": [
+            512
+          ],
+          "storage_offset_bytes": 0,
+          "stride": [
+            1
+          ],
+          "view_extent_bytes": 512
+        }
+      ],
+      "segments": [
+        {
+          "active_size": 512,
+          "address": 4096,
+          "allocated_size": 512,
+          "blocks": [
+            {
+              "address": 4096,
+              "requested_size": 512,
+              "size": 512,
+              "state": "active_allocated"
+            },
+            {
+              "address": 4608,
+              "requested_size": 0,
+              "size": 3584,
+              "state": "inactive"
+            }
+          ],
+          "device": 0,
+          "segment_pool_id": [
+            0,
+            0
+          ],
+          "stream": 0,
+          "total_size": 4096
+        }
+      ],
+      "trace_index": 12
+    }
+  ],
+  "context_id": 1,
+  "cupti_trace": {
+    "api_events": [
+      {
+        "correlation_id": 1,
+        "end_ns": 110,
+        "name": "cudaMalloc_v3020",
+        "process_id": 17,
+        "return_value": 0,
+        "start_ns": 90,
+        "thread_id": 204842784
+      }
+    ],
+    "capture": {
+      "collector_library_sha256": "1a893cec8e7386c48b86f69ebb6c677b009f9aa0653afae5b88594e8deaaaf73",
+      "start_code": 0,
+      "started_before_cuda_libraries": true,
+      "stop_code": 0
+    },
+    "completed_buffers": 1,
+    "configuration": [
+      {
+        "code": 0,
+        "operation": "register_callbacks"
+      },
+      {
+        "code": 0,
+        "operation": "allocation_source"
+      },
+      {
+        "code": 0,
+        "operation": "enable_memory2"
+      },
+      {
+        "code": 0,
+        "operation": "enable_memory_pool"
+      },
+      {
+        "code": 0,
+        "operation": "enable_runtime"
+      },
+      {
+        "code": 0,
+        "operation": "enable_driver"
+      },
+      {
+        "code": 0,
+        "operation": "flush_before_disable"
+      },
+      {
+        "code": 0,
+        "operation": "flush_after_disable"
+      }
+    ],
+    "cupti_version": 130001,
+    "dropped_records": [
+      {
+        "code": 0,
+        "context_handle": 0,
+        "count": 0,
+        "stream_id": 204842784
+      },
+      {
+        "code": 0,
+        "context_handle": 0,
+        "count": 0,
+        "stream_id": 0
+      }
+    ],
+    "end_ns": 1000,
+    "errors": [],
+    "markers": [
+      {
+        "name": "startup",
+        "timestamp_ns": 203
+      },
+      {
+        "name": "unit_end",
+        "timestamp_ns": 208
+      },
+      {
+        "name": "capture_end",
+        "timestamp_ns": 212
+      }
+    ],
+    "memory_events": [
+      {
+        "address": 4096,
+        "async": false,
+        "bytes": 4096,
+        "context_id": 1,
+        "correlation_id": 1,
+        "device_id": 0,
+        "device_memory": true,
+        "memory_kind": 3,
+        "operation": "allocate",
+        "pool_type": 0,
+        "process_id": 17,
+        "source": "/usr/local/lib/python3.12/dist-packages/torch/lib/libc10_cuda.so",
+        "stream_id": 4294967295,
+        "timestamp_ns": 100
+      }
+    ],
+    "pool_records": 0,
+    "process_id": 17,
+    "schema": "tessera.cupti_memory_trace.v1",
+    "start_ns": 1
+  },
+  "fixture_provenance": "synthetic CPU-only parser fixture, not a GPU measurement",
+  "identity": {
+    "assignment_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "canonical_units_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "device_id": 0,
+    "device_uuid": "GPU-rank-0",
+    "host": {
+      "interface": "eth0",
+      "ip": "192.168.1.107",
+      "source": "synthetic CPU fixture; no actual interface observed"
+    },
+    "model_sha256": "20923a282d7c88e7e6d767c7f2126a198ae05e113ed880a18ff0075f9ec9e35d",
+    "rank": 0,
+    "runtime_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "schema": "tessera.full_engine_resource_identity.v1",
+    "workload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "world_size": 2
+  },
+  "process_id": 4242,
+  "schema": "tessera.full_engine_resource_capture.v1",
+  "torch_snapshot": {
+    "device_traces": [
+      [
+        {
+          "action": "segment_alloc",
+          "addr": 4096,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 4096,
+          "stream": 0
+        },
+        {
+          "action": "alloc",
+          "addr": 4096,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 512,
+          "stream": 0
+        },
+        {
+          "action": "snapshot",
+          "addr": 0,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 0,
+          "stream": 0
+        },
+        {
+          "action": "alloc",
+          "addr": 4608,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 512,
+          "stream": 0
+        },
+        {
+          "action": "free_requested",
+          "addr": 4608,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 512,
+          "stream": 0
+        },
+        {
+          "action": "free_completed",
+          "addr": 4608,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 512,
+          "stream": 0
+        },
+        {
+          "action": "alloc",
+          "addr": 4608,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 1024,
+          "stream": 0
+        },
+        {
+          "action": "snapshot",
+          "addr": 0,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 0,
+          "stream": 0
+        },
+        {
+          "action": "snapshot",
+          "addr": 0,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 0,
+          "stream": 0
+        },
+        {
+          "action": "free_requested",
+          "addr": 4608,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 1024,
+          "stream": 0
+        },
+        {
+          "action": "free_completed",
+          "addr": 4608,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 1024,
+          "stream": 0
+        },
+        {
+          "action": "snapshot",
+          "addr": 0,
+          "frames": [],
+          "pool_id": [
+            0,
+            0
+          ],
+          "size": 0,
+          "stream": 0
+        }
+      ]
+    ],
+    "segments": [
+      {
+        "active_size": 512,
+        "address": 4096,
+        "allocated_size": 512,
+        "blocks": [
+          {
+            "address": 4096,
+            "requested_size": 512,
+            "size": 512,
+            "state": "active_allocated"
+          },
+          {
+            "address": 4608,
+            "requested_size": 0,
+            "size": 3584,
+            "state": "inactive"
+          }
+        ],
+        "device": 0,
+        "segment_pool_id": [
+          0,
+          0
+        ],
+        "stream": 0,
+        "total_size": 4096
+      }
+    ]
+  },
+  "unit_intervals": [
+    {
+      "begin_checkpoint": "startup",
+      "end_checkpoint": "unit_end",
+      "invocation_id": "unit:0",
+      "unit_id": "unit"
+    }
+  ]
+}

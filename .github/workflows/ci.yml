@@ -166,6 +166,37 @@ jobs:
             "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
               -q --timeout=300 -ra -p no:cacheprovider
 
+  # The boundary allowlists only shrink (decoupling step 0, #1534). The
+  # tests hold each list equal to the code; this job refuses a pull request
+  # that adds a line to one. A file absent at the base is a new gate and is
+  # admitted.
+  allowlists:
+    name: boundary allowlists only shrink
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Refuse lines added to a shrink-only allowlist
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          status=0
+          for f in $(git ls-tree -r --name-only HEAD tests/boundary_allowlists/); do
+            if ! git cat-file -e "$BASE:$f" 2>/dev/null; then
+              echo "$f is new in this pull request: admitted as a new gate"
+              continue
+            fi
+            added="$(git diff --numstat "$BASE" HEAD -- "$f" | awk '{s += $1} END {print s + 0}')"
+            if [ "$added" -gt 0 ]; then
+              echo "::error file=$f::$added line(s) added to a shrink-only allowlist"
+              status=1
+            fi
+          done
+          exit "$status"
+
   # Import hygiene: catches a module that only imports because the reference box
   # happens to have vLLM, a CUDA extension, or a stray sys.path entry. Cheap, and
   # it fails in a way that names the offending module.

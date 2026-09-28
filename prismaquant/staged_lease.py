@@ -1,10 +1,14 @@
-"""Lifetime-pinned staged reads through the PB reader-lease SDK (PQ #850).
+"""Lifetime-pinned staged reads through PrismaBuild's client SDK (PQ #850).
 
 Tier *choice* is enforced by :mod:`prismaquant.staged_tier_policy`; this
 module adds lifetime *pinning* on top, through the exact PB signature
 family (`injected_context` / `acquire_for` / `open_pinned` / `release`,
 capability `reader-lease-v1`). The PB worker owns that implementation —
-nothing here re-implements, shadows, or diverges from it:
+nothing here re-implements, shadows, or diverges from it.
+
+PrismaQuant reaches PrismaBuild only through ``prismabuild.client``, PB's
+versioned public SDK (PB #1254), and :func:`client_sdk` is the one place a
+PrismaQuant module gets it. The rules below are about that module:
 
 - The SDK resolves from a sealed tree (explicit override, else the
   authoritative PB-injected ``PRISMABUILD_READER_HELPER_ROOT``) or, in
@@ -62,14 +66,25 @@ from pathlib import Path
 
 from .staged_tier_policy import TierPolicyRefused
 
-#: Accepted PB730/PB741 source pin for the PB reader lease.
+#: Reviewed PB source pin for the reader lease and the client SDK
+#: (``prismabuild.client``, PB #1254); it moved from 461728e4 when the SDK
+#: landed, because no earlier commit carries the SDK.
 #: Deployment qualification is separate; this pin advertises no capability.
 #: No capability assertion rides it. Its stdlib resolver,
 #: tools/resolve_prismabuild_dev_pin.py, had no caller and was retired in
 #: PQ #1302; recover it with
 #: ``git show ffb40f417b2:tools/resolve_prismabuild_dev_pin.py``.
-PB_READER_LEASE_PIN_COMMIT = "461728e4dcc08123d5fdb410eb2f18772fdb3fe0"
+PB_READER_LEASE_PIN_COMMIT = "059953bc3793f539600d333cd3311773e592b0e6"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
+
+#: The PrismaBuild client SDK version this package is written against
+#: (``prismabuild.client.SDK_VERSION``, PB #1254). A tree that serves another
+#: version refuses as unsupported: the SDK's contract is pinned by version, so
+#: a mismatch is a different contract, never a subset to probe.
+PB_CLIENT_SDK_VERSION = 1
+
+#: The one PrismaBuild module PrismaQuant imports.
+_CLIENT_MODULE = "prismabuild.client"
 
 #: Names PQ actually calls. Anything else is not our protocol.
 _REQUIRED_NAMES = ("injected_context", "acquire_for", "open_pinned",
@@ -85,9 +100,6 @@ _AVAILABILITY_REFUSALS = ("unpublished", "stale-epoch", "retiring",
                           "file-missing", "no-file-identity",
                           "ram-covers-unresolved", "lease-helper-unavailable",
                           "lease-context-unavailable")
-
-#: A pool row is small structured JSON; this only bounds a pathological read.
-_MAX_POOL_ROW_BYTES = 8 * 1024 * 1024
 
 _HELPER_LOCK = threading.Lock()
 _HELPER_ROOT: str | None = None
@@ -224,16 +236,48 @@ def _sdk():
     with _HELPER_LOCK:
         injected = _INJECTED
     if injected is not None:
-        for name in _REQUIRED_NAMES:
-            if not hasattr(injected, name):
-                raise _refuse(f"lease-helper-unsupported: no {name}",
-                              kind="availability")
+        _require_client_surface(injected)
         return injected
     raise _refuse("lease-helper-unavailable", kind="availability")
 
 
+def client_sdk():
+    """PrismaBuild's client SDK (``prismabuild.client``), or a named refusal.
+
+    The one way a PrismaQuant module reaches PrismaBuild. It resolves exactly
+    as the reader lease does (:func:`_sdk`): the sealed generation tree PB
+    injected into this action, an explicit test override, or the test-only
+    injected install; anything else refuses ``lease-helper-unavailable``
+    rather than importing whatever ``prismabuild`` a bare import would find.
+    Every name a caller uses is PB's public, versioned surface
+    (:data:`PB_CLIENT_SDK_VERSION`).
+    """
+
+    return _sdk()
+
+
+def _require_client_surface(module) -> None:
+    """Refuse a client module whose contract is not the one PQ is written for."""
+
+    version = getattr(module, "SDK_VERSION", None)
+    if version != PB_CLIENT_SDK_VERSION:
+        raise _refuse(
+            f"lease-helper-unsupported: prismabuild.client SDK_VERSION "
+            f"{version!r}, this package needs {PB_CLIENT_SDK_VERSION}",
+            kind="availability")
+    for name in _REQUIRED_NAMES:
+        if not hasattr(module, name):
+            raise _refuse(f"lease-helper-unsupported: no {name}",
+                          kind="availability")
+
+
 def sdk_submodule(name: str):
     """One ``prismabuild.<name>`` from the SAME generation as the SDK.
+
+    LEGACY: an internal PrismaBuild module, not its public SDK. New code calls
+    :func:`client_sdk`. This remains only for the callers that still need
+    names the SDK does not publish (``joint_forward_resume``,
+    ``produced_output_spool`` and four tools), and goes when they move.
 
     Every PrismaBuild module this package uses must come from ONE sealed
     generation. A bare ``import prismabuild.produced_output`` does not
@@ -314,7 +358,7 @@ def inject_installed_sdk_for_tests():
     with _HELPER_LOCK:
         if _INJECTED_MODULES_BEFORE is None:
             _INJECTED_MODULES_BEFORE = frozenset(_prismabuild_modules())
-    import prismabuild.reader_lease as module  # noqa: PLC0415
+    import prismabuild.client as module  # noqa: PLC0415
     # The checks above prove what is installed, not what the import
     # served. A ``prismabuild`` preimported from another tree (a sealed
     # generation's ``src`` put on ``sys.path`` by an earlier test) answers
@@ -323,11 +367,11 @@ def inject_installed_sdk_for_tests():
     # the "installed" SDK, with another generation's behaviour
     # (PQ #1281). The raise leaves the snapshot on record, as the
     # coherence raise below does; the teardown's clear drops both.
-    installed = Path(dist.locate_file("prismabuild/reader_lease.py")).resolve()
+    installed = Path(dist.locate_file("prismabuild/client.py")).resolve()
     served = Path(getattr(module, "__file__", None) or "").resolve()
     if served != installed:
         raise RuntimeError(
-            f"test SDK injection: prismabuild.reader_lease serves {served}, "
+            f"test SDK injection: prismabuild.client serves {served}, "
             f"not the installed distribution's {installed}; a prismabuild "
             "imported from another tree shadows it (PQ #1281)")
     try:
@@ -341,9 +385,10 @@ def inject_installed_sdk_for_tests():
             "test SDK injection refuses divergent preimported "
             f"prismabuild.* outside {expected}: {exc}") from None
     origin = str(Path(getattr(module, "__file__", "")).resolve())
-    for name in _REQUIRED_NAMES:
-        if not hasattr(module, name):
-            raise RuntimeError(f"test SDK surface missing {name} at {origin}")
+    try:
+        _require_client_surface(module)
+    except LeaseRefused as exc:
+        raise RuntimeError(f"test SDK surface at {origin}: {exc}") from None
     with _HELPER_LOCK:
         _INJECTED = module
     return module
@@ -361,7 +406,7 @@ def clear_injected_sdk_for_tests() -> None:
     Resetting the module reference alone is not enough (PQ #963). The
     injection also leaves the installed distribution in ``sys.modules``,
     and :func:`_sdk_from_tree` returns a preimported
-    ``prismabuild.reader_lease`` as it is: a leftover venv module then
+    ``prismabuild.client`` as it is: a leftover venv module then
     fails containment against the sealed generation tree, so every later
     test in the same pytest worker refuses ``lease-helper-divergent``.
     Only the modules an injection added are removed, and with no
@@ -445,13 +490,13 @@ def _sdk_from_tree(root: str):
     src = Path(root) / "src"
     expected = src / "prismabuild"
     with _HELPER_LOCK:
-        present = sys.modules.get("prismabuild.reader_lease")
+        present = sys.modules.get(_CLIENT_MODULE)
         if present is not None:
             module = present
         else:
             sys.path.insert(0, str(src))
             try:
-                import prismabuild.reader_lease as module  # noqa: PLC0415
+                import prismabuild.client as module  # noqa: PLC0415
             except ImportError as exc:
                 raise _refuse(f"lease-helper-unavailable: {exc}",
                               kind="availability") from None
@@ -466,10 +511,7 @@ def _sdk_from_tree(root: str):
         except ValueError:
             raise _refuse("lease-helper-divergent: SDK resolves elsewhere",
                           kind="integrity")
-    for name in _REQUIRED_NAMES:
-        if not hasattr(module, name):
-            raise _refuse(f"lease-helper-unsupported: no {name}",
-                          kind="availability")
+    _require_client_surface(module)
     _check_package_coherence(_package_dir_of(module))
     return module
 
@@ -515,33 +557,32 @@ def resolve_sealed_readset(*, env=None):
     claim row that :func:`resolve_context` has just matched against the
     launch env, and nothing else.
 
-    **This is a protocol extension.** ``_REQUIRED_NAMES`` is the SDK
-    surface PQ calls; ``queue_root`` is an exported ``ctx`` field but the
-    row's ``cas_root``/``residency`` keys are read directly rather than
-    handed over by an SDK call. The clean shape is a PB-side ``ctx``
-    field carrying the sealed readset, and until that exists this reads
-    PB's own published row and nothing derived from it -- no sibling-path
-    guess at the CAS root, no manifest path assembled from a convention.
+    The row is read by PB's own reader (``client.read_claimed_record``), so
+    PrismaQuant does not spell the queue's layout. Its ``cas_root`` and
+    ``residency`` keys are fields of PB's published row, read as they are;
+    the clean shape is a PB-side ``ctx`` field carrying the sealed readset,
+    and until that exists this reads PB's own published row and nothing
+    derived from it -- no sibling-path guess at the CAS root, no manifest
+    path assembled from a convention.
 
     Raises :class:`ReadsetUnbound` with a reason whenever any hop is
     missing or disagrees. It never returns a partial answer.
     """
     try:
-        _sdk_module, ctx = resolve_context(env=env)
+        client, ctx = resolve_context(env=env)
     except TierPolicyRefused as refusal:
         raise ReadsetUnbound(f"lease context: {refusal}") from None
     queue_root = str(ctx.get("queue_root") or "")
     action_key = str(ctx.get("action_key") or "")
     if not queue_root or len(action_key) != 64:
         raise ReadsetUnbound("lease context names no queue row")
-    row_path = Path(queue_root) / "claimed" / f"{action_key}.json"
     try:
-        with open(row_path, "rb") as handle:
-            row = json.loads(handle.read(_MAX_POOL_ROW_BYTES + 1).decode("utf-8"))
-    except FileNotFoundError:
-        raise ReadsetUnbound(f"no claim row at {row_path}") from None
-    except (OSError, UnicodeError, ValueError) as error:
+        row = client.read_claimed_record(client.PoolQueue(queue_root), action_key)
+    except Exception as error:  # noqa: BLE001 -- PB's reader raises on a torn row
         raise ReadsetUnbound(f"claim row is unreadable: {error}") from None
+    if row is None:
+        raise ReadsetUnbound(
+            f"no claim row for {action_key[:12]} under {queue_root}")
     if not isinstance(row, dict) or row.get("action_key") != action_key:
         raise ReadsetUnbound("claim row names another action")
     cas_root = row.get("cas_root")
@@ -581,7 +622,7 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
        campaign -- and the fixed ceiling is what keeps it that way.
        Content addressing is then what makes the manifest self-attesting:
        the bytes prove themselves or nothing is adopted.
-    4. ``prismabuild.core.read_data_manifest`` decodes and validates it --
+    4. PB's ``read_data_manifest`` (``prismabuild.client``) decodes and validates it --
        gzip detected by header rather than suffix, stored and decoded bytes
        bounded independently before JSON parsing, trailing bytes and
        concatenated members refused, then PB's own schema validation. PQ
@@ -603,9 +644,11 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
             f"the claim row names manifest {digest[:12]}, this run reads "
             f"{str(bound_manifest_sha256)[:12]}")
     try:
-        from prismabuild.core import DATA_MANIFEST_MAX_BYTES, read_data_manifest
-    except ImportError as error:
+        client = client_sdk()
+    except LeaseRefused as error:
         raise ReadsetUnbound(f"PB manifest reader unavailable: {error}") from None
+    DATA_MANIFEST_MAX_BYTES = client.DATA_MANIFEST_MAX_BYTES
+    read_data_manifest = client.read_data_manifest
     # The ceiling is PB's own fixed bound, applied BEFORE anything is opened.
     # ``size`` came off the claim row: it is an input, not an established
     # fact, and the same record carries ``detail.prewarm.manifest_bytes`` --
@@ -671,10 +714,10 @@ def load_sealed_read_order(bound_manifest_sha256: str) -> list[tuple[str, int, i
     ``[(path, file offset, bytes), ...]``, in read order: the order whose
     running byte sum PrismaBuild's movers, plans and landing records name
     ranges in (PB ``core.residency_descriptor``). Cut by PB's own
-    ``storage_tiers.manifest_read_entries`` -- list order for a v1 manifest,
+    ``manifest_read_entries`` -- list order for a v1 manifest,
     the ``read_plan`` expansion for v2, revisits included -- so this reader
     and the plan agree about one order by construction rather than by a
-    second parser. The module comes through :func:`sdk_submodule`, from the
+    second parser. It comes through :func:`client_sdk`, from the
     same sealed generation as the lease SDK, never from whatever
     ``prismabuild`` a bare import would find. Raises :class:`ReadsetUnbound`
     when PB's helper is not available or the manifest describes no read
@@ -682,8 +725,7 @@ def load_sealed_read_order(bound_manifest_sha256: str) -> list[tuple[str, int, i
     """
     payload = _load_sealed_payload(bound_manifest_sha256)
     try:
-        tiers = sdk_submodule("storage_tiers")
-        manifest_read_entries = tiers.manifest_read_entries
+        manifest_read_entries = client_sdk().manifest_read_entries
     except (LeaseRefused, AttributeError) as error:
         raise ReadsetUnbound(f"PB read-order helper unavailable: {error}") from None
     entries = manifest_read_entries(payload)
@@ -1260,16 +1302,13 @@ class LeaseWindow:
             self._require_owner("__enter__")
         sdk, ctx = resolve_context(env=self._env)
         # Provenance BEFORE side effects: the serving module proves the
-        # expected package root; pool plus every preimported prismabuild.*
-        # (and the package itself) must resolve inside it, component-wise.
-        # A divergent preimport refuses here — before any pin exists, so no
-        # `with` teardown is needed and nothing can strand.
+        # expected package root; every preimported prismabuild.* (and the
+        # package itself) must resolve inside it, component-wise. A
+        # divergent preimport refuses here — before any pin exists, so no
+        # `with` teardown is needed and nothing can strand. The queue handle
+        # is the SDK's own ``PoolQueue``.
         expected = _package_dir_of(sdk)
-        try:
-            import prismabuild.pool as pool_mod  # noqa: PLC0415
-        except ImportError as exc:
-            raise _refuse(f"lease-helper-unavailable: {exc}",
-                          kind="availability") from None
+        pool_mod = sdk
         _check_package_coherence(expected)
         spec = self._spec
         # Owner and material namespace are the same action for every input

@@ -44,11 +44,11 @@ def _start_stage_a(tmp_path, monkeypatch):
     """Run ``run_adjoint_capture`` up to its first input read.
 
     The CUDA guard is a no-op, and every GPU entry the startup could reach
-    raises ``_GpuWorkStarted``. The prepared-anchor read (``_bound``, the
+    raises ``_GpuWorkStarted``. The prepared-anchor read (``stage_inputs.bound``, the
     first step after the startup checks) raises ``_PastStartupCheck``, so a
     run that passes the occupancy check stops there, before any GPU work.
     """
-    from prismaquant import gpu_guard, joint_projection_backend, tessera_joint_aura
+    from prismaquant import gpu_guard, joint_projection_backend, stage_inputs, tessera_joint_aura
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *a, **kw: None)
 
     def gpu_work(*_args, **_kwargs):
@@ -60,7 +60,7 @@ def _start_stage_a(tmp_path, monkeypatch):
     def past_check(*_args, **_kwargs):
         raise _PastStartupCheck("startup checks passed")
 
-    monkeypatch.setattr(tessera_joint_aura, "_bound", past_check)
+    monkeypatch.setattr(stage_inputs, "bound", past_check)
     # run_adjoint_capture sets this process-wide; register it for restore.
     monkeypatch.setenv(tessera_joint_aura.ACTIVATION_SCALE_ENV, "0")
     root = tmp_path / "campaign"

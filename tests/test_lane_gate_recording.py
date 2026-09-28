@@ -274,7 +274,7 @@ def test_a_lane_can_add_a_requirement_and_can_never_subtract_one():
 
     tessera_card = {"lane": "tessera", "slots": {}}
     assert set(required_slots(tessera_card)) == set(REQUIRED_SLOTS) | {
-        "route.census", "route.trace"}
+        "route.census", "route.trace", "uniform_control"}
 
     legacy_card = {"slots": {}}
     assert required_slots(legacy_card) == tuple(REQUIRED_SLOTS)
@@ -456,12 +456,13 @@ def test_every_derived_lane_slot_names_a_verifier_verify_replays():
     })
     assert derived, (
         "no lane declares a slot beyond the base set; the property is vacuous")
-    verifiers = getattr(shipcard_mod, "LANE_SLOT_VERIFIERS", {})
+    verifiers = shipcard_mod.lane_slot_verifiers()
     missing = [slot for slot in derived if slot not in verifiers]
     assert not missing, (
         f"lane-declared slot(s) {missing} name no verifier: a record with "
         "passed=True would close them on the generic checks alone. Register "
-        "the verifier beside the slot (shipcard.LANE_SLOT_VERIFIERS)")
+        "the verifier with the lane's plugin (shipcard_slot_verifiers), or in "
+        "shipcard.LANE_SLOT_VERIFIERS for a data-only lane")
     for slot in derived:
         assert callable(verifiers[slot]), f"{slot}: verifier is not callable"
 
@@ -481,7 +482,8 @@ def test_verify_replays_route_census_evidence(tmp_path, monkeypatch):
     refusal the pinned table gives the same rows).
     """
     import prismaquant.tessera_route_receipt as receipt
-    from prismaquant.shipcard import make_record, make_route_census_record
+    from prismaquant.shipcard import make_record
+    from prismaquant.tessera_shipcard import make_route_census_record
 
     def _absent():
         raise ModuleNotFoundError("No module named 'tessera'", name="tessera")
@@ -745,6 +747,6 @@ def test_preflight_build_facts_use_the_same_constructor_without_mutation(
     report = cli.preflight_lane_shipcard(root, "tessera", build=facts)
     assert captured == [({"campaign_note": "fixture", "export_container": "tessera"}, "tessera")]
     assert facts == {"campaign_note": "fixture"}
-    assert report["slots_without_declared_runner"] == ["uniform_control"]
+    assert report["slots_without_declared_runner"] == []
     assert "uniform_control" in report["unfilled_slots"]
     assert not (root / "shipcard.json").exists()

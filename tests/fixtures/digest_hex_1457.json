@@ -1,0 +1,742 @@
+{
+  "test_hex_wrapper_preserves_outcome_and_identity[boolean-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[boolean-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[boolean-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[boolean-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[bytes-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[bytes-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[bytes-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[bytes-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[claimed_length_subclass-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[claimed_length_subclass-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[claimed_length_subclass-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[claimed_length_subclass-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[different_text_subclass-prismaquant.artifact_collection._sha256]#0": {
+    "returned": "('_DifferentText', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[different_text_subclass-prismaquant.prepriced_cost._require_sha256]#0": {
+    "returned": "('_DifferentText', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[different_text_subclass-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "returned": "('_DifferentText', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[different_text_subclass-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "returned": "('_DifferentText', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[digits-prismaquant.artifact_collection._sha256]#0": {
+    "returned": "('str', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[digits-prismaquant.prepriced_cost._require_sha256]#0": {
+    "returned": "('str', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[digits-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "returned": "('str', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[digits-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "returned": "('str', '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[embedded_newline-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[embedded_newline-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[embedded_newline-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[embedded_newline-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[empty-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[empty-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[empty-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[empty-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[falsy_subclass-prismaquant.artifact_collection._sha256]#0": {
+    "returned": "('_FalsyString', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[falsy_subclass-prismaquant.prepriced_cost._require_sha256]#0": {
+    "returned": "('_FalsyString', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[falsy_subclass-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "returned": "('_FalsyString', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[falsy_subclass-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "returned": "('_FalsyString', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[float-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[float-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[float-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[float-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[hex_iteration_subclass-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[hex_iteration_subclass-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[hex_iteration_subclass-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[hex_iteration_subclass-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[integer-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[integer-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[integer-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[integer-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[long-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[long-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[long-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[long-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[lower-prismaquant.artifact_collection._sha256]#0": {
+    "returned": "('str', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[lower-prismaquant.prepriced_cost._require_sha256]#0": {
+    "returned": "('str', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[lower-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "returned": "('str', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[lower-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "returned": "('str', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[mixed-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[mixed-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[mixed-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[mixed-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nested-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nested-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nested-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nested-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[newline-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[newline-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[newline-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[newline-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[none-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[none-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[none-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[none-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nonhex_iteration_subclass-prismaquant.artifact_collection._sha256]#0": {
+    "returned": "('_NonHexIteration', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nonhex_iteration_subclass-prismaquant.prepriced_cost._require_sha256]#0": {
+    "returned": "('_NonHexIteration', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nonhex_iteration_subclass-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "returned": "('_NonHexIteration', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nonhex_iteration_subclass-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "returned": "('_NonHexIteration', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nul-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nul-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nul-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[nul-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[path-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[path-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[path-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[path-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[short-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[short-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[short-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[short-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[short_length_subclass-prismaquant.artifact_collection._sha256]#0": {
+    "returned": "('_ShortLength', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[short_length_subclass-prismaquant.prepriced_cost._require_sha256]#0": {
+    "returned": "('_ShortLength', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[short_length_subclass-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "returned": "('_ShortLength', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[short_length_subclass-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "returned": "('_ShortLength', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[space-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[space-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[space-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[space-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[subclass-prismaquant.artifact_collection._sha256]#0": {
+    "returned": "('_String', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[subclass-prismaquant.prepriced_cost._require_sha256]#0": {
+    "returned": "('_String', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[subclass-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "returned": "('_String', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[subclass-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "returned": "('_String', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', True)"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[unicode-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[unicode-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[unicode-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[unicode-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[upper-prismaquant.artifact_collection._sha256]#0": {
+    "cause": null,
+    "raised": "prismaquant.artifact_collection.ArtifactCollectionError",
+    "text": "fixture.field: expected a lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[upper-prismaquant.prepriced_cost._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "fixture.field: sha256 must be a full lowercase SHA-256 digest"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[upper-prismaquant.prismasnap_checkpoint._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field must be a full lowercase SHA-256"
+  },
+  "test_hex_wrapper_preserves_outcome_and_identity[upper-prismaquant.prismasnap_validation._require_sha256]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture.field is not a full lowercase SHA-256"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[boolean-prismaquant.artifact_collection._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'bool'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[boolean-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'bool'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[boolean-prismaquant.prismasnap_validation._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'bool'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[bytes-prismaquant.artifact_collection._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "cannot use a string pattern on a bytes-like object"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[bytes-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "cannot use a string pattern on a bytes-like object"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[bytes-prismaquant.prismasnap_validation._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "cannot use a string pattern on a bytes-like object"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[claimed_length_subclass-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[claimed_length_subclass-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[claimed_length_subclass-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[different_text_subclass-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[different_text_subclass-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[different_text_subclass-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[digits-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[digits-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[digits-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[embedded_newline-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[embedded_newline-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[embedded_newline-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[empty-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[empty-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[empty-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[falsy_subclass-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[falsy_subclass-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[falsy_subclass-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[float-prismaquant.artifact_collection._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'float'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[float-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'float'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[float-prismaquant.prismasnap_validation._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'float'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[hex_iteration_subclass-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[hex_iteration_subclass-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[hex_iteration_subclass-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[integer-prismaquant.artifact_collection._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'int'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[integer-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'int'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[integer-prismaquant.prismasnap_validation._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'int'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[long-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[long-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[long-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[lower-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[lower-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[lower-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[mixed-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[mixed-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[mixed-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nested-prismaquant.artifact_collection._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'dict'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nested-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'dict'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nested-prismaquant.prismasnap_validation._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'dict'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[newline-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[newline-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[newline-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[none-prismaquant.artifact_collection._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'NoneType'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[none-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'NoneType'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[none-prismaquant.prismasnap_validation._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'NoneType'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nonhex_iteration_subclass-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nonhex_iteration_subclass-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nonhex_iteration_subclass-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nul-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nul-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[nul-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[path-prismaquant.artifact_collection._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'PurePosixPath'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[path-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'PurePosixPath'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[path-prismaquant.prismasnap_validation._SHA256]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "expected string or bytes-like object, got 'PurePosixPath'"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[short-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[short-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[short-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[short_length_subclass-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[short_length_subclass-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[short_length_subclass-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[space-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[space-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[space-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[subclass-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[subclass-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[subclass-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "True"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[unicode-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[unicode-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[unicode-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[upper-prismaquant.artifact_collection._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[upper-prismaquant.prismasnap_checkpoint._SHA256]#0": {
+    "returned": "False"
+  },
+  "test_inline_pattern_binding_preserves_match_and_errors[upper-prismaquant.prismasnap_validation._SHA256]#0": {
+    "returned": "False"
+  }
+}

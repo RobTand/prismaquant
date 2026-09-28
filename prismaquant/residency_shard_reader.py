@@ -73,6 +73,7 @@ import time
 
 import torch
 
+from .file_identity import file_stat_signature
 from .residency_map import RANGE_HIT, RANGE_UNCOVERED, residency_resolver
 from .staged_tier_policy import (
     StagedRangeNotLanded,
@@ -740,10 +741,6 @@ def _cuts(offset: int, count: int, chunk: int) -> list[tuple[int, int]]:
     return cuts
 
 
-def _signature(info: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-
-
 def _read_shard_header(path: str) -> tuple[dict, int, int]:
     """The shard's header, its payload base, and the declared file's length.
 
@@ -1149,7 +1146,7 @@ class StagedShardReader:
                 # so the mount's read shape is read once per reader, not per tensor.
                 self._shape = _read_shape(entry["stage_path"])
             row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
-                   _signature(info), entry, "stage")
+                   file_stat_signature(info), entry, "stage")
             self._bound.append(row)
             return row
         from .staged_lease import LeaseRefused, acquire_entry_window
@@ -1211,7 +1208,7 @@ class StagedShardReader:
             self._shape = _read_shape(window.stage_path(key)
                                       or entry["stage_path"])
         row = (entry["offset"], entry["offset"] + entry["bytes"], fd,
-               _signature(info), entry, tier, window)
+               file_stat_signature(info), entry, tier, window)
         self._bound.append(row)
         return row
 
@@ -1262,7 +1259,7 @@ class StagedShardReader:
         fd, signature, entry, tier = row[2], row[3], row[4], row[5]
         try:
             raw = _read_span(fd, end - start, start - entry["offset"], self._shape)
-            if _signature(os.fstat(fd)) != signature:
+            if file_stat_signature(os.fstat(fd)) != signature:
                 raise ValueError("changed during its content read")
         except (OSError, ValueError) as error:
             self._drop(row)

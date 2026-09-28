@@ -69,9 +69,17 @@ versions it was measured under. ``v7`` (Tessera #195) adds the smoke's
 ``attribution`` derived from it. ``v8`` (Tessera #198) adds
 ``evidence.artifact``, the encoder scope of the KL: which commit wrote the
 bytes it was measured on, and whether a later encoder reproduces them.
-Each is parsed closed at its own schema and refused by name where this
-reader does not understand it; see :func:`parse_cell_evidence` and, for
-what the reader DECIDES on, :func:`cell_evidence_admits`.
+Each schema names the fields this reader consumes, and each is required at
+its own schema; see :func:`parse_cell_evidence` and, for what the reader
+DECIDES on, :func:`cell_evidence_admits`.
+
+Additive fields (#1548). A field or block this reader does not know is
+accepted and never read, so a Tessera release that adds one does not break
+this reader. A producer that adds a field an old reader may not skip lists it
+in the object's ``must_understand`` array, and this reader then refuses the
+table. Both rules live in :mod:`prismaquant.record_fields`. The ``requires``
+predicate is the exception: every key in it is a condition, so an unknown
+requirement is still refused (:func:`parse_lane_claim`).
 
 The lane predicate (contract v20, Tessera #264)
 -----------------------------------------------
@@ -88,7 +96,11 @@ predicate closed at Tessera's own vocabulary (:func:`parse_lane_claim`) and
 planned wire (``tessera_render.planned_wire_facts``) to Tessera's own
 decision core (``tessera.serving.scheme.decide_lane_requirements``).  The
 rule has one home and it is not in this repository; what lives here is the
-facts and the refusal.
+facts and the refusal.  A lane launch is made only at a rung the lane admits:
+since contract v42 a cell can name a lane launch beside a lane-free one (the
+fused routed pair beside the compact adapter), and where the lane refuses the
+plan the cell admits on the launches left (:func:`cell_rung_launches`, PQ
+#1274).
 
 One parser, and why the vocabulary is wider than one publisher
 ---------------------------------------------------------------
@@ -135,6 +147,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from . import record_fields
 from .digests import file_sha256hex
 
 
@@ -283,6 +296,8 @@ _LAUNCH_SCHEMAS = frozenset({
 } | SCOPED_LANE_SCHEMAS)
 _DIGEST_IMAGE = re.compile(
     r"[a-z0-9][a-z0-9._/-]*[a-z0-9]@sha256:[0-9a-f]{64}")
+_COMMIT = re.compile(r"[0-9a-f]{40}")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 #: Schema of the provenance payload this module produces. It was
 #: ``prismaquant.cb_route_attestation.v2`` until 2026-09-02, when the Gridbook
@@ -536,14 +551,79 @@ class ServingContext:
         return tuple(self.as_dict().values())
 
 
-def cell_matches_serving_context(cell: Any, context: ServingContext) -> bool:
-    """Match a parsed v5 cell's whole scope, shared by every admission path."""
+#: The default of every serving-code check: read the tracked pin's digest
+#: (:func:`tessera_serving_runtime_pin.pinned_serving_source_sha256`). It is a
+#: sentinel rather than ``None`` because ``None`` means "skip", and a caller
+#: that omits the keyword must be checked against the pin, not skipped.
+PINNED_SERVING_SOURCE = object()
+
+
+def resolve_serving_source_sha256(value: Any = PINNED_SERVING_SOURCE) -> str | None:
+    """The digest a code check compares against: the argument, or the tracked pin's.
+
+    ``None`` is the v2 answer (no code check); a string is a v3 pin's digest.
+    """
+    if value is PINNED_SERVING_SOURCE:
+        from .tessera_serving_runtime_pin import pinned_serving_source_sha256
+
+        return pinned_serving_source_sha256()
+    if value is not None and (not isinstance(value, str) or not _SHA256.fullmatch(value)):
+        raise LaneEligibilityError(
+            f"serving_source_sha256 must be None or 64 lowercase hex digits, got {value!r}")
+    return value
+
+
+def cell_serving_code_admits(
+    cell: Any, serving_source_sha256: Any = PINNED_SERVING_SOURCE,
+) -> tuple[bool, str]:
+    """Whether a cell's evidence was taken on the code the pin serves (#1561).
+
+    ``serving_source_sha256`` is the pinned serving code digest. ``None`` (a
+    v2 pin) skips the check. A string (a v3 pin) requires the cell's
+    ``runtime.serving_source_sha256`` to equal it; a cell that names no code
+    was measured on code nobody recorded, so it does not match either. The
+    refusal names the cell and both digests, so a unit left unattested by it
+    says which code the evidence was taken on and which code serves.
+    """
+    pinned = resolve_serving_source_sha256(serving_source_sha256)
+    if pinned is None:
+        return True, ""
+    stamped = getattr(cell, "runtime_serving_source_sha256")
+    cell_id = getattr(cell, "id", None) or getattr(cell, "cell_id", "")
+    if not stamped:
+        return False, (
+            f"cell {cell_id!r} names no serving code (runtime.serving_source_sha256 "
+            f"is absent), and the pinned serving code is {pinned}; a cell measured "
+            "on unrecorded code does not attest the pinned code")
+    if stamped != pinned:
+        return False, (
+            f"cell {cell_id!r} was measured on serving code {stamped} "
+            f"(tessera commit {getattr(cell, 'runtime_tessera_commit', '')}), "
+            f"and the pinned serving code is {pinned}; evidence taken on other "
+            "code does not attest the pinned code")
+    return True, ""
+
+
+def cell_matches_serving_context(
+    cell: Any,
+    context: ServingContext,
+    *,
+    serving_source_sha256: Any = PINNED_SERVING_SOURCE,
+) -> bool:
+    """Match a parsed v5 cell's whole scope, shared by every admission path.
+
+    Since #1561 the scope includes the serving code: see
+    :func:`cell_serving_code_admits`. The default reads the tracked pin, so a
+    v2 pin (no digest) matches exactly as before and a v3 pin cannot be
+    skipped by a caller that passes nothing.
+    """
     return (
         cell.platform == context.platform
         and cell.structure == context.structure
         and context.residency in cell.residency_modes
         and cell.runtime_image == context.runtime_image
         and context.execution_mode in cell.execution_modes
+        and cell_serving_code_admits(cell, serving_source_sha256)[0]
     )
 
 
@@ -1077,7 +1157,7 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
                         execution_modes: Sequence[str] = (),
                         cell_rungs: Sequence[int] | None = None,
                         schema: str = LANE_ELIGIBILITY_SCHEMA_TESSERA) -> CellEvidence:
-    """The ``evidence`` grammar, closed at every level, at the table's schema.
+    """The ``evidence`` grammar at the table's schema.
 
     Every structural rule the publisher's validator enforces is re-checked
     here rather than assumed, because the two that matter most are exactly the
@@ -1092,10 +1172,10 @@ def parse_cell_evidence(payload: Any, where: str, *, cell_regime: str,
 
     ``schema`` selects the member set: v6 is ``{grade, kl, smoke{status,
     receipt}}``; v7 adds ``smoke.attribution`` and ``smoke.control``; v8 adds
-    ``artifact``; v9 adds ``smoke.record``. A field from a later grammar on an
-    older table is refused as unknown, exactly as an unknown field on the
-    current one is -- a v6 table that carries an attribution is not a v6
-    table, and a v8 table that carries a record is not a v8 table.
+    ``artifact``; v9 adds ``smoke.record``. The schema decides what this
+    reader reads: a field from a later grammar on an older table is accepted
+    and never read, like any other additive field (#1548), so a v6 table that
+    carries an attribution still reads as a v6 table with no attribution.
     """
     if not isinstance(payload, Mapping):
         raise LaneEligibilityError(f"{where} must be a JSON object")
@@ -1405,7 +1485,7 @@ class LaneClaim:
 
 
 def parse_lane_claim(payload: Any, where: str, *, extension: str) -> LaneClaim:
-    """Read one ``lane`` block closed at Tessera's vocabulary, or refuse by name.
+    """Read one ``lane`` block at Tessera's vocabulary, or refuse by name.
 
     Mirrors the publisher's own validator (``tessera.serving.contract``,
     ``_validate_lane``): required ``decoder``, optional non-empty
@@ -1416,6 +1496,12 @@ def parse_lane_claim(payload: Any, where: str, *, extension: str) -> LaneClaim:
     reader cannot read is a refusal of the whole table -- a lane whose
     predicate is unreadable is a lane no gate can decide, and absent evidence
     is not a pass.
+
+    The block's own fields are read tolerantly (#1548): an added field beside
+    ``decoder`` and ``requires`` is accepted unless the producer marks it
+    ``must_understand``. The keys of ``requires`` are not fields. Each one is
+    a condition a unit's wire must satisfy, so an unknown requirement stays a
+    refusal: skipping it would admit a unit the loader refuses.
     """
     if not isinstance(payload, Mapping):
         raise LaneEligibilityError(
@@ -1536,10 +1622,14 @@ def parse_lane_claims(native_extensions: Any, where: str) -> tuple[LaneClaim, ..
 
 
 def lane_claim_for_cell(cell: Any, lanes: Sequence[LaneClaim]) -> LaneClaim | None:
-    """The lane whose predicate governs this cell, or ``None``.
+    """The first lane-bearing claim among this cell's launches, or ``None``.
 
-    A cell is lane-gated exactly when one of the decoders it EXECUTES is the
-    decoder a lane serves and that lane publishes a predicate. A decoder no
+    This answers only whether a cell is lane-gated at all. Since Tessera
+    contract v42 a cell can name several launches, some through a lane and
+    some beside it, so the first claim is not the decision: whether a rung is
+    admitted, and through which launches, is :func:`cell_rung_launches`
+    (PQ #1274). A cell is lane-gated exactly when one of the decoders it
+    EXECUTES is the decoder a lane serves and that lane publishes a predicate. A decoder no
     lane names (``torch_window``, ``torch_materialize_stock``) is the route's
     own path, gated by the cell's route status and evidence alone -- the
     contract publishes no wire predicate for it, and inventing one here would
@@ -1552,16 +1642,43 @@ def lane_claim_for_cell(cell: Any, lanes: Sequence[LaneClaim]) -> LaneClaim | No
     return None
 
 
-def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim]
-                     ) -> tuple[bool, str]:
-    """Whether the lane a cell launches through can read THIS producer's plan.
+def lane_claims_for_cell(cell: Any, lanes: Sequence[LaneClaim]
+                         ) -> tuple[LaneClaim, ...]:
+    """Every lane whose predicate governs one of this cell's launches.
 
-    ONE predicate for every admission leg (the menu's
-    ``tessera_render.tessera_attesting_cells``, the development contract's
-    ``TesseraContract.native_cells``, the export gate's
-    :func:`resolve_unit_route`), beside :func:`cell_evidence_admits` and for
-    the same reason: a rung the menu offers and the export refuses is the
-    split-brain principle 8 exists to stop.
+    :func:`lane_claim_for_cell` answers whether a cell is lane-gated at all;
+    this answers through WHICH lanes, because since Tessera contract v42 a
+    cell can launch through a lane and beside it (PQ #1274).
+    """
+    decoders = {decoder for _symbol, decoder in getattr(cell, "executes", ())}
+    return tuple(claim for claim in lanes
+                 if claim.requires is not None and claim.decoder in decoders)
+
+
+def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim]
+                       ) -> tuple[bool, str, tuple[tuple[str, str], ...]]:
+    """The launches a cell makes for THIS producer's plan at one rung.
+
+    Returns ``(admits, reason, launches)``.  A cell's ``executes`` is the
+    UNION of the launches its runtime makes over every rung it lists: Tessera
+    derives it that way (``contract._validate_cell_executes`` narrows
+    ``scheme.route_launches`` by the lanes each rung reaches), and a launch
+    through a lane happens only at a rung that lane's published predicate
+    admits.  So at one rung the cell launches through every lane-free decoder
+    it names and through each lane whose predicate this producer's planned
+    wire satisfies; a launch through a lane that refuses the plan is not made
+    there.  The cell admits the unit when at least one launch is left, and
+    ``launches`` is that set -- what the serve runs for these bytes, which a
+    route record stamps instead of the union.
+
+    Until contract v41 every lane-gated cell launched ONLY through its lane,
+    so a refusing lane left nothing and the cell refused; that case still
+    refuses, with the same reason.  Contract v42 is the first to name a lane
+    launch beside a lane-free one in one cell: the four window routed cells
+    carry the fused routed pair beside the compact adapter, whose dispatch
+    keeps the compact pair for every stack the fused lane refuses (the
+    mixed-rate q256=896 rung).  Refusing those cells whole shrank routed E4M3
+    admission to q256 1024 (PQ #1274).
 
     The rule is not here. Tessera publishes the predicate
     (``native_extensions[].lane.requires``) and owns the decision
@@ -1581,21 +1698,25 @@ def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim
     being skipped; a family this producer cannot plan, or a cell asked
     without a rung, is refused with the reason, never passed.
     """
-    claim = lane_claim_for_cell(cell, lanes)
-    if claim is None:
-        return True, ""
+    executes = tuple(getattr(cell, "executes", ()))
+    claims = lane_claims_for_cell(cell, lanes)
+    if not claims:
+        return True, "", executes
     cell_id = getattr(cell, "id", getattr(cell, "cell_id", "?"))
     family = str(getattr(cell, "family", ""))
-    launches = sorted(symbol for symbol, decoder in cell.executes
-                      if decoder == claim.decoder)
-    head = (
-        f"cell {cell_id!r} launches {launches} through the "
-        f"{claim.extension!r} lane (decoder {claim.decoder!r}), whose published "
-        "predicate this producer's planned wire")
+
+    def head(claim: LaneClaim) -> str:
+        launches = sorted(symbol for symbol, decoder in executes
+                          if decoder == claim.decoder)
+        return (
+            f"cell {cell_id!r} launches {launches} through the "
+            f"{claim.extension!r} lane (decoder {claim.decoder!r}), whose "
+            "published predicate this producer's planned wire")
+
     if rate_q256 is None:
         return False, (
-            f"{head} cannot be decided against: the unit's rung was not read, "
-            "and the lane reads a rate set that depends on it")
+            f"{head(claims[0])} cannot be decided against: the unit's rung was "
+            "not read, and the lane reads a rate set that depends on it"), ()
     from . import tessera_render
     from .tessera_formats import TesseraFormatError
 
@@ -1603,27 +1724,52 @@ def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim
         facts = tessera_render.planned_wire_facts(family, int(rate_q256))
     except TesseraFormatError as exc:
         return False, (
-            f"{head} cannot be decided against: this producer cannot plan "
-            f"family {family!r} at rung {rate_q256} ({exc}), and a plan that "
-            "does not exist is not a plan the lane reads")
+            f"{head(claims[0])} cannot be decided against: this producer "
+            f"cannot plan family {family!r} at rung {rate_q256} ({exc}), and a "
+            "plan that does not exist is not a plan the lane reads"), ()
     from tessera.serving.scheme import decide_lane_requirements
 
-    try:
-        refusals = decide_lane_requirements(claim.extension, dict(claim.requires), facts)
-    except ValueError as exc:
-        raise LaneEligibilityError(
-            f"{head} cannot be decided against: the lane publishes a "
-            f"requirement Tessera's own decision core does not decide -- {exc}"
-        ) from exc
-    if not refusals:
-        return True, ""
+    refused: list[str] = []
+    refused_decoders: set[str] = set()
+    for claim in claims:
+        try:
+            refusals = decide_lane_requirements(
+                claim.extension, dict(claim.requires), facts)
+        except ValueError as exc:
+            raise LaneEligibilityError(
+                f"{head(claim)} cannot be decided against: the lane publishes a "
+                f"requirement Tessera's own decision core does not decide -- {exc}"
+            ) from exc
+        if refusals:
+            refused_decoders.add(claim.decoder)
+            refused.append(f"{head(claim)} for {family} R{rate_q256} fails: "
+                           + "; ".join(refusals))
+    launches = tuple(pair for pair in executes if pair[1] not in refused_decoders)
+    if launches:
+        return True, "", launches
     return False, (
-        f"{head} for {family} R{rate_q256} fails: "
-        + "; ".join(refusals)
-        + ". The kernel would refuse these bytes at load, so the route is not "
-        "admitted; the predicate is Tessera's, read from the contract, and "
-        "the plan is this producer's -- change the plan or re-pin, never this gate."
-    )
+        ". ".join(refused)
+        + ". No launch the cell names is left at this rung, so the kernel "
+        "would refuse these bytes at load and the route is not admitted; the "
+        "predicate is Tessera's, read from the contract, and the plan is this "
+        "producer's -- change the plan or re-pin, never this gate."
+    ), ()
+
+
+def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim]
+                     ) -> tuple[bool, str]:
+    """Whether a lane a cell launches through leaves it a launch for this plan.
+
+    ONE predicate for every admission leg (the menu's
+    ``tessera_render.tessera_attesting_cells``, the development contract's
+    ``TesseraContract.native_cells``, the export gate's
+    :func:`resolve_unit_route`), beside :func:`cell_evidence_admits` and for
+    the same reason: a rung the menu offers and the export refuses is the
+    split-brain principle 8 exists to stop.  :func:`cell_rung_launches` holds
+    the rule and the reason; this is its verdict.
+    """
+    admits, why, _launches = cell_rung_launches(cell, rate_q256, lanes)
+    return admits, why
 
 
 @dataclass(frozen=True)
@@ -1681,6 +1827,12 @@ class EligibilityCell:
     #: v6's required ``evidence`` block. ``None`` for pre-v6 grammars, which
     #: published no such field; see :func:`cell_evidence_admits`.
     evidence: CellEvidence | None = None
+    #: The Tessera code the cell's evidence was taken on (Tessera contract
+    #: v41, optional, both or neither): the 40-hex commit for a person, and
+    #: the ``tessera.package_source.v1`` digest a v3 pin compares
+    #: (:func:`cell_serving_code_admits`). Empty when the cell names no code.
+    runtime_tessera_commit: str = ""
+    runtime_serving_source_sha256: str = ""
 
     @classmethod
     def from_dict(
@@ -1776,10 +1928,13 @@ class EligibilityCell:
         execution_modes: tuple[str, ...] = ()
         runtime_vllm = ""
         runtime_torch = ""
+        runtime_commit = runtime_digest = ""
         if is_scoped:
             runtime_image, execution_modes, runtime_vllm, runtime_torch = (
                 parse_runtime_scope(payload["runtime"], where + ".runtime",
                                     require_versions=has_evidence))
+            runtime_commit, runtime_digest = parse_runtime_code(
+                payload["runtime"], where + ".runtime")
         evidence: CellEvidence | None = None
         if has_evidence:
             evidence = parse_cell_evidence(
@@ -1821,6 +1976,8 @@ class EligibilityCell:
             runtime_vllm=runtime_vllm,
             runtime_torch=runtime_torch,
             evidence=evidence,
+            runtime_tessera_commit=runtime_commit,
+            runtime_serving_source_sha256=runtime_digest,
         )
 
     def covers_rung(self, facts: UnitStructuralFacts) -> bool:
@@ -1870,6 +2027,12 @@ class EligibilityCell:
             payload["runtime"] = {
                 "image": self.runtime_image, "execution_modes": list(self.execution_modes),
             }
+            if self.runtime_serving_source_sha256:
+                # Emitted only when the cell names its code, so a cell that
+                # names none serializes exactly as it did before v41.
+                payload["runtime"]["tessera_commit"] = self.runtime_tessera_commit
+                payload["runtime"]["serving_source_sha256"] = (
+                    self.runtime_serving_source_sha256)
         return payload
 
 
@@ -2255,6 +2418,7 @@ def resolve_unit_route(
     residency: str | None = None,
     runtime_image: str | None = None,
     execution_mode: str | None = None,
+    serving_source_sha256: Any = PINNED_SERVING_SOURCE,
 ) -> UnitRoute:
     """Resolve one unit's route status against the pinned eligibility table.
 
@@ -2273,6 +2437,12 @@ def resolve_unit_route(
     V5 also requires ``runtime_image`` and ``execution_mode``. Every regime
     must resolve on that same complete target; cells from different runtime
     scopes cannot jointly attest one artifact.
+
+    ``serving_source_sha256`` is the pinned serving code digest (#1561); the
+    default reads the tracked pin. A scoped cell that names this unit but was
+    measured on other code, or on none, is kept as a refusal beside its
+    regime, naming the cell and both digests, exactly as a cell refused by
+    its own evidence is. ``None`` (a v2 pin) skips the check.
     """
     if not table.present:
         return UnitRoute(
@@ -2353,10 +2523,14 @@ def resolve_unit_route(
         and cell.family == facts.payload_family
         and cell.structure == facts.structure
         and (not is_v4 or residency in cell.residency_modes)
-        and (not is_scoped or cell_matches_serving_context(cell, serving_context))
+        and (not is_scoped or cell_matches_serving_context(
+            cell, serving_context, serving_source_sha256=None))
         and cell.covers_rung(facts)
         and cell.matches(facts)
     ]
+    # Every table, scoped or not: a legacy grammar has no runtime block, so
+    # its cells name no code and a v3 pin admits none of them.
+    pinned_code = resolve_serving_source_sha256(serving_source_sha256)
     # A cell whose own published evidence refuses it is NOT dropped silently
     # into "no cell names this unit": the two are different facts and the
     # shipcard has to be able to tell them apart. Keep the refusal beside its
@@ -2366,12 +2540,23 @@ def resolve_unit_route(
     # same slot.
     candidates: list[EligibilityCell] = []
     refusals: dict[str, tuple[str, str]] = {}
+    #: The launches each admitted cell makes at THIS rung (PQ #1274): a cell
+    #: that launches through a lane and beside it runs the lane only where
+    #: its predicate admits the plan, so the route records what runs here,
+    #: not the cell's union over its rungs.
+    rung_launches: dict[str, tuple[tuple[str, str], ...]] = {}
     for cell in matched:
-        admits, why = cell_evidence_admits(cell)
+        # The code scope first: evidence taken on other code says nothing
+        # about the pinned code, whatever the evidence itself says.
+        admits, why = cell_serving_code_admits(cell, pinned_code)
         if admits:
-            admits, why = cell_lane_admits(cell, facts.rate_q256, table.lanes)
+            admits, why = cell_evidence_admits(cell)
+        if admits:
+            admits, why, launches = cell_rung_launches(
+                cell, facts.rate_q256, table.lanes)
         if admits:
             candidates.append(cell)
+            rung_launches[cell.id] = launches
         elif cell.regime not in refusals:
             refusals[cell.regime] = (cell.id, why)
 
@@ -2424,7 +2609,7 @@ def resolve_unit_route(
                 (best.requires_plugin,) if best.requires_plugin else ()),
             qualification=best.qualification,
             activation_contract=best.activation_contract,
-            executes=best.executes,
+            executes=rung_launches.get(best.id, best.executes),
             residency=str(residency) if is_v4 else "",
             runtime_image=str(runtime_image) if is_scoped else "",
             execution_mode=str(execution_mode) if is_scoped else "",
@@ -3010,6 +3195,40 @@ def parse_runtime_scope(payload: Any, where: str, *, require_versions: bool = Fa
     return image, tuple(modes), str(vllm), str(torch_version)
 
 
+#: The code half of a cell's ``runtime`` block (Tessera contract v41), spelled
+#: as Tessera's ``contract.RUNTIME_CODE_KEYS``: optional, both or neither.
+RUNTIME_CODE_KEYS = ("tessera_commit", "serving_source_sha256")
+
+
+def parse_runtime_code(payload: Any, where: str) -> tuple[str, str]:
+    """``(tessera_commit, serving_source_sha256)`` a cell names, or ``("", "")``.
+
+    Both or neither, exactly as the publisher's ``cell_runtime_code`` reads
+    them: a commit with no digest gives a program nothing to compare, and a
+    digest with no commit gives a person no tree to find. The shapes are
+    checked because a malformed digest can never equal a pinned one, and a
+    table that carries one is not the table the publisher's validator admits.
+    """
+    if not isinstance(payload, Mapping):
+        raise LaneEligibilityError(f"{where} must be a JSON object")
+    present = [key for key in RUNTIME_CODE_KEYS if key in payload]
+    if not present:
+        return "", ""
+    if len(present) != len(RUNTIME_CODE_KEYS):
+        missing = [key for key in RUNTIME_CODE_KEYS if key not in present]
+        raise LaneEligibilityError(
+            f"{where} names {present} without {missing}; a cell names the "
+            "Tessera code it was measured on with both fields or neither")
+    commit, digest = payload["tessera_commit"], payload["serving_source_sha256"]
+    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
+        raise LaneEligibilityError(
+            f"{where}.tessera_commit must be a 40-hex lowercase commit, got {commit!r}")
+    if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+        raise LaneEligibilityError(
+            f"{where}.serving_source_sha256 must be 64 lowercase hex digits, got {digest!r}")
+    return commit, digest
+
+
 def parse_v5_runtime(payload: Any, where: str) -> tuple[str, tuple[str, ...]]:
     """The v5 spelling, kept for callers that want only the two v5 fields."""
     image, modes, _, _ = parse_runtime_scope(payload, where)
@@ -3146,13 +3365,14 @@ def _predicate_holds(actual: Any, op: str, value: Any) -> bool:
 # ---------------------------------------------------------------------------
 def _require_keys(payload: Mapping[str, Any], where: str, *,
                   required: set[str], optional: set[str]) -> None:
-    actual = set(payload)
-    missing = sorted(required - actual)
-    extra = sorted(actual - required - optional)
-    if missing:
-        raise LaneEligibilityError(f"{where}: missing field(s) {missing}")
-    if extra:
-        raise LaneEligibilityError(f"{where}: unknown field(s) {extra}")
+    """Admit one published object through the shared tolerant rule (#1548).
+
+    Every field this reader consumes must be present; a field it does not know
+    is accepted and never read, unless the producer lists it in the object's
+    ``must_understand`` array. See :mod:`prismaquant.record_fields`.
+    """
+    record_fields.admit_fields(payload, where, required=required, optional=optional,
+                               error=LaneEligibilityError)
 
 
 _sha256 = file_sha256hex
@@ -3204,13 +3424,18 @@ __all__ = [
     "SmokeRecordRow",
     "cell_evidence_admits",
     "cell_lane_admits",
+    "cell_rung_launches",
+    "cell_serving_code_admits",
     "lane_claim_for_cell",
+    "lane_claims_for_cell",
     "parse_lane_claim",
     "parse_lane_claims",
     "derive_evidence_grade",
     "derive_smoke_attribution",
     "parse_cell_evidence",
+    "parse_runtime_code",
     "parse_runtime_scope",
+    "resolve_serving_source_sha256",
     "parse_v4_cell_contract",
     "ROUTE_ATTESTATION_SCHEMA",
     "ROUTE_STATUS_BACKED",

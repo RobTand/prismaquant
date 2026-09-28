@@ -258,6 +258,14 @@ def loads(data):
 
 
 def atomic_write(path, data):
+    # Deliberate standalone twin of
+    # prismaquant.cost_stage_checkpoint.atomic_write_bytes (#1573): this
+    # tool keeps its row rewrites stdlib-only -- importing the package pulls
+    # in torch, and the only package touch is consumer_merge's lazy import
+    # below -- so the recipe stays local. Same bytes, same mode, same
+    # write/flush/fsync/replace/dir-fsync sequence as the owner; the owner's
+    # staging suffix is fork-safe (.tmp{host}{pid}) where this stages a bare
+    # .tmp, and the staging name is never published.
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name+'.tmp')

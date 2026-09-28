@@ -28,6 +28,10 @@ Byte profiles, all lowercase-hex SHA-256:
   ``memoryview``).
 - ``text_sha256hex``: the text encoded as strict UTF-8, so a lone surrogate
   raises ``UnicodeEncodeError``.
+- ``newline_utf8_bytes`` / ``newline_utf8_sha256``: strings in caller order,
+  joined with LF, strict UTF-8, with no added final LF. Embedded newlines are
+  not escaped. ``sorted_newline_utf8_sha256`` sorts the input first. Neither
+  profile validates names or removes duplicates.
 - ``file_sha256hex``: a file's bytes, read in ``block_size`` pieces
   (``FILE_BLOCK_BYTES`` unless the site keeps its own). The block size changes
   only how the file is read, never the digest. The path may be a ``str`` or a
@@ -35,10 +39,11 @@ Byte profiles, all lowercase-hex SHA-256:
 
 Pickle profile:
 
-- ``canonical_pickle_bytes``: ``pickle.dumps`` at the default protocol of a
-  rebuilt copy. In the copy, every plain ``dict``, ``list`` and ``tuple`` is a
-  fresh object, and every equal ``str`` or ``bytes`` is one shared object. A
-  pickle writes a shared object once and refers back to it, so its bytes
+- ``canonical_pickle_bytes``: ``pickle.dumps`` at explicit protocol 4 of a
+  rebuilt copy, preserving the historical Python 3.12 encoding (PQ #1450).
+  In the copy, every plain ``dict``, ``list`` and ``tuple`` is a fresh object,
+  and every equal ``str`` or ``bytes`` is one shared object. A pickle writes
+  a shared object once and refers back to it, so its bytes
   depend on which objects the caller happened to share. This profile makes
   that a function of the value: the same plain-typed value, in the same key
   order, gives the same bytes whichever path built it (PQ #1403). Other types
@@ -54,12 +59,24 @@ so a light tool can import it without pulling in torch.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 import hashlib
 import json
 import math
 import os
+import re
+from typing import BinaryIO
+
+
+# A regex checks the underlying text, not a str subclass's Python length or
+# iteration hooks. Callers retain their own coercion, exact-type and errors.
+SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def is_sha256hex(value: object) -> bool:
+    """Whether value is str (including subclasses) containing 64 lowercase hex digits."""
+    return isinstance(value, str) and SHA256_HEX.fullmatch(value) is not None
 
 
 def canonical_json(value: object, *, where: str) -> object:
@@ -163,6 +180,19 @@ def _require_normalized_json(value: object, *, where: str) -> None:
             "JSON encoding")
 
 
+def _stream_sha256(encoder: json.JSONEncoder, value: object) -> str:
+    """Stream ``encoder.iterencode`` chunks, as UTF-8, into one SHA-256.
+
+    The one streaming recipe for every digest owner: chunks arrive as
+    ``str`` in the encoder's own spelling and are UTF-8-encoded exactly as a
+    caller feeding ``iterencode`` into a hasher does.
+    """
+    digest = hashlib.sha256()
+    for chunk in encoder.iterencode(value):
+        digest.update(chunk.encode("utf-8"))
+    return digest.hexdigest()
+
+
 def canonical_json_sha256_normalized(value: object, *, where: str) -> str:
     """``canonical_json_sha256``, for input that is already normalized JSON.
 
@@ -182,10 +212,7 @@ def canonical_json_sha256_normalized(value: object, *, where: str) -> str:
     use ``canonical_json_sha256``; a tuple key is refused by ``json`` in both.
     """
     _require_normalized_json(value, where=where)
-    digest = hashlib.sha256()
-    for chunk in _CANONICAL_ENCODER.iterencode(value):
-        digest.update(chunk.encode("utf-8"))
-    return digest.hexdigest()
+    return _stream_sha256(_CANONICAL_ENCODER, value)
 
 
 @dataclass(frozen=True)
@@ -197,9 +224,9 @@ class JsonProfile:
     allow_nan: bool
     default: Callable[[object], object] | None = None
 
-    def text(self, value: object) -> str:
-        return json.dumps(
-            value,
+    def _encoder(self) -> json.JSONEncoder:
+        """The stdlib encoder with exactly this profile's options."""
+        return json.JSONEncoder(
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=self.ensure_ascii,
@@ -207,11 +234,23 @@ class JsonProfile:
             default=self.default,
         )
 
+    def text(self, value: object) -> str:
+        return self._encoder().encode(value)
+
     def encoded(self, value: object) -> bytes:
         return self.text(value).encode("utf-8")
 
     def sha256(self, value: object) -> str:
         return hashlib.sha256(self.encoded(value)).hexdigest()
+
+    def sha256_streamed(self, value: object) -> str:
+        """Hash this profile's encoding without materializing the full text.
+
+        Byte-identical to ``sha256`` for values this profile accepts: the
+        encoder options are the profile's own, streamed chunk by chunk in
+        UTF-8 exactly as a caller feeding ``iterencode`` into a hasher does.
+        """
+        return _stream_sha256(self._encoder(), value)
 
 
 DIRECT_UTF8_STRICT = JsonProfile("direct-utf8-strict", ensure_ascii=False, allow_nan=False)
@@ -244,11 +283,19 @@ def canonical_pickle_bytes(value: object) -> bytes:
                 open_containers.discard(id(item))
         return item
 
-    return pickle.dumps(rebuild(value))
+    return pickle.dumps(rebuild(value), protocol=4)
 
 
 #: The read size ``file_sha256hex`` uses when a site does not keep its own.
 FILE_BLOCK_BYTES = 8 << 20
+
+#: The guarded source hash's read block (``tessera_calibration_cache.sha256``).
+#: With ``release_read_pages`` it is also the page window: each block's pages
+#: are advised away right after the digest consumes it, so one hash holds at
+#: most this block and its pages. Admission charges exactly that
+#: (``autoscale.selected_anchor_resources``, RobTand/prismaquant#1491), so the
+#: two read the same number from here.
+SOURCE_HASH_BLOCK_BYTES = 16 * 1024**2
 
 
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
@@ -259,9 +306,54 @@ def text_sha256hex(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def newline_utf8_bytes(lines: Iterable[str]) -> bytes:
+    """Caller order, LF separators, strict UTF-8, no added trailing LF."""
+    return "\n".join(lines).encode("utf-8")
+
+
+def newline_utf8_sha256(lines: Iterable[str]) -> str:
+    return bytes_sha256hex(newline_utf8_bytes(lines))
+
+
+def sorted_newline_utf8_sha256(names: Iterable[str]) -> str:
+    """The sorted-name roster recipe; validation stays with the caller."""
+    return newline_utf8_sha256(sorted(names))
+
+
 def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTES) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
         while block := handle.read(block_size):
             digest.update(block)
     return digest.hexdigest()
+
+
+def file_digest_sha256hex(handle: BinaryIO) -> str:
+    """Digest an already-open, stat-fenced file handle in one stream.
+
+    ``file_sha256hex`` opens the path itself; a site that fenced its read with
+    ``os.open`` + stat comparisons around the hash already holds the pinned
+    descriptor and must not reopen the path. This is the one spelling for that
+    shape: the stdlib streaming ``file_digest`` over the caller's handle,
+    reading it from its current position to EOF.
+    """
+    return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def indent2_json_file_bytes(value: object) -> bytes:
+    """The pretty capture-file JSON spelling plus one trailing LF.
+
+    Sorted keys, two-space indent, strict about non-finite numbers, default
+    separators, UTF-8, and exactly one LF after the text.
+    """
+    return (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode(
+        "utf-8")
+
+
+def hex_chain_sha256hex(left: str, right: str) -> str:
+    """The ordered hex-identity chain: concatenate two hex strings, hash once.
+
+    ``merge_load_execution``/``fold_load_receipt`` fold receipts in load order;
+    the concatenated ASCII hex string hashed as UTF-8 is the whole recipe.
+    """
+    return text_sha256hex(left + right)

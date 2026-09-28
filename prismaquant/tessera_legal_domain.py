@@ -241,6 +241,21 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "96fefc6af9bbb5057610d289df38277535994ea0626fca1b09b4bcef4ca050b9",
     },
+    "reader-pin-f94929de": {
+        "commit": "f94929defd9fa00b8726160a2cd436f02733b6dc",
+        "export.py":
+            "4e2e84876350a13acd27ae861a767b645f4e9a4bbb50bb26a3c2a65b69f459fd",
+    },
+    "reader-pin-38e96012": {
+        "commit": "38e960127478b651e42c14d52acf2274b54bca38",
+        "export.py":
+            "e54f3f1b56d54fe2b6701ccadf3e74770e41385cff884a63118bf16f8590fedc",
+    },
+    "reader-pin-a5f3b232": {
+        "commit": "a5f3b232cb3c424b537a06713c728c86153d55fb",
+        "export.py":
+            "427a8f973b5d41e65473eeb687bfe4b627021bc95a321fda4059b2c75b8a37c3",
+    },
     "unpinned-working-checkout-a9eb572e": {
         "commit": "a9eb572e1b90b17f716562192910681e65430fba",
         "export.py":
@@ -282,7 +297,8 @@ TESSERA_GRAMMAR_DIGESTS = frozenset({
 #: says so from the bytes rather than repeating the audit's prose.
 TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
-    "reader-pin-09d6559d",
+    "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-38e96012",
+    "reader-pin-a5f3b232",
 )
 
 
@@ -487,18 +503,69 @@ def live_pins() -> DomainPins:
 #: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves:
 #: ``test_legal_rate_count_is_the_audited_count`` re-derived the frozen
 #: counts through the installed 09d bytes (PrismaBuild ``f12448eff0e5``).
+#: **Re-taken 2026-09-27 for ``4c4ff1c2e`` (contract v39).** Admission
+#: scopes move, not wire grammar. ``export.py`` remains ``96fefc6a…`` and
+#: ``grammar.py`` remains ``9ae1f824…``: reuse the uniquely identified
+#: ``reader-pin-09d6559d`` byte-state, not a duplicate digest entry. Legal
+#: rate counts are unchanged; the reviewed admission answer is separate.
+#: **Re-taken 2026-09-27 for ``f94929def`` (contract v39, unchanged), a
+#: re-transcription with one additive source state.**  Tessera #663
+#: (tessera#662) moved ``served_recipe(grid, q256, structure)`` into
+#: ``export.py`` from the serving experiment and imported the structure names
+#: from the new ``tessera.structure``, so ``export.py`` is now
+#: ``4e2e8487…``.  ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap
+#: expression and the ``*_WINDOW_BITS`` constants are byte-identical, and
+#: ``grammar.py`` is still ``9ae1f824…``, so ``reader-pin-f94929de`` joins
+#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves.  The served
+#: recipe differs from ``wire_recipe`` only for a routed E2M1x2 stack below
+#: the cap, which no ``PRIMARY_FAMILIES`` rung reaches.
+#: **Re-taken 2026-09-27 for ``a3e83875d`` (contract v39, unchanged), a
+#: re-transcription.**  Tessera #671 (tessera#670) adds the v3 catalog
+#: extension to the rooted cached-unit reader only.  ``export.py`` remains
+#: ``4e2e8487…`` and ``grammar.py`` remains ``9ae1f824…``: reuse the
+#: uniquely identified ``reader-pin-f94929de`` byte-state, not a duplicate
+#: digest entry.  No count moves (PQ #1524).
+#: **Re-taken 2026-09-27 for ``20bf5346`` (contract v39, unchanged), a
+#: re-transcription.**  Tessera #669 (tessera#668) changes ``encode.py`` and
+#: docs only.  ``export.py`` remains ``4e2e8487…`` and ``grammar.py`` remains
+#: ``9ae1f824…``: the ``reader-pin-f94929de`` byte-state still applies, and no
+#: count moves (PQ #1527).
+#: **Re-taken 2026-09-27 for ``db5b6e23`` (contract v40, additive), a
+#: re-transcription with one additive source state.**  ``db5b6e23`` is the
+#: merge of Tessera #675, whose tree equals the PR head ``43da1c39``.  #675
+#: (tessera#599 step 2) moves PrismaQuant's record checks out of the rooted
+#: cached-unit and Hessian reference readers; ``ActivationSource.from_capture``
+#: gains a ``canonical_capture`` keyword it passes to those readers, and its
+#: docstring says so, so ``export.py`` is now ``e54f3f1b…``.
+#: ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap expression and the
+#: ``*_WINDOW_BITS`` constants are byte-identical, and ``grammar.py`` is still
+#: ``9ae1f824…``, so ``reader-pin-db5b6e23`` joins
+#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves (PQ #1537).
+#: **Re-taken 2026-09-28 for ``38e96012`` (contract v42), a rename of that
+#: byte-state.**  Tessera #678 (v41, optional serving-code fields on a cell),
+#: #685 (v42, the fused routed window MoE lane) and #684/#686 (suite source
+#: verifier, docs) leave ``export.py`` at ``e54f3f1b…`` and ``grammar.py`` at
+#: ``9ae1f824…``, so ``reader-pin-db5b6e23`` is renamed
+#: ``reader-pin-38e96012`` and no count moves (PQ #1274).
+#: **Re-taken 2026-09-28 for ``a5f3b232cb`` (contract v44), a new entry.**
+#: Tessera #693 (v43, the fused dense second launch) and #691 (v44, the
+#: supported exporter move) move ``export.py`` by one docstring line only
+#: (``e54f3f1b…`` -> ``427a8f97…``); ``_window_bits_for``, ``wire_recipe``,
+#: the WINDOW constants and ``grammar.py`` (``9ae1f824…``) are byte-identical,
+#: so ``reader-pin-a5f3b232`` joins the equivalent states and no count moves
+#: (PQ #1616).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+    reader_dev_pin_commit="a5f3b232cb3c424b537a06713c728c86153d55fb",
     reader_dev_pin_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
     ),
-    serving_runtime_pinned_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+    serving_runtime_pinned_commit="a5f3b232cb3c424b537a06713c728c86153d55fb",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
     ),
     producer_installed_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
     ),
 )
 

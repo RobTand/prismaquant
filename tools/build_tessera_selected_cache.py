@@ -20,9 +20,10 @@ from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.footprint import whole_artifact_budget_from_assignment_payload
 from prismaquant.layer_config import (
     canonicalize_assignment, layer_config_metadata, validate_layer_config_payload)
-from prismaquant.tessera_export_lane import selected_cached_units_manifest
+from prismaquant.tessera_export_lane import (read_cached_unit_bundle,
+                                             selected_cached_units_manifest)
 from prismaquant.tessera_joint_aura import load_measured_anchor_input
-from tessera.cached_unit import CACHE_SCHEMA, CachedUnitBundle
+from tessera.cached_unit import CACHE_SCHEMA
 
 
 def _bound(path: str, digest: str, label: str) -> bytes:
@@ -139,7 +140,8 @@ def main(argv=None) -> int:
     out = Path(args.out)
     if out.is_symlink() or (extension is None and out.resolve().parent != directory):
         raise ValueError("selected manifest must be a new file in the original wire directory")
-    CachedUnitBundle(manifest, directory, set(manifest["units"]), manifest["source"])
+    bundle = read_cached_unit_bundle(
+        manifest, directory, set(manifest["units"]), manifest["source"])
     raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
     paths_raw = None
     if args.read_paths_out:
@@ -161,6 +163,8 @@ def main(argv=None) -> int:
                       "catalog_extension": extension,
                       "producer_packages_sha256": args.producer_packages_sha256,
                       "units": len(manifest["units"]),
+                      "encoder_source_proof_mode": bundle.encoder_source_proof_mode,
+                      "warnings": bundle.warnings,
                       "export_qualified": False, "serving_qualified": False}, sort_keys=True))
     return 0
 

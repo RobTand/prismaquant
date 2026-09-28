@@ -18,6 +18,7 @@ import re
 import stat
 
 from .dev_mode import seal_check
+from .file_identity import file_stat_signature
 
 SCHEMA = 'prismaquant.joint_forward_recovery.v1'
 
@@ -44,10 +45,6 @@ def capsule_byte_limit(document):
     return (_HEADER_READS + _GROUP_READS * len(groups)) * PROOF_READ_MAX_BYTES
 
 
-def _stat_fence(value):
-    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-
-
 def _read(path, expected=None):
     """Read one proof document; a pinned read verifies its digest first.
 
@@ -66,12 +63,12 @@ def _read(path, expected=None):
         with path.open('rb') as handle:
             for chunk in iter(lambda: handle.read(1 << 20), b''):
                 digest.update(chunk)
-        if _stat_fence(path.lstat()) != _stat_fence(before):
+        if file_stat_signature(path.lstat()) != file_stat_signature(before):
             raise ForwardRecoveryRefused('recovery proof changed during read')
         if digest.hexdigest() != expected:
             raise ForwardRecoveryRefused('recovery proof SHA256 mismatch')
     raw = path.read_bytes()
-    if _stat_fence(path.lstat()) != _stat_fence(before):
+    if file_stat_signature(path.lstat()) != file_stat_signature(before):
         raise ForwardRecoveryRefused('recovery proof changed during read')
     digest = hashlib.sha256(raw).hexdigest()
     if expected is not None and digest != expected:
@@ -89,12 +86,12 @@ def _read(path, expected=None):
 def _sdk():
     from .staged_lease import sdk_submodule
     return {name: sdk_submodule(name) for name in
-            ('pool', 'reader_lease', 'produced_output', 'produced_spool', 'core')}
+            ('pool', 'reader_lease', 'produced_output', 'produced_spool', 'core', 'client')}
 
 
 def require_contained(queue, instance, sdk):
     owner = instance['owner_action_key']
-    if sdk['pool']._read_json(queue.item_path(sdk['pool'].CLAIMED, owner)) is not None:
+    if sdk['client'].read_claimed_record(queue, owner) is not None:
         raise ForwardRecoveryRefused('original forward owner is still claimed')
     ok, reason = sdk['reader_lease'].containment_certificate_ok(queue, {
         'action_key': owner, **instance['owner_attempt']})
@@ -102,7 +99,7 @@ def require_contained(queue, instance, sdk):
         raise ForwardRecoveryRefused('original forward owner is not contained: ' + reason)
 
 
-def _checked_group(group, *, queue, instance, template, commitments, sdk):
+def _checked_group(group, *, queue, instance, template, sdk):
     manifest, receipt, record = (group[k] for k in ('manifest', 'receipt', 'record'))
     if set(record) != {'export_key', 'manifest_sha256', 'batch_id', 'action'}:
         raise ForwardRecoveryRefused('export record has an invalid shape')
@@ -122,10 +119,10 @@ def _checked_group(group, *, queue, instance, template, commitments, sdk):
                 'owner': instance['owner_action_key'], 'batch_id': batch,
                 'manifest_sha256': record['manifest_sha256']}):
         raise ForwardRecoveryRefused('export action does not seal this group')
-    sdk['produced_spool']._check_receipt(receipt, manifest, record)
+    sdk['produced_spool'].check_export_receipt(receipt, manifest, record)
     try:
-        _filed, descriptors = sdk['produced_output']._load_batch_record(
-            queue.root, instance, template, commitments['batches'][batch], batch)
+        descriptors = sdk['produced_output'].batch_record(
+            queue, instance, template, batch_id=batch)['entries']
     except (KeyError, ValueError) as exc:
         raise ForwardRecoveryRefused('group has no complete immutable PB descriptor') from exc
     by_path = {item['path']: item for item in descriptors
@@ -342,13 +339,12 @@ def _verified_chain_records(document, sdk):
         directory = sdk['produced_output'].instance_dir(queue.root, instance)
         if _read(directory / 'instance.json')[0] != instance:
             raise ForwardRecoveryRefused('original PB instance changed')
-        commitments = _read(directory / 'commitments.json')[0]
         if 'imported' in segment:
             _require_imported_by_owner(segment, sdk)
         entries = []
         for group in segment['groups']:
             entries.extend(_checked_group(group, queue=queue, instance=instance,
-                template=template, commitments=commitments, sdk=sdk))
+                template=template, sdk=sdk))
         parts.append(_records(segment, entries))
     return _merge(document, parts)
 

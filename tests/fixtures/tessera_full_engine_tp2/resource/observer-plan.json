@@ -1,0 +1,43 @@
+{
+  "canonical_source": {
+    "files": {
+      "config.json": "1111111111111111111111111111111111111111111111111111111111111111",
+      "tessera_serving_manifest.json": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "ignore": [],
+    "manifest_totals": {
+      "units": 1
+    },
+    "schema": "tessera.artifact_observer_source.v1"
+  },
+  "fixture_provenance": "synthetic_cpu_protocol_fixture",
+  "identity": {
+    "assignment_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "canonical_units_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "configuration_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_sha256": "20923a282d7c88e7e6d767c7f2126a198ae05e113ed880a18ff0075f9ec9e35d",
+    "runtime_manifest_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "workload_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "rank_runtime_evidence": {
+    "0": {
+      "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/resource/runtime-rank0.json",
+      "sha256": "c8b998ca5ff5711df45438641038073853ec17e49b4b75e48bc2b53857c4b77d"
+    },
+    "1": {
+      "path": "/home/rob/tmp/prismabuild-checkouts/a5b56cd19c70.mhng4si_/checkout/fixture-producer/tp2-protocol/resource/runtime-rank1.json",
+      "sha256": "c8b998ca5ff5711df45438641038073853ec17e49b4b75e48bc2b53857c4b77d"
+    }
+  },
+  "schema": "tessera.stock_engine_resource_observer_plan.v1",
+  "selected_configuration": {
+    "engine_args": {
+      "speculative_config": null,
+      "tensor_parallel_size": 2
+    },
+    "environment": {
+      "TESSERA_SERVE_MODE": "resident"
+    }
+  },
+  "world_size": 2
+}

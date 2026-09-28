@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ import pytest
 
 from prismaquant import tessera_expert_projection as tep
 from prismaquant.tessera_export_lane import TesseraExportLaneError, selected_cached_units_manifest
+from prismaquant.tessera_reuse_authority import PRODUCER_AUTHORITY
 from test_tessera_expert_projection import (
     STACK, _declared, _projection, _record,
 )
@@ -160,16 +162,17 @@ def test_missing_or_changed_selected_evidence_refuses(tmp_path, change, match):
                                        schema="tessera.cached_units.v1")
 
 
-@pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale',
-                                    'v2_extension', 'no_proof', 'no_proof_dev'])
-def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, change):
+def _rooted_case(tmp_path, monkeypatch, change=None):
+    """The rooted (v2) selected-cache case: two seals, an adopted overlay and a served policy.
+
+    ``change`` applies one of the bridge test's refusal edits. Returns every
+    name the case builds; ``build()`` runs the manifest builder on it.
+    """
     # Capture-reuse and full512 policy derivation have independent artifact-level
     # tests. This bridge supplies their accepted boundary, then runs the real
     # per-cell migration proof checker, builder and Tessera mixed-root reader.
-    import hashlib
     from prismaquant import joint_catalog_extension as bridge, joint_served_activation as served
     from test_joint_catalog_extension import _encoder_proof, _write
-    from tessera.cached_unit import CachedUnitBundle
     source, names, records, handoff, metadata, data = fixture(tmp_path)
     proof = _encoder_proof(tmp_path)
     added = tmp_path / 'added'; added.mkdir()
@@ -185,6 +188,10 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
         candidate['identity'].update(encoder_source_sha256='8'*64, recipe=bridge.added_format_recipe(bridge.R13_ADDED_FORMAT))
         blob = (tmp_path / record['file']).read_bytes()
         path = added / record['file']; path.write_bytes(blob)
+        if change == 'accepted_wrong_size':
+            # Sealed into the catalog as written, so its stat fence holds and
+            # only the receipt's blob_bytes disagrees with the file.
+            path.write_bytes(blob + b'\x00')
         render = added / (record['file'] + '.pt'); render.write_bytes(b'render')
         adoption = {'schema': bridge.ADOPTION_SCHEMA, 'reference_pair': [name, FMT],
                     'reference_encoding_identity': reference, 'candidate_encoding_identity': candidate['identity'],
@@ -266,6 +273,21 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     def build():
         return selected_cached_units_manifest(assignment, metadata, handoff, data,
             schema='tessera.cached_units.v2', catalog_extension=extension, producer_packages=packages)
+    return SimpleNamespace(**locals())
+
+
+@pytest.mark.parametrize('change', [None, 'missing_extension', 'missing_proof', 'changed_wire', 'wrong_scale',
+                                    'v2_extension', 'no_proof', 'no_proof_dev'])
+def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, monkeypatch, capsys, change):
+    import hashlib
+    from operator import attrgetter
+    from prismaquant import joint_catalog_extension as bridge
+    from tessera.cached_unit import CachedUnitBundle
+    names_ = ('build packages names source groups seen header old_plan plan old_prepared new_prepared '
+              'old_pwc new_pwc resource capture rows records proof policy_bound policy').split()
+    (build, packages, names, source, groups, seen, header, old_plan, plan, old_prepared, new_prepared,
+     old_pwc, new_pwc, resource, capture, rows, records, proof, policy_bound, policy) = attrgetter(*names_)(
+        _rooted_case(tmp_path, monkeypatch, change))
     if change == 'no_proof':
         with pytest.raises(ValueError, match='no encoder source proof'): build()
         return
@@ -273,15 +295,26 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
         with pytest.raises((ValueError, RuntimeError)): build()
         return
     manifest = build()
+    for package in packages.values():
+        directory = Path(package['path']); directory.mkdir()
+        (directory/'__init__.py').write_text('# source fixture')
     if change == 'no_proof_dev':
         assert manifest['reuse_authority']['encoder_source_proofs'] == []
         assert all(adoption['encoder_source_proof'] is None for adoption in manifest['encoder_adoptions'].values())
         assert manifest['producer_packages'] == packages
+        # The #1441 producer's actual proof-less manifest crosses the #644
+        # reader boundary only through the producer's explicit dev opt-in.
+        from prismaquant.tessera_export_lane import read_cached_unit_bundle
+        bundle = read_cached_unit_bundle(manifest, tmp_path, set(names), source)
+        assert bundle.encoder_source_proof_mode == 'permissive'
+        assert {stamp['unit'] for stamp in bundle.warnings} == set(manifest['encoder_adoptions'])
+        assert '[cached-unit warning]' in capsys.readouterr().err
+        bundle.require_served_scales({name+'.input_global_scale': 0.25 for name in groups})
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+        with pytest.raises(ValueError, match='encoder source proof'):
+            read_cached_unit_bundle(manifest, tmp_path, set(names), source)
         return
     assert len(seen) == 1 and seen[0][1]['run_header'] == header
-    for package in packages.values():
-        directory = Path(package['path']); directory.mkdir()
-        (directory/'__init__.py').write_text('# source fixture')
     reads = set(bridge.selected_cache_read_paths(manifest))
     assert {item['path'] for item in (old_plan, plan, old_prepared, new_prepared, old_pwc, new_pwc, resource)} <= reads
     assert (capture['path'] in reads) == (change != 'v2_extension')
@@ -294,7 +327,8 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     # v1 extension as rooted cached-unit authority. Tessera f46be81f7 (in the
     # af7a86d43 pin) reads v2 as well, so a band-created extension now binds
     # through the same reader and the full bundle checks below apply to it.
-    bundle = CachedUnitBundle(manifest, tmp_path, set(names), source)
+    bundle = CachedUnitBundle(manifest, tmp_path, set(names), source,
+                              authority=PRODUCER_AUTHORITY)
     assert len(bundle.roots) == 2 and bundle.producer_packages == packages
     for name in names:
         blob, record = bundle.read(name)
@@ -304,3 +338,125 @@ def test_rooted_builder_reader_bridge_binds_adoption_and_served_scale(tmp_path, 
     bundle.require_served_scales({name+'.input_global_scale': 0.25 for name in groups})
     with pytest.raises(ValueError, match='served policy'):
         bundle.require_served_scales({name+'.input_global_scale': 0.5 for name in groups})
+
+
+VISUAL = "model.visual.blocks.0.attn.qkv"
+
+
+def test_export_lane_passes_a_bf16_sidecar_outside_the_census(tmp_path):
+    """GLM-5.3 Flash's allocator config also names the 124 visual-tower
+    Linears it keeps at BF16. The census holds no wire for them, so the
+    export lane passes them through, as the census cache does (#1510)."""
+    source, names, _, handoff, metadata, data = fixture(tmp_path)
+    manifest = selected_cached_units_manifest(
+        {**{name: FMT for name in names}, VISUAL: "BF16"}, metadata, handoff, data,
+        schema="tessera.cached_units.v1")
+    assert set(manifest["units"]) == names
+
+
+def test_export_lane_refuses_a_wired_sidecar_outside_the_census(tmp_path):
+    source, names, _, handoff, metadata, data = fixture(tmp_path)
+    with pytest.raises(TesseraExportLaneError, match="outside the census roster are not BF16"):
+        selected_cached_units_manifest(
+            {**{name: FMT for name in names}, VISUAL: FMT}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
+
+
+def test_export_lane_refuses_a_census_unit_the_assignment_omits(tmp_path):
+    source, names, _, handoff, metadata, data = fixture(tmp_path)
+    with pytest.raises(TesseraExportLaneError, match="does not cover the full source roster"):
+        selected_cached_units_manifest(
+            {name: FMT for name in names if name != DENSE}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
+
+
+def _two_roots(tmp_path: Path):
+    """The #1513 shape: receipts were priced under the loader payload root,
+    the joint handoff (and the allocator's recorded root) name a second wire
+    directory holding copies."""
+    import shutil
+    from prismaquant import tessera_expert_projection as tep
+    source, names, records, handoff, metadata, data = fixture(tmp_path)
+    home = tmp_path.parent / (tmp_path.name + "-handoff")
+    home.mkdir()
+    for record in records.values():
+        shutil.copy2(tmp_path / record["file"], home / record["file"])
+    handoff["provenance"]["wire_dir"] = str(home)
+    metadata[tep.WIRE_DIR_KEY] = str(home)
+    return source, names, records, handoff, metadata, data, home
+
+
+def test_two_wire_roots_holding_identical_bytes_build_the_selected_cache(tmp_path):
+    # Path equality between the manifest root and the loader's payload root is
+    # context, never the gate: presence, placement and receipted size decide
+    # at manifest time, content identity at intake (PrismaQuant #1513).
+    from tessera.cached_unit import CachedUnitBundle
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    manifest = selected_cached_units_manifest(
+        {name: FMT for name in names}, metadata, handoff, data,
+        schema="tessera.cached_units.v1")
+    assert set(manifest["units"]) == names
+    bundle = CachedUnitBundle(manifest, home, set(names), source)
+    assert set(bundle.units) == names
+    blob, record = bundle.read(DENSE)
+    assert hashlib.sha256(blob).hexdigest() == record["blob_sha256"]
+
+
+def test_handoff_root_copy_that_diverges_from_the_priced_receipt_refuses(tmp_path):
+    # A same-size content change passes the manifest-time gate and refuses at
+    # intake, where the bytes the export reads are hashed against the priced
+    # receipt (PrismaQuant #1513, #641/#643).
+    from tessera.cached_unit import CachedUnitBundle, verify_cached_unit
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    path = home / records[DENSE]["file"]
+    raw = path.read_bytes()
+    path.write_bytes(bytes([raw[0] ^ 1]) + raw[1:])
+    manifest = selected_cached_units_manifest(
+        {name: FMT for name in names}, metadata, handoff, data,
+        schema="tessera.cached_units.v1")
+    bundle = CachedUnitBundle(manifest, home, set(names), source)
+    blob, record = bundle.read(DENSE)
+    with pytest.raises(ValueError, match="blob size/sha256 mismatch"):
+        verify_cached_unit(blob, record, record["identity"])
+
+
+def test_handoff_root_copy_of_the_wrong_size_refuses_at_manifest_time(tmp_path):
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    path = home / records[DENSE]["file"]
+    path.write_bytes(path.read_bytes() + b"\x00")
+    with pytest.raises(TesseraExportLaneError,
+                       match="does not match its receipt"):
+        selected_cached_units_manifest(
+            {name: FMT for name in names}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
+
+
+def test_handoff_root_missing_the_priced_wire_refuses(tmp_path):
+    source, names, records, handoff, metadata, data, home = _two_roots(tmp_path)
+    (home / records[DENSE]["file"]).unlink()
+    with pytest.raises(TesseraExportLaneError, match="is not in the wire directory"):
+        selected_cached_units_manifest(
+            {name: FMT for name in names}, metadata, handoff, data,
+            schema="tessera.cached_units.v1")
+
+
+def test_a_catalog_adopted_wire_only_under_its_accepted_root_builds(tmp_path, monkeypatch):
+    # PR #1515 r2: a catalog-adopted cell is read from its catalog row's own
+    # directory, so the handoff root need not hold a copy of its wire.
+    case = _rooted_case(tmp_path, monkeypatch)
+    for row in case.rows:
+        (tmp_path / row['record']['file']).unlink()
+    manifest = case.build()
+    for row in case.rows:
+        root = manifest['wire_roots'][manifest['unit_roots'][row['qname']]]
+        assert root == str(Path(row['wire']).resolve().parent)
+
+
+def test_a_catalog_adopted_wire_of_the_wrong_size_refuses_at_manifest_time(tmp_path, monkeypatch):
+    # The size gate runs on the root the export reads: the accepted catalog
+    # root, against the receipt its bytes are priced by (PR #1515 r2).
+    case = _rooted_case(tmp_path, monkeypatch, 'accepted_wrong_size')
+    import re
+    bad = Path(case.rows[0]['wire']).resolve()
+    with pytest.raises(TesseraExportLaneError, match=re.escape(f'{bad} does not match its receipt')):
+        case.build()

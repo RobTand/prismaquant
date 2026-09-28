@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def write_selected_scales(assignment_binding, output_dir):
-    from .tessera_joint_allocation import _read_bound
+    from .stage_inputs import read_bound as _read_bound
     from .layer_config import canonicalize_assignment, layer_config_metadata
     from .schemas import validate_layer_config_payload
     from .tessera_expert_projection import (
