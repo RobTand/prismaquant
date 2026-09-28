@@ -331,6 +331,36 @@ def allocation_runtime_identity() -> dict:
     return tessera_dev_pin
 
 
+def allocation_shape_price_scope(serving_target, *, tensor_parallel):
+    """What a PACT shape-time table must equal, and what admits its launches.
+
+    Returns ``(ShapeTableScope, eligibility table, published formats)``. The
+    scope is the TRACKED serving pin, after the live gate has checked the
+    installed contract's bytes against it (``require_pinned_tessera_runtime``),
+    plus the serving target the flags name and the world size the caller
+    declares; the eligibility table and the format rows are the installed
+    contract's own (``tessera_render._pinned_serving_table``). The table's
+    ``tessera_commit`` is the commit the serve installs, so it is compared with
+    the pin's ``serving_commit``.
+    """
+    from . import tessera_render, tessera_serving_runtime_pin as pins
+    from .shape_runtime_prices import ShapeTableScope
+
+    if serving_target is None:
+        raise LookupError("a shape-time table is admitted only under an explicit serving "
+                          "target: pass --tessera-platform, --tessera-runtime-image, "
+                          "--tessera-execution-mode and --tessera-residency")
+    pin = pins.load_tessera_serving_runtime_pin()
+    pins.require_pinned_tessera_runtime(pin)
+    eligibility, published = tessera_render._pinned_serving_table()
+    scope = ShapeTableScope(
+        contract_sha256=pin.contract_sha256, tessera_commit=pin.serving_commit,
+        runtime_image_digest=serving_target.runtime_image,
+        tensor_parallel=int(tensor_parallel), platform=serving_target.platform,
+        residency=serving_target.residency, execution_mode=serving_target.execution_mode)
+    return scope, eligibility, published
+
+
 class AllocationMenu:
     """The allocator's menu after this lane expanded its token.
 

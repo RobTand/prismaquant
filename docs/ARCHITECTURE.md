@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`, exact probe): the
+PACT hull's binding-budget probe is now `prismaquant/exact_mckp.py`, an exact
+single-budget multiple-choice knapsack in integer arithmetic, in place of a
+call to `solve_runtime_frontier`. That solver kept lexical assignment order as
+a dominance coordinate in every fold. On GLM-5.3's E4M3 menu it held 458,239
+states at unit 47 and was refused at unit 48. With exact sums, the fold keeps
+the (bytes, cost) Pareto set and an exact LP bound prunes it: the largest
+fold in the whole 121-vertex hull is 196 states. The tie rule (minimum cost,
+then fewest bytes, then lexical order) is unchanged, and
+`solve_runtime_frontier`'s own contract is untouched. No pipeline default, stage, format, lane or ship gate changes. See
+§4.5, "PACT hull".
+
 Re-stamped 2026-09-28 (PQ #1614, tessera#508): the `glm53_kpool_tail_slot_mapping`
 serving-runtime patch set (the vLLM #57317 backport over the `glm53_mtp_mapper`
 image, derived image `…@sha256:c2e75e03…`) records its qualification on the
@@ -22,6 +34,16 @@ its inline copy. `--mtp-fixed-formats` passes `fixed_formats` to the selector
 from the allocator. After the swap the card and exported-r2 differ only by the
 Tessera side bytes #1609 names (28,802,632 B). Gate:
 `tests/test_mtp_card_rebase_1610.py`.
+
+Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
+gains a research-only PACT mode, reached only through
+`prismaquant.prefill_frontier` (`--pact-shape-table`, `--pact-regime`,
+`--pact-tensor-parallel`, `--pact-time-ceiling-ms`). It builds the exact lower
+convex hull of (operator-sum time, predicted Δloss) with
+`prismaquant/pact_hull.py`, and a replay writes one vertex as a research-only
+layer config. `layer_config.prefill_frontier_replay_claim` also carries a
+measured-runtime single solve's research stamp to the build record. No
+default, stage, format, lane or ship gate changes. See §4.5, "PACT hull".
 
 Re-stamped 2026-09-28 (PQ #1586 research half, the `research_only`
 publication gate): `tools/publish_artifact.py` now refuses a card whose
@@ -4119,8 +4141,12 @@ resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
-As of: 2026-09-28 · `claude/508-kpool-tail-image`.
+As of: 2026-09-28 · `claude/pact-1584-hull`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-28, `claude/pact-1584-hull`) for **the PACT hull's exact
+binding-budget probe** (PQ #1584): `prismaquant/exact_mckp.py` replaces the
+call to `solve_runtime_frontier`; see the stamp at the top of this document.
 
 Re-stamped (2026-09-28, `claude/508-kpool-tail-image`) for **the kpool-tail
 backport patch set's stub qualification and debt D38 (b)** (PQ #1614,
@@ -18880,6 +18906,121 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
   until tessera#688 publishes that schema.
 
 CPU gates: `tests/test_shape_runtime_prices.py`.
+
+**PACT hull (2026-09-28, PQ #1584).** `prismaquant/pact_hull.py` generates
+PACT's candidates, and `prefill_frontier` drives it when the allocator argv
+names `--pact-shape-table`. The output is a `prismaquant.pact_frontier.v1`
+document.
+
+- **Why a hull loses no pick.** Every PACT selection rule maximises an affine
+  function of (time, Δloss): argmin Δloss, argmin time, and
+  `select_development_point`'s chord distance in coordinates normalised by the
+  two endpoints. An affine maximum over a finite set is attained at a vertex
+  of its convex hull, so the exact lower hull holds every pick those rules can
+  make.
+- **Generation.** Dichotomic parametric search (Aneja–Nair): probe min Δloss
+  and min time, then for each adjacent pair (A, B) probe
+  `w_d·Δloss + w_t·time` with `(w_d, w_t) = (t_A − t_B, d_B − d_A)` under the
+  byte budget. A result strictly below AB is a new vertex, and the search
+  recurses on both halves. Otherwise AB is an edge. "Strictly below" is
+  judged against the float64 sum bound `(n + 1)·2⁻⁵³·(S_probe + S_segment)`,
+  never a chosen epsilon. λ = `w_t/w_d` is recorded per edge as a diagnostic
+  and never enters a selection objective.
+- **Probe.** Every probe is exact in exact arithmetic: each option's
+  `w_d·Δloss + w_t·time` is an exact rational of float64 inputs, scaled to
+  integers over one power-of-two denominator (`exact_mckp.exact_integer_costs`),
+  and sums never round. When every unit's largest option fits the budget, the
+  byte constraint is vacuous, so each probe is the per-unit exact minimiser,
+  with ties going to the smallest format name. When the budget binds, each
+  probe is one single-budget multiple-choice knapsack,
+  `exact_mckp.solve_exact_mckp`. It returns the minimum cost, then the fewest
+  bytes, then the lexically first assignment. That is the order
+  `solve_runtime_frontier` ranks its final frontier by, and the same answer
+  it gives whenever its float sums are exact (`tests/test_exact_mckp.py`).
+  It is not that solver, whose general contract is unchanged. Its folds keep
+  lexical order as a dominance coordinate, which is needed there because a
+  float sum or a later peak can erase a strict difference. Here every
+  coordinate is an exact sum, so each fold keeps only the (bytes, cost)
+  Pareto set, with an exact duplicate keeping the lexically earlier prefix. A
+  prefix is also dropped when its bytes plus the remaining units' smallest
+  bytes exceed the budget, or when its cost plus the remaining units' LP
+  relaxation strictly exceeds the incumbent. The LP relaxation is the greedy
+  over each unit's lower convex hull of (bytes, cost), compared by
+  cross-multiplication. The incumbent is the cheapest feasible assignment in
+  hand: an LP-rounded completion, or one of the two segment ends the probe
+  bisects. The proof that no answer changes is in the `exact_mckp` module
+  docstring. `--pact-max-states` and `--pact-max-transitions` bound this
+  search (`pact_hull.DEFAULT_MAX_STATES` = 100,000,
+  `DEFAULT_MAX_TRANSITIONS` = 8,000,000 when unset), and it refuses rather
+  than truncates. The hull document records both, a replay re-runs its probe
+  under them, and a refusal prints the per-unit frontier sizes it measured
+  before the refused unit. The document also records the process peak RSS
+  (`ru_maxrss`) before and after the hull, in `hull_peak_rss_kib`.
+  `solve_allocation` is not used, because its bin rounding is a projection
+  with bounded overshoot and so is not exact at a binding budget.
+- **Inputs and exact checks.** The shape table is admitted against the
+  tracked pin and the serving target (`tessera_lane.allocation_shape_price_scope`).
+  Options it does not price are absent and reported as gaps. Each vertex must
+  pass the measured solve's checks: promotion identity, and exact payload bpp
+  at or below `--target-bits`. The byte budget is
+  `floor(target_bits × mutable_params / 8)`.
+- **Whole-artifact card.** `--target-disk-gb` (with its required
+  `--artifact-overhead-reserve-bytes`) replaces that budget with an on-disk
+  cap priced by `footprint.assignment_artifact_bytes`. The unit budget is the
+  card, less the reserve, less the payload outside the DP units. That last
+  term is read at the smallest and the largest unit assignment, and PACT
+  refuses when the two differ, because then no unit budget states the card
+  exactly. Each vertex is re-priced exactly, and it is feasible only when its
+  payload plus the reserve fits the card. A replay stamps
+  `whole_artifact_budget` for the exporter. The hull document records the
+  split under `whole_artifact_budget`.
+- **Refusals.** A lone allocator run refuses the flags. PACT also refuses the
+  measured table, dispatch table, workload mix and every `--slo-*`. It refuses
+  every device budget, because the table prices no residency (tessera#624 owns
+  that table). The card above is artifact bytes on disk, not device-resident
+  bytes, so that objection does not apply to it.
+- **Menu.** A family restriction, such as E4M3-only, is the declared
+  `--formats` menu. It is not a ban applied after allocation.
+- **Time axis.** Fixed prefill is 0. Members with a fixed format, and every
+  operator outside the table, are neither priced nor added. The document
+  reports them as the `remainder`.
+- **Replay.** `prefill_frontier replay` re-runs the one probe that found a
+  vertex and writes it through the allocator's only layer-config writer. The
+  config carries `research_only: true`, `certifies_placement: false`,
+  `candidate_generator: lower_convex_hull_dichotomic` and
+  `time_claim: operator_sum_proposal`, inside a replay.v1 block, which
+  `prefill_frontier_replay_claim` carries to `build.research_only`.
+
+Limits:
+
+- `--pact-time-ceiling-ms` is a report bound. It flags vertices above the
+  ceiling and does not generate the constrained set's own boundary vertex.
+- `select_development_point`'s top-two min_separation test sees hull
+  vertices, not every point of the exact frontier (PQ #1585).
+
+On GLM-5.3's 132 units × 3 rungs at M=2048, the hull has 139 vertices, found
+with 277 probes in 0.13 s.
+
+On GLM-5.3's 132 units × up to 7 E4M3 rungs (544 options) at M=2048, TP2,
+under the corrected 175.72 GB card, the budget binds. There the former probe
+(`solve_runtime_frontier`) held 81,221 states at unit 30 and 458,239 at unit
+47, and it was refused at unit 48 after 1,977 s. The order coordinate alone
+accounts for that: the (bytes, cost) Pareto set at unit 30 is 860 states. The
+exact probe's largest fold is 196 states over all 241 probes, and no probe
+makes more than 29,940 transitions. The hull has 121 vertices, found in 8.1 s
+under cProfile, and every vertex fits the card. Its λ→0 vertex is the
+corrected accuracy pick, assignment for assignment (sha256 `086c7302…`):
+Δloss 0.046791, 155,565,350,912 unit bytes, 4.068 bpp, and a
+whole-artifact upper bound of 175,630,529,175 B. Its time vertex costs
+Δloss 0.078111 at an operator sum of 1,023 ms, against 2,928 ms at the
+accuracy end, with an upper bound of 173,677,294,231 B.
+
+CPU gates: `tests/test_pact_hull.py` (exact against brute force, 8 units ×
+3 options, 6,561 assignments, slack and binding budgets),
+`tests/test_exact_mckp.py` (brute force with engineered ties, identity with
+the unbounded `solve_runtime_frontier` on synthetic problems and on a
+GLM-5.3 prefix, `tests/fixtures/pact_glm53_e4m3_prefix_1584.json`) and
+`tests/test_pact_allocator_replay.py`.
 
 ### 4.6 Selection
 
