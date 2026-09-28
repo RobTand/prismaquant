@@ -376,7 +376,10 @@ def resolve_tessera_checkout(checkout, commit):
 
 
 def _load_report(path, label, report_sha256):
-    """Read a report file, re-hash its bytes against a REQUIRED digest."""
+    """Read a report file, re-hash its bytes against a REQUIRED digest.
+
+    Returns the parsed object; callers must pass it straight to
+    :func:`_verify_parsed_report` with the same digest."""
     if not isinstance(report_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", report_sha256):
         raise ValueError(f"{label} requires its 64-hex sha256; the digest is the "
                          "evidence chain, not an optional annotation")
@@ -396,16 +399,12 @@ def _load_report(path, label, report_sha256):
     return report
 
 
-def verify_run_report(report, *, report_sha256=None, trace_path=None, expected_runtime=None):
-    """Verify a run report's own bindings; trust its windows as attested measurement.
+def _verify_parsed_report(report, *, report_sha256, trace_path=None, expected_runtime=None):
+    """Validate an already-parsed report against its REQUIRED bytes digest.
 
-    ``report_sha256`` is REQUIRED: callers pass the report through
-    :func:`_load_report` (bytes re-hashed against the digest) or supply the
-    digest of an already-parsed object they hashed themselves. Refuses
-    unknown schema versions, requires one runtime identity across both
-    passes, and binds the trace (canonical digest and, when the trace file
-    is given, its file sha) plus the collector library digest to every
-    pass-R record's window.
+    The digest must have been produced by :func:`verify_run_report` (or
+    :func:`_load_report`) from the file bytes; a caller-supplied digest over
+    an arbitrary dict is self-referential and refused here by construction.
     """
     if not isinstance(report, dict):
         raise ValueError("run report must be a JSON object")
@@ -443,7 +442,7 @@ def verify_run_report(report, *, report_sha256=None, trace_path=None, expected_r
         if not isinstance(process, dict) or window.get("process_id") != process.get("pid"):
             raise ValueError(f"pass-R record for {rate} window belongs to another process")
     for rate, record in timing.items():
-        if bool(record.get("collector_started", True)):
+        if record.get("collector_started") is not False:
             raise ValueError(f"pass-T record for {rate} claims a started collector")
         samples = record.get("samples_ms")
         if not isinstance(samples, dict) or set(samples) != {"prefill", "decode"}:
@@ -458,6 +457,22 @@ def verify_run_report(report, *, report_sha256=None, trace_path=None, expected_r
         if digest(json.loads(raw)) != trace_binding["sha256"]:
             raise ValueError("trace object does not hash to the report's trace digest")
     return report
+
+
+def verify_run_report(report_path, *, report_sha256=None, trace_path=None,
+                      expected_runtime=None):
+    """Verify a run-report FILE: re-hash its bytes, parse, check bindings.
+
+    The public entry point takes the path and does the hashing itself; the
+    digest is REQUIRED. Windows are attested measurements: this verifies the
+    report's own bindings (bytes -> digest -> schema -> trace sha ->
+    collector sha -> per-record window digest/interval/process) and trusts
+    the derivation, re-derived only through :func:`rereport_windows`.
+    """
+    report = _load_report(report_path, "run report", report_sha256)
+    return _verify_parsed_report(report, report_sha256=report_sha256,
+                                 trace_path=trace_path,
+                                 expected_runtime=expected_runtime)
 
 
 def rereport_windows(checkout, commit, report, trace_path):
@@ -477,7 +492,7 @@ def rereport_windows(checkout, commit, report, trace_path):
         command += ["--interval", f"rate:{rate}"]
     probe = subprocess.run(command, capture_output=True, text=True, timeout=120)
     if probe.returncode != 0:
-        raise ValueError(f"tessera analyzer failed: {probe.stderr.strip()[:200]}")
+        raise ValueError(f"tessera analyzer failed: {probe.stderr.strip()[:500]}")
     try:
         derived = json.loads(probe.stdout)["intervals"]
     except (KeyError, ValueError) as error:
@@ -513,19 +528,23 @@ def qualify_resource_transfer(runtime_identity, *, rates, persistent_report,
     resolve_tessera_checkout(producer["checkout"], producer["commit"])
     if not isinstance(rates, list) or len(rates) < 5 or rates != list(range(rates[0], rates[-1] + 1)):
         raise ValueError("rates must be a consecutive integer domain of at least five")
-    persistent_report = verify_run_report(
+    persistent_report = _verify_parsed_report(
         _load_report(persistent_report, "run report", report_sha256),
         report_sha256=report_sha256, trace_path=trace_path,
         expected_runtime=runtime_identity)
     # k derives from the band's own fresh evidence, never a magic constant.
-    raw_fresh = noise_band["raw"]["phases"]["prefill"]["fresh"]
+    try:
+        raw_fresh = noise_band["raw"]["phases"]["prefill"]["fresh"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("noise band raw.phases.prefill.fresh is missing: the "
+                         "band must carry per-rate fresh evidence") from error
     selected = stratified_rates(rates, len(raw_fresh))
     if set(fresh_reports) != set(selected):
         raise ValueError("fresh evidence must cover exactly the stratified sample")
     verified_fresh = {}
     for rate in selected:
         entry = fresh_reports[rate]
-        report = verify_run_report(
+        report = _verify_parsed_report(
             _load_report(entry["report"], f"fresh report {rate}", entry["sha256"]),
             report_sha256=entry["sha256"], expected_runtime=runtime_identity)
         wire_rate = _wire_rate(runtime_identity, rate)
@@ -604,7 +623,7 @@ def qualify_resource_transfer(runtime_identity, *, rates, persistent_report,
             if row["samples_ms"] != record["samples_ms"][phase]:
                 reasons.append(f"band persistent samples for {wire_rate} {phase} differ "
                                f"from the run report")
-            if row.get("time_in_process") != record["time_in_process"]:
+            if row.get("time_in_process") != record.get("time_in_process"):
                 reasons.append(f"band ordinal for {wire_rate} {phase} differs from "
                                f"the run report")
             if raw_phase["persistent"]["process"] != record["process"]:
@@ -650,16 +669,6 @@ def require_resource_transfer(qualification, *, runtime_identity, persistent_rep
         raise ValueError("resource transfer qualification recompute failed: "
                          + "; ".join(recomputed["reasons"][:3]))
     return recomputed
-
-
-def _run_producer(checkout, commit, *argv, timeout=600):
-    """Run the pinned checkout's producer CLI as a subprocess."""
-    checkout = resolve_tessera_checkout(checkout, commit)
-    command = [sys.executable, str(checkout / PRODUCER_CLI), *[str(arg) for arg in argv]]
-    probe = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-    if probe.returncode != 0:
-        raise ValueError(f"tessera producer failed: {probe.stderr.strip()[:200]}")
-    return probe
 
 
 def _file_sha256(path):
@@ -712,10 +721,16 @@ def _main(argv=None):
     legs.add_argument("--tessera-commit", required=True)
     legs.add_argument("--identity", required=True)
     legs.add_argument("--rates", required=True, help="persistent roster, comma-separated wires")
-    legs.add_argument("--engine", required=True, help="module:factory in the checkout's tests")
-    legs.add_argument("--collector", required=True)
-    legs.add_argument("--fresh-rates", required=True,
-                      help="comma-separated q256 integers for the fresh legs")
+    legs.add_argument("--fixtures", required=True,
+                      help="JSON file mapping wire rates to fixture directories")
+    legs.add_argument("--collector-library", required=True)
+    legs.add_argument("--producer-python", required=True,
+                      help="interpreter of the Tessera runtime the identity names")
+    legs.add_argument("--fresh-rates", default=None,
+                      help="comma-separated q256 integers (default: derived from --band)")
+    legs.add_argument("--band", default=None,
+                      help="raw noise band JSON; when given, the fresh sample is "
+                           "derived with stratified_rates(rates, k) from the band")
     legs.add_argument("--device-id", type=int, required=True)
     legs.add_argument("--context-id", type=int, required=True)
     legs.add_argument("--out-dir", required=True)
@@ -730,10 +745,9 @@ def _main(argv=None):
             raise ValueError(f"cannot read {label} file {str(path)!r}: {error}") from error
 
     if args.command == "verify-report":
-        report = _load_report(args.report, "run report", args.sha)
-        expected = read(args.identity, "identity") if args.identity else None
-        verify_run_report(report, report_sha256=args.sha,
-                          trace_path=args.trace, expected_runtime=expected)
+        verify_run_report(args.report, report_sha256=args.sha,
+                          trace_path=args.trace,
+                          expected_runtime=read(args.identity, "identity") if args.identity else None)
         print(json.dumps({"status": "verified", "report": str(args.report),
                           "sha256": args.sha}, sort_keys=True))
     elif args.command == "rereport":
@@ -760,57 +774,79 @@ def _main(argv=None):
         print(json.dumps({"status": "passed", "qualification_id": artifact["qualification_id"],
                           "out": str(args.out)}, sort_keys=True))
     else:
-        import os
         out = Path(args.out_dir)
         out.mkdir(parents=True, exist_ok=True)
-        resolve_tessera_checkout(args.tessera_checkout, args.tessera_commit)
-        _run_producer(args.tessera_checkout, args.tessera_commit,
-                      "pass-r", "--rates", args.rates, "--engine", args.engine,
-                      "--collector", args.collector, "--runtime-identity", args.identity,
-                      "--trace", out / "persistent_trace.json",
-                      "--out", out / "persistent_records.json",
-                      "--device-id", args.device_id, "--context-id", args.context_id)
-        _run_producer(args.tessera_checkout, args.tessera_commit,
-                      "pass-t", "--rates", args.rates, "--engine", args.engine,
-                      "--records", out / "persistent_records.json",
-                      "--runtime-identity", args.identity,
-                      "--out", out / "persistent_timing.json")
-        _run_producer(args.tessera_checkout, args.tessera_commit,
-                      "assemble", "--resource", out / "persistent_records.json",
-                      "--timing", out / "persistent_timing.json",
-                      "--trace", out / "persistent_trace.json",
-                      "--out", out / "persistent_report.json")
+        identity = read(args.identity, "identity")
+        family = identity["family"]
+        checkout = resolve_tessera_checkout(args.tessera_checkout, args.tessera_commit)
+
+        def producer(*argv):
+            command = [args.producer_python, "-m", "experiments.native_resource_passes",
+                       *[str(arg) for arg in argv]]
+            probe = subprocess.run(command, capture_output=True, text=True,
+                                   timeout=600, cwd=str(checkout))
+            if probe.returncode != 0:
+                raise ValueError(f"tessera producer failed: {probe.stderr.strip()[:500]}")
+            return probe
+
+        def wire(rate):
+            return f"{family}_R{rate}"
+
+        if args.fresh_rates is not None:
+            fresh_q256 = [int(value) for value in args.fresh_rates.split(",") if value]
+        else:
+            if args.band is None:
+                raise ValueError("run-legs needs --fresh-rates or --band to derive the sample")
+            band = read(args.band, "noise band")
+            try:
+                raw_fresh = band["raw"]["phases"]["prefill"]["fresh"]
+            except (KeyError, TypeError) as error:
+                raise ValueError("noise band raw.phases.prefill.fresh is missing") from error
+            first_q = int(args.rates.split(",")[0].rsplit("_R", 1)[1])
+            last_q = int(args.rates.split(",")[-1].rsplit("_R", 1)[1])
+            fresh_q256 = stratified_rates(list(range(first_q, last_q + 1)), len(raw_fresh))
+
+        producer("pass-r", "--rates", args.rates, "--fixtures", args.fixtures,
+                 "--collector-library", args.collector_library,
+                 "--runtime-identity", args.identity,
+                 "--trace", out / "persistent_trace.json",
+                 "--out", out / "persistent_records.json",
+                 "--device-id", args.device_id, "--context-id", args.context_id)
+        producer("pass-t", "--rates", args.rates, "--fixtures", args.fixtures,
+                 "--records", out / "persistent_records.json",
+                 "--runtime-identity", args.identity,
+                 "--out", out / "persistent_timing.json")
+        producer("assemble", "--resource", out / "persistent_records.json",
+                 "--timing", out / "persistent_timing.json",
+                 "--trace", out / "persistent_trace.json",
+                 "--out", out / "persistent_report.json")
         manifest = {}
-        for rate in [value for value in args.fresh_rates.split(",") if value]:
+        for rate in fresh_q256:
             stem = f"fresh_{rate}"
-            _run_producer(args.tessera_checkout, args.tessera_commit,
-                          "pass-r", "--rates", f"TESSERA_{read(args.identity,'identity')['family']}_R{rate}",
-                          "--engine", args.engine, "--collector", args.collector,
-                          "--runtime-identity", args.identity,
-                          "--trace", out / f"{stem}_trace.json",
-                          "--out", out / f"{stem}_records.json",
-                          "--device-id", args.device_id, "--context-id", args.context_id)
-            _run_producer(args.tessera_checkout, args.tessera_commit,
-                          "pass-t", "--rates", f"TESSERA_{read(args.identity,'identity')['family']}_R{rate}",
-                          "--engine", args.engine,
-                          "--records", out / f"{stem}_records.json",
-                          "--runtime-identity", args.identity,
-                          "--out", out / f"{stem}_timing.json")
-            _run_producer(args.tessera_checkout, args.tessera_commit,
-                          "assemble", "--resource", out / f"{stem}_records.json",
-                          "--timing", out / f"{stem}_timing.json",
-                          "--trace", out / f"{stem}_trace.json",
-                          "--out", out / f"{stem}_report.json")
-            manifest[rate] = {"report": str(out / f"{stem}_report.json"),
-                              "sha256": _file_sha256(out / f"{stem}_report.json")}
+            producer("pass-r", "--rates", wire(rate), "--fixtures", args.fixtures,
+                     "--collector-library", args.collector_library,
+                     "--runtime-identity", args.identity,
+                     "--trace", out / f"{stem}_trace.json",
+                     "--out", out / f"{stem}_records.json",
+                     "--device-id", args.device_id, "--context-id", args.context_id)
+            producer("pass-t", "--rates", wire(rate), "--fixtures", args.fixtures,
+                     "--records", out / f"{stem}_records.json",
+                     "--runtime-identity", args.identity,
+                     "--out", out / f"{stem}_timing.json")
+            producer("assemble", "--resource", out / f"{stem}_records.json",
+                     "--timing", out / f"{stem}_timing.json",
+                     "--trace", out / f"{stem}_trace.json",
+                     "--out", out / f"{stem}_report.json")
+            manifest[str(rate)] = {"report": str(out / f"{stem}_report.json"),
+                                   "sha256": _file_sha256(out / f"{stem}_report.json")}
         summary = {"schema": "prismaquant.native_resource_transfer_run_legs.v1",
+                   "producer_python": args.producer_python,
                    "persistent_report": str(out / "persistent_report.json"),
                    "persistent_report_sha256": _file_sha256(out / "persistent_report.json"),
                    "trace": str(out / "persistent_trace.json"),
                    "fresh": manifest}
         with open(out / "legs.json", "w", encoding="utf-8") as handle:
             json.dump(summary, handle, sort_keys=True)
-        del os
         print(json.dumps(summary, sort_keys=True))
 
 

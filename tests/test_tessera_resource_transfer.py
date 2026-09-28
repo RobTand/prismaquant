@@ -473,40 +473,62 @@ def test_stratified_sampler_never_drops_the_last_rate():
 
 
 
-def test_report_verification_refuses_unknown_schema_or_version():
+def test_report_verification_refuses_unknown_schema_or_version(tmp_path):
+    import hashlib
     report = _report([256], pid=1, timings=_timings([256]))
-    sha = digest(report)
+    path = tmp_path / "r.json"
+    path.write_text(json.dumps(report))
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
     with pytest.raises(ValueError, match="sha256"):
-        verify_run_report(report)  # no digest: the evidence chain is required
+        verify_run_report(path)  # no digest: the evidence chain is required
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(dict(report, schema="tessera.native_persistent_run.v2")))
+    sha_bad = hashlib.sha256(bad.read_bytes()).hexdigest()
     with pytest.raises(ValueError, match="schema"):
-        verify_run_report(dict(report, schema="tessera.native_persistent_run.v2"),
-                          report_sha256=sha)
+        verify_run_report(bad, report_sha256=sha_bad)
+    v2 = tmp_path / "v2.json"
+    v2.write_text(json.dumps(dict(report, schema_version=2)))
     with pytest.raises(ValueError, match="schema version"):
-        verify_run_report(dict(report, schema_version=2), report_sha256=sha)
-    with pytest.raises(ValueError, match="object"):
-        verify_run_report([report], report_sha256=sha)
+        verify_run_report(v2, report_sha256=hashlib.sha256(v2.read_bytes()).hexdigest())
 
 
-def test_report_verification_binds_windows_trace_and_collector():
+def test_report_verification_binds_windows_trace_and_collector(tmp_path):
+    import hashlib
     report = _report([256, 257], pid=1, timings=_timings([256, 257]))
-    verify_run_report(report, report_sha256=digest(report), expected_runtime=_identity())
+    path = tmp_path / "r.json"
+    path.write_text(json.dumps(report))
+    verify_run_report(path, report_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                      expected_runtime=_identity())
+    drift_path = path
     drift = copy.deepcopy(report)
     drift["pass_r"]["TESSERA_BF16_K1_R257"]["window"] = dict(
         drift["pass_r"]["TESSERA_BF16_K1_R257"]["window"], trace_sha256="9" * 64)
+    drift_path.write_text(json.dumps(drift))
     with pytest.raises(ValueError, match="bound to this report's trace"):
-        verify_run_report(drift, report_sha256=digest(drift))
+        verify_run_report(drift_path,
+                          report_sha256=hashlib.sha256(drift_path.read_bytes()).hexdigest())
     swap = copy.deepcopy(report)
     swap["pass_r"]["TESSERA_BF16_K1_R256"]["collector"]["library_sha256"] = "8" * 64
+    swap_path = tmp_path / "swap.json"
+    swap_path.write_text(json.dumps(swap))
     with pytest.raises(ValueError, match="another collector library"):
-        verify_run_report(swap, report_sha256=digest(swap))
+        verify_run_report(swap_path,
+                          report_sha256=hashlib.sha256(swap_path.read_bytes()).hexdigest())
     collector = copy.deepcopy(report)
-    collector["pass_t"]["TESSERA_BF16_K1_R256"]["collector_started"] = True
+    collector["pass_t"]["TESSERA_BF16_K1_R256"]["collector_started"] = None
+    collector_path = tmp_path / "collector.json"
+    collector_path.write_text(json.dumps(collector))
     with pytest.raises(ValueError, match="started collector"):
-        verify_run_report(collector, report_sha256=digest(collector))
+        verify_run_report(collector_path,
+                          report_sha256=hashlib.sha256(collector_path.read_bytes()).hexdigest())
     foreign = copy.deepcopy(report)
     foreign["runtime_identity"] = _identity(world=2)
+    foreign_path = tmp_path / "foreign.json"
+    foreign_path.write_text(json.dumps(foreign))
     with pytest.raises(ValueError, match="runtime identity differs"):
-        verify_run_report(foreign, report_sha256=digest(foreign), expected_runtime=_identity())
+        verify_run_report(foreign_path,
+                          report_sha256=hashlib.sha256(foreign_path.read_bytes()).hexdigest(),
+                          expected_runtime=_identity())
 
 
 def test_report_verification_checks_trace_file_digests(tmp_path):
@@ -521,10 +543,17 @@ def test_report_verification_checks_trace_file_digests(tmp_path):
     windows = {rate: dict(_window(rate, pid=1), trace_sha256=trace_sha) for rate in (256,)}
     report = _report([256], pid=1, timings=_timings([256]), window_by_rate=windows)
     report = dict(report, trace=binding)
-    verify_run_report(report, report_sha256=digest(report), trace_path=path)
+    report_path = tmp_path / "bound.json"
+    report_path.write_text(json.dumps(report))
+    import hashlib
+    verify_run_report(report_path,
+                      report_sha256=hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                      trace_path=path)
     path.write_text(json.dumps({"schema": "tessera.cupti_memory_trace.v1", "rows": [1]}))
     with pytest.raises(ValueError, match="trace"):
-        verify_run_report(report, report_sha256=digest(report), trace_path=path)
+        verify_run_report(report_path,
+                          report_sha256=hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                          trace_path=path)
 
 
 def test_producer_checkout_pin_refuses_head_mismatch(tmp_path):
@@ -862,82 +891,198 @@ def test_driver_qualify_and_verify_go_through_the_cli(tmp_path):
     assert bad.returncode == 2 and "does not hash" in bad.stderr
 
 
-def test_driver_run_legs_shells_out_to_the_fake_producer(tmp_path):
-    from prismaquant import tessera_resource_transfer as module
-    # fake producer: writes a small file for every argv and exits 0
-    script = ("import sys\n"
-              "argv = sys.argv[1:]\n"
-              "out = [a for a in argv if '--out' == argv[argv.index(a)-1]][0] if '--out' in argv else None\n"
-              "if out:\n"
-              "    open(out, 'w').write('{}')\n")
-    stub, head = _stub_producer_checkout(tmp_path, passes_body=script)
+def _fake_producer_body():
+    return '''import hashlib, json, os, sys
+
+argv = sys.argv[1:]
+command, args = argv[0], argv[1:]
+
+
+def value(flag, default=None):
+    return args[args.index(flag) + 1] if flag in args else default
+
+
+def digest(obj):
+    return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()
+
+
+identity_path = value("--runtime-identity")
+if identity_path is None:
+    resource = json.load(open(value("--resource")))
+    identity = resource[next(iter(resource))]["runtime_identity"]
+else:
+    identity = json.load(open(identity_path))
+rates = [r for r in (value("--rates") or "").split(",") if r]
+base = int(hashlib.sha256(",".join(rates).encode()).hexdigest()[:8], 16)
+pid = base % 100000
+process = {"pid": pid, "boot_id": "fake", "start_ticks": pid}
+collector_sha = hashlib.sha256(open(value("--collector-library"), "rb").read()).hexdigest() if value("--collector-library") else "a" * 64
+trace_digest = digest({"process": pid})
+
+def window(wire):
+    q = int(wire.rsplit("_R", 1)[1])
+    return {"schema": "tessera.native_rate_resource_window.v1", "status": "observed",
+            "trace_sha256": trace_digest, "process_id": pid, "collection_start_ns": 1,
+            "interval": "rate:" + wire, "begin_ns": 10 + 2 * q, "end_ns": 11 + 2 * q,
+            "baseline_live": [], "end_live": [], "baseline_bytes": 100,
+            "window_peak_bytes": 140, "transient_peak_bytes": 40,
+            "allocation_requests": [{"bytes": 40, "source": "torch-fixture",
+                                      "memory_kind": 3, "count": 1}],
+            "initialization_requests": [{"bytes": 100, "source": "nccl-init-fixture",
+                                          "memory_kind": 3, "count": 1}]}
+
+def write(path, obj):
+    with open(path, "w") as handle:
+        json.dump(obj, handle, sort_keys=True)
+
+if command == "pass-r":
+    records = {}
+    for wire in rates:
+        records[wire] = {"schema": "tessera.native_resource_pass_r.v1",
+                         "status": "observed", "rate": wire,
+                         "q256": int(wire.rsplit("_R", 1)[1]),
+                         "runtime_identity": identity,
+                         "collector": {"started": True, "library_sha256": collector_sha},
+                         "process": process, "binding": {"format": wire},
+                         "device_id": int(value("--device-id")),
+                         "context_id": int(value("--context-id")),
+                         "window": window(wire)}
+    write(value("--out"), records)
+    write(value("--trace"), {"stub": pid})
+elif command == "pass-t":
+    records = json.load(open(value("--records")))
+    timing = {}
+    for ordinal, wire in enumerate(rates, start=1):
+        timing[wire] = {"schema": "tessera.native_resource_pass_t.v1",
+                        "status": "observed", "rate": wire,
+                        "q256": int(wire.rsplit("_R", 1)[1]),
+                        "runtime_identity": identity, "collector_started": False,
+                        "time_in_process": ordinal,
+                        "process": {"pid": pid + 1000, "boot_id": "fake",
+                                    "start_ticks": pid + 1000},
+                        "binding": records[wire]["binding"],
+                        "samples_ms": {"prefill": [1.0, 1.1, 0.9],
+                                       "decode": [0.4, 0.5, 0.6]}}
+    write(value("--out"), timing)
+else:
+    resource = json.load(open(value("--resource")))
+    timing = json.load(open(value("--timing")))
+    trace_file = value("--trace")
+    file_sha = hashlib.sha256(open(trace_file, "rb").read()).hexdigest()
+    first_wire = next(iter(resource))
+    report = {"schema": "tessera.native_persistent_run.v1", "schema_version": 1,
+              "runtime_identity": identity,
+              "trace": {"file": trace_file,
+                        "sha256": resource[first_wire]["window"]["trace_sha256"],
+                        "file_sha256": file_sha,
+                        "collector_library_sha256":
+                            resource[first_wire]["collector"]["library_sha256"]},
+              "device_id": int(resource[next(iter(resource))]["device_id"]),
+              "context_id": int(resource[next(iter(resource))]["context_id"]),
+              "pass_r": resource, "pass_t": timing}
+    write(value("--out"), report)
+'''
+
+FAKE_TIMINGS = {"prefill": [1.0, 1.1, 0.9], "decode": [0.4, 0.5, 0.6]}
+
+
+def _fake_producer_pid(rates, *, pass_t=False):
+    import hashlib as _hashlib
+    base = int(_hashlib.sha256(",".join(rates).encode()).hexdigest()[:8], 16) % 100000
+    return base + 1000 if pass_t else base
+
+
+def _driver_band(rates):
+    persistent_pid = _fake_producer_pid([f"TESSERA_BF16_K1_R{rate}" for rate in rates],
+                                        pass_t=True)
+    raw = {"eps": {"samples_ms": [1e-4, 2e-4], "eps_source": "cpu"}, "phases": {}}
+    for phase in PHASES:
+        fresh = {}
+        for index, rate in enumerate(rates):
+            legs = []
+            for rep in range(5):
+                median = 1.0 + 1e-3 * rep
+                legs.append({"process": {"pid": 500 + 10 * index + rep,
+                                         "boot_id": "fake-fresh",
+                                         "start_ticks": 500 + 10 * index + rep},
+                             "samples_ms": [median - 1e-5, median, median + 1e-5]})
+            fresh[str(rate)] = legs
+        raw["phases"][phase] = {"fresh": fresh,
+                                "persistent": {"process": {"pid": persistent_pid,
+                                                           "boot_id": "fake",
+                                                           "start_ticks": persistent_pid},
+                                               "rates": [{"q256": rate,
+                                                          "samples_ms": FAKE_TIMINGS[phase],
+                                                          "time_in_process": index + 1}
+                                                         for index, rate in enumerate(rates)]}}
+    return {"source": "fresh_process_repeat_r5_pooled_log",
+            "gate_kind": "not_detected", "raw": raw}
+
+
+def _run_driver(*argv):
+    return subprocess.run(
+        [sys.executable, "-m", "prismaquant.tessera_resource_transfer", *argv],
+        capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]))
+
+
+def test_run_legs_feeds_qualify_end_to_end_and_refuses_mutations(tmp_path):
+    rates = list(range(256, 265))
+    stub, head = _stub_producer_checkout(tmp_path, passes_body=_fake_producer_body())
+    (stub / "experiments" / "native_resource_passes.py").write_text(_fake_producer_body())
     identity = tmp_path / "identity.json"
     identity.write_text(json.dumps(_identity()))
+    fixtures = tmp_path / "fixtures.json"
+    fixtures.write_text(json.dumps({f"TESSERA_BF16_K1_R{rate}": str(tmp_path)
+                                    for rate in rates}))
+    library = tmp_path / "lib.so"
+    library.write_bytes(b"collector-bytes")
+    band = tmp_path / "band.json"
+    band.write_text(json.dumps(_driver_band(rates)))
     out = tmp_path / "legs-out"
-    cli = subprocess.run(
-        [sys.executable, "-m", "prismaquant.tessera_resource_transfer", "run-legs",
-         "--tessera-checkout", str(stub), "--tessera-commit", head,
-         "--identity", str(identity), "--rates", "TESSERA_BF16_K1_R256,TESSERA_BF16_K1_R257",
-         "--engine", "x:y", "--collector", "x:y", "--fresh-rates", "256,257",
-         "--device-id", "0", "--context-id", "42", "--out-dir", str(out)],
-        capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]))
-    assert cli.returncode == 0, cli.stderr
+    legs = _run_driver(
+        "run-legs", "--tessera-checkout", str(stub), "--tessera-commit", head,
+        "--identity", str(identity),
+        "--rates", ",".join(f"TESSERA_BF16_K1_R{rate}" for rate in rates),
+        "--fixtures", str(fixtures), "--collector-library", str(library),
+        "--producer-python", sys.executable,
+        "--band", str(band), "--device-id", "0", "--context-id", "42",
+        "--out-dir", str(out))
+    assert legs.returncode == 0, legs.stderr
     summary = json.loads((out / "legs.json").read_text())
-    assert summary["persistent_report"].endswith("persistent_report.json")
-    assert set(summary["fresh"]) == {"256", "257"}
+    assert summary["producer_python"] == sys.executable
+    assert set(summary["fresh"]) == {str(rate) for rate in rates}
+    qualification = tmp_path / "qualification.json"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(summary["fresh"]))
+    passed = _run_driver(
+        "qualify", "--tessera-checkout", str(stub), "--tessera-commit", head,
+        "--identity", str(identity), "--rates", "256:264",
+        "--report", summary["persistent_report"],
+        "--report-sha", summary["persistent_report_sha256"],
+        "--fresh-manifest", str(manifest), "--band", str(band),
+        "--out", str(qualification))
+    assert passed.returncode == 0, passed.stderr
+    assert json.loads(qualification.read_text())["status"] == "passed"
 
-
-def test_qualification_refuses_fresh_windows_from_the_persistent_trace(tmp_path):
-    rates, (path, sha), fresh, band, _ = _qualification_inputs(tmp_path)
-    rate = 257
-    report = _report([rate], pid=399, timings={rate: _timings(rates)[rate]},
-                     window_by_rate={rate: _window(rate, pid=399, trace_sha=TRACE_SHA)},
-                     trace_sha=TRACE_SHA)
-    entry = _persist(report, tmp_path, "same_trace.json")
-    fresh2 = dict(fresh)
-    fresh2[rate] = {"report": entry[0], "sha256": entry[1]}
-    stub, head = _stub_producer_checkout(tmp_path)
-    result = qualify_resource_transfer(_identity(), rates=rates, persistent_report=path,
-                                       report_sha256=sha, fresh_reports=fresh2,
-                                       noise_band=band, producer={"checkout": stub, "commit": head})
-    assert any("one trace" in reason for reason in result["reasons"])
-
-
-def test_qualification_refuses_a_window_from_another_process(tmp_path):
-    rates, (path, sha), fresh, band, persistent = _qualification_inputs(tmp_path)
-    tampered = copy.deepcopy(persistent)
-    wire = "TESSERA_BF16_K1_R258"
-    tampered["pass_r"][wire]["window"] = dict(tampered["pass_r"][wire]["window"],
-                                              process_id=999)
-    p2, sha2 = _persist(tampered, tmp_path, "pid_drift.json")
-    stub, head = _stub_producer_checkout(tmp_path)
-    with pytest.raises(ValueError, match="another process"):
-        qualify_resource_transfer(_identity(), rates=rates, persistent_report=p2,
-                                  report_sha256=sha2, fresh_reports=fresh,
-                                  noise_band=band, producer={"checkout": stub, "commit": head})
-
-
-def test_qualification_refuses_a_pass_r_that_changed_process_mid_roster(tmp_path):
-    rates, (path, sha), fresh, band, persistent = _qualification_inputs(tmp_path)
-    tampered = copy.deepcopy(persistent)
-    wire = "TESSERA_BF16_K1_R260"
-    other = {"pid": 777, "boot_id": "CPU-fixture", "start_ticks": 777}
-    tampered["pass_r"][wire]["process"] = other
-    tampered["pass_r"][wire]["window"] = dict(tampered["pass_r"][wire]["window"], process_id=777)
-    tampered["pass_t"][wire]["binding"] = tampered["pass_r"][wire]["binding"]
-    p2, sha2 = _persist(tampered, tmp_path, "two_processes.json")
-    stub, head = _stub_producer_checkout(tmp_path)
-    result = qualify_resource_transfer(_identity(), rates=rates, persistent_report=p2,
-                                       report_sha256=sha2, fresh_reports=fresh,
-                                       noise_band=band, producer={"checkout": stub, "commit": head})
-    assert any("more than one process" in reason for reason in result["reasons"])
-
-
-def test_qualification_refuses_band_fresh_legs_sharing_a_report_process(tmp_path):
-    def collide(band):
-        collide_process = {"pid": 301, "boot_id": "CPU-fixture", "start_ticks": 301}
-        band["raw"]["phases"]["prefill"]["fresh"]["257"][0]["process"] = dict(collide_process)
-        band["raw"]["phases"]["decode"]["fresh"]["257"][0]["process"] = dict(collide_process)
-
-    result, _, _ = _qualify(tmp_path, _qualification_inputs(tmp_path, band_mutator=collide))
-    assert any("band fresh repeats share" in reason for reason in result["reasons"])
+    # mutated sample: a fresh rate outside the domain the band stratifies over
+    mutated = _run_driver(
+        "run-legs", "--tessera-checkout", str(stub), "--tessera-commit", head,
+        "--identity", str(identity),
+        "--rates", ",".join(f"TESSERA_BF16_K1_R{rate}" for rate in rates),
+        "--fixtures", str(fixtures), "--collector-library", str(library),
+        "--producer-python", sys.executable, "--fresh-rates", "256,300",
+        "--device-id", "0", "--context-id", "42",
+        "--out-dir", str(tmp_path / "legs-mutated"))
+    assert mutated.returncode == 0, mutated.stderr
+    mutated_summary = json.loads((tmp_path / "legs-mutated" / "legs.json").read_text())
+    mutated_manifest = tmp_path / "manifest-mutated.json"
+    mutated_manifest.write_text(json.dumps(mutated_summary["fresh"]))
+    refused = _run_driver(
+        "qualify", "--tessera-checkout", str(stub), "--tessera-commit", head,
+        "--identity", str(identity), "--rates", "256:264",
+        "--report", mutated_summary["persistent_report"],
+        "--report-sha", mutated_summary["persistent_report_sha256"],
+        "--fresh-manifest", str(mutated_manifest), "--band", str(band),
+        "--out", str(tmp_path / "qualification-mutated.json"))
+    assert refused.returncode == 2
+    assert "stratified sample" in refused.stderr
