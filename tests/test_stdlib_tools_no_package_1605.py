@@ -13,7 +13,9 @@ tool file at ``<root>/tools/<name>`` plus, for the fingerprint, the pin data
 file its module-level table reads through ``__file__`` -- then loads the
 tool standalone in a subprocess whose ``sys.path`` has the real repo root
 and ``tools/`` scrubbed (``cwd`` is the case root, ``PYTHONPATH`` is unset)
-and exercises the loader. The fingerprint and snapshot cases fail on the
+and whose import system refuses ``prismaquant`` outright (an editable
+install resolves it through a meta-path finder, not ``sys.path``), and
+exercises the loader. The fingerprint and snapshot cases fail on the
 pre-revert head and pass after it.
 """
 
@@ -39,6 +41,19 @@ _CHILD = (
     "banned = {{os.path.normpath(repo), os.path.normpath(os.path.join(repo, 'tools'))}}\n"
     "sys.path = [p for p in sys.path\n"
     "            if os.path.normpath(os.path.abspath(p or os.getcwd())) not in banned]\n"
+    # An editable install (CI's ``pip install -e .``) resolves the package
+    # through a meta-path finder, not through ``sys.path``, so scrubbing the
+    # path alone leaves it importable. Refuse it the way a container without
+    # the package does.
+    "class _NoPackage:\n"
+    "    def find_spec(self, name, path=None, target=None):\n"
+    "        if name == 'prismaquant' or name.startswith('prismaquant.'):\n"
+    "            raise ModuleNotFoundError(f'No module named {{name!r}}', name=name)\n"
+    "        return None\n"
+    "sys.meta_path.insert(0, _NoPackage())\n"
+    "for _name in [n for n in sys.modules\n"
+    "              if n == 'prismaquant' or n.startswith('prismaquant.')]:\n"
+    "    del sys.modules[_name]\n"
     "try:\n"
     "    import prismaquant.schemas\n"
     "except ImportError:\n"
