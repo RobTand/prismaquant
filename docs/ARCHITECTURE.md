@@ -20,6 +20,18 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Re-stamped 2026-09-28 (PQ #1558, decoupling step 6 part 2b): the allocator
+CLI reaches the lane through the allocation protocol (§8.10). `allocator.py`
+imports no lane module, and importing it loads none (27 before). The lane's
+flags, serving scope, menu-token expansion, cost-table identity checks,
+metadata blocks and selection side outputs are plugin hooks on
+`prismaquant.tessera_lane`, moved unchanged, and the metadata blocks are
+inserted at the positions they occupied. The core-boundary allowlist loses
+the last 13 `allocator.py` lines. The recorded GLM-5.3 allocation reproduces
+every output byte for byte on main and on the branch, apart from the
+wall-clock `solver_seconds` stamp. No format, default, stage, stored byte or
+ship gate changes.
+
 Re-stamped 2026-09-28 (PQ #1552, decoupling step 6 part 2a): the DP
 receives lane facts through hooks (§8.10). `allocator_solver`,
 `allocator_candidates`, `cost_currency`, `prepriced_cost` and
@@ -24802,6 +24814,23 @@ plus a plugin module.
   The currency gate reads `cost_currency` off the family declaration, and
   `prepriced_cost` and `unit_topology_restamp` reach the run-level hooks
   `hessian_identity` and `restamp_topology`.
+- **The allocation protocol (PQ #1558).** `allocator.main` reads every lane
+  step off one plugin, the one providing `allocation_menu`
+  (`allocator._allocation_lane`): its flags (`allocation_arguments`: the
+  `--tessera-*` scope flags and `--tessera-materialization-plan`), its serving
+  target and per-unit contexts (`allocation_serving_target`,
+  `allocation_contexts`, `allocation_unit_context`), its cost-table Hessian
+  identity and runtime-contract identity (`allocation_hessian_identity`,
+  `allocation_runtime_identity`), the menu token's expansion with its width
+  report and refusal cause (`allocation_menu`), its metadata blocks at the two
+  positions they have always occupied (`allocation_scope_meta`,
+  `allocation_layer_config_meta`, `allocation_selection_meta`), and its
+  selection side outputs (`allocation_selection_request_path`,
+  `write_allocation_selection_request`, `allocation_expert_projection`).
+  `allocator._StockAllocationLane` holds the stock answer to each and is the
+  protocol's written statement; `tests/test_lane_allocation_protocol.py`
+  holds the Tessera plugin to all of it. Importing the allocator imports no
+  lane module (27 on the parent commit).
 - **Neutral homes for shared helpers.** `digests.SOURCE_HASH_BLOCK_BYTES`
   (the guarded source hash's read block, which admission charges) and
   `joint_eval_observation` (the pilot panel's `STATUS` and
