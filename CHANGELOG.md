@@ -4,6 +4,16 @@
 
 ### Fixed
 
+- **Lane roster mirror learns Tessera v45's structure-scoped
+  `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
+  A v45 table was refused as an unknown requirement. The parser now reads the
+  field as an ascending subset of `column_rates`, `planned_wire_facts` states
+  the unit's structure (`dense` | `routed_moe`) from the eligibility cell
+  rather than inferring it, and Tessera's decision core decides the field for
+  routed units only: a routed unit at rate 7 is refused with the field named
+  and the compact adapter as the route it keeps, a dense unit passes, and a
+  unit with no structure fact is refused by name. A v44 contract still reads.
+
 - **Campaign resume refuses W4A4 anchors priced under another activation
   contract** (follow-on to #194; `tessera_campaign._require_resumable_anchor`).
   A pre-#194 checkpoint's W4A4 rows carry no `input_global_scale` (dynamic

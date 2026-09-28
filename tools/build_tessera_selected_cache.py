@@ -17,7 +17,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
-from prismaquant.layer_config import load_assignment, read_layer_config_metadata
+from prismaquant.footprint import whole_artifact_budget_from_assignment_payload
+from prismaquant.layer_config import (
+    canonicalize_assignment, layer_config_metadata, validate_layer_config_payload)
 from prismaquant.tessera_export_lane import (read_cached_unit_bundle,
                                              selected_cached_units_manifest)
 from prismaquant.tessera_joint_aura import load_measured_anchor_input
@@ -31,12 +33,47 @@ def _bound(path: str, digest: str, label: str) -> bytes:
     return raw
 
 
+def _bind_selected_assignment(assignment_path: str, expected_digest: str
+                              ) -> tuple[dict, dict[str, str], dict]:
+    """Bind the selected assignment by the allocator's own digest primitive.
+
+    The identity of a selected assignment is
+    ``footprint.assignment_serialization_sha256`` over the canonical
+    unit-to-format mapping (meta excluded) -- the same digest the allocator
+    stamps as ``selection_assignment_sha256``. Raw file bytes are NOT the
+    identity: allocator stamps, meta blocks and JSON re-serialization all
+    change bytes without changing the selection. The file is read ONCE and
+    the assignment and metadata returned are parsed from the bytes that were
+    checked, never from a second read. Returns ``(stamp, assignment, metadata)``.
+    """
+    payload = json.loads(Path(assignment_path).read_text())
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"selected assignment {assignment_path} is not a JSON object")
+    validate_layer_config_payload(payload, assignment_path)
+    assignment = canonicalize_assignment(payload)
+    stamp = whole_artifact_budget_from_assignment_payload(
+        payload, where=f"selected assignment {assignment_path}",
+        assignment=assignment)
+    if stamp is None:
+        raise ValueError(
+            f"selected assignment {assignment_path} carries no whole-artifact "
+            "budget stamp; refusing unstamped selection")
+    stamped = stamp["selection_assignment_sha256"]
+    if expected_digest != stamped:
+        raise ValueError(
+            f"selected assignment flag names {expected_digest} but the "
+            f"assignment's budget stamp binds {stamped}")
+    return stamp, assignment, layer_config_metadata(payload)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--handoff", required=True)
     parser.add_argument("--handoff-sha256", required=True)
     parser.add_argument("--assignment", required=True)
-    parser.add_argument("--assignment-sha256", required=True)
+    parser.add_argument("--assignment-sha256", required=True,
+                        help="the assignment's owner digest (its stamped selection_assignment_sha256), not the file bytes")
     parser.add_argument("--out", required=True)
     parser.add_argument("--read-paths-out", help="new JSON file listing all rooted export inputs for PB staging")
     parser.add_argument("--catalog-extension")
@@ -73,9 +110,8 @@ def main(argv=None) -> int:
             plan_binding=research['input_bindings']['pilot_plan'])
     else:
         handoff = pickle.loads(_bound(args.handoff, args.handoff_sha256, "joint handoff"))
-    _bound(args.assignment, args.assignment_sha256, "selected assignment")
-    assignment = load_assignment(args.assignment)
-    metadata = read_layer_config_metadata(args.assignment)
+    _stamp, assignment, metadata = _bind_selected_assignment(
+        args.assignment, args.assignment_sha256)
     if research is not None:
         binding = require_research_proposal_assignment(research, assignment,
                                                         pilot_joint_binding=pilot_binding)
