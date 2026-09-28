@@ -148,17 +148,23 @@ def test_the_resolution_is_the_float64_sum_bound():
 
 
 def test_a_live_probe_over_its_state_bound_is_refused_with_its_measured_growth():
-    candidates, time_ms = _problem(3, n_units=6)
-    budget = sum(min(c.memory_bytes for c in row) for row in candidates.values()) + 3_000
-    exact = pact_hull.dichotomic_lower_hull(candidates, time_ms, max_memory_bytes=budget)
+    # The first seeded problem whose exact probe folds hold more than one state.
+    for seed in range(3, 60):
+        candidates, time_ms = _problem(seed, n_units=6)
+        budget = sum(min(c.memory_bytes for c in row) for row in candidates.values()) + 3_000
+        exact = pact_hull.dichotomic_lower_hull(candidates, time_ms, max_memory_bytes=budget)
+        peak = max(p.solver["max_fold_size"] for p in exact.probes)
+        if peak > 1:
+            break
     assert exact.byte_axis == pact_hull.BYTE_AXIS_LIVE
+    assert peak > 1
     with pytest.raises(pact_hull.RuntimeFrontierLimitError) as refused:
         pact_hull.dichotomic_lower_hull(candidates, time_ms, max_memory_bytes=budget,
-                                        max_states=3)
+                                        max_states=peak - 1)
     sizes = refused.value.diagnostics["frontier_sizes"]
     assert refused.value.diagnostics["refusal"] == "max_states"
-    assert refused.value.diagnostics["frontier_size_lower_bound"] > 3
-    assert all(size <= 3 for size in sizes)
+    assert refused.value.diagnostics["frontier_size_lower_bound"] > peak - 1
+    assert all(size <= peak - 1 for size in sizes)
     # A raised bound returns the same exact hull.
     raised = pact_hull.dichotomic_lower_hull(
         candidates, time_ms, max_memory_bytes=budget,

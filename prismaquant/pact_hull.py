@@ -33,17 +33,28 @@ How it is generated (dichotomic parametric search)
 every edge as a DIAGNOSTIC. It never enters a selection objective; it only
 generates the candidates (CLAUDE.md §9: λ is a candidate generator only).
 
-Each probe is exact. When the byte budget binds, it is ONE call to the
-unchanged exact solver (``allocator_solver.solve_runtime_frontier``) with the
-option's cost pre-combined and its prefill coordinate zero, and the solver's
-own ``max_states`` refusal stands. When the budget provably cannot bind --
-every unit's largest option fits together -- the constraint is vacuous, no
-term couples two units, and the probe's minimum is the sum of per-unit minima,
-taken directly with the solver's own tie rule. (Handing the vacuous case to
-the solver gives the same answer: with each unit's bytes flattened to its
-largest option it returns in ~2.6 s per probe on GLM-5.3's 132 x 3, but its
-canonical-prefix tie coordinate keeps a ~1,100-state fold alive, and a hull of
-up to 2 x 132 edges needs ~500 probes.)
+Each probe is exact, in exact arithmetic. An option's probe cost
+``w_d·Δloss + w_t·time`` is computed as an exact rational (every float64 is
+one), and sums never round. When the byte budget binds, the probe is one
+single-budget multiple-choice knapsack, solved by
+``exact_mckp.solve_exact_mckp``. It returns the minimum cost, then the fewest
+bytes, then the lexically first assignment: the order
+``allocator_solver.solve_runtime_frontier`` ranks its final frontier by, and
+the same answer that solver gives whenever its float sums are exact. It is
+not that solver. That solver keeps lexical order as a dominance coordinate in
+every intermediate fold, because a float sum or a later peak can erase a
+strict difference. Here both coordinates are exact sums, so the fold keeps
+only the (bytes, cost) Pareto set. It also drops prefixes that an exact LP
+bound proves cannot reach the incumbent. On GLM-5.3's 132 units x 7 E4M3 rungs
+the order coordinate had held 458,239 states at unit 47 before a refusal
+(``exact_mckp`` has the numbers and the proof). ``max_states`` and
+``max_transitions`` bound that search the same way and refuse rather than
+truncate. When the budget provably cannot bind -- every unit's largest option
+fits together -- the constraint is vacuous, no term couples two units, and the
+probe's minimum is the sum of per-unit minima: each unit's exact minimiser,
+ties to the smallest format name. Bytes do not enter that key, since no
+assignment can exceed the budget; this is the tie rule the slack probe
+always had (it used to flatten every unit's bytes to its largest option).
 
 "Strictly below" is decided against the float resolution of the sums being
 compared, never a chosen epsilon: a sequential float64 sum of n terms is
@@ -63,18 +74,20 @@ Limits, stated
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import Mapping, Sequence
 
-from .allocator_solver import Candidate, RuntimeFrontierLimitError, solve_runtime_frontier
-from .measured_runtime_prices import RuntimeResources
+from .allocator_solver import Candidate, RuntimeFrontierLimitError
+from .exact_mckp import exact_integer_costs, solve_exact_mckp
 
 SCHEMA = "prismaquant.pact_hull.v1"
 CANDIDATE_GENERATOR = "lower_convex_hull_dichotomic"
 #: Unit roundoff of IEEE-754 binary64, the dtype every cost and time here is.
 FLOAT64_UNIT_ROUNDOFF = 2.0 ** -53
-#: The exact solver's own bounds (``solve_runtime_frontier``); a caller may
-#: raise them (``--pact-max-states`` / ``--pact-max-transitions``).
+#: The exact probe's bounds, the same defaults ``solve_runtime_frontier``
+#: has; a caller may raise them (``--pact-max-states`` /
+#: ``--pact-max-transitions``).
 DEFAULT_MAX_STATES = 100_000
 DEFAULT_MAX_TRANSITIONS = 8_000_000
 
@@ -190,53 +203,63 @@ def _byte_axis(candidates, max_memory_bytes: int) -> tuple[str, dict[str, int], 
     return axis, unit_max, slack_bound
 
 
+def _exact_option_costs(candidates, time_ms, w_d: float, w_t: float) -> dict:
+    """Every option's ``w_d·Δloss + w_t·time`` as an exact integer, one scale.
+
+    Weights, Δloss and time are float64 values, so each product and each sum
+    is an exact dyadic rational; ``exact_integer_costs`` scales all of them by
+    one power of two. Nothing is rounded, so no tie and no strict difference
+    depends on float rounding.
+    """
+    wd, wt = Fraction(w_d), Fraction(w_t)
+    scaled, _denominator = exact_integer_costs({
+        (unit, c.fmt): wd * Fraction(float(c.predicted_dloss))
+        + wt * Fraction(float(time_ms[(unit, c.fmt)]))
+        for unit in candidates for c in candidates[unit]})
+    return scaled
+
+
 def _solve_weighted(candidates, time_ms, w_d: float, w_t: float, *, byte_axis: str,
-                    unit_max: Mapping[str, int], max_memory_bytes: int, max_states: int,
-                    max_transitions: int) -> tuple[dict[str, str], dict]:
+                    max_memory_bytes: int, max_states: int, max_transitions: int,
+                    hints: Sequence[Mapping[str, str]] = ()) -> tuple[dict[str, str], dict]:
     """One exact probe: min Σ(w_d·Δloss + w_t·time) subject to bytes ≤ budget.
 
     Slack byte axis: the constraint is vacuous (every unit's largest option
     fits together), so nothing couples two units and the minimum of the sum is
-    the sum of per-unit minima. Each unit's answer is its minimiser, ties to
-    the smallest format name -- the rule ``solve_runtime_frontier``'s final sort
-    applies to a product of per-unit tie sets. Live byte axis: the unchanged
-    exact solver, whose ``max_states`` refusal stands.
+    the sum of per-unit minima. Each unit's answer is its exact minimiser, ties
+    to the smallest format name; bytes do not enter the key. Live byte axis:
+    ``solve_exact_mckp``, whose ``max_states``/``max_transitions`` refusal
+    stands; its key is minimum cost, then fewest bytes, then lexical order.
+    One problem has one byte axis, so every probe of a hull uses one key.
+    ``hints`` are feasible assignments already found (a probed segment's two
+    ends); they only tighten the live probe's bound and never change its answer,
+    so a replay without them re-derives the same assignment.
     """
+    cost = _exact_option_costs(candidates, time_ms, w_d, w_t)
     if byte_axis == BYTE_AXIS_SLACK:
         assignment = {}
         for unit in sorted(candidates):
-            best = min(candidates[unit], key=lambda c: (
-                w_d * float(c.predicted_dloss) + w_t * float(time_ms[(unit, c.fmt)]), c.fmt))
+            best = min(candidates[unit], key=lambda c: (cost[(unit, c.fmt)], c.fmt))
             assignment[unit] = best.fmt
         return assignment, {"method": "separable_per_unit_minimum"}
-    probe_candidates, resources = {}, {}
-    for unit in sorted(candidates):
-        row = []
-        for c in candidates[unit]:
-            memory = unit_max[unit] if byte_axis == BYTE_AXIS_SLACK else int(c.memory_bytes)
-            cost = w_d * float(c.predicted_dloss) + w_t * float(time_ms[(unit, c.fmt)])
-            row.append(replace(c, predicted_dloss=cost, memory_bytes=memory))
-            resources[(unit, c.fmt)] = RuntimeResources(
-                prefill_ms=0.0, decode_ms=None, serialized_bytes=memory,
-                resident_bytes=0, peak_scratch_bytes=0, activation_bytes=0)
-        probe_candidates[unit] = row
+    units = {unit: [(c.fmt, cost[(unit, c.fmt)], int(c.memory_bytes))
+                    for c in candidates[unit]] for unit in sorted(candidates)}
     diag: dict = {}
     try:
-        frontier = solve_runtime_frontier(
-            probe_candidates, resources, max_memory_bytes=int(max_memory_bytes),
-            max_prefill_ms=0.0, max_states=max_states, max_transitions=max_transitions,
-            diagnostics=diag)
+        assignment = solve_exact_mckp(units, max_bytes=int(max_memory_bytes),
+                                      max_states=max_states,
+                                      max_transitions=max_transitions, diagnostics=diag,
+                                      incumbent_hints=hints)
     except RuntimeFrontierLimitError as exc:
         # The refusal stands; its measured growth (per-unit frontier sizes up
         # to the refused unit) travels with it so a caller can report it.
         exc.diagnostics = diag
         raise
-    if not frontier:
+    if assignment is None:
         raise PactHullError(
             f"no assignment fits max_memory_bytes={int(max_memory_bytes)} "
             f"(byte axis {byte_axis})")
-    diag["method"] = "solve_runtime_frontier"
-    return dict(frontier[0].assignment), diag
+    return assignment, diag
 
 
 def probe_assignment(candidates: Mapping[str, Sequence[Candidate]],
@@ -251,9 +274,9 @@ def probe_assignment(candidates: Mapping[str, Sequence[Candidate]],
     """
     _check_inputs(candidates, time_ms)
     w_d, w_t = (float(w) for w in weights)
-    axis, unit_max, _ = _byte_axis(candidates, max_memory_bytes)
+    axis, _unit_max, _ = _byte_axis(candidates, max_memory_bytes)
     assignment, _diag = _solve_weighted(
-        candidates, time_ms, w_d, w_t, byte_axis=axis, unit_max=unit_max,
+        candidates, time_ms, w_d, w_t, byte_axis=axis,
         max_memory_bytes=max_memory_bytes, max_states=max_states,
         max_transitions=max_transitions)
     return assignment
@@ -274,7 +297,7 @@ def dichotomic_lower_hull(candidates: Mapping[str, Sequence[Candidate]],
     _check_inputs(candidates, time_ms)
     units = sorted(candidates)
     n = len(units)
-    byte_axis, unit_max, slack_bound = _byte_axis(candidates, max_memory_bytes)
+    byte_axis, _unit_max, slack_bound = _byte_axis(candidates, max_memory_bytes)
     options = {u: {c.fmt: c for c in candidates[u]} for u in units}
 
     points: list[HullPoint] = []
@@ -289,10 +312,11 @@ def dichotomic_lower_hull(candidates: Mapping[str, Sequence[Candidate]],
         return values, math.fsum(abs(v) for v in values)
 
     def probe(w_d: float, w_t: float, segment=None) -> int:
+        hints = () if segment is None else tuple(points[i].assignment for i in segment)
         assignment, diag = _solve_weighted(
-            candidates, time_ms, w_d, w_t, byte_axis=byte_axis, unit_max=unit_max,
+            candidates, time_ms, w_d, w_t, byte_axis=byte_axis,
             max_memory_bytes=max_memory_bytes, max_states=max_states,
-            max_transitions=max_transitions)
+            max_transitions=max_transitions, hints=hints)
         point = HullPoint(
             assignment=assignment,
             predicted_dloss=math.fsum(float(options[u][f].predicted_dloss)
@@ -306,6 +330,9 @@ def dichotomic_lower_hull(candidates: Mapping[str, Sequence[Candidate]],
         pid = point_index[key]
         solver = {"method": diag["method"], "frontier_size": diag.get("frontier_size"),
                   "max_fold_size": max(diag.get("frontier_sizes") or [0]),
+                  "fold_states": sum(diag.get("frontier_sizes") or []),
+                  "pruned_by_bound": diag.get("pruned_by_bound"),
+                  "pruned_infeasible": diag.get("pruned_infeasible"),
                   "transitions": diag.get("transitions")}
         value = segment_value = resolution = below = None
         lam = None
