@@ -390,14 +390,21 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: ``producer_interface`` block (which export drivers take
 #: ``--producer-authority``), so the SHA-256 below moves and the admission
 #: answer does not.
-TESSERA_DEV_PIN_COMMIT = "db5b6e23a06869e87d778cb223c1ac5a5154aec5"
+#: Re-pinned 2026-09-28 to 38e96012, Tessera master after #678, #685 and
+#: #686, under PQ #1274. Contract v41 lets a cell name its serving code
+#: (no packaged cell does); v42 (tessera#640) adds the fused routed window
+#: MoE lane. The answer moves in two places, both additive for admission:
+#: two NEW ``native_extensions`` rows, and one more launch pair in the four
+#: window routed cells' ``executes``. ``export.py`` and ``grammar.py`` did not
+#: move.
+TESSERA_DEV_PIN_COMMIT = "38e960127478b651e42c14d52acf2274b54bca38"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
+    "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -559,7 +566,48 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                              'structure': 'shared'},
                   'sidecar_q256': 'int_or_per_role_list',
                   'mixed_rung_receipt': False},
- 'native_extensions': [{'module_name_prefix': 'tessera_window_gemv',
+ # v42 review (Tessera #640): two NEW lane-bearing extensions from one source,
+ # csrc/routed_fused_window.cu -- tessera_routed_fused_e4m3 (TESSERA_FP8,
+ # native_routed_fused_window) and tessera_routed_fused_value (TESSERA_BF16,
+ # native_routed_fused_window_folded). Each lane admits rate-4, window_bits 14,
+ # undecorated window/channel stacks (q256 1024), and when the library is
+ # absent the serve substitutes the compact adapter's decoder in both
+ # residencies. The window_gemv row did not move.
+ 'native_extensions': [{'module_name_prefix': 'tessera_routed_fused_e4m3',
+                        'filename_glob': 'tessera_routed_fused_e4m3*.so',
+                        'match': 'basename_fnmatch',
+                        'routes': ['TESSERA_FP8'],
+                        'when_unavailable': {'resident': {'status': 'substituted',
+                                                          'decoder': 'native_window_moe_compact'},
+                                             'streamed': {'status': 'substituted',
+                                                          'decoder': 'native_window_moe_compact'}},
+                        'lane': {'decoder': 'native_routed_fused_window',
+                                 'requires': {'column_rates': [4],
+                                              'window_bits': [14],
+                                              'body': 'window',
+                                              'plane': 'channel',
+                                              'release_overrides': False,
+                                              'diagonals': False,
+                                              'rotation': ['none'],
+                                              'grid_arities': [1]}}},
+                       {'module_name_prefix': 'tessera_routed_fused_value',
+                        'filename_glob': 'tessera_routed_fused_value*.so',
+                        'match': 'basename_fnmatch',
+                        'routes': ['TESSERA_BF16'],
+                        'when_unavailable': {'resident': {'status': 'substituted',
+                                                          'decoder': 'native_window_moe_compact_folded'},
+                                             'streamed': {'status': 'substituted',
+                                                          'decoder': 'native_window_moe_compact_folded'}},
+                        'lane': {'decoder': 'native_routed_fused_window_folded',
+                                 'requires': {'column_rates': [4],
+                                              'window_bits': [14],
+                                              'body': 'window',
+                                              'plane': 'channel',
+                                              'release_overrides': False,
+                                              'diagonals': False,
+                                              'rotation': ['none'],
+                                              'grid_arities': [1]}}},
+                       {'module_name_prefix': 'tessera_window_gemv',
                         'filename_glob': 'tessera_window_gemv*.so',
                         'match': 'basename_fnmatch',
                         'routes': ['TESSERA_BF16', 'TESSERA_FP8'],
@@ -2227,6 +2275,13 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                   'max_world_size': 2,
                                   'loader_axes': {'column': 'sharded',
                                                   'row': 'sharded'}}},
+ # v42 review (Tessera #640): the four window routed cells,
+ # tessera_{bf16,e4m3}_k1_routed_moe_sm121_{batch,decode}_resident, each
+ # name one more launch in column 11, the fused routed pair beside the
+ # compact pair they already named. No other column, cell, rung, image,
+ # flag or evidence value moved, so admission is unchanged. v41 adds only
+ # optional runtime.tessera_commit / serving_source_sha256 fields that no
+ # packaged cell stamps, so this projection does not see them.
  'cells': [['tessera_bf16_k1_dense_sm121_batch_resident',
             'sm_121',
             'TESSERA_BF16_K1',
@@ -2287,7 +2342,9 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
             [['tessera.native_window_moe.NativeWindowMoE.__call__',
-              'native_window_moe_compact_folded']],
+              'native_window_moe_compact_folded'],
+             ['tessera.routed_fused.FusedRoutedWindowMoE.__call__',
+              'native_routed_fused_window_folded']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2312,7 +2369,9 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
             [['tessera.native_window_moe.NativeWindowMoE.__call__',
-              'native_window_moe_compact_folded']],
+              'native_window_moe_compact_folded'],
+             ['tessera.routed_fused.FusedRoutedWindowMoE.__call__',
+              'native_routed_fused_window_folded']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2531,7 +2590,9 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
             [['tessera.native_window_moe.NativeWindowMoE.__call__',
-              'native_window_moe_compact']],
+              'native_window_moe_compact'],
+             ['tessera.routed_fused.FusedRoutedWindowMoE.__call__',
+              'native_routed_fused_window']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},
@@ -2556,7 +2617,9 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
             'tessera',
             ['TESSERA_SERVE_MODE=resident'],
             [['tessera.native_window_moe.NativeWindowMoE.__call__',
-              'native_window_moe_compact']],
+              'native_window_moe_compact'],
+             ['tessera.routed_fused.FusedRoutedWindowMoE.__call__',
+              'native_routed_fused_window']],
             ['resident'],
             {'image': 'localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5',
              'execution_modes': ['eager']},

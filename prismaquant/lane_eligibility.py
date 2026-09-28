@@ -96,7 +96,11 @@ predicate closed at Tessera's own vocabulary (:func:`parse_lane_claim`) and
 planned wire (``tessera_render.planned_wire_facts``) to Tessera's own
 decision core (``tessera.serving.scheme.decide_lane_requirements``).  The
 rule has one home and it is not in this repository; what lives here is the
-facts and the refusal.
+facts and the refusal.  A lane launch is made only at a rung the lane admits:
+since contract v42 a cell can name a lane launch beside a lane-free one (the
+fused routed pair beside the compact adapter), and where the lane refuses the
+plan the cell admits on the launches left (:func:`cell_rung_launches`, PQ
+#1274).
 
 One parser, and why the vocabulary is wider than one publisher
 ---------------------------------------------------------------
@@ -1634,16 +1638,43 @@ def lane_claim_for_cell(cell: Any, lanes: Sequence[LaneClaim]) -> LaneClaim | No
     return None
 
 
-def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim]
-                     ) -> tuple[bool, str]:
-    """Whether the lane a cell launches through can read THIS producer's plan.
+def lane_claims_for_cell(cell: Any, lanes: Sequence[LaneClaim]
+                         ) -> tuple[LaneClaim, ...]:
+    """Every lane whose predicate governs one of this cell's launches.
 
-    ONE predicate for every admission leg (the menu's
-    ``tessera_render.tessera_attesting_cells``, the development contract's
-    ``TesseraContract.native_cells``, the export gate's
-    :func:`resolve_unit_route`), beside :func:`cell_evidence_admits` and for
-    the same reason: a rung the menu offers and the export refuses is the
-    split-brain principle 8 exists to stop.
+    :func:`lane_claim_for_cell` answers whether a cell is lane-gated at all;
+    this answers through WHICH lanes, because since Tessera contract v42 a
+    cell can launch through a lane and beside it (PQ #1274).
+    """
+    decoders = {decoder for _symbol, decoder in getattr(cell, "executes", ())}
+    return tuple(claim for claim in lanes
+                 if claim.requires is not None and claim.decoder in decoders)
+
+
+def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim]
+                       ) -> tuple[bool, str, tuple[tuple[str, str], ...]]:
+    """The launches a cell makes for THIS producer's plan at one rung.
+
+    Returns ``(admits, reason, launches)``.  A cell's ``executes`` is the
+    UNION of the launches its runtime makes over every rung it lists: Tessera
+    derives it that way (``contract._validate_cell_executes`` narrows
+    ``scheme.route_launches`` by the lanes each rung reaches), and a launch
+    through a lane happens only at a rung that lane's published predicate
+    admits.  So at one rung the cell launches through every lane-free decoder
+    it names and through each lane whose predicate this producer's planned
+    wire satisfies; a launch through a lane that refuses the plan is not made
+    there.  The cell admits the unit when at least one launch is left, and
+    ``launches`` is that set -- what the serve runs for these bytes, which a
+    route record stamps instead of the union.
+
+    Until contract v41 every lane-gated cell launched ONLY through its lane,
+    so a refusing lane left nothing and the cell refused; that case still
+    refuses, with the same reason.  Contract v42 is the first to name a lane
+    launch beside a lane-free one in one cell: the four window routed cells
+    carry the fused routed pair beside the compact adapter, whose dispatch
+    keeps the compact pair for every stack the fused lane refuses (the
+    mixed-rate q256=896 rung).  Refusing those cells whole shrank routed E4M3
+    admission to q256 1024 (PQ #1274).
 
     The rule is not here. Tessera publishes the predicate
     (``native_extensions[].lane.requires``) and owns the decision
@@ -1663,21 +1694,25 @@ def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim
     being skipped; a family this producer cannot plan, or a cell asked
     without a rung, is refused with the reason, never passed.
     """
-    claim = lane_claim_for_cell(cell, lanes)
-    if claim is None:
-        return True, ""
+    executes = tuple(getattr(cell, "executes", ()))
+    claims = lane_claims_for_cell(cell, lanes)
+    if not claims:
+        return True, "", executes
     cell_id = getattr(cell, "id", getattr(cell, "cell_id", "?"))
     family = str(getattr(cell, "family", ""))
-    launches = sorted(symbol for symbol, decoder in cell.executes
-                      if decoder == claim.decoder)
-    head = (
-        f"cell {cell_id!r} launches {launches} through the "
-        f"{claim.extension!r} lane (decoder {claim.decoder!r}), whose published "
-        "predicate this producer's planned wire")
+
+    def head(claim: LaneClaim) -> str:
+        launches = sorted(symbol for symbol, decoder in executes
+                          if decoder == claim.decoder)
+        return (
+            f"cell {cell_id!r} launches {launches} through the "
+            f"{claim.extension!r} lane (decoder {claim.decoder!r}), whose "
+            "published predicate this producer's planned wire")
+
     if rate_q256 is None:
         return False, (
-            f"{head} cannot be decided against: the unit's rung was not read, "
-            "and the lane reads a rate set that depends on it")
+            f"{head(claims[0])} cannot be decided against: the unit's rung was "
+            "not read, and the lane reads a rate set that depends on it"), ()
     from . import tessera_render
     from .tessera_formats import TesseraFormatError
 
@@ -1685,27 +1720,52 @@ def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim
         facts = tessera_render.planned_wire_facts(family, int(rate_q256))
     except TesseraFormatError as exc:
         return False, (
-            f"{head} cannot be decided against: this producer cannot plan "
-            f"family {family!r} at rung {rate_q256} ({exc}), and a plan that "
-            "does not exist is not a plan the lane reads")
+            f"{head(claims[0])} cannot be decided against: this producer "
+            f"cannot plan family {family!r} at rung {rate_q256} ({exc}), and a "
+            "plan that does not exist is not a plan the lane reads"), ()
     from tessera.serving.scheme import decide_lane_requirements
 
-    try:
-        refusals = decide_lane_requirements(claim.extension, dict(claim.requires), facts)
-    except ValueError as exc:
-        raise LaneEligibilityError(
-            f"{head} cannot be decided against: the lane publishes a "
-            f"requirement Tessera's own decision core does not decide -- {exc}"
-        ) from exc
-    if not refusals:
-        return True, ""
+    refused: list[str] = []
+    refused_decoders: set[str] = set()
+    for claim in claims:
+        try:
+            refusals = decide_lane_requirements(
+                claim.extension, dict(claim.requires), facts)
+        except ValueError as exc:
+            raise LaneEligibilityError(
+                f"{head(claim)} cannot be decided against: the lane publishes a "
+                f"requirement Tessera's own decision core does not decide -- {exc}"
+            ) from exc
+        if refusals:
+            refused_decoders.add(claim.decoder)
+            refused.append(f"{head(claim)} for {family} R{rate_q256} fails: "
+                           + "; ".join(refusals))
+    launches = tuple(pair for pair in executes if pair[1] not in refused_decoders)
+    if launches:
+        return True, "", launches
     return False, (
-        f"{head} for {family} R{rate_q256} fails: "
-        + "; ".join(refusals)
-        + ". The kernel would refuse these bytes at load, so the route is not "
-        "admitted; the predicate is Tessera's, read from the contract, and "
-        "the plan is this producer's -- change the plan or re-pin, never this gate."
-    )
+        ". ".join(refused)
+        + ". No launch the cell names is left at this rung, so the kernel "
+        "would refuse these bytes at load and the route is not admitted; the "
+        "predicate is Tessera's, read from the contract, and the plan is this "
+        "producer's -- change the plan or re-pin, never this gate."
+    ), ()
+
+
+def cell_lane_admits(cell: Any, rate_q256: int | None, lanes: Sequence[LaneClaim]
+                     ) -> tuple[bool, str]:
+    """Whether a lane a cell launches through leaves it a launch for this plan.
+
+    ONE predicate for every admission leg (the menu's
+    ``tessera_render.tessera_attesting_cells``, the development contract's
+    ``TesseraContract.native_cells``, the export gate's
+    :func:`resolve_unit_route`), beside :func:`cell_evidence_admits` and for
+    the same reason: a rung the menu offers and the export refuses is the
+    split-brain principle 8 exists to stop.  :func:`cell_rung_launches` holds
+    the rule and the reason; this is its verdict.
+    """
+    admits, why, _launches = cell_rung_launches(cell, rate_q256, lanes)
+    return admits, why
 
 
 @dataclass(frozen=True)
@@ -2476,6 +2536,11 @@ def resolve_unit_route(
     # same slot.
     candidates: list[EligibilityCell] = []
     refusals: dict[str, tuple[str, str]] = {}
+    #: The launches each admitted cell makes at THIS rung (PQ #1274): a cell
+    #: that launches through a lane and beside it runs the lane only where
+    #: its predicate admits the plan, so the route records what runs here,
+    #: not the cell's union over its rungs.
+    rung_launches: dict[str, tuple[tuple[str, str], ...]] = {}
     for cell in matched:
         # The code scope first: evidence taken on other code says nothing
         # about the pinned code, whatever the evidence itself says.
@@ -2483,9 +2548,11 @@ def resolve_unit_route(
         if admits:
             admits, why = cell_evidence_admits(cell)
         if admits:
-            admits, why = cell_lane_admits(cell, facts.rate_q256, table.lanes)
+            admits, why, launches = cell_rung_launches(
+                cell, facts.rate_q256, table.lanes)
         if admits:
             candidates.append(cell)
+            rung_launches[cell.id] = launches
         elif cell.regime not in refusals:
             refusals[cell.regime] = (cell.id, why)
 
@@ -2538,7 +2605,7 @@ def resolve_unit_route(
                 (best.requires_plugin,) if best.requires_plugin else ()),
             qualification=best.qualification,
             activation_contract=best.activation_contract,
-            executes=best.executes,
+            executes=rung_launches.get(best.id, best.executes),
             residency=str(residency) if is_v4 else "",
             runtime_image=str(runtime_image) if is_scoped else "",
             execution_mode=str(execution_mode) if is_scoped else "",
@@ -3353,8 +3420,10 @@ __all__ = [
     "SmokeRecordRow",
     "cell_evidence_admits",
     "cell_lane_admits",
+    "cell_rung_launches",
     "cell_serving_code_admits",
     "lane_claim_for_cell",
+    "lane_claims_for_cell",
     "parse_lane_claim",
     "parse_lane_claims",
     "derive_evidence_grade",

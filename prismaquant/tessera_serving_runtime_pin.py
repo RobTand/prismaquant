@@ -329,12 +329,20 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: cached-unit and Hessian-reference record checks move to PQ's reuse authority
 #: (PQ #1537). Contract v40 adds only the ``producer_interface`` block, so
 #: the contract SHA-256 moves and this reviewed answer does not.
+#: Re-pinned 2026-09-28 to 38e96012, Tessera master after #678 (v41), #685
+#: (v42, tessera#640) and #686 (PQ #1274). v42 publishes two lane-bearing
+#: native extensions for the fused routed window MoE lane, so the pin JSON's
+#: ``serving_native_extensions`` gains their rows, and the four window routed
+#: cells name the fused pair beside the compact pair. The pin stays schema v2:
+#: v41 lets a cell stamp its serving code, and no v42 cell does, so a v3 pin
+#: would admit no cell. The digest a v3 pin at this commit would carry is
+#: ``445da73b…`` (``prismaquant/tessera_runtime/README.md``).
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "db5b6e23a06869e87d778cb223c1ac5a5154aec5"
+    "38e960127478b651e42c14d52acf2274b54bca38"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
+    "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
 )
 #: The v3 split (#1561).  ``TESSERA_SERVING_RUNTIME_PINNED_COMMIT`` above is
 #: the SERVING commit; the producer commit and the serving code digest are
@@ -344,7 +352,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "db5b6e23a06869e87d778cb223c1ac5a5154aec5"
+    "38e960127478b651e42c14d52acf2274b54bca38"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 
