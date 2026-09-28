@@ -86,7 +86,7 @@ def test_the_host_reading_is_memavailable_plus_the_per_cpu_pages(tmp_path, proc)
     _meminfo(meminfo, 10 * GiB)
     _zoneinfo(zoneinfo, 3 * GiB)
     assert io_spans.per_cpu_free_bytes() == 3 * GiB
-    assert io_spans.host_available_bytes() == 13 * GiB
+    assert io_spans.host_memory()[0] == 13 * GiB
     assert mm._host_memory_info() == (13 * GiB, 121 * GiB)
 
 
@@ -95,12 +95,12 @@ def test_a_host_without_zoneinfo_reads_memavailable_alone(tmp_path, proc):
     _meminfo(meminfo, 10 * GiB)
     assert not zoneinfo.exists()
     assert io_spans.per_cpu_free_bytes() == 0
-    assert io_spans.host_available_bytes() == 10 * GiB
+    assert io_spans.host_memory()[0] == 10 * GiB
 
 
 def test_a_host_without_meminfo_is_unreadable(tmp_path, proc):
     meminfo, zoneinfo = proc
     _zoneinfo(zoneinfo, GiB)
     with pytest.raises(OSError):
-        io_spans.host_available_bytes()
+        io_spans.host_memory()[0]
     assert mm._host_memory_info() is None
