@@ -40,6 +40,11 @@ def tensor_host_bytes(tensor: torch.Tensor) -> bytes:
     return _raw(_host(tensor))
 
 
+def tensor_sha256(tensor: torch.Tensor) -> str:
+    """SHA-256 of the tensor's exact host bits, C-contiguous (PQ #1531)."""
+    return bytes_sha256hex(tensor_host_bytes(tensor))
+
+
 def tensor_identity(tensor: torch.Tensor) -> dict[str, object]:
     """``{"dtype", "shape", "sha256"}`` of the tensor's host bytes."""
     host = _host(tensor)

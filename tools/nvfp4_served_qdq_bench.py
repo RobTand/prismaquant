@@ -30,7 +30,6 @@ Prints one JSON document on the line after ``BENCH-JSON``.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import statistics
@@ -44,6 +43,7 @@ import torch  # noqa: E402
 
 from prismaquant import nvfp4_activation_contract as owner  # noqa: E402
 from prismaquant.io_spans import PeriodicSampler  # noqa: E402
+from prismaquant.tensor_digests import tensor_sha256  # noqa: E402
 
 ARMS = {
     "unfused": owner._nvfp4_activation_qdq_registered_op_unfused,
@@ -97,11 +97,6 @@ def activation(rows: int, width: int, seed: int) -> torch.Tensor:
     x = torch.where(spikes, x * 40.0, x)
     x[:, 16:32] = 0.0
     return x.to(torch.bfloat16)
-
-
-def digest(tensor: torch.Tensor) -> str:
-    raw = tensor.contiguous().view(torch.uint8).cpu().numpy().tobytes()
-    return hashlib.sha256(raw).hexdigest()
 
 
 def time_leg(leg, x, g, calls):
@@ -205,7 +200,7 @@ def main() -> int:
         grad = torch.randn(rows, args.grad_width, device="cuda")
         outputs = {name: leg(x, g) for name, leg in ARMS.items()}   # warm + digest
         torch.cuda.synchronize()
-        digests = {name: digest(out) for name, out in outputs.items()}
+        digests = {name: tensor_sha256(out) for name, out in outputs.items()}
         equal = torch.equal(outputs["fused"], outputs["unfused"])
         del outputs
         # Small shapes are overhead-bound; give each window comparable work.

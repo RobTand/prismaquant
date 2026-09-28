@@ -18,6 +18,7 @@ import re
 import stat
 
 from .dev_mode import seal_check
+from .file_identity import file_stat_signature
 
 SCHEMA = 'prismaquant.joint_forward_recovery.v1'
 
@@ -44,10 +45,6 @@ def capsule_byte_limit(document):
     return (_HEADER_READS + _GROUP_READS * len(groups)) * PROOF_READ_MAX_BYTES
 
 
-def _stat_fence(value):
-    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-
-
 def _read(path, expected=None):
     """Read one proof document; a pinned read verifies its digest first.
 
@@ -66,12 +63,12 @@ def _read(path, expected=None):
         with path.open('rb') as handle:
             for chunk in iter(lambda: handle.read(1 << 20), b''):
                 digest.update(chunk)
-        if _stat_fence(path.lstat()) != _stat_fence(before):
+        if file_stat_signature(path.lstat()) != file_stat_signature(before):
             raise ForwardRecoveryRefused('recovery proof changed during read')
         if digest.hexdigest() != expected:
             raise ForwardRecoveryRefused('recovery proof SHA256 mismatch')
     raw = path.read_bytes()
-    if _stat_fence(path.lstat()) != _stat_fence(before):
+    if file_stat_signature(path.lstat()) != file_stat_signature(before):
         raise ForwardRecoveryRefused('recovery proof changed during read')
     digest = hashlib.sha256(raw).hexdigest()
     if expected is not None and digest != expected:

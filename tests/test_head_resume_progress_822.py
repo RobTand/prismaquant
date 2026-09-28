@@ -173,7 +173,8 @@ def test_overlay_fence_continues_the_count_on_the_cadence(tmp_path, monkeypatch)
     resumed = bridge.load_measured_anchor_input(
         config, verify_payloads=False, head_checkpoint=journal, head_resume=True,
         head_walk_workers=1, progress_allowance_s=allowance_s)
-    assert calls and calls[0]['hash_workers'] == 1
+    # The overlay's hash concurrency is the IO engine's, not the walk's (#1531).
+    assert calls and 'hash_workers' not in calls[0]
     overlay = [r['units_completed'] for r in writes[before:] if r['units_completed'] > len(names)]
     assert len(overlay) >= 2, f'the overlay fence committed {len(overlay)} times'
     assert overlay[-1] == len(names) + overlay_cells

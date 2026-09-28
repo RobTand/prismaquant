@@ -13,13 +13,12 @@ import json
 import os
 import pickle
 import stat as stat_module
-from collections import deque
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .dev_mode import dev_mode_enabled, dev_warning, seal_check
+from .file_identity import file_stat_signature
 from .tessera_joint_allocation import _read_bound, _bound_stat_fence
 from .schemas import Contract
 
@@ -87,9 +86,12 @@ def _same(a, b, message):
 FENCE_REHASHED = {}
 
 
-def _stat_fence(stat):
-    return {"inode": stat.st_ino, "bytes": stat.st_size,
-            "mtime_ns": stat.st_mtime_ns, "ctime_ns": stat.st_ctime_ns}
+def catalog_stat_fence(stat):
+    """The four stat keys a sealed catalog persists, projected from the one
+    file identity (``file_identity.file_stat_signature``, PQ #1531). The
+    dict is part of the sealed wire format: its keys and values are unchanged."""
+    _device, inode, size, mtime_ns, ctime_ns = file_stat_signature(stat)
+    return {"inode": inode, "bytes": size, "mtime_ns": mtime_ns, "ctime_ns": ctime_ns}
 
 
 def _fence_drift(stat, recorded, content_sha256, message):
@@ -107,7 +109,7 @@ def _fence_drift(stat, recorded, content_sha256, message):
     refuses here, without hashing, and so does an artifact with no recorded
     digest: it keeps the strict fence.
     """
-    current = _stat_fence(stat)
+    current = catalog_stat_fence(stat)
     if current == recorded:
         return None
     _require(content_sha256 is not None and current["bytes"] == recorded.get("bytes"), message + " differs")
@@ -118,7 +120,7 @@ def _rehash_drifted(path, before, content_sha256, message):
     """Admit a stat-drifted artifact only by its recorded digest, hashed while its stat held still."""
     with open(path, "rb") as handle:
         digest = hashlib.file_digest(handle, "sha256").hexdigest()
-    _same(_stat_fence(Path(path).stat()), before, f"{message} of {path} (stat while re-hashing)")
+    _same(catalog_stat_fence(Path(path).stat()), before, f"{message} of {path} (stat while re-hashing)")
     _same(digest, content_sha256, f"{message} (content re-hash after stat drift) of {path}")
     return digest
 
@@ -136,77 +138,95 @@ def _artifact_fence(path, stat, recorded, content_sha256, message):
     FENCE_REHASHED[message] = FENCE_REHASHED.get(message, 0) + 1
 
 
-def _fence_hash_workers(requested=None):
-    """The overlay fence's hash pool: the CPU set PrismaBuild assigned this action.
+def _captured(job, *args, **kwargs):
+    """Run one fence hash job, returning its outcome rather than raising it.
 
-    ``hashlib`` releases the GIL while it digests and reads release it in the
-    syscall, so a thread per assigned CPU overlaps both the digest and the
-    storage streams. An explicit count may not exceed that assignment.
+    A stream entry that fails while it is only read ahead is read again when
+    the consumer asks for it (``io_engine`` module docstring). A fence
+    refusal is final, and a file is hashed once for every check it answers,
+    so the job's own exception travels as the value and the admitting thread
+    raises it, the same object the job raised.
     """
     try:
-        assigned = max(1, len(os.sched_getaffinity(0)))
-    except (AttributeError, OSError):
-        assigned = 1
-    if requested is None:
-        return assigned
-    _require(type(requested) is int and 0 < requested <= assigned,
-             f"fence hash workers {requested!r} exceed the assigned CPU affinity ({assigned})")
-    return requested
+        return (job(*args, **kwargs), None), None
+    except Exception as exc:  # noqa: BLE001 -- raised by the admitting thread
+        return (None, exc), None
 
 
 @contextmanager
-def _bounded_hash_pool(workers):
-    """A hash pool that, on a refusal, drops its queued reads instead of finishing them."""
-    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="overlay-fence-hash")
-    try:
-        yield pool
-    except BaseException:
-        pool.shutdown(wait=True, cancel_futures=True)
-        raise
-    pool.shutdown(wait=True)
+def _fence_hashes(jobs):
+    """Run fence hash ``jobs`` through the process's IO engine; yield their results in order.
+
+    ``jobs`` is ``[(bytes read, job, args, kwargs)]``. Each job is one range
+    entry of one ``io_engine.read_stream`` (PQ #1531), so how many run at once
+    is the engine's to decide from its measured rates, and the pool is the
+    engine's one pool (PQ #1294). The results iterator yields each job's
+    return value in ``jobs`` order and raises the first failed job's own
+    exception, in order. Leaving the block closes the stream: a job not yet
+    started never starts, and one in flight is waited for.
+
+    A hash job holds nothing once it returns but its digest, so each entry
+    is charged no held bytes and the stream reads as far ahead as the
+    engine's workers allow.
+    """
+    from functools import partial
+
+    from .io_engine import FixedBudget, ReadEntry, read_stream
+    if not jobs:
+        yield iter(())
+        return
+    entries = [ReadEntry(key=index, path=None, size=int(size), limit=int(size), held_bytes=0,
+                         expected_sha256=None, decoder=None, group=index,
+                         reader=partial(_captured, job, *args, **kwargs))
+               for index, (size, job, args, kwargs) in enumerate(jobs)]
+
+    def results(stream):
+        for index in range(len(entries)):
+            (delivered,) = stream.take(index)
+            stream.release()
+            value, error = delivered.value
+            if error is not None:
+                raise error
+            yield value
+
+    with read_stream(entries, budget=FixedBudget(buffer_bytes=1)) as stream:
+        yield results(stream)
 
 
 class _StreamedFences:
-    """Stat fences checked inline, drifted re-hashes streamed onto the bounded pool (PQ #1522).
+    """Stat fences checked inline, drifted re-hashes proven on the IO engine (PQ #1522, #1531).
 
     ``check`` is ``_artifact_fence`` with the proof deferred: ``_fence_drift``
     decides on the calling thread, so a size change and an undigested drift
     refuse before anything is hashed, and a drifted artifact's
-    ``_rehash_drifted`` goes to the pool. At most ``window`` re-hashes are in
-    flight; they resolve in submission order. ``streamed_fences`` resolves
-    every one before its block exits, so a caller that returns after the
-    block never returns an unproven artifact.
+    ``_rehash_drifted`` is queued. ``streamed_fences`` proves every queued
+    re-hash, in the order it was queued, before its block exits, so a caller
+    that returns after the block never returns an unproven artifact.
     """
 
-    def __init__(self, pool, window):
-        self._pool, self._window, self._inflight = pool, window, deque()
+    def __init__(self):
+        self._queued = []
 
     def check(self, path, stat, recorded, content_sha256, message):
         drift = _fence_drift(stat, recorded, content_sha256, message)
         if drift is None:
             return
-        while len(self._inflight) >= self._window:
-            self._resolve()
-        self._inflight.append((message, self._pool.submit(_rehash_drifted, path, drift, content_sha256, message)))
-
-    def _resolve(self):
-        message, job = self._inflight.popleft()
-        job.result()
-        FENCE_REHASHED[message] = FENCE_REHASHED.get(message, 0) + 1
+        self._queued.append((message, (drift["bytes"], _rehash_drifted,
+                                       (path, drift, content_sha256, message), {})))
 
     def drain(self):
-        while self._inflight:
-            self._resolve()
+        queued, self._queued = self._queued, []
+        with _fence_hashes([job for _, job in queued]) as results:
+            for (message, _), _digest in zip(queued, results):
+                FENCE_REHASHED[message] = FENCE_REHASHED.get(message, 0) + 1
 
 
 @contextmanager
-def streamed_fences(hash_workers=None):
-    """A ``_StreamedFences`` on the assigned-CPU hash pool, every re-hash proven on exit."""
-    workers = _fence_hash_workers(hash_workers)
-    with _bounded_hash_pool(workers) as pool:
-        fences = _StreamedFences(pool, 2 * workers)
-        yield fences
-        fences.drain()
+def streamed_fences():
+    """A ``_StreamedFences`` whose queued re-hashes are all proven on exit."""
+    fences = _StreamedFences()
+    yield fences
+    fences.drain()
 
 
 def _verify_overlay_payload(observed, blob_sha256, *, rehash, hash_render):
@@ -225,14 +245,14 @@ def _verify_overlay_payload(observed, blob_sha256, *, rehash, hash_render):
     else:
         with open(wire, "rb") as handle:
             digest = hashlib.file_digest(handle, "sha256").hexdigest()
-        _same(_stat_fence(wire.stat()), observed["wire"][2], f"overlay wire {wire} (stat while hashing)")
+        _same(catalog_stat_fence(wire.stat()), observed["wire"][2], f"overlay wire {wire} (stat while hashing)")
         _same(digest, blob_sha256, f"overlay wire bytes of {wire}")
     if not hash_render:
         return None
     render, _, before = observed["render"]
     with open(render, "rb") as handle:
         digest = hashlib.file_digest(handle, "sha256").hexdigest()
-    _same(_stat_fence(render.stat()), before, f"overlay render {render} (stat while hashing)")
+    _same(catalog_stat_fence(render.stat()), before, f"overlay render {render} (stat while hashing)")
     return digest
 
 
@@ -1112,7 +1132,7 @@ def hessian_references(payload):
 
 
 def attach_candidate_overlay(data, bound, *, verify_payloads=False, defer_render_hashes=False,
-                             hash_workers=None, progress=None):
+                             progress=None):
     """Attach an authenticated historical catalog without rewriting its base.
 
     This is intake, not qualification. The new PWC must separately carry the
@@ -1120,17 +1140,17 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False, defer_render
     Historical scalar scores remain scalar scores; Stage B measures every
     added joint cost using the unchanged source adjoints.
 
-    Every byte this intake reads is hashed on a bounded thread pool
-    (``hash_workers``; by default the CPU set PrismaBuild assigned, see
-    ``_fence_hash_workers``), streamed as the rows are walked (PQ #1519).
-    The pool hashes a wire whose stat fence drifted, and with
-    ``verify_payloads`` every wire and, unless ``defer_render_hashes``, every
-    render. A file is hashed once, for every check it answers. At most twice
-    the pool's size of files are in flight. Cells are admitted in catalog
-    order, each only after its digests are verified, so a refusal leaves
-    no unverified cell behind and names the file that failed. The refusal
-    rules are ``_fence_drift``'s: a size change and an undigested drift
-    refuse before anything is hashed.
+    Every byte this intake reads is hashed through the process's IO engine
+    (``_fence_hashes``, PQ #1519, #1531): a wire whose stat fence drifted,
+    and with ``verify_payloads`` every wire and, unless
+    ``defer_render_hashes``, every render. A file is hashed once, for every
+    check it answers; the engine decides how many are read at once. The rows
+    are walked and checked first, and every file they name is fenced by
+    stat on the way, so a refusal the walk can find is found before any byte
+    is hashed. Cells are then admitted in catalog order, each only after its
+    digests are verified, so a refusal leaves no unverified cell behind and
+    names the file that failed. The refusal rules are ``_fence_drift``'s: a
+    size change and an undigested drift refuse before anything is hashed.
 
     ``progress`` is called as ``progress(admitted, unit)`` after each
     admission, with the cumulative count of overlay cells admitted. The
@@ -1172,18 +1192,15 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False, defer_render
     # Each source's measured costs are read once, when its first selected
     # cell is met, and only for sources that answer a selected unit.
     source_costs, reference_units, added = {}, {}, {}
-    workers = _fence_hash_workers(hash_workers)
-    window = 2 * workers
-    pending, inflight, admitted = deque(), 0, 0
+    pending, jobs, admitted = [], [], 0
 
-    def admit(entry):
+    def admit(entry, results):
         # The one place a cell enters ``data``: in catalog order, on this
         # thread, and only after its hash job (if any) has proven it.
-        nonlocal inflight, admitted
+        nonlocal admitted
         name, fmt, cell, scalar, job, rehashed = entry
         if job is not None:
-            inflight -= 1
-            render_digest = job.result()
+            render_digest = next(results)
             if render_digest is not None:
                 cell["render_file_sha256"] = render_digest
         if rehashed:
@@ -1197,7 +1214,7 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False, defer_render
         if progress is not None:
             progress(admitted, f"{name}@{fmt}")
 
-    with EncoderAdoptionValidation() as proof_checks, _bounded_hash_pool(workers) as pool:
+    with EncoderAdoptionValidation() as proof_checks:
         for row, index in zip(rows, view["cell_sources"]):
             name, fmt = row["qname"], row["format"]
             if name not in selected_names:
@@ -1278,18 +1295,15 @@ def attach_candidate_overlay(data, bound, *, verify_payloads=False, defer_render
             hash_render = verify_payloads and not defer_render_hashes
             job = None
             if rehash or verify_payloads:
-                job = pool.submit(_verify_overlay_payload, observed, cell["record"]["blob_sha256"],
-                                  rehash=rehash, hash_render=hash_render)
-                inflight += 1
+                job = (observed["wire"][2]["bytes"]
+                       + (observed["render"][2]["bytes"] if hash_render else 0),
+                       _verify_overlay_payload, (observed, cell["record"]["blob_sha256"]),
+                       {"rehash": rehash, "hash_render": hash_render})
+                jobs.append(job)
             pending.append((name, fmt, cell, scalar, job, rehash))
-            # Admit the verified head of the stream, then hold the read-ahead
-            # window: never more than ``window`` files hashed ahead of it.
-            while pending and (pending[0][4] is None or pending[0][4].done()):
-                admit(pending.popleft())
-            while inflight >= window:
-                admit(pending.popleft())
-        while pending:
-            admit(pending.popleft())
+        with _fence_hashes(jobs) as results:
+            for entry in pending:
+                admit(entry, results)
     # One insertion per unit, so several added formats land in the one
     # deterministic order the assembler and the pair check use.
     for name, formats in added.items():

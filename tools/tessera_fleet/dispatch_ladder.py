@@ -38,18 +38,14 @@ OF_SHARDS = 120
 RESOURCE_DEMAND = {"cpu": 1, "gpu": 1, "mem_gb": 12}
 
 
-def row(workspace: Path, shard: int, *, python: str, source: str, rung: int,
-        calibrate_every: int) -> dict:
-    return {
-        "cwd": str(workspace),
-        "argv": [python, WRAPPER, "--shard", str(shard), "--source", source,
-                 "--rung", str(rung), "--calibrate-every", str(calibrate_every),
-                 "--result",
-                 f"results/glm53-tessera-ladder/rung{rung}/shard-{shard:05d}.json"],
-        "demand": dict(RESOURCE_DEMAND),
-        "tags": ["gb10"],
-        "env": dict(ENVIRONMENT),
-    }
+def probe_row(workspace: Path, shard: int, *, python: str, source: str, rung: int,
+              calibrate_every: int) -> dict:
+    return common.gb10_row(
+        workspace,
+        [python, WRAPPER, "--shard", str(shard), "--source", source,
+         "--rung", str(rung), "--calibrate-every", str(calibrate_every),
+         "--result", f"results/glm53-tessera-ladder/rung{rung}/shard-{shard:05d}.json"],
+        demand=RESOURCE_DEMAND, env=ENVIRONMENT)
 
 
 def main(argv=None) -> int:
@@ -78,7 +74,7 @@ def main(argv=None) -> int:
     if args.workspace is None and not args.dry_run:
         ap.error("--workspace is required unless --dry-run")
     workspace = (args.workspace or Path("<workspace>")).resolve()
-    rows = [row(workspace, shard, python=args.python, source=args.source,
+    rows = [probe_row(workspace, shard, python=args.python, source=args.source,
                 rung=args.rung, calibrate_every=args.calibrate_every)
             for shard in args.shards]
     if args.dry_run:
