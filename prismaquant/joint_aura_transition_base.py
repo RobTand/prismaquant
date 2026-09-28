@@ -36,7 +36,7 @@ def _bound(record, label):
     return path
 
 
-def _actual_execution(source_proof, repo_root):
+def actual_execution(source_proof, repo_root):
     """The package that is executing: its bytes, and the commit it runs as.
 
     ``source_proof`` is the caller's own proof builder; ``repo_root`` is the

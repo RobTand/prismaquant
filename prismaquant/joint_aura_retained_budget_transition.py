@@ -68,11 +68,11 @@ import weakref
 from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
 from .joint_aura_transition_base import (
     _COMMIT,
-    _actual_execution as _base_actual_execution,
     _bound,
     _bytes_identity,
     _committed_package,
     _require,
+    actual_execution,
     checkout_head_commit,
 )
 
@@ -348,7 +348,7 @@ def plan_difference(prepared_plan, run_plan):
 def _actual_execution():
     """The package that is executing: its bytes, and the commit it runs as."""
     root = Path(__file__).resolve().parents[1]
-    return _base_actual_execution(source_proof, root)
+    return actual_execution(source_proof, root)
 
 
 def _load_inputs(bindings):
