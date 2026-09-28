@@ -190,9 +190,9 @@ def test_the_helper_reads_the_contract_not_a_constant(tmp_path):
     assert lane.producer_authority_argv(_checkout(tmp_path / "unlisted", unlisted), "/a.py") == []
     renamed = json.loads(json.dumps(NEW_PIN_CONTRACT))
     renamed["producer_interface"]["reuse_authority"]["option"] = "--authority"
-    with pytest.raises(lane.TesseraExportLaneError, match="does not publish"):
+    with pytest.raises(lane.ProducerInterfaceError, match="does not publish"):
         lane.producer_authority_argv(_checkout(tmp_path / "renamed", renamed), "/a.py")
-    with pytest.raises(lane.TesseraExportLaneError, match="packages no"):
+    with pytest.raises(lane.ProducerInterfaceError, match="packages no"):
         lane.producer_authority_argv(tmp_path / "missing", "/a.py")
 
 
@@ -204,8 +204,27 @@ def test_run_pipeline_passes_the_authority_only_through_the_helper():
     assert '"${TESSERA_AUTHORITY_ARGS[@]}"' in call
     gate = script[:script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')]
     gate = gate[gate.rindex("TESSERA_AUTHORITY_LINES=$("):]
-    assert "producer_authority_argv" in gate
+    assert '"${PIPELINE_SCRIPT_DIR}/tessera_producer_interface.py"' in gate
     assert '"${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"' in gate
+
+
+def test_the_producer_interface_reader_stands_alone():
+    """run-pipeline.sh runs it by path, so it imports only the standard library."""
+    import ast
+    from prismaquant import tessera_producer_interface as interface
+    path = ROOT / "prismaquant" / "tessera_producer_interface.py"
+    imported = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        if isinstance(node, ast.Import):
+            imported |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            assert node.level == 0, "a relative import cannot run by path"
+            imported.add(node.module.split(".")[0])
+    assert imported <= {"__future__", "collections", "json", "pathlib", "sys", "typing"}
+    for name in ("EXPORTER_DRIVER", "PRODUCER_AUTHORITY_OPTION", "ProducerInterfaceError",
+                 "advertises_producer_authority", "checkout_contract_path",
+                 "producer_authority_argv"):
+        assert getattr(lane, name) is getattr(interface, name), name
 
 
 def _run_pipeline_authority_gate() -> str:

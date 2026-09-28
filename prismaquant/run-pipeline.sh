@@ -2494,7 +2494,10 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   # preflight exits 2 above before this line runs.
   # The reuse authority rides only when the checkout's contract attests the
   # exporter takes it (Tessera contract v40); an older pin gets today's argv.
-  if ! TESSERA_AUTHORITY_LINES=$(python3 -c 'import sys; from prismaquant.tessera_export_lane import producer_authority_argv; print("\n".join(producer_authority_argv(sys.argv[1], sys.argv[2])))' \
+  # The reader is stdlib-only and runs by path, so this JSON read does not
+  # import the prismaquant package (torch, transformers) first.
+  if ! TESSERA_AUTHORITY_LINES=$(python3 -c 'import runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name="__main__")' \
+      "${PIPELINE_SCRIPT_DIR}/tessera_producer_interface.py" \
       "${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"); then
     exit 2
   fi

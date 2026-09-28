@@ -156,70 +156,14 @@ def packaged_contract_path() -> Path:
         return Path(path)
 
 
-#: The exporter every PrismaQuant export argv names, relative to its checkout.
-EXPORTER_DRIVER = "experiments/export_tessera_serving.py"
-
-#: The option the reuse-authority seam adds (tessera#599), as the contract
-#: spells it. Read back from the contract below; never passed on this alone.
-PRODUCER_AUTHORITY_OPTION = "--producer-authority"
-
-#: Where a Tessera checkout packages its contract, under ``src/`` or flat --
-#: the same two layouts :func:`require_producer_repo_is_pinned` accepts.
-_CHECKOUT_CONTRACT = Path("tessera", "serving", "runtime_contract.json")
-
-
-def checkout_contract_path(tessera_checkout) -> Path:
-    """The ``runtime_contract.json`` a Tessera checkout packages; absent refuses."""
-    root = Path(tessera_checkout)
-    for candidate in (root / "src" / _CHECKOUT_CONTRACT, root / _CHECKOUT_CONTRACT):
-        if candidate.is_file():
-            return candidate
-    raise TesseraExportLaneError(
-        f"{root} packages no {_CHECKOUT_CONTRACT}, so whether its export "
-        "drivers take --producer-authority cannot be read from it")
-
-
-def advertises_producer_authority(contract: Mapping[str, Any],
-                                  driver: str = EXPORTER_DRIVER) -> bool:
-    """Does this Tessera contract attest that ``driver`` takes the option?
-
-    Principle 14: the capability is READ from the pinned runtime's contract
-    (``producer_interface.reuse_authority``, Tessera contract v40), never
-    asserted here. A contract with no ``producer_interface`` block predates
-    the option, and its drivers would refuse it as an unknown argument, so
-    the answer is no. A block that is present but does not name the option in
-    the shape v40 publishes refuses: it is not a contract this reader knows.
-    """
-    block = contract.get("producer_interface")
-    if block is None:
-        return False
-    reuse = block.get("reuse_authority") if isinstance(block, Mapping) else None
-    drivers = reuse.get("drivers") if isinstance(reuse, Mapping) else None
-    if (not isinstance(reuse, Mapping)
-            or reuse.get("option") != PRODUCER_AUTHORITY_OPTION
-            or not isinstance(drivers, list)
-            or not all(isinstance(item, str) for item in drivers)):
-        raise TesseraExportLaneError(
-            "the Tessera contract's producer_interface block does not publish "
-            f"reuse_authority.option={PRODUCER_AUTHORITY_OPTION!r} with a "
-            "drivers list; this reader cannot tell whether the exporter takes "
-            "the producer authority")
-    return driver in drivers
-
-
-def producer_authority_argv(tessera_checkout, authority_path,
-                            driver: str = EXPORTER_DRIVER) -> list[str]:
-    """``[--producer-authority, <path>]`` when the checkout attests it, else ``[]``.
-
-    Every PrismaQuant export argv goes through this, so a Tessera pin that
-    predates the option is handed the argv it was always handed, byte for
-    byte, and a pin that publishes it is handed PrismaQuant's reuse
-    authority (``tessera_reuse_authority.py``).
-    """
-    contract = json.loads(checkout_contract_path(tessera_checkout).read_text())
-    if not advertises_producer_authority(contract, driver):
-        return []
-    return [PRODUCER_AUTHORITY_OPTION, str(authority_path)]
+#: Whether a Tessera checkout's exporter takes the producer authority is read
+#: by a stdlib-only module, so ``run-pipeline.sh`` can ask it by path without
+#: importing this package (torch, transformers) to read one JSON block.
+from .tessera_producer_interface import (  # noqa: E402  (re-exported)
+    EXPORTER_DRIVER, PRODUCER_AUTHORITY_OPTION, ProducerInterfaceError,
+    advertises_producer_authority, checkout_contract_path,
+    producer_authority_argv,
+)
 
 
 def derive_executes(
