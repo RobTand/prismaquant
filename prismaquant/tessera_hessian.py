@@ -196,12 +196,13 @@ def activation_source(hessians: Mapping[str, Any], identity: Mapping[str, Any],
     ``source_scope`` must own the metadata reader until every consumer ends.
     """
     from tessera.export import ActivationSource
+    from .tessera_reuse_authority import CANONICAL_CAPTURE
 
     if reference_path is not None:
         if source_scope is None:
             raise ValueError("a resident Hessian reference requires an owning source scope")
         source = ActivationSource.from_capture(reference_path, resident_hessians=hessians,
-                                               **overrides)
+                                               canonical_capture=CANONICAL_CAPTURE, **overrides)
         source_scope.callback(source.hessians.close)
         source.hessians.require_provenance({**dict(identity), "hessian_role": "fit"})
         return source

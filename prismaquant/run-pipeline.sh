@@ -2497,6 +2497,7 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
     --plan-json "$TESSERA_PLAN" \
     --priced-inputs "$TESSERA_BUILD_JSON" \
     --priced-inputs-sha256 "$TESSERA_BUILD_SHA256" \
+    --producer-authority "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py" \
     --device "$EXPORT_DEVICE" \
     "${TESSERA_PRICED_INPUT_ARGS[@]}" \
     "${TESSERA_CACHED_UNIT_ARGS[@]}" \

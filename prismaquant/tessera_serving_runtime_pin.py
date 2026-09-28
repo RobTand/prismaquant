@@ -293,8 +293,11 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: Re-pinned 2026-09-27 to 20bf5346 after Tessera #669: a mixed-rate window
 #: span runs its rate calls on per-rate CUDA streams, bit-exact (PQ #1527).
 #: Contract v39 and this reviewed answer do not move.
+#: Re-pinned 2026-09-27 to cadc200c (Tessera #675, tessera#599 step 2): PQ's
+#: cached-unit and Hessian-reference record checks move to PQ's reuse authority
+#: (PQ #1537). Contract v39 and this reviewed answer do not move.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "20bf53464f9113f3115f454f8fa80453e71c0308"
+    "cadc200c9e705d02766cfce15e40284923f29242"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (

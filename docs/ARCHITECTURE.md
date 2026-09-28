@@ -110,6 +110,30 @@ menu, runtime pin or serving admission changes. Table world equality, native
 numerics, activation attestation, served-family and fixed-resource gates stay
 unchanged; this is not a real TP2 measurement or placement certificate.
 
+Re-stamped 2026-09-27 (PQ #1537, tessera#599 step 2): the exact Tessera pin is
+`cadc200c9e705d02766cfce15e40284923f29242`, the head of Tessera #675, pinned
+before that PR merges so both halves land together (re-pin to its merge
+commit). Tessera no longer names PrismaQuant records. The rooted cached-unit
+reader (`tessera.cached_units.v2`) takes a `ReuseAuthority` from its caller:
+catalog-extension and overlay schema, source adoption, reseal proof and served
+activation policy. The Hessian reference readers take the canonical capture
+`(schema, source)` from their caller, and both refuse by name without one. PQ's
+authority is `prismaquant/tessera_reuse_authority.py` (stdlib-only; the checks
+moved verbatim, and a 346-construction differential over Tessera's own
+fixtures matched every decision and reason string). `read_cached_unit_bundle`,
+`open_hessian_reference`, `tessera_hessian` and
+`tools/build_tessera_hessian_collection.py` pass it in process;
+`run-pipeline.sh` hands the exporter its path as `--producer-authority`. A new
+PQ record version is now a change to that file alone. The packaged contract
+(v39, `f2f90948…`), the admission answer and `grammar.py` are unchanged.
+`export.py` moves to `e54f3f1b…` (`from_capture` gains `canonical_capture`)
+with the wire functions byte-identical, so the legal inventory adds the
+equivalent `reader-pin-cadc200c` byte-state and no rate count moves. Its PB
+interpreters are `/home/rob/venvs/pq-pb461728e4-tessera-cadc200c` on dl380g10
+(PB build `054917049841`), sparky and sparklina, with a `-tf516` sibling on
+each Spark (PB builds sparky `932e0727851f`/`0c0421031a4b`, sparklina
+`e4bb44c990c7`/`93d85bea1147`); the `20bf5346` interpreters stay in place.
+
 Re-stamped 2026-09-27 (PQ #1527): the exact Tessera pin is
 `20bf53464f9113f3115f454f8fa80453e71c0308`, master after Tessera #669 (closing
 tessera#668). At a mixed-rate window rung, the batched LDLQ encode now runs a
@@ -3619,10 +3643,16 @@ fences, the wire and render digests and rendered-shape equality stay hard
 walls in both modes. At export, `tessera_export_lane.selected_cached_units_manifest`
 records such a cell's adoption with no proof and compares no proof-bound
 producer package for it (PQ #1438); the seal's producer package is still
-required. The pinned Tessera reader (`tessera/cached_unit.py` at af7a86d4)
-does not yet read that shape: it requires a covering reseal proof for every
-adoption and reads only the v1 R896 served activation policy, so a rooted
-selection with an unproven or non-R896 added cell refuses there.
+required. Tessera's rooted reader no longer judges these PQ records itself
+(tessera#599 step 2, PQ #1537): `tessera.cached_unit.CachedUnitBundle` takes a
+`ReuseAuthority` from its caller and refuses a rooted bundle by name without
+one, and PQ's authority is `prismaquant/tessera_reuse_authority.py` (the
+checks moved there verbatim; `read_cached_unit_bundle` passes it, and
+`run-pipeline.sh` hands the exporter its path as `--producer-authority`). That
+authority still requires a covering reseal proof for every adoption in strict
+mode (permissive mode admits it with a warning) and reads the v1 R896 and v2
+served activation policies, so a strict rooted selection with an unproven
+added cell refuses there.
 
 A catalog extension is priced by a **full re-price**, not a merge (PQ #1432).
 The join (`joint_quanta_join.py`, the `coverage` check) requires every unit's

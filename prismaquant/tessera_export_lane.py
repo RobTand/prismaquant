@@ -1576,6 +1576,7 @@ def _mtp_hessian_collection_proof(config, metadata, selected, block, owner):
     from tessera import hessian_capture as reader
     from .glm_mtp_selection import (_bound_payload, backfill_mtp_selection_wires,
                                     WIRE_BINDING_SCHEMA)
+    from .tessera_reuse_authority import CANONICAL_CAPTURE
 
     collection_type = getattr(reader, 'ReferenceHessianCollection', None)
     if collection_type is None or not isinstance(owner, collection_type):
@@ -1595,7 +1596,7 @@ def _mtp_hessian_collection_proof(config, metadata, selected, block, owner):
     references = owner.binding()['references']
     children, by_unit = [], {}
     for reference in references:
-        with reader.ReferenceHessians(reference['path']) as child:
+        with reader.ReferenceHessians(reference['path'], canonical_capture=CANONICAL_CAPTURE) as child:
             if (child.document_sha256 != reference['sha256'] or
                     child.binding() != reference['binding']):
                 raise TesseraExportLaneError('Hessian collection child binding changed')
@@ -2321,10 +2322,12 @@ def read_cached_unit_bundle(manifest, directory, expected_units, source):
     """Read with the producer's mode, retaining and surfacing every warning."""
     import sys
     from tessera.cached_unit import CachedUnitBundle
+    from .tessera_reuse_authority import PRODUCER_AUTHORITY
 
     bundle = CachedUnitBundle(
         manifest, directory, expected_units, source,
-        encoder_source_proof_mode=cached_unit_encoder_source_proof_mode())
+        encoder_source_proof_mode=cached_unit_encoder_source_proof_mode(),
+        authority=PRODUCER_AUTHORITY)
     for warning in bundle.warnings:
         print('[cached-unit warning] ' + json.dumps(warning, sort_keys=True),
               file=sys.stderr)
