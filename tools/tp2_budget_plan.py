@@ -60,10 +60,10 @@ import math
 import os
 from pathlib import Path
 import re
-import struct
 import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+from prismaquant import source_read_plan
 
 SCHEMA = "prismaquant.tp2_budget_plan.v1"
 
@@ -151,23 +151,16 @@ def tensor_bytes(dtype: str, shape: Sequence[int]) -> int:
 
 
 def read_safetensors_header(path: Path) -> Dict[str, Any]:
-    """Parse the 8-byte-length JSON header only.  Tensor data is never read."""
-    with open(path, "rb") as fh:
-        raw = fh.read(8)
-        if len(raw) != 8:
-            raise HeaderError(f"{path}: file shorter than the 8-byte header length")
-        (hlen,) = struct.unpack("<Q", raw)
-        if hlen <= 0 or hlen > 512 * 1024 * 1024:
-            raise HeaderError(f"{path}: implausible safetensors header length {hlen}")
-        blob = fh.read(hlen)
-        if len(blob) != hlen:
-            raise HeaderError(f"{path}: truncated safetensors header")
+    """Parse the 8-byte-length JSON header only.  Tensor data is never read.
+
+    Delegates to the repository's owning reader
+    (``prismaquant.source_read_plan.read_safetensors_header``) and maps its
+    refusal to this tool's ``HeaderError`` so the CLI contract is unchanged.
+    """
     try:
-        header = json.loads(blob)
-    except json.JSONDecodeError as exc:
-        raise HeaderError(f"{path}: safetensors header is not JSON ({exc})") from exc
-    if not isinstance(header, dict):
-        raise HeaderError(f"{path}: safetensors header is not a JSON object")
+        header, _base, _size = source_read_plan.read_safetensors_header(str(path))
+    except ValueError as exc:
+        raise HeaderError(f"{path}: {exc}") from exc
     return header
 
 
