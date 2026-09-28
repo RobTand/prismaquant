@@ -166,3 +166,39 @@ def test_a_live_probe_over_its_state_bound_is_refused_with_its_measured_growth()
         max_transitions=10 * pact_hull.DEFAULT_MAX_TRANSITIONS)
     assert [dict(v.assignment) for v in raised.vertices] == \
         [dict(v.assignment) for v in exact.vertices]
+
+
+def _order_coordinate_problem(n_units=20):
+    """Every unit: A costs 2 at 2 bytes, B costs 1 at 1 byte, same time.
+
+    A is dominated in (bytes, Δloss) and lexically first, so a fold that keeps
+    lexical order as a dominance coordinate keeps one prefix per count of A's
+    (nothing lexically earlier dominates it), while the (bytes, Δloss) Pareto
+    set is the all-B prefix alone.
+    """
+    candidates = {f"u{u:02d}": [Candidate("A", 0.0, 2, 2.0), Candidate("B", 0.0, 1, 1.0)]
+                  for u in range(n_units)}
+    time_ms = {(u, f): 1.0 for u in candidates for f in ("A", "B")}
+    return candidates, time_ms
+
+
+def test_a_binding_probe_holds_only_the_two_dimensional_pareto_set():
+    candidates, time_ms = _order_coordinate_problem()
+    # 20 units: every smallest option fits in 20 bytes, every largest in 40.
+    budget = 30
+    assert pact_hull._byte_axis(candidates, budget)[0] == pact_hull.BYTE_AXIS_LIVE
+    assignment = pact_hull.probe_assignment(candidates, time_ms, (1.0, 0.0),
+                                            max_memory_bytes=budget, max_states=2)
+    assert assignment == {u: "B" for u in candidates}
+
+
+def test_a_probe_prices_every_option_exactly():
+    # w_d*d + w_t*t = 2**53 + 1 rounds to 2**53 in float64 and ties P with Q,
+    # whose exact cost is 1 lower. Both byte axes must pick Q.
+    candidates = {"u0": [Candidate("P", 0.0, 0, 2.0 ** 53), Candidate("Q", 0.0, 1, 2.0 ** 53)],
+                  "u1": [Candidate("X", 0.0, 0, 0.0), Candidate("Y", 0.0, 5, 1.0)]}
+    time_ms = {("u0", "P"): 1.0, ("u0", "Q"): 0.0, ("u1", "X"): 0.0, ("u1", "Y"): 1.0}
+    for budget, axis in ((1, pact_hull.BYTE_AXIS_LIVE), (6, pact_hull.BYTE_AXIS_SLACK)):
+        assert pact_hull._byte_axis(candidates, budget)[0] == axis
+        assert pact_hull.probe_assignment(candidates, time_ms, (1.0, 1.0),
+                                          max_memory_bytes=budget) == {"u0": "Q", "u1": "X"}
