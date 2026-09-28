@@ -20,7 +20,7 @@ def adopt_source_digests(source, binding, output, *, expected_content_sha256,
     ``adopt`` exactly as a fresh read would not be recorded.
     """
     from . import cost_streaming as owner
-    from .tessera_joint_allocation import _read_bound, _bound_stat_fence
+    from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
     from .cost_stage_checkpoint import publish_new_bytes
     from tessera.source_digest_cache import SourceDigestCache
     source=Path(source).resolve();path=Path(binding['path'])

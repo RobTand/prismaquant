@@ -25,6 +25,8 @@ import os
 import time
 from pathlib import Path
 
+from .dev_mode import dev_mode_enabled, dev_stamp
+
 
 #: The record schema PrismaBuild's ``ProgressWatch`` accepts.  A record with
 #: any other value here is not advancement, so this string is a contract with
@@ -75,6 +77,73 @@ def report(phase: str, units_completed: int, *, unit: str = "anchors") -> bool:
         return False
     return True
 
+
+
+_DEV_SOURCE_SHA256_MEMO: str | None = None
+
+
+def _progress_dev_source_sha256():
+    """The executing package's actual tree digest, for the dev stamps.
+
+    Lazy so importing this module never pulls ``aura_cost``; only a dev-mode
+    progress commit that opted into the stamp pays for the hash -- and it pays
+    it **once**: the digest is memoized after the first commit because a
+    progress line fires per durable unit and a walk commits tens of thousands
+    of them. Measured live
+    on stage A (2026-09-20, action 398c81b4): the un-memoized form re-walked
+    and re-hashed the whole package tree on every unit, holding the head
+    walk to ~0.3 units/s of pure pathlib with zero IO -- the dev stamp is an
+    identity, and the executing tree's identity does not change mid-run.
+    """
+    global _DEV_SOURCE_SHA256_MEMO
+    if _DEV_SOURCE_SHA256_MEMO is None:
+        from .aura_cost import _aura_source_sha256
+        _DEV_SOURCE_SHA256_MEMO = _aura_source_sha256()
+    return _DEV_SOURCE_SHA256_MEMO
+
+
+def commit(units, phase, unit=None):
+    """Report cumulative durable units to PrismaBuild; a no-op elsewhere.
+
+    The Stage A/B form of :func:`report` (moved from the Tessera lane
+    module in decoupling step 7, PQ #1555). Its bytes are its own and stay
+    so: ``unit`` defaults to ``None`` and is written as given, the
+    temporary file is ``<path>.<pid>.tmp``, and an ``OSError`` propagates,
+    where :func:`report` returns ``False``.
+
+    Held byte for byte against the published submission skill's snippet
+    (``skills/prismabuild/SKILL.md``, ``pb-progress-snippet``) so an action
+    inside a container that cannot import PrismaBuild still reports. It is a
+    no-op when the action was not admitted under the progress contract, so it
+    is called unconditionally rather than by testing how we were launched.
+
+    Under ``PRISMAQUANT_DEV_MODE=1`` the record may carry the dev stamp in
+    its metadata -- **opt-in** via ``PRISMAQUANT_DEV_PROGRESS_STAMP=1``.
+    The stamp is provenance ceremony; Rob's standing campaign directive
+    (2026-09-13) is that dev-mode campaign runs incur no sealing overhead,
+    and the per-line stamp measurably did: before the memo it re-hashed the
+    whole executing tree on every durable unit (2026-09-20, #826). The
+    run's identity is already recorded where it belongs -- once, in the
+    results record's top-level dev stamp and the startup implementation
+    line -- so the default progress record stays byte-identical to the
+    certified shape. The worker's ``ProgressWatch`` reads the fields it
+    knows and ignores the rest either way.
+    """
+    path = os.environ.get(PATH_ENV)
+    token = os.environ.get(TOKEN_ENV)
+    if not path or not token:
+        return False
+    record = {"schema": RECORD_SCHEMA, "token": token,
+              "phase": phase, "units_completed": units, "unit": unit,
+              "reported_unix": time.time()}
+    if (dev_mode_enabled()
+            and os.environ.get("PRISMAQUANT_DEV_PROGRESS_STAMP") == "1"):
+        record.update(dev_stamp(_progress_dev_source_sha256()))
+    temporary = f"{path}.{os.getpid()}.tmp"
+    with open(temporary, "w") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+    os.replace(temporary, path)
+    return True
 
 #: What a consumer blocked on its own staged range writes beside its progress
 #: report (PrismaBuild #989).  PrismaBuild's ``no_progress`` rung reads it,

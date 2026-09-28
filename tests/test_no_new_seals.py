@@ -73,6 +73,7 @@ MODULES = (
     "prismaquant/stage_a_chain_resume.py",
     "prismaquant/stage_a_chain_seed.py",
     "prismaquant/stage_a_chain_split.py",
+    "prismaquant/stage_inputs.py",
     "prismaquant/tessera_joint_aura.py",
     "tools/dispatch_joint_quanta.py",
     "tools/dispatch_tessera_campaign.py",
@@ -263,7 +264,7 @@ ALLOWLIST = {
     ("prismaquant/joint_cost_stage_a.py", "bind_stage_a_produced_output"): (
         1, RESOURCE, "the produced-output template's durable payload maximum against the "
         "running artifact ceiling: PrismaBuild admits the one and the run spends the other"),
-    ("prismaquant/tessera_joint_aura.py", "_bound"): (
+    ("prismaquant/stage_inputs.py", "bound"): (
         1, INTEGRITY, "an artifact's bytes against the digest it was bound under"),
     ("prismaquant/tessera_joint_aura.py", "require_encoder_source_reuse_record"): (
         1, STRUCTURE, "a reuse record names two different encoder seals"),
