@@ -1259,6 +1259,7 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
     from .joint_layer_quanta import (
         CHECKPOINT_LOAD_PHASE,
         MANIFEST_SCHEMA_V2,
+        append_read_phase,
         executable_bound_phase_name,
         executable_source_phase_name,
         executable_spill_phase_name,
@@ -1320,12 +1321,10 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
 
     def seal(name: str, indices: list[int]) -> None:
         nonlocal cumulative
-        size = sum(entries[index]["bytes"] for index in indices)
-        if size <= 0:
-            raise QuantumHandoffRefused(f"read phase {name} is empty")
-        cumulative += size
-        read_phases.append({"name": name, "entry_indices": list(indices),
-                            "bytes": size, "cumulative_bytes": cumulative})
+        cumulative = append_read_phase(
+            read_phases, entries, name, indices, cumulative,
+            refuse=lambda phase: QuantumHandoffRefused(
+                f"read phase {phase} is empty"))
 
     streamed = annotations.get("replay_mode") == "spill"
     incoming: dict[str, list[dict]] = {}
