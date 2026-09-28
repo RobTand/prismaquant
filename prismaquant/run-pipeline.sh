@@ -184,6 +184,20 @@ fi
 # extrapolation; it is never the default, because silence must not become a
 # 4-bit rung.
 : "${TESSERA_PLAN_COVER:=as-allocated}"
+# TESSERA_RESEARCH_ROUTE_OVERRIDE (#1275) is the explicit per-run admission of
+# a research route: its value is the operator's REASON, stamped on the shipcard
+# with the route histogram.  It is the ONLY way an emulation_only serving
+# profile (glm_packed_research_sm121) reaches the Tessera export lane; the
+# preflight below and tessera_export_lane refuse it for any other profile.
+: "${TESSERA_RESEARCH_ROUTE_OVERRIDE:=}"
+TESSERA_RESEARCH_OVERRIDE_ARGS=()
+if [[ -n "$TESSERA_RESEARCH_ROUTE_OVERRIDE" ]]; then
+  if [[ "$EXPORT_CONTAINER" != "tessera" ]]; then
+    echo "[pipeline] ERROR: TESSERA_RESEARCH_ROUTE_OVERRIDE applies only to EXPORT_CONTAINER=tessera." >&2
+    exit 2
+  fi
+  TESSERA_RESEARCH_OVERRIDE_ARGS=(--research-route-override "$TESSERA_RESEARCH_ROUTE_OVERRIDE")
+fi
 if [[ "$EXPORT_CONTAINER" == "gguf" ]]; then
   : "${ACTIVATION_ROWS_LIMIT:=1024}"
 else
@@ -255,27 +269,35 @@ if ! TARGET_PROFILE_RESOLVED="$(
   PQ_EXPORT_CONTAINER="$EXPORT_CONTAINER" \
   PQ_TARGET_PROFILE="$TARGET_PROFILE" \
   PQ_TARGET_PROFILE_DEFAULT="$TARGET_PROFILE_DEFAULT" \
+  PQ_RESEARCH_ROUTE_OVERRIDE="$TESSERA_RESEARCH_ROUTE_OVERRIDE" \
   python3 - <<'PY'
 import os
 import sys
 
 from prismaquant.model_profiles import detect_profile
 from prismaquant.serving_profiles import (
+    load_serving_profile,
     require_lane_supported,
     resolve_target_profile,
 )
 
 profile = detect_profile(os.environ["PQ_MODEL_PATH"])
-try:
-    require_lane_supported(profile, os.environ["PQ_EXPORT_CONTAINER"])
-except SystemExit as exc:
-    print(str(exc), file=sys.stderr)
-    raise SystemExit(2) from None
-print(resolve_target_profile(
+resolved = resolve_target_profile(
     profile,
     os.environ.get("PQ_TARGET_PROFILE") or None,
     default=os.environ["PQ_TARGET_PROFILE_DEFAULT"],
-))
+)
+# #1275: an explicit per-run research-route override is the ONLY admission of
+# an undeclared lane, and only for an emulation_only research profile.  Any
+# other profile keeps the declared-lane refusal exactly as it was.
+research_override = bool(os.environ.get("PQ_RESEARCH_ROUTE_OVERRIDE", "").strip())
+if not (research_override and load_serving_profile(resolved).emulation_only):
+    try:
+        require_lane_supported(profile, os.environ["PQ_EXPORT_CONTAINER"])
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2) from None
+print(resolved)
 PY
 )"; then
   echo "[pipeline] ERROR: preflight refused this run (export lane not declared for the architecture, or serving-profile resolution failed)." >&2
@@ -1205,6 +1227,7 @@ STAGE_SETTINGS_ENV=(
   "VALIDATED_FRONTIER_CALIB_SKIP_FIRST=$VALIDATED_FRONTIER_CALIB_SKIP_FIRST"
   "VALIDATED_FRONTIER_KL_SCOPE=$VALIDATED_FRONTIER_KL_SCOPE"
   "TESSERA_PLAN_COVER=$TESSERA_PLAN_COVER"
+  "TESSERA_RESEARCH_ROUTE_OVERRIDE=$TESSERA_RESEARCH_ROUTE_OVERRIDE"
   "TESSERA_PLATFORM=$TESSERA_RESOLVED_PLATFORM"
   "TESSERA_RUNTIME_IMAGE=${TESSERA_RUNTIME_IMAGE:-}"
   "TESSERA_EXECUTION_MODE=${TESSERA_EXECUTION_MODE:-}"
@@ -2369,15 +2392,17 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   # the checkpoint selects the plugin. Scoped targets additionally bind the
   # exact image and execution mode rather than inheriting wrapper defaults.
   #
-  # TWO CALLS OUT, ZERO CODECS IN. The layer_config -> plan translation and
-  # the encode both live in the Tessera repository and are NAMED here, never
-  # copied: `plan_from_layer_config.py` is the only place the
-  # `TESSERA_<BASE>_K<arity>_R<rung>` spelling is turned into the exporter's
-  # (grid, q256), and `export_tessera_serving.py` is the only place the wire
-  # is written. A second copy of either in this repository would be a second
-  # place a wire recipe can drift, which is exactly what the producer/consumer
+  # ONE CALL OUT, ZERO CODECS IN. The layer_config -> plan translation lives
+  # in THIS repository (`python -m prismaquant.tessera_plan_writer`, #1587:
+  # the `TESSERA_<BASE>_K<arity>_R<rung>` spelling and the charged-bits
+  # accounting are the producer's own records, not the exporter's), and the
+  # encode is Tessera's supported package entry point
+  # (`python -m tessera.export_serving`, RobTand/tessera#687), NAMED here and
+  # run with the pin-verified checkout first on its PYTHONPATH, never copied:
+  # a second copy of either in this repository would be a second place a
+  # wire recipe can drift, which is exactly what the producer/consumer
   # boundary exists to prevent. The lane preflight above has already refused
-  # if TESSERA_REPO does not hold both.
+  # if TESSERA_REPO does not hold the declared exporter.
   # Re-read the allocation's scope and actual source header dimensions even
   # when an old plan exists: a cached plan is not an admission receipt.
   TESSERA_BUILD_JSON="${WORK_DIR}/artifacts/tessera_build.json"
@@ -2401,7 +2426,8 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
       --print-build-sha256 \
       "${TESSERA_PREFLIGHT_CACHE_ARGS[@]}" \
       --target-profile "$TARGET_PROFILE_RESOLVED" "${TESSERA_SCOPE_ARGS[@]}" \
-      "${TESSERA_PRICED_INPUT_ARGS[@]}"); then
+      "${TESSERA_PRICED_INPUT_ARGS[@]}" \
+      "${TESSERA_RESEARCH_OVERRIDE_ARGS[@]}"); then
     exit 2
   fi
   TESSERA_PLAN="${WORK_DIR}/artifacts/tessera_plan.json"
@@ -2429,13 +2455,14 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   if [[ ! -f "$TESSERA_PLAN" ]]; then
     echo "[pipeline] [4/4] translating layer_config.json -> Tessera plan (cover=${TESSERA_PLAN_COVER}) ..."
     # Write-then-rename: a crashed translation must not leave a partial plan
-    # that the skip-gate above then trusts.
-    python3 "${TESSERA_REPO%/}/experiments/plan_from_layer_config.py" \
+    # that the skip-gate above then trusts. The writer is PrismaQuant's own
+    # module (#1587) -- no --prismaquant flag: there is no translation layer
+    # left to point at this repository.
+    python3 -m prismaquant.tessera_plan_writer \
       "$TESSERA_PLAN_ASSIGNMENT" \
       "$MODEL_PATH" \
       "${TESSERA_PLAN}.tmp" \
       --cover "$TESSERA_PLAN_COVER" \
-      --prismaquant "$PIPELINE_SCRIPT_DIR/.." \
       2>&1 | tee "${WORK_DIR}/logs/tessera_plan.log"
     if [[ "$TESSERA_PLAN_ASSIGNMENT" != "${WORK_DIR}/artifacts/layer_config.json" ]]; then
       TESSERA_PLAN_ASSIGNMENT_DIGEST=$(sha256sum "$TESSERA_PLAN_ASSIGNMENT")
@@ -2445,8 +2472,8 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
       fi
     fi
     mv "${TESSERA_PLAN}.tmp" "$TESSERA_PLAN"
-    # The translator writes `<out>.provenance.json` beside the plan: the
-    # source path, the allocation's own __prismaquant__ block, the coverage
+    # The writer writes `<out>.provenance.json` beside the plan: the source
+    # path, the allocation's own __prismaquant__ block, the coverage
     # decision, and the per-unit shape/rung/wire-bytes table an export is
     # checked against. It moves with the plan, not after it. An explicit `if`
     # rather than `[[ ... ]] &&` because a false test would be this block's
@@ -2494,9 +2521,11 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   # correct; omitting them on an H-aware allocation is unreachable -- the
   # preflight exits 2 above before this line runs.
   # The reuse authority rides only when the checkout's contract attests the
-  # exporter takes it (Tessera contract v40); an older pin gets today's argv.
-  # The reader is stdlib-only and runs by path, so this JSON read does not
-  # import the prismaquant package (torch, transformers) first.
+  # exporter takes it (Tessera contract v40+); a pin whose contract has no
+  # producer_interface block gets today's argv, and a pin whose block does
+  # not list the exporter refuses rather than silently dropping the option
+  # (#1587). The reader is stdlib-only and runs by path, so this JSON read
+  # does not import the prismaquant package (torch, transformers) first.
   if ! TESSERA_AUTHORITY_LINES=$(python3 -c 'import runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name="__main__")' \
       "${PIPELINE_SCRIPT_DIR}/tessera_producer_interface.py" \
       "${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"); then
@@ -2506,7 +2535,11 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   if [[ -n "$TESSERA_AUTHORITY_LINES" ]]; then
     mapfile -t TESSERA_AUTHORITY_ARGS <<< "$TESSERA_AUTHORITY_LINES"
   fi
-  python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py" \
+  # The exporter resolves from the pin-verified checkout FIRST: a Tessera
+  # installed beside the checkout (the PB venvs install one non-editable)
+  # must never answer `python -m tessera.export_serving` while a different
+  # checkout wrote the plan the preflight checked (principle 8).
+  PYTHONPATH="${TESSERA_REPO%/}/src${PYTHONPATH:+:$PYTHONPATH}" python3 -m tessera.export_serving \
     "$MODEL_PATH" "${WORK_DIR}/exported" \
     --plan-json "$TESSERA_PLAN" \
     --priced-inputs "$TESSERA_BUILD_JSON" \
