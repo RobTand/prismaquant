@@ -222,7 +222,7 @@ def test_a_unit_route_whose_cells_name_other_code_is_unattested_and_says_why(tmp
 
 
 def test_a_v3_pin_admits_no_cell_that_names_no_code(tmp_path):
-    """The packaged v40 cells name no code, so a v3 pin attests none of them."""
+    """The packaged cells (v42) name no code, so a v3 pin attests none of them."""
     table = lane.load_eligibility_table(
         "0.1.0", contract_path=_write(tmp_path, _packaged_contract()))
     for cell in table.cells:
