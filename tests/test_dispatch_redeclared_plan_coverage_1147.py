@@ -44,10 +44,14 @@ from test_stageb_readset_source_coverage import (  # noqa: E402
     PREFIX, _source_model, _with_source_paths,
 )
 
+from prismaquant.joint_retained_window_plan import HOST_RESIDENT_BUDGET_FIELDS  # noqa: E402
+
 #: The resource policy the plan binds, as ``verify_policy`` returns it. The
 #: policy file itself is not under test; the spec below matches its limits.
 POLICY = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30,
-                     "gpu_bytes": 72 << 30}}
+                     "gpu_bytes": 72 << 30},
+          "budget": {name: 0 for name in (*HOST_RESIDENT_BUDGET_FIELDS,
+                                  "retained_render_cap_bytes")}}
 
 
 def _sha(path: Path) -> str:

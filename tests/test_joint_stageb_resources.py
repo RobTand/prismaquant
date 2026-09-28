@@ -212,6 +212,32 @@ def test_a_capture_that_does_not_fit_refuses_the_policy(resource_fixture):
         derive_policy(inputs, **limits, capture=_capture(4, 16 << 20))
 
 
+def test_a_host_held_cotangent_plane_is_priced_into_the_render_bound(resource_fixture, tmp_path):
+    """PQ #1141: the plane the checkpoint load holds on the host is a host owner."""
+    from prismaquant.joint_retained_window_plan import HOST_RESIDENT_BUDGET_FIELDS
+    inputs, _original, _extended, _binding, legacy = resource_fixture
+    assert 'cotangent' not in legacy and 'cotangent' not in legacy['derivation']
+    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    plane = 6 << 20
+    policy = derive_policy(inputs, **limits, cotangent={'host_plane_bytes': plane})
+    assert policy['cotangent'] == {'host_plane_bytes': plane}
+    budget = policy['budget']
+    resident = sum(budget[name] for name in HOST_RESIDENT_BUDGET_FIELDS)
+    assert budget['retained_render_cap_bytes'] + resident + plane <= limits['host_bytes']
+    assert verify_policy(bound(tmp_path / 'plane.json', policy)) == policy
+    forged = copy.deepcopy(policy)
+    forged['cotangent']['host_plane_bytes'] = 1
+    with pytest.raises(ValueError, match='independent resource derivation'):
+        verify_policy(bound(tmp_path / 'forged-plane.json', forged))
+
+
+def test_a_cotangent_plane_that_exhausts_the_host_refuses_the_policy(resource_fixture):
+    inputs, *_ = resource_fixture
+    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    with pytest.raises(RuntimeError, match='cotangent plane'):
+        derive_policy(inputs, **limits, cotangent={'host_plane_bytes': 16 << 20})
+
+
 def test_the_receipt_is_read_once_for_its_bytes_and_digest(tmp_path):
     import hashlib
     from prismaquant.joint_stageb_resources import workspace_from_receipt
