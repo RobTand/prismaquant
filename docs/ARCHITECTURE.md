@@ -29,6 +29,26 @@ dormant under the tracked v2 pin, and every gate answers as before.
   the code column at the bump that activates v3, and that bump needs the
   cells re-censused at `serving_commit`.
 
+Calibration-cache digest consolidation (2026-09-27,
+`astra/digest-calibration-1512`, PQ #1512): fourteen primitive digest sites
+in `prismaquant/tessera_calibration_cache.py` now call named
+`digests.JsonProfile`/byte owners instead of inline `hashlib` and
+`json.dumps` recipes -- the pretty indented capture files, the strict compact
+identity/policy texts and compares, the lax streamed load-execution identity
+(kept deliberately lax: `allow_nan` stays permissive there while the owner
+compare stays strict), raw census/adoption/contract hex digests, and the
+ordered-receipt hex chain. All encodings are byte-identical;
+`tests/test_digest_calibration_cache_1512.py` recomputes 22 pre-change PB
+golden rows (file bytes, texts, streamed hashes, chains through
+`_load_execution`/`fold_load_receipt`/`merge_load_execution`). The guarded
+streaming `sha256()` file reader (descriptor aliases, stat fences, page
+release) and the default-separator identity JSON in
+`CaptureSourceAuthentication.__init__` remain raw on purpose -- the first is
+the production-cache guard itself, the second has no matching profile and is
+parsed-only. Gated primitive sites 697 → 683. No pipeline default, format,
+serving lane or ship gate changes. Inventory:
+`docs/design/digest_calibration_cache_1512.md`.
+
 Primitive digest-site ratchet (2026-09-27, `astra/digest-site-ratchet`, PQ
 #1508): the #1298 shrink-only duplication baseline now also records every raw
 `hashlib` constructor site and literal `sort_keys=True` JSON encoding outside
