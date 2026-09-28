@@ -24,21 +24,28 @@ A8_BODY_MTP = (
 )
 A8_STAMP = "66b321d8e0e9c7465861fd5f30a261f8fcf7a74d3b8d5ee278a7b7e76b92d520"
 
-RELEASE_PICK = (
+STALE_STAMP_PICK = (  # pre-#1632 output: stamp binds the body without layer 45
     "/mnt/shared/tessera-measurements/pact-e4m3-accuracy-20260928"
     "/corrected/accuracy/layer_config.json"
 )
-RELEASE_STAMP = "086c73026b18518c8cfe2784282fb384ed27e74fb970106f106238c56b6ebc6e"
+STALE_STAMP = "086c73026b18518c8cfe2784282fb384ed27e74fb970106f106238c56b6ebc6e"
+
+RESTAMPED_PICK = (  # the release pick re-allocated on the #1632 fix (PB 39b2cf0c)
+    "/mnt/shared/tessera-measurements/pact-e4m3-accuracy-20260928"
+    "/corrected/accuracy-1632/layer_config.json"
+)
+RESTAMPED_STAMP = "69d7c894"  # prefix; the full digest is read from the stamp below
 
 requires_shared_fixtures = pytest.mark.skipif(
-    not (os.path.exists(A8_BODY_MTP) and os.path.exists(RELEASE_PICK)),
+    not (os.path.exists(A8_BODY_MTP) and os.path.exists(STALE_STAMP_PICK) and os.path.exists(RESTAMPED_PICK)),
     reason="needs /mnt/shared fixtures (fleet-only; CI has no shared mount)",
 )
 
 
 @requires_shared_fixtures
 def test_pristine_allocator_output_binds_by_stamp():
-    stamp = _bind_selected_assignment(A8_BODY_MTP, A8_STAMP)
+    stamp, assignment, _meta = _bind_selected_assignment(A8_BODY_MTP, A8_STAMP)
+    assert assignment
     assert stamp["selection_assignment_sha256"] == A8_STAMP
     assert stamp["budget_bytes"] == 175642157752
 
@@ -46,7 +53,7 @@ def test_pristine_allocator_output_binds_by_stamp():
 @requires_shared_fixtures
 def test_diverged_pick_refuses_naming_both_digests():
     with pytest.raises(ValueError, match="086c7302.*69d7c894"):
-        _bind_selected_assignment(RELEASE_PICK, RELEASE_STAMP)
+        _bind_selected_assignment(STALE_STAMP_PICK, STALE_STAMP)
 
 
 def test_unstamped_selection_refuses(tmp_path):
@@ -63,3 +70,14 @@ def test_unstamped_selection_refuses(tmp_path):
 def test_flag_must_name_the_stamped_digest():
     with pytest.raises(ValueError, match="flag names"):
         _bind_selected_assignment(A8_BODY_MTP, "0" * 64)
+
+
+@requires_shared_fixtures
+def test_restamped_release_pick_binds_its_mtp_bearing_digest():
+    """After #1632 the stamp covers layer 45, so the release pick binds."""
+    stamped = json.loads(open(RESTAMPED_PICK).read())["__prismaquant__"][
+        "whole_artifact_budget"]["selection_assignment_sha256"]
+    assert stamped.startswith(RESTAMPED_STAMP)
+    stamp, assignment, _meta = _bind_selected_assignment(RESTAMPED_PICK, stamped)
+    assert stamp["selection_assignment_sha256"] == stamped
+    assert any(".layers.45." in name for name in assignment)
