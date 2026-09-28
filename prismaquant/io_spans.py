@@ -510,6 +510,51 @@ def mem_available_bytes(path: str | Path = "/proc/meminfo") -> int:
     return value
 
 
+#: The kernel files the host reading is taken from. Looked up at call time.
+PROC_MEMINFO = Path("/proc/meminfo")
+PROC_ZONEINFO = Path("/proc/zoneinfo")
+
+
+def per_cpu_free_bytes(path: str | Path | None = None) -> int:
+    """Free pages parked on the kernel's per-CPU lists, in bytes.
+
+    A freed page can sit on a per-CPU list, which ``MemAvailable`` does not
+    count until the kernel trims the list. ``/proc/zoneinfo`` gives each list's
+    length as a ``count:`` line (in pages). A host without the file has none
+    to count and reads 0.
+    """
+    try:
+        lines = Path(PROC_ZONEINFO if path is None else path).read_text().splitlines()
+    except FileNotFoundError:
+        return 0
+    pages = sum(int(line.split()[1]) for line in lines
+                if line.strip().startswith("count:"))
+    return pages * os.sysconf("SC_PAGE_SIZE")
+
+
+def host_memory(meminfo: str | Path | None = None,
+                zoneinfo: str | Path | None = None) -> tuple[int, int]:
+    """``(available, MemTotal)`` in bytes: the one host reading.
+
+    ``available`` is ``MemAvailable`` plus the pages on the per-CPU free lists
+    (:func:`per_cpu_free_bytes`), so a free returns its bytes to it wherever
+    the pages land. The capture guard and the GB10 reclaim probe both read
+    this. Raises ``OSError`` when ``/proc/meminfo`` cannot be read and
+    ``RuntimeError`` when it lacks ``MemAvailable`` or ``MemTotal``.
+    """
+    values = read_meminfo(PROC_MEMINFO if meminfo is None else meminfo)
+    if "MemAvailable" not in values or "MemTotal" not in values:
+        raise RuntimeError("/proc/meminfo has no MemAvailable or MemTotal")
+    return (values["MemAvailable"] + per_cpu_free_bytes(zoneinfo),
+            values["MemTotal"])
+
+
+def host_available_bytes(meminfo: str | Path | None = None,
+                         zoneinfo: str | Path | None = None) -> int:
+    """The host's ``MemAvailable`` plus the per-CPU free pages, in bytes."""
+    return host_memory(meminfo, zoneinfo)[0]
+
+
 def read_mountstats(path: str | Path = "/proc/self/mountstats") -> dict[str, dict]:
     """Per mount point, the NFS client's ``bytes`` row and every per-op row.
 

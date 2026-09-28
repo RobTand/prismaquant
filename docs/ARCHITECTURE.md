@@ -7,10 +7,13 @@ frees lower `MemAvailable` as well as committed bytes
 `joint_statistics_replay.py:377,386`). The GB10 probe measured both frees
 returning about the bytes freed to the host; the declaration of `committed`
 alone was wrong. The probe's midpoint criterion stays, but its host reading is
-now the larger of the `MemAvailable` rise and the per-CPU free-list rise: the
-same free read +755 MB in `MemAvailable` on one run and -1 MB on the next,
-with the pages parked on per-CPU lists that `MemAvailable` does not count until
-the kernel trims them. A host-term shortfall now asks all three reclaimers, in
+the rise of the host reading the guard acts on: `MemAvailable` plus the pages
+on the per-CPU free lists (`io_spans.host_memory`, read by
+`CaptureMemoryGuard._observe` through `memory_management._host_memory_info`,
+and by the probe). The same free read +755 MB in `MemAvailable` on one run and
+-1 MB on the next, with the pages parked on per-CPU lists that `MemAvailable`
+does not count until the kernel trims them; the sum does not depend on where
+they land. A host-term shortfall now asks all three reclaimers, in
 refill-cost order. See the
 reclaim bullet in the Stage B replay section. No pipeline default, stage,
 format or lane changes.
@@ -944,11 +947,14 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
     the reservation and `MemAvailable`. So a host-term shortfall asks all
     three reclaimers, in refill-cost order, and the guard's re-read after
     each ask ends the pass once the term clears. A reading counts as lowered
-    when it moves by more than half of what was freed. The host reading is the
-    larger of the `MemAvailable` rise and the per-CPU free-list rise, because a
-    freed page can sit on a per-CPU list that `MemAvailable` skips until the
-    kernel trims it (the same 805 MB memfd free read +755 MB and -1 MB on
-    different runs). The earlier declaration that shmem frees leave
+    when it moves by more than half of what was freed. The host reading is one
+    quantity everywhere: `MemAvailable` plus the per-CPU free-list pages
+    (`io_spans.host_memory`, `memory_management._host_memory_info`). The guard
+    reads it and the probe takes its rise, because a freed page can sit on a
+    per-CPU list that `MemAvailable` skips until the kernel trims it (the same
+    805 MB memfd free read +755 MB and -1 MB in `MemAvailable` on different
+    runs). Reading `/proc/zoneinfo` costs 0.085 ms against 0.0088 ms for
+    `/proc/meminfo`; a check runs per operator or allocation, not per token. The earlier declaration that shmem frees leave
     `MemAvailable` alone (a -28 MB reading) was that second case.
   - A check that would refuse makes one pass in order
     (`CaptureMemoryGuard._reclaim`, `:702`). A reclaimer is asked only while

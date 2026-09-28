@@ -78,7 +78,7 @@ def test_a_free_that_lands_on_the_per_cpu_lists_helps_the_guard(
     guard.add_reclaimer(reclaim, lowers={"available"})
     record = guard.check("phase", reserve_bytes=GiB)
     assert asked == [GiB]
-    assert record["host_available_bytes"] == guard.host_floor_bytes + 2 * GiB
+    assert record["host_mem_available_bytes"] == guard.host_floor_bytes + 2 * GiB
 
 
 def test_the_host_reading_is_memavailable_plus_the_per_cpu_pages(tmp_path, proc):
