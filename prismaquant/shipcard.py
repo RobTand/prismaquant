@@ -1386,7 +1386,9 @@ def git_provenance(repo: str | os.PathLike | None = None) -> dict[str, Any]:
 
 
 def _canonical_json(obj: Any) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+    from .digests import DIRECT_ASCII_LAX_DEFAULT_STR
+
+    return DIRECT_ASCII_LAX_DEFAULT_STR.text(obj)
 
 
 def _now() -> str:
