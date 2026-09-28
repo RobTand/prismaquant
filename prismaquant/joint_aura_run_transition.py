@@ -43,6 +43,7 @@ from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
 from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
 from .joint_aura_transition_base import (
     _COMMIT,
+    _actual_execution as _base_actual_execution,
     _bound,
     _bytes_identity,
     _committed_package,
@@ -241,11 +242,7 @@ def _actual_execution():
     sealed checkout's own HEAD; a caller-chosen label is refused here.
     """
     root = Path(__file__).resolve().parents[1]
-    observed = checkout_head_commit(root)
-    from .aura_cost import _checkpoint_git_commit
-    commit = _checkpoint_git_commit()
-    _require(commit == observed, "checkpoint Git identity contradicts the sealed checkout HEAD")
-    return {"git_commit": commit, **source_proof()}
+    return _base_actual_execution(source_proof, root)
 
 
 def _load_inputs(bindings):
