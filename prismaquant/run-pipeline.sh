@@ -2492,11 +2492,25 @@ if [[ "$EXPORT_CONTAINER" == "tessera" ]]; then
   # accepted an H-free/scale-free allocation is the weights-only lane and
   # correct; omitting them on an H-aware allocation is unreachable -- the
   # preflight exits 2 above before this line runs.
+  # The reuse authority rides only when the checkout's contract attests the
+  # exporter takes it (Tessera contract v40); an older pin gets today's argv.
+  # The reader is stdlib-only and runs by path, so this JSON read does not
+  # import the prismaquant package (torch, transformers) first.
+  if ! TESSERA_AUTHORITY_LINES=$(python3 -c 'import runpy, sys; sys.argv = sys.argv[1:]; runpy.run_path(sys.argv[0], run_name="__main__")' \
+      "${PIPELINE_SCRIPT_DIR}/tessera_producer_interface.py" \
+      "${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"); then
+    exit 2
+  fi
+  TESSERA_AUTHORITY_ARGS=()
+  if [[ -n "$TESSERA_AUTHORITY_LINES" ]]; then
+    mapfile -t TESSERA_AUTHORITY_ARGS <<< "$TESSERA_AUTHORITY_LINES"
+  fi
   python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py" \
     "$MODEL_PATH" "${WORK_DIR}/exported" \
     --plan-json "$TESSERA_PLAN" \
     --priced-inputs "$TESSERA_BUILD_JSON" \
     --priced-inputs-sha256 "$TESSERA_BUILD_SHA256" \
+    "${TESSERA_AUTHORITY_ARGS[@]}" \
     --device "$EXPORT_DEVICE" \
     "${TESSERA_PRICED_INPUT_ARGS[@]}" \
     "${TESSERA_CACHED_UNIT_ARGS[@]}" \
