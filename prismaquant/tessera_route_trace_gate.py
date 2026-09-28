@@ -657,13 +657,6 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _TRACKED_PIN = object()
 
 
-def pinned_serving_source_sha256() -> "str | None":
-    """The tracked pin's serving code digest; ``None`` under a v2 pin."""
-    from .tessera_serving_runtime_pin import pinned_serving_source_sha256 as pinned
-
-    return pinned()
-
-
 def serving_source_refusal(
     traces: Sequence[tuple[str, Any]], pinned: str, *, where: str = "trace",
 ) -> tuple[str, str, dict[str, Any]] | None:
@@ -727,8 +720,12 @@ def compare_route_traces(
     against it. ``None`` (a v2 pin) skips the check and adds nothing to the
     verdict.
     """
-    pinned = (pinned_serving_source_sha256()
-              if serving_source_sha256 is _TRACKED_PIN else serving_source_sha256)
+    if serving_source_sha256 is _TRACKED_PIN:
+        from . import tessera_serving_runtime_pin
+
+        pinned = tessera_serving_runtime_pin.pinned_serving_source_sha256()
+    else:
+        pinned = serving_source_sha256
     if pinned is not None and (not isinstance(pinned, str) or _SHA256.match(pinned) is None):
         raise TesseraRouteTraceError(
             f"the pinned serving_source_sha256 must be 64 lowercase hex digits, got {pinned!r}")

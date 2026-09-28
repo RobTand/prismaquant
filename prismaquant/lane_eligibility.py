@@ -2464,8 +2464,9 @@ def resolve_unit_route(
         and cell.covers_rung(facts)
         and cell.matches(facts)
     ]
-    pinned_code = (resolve_serving_source_sha256(serving_source_sha256)
-                   if is_scoped else None)
+    # Every table, scoped or not: a legacy grammar has no runtime block, so
+    # its cells name no code and a v3 pin admits none of them.
+    pinned_code = resolve_serving_source_sha256(serving_source_sha256)
     # A cell whose own published evidence refuses it is NOT dropped silently
     # into "no cell names this unit": the two are different facts and the
     # shipcard has to be able to tell them apart. Keep the refusal beside its
