@@ -828,6 +828,14 @@ def tessera_quantize_dequantize(name: str, recipe=None):
     return _qdq
 
 
+def _lane_family():
+    """The ``tessera`` format family as ``lane_specs/tessera.json`` declares it."""
+    from .lane_spec import format_family_by_id
+    from .tessera_lane import FAMILY_ID
+
+    return format_family_by_id(FAMILY_ID)
+
+
 def _identity_activation(x: torch.Tensor) -> torch.Tensor:
     """A weight-only format's activation path: the kernel reads bf16."""
     return x
@@ -1008,6 +1016,10 @@ def synthesize_tessera_spec(
         quantize_dequantize=tessera_quantize_dequantize(name, wire),
         activation_quantize_dequantize=activation_qdq,
         static_activation_contract=static_activation_contract,
+        # The lane capabilities its family declares (``lane_specs/tessera.json``),
+        # carried on the spec so a resolved spec and a bare name answer alike.
+        render_owner=_lane_family().id,
+        requires_production_render=_lane_family().requires_production_render,
         # Producer-eligibility is the AND of two independent gates, and
         # conflating them is how a rung reaches the DP that cannot be written:
         #   (a) the wire can carry it -- the grid's digest is a permanent

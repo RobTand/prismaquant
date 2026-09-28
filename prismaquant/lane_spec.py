@@ -284,6 +284,68 @@ class LaneActivationContract:
 
 
 @dataclass(frozen=True)
+class LaneFormatFamily:
+    """A format family a lane owns, declared as data (decoupling step 6).
+
+    Core code asks "whose format is this?" before it may import anything
+    that can answer anything else: the render path, the three cache-miss
+    fallbacks and the allocator all run on every stock format too, and a
+    lane's code can need a package a stock run does not have. So membership
+    is a prefix over the name, read from this declaration, and the lane's
+    plugin module is imported only when a family claims the name.
+
+    ``requires_production_render`` and ``rate_axis`` are the family's
+    capabilities. ``FormatSpec`` carries the first two for a resolved spec;
+    this declaration answers the same questions for a bare name.
+    """
+
+    id: str
+    lane: str
+    name_prefix: str
+    label: str
+    #: Only the production cache renders these bytes: the registry's RTN
+    #: ``quantize_dequantize`` is a reconstruction, not the shipped encode, so
+    #: a cache miss must refuse instead of falling back to it.
+    requires_production_render: bool = False
+    #: The family addresses a continuous rate axis rather than a fixed menu.
+    rate_axis: bool = False
+    #: The currency every priced row of this family must carry, or ``None``
+    #: when the family's rows carry none.
+    cost_currency: str | None = None
+
+    def claims(self, name: object) -> bool:
+        """Is ``name`` spelled as a member of this family?
+
+        A prefix test on purpose: a malformed member name is still the
+        family's to refuse with its own error, not the registry's KeyError
+        about an unknown format.
+        """
+        return (isinstance(name, str)
+                and name.strip().upper().startswith(self.name_prefix))
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any], *, lane: str
+                  ) -> "LaneFormatFamily":
+        prefix = str(payload.get("name_prefix", "")).strip()
+        if not prefix or prefix != prefix.upper():
+            raise ValueError(
+                f"lane {lane!r} format family {payload.get('id')!r} must "
+                "declare an upper-case `name_prefix`; format names are "
+                "canonicalized upper-case before a family is looked up")
+        currency = payload.get("cost_currency")
+        return cls(
+            id=str(payload["id"]),
+            lane=lane,
+            name_prefix=prefix,
+            label=str(payload.get("label") or payload["id"]),
+            requires_production_render=bool(
+                payload.get("requires_production_render", False)),
+            rate_axis=bool(payload.get("rate_axis", False)),
+            cost_currency=None if currency is None else str(currency),
+        )
+
+
+@dataclass(frozen=True)
 class LaneSpec:
     id: str
     export_container: str
@@ -300,6 +362,15 @@ class LaneSpec:
     advisory_gates: bool = True
     notes: tuple[str, ...] = field(default=())
     served_activation_quantization: LaneActivationContract | None = None
+    #: Dotted module path of the lane's code plugin, or ``None`` for a lane
+    #: that is data only. Core reaches lane code through this module's hook
+    #: functions (``lane_hooks``), never by importing a lane module.
+    plugin: str | None = None
+    format_families: tuple[LaneFormatFamily, ...] = ()
+    #: Prefixes of the ``layer_config`` metadata keys this lane's allocation
+    #: writes. A reader that must know whether a recipe carries lane state
+    #: asks here instead of spelling the lane's name.
+    layer_config_meta_prefixes: tuple[str, ...] = ()
 
     #: ``wired_architectures`` value meaning "every architecture", used by the
     #: default lane: every model profile ships through compressed-tensors, so
@@ -318,6 +389,11 @@ class LaneSpec:
         schema = str(payload.get("schema", SCHEMA))
         if schema != SCHEMA:
             raise ValueError(f"unknown lane spec schema {schema!r}")
+        if payload.get("format_families") and not _opt_str(payload.get("plugin")):
+            raise ValueError(
+                f"lane {payload.get('id')!r} declares format families and no "
+                "`plugin`; a family's names resolve to specs, renders and "
+                "admissions only through its lane's plugin module")
         serve = payload.get("serve", {}) or {}
         return cls(
             id=str(payload["id"]),
@@ -343,6 +419,12 @@ class LaneSpec:
                     payload["served_activation_quantization"])
                 if payload.get("served_activation_quantization") is not None
                 else None),
+            plugin=_opt_str(payload.get("plugin")),
+            format_families=tuple(
+                LaneFormatFamily.from_dict(f, lane=str(payload["id"]))
+                for f in payload.get("format_families", ())),
+            layer_config_meta_prefixes=tuple(
+                str(p) for p in payload.get("layer_config_meta_prefixes", ())),
         )
 
     def gate(self, gate_id: str) -> LaneGate | None:
@@ -444,6 +526,142 @@ def lane_spec_for_container(export_container: str) -> LaneSpec:
 
 def all_lane_specs() -> tuple[LaneSpec, ...]:
     return tuple(load_lane_spec(name) for name in lane_spec_names())
+
+
+# --------------------------------------------------------------------------
+# Lane plugins and format families (decoupling step 6, PQ #1550).
+#
+# Core reaches a lane's code through ONE seam: the lane spec names a plugin
+# module, and core looks hooks up on it by name. Core never imports a lane
+# module, so a fourth lane is a data file plus a plugin module.
+#
+# The registry below reads the spec files itself rather than through
+# ``load_lane_spec``: it is consulted on the render hot path and cached for
+# the process, and a test that substitutes ``load_lane_spec`` for one lane
+# must not leave a process-wide family table built from its substitute.
+# --------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=None)
+def _declared_lane_specs() -> tuple[LaneSpec, ...]:
+    return tuple(
+        LaneSpec.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        for path in sorted(_SPEC_DIR.glob("*.json")))
+
+
+@lru_cache(maxsize=None)
+def format_families() -> tuple[LaneFormatFamily, ...]:
+    """Every format family a lane declares, in lane-id order."""
+    families = tuple(f for spec in _declared_lane_specs()
+                     for f in spec.format_families)
+    seen: dict[str, str] = {}
+    for family in families:
+        for prefix, owner in seen.items():
+            if (family.name_prefix.startswith(prefix)
+                    or prefix.startswith(family.name_prefix)):
+                raise ValueError(
+                    f"format family {family.id!r} (prefix "
+                    f"{family.name_prefix!r}) overlaps {owner!r} (prefix "
+                    f"{prefix!r}); one name must have one owner")
+        seen[family.name_prefix] = family.id
+    return families
+
+
+def format_family_for_name(name: object) -> LaneFormatFamily | None:
+    """The lane format family that claims ``name``, without importing it."""
+    for family in format_families():
+        if family.claims(name):
+            return family
+    return None
+
+
+def format_family_by_id(family_id: str) -> LaneFormatFamily:
+    for family in format_families():
+        if family.id == family_id:
+            return family
+    raise KeyError(f"no lane declares format family {family_id!r}")
+
+
+@lru_cache(maxsize=None)
+def _import_plugin(module_path: str):
+    from importlib import import_module
+
+    return import_module(module_path)
+
+
+def lane_plugin(lane_id: str):
+    """The lane's plugin module, imported on first use, or ``None``."""
+    for spec in _declared_lane_specs():
+        if spec.id == lane_id:
+            return None if spec.plugin is None else _import_plugin(spec.plugin)
+    raise KeyError(f"unknown lane {lane_id!r}; known lanes: {lane_spec_names()}")
+
+
+def family_hook(family: LaneFormatFamily, name: str):
+    """Hook ``name`` on the plugin of the lane that owns ``family``.
+
+    A declared family whose plugin lacks the hook is a defect in the lane,
+    not an absence to route around, so this raises.
+    """
+    plugin = lane_plugin(family.lane)
+    hook = None if plugin is None else getattr(plugin, name, None)
+    if hook is None:
+        raise LookupError(
+            f"lane {family.lane!r} declares format family {family.id!r} but "
+            f"its plugin provides no {name!r} hook")
+    return hook
+
+
+def lane_hooks(name: str) -> tuple[tuple[str, Any], ...]:
+    """``(lane id, hook)`` for every lane plugin that provides ``name``.
+
+    Imports every declared plugin. Plugins keep their module import free of
+    lane dependencies, so this costs a stock run nothing it did not already
+    pay.
+    """
+    found = []
+    for spec in _declared_lane_specs():
+        if spec.plugin is None:
+            continue
+        hook = getattr(_import_plugin(spec.plugin), name, None)
+        if hook is not None:
+            found.append((spec.id, hook))
+    return tuple(found)
+
+
+def single_lane_hook(name: str):
+    """The one lane hook ``name``, or ``None`` when no lane provides it.
+
+    For a question only one lane may answer per process (the pinned serving
+    runtime, the fused-module licence). Two providers is a refusal: picking
+    one would be a guess about which lane the caller meant.
+    """
+    found = lane_hooks(name)
+    if len(found) > 1:
+        raise LookupError(
+            f"lanes {[lane for lane, _ in found]} all provide {name!r}; the "
+            "caller asks a question with one answer per process")
+    return found[0][1] if found else None
+
+
+def single_lane_plugin(name: str):
+    """The plugin of the one lane that provides hook ``name``, or ``None``.
+
+    For a lane that owns a group of related hooks (a pin, its loader and its
+    error type), so the caller reads all of them off one plugin.
+    """
+    found = lane_hooks(name)
+    if len(found) > 1:
+        raise LookupError(
+            f"lanes {[lane for lane, _ in found]} all provide {name!r}; the "
+            "caller asks a question with one answer per process")
+    return lane_plugin(found[0][0]) if found else None
+
+
+def layer_config_meta_prefixes() -> tuple[str, ...]:
+    """Every lane's ``layer_config`` metadata key prefixes."""
+    return tuple(prefix for spec in _declared_lane_specs()
+                 for prefix in spec.layer_config_meta_prefixes)
 
 
 def lane_gate_report(spec: LaneSpec, shipcard: Mapping[str, Any] | None = None

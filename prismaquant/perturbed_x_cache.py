@@ -3034,9 +3034,10 @@ class PerturbedActivationCache:
                     )
             if q is None:
                 fmt_canon = fr.canonical_format_name(param_plan.spec.name)
-                if fr.is_tessera_format_name(fmt_canon):
+                if fr.requires_production_render(fmt_canon):
                     raise RuntimeError(
-                        f"production_weight_cache is required for Tessera "
+                        f"production_weight_cache is required for "
+                        f"{fr.format_owner_label(fmt_canon)} "
                         f"({param_plan.name!r}, {fmt_canon!r}); the registry "
                         "render is a weights-only reconstruction, not the "
                         "decoded wire and not the H-aware encode that ships"
