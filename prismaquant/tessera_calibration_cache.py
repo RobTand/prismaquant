@@ -300,7 +300,7 @@ class CaptureSourceAuthentication:
         after = path.stat()
         if file_stat_signature(before) != file_stat_signature(after):
             raise RuntimeError('streamed source identity cache changed while reading')
-        if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
+        if expected_sha256 is not None and bytes_sha256hex(raw) != expected_sha256:
             raise RuntimeError('streamed source identity cache differs from its declared SHA256')
         checked_cache, identity = _read_streamed_model_identity_cache(
             path, source_model=str(self.root))
