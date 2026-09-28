@@ -46,8 +46,8 @@ V40_PRODUCER_INTERFACE = {
         "canonical_capture_attribute": "canonical_hessian_capture",
         "drivers": ["experiments/bf16_reach_roster.py",
                     "experiments/export_glm53_tessera.py",
-                    "experiments/export_tessera_serving.py",
                     "experiments/glm_routed_owner_inputs.py",
+                    "src/tessera/export_serving.py",
                     "tools/glm_cpu_cached_pack_probe.py"]}}
 
 #: A pre-v40 contract: it publishes no producer interface at all.
@@ -56,14 +56,15 @@ NEW_PIN_CONTRACT = {"contract_version": 40, "formats": [],
                     "producer_interface": V40_PRODUCER_INTERFACE}
 
 CONTAINER_TESSERA = "/tessera-pin"
-EXPORTER = CONTAINER_TESSERA + "/experiments/export_tessera_serving.py"
-INNER = ["python3", EXPORTER, "/models/glm", "/out/exported",
+EXPORTER_MODULE = "tessera.export_serving"
+INNER = ["python3", "-m", EXPORTER_MODULE, "/models/glm", "/out/exported",
          "--plan-json", "/out/plan.json", "--device", "cuda"]
 
 
 def _checkout(root: Path, contract: dict) -> Path:
-    (root / "experiments").mkdir(parents=True)
-    (root / "experiments" / "export_tessera_serving.py").write_text("# exporter\n")
+    exporter = root / "src" / "tessera" / "export_serving.py"
+    exporter.parent.mkdir(parents=True)
+    exporter.write_text("# exporter\n")
     contract_path = root / "src" / "tessera" / "serving" / "runtime_contract.json"
     contract_path.parent.mkdir(parents=True)
     contract_path.write_text(json.dumps(contract))
@@ -148,8 +149,8 @@ def test_an_old_pin_submits_the_argv_it_submitted_before_the_gate(tmp_path, monk
 
 def test_a_v40_pin_gets_the_authority_after_the_exporter(tmp_path, monkeypatch):
     gated, manifest_argv = _submit(tmp_path, monkeypatch, NEW_PIN_CONTRACT)
-    expected = [INNER[0], EXPORTER, "--producer-authority",
-                "/workspace/prismaquant/tessera_reuse_authority.py", *INNER[2:]]
+    expected = [INNER[0], "-m", EXPORTER_MODULE, "--producer-authority",
+                "/workspace/prismaquant/tessera_reuse_authority.py", *INNER[3:]]
     assert gated[-len(expected):] == expected
     assert manifest_argv == expected
     before, _ = _submit(tmp_path, monkeypatch, NEW_PIN_CONTRACT, gate=False)
@@ -198,11 +199,11 @@ def test_the_helper_reads_the_contract_not_a_constant(tmp_path):
 
 def test_run_pipeline_passes_the_authority_only_through_the_helper():
     script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
-    call = script[script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"'):]
+    call = script[script.index("python3 -m tessera.export_serving"):]
     call = call[:call.index("2>&1 | tee")]
     assert "--producer-authority" not in call
     assert '"${TESSERA_AUTHORITY_ARGS[@]}"' in call
-    gate = script[:script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')]
+    gate = script[:script.index("python3 -m tessera.export_serving")]
     gate = gate[gate.rindex("TESSERA_AUTHORITY_LINES=$("):]
     assert '"${PIPELINE_SCRIPT_DIR}/tessera_producer_interface.py"' in gate
     assert '"${TESSERA_REPO%/}" "${PIPELINE_SCRIPT_DIR}/tessera_reuse_authority.py"' in gate
@@ -230,7 +231,7 @@ def test_the_producer_interface_reader_stands_alone():
 def _run_pipeline_authority_gate() -> str:
     """The ``run-pipeline.sh`` lines that decide the exporter's authority argv."""
     script = (ROOT / "prismaquant" / "run-pipeline.sh").read_text()
-    gate = script[:script.index('python3 "${TESSERA_REPO%/}/experiments/export_tessera_serving.py"')]
+    gate = script[:script.index("python3 -m tessera.export_serving")]
     gate = gate[gate.rindex("  if ! TESSERA_AUTHORITY_LINES=$("):]
     return gate[:gate.index("\n  fi\n")] + "\n  fi\n"
 
