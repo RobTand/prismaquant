@@ -159,5 +159,14 @@ def test_tool_sites_route_through_the_owner(monkeypatch, checkpoint):
         chain_roll_bench._safetensors_spans(Path(directory), ["tensor.a.weight"])
     monkeypatch.setattr(tp2_budget_plan.source_read_plan,
                         "read_safetensors_header", _raise, raising=False)
-    with pytest.raises(tp2_budget_plan.HeaderError, match="routed through"):
+    with pytest.raises(AssertionError, match="routed through"):
+        tp2_budget_plan.read_safetensors_header(shard)
+    # and the owner's own refusals still surface as the tool's HeaderError
+    class _Refusal(ValueError):
+        pass
+    monkeypatch.setattr(tp2_budget_plan.source_read_plan,
+                        "read_safetensors_header",
+                        lambda *a, **k: (_ for _ in ()).throw(_Refusal("bad header")),
+                        raising=False)
+    with pytest.raises(tp2_budget_plan.HeaderError, match="bad header"):
         tp2_budget_plan.read_safetensors_header(shard)
