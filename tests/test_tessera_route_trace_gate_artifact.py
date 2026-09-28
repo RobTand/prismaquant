@@ -19,7 +19,8 @@ from prismaquant.lane_spec import load_lane_spec
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "tessera_route_trace_union"
 GRIDS = {"TESSERA_E2M1_K2": "E2M1x2", "TESSERA_E4M3_K1": "E4M3", "TESSERA_BF16_K1": "BF16"}
-MTP_SERVED = "language_model.model.layers.45.mlp.experts"
+# The attested draft namespace: glm5_next.served_module_name maps the MTP layer here.
+MTP_SERVED = "model.layers.45.mlp.experts"
 LAYER10_SERVED = "language_model.model.layers.10.mlp.experts"
 
 
@@ -52,10 +53,20 @@ def _judge(phases, *, config=None, expected_ranks=2):
 
 
 def _rename_layer45_contract(trace, contract):
-    for entry in trace["entries"]:
-        if MTP_SERVED in entry["module_names"]:
-            entry["contract"] = contract
-            entry["policy"] = "TESSERA_FP8:resident"
+    """Serve the draft layer on the layer-10 routed-MoE FP8 contract.
+
+    Folds the draft module into the FP8 routed-MoE entry of the same token
+    count (a second entry with that counter key would be a duplicate) and drops
+    the draft layer's own BF16 entry.
+    """
+    for entry in [e for e in trace["entries"] if MTP_SERVED in e["module_names"]]:
+        trace["entries"].remove(entry)
+        host = next(e for e in trace["entries"]
+                    if e["kind"] == "moe" and e["shape"] == entry["shape"]
+                    and LAYER10_SERVED in e["module_names"])
+        assert host["contract"] == contract
+        host["module_names"].append(MTP_SERVED)
+        host["modules"] = len(host["module_names"])
 
 
 def _serve_layer10_as_bf16(trace):

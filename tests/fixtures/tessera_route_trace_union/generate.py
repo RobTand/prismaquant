@@ -65,7 +65,7 @@ def with_mtp_layer(doc):
     for moe in [e for e in out["entries"] if e["kind"] == "moe"]:
         entry = copy.deepcopy(moe)
         entry.update(policy="TESSERA_BF16:resident", contract="bf16_unquantized",
-                     module_names=["language_model.model.layers.45.mlp.experts"],
+                     module_names=["model.layers.45.mlp.experts"],
                      modules=1, launches=1)
         out["entries"].append(entry)
     return out
