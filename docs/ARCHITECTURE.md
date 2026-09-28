@@ -21196,6 +21196,13 @@ fallback:
   import, `tests/test_prismabuild_boundary.py` freezes PQ's reach into
   PrismaBuild internals, and their allowlists under `tests/boundary_allowlists/`
   only shrink.
+  The Tessera fleet drivers PrismaBuild used to carry (the whole-model
+  dispatcher and its worker, the per-shard export and ladder dispatchers, the
+  status screen and `render_identity.py`) live here since 2026-09-28
+  (RobTand/prismabuild#1076): `tools/tessera_fleet/` and `tools/render_identity.py`.
+  They reach PrismaBuild only by running the published `pbcampaign.py` and
+  `pbwait.py`, so they add no line to the PrismaBuild allowlist
+  (`docs/operations/tessera_fleet_drivers.md`).
 
 **Exact pricing, or refusal.** `FormatSpec.bits_for_shape_fn` (added on this
 branch) is a format's own accountant. A Tessera spec has no scalar bpp:
