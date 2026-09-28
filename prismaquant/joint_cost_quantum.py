@@ -2124,6 +2124,17 @@ def run_layer_quantum_core(
                         if adjoint_handoff is not None and spill_config is not None
                         else None)
     incoming_budget = None
+    if resource_policy is not None and (adjoint_handoff is None
+                                        or handoff_incoming is None):
+        # PQ #1141: this launch loads the whole cotangent plane through the
+        # checkpoint sink (or, under a handoff without the one-pass spill,
+        # through the handoff load). Refuse before the load when the sealed
+        # host envelope cannot hold it and no scratch pair spills it.
+        from prismaquant.joint_stageb_resources import (
+            checkpoint_plane_bytes, verify_cotangent_plane_fits)
+        verify_cotangent_plane_fits(
+            checkpoint_plane_bytes(checkpoint_record), resource_policy,
+            os.environ)
     with storage, (spill if spill is not None else nullcontext()), \
             ExitStack() as handoff_exit:
         with counters.io.span(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
