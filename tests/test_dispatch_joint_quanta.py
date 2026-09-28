@@ -1213,7 +1213,8 @@ def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, camp
         "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
         "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
     dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path),
+                   _huge_plane_receipt(campaign, row_bytes=1 << 20),
                    tmp_path / 'adjoint-slices')
     path = tmp_path/'record.json'; path.write_text(json.dumps(record))
     args = dict(record_path=path, output_root=tmp_path/'out')
@@ -1243,7 +1244,8 @@ def test_dev_mode_dispatches_a_re_declared_resource_plan(tmp_path, campaign, mon
         "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
         "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
     dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path),
+                   _huge_plane_receipt(campaign, row_bytes=1 << 20),
                    tmp_path / 'adjoint-slices')
     path = tmp_path/'record.json'; path.write_text(json.dumps(record))
     # The plan is re-declared after the record sealed its digest.

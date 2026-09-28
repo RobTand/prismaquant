@@ -378,3 +378,47 @@ def test_a_v2_catalog_refuses_a_routed_a4_rung_the_policy_does_not_price(tmp_pat
     inputs, _plan, _ = _inputs(tmp_path, monkeypatch, added=added, activation_formats=[R768, FORMAT])
     with pytest.raises(ValueError, match=match):
         derive_policy(inputs, **LIMITS)
+
+
+_PLANE_POLICY = {"limits": {"host_bytes": 28 << 30},
+                 "budget": {"safety_margin_bytes": 1 << 30, "metadata_reserve_bytes": 0,
+                            "load_buffer_bytes": 0, "read_page_reserve_bytes": 0,
+                            "retained_render_cap_bytes": 4 << 30}}
+_SCRATCH = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT", "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
+
+
+def test_cotangent_plane_check_prices_host_owners_and_the_render_cap():
+    from prismaquant.joint_stageb_resources import verify_cotangent_plane_fits
+    verify_cotangent_plane_fits(23 << 30, _PLANE_POLICY, {})  # 23 + 1 + 4 == 28
+    with pytest.raises(ValueError, match="cotangent plane"):
+        verify_cotangent_plane_fits((23 << 30) + 1, _PLANE_POLICY, {})
+
+
+@pytest.mark.parametrize("env, ok", [
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: str(40 << 30)}, True),
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: str(32 << 30)}, True),
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: str((32 << 30) - 1)}, False),
+    ({_SCRATCH[0]: "/s"}, False),
+    ({_SCRATCH[1]: str(40 << 30)}, False),
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: "0"}, False),
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: "-5"}, False),
+    ({_SCRATCH[0]: "", _SCRATCH[1]: str(40 << 30)}, False),
+])
+def test_cotangent_scratch_pair_must_cover_the_plane(env, ok):
+    from prismaquant.joint_stageb_resources import verify_cotangent_plane_fits
+    if ok:
+        verify_cotangent_plane_fits(32 << 30, _PLANE_POLICY, env)
+    else:
+        with pytest.raises(ValueError, match="cotangent"):
+            verify_cotangent_plane_fits(32 << 30, _PLANE_POLICY, env)
+
+
+def test_checkpoint_plane_bytes_sums_rows_and_refuses_an_unsized_row(monkeypatch):
+    from prismaquant import joint_adjoint_slices as slices
+    from prismaquant.joint_stageb_resources import checkpoint_plane_bytes
+    rows = {(0, 0): {"tensor_bytes": 5}, (0, 1): {"tensor_bytes": 7}}
+    monkeypatch.setattr(slices, "checkpoint_cotangent_plane", lambda record: rows)
+    assert checkpoint_plane_bytes({}) == 12
+    rows[(0, 1)] = {"file_bytes": 7}
+    with pytest.raises(ValueError, match="tensor_bytes"):
+        checkpoint_plane_bytes({})
