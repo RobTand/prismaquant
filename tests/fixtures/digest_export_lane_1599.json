@@ -1,0 +1,67 @@
+{
+ "fixture_schema": "prismaquant.digest_golden.v1",
+ "issue": 1599,
+ "module": "prismaquant/tessera_export_lane.py",
+ "old_head": "d9cd5b9d (origin/main)",
+ "provenance": "expected values computed from the pre-change spellings verbatim (json.dumps(indent=2, sort_keys=True, allow_nan=False) + LF -> .encode(); hashlib.sha256(x).hexdigest())",
+ "rows": [
+  {
+   "expected_bytes_sha256_hex": "717856e69a5ebd88c205f1cc55600fadc5b8f081bdff475c02db3858f557fe7f",
+   "expected_digest_hex": "717856e69a5ebd88c205f1cc55600fadc5b8f081bdff475c02db3858f557fe7f",
+   "family": "indent2_json_file_bytes:write_cached_expert_units",
+   "input": {
+    "schema": "tessera.cached-unit-bundle.v1",
+    "source_sha256": "5f4e3d2c1b0a998877665544332211ff00ee11dd22cc33bb44aa55ff66ee77dd",
+    "units": {
+     "layer.0.expert_down": {
+      "bytes": 8192,
+      "fmt": "fp8e4m3",
+      "sha256": "9d2b7e4f11a0b6c3f5e8d7a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9"
+     },
+     "layer.0.expert_gate": {
+      "bytes": 4096,
+      "fmt": "nvfp4",
+      "sha256": "6347f0a1c1d1c0f7e2b9b2a1bda51c90aa8a6f7a0e32c0f26ff58b1a1a2c3d4e"
+     }
+    }
+   }
+  },
+  {
+   "expected_bytes_sha256_hex": "98cf863c79ce44c9726005365d6b440971e5039e0d6b2196534d9ad2992b3ea0",
+   "expected_digest_hex": "98cf863c79ce44c9726005365d6b440971e5039e0d6b2196534d9ad2992b3ea0",
+   "family": "indent2_json_file_bytes:_write_plan_assignment",
+   "input": {
+    "tessera_export_assignment": {
+     "member_owners": {
+      "layer.7.expert_down": "unit-b",
+      "layer.7.expert_gate": "unit-a"
+     },
+     "schema": "prismaquant.tessera_export_assignment.v1",
+     "source_layer_config": "/alloc/source.json",
+     "source_precision_outside_graph": "bf16",
+     "source_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    }
+   }
+  },
+  {
+   "expected_hex": "480c4cb80903ae800c7657e0f962bb55bc42e7da86611d771a9f943ac4e7dee1",
+   "family": "bytes_sha256hex:require_composed_cached_units",
+   "input_bytes_b64": "TGFncmFuZ2UgY2FjaGVkLXVuaXQgbWFuaWZlc3QgYnl0ZXMgMTIzNDU2Nzg5MA=="
+  },
+  {
+   "expected_hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "family": "bytes_sha256hex:selected_cached_units_manifest",
+   "input_bytes_b64": ""
+  },
+  {
+   "expected_hex": "db0c0f3486e4aa7e1766c8fef88bb03edf22fe347c77092888d92c38a6ebf10b",
+   "family": "bytes_sha256hex:main.build_bytes",
+   "input_bytes_b64": "8J+mjiB0ZXNzZXJhIHNlcnZpbmcgcHJlZmxpZ2h0IOKAlA=="
+  },
+  {
+   "expected_hex": "d8480e1234ff7bd546909516d772e82c9dfe0973a727c9b340d27ffd148b212e",
+   "family": "text_sha256hex:selected_cached_units_manifest.root_id",
+   "input_text": "/alloc/joint-panel/layer-000/wire/units/TESSERA_E4M3_K1_R1024"
+  }
+ ]
+}
