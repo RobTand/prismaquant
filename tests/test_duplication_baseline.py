@@ -138,3 +138,18 @@ def test_the_digest_site_ratchet_fails_on_a_new_raw_site_and_passes_the_owner(tm
     baseline = {"hashlib:tools/fresh_site.py::_digest",
                 "sorted-json:tools/fresh_site.py::_digest"}
     assert not live - baseline and not baseline - live
+
+
+def test_image_side_patch_scripts_are_outside_the_scan_and_their_loader_is_not(tmp_path):
+    """A serving-runtime patch script runs inside the pinned image, where the
+    digest owners cannot be imported, and its bytes are bound to the image
+    digest; the exclusion covers that directory and nothing beside it."""
+    raw = ("import hashlib\nfrom pathlib import Path\n"
+           "DIGEST = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()\n")
+    patch_dir = tmp_path / "prismaquant" / "serving_runtime_patches" / "some_set"
+    patch_dir.mkdir(parents=True)
+    (tmp_path / "tools").mkdir()
+    (patch_dir / "patch_some_set.py").write_text(raw)
+    (tmp_path / "prismaquant" / "serving_runtime_patch_set.py").write_text(raw)
+    live = set(inventory.scan(tmp_path)["primitive_digest_sites"])
+    assert live == {"hashlib:prismaquant/serving_runtime_patch_set.py::<module>"}
