@@ -148,12 +148,14 @@ class PromptLogitsCapture:
         self.expected_calls = prompt_logit_shapes(rows, vocab_size, logits_layout)
         self.window_id = None
         self.teacher = None
+        self.teacher2 = None
         self.calls = []
         self.values = None
+        self.values2 = None
         self.target_ids = self.target_logprobs = None
         self.next_index = 0
 
-    def arm(self, index, window_id, teacher, target_ids=None):
+    def arm(self, index, window_id, teacher, target_ids=None, teacher2=None):
         if self.window_id is not None or index != self.next_index:
             raise ValueError("hook request order or outstanding request mismatch")
         if self.rank == 0:
@@ -161,13 +163,20 @@ class PromptLogitsCapture:
                 raise ValueError("owner requires the complete resident teacher window")
             if self.require_cuda and teacher.device.type != "cuda":
                 raise ValueError("teacher must be resident on CUDA before request")
-        elif teacher is not None:
+        elif teacher is not None or teacher2 is not None:
             raise ValueError("only TP rank zero owns the teacher")
+        if teacher2 is not None:
+            # Second teacher (optional): scored against the same candidate
+            # logits, inside the same hook call. Same geometry rules as teacher 1.
+            if tuple(teacher2.shape) != (self.rows, self.vocab_size):
+                raise ValueError("owner requires the complete resident teacher2 window")
+            if self.require_cuda and teacher2.device.type != "cuda":
+                raise ValueError("teacher2 must be resident on CUDA before request")
         if target_ids is not None and (self.rank != 0 or tuple(target_ids.shape) != (self.rows,)
                                       or target_ids.device != teacher.device):
             raise ValueError("prompt target IDs must be co-resident on the owner")
-        self.window_id, self.teacher = window_id, teacher
-        self.calls, self.values = [], None
+        self.window_id, self.teacher, self.teacher2 = window_id, teacher, teacher2
+        self.calls, self.values, self.values2 = [], None, None
         self.target_ids, self.target_logprobs = target_ids, None
 
     def __call__(self, _module, _args, output):
@@ -199,6 +208,10 @@ class PromptLogitsCapture:
                 values = token_kl(self.teacher[start:stop], logits, tile_rows=self.tile_rows,
                                   require_cuda=self.require_cuda).cpu().tolist()
                 self.values = (self.values or []) + values
+                if self.teacher2 is not None:
+                    values2 = token_kl(self.teacher2[start:stop], logits, tile_rows=self.tile_rows,
+                                       require_cuda=self.require_cuda).cpu().tolist()
+                    self.values2 = (self.values2 or []) + values2
                 if self.target_ids is not None:
                     count = stop - start
                     target_lps = torch.empty(count, device=output.device, dtype=torch.float32)
@@ -224,7 +237,12 @@ class PromptLogitsCapture:
         result = {"rank": self.rank, "world_size": self.world_size,
                   "window_id": window_id, "calls": self.calls, "values": self.values,
                   "target_logprobs": self.target_logprobs, "logits_layout": self.logits_layout}
+        if self.teacher2 is not None:
+            # Key only present when a second teacher was armed, so single-teacher
+            # dicts (and everything derived from them) stay unchanged.
+            result["values2"] = self.values2
         self.window_id = self.teacher = self.values = None
+        self.teacher2 = self.values2 = None
         self.target_ids = self.target_logprobs = None
         self.next_index += 1
         return result
@@ -247,6 +265,16 @@ def collect_tp_result(results, *, window_id, world_size, rows, vocab_size,
     values = next(r["values"] for r in results if r["rank"] == 0)
     if values is None or len(values) != rows or not np.isfinite(values).all():
         raise ValueError("missing/nonfinite owner KL vector")
+    return values
+
+
+def collect_tp_result2(results, *, rows):
+    """Rank-0 KL vector against the second teacher. Call after collect_tp_result."""
+    values = next(r.get("values2") for r in results if r["rank"] == 0)
+    if any(r["rank"] != 0 and r.get("values2") is not None for r in results):
+        raise ValueError("duplicate TP teacher2 score owner")
+    if values is None or len(values) != rows or not np.isfinite(values).all():
+        raise ValueError("missing/nonfinite owner teacher2 KL vector")
     return values
 
 

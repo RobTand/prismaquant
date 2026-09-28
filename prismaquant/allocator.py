@@ -2613,6 +2613,19 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 args, serving_target=tessera_serving_target, profile=model_profile))
         return _mtp_selection_memo[0]
 
+    def _stamped_assignment(body: Mapping[str, str]) -> dict[str, str]:
+        """The assignment a whole-artifact stamp binds: the one the layer config emits.
+
+        The card prices the selected MTP rungs (PQ #1610) and
+        ``_stamp_mtp_selection`` writes them into the same file, so the digest
+        covers them too; a body-only digest refuses every consumer that hashes
+        the file it loads (PQ #1632). The two are disjoint by that function's
+        own clash refusal.
+        """
+        if not args.mtp_joint_cost:
+            return dict(body)
+        return {**body, **_mtp_selection()[1]["assignment"]}
+
     with open(args.probe, "rb") as f:
         probe = pickle.load(f)
     with open(args.costs, "rb") as f:
@@ -4771,7 +4784,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     budget_bytes=pact_disk["budget_bytes"],
                     selection_tensor_payload_bytes=record["artifact_tensor_payload_bytes"],
                     selection_non_tensor_reserve_bytes=pact_disk["reserve_bytes"],
-                    selection_assignment=record["assignment"],
+                    selection_assignment=_stamped_assignment(record["assignment"]),
                     excluded_source_prefixes=getattr(args, "exclude_source_prefix", None) or ())
             # Replay owns only its explicit output, never sweep-side attribution files.
             args.bit_attribution_json = args.bit_attribution_csv = None
@@ -5808,7 +5821,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 chosen_info["tensor_payload_bytes"]
             ),
             selection_non_tensor_reserve_bytes=overhead_reserve_bytes,
-            selection_assignment=chosen_info["assignment"],
+            selection_assignment=_stamped_assignment(chosen_info["assignment"]),
             excluded_source_prefixes=(
                 getattr(args, "exclude_source_prefix", None) or ()
             ),

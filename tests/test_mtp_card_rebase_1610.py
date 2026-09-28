@@ -184,3 +184,25 @@ def test_fixed_formats_pin_the_mtp_rung_the_card_charges(mtp_case, monkeypatch):
     assert record["resident_bytes"] == selected
     source = sum(2 * payload["params"][n] for n in ROUTED + SHARED)
     assert plain["source_total_bytes"] - got["source_total_bytes"] == source - selected
+
+
+def test_the_budget_stamp_binds_the_assignment_the_file_emits(mtp_case, monkeypatch):
+    """PQ #1632: the card prices the MTP rungs, so the digest must bind them too.
+
+    Every consumer (exporter preflight, validated frontier, R2 compose) hashes
+    the layer config it LOADS; a stamp over the pre-MTP body refuses them all.
+    """
+    from prismaquant.footprint import assignment_serialization_sha256
+    from prismaquant.layer_config import load_assignment
+    from test_glm_mtp_selection import R1024
+
+    tmp_path, _probe, _cost_p, payload, cost, constants = mtp_case
+    budget = sum(payload["wire_bytes"][n][R1024] for n in ROUTED) + \
+        sum(2 * payload["params"][n] for n in SHARED)
+    _, meta = _run_mtp(
+        monkeypatch, mtp_case, "--mtp-joint-cost", str(cost),
+        "--mtp-byte-budget", str(budget), "--mtp-serve-constants", str(constants))
+    emitted = load_assignment(tmp_path / "layer_config.json")
+    assert set(ROUTED + SHARED) <= set(emitted)
+    assert (meta["whole_artifact_budget"]["selection_assignment_sha256"]
+            == assignment_serialization_sha256(emitted))
