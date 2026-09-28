@@ -151,7 +151,7 @@ def _artifact_bytes(model_dir, fmt, stats):
 
 def _run(monkeypatch, tmp_path, probe_p, cost_p, *, disk_gb, fmt_for_target,
          pareto="4.6,8.2", overhead_reserve=_OVERHEAD_RESERVE,
-         exclude_prefixes=()):
+         exclude_prefixes=(), extra_argv=()):
     monkeypatch.setattr(alloc, "solve_with_promotion",
                         _stub_solver(fmt_for_target))
     lc = tmp_path / "layer_config.json"
@@ -173,6 +173,7 @@ def _run(monkeypatch, tmp_path, probe_p, cost_p, *, disk_gb, fmt_for_target,
         ])
     for prefix in exclude_prefixes:
         argv.extend(["--exclude-source-prefix", prefix])
+    argv.extend(extra_argv)
     monkeypatch.setattr(sys, "argv", argv)
     alloc.main()
     selection = json.loads((tmp_path / "selection.json").read_text())
