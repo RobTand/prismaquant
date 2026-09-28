@@ -33,6 +33,7 @@ import os
 import re
 from pathlib import Path
 from . import io_spans
+from prismaquant.source_read_plan import read_safetensors_header
 
 
 DEFAULT_SAFETY_GB = 20.0     # slack above the committed estimate. NEVER rely on
@@ -995,13 +996,7 @@ def _shard_resident_bytes(path: Path, dtype_bytes: int,
     Parses the safetensors JSON header directly (stdlib-only; no tensor
     data is read). Raises on malformed files; the caller falls back to
     the raw file size."""
-    with open(path, "rb") as f:
-        header_len = int.from_bytes(f.read(8), "little")
-        if header_len <= 0 or header_len > 512 * 1024 ** 2:
-            raise ValueError(
-                f"implausible safetensors header length {header_len} in {path}"
-            )
-        header = json.loads(f.read(header_len))
+    header, _base, _size = read_safetensors_header(str(path))
     total = 0
     for key, meta in header.items():
         if key == "__metadata__":

@@ -32,9 +32,9 @@ from __future__ import annotations
 
 import json
 import re
-import struct
 from dataclasses import dataclass, field
 from pathlib import Path
+from prismaquant.source_read_plan import read_safetensors_header
 
 
 __all__ = [
@@ -179,11 +179,9 @@ class CompletenessReport:
 def _read_safetensors_header(path: Path) -> dict[str, dict]:
     """Read one safetensors-compatible container header, never its data."""
 
-    with open(path, "rb") as handle:
-        (length,) = struct.unpack("<Q", handle.read(8))
-        entries = json.loads(handle.read(length))
+    header, _base, _size = read_safetensors_header(str(path))
     return {
-        name: meta for name, meta in entries.items() if name != "__metadata__"
+        name: meta for name, meta in header.items() if name != "__metadata__"
     }
 
 

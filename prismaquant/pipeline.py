@@ -18,6 +18,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from prismaquant.source_read_plan import read_safetensors_header
 
 
 APPROVED_RESOURCE_OWNERS: dict[str, frozenset[str]] = {
@@ -135,17 +136,8 @@ def _safetensors_parameter_count(model_path: str | Path) -> int:
     total = 0
     for shard in _safetensors_shards(model_path):
         try:
-            with shard.open("rb") as handle:
-                header_size = int.from_bytes(handle.read(8), "little")
-                if not 0 < header_size <= 512 * 1024 * 1024:
-                    raise ValueError(
-                        f"implausible safetensors header size {header_size}"
-                    )
-                raw_header = handle.read(header_size)
-            if len(raw_header) != header_size:
-                raise ValueError("truncated safetensors header")
-            header = json.loads(raw_header)
-        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            header, _base, _size = read_safetensors_header(str(shard))
+        except (OSError, UnicodeError, ValueError) as exc:
             raise ValueError(f"cannot inspect safetensors shard {shard}: {exc}") from exc
         if not isinstance(header, Mapping):
             raise ValueError(f"safetensors header is not an object: {shard}")
