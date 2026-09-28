@@ -1402,6 +1402,86 @@ def rate_axis_format(name: object) -> bool:
     return family is not None and family.rate_axis
 
 
+# -- a family's name grammar, answered by its lane (decoupling step 6) ------
+#
+# The allocator and its DP ask four questions about a format NAME that only
+# the name's family can answer: what a serving unit's members must share
+# (the promotion class), whether a name is a whole-group option, what one
+# fused module commits to, and which member and rung a name spells. A registry
+# format answers each without a lane: it is its own class, never a group
+# option, commits to nothing a licence names, and parses to no rung. A family
+# answers through its lane plugin, looked up when asked, so a test that
+# substitutes the lane's function still reaches every caller.
+
+def format_promotion_class(fmt: object) -> str:
+    """The identity every member of one serving unit must share.
+
+    A registry format is its own class. A family rung answers with the part
+    of its name the runtime dispatches on (for Tessera, the family without
+    the rate), so promotion can require the shared decoder and leave the rate
+    free per member.
+    """
+    if not isinstance(fmt, str):
+        return str(fmt)
+    family = format_family_of(fmt)
+    if family is None:
+        return fmt
+    from .lane_spec import family_hook
+
+    return family_hook(family, "promotion_class")(fmt)
+
+
+def is_group_option(fmt: object) -> bool:
+    """Is ``fmt`` a whole-group option (a rung per member), not one format?"""
+    family = format_family_of(fmt)
+    if family is None:
+        return False
+    from .lane_spec import family_hook
+
+    return bool(family_hook(family, "is_group_option")(fmt))
+
+
+def group_option_name(promotion_class: str, index: int) -> str:
+    """The name of the ``index``-th whole-group option of one promotion class."""
+    family = format_family_of(promotion_class)
+    if family is None:
+        raise ValueError(
+            f"{promotion_class!r} is a registry format; only a lane family's "
+            "promotion class has whole-group options")
+    from .lane_spec import family_hook
+
+    return family_hook(family, "group_option_name")(promotion_class, index)
+
+
+def fused_shared_signature(fmt: object, shared_fields):
+    """What ``fmt`` commits one fused module to over ``shared_fields``.
+
+    ``None`` for a name no family claims: the question does not apply.
+    """
+    family = format_family_of(fmt)
+    if family is None:
+        return None
+    from .lane_spec import family_hook
+
+    return family_hook(family, "fused_shared_signature")(fmt, shared_fields)
+
+
+def parse_family_rung(fmt: object):
+    """``(member, rung)`` for a family rung name, or ``None``.
+
+    ``None`` for a registry format and for a family name that is not a rung.
+    A family-shaped name that spells an illegal rung raises the family's own
+    ``ValueError``: silence there would put an unpriced format in front of
+    the DP.
+    """
+    family = format_family_of(fmt)
+    if family is None:
+        return None
+    from .lane_spec import family_hook
+
+    return family_hook(family, "parse_format_name")(fmt)
+
+
 # The retired Gridbook lane's codebook rungs (NVFP4_CB_K<k>, FP8_CB_K<k>).
 # They are no longer registered. A stale artifact that names one gets this
 # refusal, never a silent skip: RetiredFormatError is deliberately NOT a

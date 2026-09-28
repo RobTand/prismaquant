@@ -20,6 +20,21 @@ not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
+Re-stamped 2026-09-28 (PQ #1552, decoupling step 6 part 2a): the DP
+receives lane facts through hooks (§8.10). `allocator_solver`,
+`allocator_candidates`, `cost_currency`, `prepriced_cost` and
+`unit_topology_restamp` import no lane module. A format name's family grammar
+(promotion class, group options, fused-module signature, rung parse) is
+answered through `format_registry`, the fused-module licence and its field
+vocabulary through `allocator_solver.lane_fused_module_licence` and
+`lane_fused_module_fields`, and the campaign currency is declared on the
+Tessera family as `cost_currency`. `prune_dominated` and
+`collapse_to_dp_bins` move into `allocator_solver`. The core-boundary
+allowlist loses 24 lines. The recorded GLM-5.3 allocation reproduces every
+output byte for byte on main and on the branch, apart from the wall-clock
+`solver_seconds` stamp. No format, default, stage, stored byte or ship gate
+changes.
+
 Re-stamped 2026-09-28 (PQ #1551, decoupling step 6 part 1): core reaches
 the Tessera lane's format code through lane data and a plugin, not imports
 (§8.10). `lane_specs/tessera.json` declares `plugin:
@@ -24731,11 +24746,14 @@ plus a plugin module.
 - **Declared as data** (`lane_specs/<lane>.json`): `plugin`, the dotted
   module that holds the lane's hooks; `format_families`, each with an `id`, a
   `label`, an upper-case `name_prefix` and the capabilities
-  `requires_production_render` and `rate_axis`; and
+  `requires_production_render` and `rate_axis`, and an optional
+  `cost_currency` its priced rows must carry; and
   `layer_config_meta_prefixes`, the metadata keys the lane's allocation
   writes. `LaneSpec.from_dict` refuses a family with no plugin, and
   `lane_spec.format_families()` refuses two families whose prefixes overlap.
-  Tessera declares one family (`TESSERA_`), both capabilities, the plugin
+  Tessera declares one family (`TESSERA_`), both capabilities, the currency
+  `output_mse_under_route_activation_contract` (held equal to
+  `tessera_campaign.CURRENCY` by `tests/test_cost_currency.py`), the plugin
   `prismaquant.tessera_lane` and the prefix `tessera_`.
 - **Resolved without the plugin.** `format_registry.format_family_of(name)`
   is a prefix match over the declared families. It imports neither the plugin
@@ -24762,6 +24780,25 @@ plus a plugin module.
   `serving_runtime_pin_path`, `load_serving_runtime_pin`,
   `ServingRuntimePinError` and `serving_runtime_contract_path`, which
   `serving_profiles._load_pinned_lane_tables` reads.
+- **What the DP receives (PQ #1552).** A family's name grammar is answered
+  by its plugin through `format_registry`: `format_promotion_class` (what a
+  serving unit's members must share; a registry format is its own class),
+  `is_group_option`, `group_option_name`, `fused_shared_signature` and
+  `parse_family_rung` (raising on an illegal rung of a family-shaped name),
+  from the family hooks `promotion_class`, `is_group_option`,
+  `group_option_name`, `fused_shared_signature` and `parse_format_name`.
+  Candidate admission uses the family hooks `route_admission` and
+  `menu_mode`, and the shard gate `tensor_parallel_applicability`. The
+  fused-module licence and its field vocabulary reach promotion and the group
+  knapsack through `allocator_solver.lane_fused_module_licence` and
+  `lane_fused_module_fields` (run-level hooks `fused_module_licence` and
+  `fused_module_fields`); no licence means one rung per group. The DP's exact
+  reductions, `prune_dominated` and `collapse_to_dp_bins`, live in
+  `allocator_solver` beside `_charged_bins`; the lane's only input to them is
+  which candidates sit on a rate axis (promotion class differs from name).
+  The currency gate reads `cost_currency` off the family declaration, and
+  `prepriced_cost` and `unit_topology_restamp` reach the run-level hooks
+  `hessian_identity` and `restamp_unit_topology`.
 - **Neutral homes for shared helpers.** `digests.SOURCE_HASH_BLOCK_BYTES`
   (the guarded source hash's read block, which admission charges) and
   `joint_eval_observation` (the pilot panel's `STATUS` and

@@ -61,11 +61,43 @@ _GROUP_KIND_PACKED = "packed"
 _GROUP_KINDS = frozenset({_GROUP_KIND_FUSED, _GROUP_KIND_PACKED})
 
 #: ``promote_serving_units`` / ``_promote_group_components`` default: read the
-#: pinned contract's ``fused_module`` block on first need (through
-#: ``tessera_menu.fused_module_licence``, the module's declared one read).  An
+#: pinned contract's ``fused_module`` block on first need, through
+#: :func:`lane_fused_module_licence` (for Tessera,
+#: ``tessera_menu.fused_module_licence``, that module's declared one read).  An
 #: explicit ``None`` is the ABSENCE of a licence -- one rung per group -- not
 #: a request to read.
 _LICENCE_FROM_CONTRACT: object = object()
+
+
+def lane_fused_module_licence():
+    """The fused-module licence the serving lane publishes, or ``None``.
+
+    What one fused module's roles may disagree about is a fact about the
+    serving runtime, so the DP receives it from the lane that pins that
+    runtime (the plugin's ``fused_module_licence`` hook) and never reads a
+    lane's contract itself. ``None`` -- no lane provides one, or its runtime
+    is not pinned -- is the absence of a licence: one rung per group.
+    """
+    from .lane_spec import single_lane_hook
+
+    read = single_lane_hook("fused_module_licence")
+    return None if read is None else read()
+
+
+def lane_fused_module_fields():
+    """``(rung_fields, shape_fields, rate_field)`` of the licensing lane.
+
+    Only asked once a licence was read, so a lane that licenses fused
+    modules and publishes no vocabulary for them is a defect: it raises.
+    """
+    from .lane_spec import single_lane_hook
+
+    fields = single_lane_hook("fused_module_fields")
+    if fields is None:
+        raise LookupError(
+            "a lane publishes a fused-module licence and no "
+            "'fused_module_fields' vocabulary for it")
+    return fields()
 
 
 @dataclass
@@ -982,7 +1014,14 @@ def _resolve_family_group(
         return None
     if not fused_licence.is_per_member("q256"):
         return None
-    from .tessera_formats import format_promotion_class
+    # One lane lookup per format, not per (member, format).
+    classes: dict[str, str] = {}
+
+    def format_promotion_class(fmt):
+        cls = classes.get(fmt)
+        if cls is None:
+            cls = classes[fmt] = fr.format_promotion_class(fmt)
+        return cls
 
     out: dict[str, str] = {}
     for member in members:
@@ -1042,10 +1081,10 @@ def _promote_group_components(
     ``fused_licence`` is the pinned contract's ``fused_module`` block parsed
     into a ``FusedModuleLicence``; ``None`` is the absence of a licence (one
     rung per group), and the default reads the contract on first need through
-    ``tessera_menu.fused_module_licence`` -- lazily, so a stock run never
+    :func:`lane_fused_module_licence` -- lazily, so a stock run never
     imports the menu reader.
     """
-    from .tessera_formats import format_promotion_class
+    format_promotion_class = fr.format_promotion_class
 
     if group_kinds is not None:
         if len(group_kinds) != len(groups):
@@ -1146,8 +1185,7 @@ def _promote_group_components(
                 )
             if kinds_here == {_GROUP_KIND_FUSED}:
                 if licence is _LICENCE_FROM_CONTRACT:
-                    from .tessera_menu import fused_module_licence as _read_licence
-                    licence = _read_licence()
+                    licence = lane_fused_module_licence()
                 resolved = _resolve_family_group(
                     members, out, format_rank, legal_formats, promotion_class,
                     licence)
@@ -1268,7 +1306,7 @@ def promote_fused(assignment: dict[str, str],
     ``fused_licence`` is the pinned Tessera contract's ``fused_module``
     block parsed into a ``FusedModuleLicence``; ``None`` is the absence of
     a licence (one rung per group), and the default reads the contract on
-    first need through ``tessera_menu.fused_module_licence`` -- lazily, so
+    first need through :func:`lane_fused_module_licence` -- lazily, so
     a stock run never imports the menu reader. It is forwarded to
     ``promote_serving_units`` unchanged, so a licensed fused group keeps
     its per-member rungs here exactly as it does on the
@@ -1301,14 +1339,12 @@ def promote_fused(assignment: dict[str, str],
         guessing either way -- the same fail-closed read
         ``_resolve_family_group`` performs.
         """
-        from .tessera_formats import format_promotion_class
-        if len({format_promotion_class(out[m])
+        if len({fr.format_promotion_class(out[m])
                 for m in members_present}) != 1:
             return False
         nonlocal licence
         if licence is _LICENCE_FROM_CONTRACT:
-            from .tessera_menu import fused_module_licence as _read_licence
-            licence = _read_licence()
+            licence = lane_fused_module_licence()
         if licence is None:
             return False
         return bool(licence.is_per_member("q256"))
@@ -1377,6 +1413,83 @@ def _charged_bins(d_avg_bits: float, bit_precision: float) -> int:
     if dbins == 0 and d_avg_bits > 0.0:
         return 1
     return dbins
+
+
+# ---------------------------------------------------------------------------
+# Making a continuous menu tractable, exactly (moved from tessera_menu, #1552)
+# ---------------------------------------------------------------------------
+#
+# Both reductions are the DP's own: they drop only rows this solver could never
+# choose, so a lane with a continuous rate axis hands the DP its full priced
+# menu and the DP reduces it. Which candidates are on a rate axis is the one
+# input a lane supplies (``format_registry.format_promotion_class``).
+
+def prune_dominated(
+    rows: Sequence[tuple[int, float, object]],
+) -> list[tuple[int, float, object]]:
+    """Drop only rows another row beats on BOTH axes.  Exact, not a hull.
+
+    ``rows`` is ``(memory_bytes, cost, payload)``.  A row is dominated when
+    another row is no larger in bytes and no larger in cost, and strictly
+    better on at least one -- which is the only reduction a multi-choice
+    knapsack admits without changing its answer, because the DP's budget is
+    discrete and a point strictly inside the convex hull can still be the
+    optimum for one particular remaining capacity.  Hull pruning would drop
+    exactly those points, so it is refused here rather than offered behind a
+    flag.
+
+    Ties on both axes keep the first row in the sorted order, so the reduction
+    is deterministic.
+    """
+    ordered = sorted(rows, key=lambda r: (int(r[0]), float(r[1])))
+    kept: list[tuple[int, float, object]] = []
+    best = float("inf")
+    for row in ordered:
+        cost = float(row[1])
+        if cost < best:
+            kept.append(row)
+            best = cost
+    return kept
+
+
+def collapse_to_dp_bins(
+    rows: Sequence[tuple[int, float, object]],
+    *,
+    baseline_bits_per_param: float,
+    n_params: int,
+    total_params: int,
+    bit_precision: float,
+) -> list[tuple[int, float, object]]:
+    """Keep one row per distinct DP bin.  Exact **for this DP**, and says so.
+
+    :func:`solve_allocation` charges a candidate
+    ``round(((bpp - baseline_bpp) * n_params/total_params) / bit_precision)``
+    bins and can express nothing finer.  Two rungs that land in the same bin are
+    indistinguishable *to the solver*, so keeping the lower-cost one changes no
+    answer it could have given -- which is a different and weaker statement than
+    :func:`prune_dominated`'s, and is why the two are separate functions with
+    separately reported counts.
+
+    The distinction matters for reading a receipt.  If an allocation's selected
+    rates look coarse, this tells you whether the campaign priced few rungs
+    (a campaign result) or the DP's bin width swallowed them (a
+    ``--bit-precision`` result).  On a 0.6B model a 3M-parameter Linear holds a
+    fraction near 0.007 of the body, so Tessera's 1/256-bpp step is ~2.7e-5
+    average bits and the default ``bit_precision=1e-4`` resolves roughly one
+    rung in four.  Neither number is a constant here: both are reported.
+    """
+    if total_params <= 0 or n_params <= 0:
+        return list(rows)
+    fraction = float(n_params) / float(total_params)
+    best: dict[int, tuple[int, float, object]] = {}
+    for row in sorted(rows, key=lambda r: (int(r[0]), float(r[1]))):
+        bits_per_param = float(row[0]) * 8.0 / float(n_params)
+        d_avg = (bits_per_param - float(baseline_bits_per_param)) * fraction
+        dbins = _charged_bins(d_avg, float(bit_precision))
+        prior = best.get(dbins)
+        if prior is None or float(row[1]) < float(prior[1]):
+            best[dbins] = row
+    return [best[k] for k in sorted(best)]
 
 
 def selected_rung_dual_intervals(

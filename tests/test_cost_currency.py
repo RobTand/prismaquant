@@ -153,13 +153,15 @@ def test_the_expected_currency_comes_from_the_stamp_not_the_environment(monkeypa
     assert require_run_currency(render_stamp)["tessera_rows"] == 1
 
 
-def test_the_tessera_currency_is_read_from_the_campaign_not_restated():
-    """Pin the rule, not the roster: the gate reads the currency string from
-    the module that stamps it."""
+def test_the_tessera_currency_the_gate_reads_is_the_one_the_campaign_stamps():
+    """Pin the rule, not the roster: the gate reads the currency the lane
+    declares on its format family, and that declaration is the stamping
+    module's own constant (decoupling step 6, PQ #1552)."""
     from prismaquant import cost_currency as cc
     from prismaquant.tessera_campaign import CURRENCY
 
-    assert cc.tessera_campaign_currency() == CURRENCY
+    assert [family.cost_currency for family in cc.campaign_currency_families()
+            if family.id == "tessera"] == [CURRENCY]
     assert CURRENCY == "output_mse_under_route_activation_contract"
 
 

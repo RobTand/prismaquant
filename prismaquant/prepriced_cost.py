@@ -120,7 +120,7 @@ def validate_prepriced_cost(
     from .cost_currency import COST_MODE_OBJECTIVE_CURRENCY, require_run_currency
     from .research_cost_acceptance import accepted_cost_provenance
     from .schemas import validate_cost_payload
-    from .tessera_menu import assert_uniform_hessian_identity
+    from .lane_spec import single_lane_hook
 
     input_path = Path(path).absolute()
     source = _input_path(input_path)
@@ -158,8 +158,11 @@ def validate_prepriced_cost(
         # A content-equal second reference seal is one identity (#1270); the
         # report keeps the per-seal row counts, not the whole row map.
         from .joint_catalog_extension import hessian_references
-        hessian = assert_uniform_hessian_identity(
-            payload["costs"], references=lambda: hessian_references(payload))
+        # The lane whose rungs consume a per-unit Hessian owns the identity
+        # rule; with no such lane a table has no Hessian claim to check.
+        hessian_identity = single_lane_hook("hessian_identity")
+        hessian = ({} if hessian_identity is None else hessian_identity(
+            payload["costs"], references=lambda: hessian_references(payload)))
         hessian.pop("row_capture_sha256", None)
         binding = _model_binding(payload, model)
         usable = sum(
