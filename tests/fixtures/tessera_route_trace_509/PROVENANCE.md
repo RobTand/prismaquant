@@ -21,7 +21,7 @@ would have observed (rank `n` of 2, platform `sm_121`) and flushes through the
 producer's own `_RouteTrace`:
 
 ```
-/home/rob/venvs/pq-cpu312-tessera-4c384e60/bin/python \
+python3 \
   tests/fixtures/tessera_route_trace_509/generate.py \
   --producer-src /home/rob/tmp/tessera-509-route-trace-identity/src \
   --producer-commit 8104dc6 \
@@ -35,3 +35,17 @@ producer's own `_RouteTrace`:
 
 Regenerating rewrites `pid`, `started_utc`, `flushed_utc` and `flushes`; the
 `entries` and the identity header are deterministic.
+
+## Module names are the serve's, not the checkpoint's (PQ #1490)
+
+Regenerated 2026-09-28 at the same producer commit (`8104dc6`) with the
+system `python3` (3.12; the producer's telemetry module is stdlib-only, and
+the venv named above no longer exists). The only change to `entries` is the
+module names. Each stand-in layer's `prefix` was the checkpoint target
+(`model.language_model.layers.N.…`), which no GLM serve records: vLLM builds
+the body under `language_model.model.layers.N.…`, and Tessera records the
+layer's `prefix`. The measured U4 BAL TP2 serves (2026-09-28) confirm it.
+`generate.py` now applies that rule (`served_prefix`) before it emits, and
+the gate maps the m44e1 config's targets through the `glm5_next` profile to
+compare them. Before this change the fixture agreed only because both sides
+used the same wrong namespace.

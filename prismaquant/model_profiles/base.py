@@ -628,6 +628,26 @@ class ModelProfile(ABC):
                 return mapped
         return self._name_remapper(checkpoint_name)
 
+    def served_module_name(self, checkpoint_name: str, config: dict) -> str:
+        """The name the serving runtime's module tree gives a priced target.
+
+        ``config_groups`` targets are checkpoint names. Route telemetry
+        (Tessera's ``TESSERA_ROUTE_TRACE``) records each dispatching layer's
+        ``prefix``, which is the name vLLM built the module under. The
+        ``route.trace`` gate (`tessera_route_trace_gate`, PQ #1490) maps each
+        priced target through this method before it compares the two.
+
+        ``config`` is the artifact's parsed ``config.json``. A profile that
+        serves a separate draft model (MTP) reads its layer range from it.
+
+        The default is the identity: a profile that attests no runtime
+        namespace compares checkpoint names verbatim, exactly as the gate did
+        before this hook existed. It deliberately does NOT fall back to
+        :meth:`to_vllm_internal_name`, which imports the vLLM class to read
+        its mapper. A profile overrides this only with a mapping it cites to
+        the pinned serving image (principle 14)."""
+        return checkpoint_name
+
     def runtime_loads_source_fp8(self, module_name: str) -> bool:
         """True when the pinned serving runtime loads this Linear's FP8
         source bytes itself — expecting SOURCE-style keys

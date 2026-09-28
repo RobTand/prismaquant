@@ -521,6 +521,13 @@ def _served_owners():
         formats=formats)["owners"]
 
 
+def _served_body_name(target):
+    """The GLM body's served name, spelled out here rather than read back from
+    the profile under test (PQ #1490): what the U4 BAL serves traced."""
+    assert target.startswith("model.language_model.")
+    return "language_model.model." + target[len("model.language_model."):]
+
+
 def test_the_fixture_is_a_written_trace_and_not_a_local_transcription():
     """Tessera wrote these; the schema under test is the producer's (#509)."""
     assert gate.IDENTITY_VERSION == IDENTITY_VERSION
@@ -546,8 +553,15 @@ def test_a_written_producer_trace_is_compared_module_by_module_and_says_so():
     assert verdict["status"] == gate.AGREE, verdict["detail"]
     assert verdict["granularity"] == gate.EXACT_GRANULARITY
     assert verdict["exact_module_qualified"] is True
-    assert verdict["served_modules"]["rank0"] == verdict["priced_owners"]
-    assert verdict["served_modules"]["rank1"] == verdict["priced_owners"]
+    # The price keeps its checkpoint names; the serve names the same modules
+    # in vLLM's namespace, and the glm5_next profile maps one to the other.
+    in_serve_namespace = {_served_body_name(name): key
+                          for name, key in verdict["priced_owners"].items()}
+    assert verdict["served_modules"]["rank0"] == in_serve_namespace
+    assert verdict["served_modules"]["rank1"] == in_serve_namespace
+    assert verdict["served_namespace"] == {
+        "profile": "glm5_next",
+        "renamed": {name: _served_body_name(name) for name in verdict["priced_owners"]}}
     assert verdict["priced_owners"] == _served_owners()
     assert len(verdict["priced_owners"]) == len(EXACT_LEDGER)
     header = verdict["header"]["rank0"]
@@ -572,12 +586,14 @@ def test_the_written_swapped_serve_is_refused_though_its_counts_are_identical():
     assert verdict["status"] == gate.REFUSED
     assert "differ per module" in verdict["detail"]
     assert (
-        "model.language_model.layers.0.mlp.down_proj: "
+        "language_model.model.layers.0.mlp.down_proj (priced as "
+        "model.language_model.layers.0.mlp.down_proj): "
         f"priced TESSERA_BF16/dense/{BF16} but served "
         f"TESSERA_NVFP4/dense/{NVFP4}" in verdict["detail"]
     ), verdict["detail"]
     assert (
-        "model.language_model.layers.1.mlp.shared_experts.down_proj: "
+        "language_model.model.layers.1.mlp.shared_experts.down_proj (priced as "
+        "model.language_model.layers.1.mlp.shared_experts.down_proj): "
         f"priced TESSERA_NVFP4/dense/{NVFP4} but served "
         f"TESSERA_BF16/dense/{BF16}" in verdict["detail"]
     ), verdict["detail"]

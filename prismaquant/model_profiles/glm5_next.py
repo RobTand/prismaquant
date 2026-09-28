@@ -268,6 +268,80 @@ class Glm5NextProfile(ModelProfile):
             return "language_model." + name
         return name
 
+    # ------------------------------------------------------------
+    # Served module namespace (route telemetry, PQ #1490)
+    # ------------------------------------------------------------
+    _CHECKPOINT_BODY_PREFIX = "model.language_model."
+    _CHECKPOINT_LAYER_RE = re.compile(r"^model\.language_model\.layers\.([0-9]+)\.(.+)$")
+
+    @staticmethod
+    def mtp_draft_layer_range(config) -> range:
+        """The checkpoint layer indices the MTP draft model serves.
+
+        GLM ships its nextn/MTP block as the text tower's layers
+        ``num_hidden_layers .. num_hidden_layers + num_nextn_predict_layers - 1``
+        (``model.language_model.layers.45`` on GLM-5.3-Flash). Both numbers
+        are read from the artifact's own ``config.json``, under
+        ``text_config`` when the wrapper nests it, never assumed.
+        ``num_nextn_predict_layers: 0`` is an empty range: no draft.
+
+        A config that states neither number, or a non-integer, raises
+        ``ValueError``: which layers the draft owns is not guessed.
+        """
+        if not isinstance(config, dict):
+            raise ValueError("glm5_next: config.json is not a JSON object")
+        text = config.get("text_config")
+        source, where = (text, "text_config") if isinstance(text, dict) else (config, "config")
+        values = []
+        for field in ("num_hidden_layers", "num_nextn_predict_layers"):
+            value = source.get(field)
+            if type(value) is not int or value < 0:
+                raise ValueError(
+                    f"glm5_next: {where}.{field} is {value!r}, not a non-negative "
+                    "integer; the MTP draft's layer range cannot be derived")
+            values.append(value)
+        first, count = values
+        return range(first, first + count)
+
+    def to_mtp_draft_module_name(self, checkpoint_name: str, config) -> str | None:
+        """A draft-layer checkpoint name in the MTP draft model's namespace.
+
+        Attested from the pinned serving image
+        ``prismaquant/spark-vllm-nccl230@sha256:f8dbe1a0…`` (tag
+        ``a5424378-mtpmap1``; ``serving_runtime_patches/glm53_mtp_mapper``,
+        patched ``vllm/models/glm5next/nvidia/mtp.py`` sha256 ``45124573…``):
+        ``Glm5NextMTP.hf_to_vllm_mapper = WeightsMapper(orig_to_new_prefix=
+        {"model.language_model.": "model."})``. The drafter builds its
+        decoder layer under that bare prefix, and Tessera's trace records the
+        layer's ``prefix``. The measured MTP k=1 serve on that image (U4 BAL
+        2c-r5, 2026-09-28) traced the draft experts as
+        ``model.layers.45.mlp.experts``: no ``mtp_block`` segment, which is
+        the drafter's ``named_modules`` namespace and not the trace's.
+
+        Returns ``None`` for a name outside :meth:`mtp_draft_layer_range`:
+        the body's namespace is :meth:`to_vllm_internal_name`'s. Only the
+        checkpoint namespace is read, because ``config_groups`` targets are
+        checkpoint names.
+        """
+        match = self._CHECKPOINT_LAYER_RE.match(checkpoint_name)
+        if match is None or int(match.group(1)) not in self.mtp_draft_layer_range(config):
+            return None
+        return "model." + checkpoint_name[len(self._CHECKPOINT_BODY_PREFIX):]
+
+    def served_module_name(self, checkpoint_name: str, config) -> str:
+        # Two models serve one GLM artifact, each under its own mapper: the
+        # MTP draft owns the layer range `mtp_draft_layer_range` names and the
+        # body owns the rest. A draft target spelled in the body's namespace
+        # (``language_model.model.layers.45.…``) is therefore a module the
+        # price does not name, and the route gate refuses it. The body map is
+        # cited to its image in `to_vllm_internal_name`; the measured U4 BAL
+        # serves on the mtpmap1 image above traced the body under the same
+        # ``language_model.model.layers.N.…`` names.
+        draft = self.to_mtp_draft_module_name(checkpoint_name, config)
+        if draft is not None:
+            return draft
+        return self.to_vllm_internal_name(checkpoint_name)
+
     _RUNTIME_SOURCE_FP8_RE = re.compile(
         r"\.self_attn\.(q_a_proj|q_b_proj|kv_a_proj_with_mqa|o_proj)$")
 
