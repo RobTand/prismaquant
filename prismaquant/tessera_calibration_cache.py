@@ -16,6 +16,7 @@ import threading
 from types import MappingProxyType
 
 from .cost_stage_checkpoint import atomic_write_bytes, prepare_journal, write_unit
+from .file_identity import file_stat_signature
 from .memory_management import reserve_allocation
 
 SCHEMA = 'prismaquant.tessera_calibration_cache.v2'
@@ -160,10 +161,6 @@ SELECTED_SOURCE_LOAD_SCHEMAS = frozenset({
 })
 
 
-def _source_stat(value):
-    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-
-
 class CaptureSourceAuthentication:
     """One complete capture's source descriptors, not a weight/digest cache.
 
@@ -243,7 +240,7 @@ class CaptureSourceAuthentication:
     def _check_file(self, name, state):
         try:
             current = (os.fstat(state['fd']), os.stat(self.root/name))
-            if any(_source_stat(value) != _source_stat(state['before']) for value in current):
+            if any(file_stat_signature(value) != file_stat_signature(state['before']) for value in current):
                 raise RuntimeError(f'authenticated source changed during consumption: {name}')
         except OSError as exc:
             raise RuntimeError(f'authenticated source changed during consumption: {name}') from exc
@@ -297,7 +294,7 @@ class CaptureSourceAuthentication:
         raw = path.read_bytes()
         cached = json.loads(raw)
         after = path.stat()
-        if _source_stat(before) != _source_stat(after):
+        if file_stat_signature(before) != file_stat_signature(after):
             raise RuntimeError('streamed source identity cache changed while reading')
         if expected_sha256 is not None and hashlib.sha256(raw).hexdigest() != expected_sha256:
             raise RuntimeError('streamed source identity cache differs from its declared SHA256')
@@ -949,7 +946,7 @@ def _capture_manifest_stat(path):
     observed = Path(path).lstat()
     if not stat.S_ISREG(observed.st_mode):
         raise RuntimeError('canonical capture manifest must be a regular nonsymlink file')
-    return _source_stat(observed)
+    return file_stat_signature(observed)
 
 
 def _freeze_capture_metadata(value):

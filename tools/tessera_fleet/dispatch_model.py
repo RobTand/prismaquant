@@ -81,7 +81,7 @@ def campaign_row(workspace, spec, command, *, index=None, host=None):
             'retry_safe': True}
 
 
-def prepare(spec, workspace, wait_s):
+def prepare_source_identity(spec, workspace, wait_s):
     """Prepare the source identity on every named host, and require agreement."""
     rows = [campaign_row(workspace, spec, 'prepare', host=host) for host in spec['prepare_hosts']]
     common.run_stage(rows, workspace, 'prepare', wait_s=wait_s)
@@ -159,7 +159,7 @@ def main(argv=None):
                 'prepare_hosts': sorted(set(args.prepare_hosts))}
         model.atomic_json(workspace / 'job.json', spec)
     if 'contract' not in spec:
-        spec.update(prepare(spec, workspace, args.wait_s))
+        spec.update(prepare_source_identity(spec, workspace, args.wait_s))
         spec['contract'] = model.digest_json(spec)
         model.atomic_json(workspace / 'job.json', spec)
     print(f"export {spec['contract']}: {spec['count']} whole-layer actions", flush=True)

@@ -91,12 +91,12 @@ def test_output_must_match_its_barrier_record_and_actual_payload(tmp_path):
     (tmp_path / 'wire').write_bytes(b'wire')
     record = {'files': {'wire': model.digest_file(tmp_path / 'wire')}, 'contract': 'a'}
     model.atomic_json(tmp_path / 'pb-result.json', record)
-    assert model.verify_record(tmp_path, record) == record
+    assert model.verify_output_record(tmp_path, record) == record
     with pytest.raises(ValueError, match='differs'):
-        model.verify_record(tmp_path, dict(record, contract='b'))
+        model.verify_output_record(tmp_path, dict(record, contract='b'))
     (tmp_path / 'wire').write_bytes(b'corrupt')
     with pytest.raises(ValueError, match='output changed'):
-        model.verify_record(tmp_path, record)
+        model.verify_output_record(tmp_path, record)
 
 
 def test_unlisted_output_cannot_be_reused(tmp_path):
@@ -105,7 +105,7 @@ def test_unlisted_output_cannot_be_reused(tmp_path):
     model.atomic_json(tmp_path / 'pb-result.json', record)
     (tmp_path / 'unexpected.safetensors').write_bytes(b'stale checkpoint')
     with pytest.raises(ValueError, match='population changed'):
-        model.verify_record(tmp_path, record)
+        model.verify_output_record(tmp_path, record)
 
 
 def test_mutated_plan_refuses_before_any_encode(tmp_path, monkeypatch):
@@ -173,13 +173,13 @@ def test_preparation_runs_on_every_named_host_and_they_must_agree(tmp_path, monk
             'tags': ['gb10'], 'cpus': 1, 'mem_gb': 16, 'assembly_mem_gb': 4}
     for host, count in (('sparklina', 3), ('sparky', 3)):
         model.atomic_json(model.prepared_path(spec, host), {'count': count})
-    assert dispatch_model.prepare(spec, tmp_path, 1) == {'count': 3}
+    assert dispatch_model.prepare_source_identity(spec, tmp_path, 1) == {'count': 3}
     rows = calls[0][1]
     assert [row['tags'] for row in rows] == [['gb10', 'sparklina'], ['gb10', 'sparky']]
     assert [row['argv'][-2:] for row in rows] == [['--host', 'sparklina'], ['--host', 'sparky']]
     model.atomic_json(model.prepared_path(spec, 'sparky'), {'count': 4})
     with pytest.raises(ValueError, match='disagree'):
-        dispatch_model.prepare(spec, tmp_path, 1)
+        dispatch_model.prepare_source_identity(spec, tmp_path, 1)
 
 
 def test_a_part_record_of_another_export_is_refused(tmp_path):
@@ -339,7 +339,7 @@ def test_status_asks_pbwait_for_the_recorded_keys(tmp_path, capsys):
     (['executed'], status.EXIT_FAILED),
 ])
 def test_the_exit_status_is_the_worst_ending(statuses, expected):
-    assert status.verdict([{'status': s} for s in statuses], 2) == expected
+    assert status.exit_status([{'status': s} for s in statuses], 2) == expected
 
 
 # --- nothing here reaches PrismaBuild internals -------------------------------

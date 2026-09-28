@@ -51,7 +51,7 @@ def recorded_keys(workspace: Path, stage: str) -> list[str]:
     return []
 
 
-def verdict(table: list[dict], expected: int) -> int:
+def exit_status(table: list[dict], expected: int) -> int:
     statuses = [row.get("status", "") for row in table]
     if len(table) != expected or any(s not in DONE_STATUSES and s != "waiting"
                                      for s in statuses):
@@ -84,7 +84,7 @@ def main(argv=None) -> int:
     counts = Counter(row.get("status", "?") for row in table)
     print(f"{args.stage}: {len(keys)} recorded, "
           + ", ".join(f"{n} {status}" for status, n in sorted(counts.items())))
-    return verdict(table, len(keys))
+    return exit_status(table, len(keys))
 
 
 if __name__ == "__main__":

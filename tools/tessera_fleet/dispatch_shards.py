@@ -61,16 +61,13 @@ ENVIRONMENT = {
 }
 
 
-def row(workspace: Path, shard: int, *, python: str, source: str, parts: str) -> dict:
-    return {
-        "cwd": str(workspace),
-        "argv": [python, WRAPPER, "--shard", str(shard), "--source", source,
-                 "--plan", "plan.json", "--out", f"{parts}/shard-{shard:05d}",
-                 "--result", f"results/glm53-tessera/shard-{shard:05d}.json"],
-        "demand": dict(RESOURCE_DEMAND),
-        "tags": ["gb10"],
-        "env": dict(ENVIRONMENT),
-    }
+def shard_row(workspace: Path, shard: int, *, python: str, source: str, parts: str) -> dict:
+    return common.gb10_row(
+        workspace,
+        [python, WRAPPER, "--shard", str(shard), "--source", source,
+         "--plan", "plan.json", "--out", f"{parts}/shard-{shard:05d}",
+         "--result", f"results/glm53-tessera/shard-{shard:05d}.json"],
+        demand=RESOURCE_DEMAND, env=ENVIRONMENT)
 
 
 def main(argv=None) -> int:
@@ -94,7 +91,7 @@ def main(argv=None) -> int:
     if args.workspace is None and not args.dry_run:
         ap.error("--workspace is required unless --dry-run")
     workspace = (args.workspace or Path("<workspace>")).resolve()
-    rows = [row(workspace, shard, python=args.python, source=args.source,
+    rows = [shard_row(workspace, shard, python=args.python, source=args.source,
                 parts=args.parts) for shard in args.shards]
     if args.dry_run:
         print(json.dumps(rows, indent=1))
