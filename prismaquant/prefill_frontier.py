@@ -630,6 +630,7 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
     stub = {"table_id": ctx.table_identity["table_id"],
             "table_sha256": ctx.table_identity["sha256"]}
     vertices = []
+    selection_points = []
     for i, (vertex, record) in enumerate(zip(hull.vertices, built["vertices"])):
         probe = hull.finding_probe(vertex)
         entry = {
@@ -657,14 +658,36 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
                 assignments_dir, assignment=assignment, digest=digest, provenance_stub=stub)
             entry.update({"assignment_sha256": digest, "assignment_path": str(path),
                           "assignment_file_provenance": published_by})
+        if record["feasible"]:
+            selection_points.append({
+                "point_id": str(i),
+                "assignment_sha256": entry["assignment_sha256"],
+                "bytes": int(entry["payload_bytes"] if entry["payload_bytes"] is not None
+                             else entry["candidate_bytes"]),
+                "time_ms": float(vertex.time_ms),
+                "time_interval_ms": [float(entry["operator_sum_ms_bootstrap"]["p2.5"]),
+                                     float(entry["operator_sum_ms_bootstrap"]["p97.5"])],
+                "predicted_dloss": float(vertex.predicted_dloss),
+                "kernel_lanes": ctx.pricing.kernel_lane_histogram(assignment),
+            })
         vertices.append(entry)
         boot = entry["operator_sum_ms_bootstrap"]
         print(f"[pact-hull] vertex {i}: dloss={vertex.predicted_dloss:.6g} "
               f"ops={vertex.time_ms:.6g} ms [{boot['p2.5']:.6g}, {boot['p97.5']:.6g}] "
               + (f"sha={entry['assignment_sha256'][:12]}" if entry["feasible"]
                  else f"REFUSED ({entry['refusal_reason']})"), flush=True)
+    from .pact_selection import select_pact
+
+    selection = select_pact(
+        selection_points, regime_m=int(ctx.regime_m),
+        table_identity=dict(ctx.table_identity),
+        frontier_scope="lower_convex_hull_vertices")
+    print(f"[pact-hull] selection: materiality={selection['materiality']['verdict']} "
+          + " ".join(f"{role}={pick['point_id']}" for role, pick in selection["picks"].items()),
+          flush=True)
     return {
         "schema": PACT_SCHEMA,
+        "pact_selection": selection,
         "candidate_generator": CANDIDATE_GENERATOR,
         "time_claim": TIME_CLAIM,
         "research_only": True, "certifies_placement": False, "certifies_p95": False,
@@ -673,8 +696,11 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
             "argmin Δloss, argmin time, and select_development_point's chord distance in "
             "endpoint-normalised coordinates -- so its pick is a vertex of this hull; λ "
             "generates the hull and never enters a selection objective"),
-        "separation_scope": ("a separation test between the top two candidates sees hull "
-                             "vertices, not every point of the exact frontier (PQ #1585)"),
+        "separation_scope": ("the materiality test and the derived min_separation read the "
+                             "hull vertices' own bootstrap intervals; a separation test "
+                             "between the top two candidates sees hull vertices, not every "
+                             "point of the exact frontier, and pact_selection.frontier_scope "
+                             "says so on the record (PQ #1585)"),
         "regime_m": int(ctx.regime_m), "tensor_parallel": int(ctx.tensor_parallel),
         "time_ceiling_ms": ctx.time_ceiling_ms,
         "time_ceiling_role": ("report bound: vertices above it are flagged, never removed; "
@@ -714,7 +740,10 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
                           "function": "prismaquant.measured_runtime_prices.bootstrap_sum",
                           "resamples": ("each distinct shape row's own samples, once per draw, "
                                         "weighted by how many units read it"),
-                          "applied_as_a_threshold": False},
+                          "applied_as_a_threshold": ("only through pact_selection: the "
+                                                     "endpoint interval overlap is the "
+                                                     "materiality verdict and the top-two "
+                                                     "half-widths set min_separation")},
             "allocator_argv": list(allocator_argv),
             "assignments_dir": str(assignments_dir),
             "n_units": int(ctx.n_units),
@@ -791,6 +820,10 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
             "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
             "probe_bound_by_sweep": True,
         }
+        selection = document.get("pact_selection")
+        if selection is not None:
+            stamp["pact_selection_sha256"] = selection["identity_sha256"]
+            stamp["pact_selection"] = selection
         ctx.emit_replay(vertex["finding_probe"]["weights"], expected, stamp)
         emitted = True
 

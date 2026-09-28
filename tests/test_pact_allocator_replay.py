@@ -174,6 +174,21 @@ def test_hull_replay_and_export_intake_carry_the_research_standing(tmp_path, mon
     assert replay["probe_weights"] == interior["finding_probe"]["weights"]
     assert not (tmp_path / "layer.json").exists()
 
+    # The selection record (PQ #1585) rides beside the replay stamp, bound by digest.
+    record = meta["pact_selection"]
+    assert record["schema"] == "prismaquant.pact_selection.v1"
+    assert replay["pact_selection_sha256"] == record["identity_sha256"]
+    assert record["regime_m"] == M and record["table_identity"] == replay["table_identity"]
+    assert record["frontier_scope"] == "lower_convex_hull_vertices"
+    assert record["materiality"]["verdict"] == "material"
+    assert set(record["picks"]) == {"high_accuracy", "balanced", "high_prefill"}
+    by_id = {r["point_id"]: r for r in record["roster"]}
+    assert interior["assignment_sha256"] in {r["assignment_sha256"] for r in by_id.values()}
+    accuracy = by_id[record["picks"]["high_accuracy"]["point_id"]]
+    assert accuracy["assignment_sha256"] == doc["vertices"][0]["assignment_sha256"]
+    assert accuracy["kernel_lanes"], "the roster carries the kernel-lane histogram"
+    assert doc["pact_selection"]["identity_sha256"] == record["identity_sha256"]
+
     for name, value in {
         "require_declared_structure": "dense", "require_serving_target": None,
         "require_executes_derived_from_contract": (), "require_producer_tools": (),
@@ -192,6 +207,16 @@ def test_hull_replay_and_export_intake_carry_the_research_standing(tmp_path, mon
     assert card["build"]["prefill_frontier_replay"]["candidate_generator"] == \
         "lower_convex_hull_dichotomic"
     assert shipcard._verify_build_block(card) == []
+    assert card["build"]["pact_selection"] == record
+    # A card whose record was edited fails its own identity (PQ #1585).
+    forged = json.loads(json.dumps(card))
+    forged["build"]["pact_selection"]["picks"]["balanced"]["point_id"] = "forged"
+    assert any("pact_selection" in problem for problem in shipcard._verify_build_block(forged))
+    # A build that disagrees with the recipe's record is refused at build time.
+    other = json.loads(json.dumps(report["build"]))
+    other["pact_selection"]["regime_m"] = M + 1
+    with pytest.raises(Exception, match="pact_selection"):
+        shipcard.build_shipcard(tmp_path, build=other, lane="tessera")
 
     # Publication refuses the research standing (PQ #1598); every slot is
     # closed, so the research stamp is the only thing it can refuse on.
@@ -342,3 +367,33 @@ def test_the_one_claim_carries_every_research_standing():
         {"measured_runtime_search": {"research_only": True}}) == {"research_only": True}
     assert prefill_frontier_replay_claim({"measured_runtime_search": {}}) == {}
     assert prefill_frontier_replay_claim({}) == {}
+
+
+def test_the_claim_binds_the_selection_record_to_its_replay(tmp_path, monkeypatch):
+    case = _fixture(tmp_path, monkeypatch)
+    frontier, doc = _hull(tmp_path, case.argv, "--bootstrap-draws", "50")
+    interior = doc["vertices"][1]
+    output = tmp_path / "replayed.json"
+    assert _replay(frontier, interior["assignment_sha256"], output) == 0
+    meta = json.loads(output.read_text())[LAYER_CONFIG_META_KEY]
+    good = prefill_frontier_replay_claim(meta)
+    assert good["pact_selection"] == meta["pact_selection"]
+
+    def refused(mutate, match):
+        bad = json.loads(json.dumps(meta))
+        mutate(bad)
+        with pytest.raises(ValueError, match=match):
+            prefill_frontier_replay_claim(bad)
+
+    refused(lambda m: m["pact_selection"]["picks"]["balanced"].update(point_id="x"),
+            "pact_selection")
+    refused(lambda m: m["prefill_frontier_replay"].update(pact_selection_sha256="0" * 64),
+            "pact_selection")
+    refused(lambda m: m["prefill_frontier_replay"].update(assignment_sha256="1" * 64),
+            "roster")
+    refused(lambda m: m.pop("prefill_frontier_replay"), "pact_selection")
+    # A recipe with no record (legacy) stays accepted and carries none.
+    legacy = json.loads(json.dumps(meta))
+    del legacy["pact_selection"]
+    legacy["prefill_frontier_replay"].pop("pact_selection_sha256")
+    assert "pact_selection" not in prefill_frontier_replay_claim(legacy)
