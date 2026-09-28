@@ -279,13 +279,18 @@ def test_the_consumer_core_is_held_back_only_while_the_consumer_works():
         # A consumer that mostly waits (the fence: sha256 in the pool, the
         # consumer only admits) gives its core to the reads.
         stream.counters["consumer_work_s"] = 0.1
-        stream.counters["consumer_wait_s"] = 2.0
+        stream.counters["consumer_steady_wait_s"] = 2.0
         assert stream._width() == 8
         # A CPU-heavy consumer keeps its core, waiting or not: a read started
         # during a short wait runs on into its next work interval.
         stream.counters["consumer_work_s"] = 5.0
         assert stream._width() == 7
         stream._consumer_waiting = True
+        assert stream._width() == 7
+        # The first take's fill wait never weighs the core.
+        stream.counters["consumer_steady_wait_s"] = 0.0
+        stream.counters["consumer_wait_s"] = 60.0
+        stream.counters["consumer_work_s"] = 0.5
         assert stream._width() == 7
 
 
@@ -303,6 +308,7 @@ def test_work_is_measured_take_to_take_even_when_the_consumer_releases_early(tmp
     assert groups >= 2
     assert counters["consumer_work_s"] >= 0.05 * (groups - 1)
     assert counters["consumer_busy_s"] < 0.05
+    assert counters["consumer_steady_wait_s"] <= counters["consumer_wait_s"]
 
 
 def test_the_engine_pool_spans_the_whole_affinity():

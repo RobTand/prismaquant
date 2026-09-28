@@ -223,7 +223,7 @@ def _busy_consumer(report, wires, total, args):
         c = stream.counters
         report["runs"].append({"repeat": repeat, "wall_s": wall, "bytes_per_s": total / wall,
                                "engine": {k: c.get(k) for k in (
-                                   "pool_width", "peak_workers", "peak_workers_consumer_busy", "consumer_busy_s",
+                                   "pool_width", "peak_workers", "peak_workers_consumer_busy", "consumer_busy_s", "consumer_work_s", "consumer_steady_wait_s",
                                    "consumer_wait_s", "per_stream_bytes_per_s")}})
 
 

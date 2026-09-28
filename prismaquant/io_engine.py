@@ -54,7 +54,7 @@ states a depth or a worker count:
   width while the consumer waits or before it has measured anything. The pool
   is sized by the CPU affinity. A stream holds one core back for its
   consumer only while the consumer's measured work (take to take) exceeds its
-  measured wait in ``take``, and before it has measured a work interval
+  measured wait in ``take`` after the first, and before it has measured a work interval
   (``ReadStream._width``, PQ #1533).
 * **Order and verification.** A group is delivered only when every one of its
   entries is read, hashed, held to its digest and decoded; entries come back
@@ -743,7 +743,7 @@ class ReadStream:
             "ahead_deferrals": 0, "ahead_failures": 0,
             "peak_held_bytes": 0, "peak_workers": 0, "peak_workers_consumer_busy": 0,
             "consumer_wait_s": 0.0, "consumed_bytes": 0, "consumer_busy_s": 0.0,
-            "consumer_work_s": 0.0,
+            "consumer_work_s": 0.0, "consumer_steady_wait_s": 0.0,
             "groups_taken": [],
         }
 
@@ -868,6 +868,11 @@ class ReadStream:
             waited = time.monotonic() - started
             nbytes = sum(self._entries[i].size for i in indices)
             self.counters["consumer_wait_s"] += waited
+            if self._worked:
+                # The first take waits for the stream to fill whatever the
+                # width; only waits after a work interval weigh the
+                # consumer's core (``_width``, PQ #1533).
+                self.counters["consumer_steady_wait_s"] += waited
             self.counters["groups_taken"].append(
                 {"group": _jsonable(group), "wait_s": waited, "bytes": nbytes,
                  "entries": len(indices),
@@ -990,8 +995,10 @@ class ReadStream:
 
         The consumer runs on a core of the same affinity the pool is sized
         by. The engine measures where the consumer's time goes: waiting in
-        :meth:`take` (``consumer_wait_s``) or working between one take's
-        return and the next take (``consumer_work_s``). A core held back for
+        :meth:`take` after its first work interval
+        (``consumer_steady_wait_s``; the first take waits for the stream to
+        fill at any width) or working between one take's return and the next
+        take (``consumer_work_s``). A core held back for
         the consumer idles for its wait share; a core given to the reads
         costs the consumer its work share in contention. So the core is held
         back while the measured work share is the larger, and given to the
@@ -1004,7 +1011,7 @@ class ReadStream:
         pool = self._engine.width
         if not self._worked:
             return max(1, pool - 1)
-        if self.counters["consumer_work_s"] <= self.counters["consumer_wait_s"]:
+        if self.counters["consumer_work_s"] <= self.counters["consumer_steady_wait_s"]:
             return pool
         return max(1, pool - 1)
 

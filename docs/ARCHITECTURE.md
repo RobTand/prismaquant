@@ -524,8 +524,9 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   consumer on the module's one thread pool, sized by the whole CPU affinity.
   A stream holds one core back for its consumer only while the consumer
   needs it (`ReadStream._width`, PQ #1533): while its measured work, take to
-  take (`consumer_work_s`), exceeds its measured wait in `take`
-  (`consumer_wait_s`), and before it has measured a work interval. The rule
+  take (`consumer_work_s`), exceeds its measured wait in `take` after
+  the first (`consumer_steady_wait_s`; the first take waits for the stream to
+  fill at any width), and before it has measured a work interval. The rule
   reads the measured shares, not the consumer's state at one instant, since a
   read started during a short wait runs on into the next work interval. A
   consumer that only waits (the fence re-hash) reads on every core; a
