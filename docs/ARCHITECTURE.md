@@ -22,6 +22,38 @@ its graph-replayed decode. Measurement-tool contract only; no default, stage,
 format, lane or ship gate changes. Gates: `tests/test_glm_tr3_full_vocab.py`,
 `tests/test_gold_engine_options.py`.
 
+Re-stamped 2026-09-28 (PQ #1626, `claude/pq-route-trace-union`): **the
+`route.trace` gate judges an ARTIFACT against the union of its serve phases**
+(§8.2, §9.4). A phase compared against the whole price can never pass for an MTP
+artifact: the draft layer is priced, and a non-speculative serve never
+dispatches it. `tessera_route_trace_gate.compare_artifact_route_traces` takes
+the caller's claimed phases explicitly (`{"nonspec": [rank traces], "spec":
+[rank traces]}`; phases are never inferred from which files exist) and
+requires, per module: a priced module is dispatched in at least one claimed
+phase, a served Tessera module is priced, and its activation contract equals
+the priced one in EVERY phase that dispatches it. A claimed phase with a
+missing or empty trace is NOT VERIFIED, ranks that name different module sets
+are REFUSED, and a REFUSED finding in an observed phase outranks a NOT
+VERIFIED one from a missing phase. Per-phase verdicts stay in the result,
+labelled diagnostic; only the artifact verdict is the gate. There is no
+exclusion list: a module unserved in every claimed phase is REFUSED by name.
+`compare_route_traces` (one phase against the whole price) is unchanged.
+The draft layer's served name is the attested draft namespace
+(`model.layers.45.mlp.experts`, #1490). Gates:
+`tests/test_tessera_route_trace_gate_artifact.py` on fixtures cut from the real
+A8 traces (`tests/fixtures/tessera_route_trace_union/`, see its
+`PROVENANCE.md`). No pipeline default, stage, format or lane changes.
+
+Re-stamped 2026-09-28 (PQ #1618, `claude/pq-1618-routed-rates`): the lane
+roster mirror learns Tessera v45's structure-scoped `column_rates_routed_moe`
+requirement. `lane_eligibility.parse_lane_claim` reads it (an ascending subset
+of `column_rates`), `tessera_render.planned_wire_facts` states the unit's
+structure from the eligibility cell, and Tessera's decision core decides it for
+`routed_moe` units only; a unit with no structure fact is refused by name. No
+pipeline default, stage, format or ship gate changes and the Tessera pin does
+not move. See the lane predicate paragraph and the "lane the cell launches
+through" item.
+
 Re-stamped 2026-09-28 (PQ #1632, `claude/mtp-stamp-binds-emitted-1632`): the
 whole-artifact budget stamp's `selection_assignment_sha256` now binds the
 assignment the layer config emits, which is the body plus the selected MTP
@@ -22020,7 +22052,7 @@ alone:
    A cell's `executes` names a lane launch only for the rungs the ATTESTED
    wire stamp reaches, and that stamp is not this producer's plan.
    `lane_eligibility.cell_lane_admits(cell, rung, table.lanes)` therefore
-   reads the plan off `tessera_render.planned_wire_facts(family, rung)` — the
+   reads the plan off `tessera_render.planned_wire_facts(family, rung, structure=...)` — the
    rate set (`tessera.grammar.rate_set` over the family's root and cap), the
    recipe's window width, body and plane, and the render's own decoration
    constants (`TESSERA_PLANNED_ROTATION / _DIAGONALS / _RELEASE_OVERRIDES`,
@@ -22040,6 +22072,21 @@ alone:
    rows travel into `EligibilityTable.provenance()["lanes"]` and into the
    reviewed dev-pin answer (`native_extensions[].lane`), so a lane that
    widens or narrows what it reads is a re-review, not a silent widening.
+   **Structure-scoped rates (Tessera v45, PQ #1618).** A fused lane may
+   publish `column_rates_routed_moe` beside `column_rates`: the routed
+   gate/up two-table launch does not fit sm_121 shared memory above rate 6, so
+   the lane reads `[1..6]` for a routed unit and `[1..8]` for a dense one.
+   `parse_lane_claim` now knows the name and holds it to an ascending subset of
+   `column_rates` (Tessera's validator rule). `planned_wire_facts(family, rung,
+   structure=...)` states the unit's structure — `dense` or `routed_moe`, read
+   off the eligibility cell (the serving profile's fact, never inferred from
+   bytes) and omitted when the cell states none — and Tessera's
+   `decide_lane_requirements` decides the field only for `routed_moe`: absent
+   structure is refused by name, dense ignores it, and a routed unit outside the
+   set is refused with the compact adapter named as the route it keeps. The
+   installed pin (contract v44 and earlier) publishes no such field, so nothing
+   changes hands until the pin moves; a v45 table is read, not refused as an
+   unknown requirement (`tests/test_tessera_lane_routed_rates.py`).
    Consequence on the pinned table today: nothing changes hands — the only
    cells that launch through the window-GEMV lane are the two streamed dense
    E4M3 cells at rung 1024, whose plan (`rates (4,)`, 14-bit window, WINDOW /
@@ -25894,7 +25941,11 @@ artifact's `config.json` prices, and stays unfilled when any rank's trace is
 missing. The priced targets are checkpoint names, so the gate first names each
 one in the serve's namespace through `ModelProfile.served_module_name` (§8.2,
 PQ #1490); GLM-5.3 serves its body as `language_model.model.…` and its MTP
-draft as `model.layers.N.…`. The eighth is `uniform_control`, which `required_slots` adds because
+draft as `model.layers.N.…`. A single phase is diagnostic: an artifact is judged
+by `compare_artifact_route_traces` against the union of its explicitly claimed
+serve phases (PQ #1626), so a non-speculative phase that never dispatches the
+priced draft layer no longer refuses an MTP artifact that a speculative phase
+does serve. The eighth is `uniform_control`, which `required_slots` adds because
 the artifact has a rate axis, not because any lane asked for it (#121, §7.1).
 `open_lane_shipcard` stamps `export_container` into the card's build block so
 that second obligation rests on the card as well as on the checkpoint's
