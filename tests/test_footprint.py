@@ -251,6 +251,63 @@ def test_assignment_artifact_bytes_packed_nvfp4_counts_per_expert_globals():
     assert r["body_quant_bytes"] == expected
 
 
+def test_assignment_artifact_bytes_memo_matches_per_member_reference(monkeypatch):
+    """#1623: the per-call (format, shape) memo must not change one byte.
+
+    Recompute the body independently, member by member with no memo, and
+    require the same numbers. Shapes repeat across members (the case the memo
+    exploits) but two shapes differ under one format, so a memo keyed on the
+    format alone would fail here. ``get_format`` must be reached once per
+    distinct (format, shape), not once per member.
+    """
+    stats = {}
+    assignment = {}
+    for i in range(40):
+        out_f, in_f = (128, 32) if i % 2 else (64, 64)
+        stats[f"l{i}.w"] = {"n_params": out_f * in_f,
+                            "in_features": in_f, "out_features": out_f}
+        assignment[f"l{i}.w"] = ("NVFP4", "nvfp4", "FP8_DYNAMIC", "BF16")[i % 4]
+    stats["e.experts.gate_up_proj"] = {
+        "n_params": 4 * 128 * 32, "in_features": 32,
+        "out_features": 128, "num_experts": 4}
+    assignment["e.experts.gate_up_proj"] = "NVFP4"
+    assignment["ghost.w"] = "NVFP4"          # absent from stats
+    source_total = sum(v["n_params"] for v in stats.values()) * 2
+
+    expected_body = 0
+    expected_reencoded = 0
+    for qname, fmt in assignment.items():
+        entry = stats.get(qname)
+        if entry is None:
+            continue
+        shape = fp._shape_from_stats(entry)
+        name = fr.canonical_format_name(fmt)
+        expected_body += fr.get_format(name).memory_bytes_for_shape(shape)
+        if name == "NVFP4":
+            expected_body += fp.nvfp4_global_sidecar_bytes(qname, shape)
+        expected_reencoded += 1
+
+    calls = []
+    real_get = fr.get_format
+
+    def counting_get(name, *a, **k):
+        calls.append(name)
+        return real_get(name, *a, **k)
+
+    monkeypatch.setattr(fr, "get_format", counting_get)
+    r = fp.assignment_artifact_bytes(
+        assignment, stats, source_total_bytes=source_total,
+        regime="bf16", source_manifest=None)
+
+    assert r["body_quant_bytes"] == expected_body
+    assert r["n_reencoded"] == expected_reencoded
+    assert r["n_missing_stats"] == 1
+    # 3 formats x 2 shapes + the packed 3-D expert shape (BF16 is canonical
+    # "BF16"; "nvfp4" folds into NVFP4) is at most 8 distinct pairs.
+    assert len(calls) <= 8 < expected_reencoded
+
+
+
 # ---------------------------------------------------------------------------
 # Per-tensor source-byte manifest (mixed-precision sources)
 # ---------------------------------------------------------------------------
