@@ -262,7 +262,7 @@ def _chain_sdk():
             batch_record=lambda queue, instance, template, *, batch_id: {'entries': json.loads(
                 (Path(queue.root) / 'instances' / instance['owner_action_key']
                  / 'commitments.json').read_text())['batches'][batch_id]['descriptors']}),
-        'produced_spool': ns(_check_receipt=lambda receipt, manifest, record: None),
+        'produced_spool': ns(check_export_receipt=lambda receipt, manifest, record: None),
         'core': ns(validate_action=lambda value: value),
         'client': ns(read_claimed_record=lambda queue, key: None)}
 
