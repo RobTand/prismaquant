@@ -40,7 +40,35 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `db5b6e23a06869e87d778cb223c1ac5a5154aec5`, master
+The current pin is Tessera `38e960127478b651e42c14d52acf2274b54bca38`, master
+on 2026-09-28 after #678 (contract v41), #685 (contract v42, tessera#640) and
+#686 (PQ #1274). v41 lets a cell's `runtime` stamp `tessera_commit` and
+`serving_source_sha256`; no packaged cell does. v42 adds the fused routed
+window MoE lane: two lane-bearing native extensions,
+`tessera_routed_fused_e4m3` (route `TESSERA_FP8`) and
+`tessera_routed_fused_value` (route `TESSERA_BF16`), whose `when_unavailable`
+substitutes the compact adapter's decoder, and the four window routed cells
+name the fused pair beside the compact pair. The pin JSON's
+`serving_native_extensions` gains both rows, and the reviewed answer moves in
+exactly those two places. `export.py` and `grammar.py` are byte-identical to
+`db5b6e23`, so the legal inventory renames that byte-state
+`reader-pin-38e96012` and no rate count moves. The SHA-256 moves to
+`4aeba5dc…`.
+
+v42 is the first pinned table in which a cell names a lane launch beside a
+lane-free one, and PrismaQuant's lane gate refused a whole cell whenever its
+lane refused the plan. That would have dropped routed E4M3 at every q256 rung
+but 1024, where the fused lane cannot read the mixed-rate plan and the
+dispatch keeps the compact adapter. `lane_eligibility.cell_rung_launches` now
+drops only the launches through a refusing lane, as Tessera's own
+`executes` derivation does, and a route records the launches its rung makes.
+
+The pin stays schema v2. A v3 pin admits only cells censused with the code
+fields, and none is. For the record, `serving_source_sha256()` of this tree is
+`445da73b1960f2de20fe248184f49f50c1b1d2f0809a6ab47d2057f43982244d` on all five
+interpreters below.
+
+The previous pin was Tessera `db5b6e23a06869e87d778cb223c1ac5a5154aec5`, master
 on 2026-09-28: the merge of Tessera #675 (tessera#599 step 2, PQ #1537), whose
 tree equals the PR head `43da1c39` that this change was first tested at. Tessera
 no longer names PrismaQuant's record schemas: a rooted cached-unit bundle
@@ -103,15 +131,19 @@ and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 Provision the pin venv from a git URL so the install records the commit
 (`git+https://github.com/RobTand/tessera.git@<pin>`). The PrismaBuild test
 interpreter for the current pin is
-`/home/rob/venvs/pq-pb059953bc-tessera-db5b6e23`. It carries both pins this
-tree tests against: Tessera `db5b6e23` and PrismaBuild `059953bc`
+`/home/rob/venvs/pq-pb059953bc-tessera-38e96012`. It carries both pins this
+tree tests against: Tessera `38e96012` and PrismaBuild `059953bc`
 (`staged_lease.PB_READER_LEASE_PIN_COMMIT`, PQ #1541). It is a copy of
-`pq-pb059953bc-tessera-20bf5346` with only Tessera reinstalled, non-editable,
+`pq-pb059953bc-tessera-db5b6e23` with only Tessera reinstalled, non-editable,
 provisioned by host-pinned PB build actions on 2026-09-28: dl380g10
-`18ee90816fc6`, sparky `7d203c3cdacb`, sparklina `27b513d61205`. Each Spark
-also has a `-tf516` sibling, copied from `pq-pb461728e4-tessera-43da1c39-tf516`
-with Tessera and PrismaBuild both reinstalled (sparky `cb5f94eae9b2`,
-sparklina `ddd47cb807ed`). Each build asserts both commits in `direct_url.json`
+`c94b89b4e2ac`, sparky `d36bf663315b`, sparklina `13d94ab22f4d`. Each Spark
+also has a `-tf516` sibling, copied from `pq-pb059953bc-tessera-db5b6e23-tf516`
+with only Tessera reinstalled (sparky `07013de7488f`, sparklina
+`e8cb68eab74e`). Each of those builds also ran the pbtest dependency-pin
+preflight (`pbtest_pins.preflight`) against this tree's resolver. The
+`db5b6e23` interpreters (dl380g10 `18ee90816fc6`, sparky `7d203c3cdacb`,
+sparklina `27b513d61205`; `-tf516` sparky `cb5f94eae9b2`, sparklina
+`ddd47cb807ed`) came from `20bf5346` and `43da1c39-tf516`. Each build asserts both commits in `direct_url.json`
 (distributions `tessera-quant` and `prismabuild`, neither editable), the
 contract, `export.py` and `grammar.py` digests, that `tessera.cached_unit`
 defines `ReuseAuthority` and no PQ schema roster, that
@@ -129,8 +161,8 @@ the copy repoints any `base-shadow` `.pth` file from the source venv to the new
 one:
 
 ```bash
-SRC=/home/rob/venvs/pq-pb059953bc-tessera-20bf5346  # the -tf516 sibling: see above
-V=/home/rob/venvs/pq-pb059953bc-tessera-db5b6e23    # + "-tf516" for the sibling
+SRC=/home/rob/venvs/pq-pb059953bc-tessera-db5b6e23  # + "-tf516" for the sibling
+V=/home/rob/venvs/pq-pb059953bc-tessera-38e96012    # + "-tf516" for the sibling
 test ! -e "$V" || exit 1
 cp -a "$SRC" "$V"
 for pth in "$V"/lib/python*/site-packages/*base-shadow*.pth; do
@@ -138,7 +170,7 @@ for pth in "$V"/lib/python*/site-packages/*base-shadow*.pth; do
   grep -qF "$SRC" "$pth" && sed -i "s#$SRC#$V#" "$pth"
 done
 "$V/bin/python" -m pip install --no-deps --no-build-isolation --force-reinstall \
-  'git+https://github.com/RobTand/tessera.git@db5b6e23a06869e87d778cb223c1ac5a5154aec5'
+  'git+https://github.com/RobTand/tessera.git@38e960127478b651e42c14d52acf2274b54bca38'
 ```
 
 dl380g10's x86 interpreter descends from `pq881-pb461728e4` (Python 3.14,
@@ -155,13 +187,13 @@ from it and skip with it: `test_glm_campaign_streaming`,
 `test_collector_source_release` and `test_streamed_capture_admission`. Until
 2026-09-23 none of the six had run in a PrismaBuild test run.
 
-The sibling interpreter `/home/rob/venvs/pq-pb059953bc-tessera-db5b6e23-tf516`
+The sibling interpreter `/home/rob/venvs/pq-pb059953bc-tessera-38e96012-tf516`
 is the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
 safetensors 0.8.0, the versions in the campaign's `prismaquant-tf516` venv.
 Tessera, PrismaBuild, torch and every other package are the same, so
 `pbtest` checks the same exact pin. Each pin move copies the previous pin's
-`-tf516` sibling in the Spark build actions above; the `db5b6e23` siblings
-descend from `43da1c39-tf516` (with PrismaBuild reinstalled at `059953bc`), the
+`-tf516` sibling in the Spark build actions above; the `38e96012` siblings
+descend from `db5b6e23-tf516`, the `db5b6e23` ones from `43da1c39-tf516` (with PrismaBuild reinstalled at `059953bc`), the
 `43da1c39` ones from `cadc200c-tf516`, the `cadc200c` ones from `20bf5346-tf516`, the `20bf5346` ones from `a3e83875-tf516`, the `a3e83875` ones from `f94929de-tf516`, and the `4c4ff1c2` ones from `09d6559d-tf516`. The original
 transformers installations came from actions `fa510fbf5a02` (sparky) and
 `29ec7048687b` (sparklina, 2026-09-25). dl380g10's interpreter of the base name is a
@@ -191,7 +223,7 @@ A PR that touches those six modules, or what they test, runs them there:
 ```bash
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
   --checkout <this worktree> --tag gb10 --priority -10 \
-  --python /home/rob/venvs/pq-pb059953bc-tessera-db5b6e23-tf516/bin/python \
+  --python /home/rob/venvs/pq-pb059953bc-tessera-38e96012-tf516/bin/python \
   --threads-per-shard 1 --workers-per-shard 2 --cpus-per-shard 2 --mem-gb 8 \
   --timeout-s 1800 \
   tests/test_glm5_next_streamed_forward_parity.py \
@@ -280,7 +312,7 @@ cat-file` command below. Tessera master has since advanced to contract v33
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p db5b6e23a06869e87d778cb223c1ac5a5154aec5:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 38e960127478b651e42c14d52acf2274b54bca38:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -410,14 +442,13 @@ them.
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-28, at the merge of
-Tessera #675:
+Verified against `RobTand/tessera` master on 2026-09-28, after Tessera #686:
 
 ```
-commit           db5b6e23a06869e87d778cb223c1ac5a5154aec5
-contract_sha256  d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151
+commit           38e960127478b651e42c14d52acf2274b54bca38
+contract_sha256  4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb
 versions.tessera 0.1.0
-contract_version 40
+contract_version 42
 lane schema      tessera.lane-eligibility.v10
 ```
 

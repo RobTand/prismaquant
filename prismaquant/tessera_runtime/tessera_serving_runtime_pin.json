@@ -1,10 +1,10 @@
 {
   "schema": "prismaquant.tessera_serving_runtime_pin.v2",
   "repository": "https://github.com/RobTand/tessera.git",
-  "commit": "db5b6e23a06869e87d778cb223c1ac5a5154aec5",
+  "commit": "38e960127478b651e42c14d52acf2274b54bca38",
   "version": "0.1.0",
   "version_is_release": false,
-  "contract_sha256": "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151",
+  "contract_sha256": "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb",
   "runtime_contract_schema": "tessera.runtime-contract.v1",
   "plugin_entry_point": "tessera = tessera.serving:register",
   "serving_residency_env": "TESSERA_SERVE_MODE",
@@ -21,6 +21,36 @@
         "streamed": {
           "status": "substituted",
           "decoder": "torch_window"
+        }
+      }
+    },
+    {
+      "module_name_prefix": "tessera_routed_fused_e4m3",
+      "filename_glob": "tessera_routed_fused_e4m3*.so",
+      "match": "basename_fnmatch",
+      "when_unavailable": {
+        "resident": {
+          "status": "substituted",
+          "decoder": "native_window_moe_compact"
+        },
+        "streamed": {
+          "status": "substituted",
+          "decoder": "native_window_moe_compact"
+        }
+      }
+    },
+    {
+      "module_name_prefix": "tessera_routed_fused_value",
+      "filename_glob": "tessera_routed_fused_value*.so",
+      "match": "basename_fnmatch",
+      "when_unavailable": {
+        "resident": {
+          "status": "substituted",
+          "decoder": "native_window_moe_compact_folded"
+        },
+        "streamed": {
+          "status": "substituted",
+          "decoder": "native_window_moe_compact_folded"
         }
       }
     }

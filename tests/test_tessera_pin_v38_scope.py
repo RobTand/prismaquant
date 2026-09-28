@@ -58,12 +58,13 @@ def _resolve(facts, image):
         runtime_image=image, execution_mode="eager")
 
 
-def test_the_installed_contract_is_the_v40_pin():
-    # v40 (Tessera #675) adds only the producer_interface block; the admission
-    # scopes this module pins are v39's and do not move.
+def test_the_installed_contract_is_the_v42_pin():
+    # v40 (Tessera #675) adds only the producer_interface block, v41 optional
+    # serving-code fields no cell stamps, and v42 the fused routed launches;
+    # the admission scopes this module pins are v39's and do not move.
     raw = _packaged_bytes()
     assert hashlib.sha256(raw).hexdigest() == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
-    assert json.loads(raw)["contract_version"] == 40
+    assert json.loads(raw)["contract_version"] == 42
 
 
 @pytest.mark.parametrize("rung", [832, 864, 896, 928, 944, 960, 1024, 1088])
@@ -183,8 +184,12 @@ def test_layer43s_routed_e4m3_pick_passes_the_export_scope_gate(tmp_path, rung):
     """The real gate, the real packaged table, no contract substitution.
 
     ``require_assignment_scope`` resolves the unit on the reused cells; each
-    of them admits q896 through ``cell_lane_admits``, whose only gated lane
-    (``window_gemv``) these cells do not launch through.
+    of them admits q896 through ``cell_lane_admits``.  Since contract v42 the
+    cells also launch through the fused routed lane, whose predicate reads
+    rate-4 columns only: at q1024 the route records the fused pair beside the
+    compact one, and at q896 the lane refuses the plan and the route records
+    the compact pair alone -- the stack the dispatch keeps on the compact
+    adapter (PQ #1274).
     """
     from prismaquant import tessera_export_lane as export
 
@@ -194,10 +199,21 @@ def test_layer43s_routed_e4m3_pick_passes_the_export_scope_gate(tmp_path, rung):
     assert route["route_status"] == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route
     assert {row["cell_id"] for row in route["regime_routes"]} == set(REUSED.values())
     table = _table()
+    compact = ("tessera.native_window_moe.NativeWindowMoE.__call__",
+               "native_window_moe_compact")
+    fused = ("tessera.routed_fused.FusedRoutedWindowMoE.__call__",
+             "native_routed_fused_window")
+    want = [compact, fused] if rung == 1024 else [compact]
+    for row in route["regime_routes"]:
+        assert sorted((pair["symbol"], pair["decoder"])
+                      for pair in row["executes"]) == sorted(want), row
     for cell_id in REUSED.values():
         cell = next(c for c in table.cells if c.id == cell_id)
-        assert lane.lane_claim_for_cell(cell, table.lanes) is None
+        claim = lane.lane_claim_for_cell(cell, table.lanes)
+        assert claim is not None and claim.extension == "tessera_routed_fused_e4m3"
         assert lane.cell_lane_admits(cell, rung, table.lanes) == (True, "")
+        admits, _why, launches = lane.cell_rung_launches(cell, rung, table.lanes)
+        assert admits and sorted(launches) == sorted(want)
 
 
 def test_layer43_at_unattested_q800_is_refused_by_the_export_scope_gate(tmp_path):

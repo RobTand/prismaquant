@@ -246,8 +246,8 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "4e2e84876350a13acd27ae861a767b645f4e9a4bbb50bb26a3c2a65b69f459fd",
     },
-    "reader-pin-db5b6e23": {
-        "commit": "db5b6e23a06869e87d778cb223c1ac5a5154aec5",
+    "reader-pin-38e96012": {
+        "commit": "38e960127478b651e42c14d52acf2274b54bca38",
         "export.py":
             "e54f3f1b56d54fe2b6701ccadf3e74770e41385cff884a63118bf16f8590fedc",
     },
@@ -292,7 +292,7 @@ TESSERA_GRAMMAR_DIGESTS = frozenset({
 #: says so from the bytes rather than repeating the audit's prose.
 TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
-    "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-db5b6e23",
+    "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-38e96012",
 )
 
 
@@ -535,18 +535,24 @@ def live_pins() -> DomainPins:
 #: ``*_WINDOW_BITS`` constants are byte-identical, and ``grammar.py`` is still
 #: ``9ae1f824…``, so ``reader-pin-db5b6e23`` joins
 #: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves (PQ #1537).
+#: **Re-taken 2026-09-28 for ``38e96012`` (contract v42), a rename of that
+#: byte-state.**  Tessera #678 (v41, optional serving-code fields on a cell),
+#: #685 (v42, the fused routed window MoE lane) and #684/#686 (suite source
+#: verifier, docs) leave ``export.py`` at ``e54f3f1b…`` and ``grammar.py`` at
+#: ``9ae1f824…``, so ``reader-pin-db5b6e23`` is renamed
+#: ``reader-pin-38e96012`` and no count moves (PQ #1274).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="db5b6e23a06869e87d778cb223c1ac5a5154aec5",
+    reader_dev_pin_commit="38e960127478b651e42c14d52acf2274b54bca38",
     reader_dev_pin_contract_sha256=(
-        "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
+        "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
     ),
-    serving_runtime_pinned_commit="db5b6e23a06869e87d778cb223c1ac5a5154aec5",
+    serving_runtime_pinned_commit="38e960127478b651e42c14d52acf2274b54bca38",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
+        "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
     ),
     producer_installed_contract_sha256=(
-        "d6768313069773ffb6ddbcc0a91e110771429458b16885f4a392d2680e519151"
+        "4aeba5dc8a209111e5bdc188ef7eed40b13478316dd1c36b02c869846dd009fb"
     ),
 )
 

@@ -1,10 +1,12 @@
 """PACT shape-time price table (PQ #1583): parse, admit, derive, price.
 
-The contract fixture is the INSTALLED pinned contract with Tessera #685's
-fused routed lane grafted in (contract v42 names ``native_routed_fused_window``
-beside the compact launch in the routed E4M3 cells, and publishes the lane's
-``requires`` predicate on its own ``native_extensions`` row). The lane
-decision itself is Tessera's (``decide_lane_requirements``) reached through
+The contract fixture is the INSTALLED pinned contract, read as published.
+Since the pin moved to contract v42 (PQ #1274) it carries Tessera #685's fused
+routed lanes itself: the routed E4M3 and BF16 cells name the fused launch
+beside the compact one, and each lane publishes its ``requires`` predicate on
+its own ``native_extensions`` row. The fixtures assert that instead of
+grafting it. The lane decision itself is Tessera's
+(``decide_lane_requirements``) reached through
 ``lane_eligibility.cell_lane_admits``; nothing here restates its rule.
 """
 import copy
@@ -43,15 +45,27 @@ FUSED_LANE = {"decoder": "native_routed_fused_window",
                            "rotation": ["none"], "grid_arities": [1]}}
 
 
+FOLDED_COMPACT = dict(COMPACT, decoder="native_window_moe_compact_folded")
+FOLDED_FUSED = dict(FUSED, decoder="native_routed_fused_window_folded")
+
+
 def _payload():
     with as_file(contract.contract_path()) as path:
         payload = json.loads(path.read_bytes())
-    payload = copy.deepcopy(payload)
-    payload["native_extensions"].append({"module_name_prefix": "tessera_routed_fused_e4m3",
-                                         "lane": FUSED_LANE})
-    for cell in payload["lane_eligibility"]["cells"]:
-        if cell["family"] == E4M3 and cell["structure"] == "routed_moe":
-            cell["executes"] = [COMPACT, FUSED]
+    # The pinned v42 contract publishes both fused lanes and names each
+    # beside the compact launch in the routed cells; the fixtures below
+    # depend on exactly that, so a re-pin that moves it fails here.
+    lanes = {row["module_name_prefix"]: row.get("lane")
+             for row in payload["native_extensions"]}
+    assert lanes["tessera_routed_fused_e4m3"] == FUSED_LANE
+    assert lanes["tessera_routed_fused_value"] == dict(
+        FUSED_LANE, decoder="native_routed_fused_window_folded")
+    want = {E4M3: [COMPACT, FUSED], BF16: [FOLDED_COMPACT, FOLDED_FUSED]}
+    routed = [cell for cell in payload["lane_eligibility"]["cells"]
+              if cell["structure"] == "routed_moe" and cell["family"] in want]
+    assert routed and all(
+        [dict(pair) for pair in cell["executes"]] == want[cell["family"]]
+        for cell in routed), routed
     return payload
 
 
@@ -117,19 +131,10 @@ def _glm_table(eligibility, rows=GLM_ROWS, ms=(2048,)):
 
 
 @pytest.fixture(scope="module")
-def glm_eligibility(payload):
-    # The installed pin's BF16 routed cell names the compact folded launch
-    # only; graft the folded fused launch and its lane the way v42 publishes
-    # them (the after-#640 bench timed BF16 routed stacks on that lane).
-    moved = copy.deepcopy(payload)
-    moved["native_extensions"].append({"module_name_prefix": "tessera_routed_fused_value",
-                                       "lane": dict(FUSED_LANE, decoder="native_routed_fused_window_folded")})
-    for cell in moved["lane_eligibility"]["cells"]:
-        if cell["family"] == BF16 and cell["structure"] == "routed_moe":
-            cell["executes"] = [dict(COMPACT, decoder="native_window_moe_compact_folded"),
-                                dict(FUSED, decoder="native_routed_fused_window_folded")]
-    return lane._parse_table(moved["lane_eligibility"], moved["formats"], "", COMMIT, SHA,
-                             native_extensions=moved["native_extensions"])
+def glm_eligibility(eligibility):
+    # The after-#640 bench timed BF16 routed stacks on the folded fused lane,
+    # which the pinned v42 contract publishes itself (asserted in _payload).
+    return eligibility
 
 
 # --------------------------------------------------------------------------- #
