@@ -241,6 +241,11 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "96fefc6af9bbb5057610d289df38277535994ea0626fca1b09b4bcef4ca050b9",
     },
+    "reader-pin-f94929de": {
+        "commit": "f94929defd9fa00b8726160a2cd436f02733b6dc",
+        "export.py":
+            "4e2e84876350a13acd27ae861a767b645f4e9a4bbb50bb26a3c2a65b69f459fd",
+    },
     "unpinned-working-checkout-a9eb572e": {
         "commit": "a9eb572e1b90b17f716562192910681e65430fba",
         "export.py":
@@ -282,7 +287,7 @@ TESSERA_GRAMMAR_DIGESTS = frozenset({
 #: says so from the bytes rather than repeating the audit's prose.
 TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
-    "reader-pin-09d6559d",
+    "reader-pin-09d6559d", "reader-pin-f94929de",
 )
 
 
@@ -487,18 +492,45 @@ def live_pins() -> DomainPins:
 #: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves:
 #: ``test_legal_rate_count_is_the_audited_count`` re-derived the frozen
 #: counts through the installed 09d bytes (PrismaBuild ``f12448eff0e5``).
+#: **Re-taken 2026-09-27 for ``4c4ff1c2e`` (contract v39).** Admission
+#: scopes move, not wire grammar. ``export.py`` remains ``96fefc6a…`` and
+#: ``grammar.py`` remains ``9ae1f824…``: reuse the uniquely identified
+#: ``reader-pin-09d6559d`` byte-state, not a duplicate digest entry. Legal
+#: rate counts are unchanged; the reviewed admission answer is separate.
+#: **Re-taken 2026-09-27 for ``f94929def`` (contract v39, unchanged), a
+#: re-transcription with one additive source state.**  Tessera #663
+#: (tessera#662) moved ``served_recipe(grid, q256, structure)`` into
+#: ``export.py`` from the serving experiment and imported the structure names
+#: from the new ``tessera.structure``, so ``export.py`` is now
+#: ``4e2e8487…``.  ``_window_bits_for``, ``wire_recipe``, the WINDOW raw-cap
+#: expression and the ``*_WINDOW_BITS`` constants are byte-identical, and
+#: ``grammar.py`` is still ``9ae1f824…``, so ``reader-pin-f94929de`` joins
+#: :data:`TESSERA_EQUIVALENT_SOURCE_STATES` and no count moves.  The served
+#: recipe differs from ``wire_recipe`` only for a routed E2M1x2 stack below
+#: the cap, which no ``PRIMARY_FAMILIES`` rung reaches.
+#: **Re-taken 2026-09-27 for ``a3e83875d`` (contract v39, unchanged), a
+#: re-transcription.**  Tessera #671 (tessera#670) adds the v3 catalog
+#: extension to the rooted cached-unit reader only.  ``export.py`` remains
+#: ``4e2e8487…`` and ``grammar.py`` remains ``9ae1f824…``: reuse the
+#: uniquely identified ``reader-pin-f94929de`` byte-state, not a duplicate
+#: digest entry.  No count moves (PQ #1524).
+#: **Re-taken 2026-09-27 for ``20bf5346`` (contract v39, unchanged), a
+#: re-transcription.**  Tessera #669 (tessera#668) changes ``encode.py`` and
+#: docs only.  ``export.py`` remains ``4e2e8487…`` and ``grammar.py`` remains
+#: ``9ae1f824…``: the ``reader-pin-f94929de`` byte-state still applies, and no
+#: count moves (PQ #1527).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+    reader_dev_pin_commit="20bf53464f9113f3115f454f8fa80453e71c0308",
     reader_dev_pin_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
     ),
-    serving_runtime_pinned_commit="09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+    serving_runtime_pinned_commit="20bf53464f9113f3115f454f8fa80453e71c0308",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
     ),
     producer_installed_contract_sha256=(
-        "04d5a20a33b932607be604fc78cc3559499a151be1471bdf66e9c8049d9d22e4"
+        "f2f909486841c6e21ef6825fdc67ea5f57cf8ff8ffc241ccd89a521ea781c0bb"
     ),
 )
 

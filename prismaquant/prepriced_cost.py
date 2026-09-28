@@ -14,9 +14,10 @@ import json
 import os
 from pathlib import Path
 import pickle
-import re
 import tempfile
 from typing import Any
+
+from .digests import is_sha256hex
 
 
 REPORT_SCHEMA = "prismaquant.prepriced_cost_input.v1"
@@ -43,7 +44,7 @@ def _sha256(path: Path) -> str:
 
 
 def _require_sha256(value: Any, *, where: str) -> str:
-    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+    if not is_sha256hex(value):
         raise ValueError(f"{where}: sha256 must be a full lowercase SHA-256 digest")
     return value
 

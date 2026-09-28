@@ -1,0 +1,385 @@
+{
+  "test_head_walk_slice_bytes[1]#0": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "61",
+      "6d6f64656c2e6c61796572732e302e715f70726f6a",
+      "7a",
+      "c3a9"
+    ],
+    "outcome": {
+      "returned": "[{'schema': 'prismaquant.joint_head_walk_quanta.v1', 'quantum_id': 'quantum-0000', 'lo': 0, 'hi': 1, 'units': ['a'], 'roster_sha256': '5d01007c3e02fbab66e005a96697ee041fdf347aac30b8f628493451ada93e34', 'slice_sha256': 'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb', 'quanta': 4}, {'schema': 'prismaquant.joint_head_walk_quanta.v1', 'quantum_id': 'quantum-0001', 'lo': 1, 'hi': 2, 'units': ['model.layers.0.q_proj'], 'roster_sha256': '5d01007c3e02fbab66e005a96697ee041fdf347aac30b8f628493451ada93e34', 'slice_sha256': 'de5e2b9c1413f81ef73b42c719abe66b81c4020951355da63a6292234be7d4a6', 'quanta': 4}, {'schema': 'prismaquant.joint_head_walk_quanta.v1', 'quantum_id': 'quantum-0002', 'lo': 2, 'hi': 3, 'units': ['z'], 'roster_sha256': '5d01007c3e02fbab66e005a96697ee041fdf347aac30b8f628493451ada93e34', 'slice_sha256': '594e519ae499312b29433b7dd8a97ff068defcba9755b6d5d00e84c524d67b06', 'quanta': 4}, {'schema': 'prismaquant.joint_head_walk_quanta.v1', 'quantum_id': 'quantum-0003', 'lo': 3, 'hi': 4, 'units': ['\u00e9'], 'roster_sha256': '5d01007c3e02fbab66e005a96697ee041fdf347aac30b8f628493451ada93e34', 'slice_sha256': '4a99557e4033c3539de2eb65472017cad5f9557f7a0625a09f1c3f6e2ba69c4c', 'quanta': 4}]"
+    }
+  },
+  "test_head_walk_slice_bytes[1]#1": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "61"
+    ],
+    "outcome": {
+      "returned": "(0, 1)"
+    }
+  },
+  "test_head_walk_slice_bytes[1]#2": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "6d6f64656c2e6c61796572732e302e715f70726f6a"
+    ],
+    "outcome": {
+      "returned": "(1, 2)"
+    }
+  },
+  "test_head_walk_slice_bytes[1]#3": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "7a"
+    ],
+    "outcome": {
+      "returned": "(2, 3)"
+    }
+  },
+  "test_head_walk_slice_bytes[1]#4": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "c3a9"
+    ],
+    "outcome": {
+      "returned": "(3, 4)"
+    }
+  },
+  "test_head_walk_slice_bytes[1]#5": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "61"
+    ],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.ValueError",
+      "text": "head-walk quantum slice digest differs from the roster at its slice"
+    }
+  },
+  "test_head_walk_slice_bytes[2]#0": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a",
+      "7a0ac3a9"
+    ],
+    "outcome": {
+      "returned": "[{'schema': 'prismaquant.joint_head_walk_quanta.v1', 'quantum_id': 'quantum-0000', 'lo': 0, 'hi': 2, 'units': ['a', 'model.layers.0.q_proj'], 'roster_sha256': '5d01007c3e02fbab66e005a96697ee041fdf347aac30b8f628493451ada93e34', 'slice_sha256': '9f2fe37cf8bdebbf03f219551bebe2c6409dd83cc5a713f941baf33af82ce8fd', 'quanta': 2}, {'schema': 'prismaquant.joint_head_walk_quanta.v1', 'quantum_id': 'quantum-0001', 'lo': 2, 'hi': 4, 'units': ['z', '\u00e9'], 'roster_sha256': '5d01007c3e02fbab66e005a96697ee041fdf347aac30b8f628493451ada93e34', 'slice_sha256': '83de4d7323290ebdba64e03eb87ea54a0c802134c78e330f81ffd07252f7c8fd', 'quanta': 2}]"
+    }
+  },
+  "test_head_walk_slice_bytes[2]#1": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a"
+    ],
+    "outcome": {
+      "returned": "(0, 2)"
+    }
+  },
+  "test_head_walk_slice_bytes[2]#2": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "7a0ac3a9"
+    ],
+    "outcome": {
+      "returned": "(2, 4)"
+    }
+  },
+  "test_head_walk_slice_bytes[2]#3": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a"
+    ],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.ValueError",
+      "text": "head-walk quantum slice digest differs from the roster at its slice"
+    }
+  },
+  "test_head_walk_slice_bytes[4]#0": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9"
+    ],
+    "outcome": {
+      "returned": "[{'schema': 'prismaquant.joint_head_walk_quanta.v1', 'quantum_id': 'quantum-0000', 'lo': 0, 'hi': 4, 'units': ['a', 'model.layers.0.q_proj', 'z', '\u00e9'], 'roster_sha256': '5d01007c3e02fbab66e005a96697ee041fdf347aac30b8f628493451ada93e34', 'slice_sha256': '5d01007c3e02fbab66e005a96697ee041fdf347aac30b8f628493451ada93e34', 'quanta': 1}]"
+    }
+  },
+  "test_head_walk_slice_bytes[4]#1": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9"
+    ],
+    "outcome": {
+      "returned": "(0, 4)"
+    }
+  },
+  "test_head_walk_slice_bytes[4]#2": {
+    "encoded_hex": [
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9",
+      "610a6d6f64656c2e6c61796572732e302e715f70726f6a0a7a0ac3a9"
+    ],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.ValueError",
+      "text": "head-walk quantum slice digest differs from the roster at its slice"
+    }
+  },
+  "test_roster_iterator[head]#0": {
+    "encoded_hex": [
+      "610a7a0ac3a9"
+    ],
+    "outcome": {
+      "returned": "'581269566147b659eeacd517f2f299b390b33e1eea3a2cfd3c408daed77e302c'"
+    }
+  },
+  "test_roster_iterator[layer]#0": {
+    "encoded_hex": [
+      "610a7a0ac3a9"
+    ],
+    "outcome": {
+      "returned": "'581269566147b659eeacd517f2f299b390b33e1eea3a2cfd3c408daed77e302c'"
+    }
+  },
+  "test_roster_site[duplicates-head]#0": {
+    "encoded_hex": [
+      "780a78"
+    ],
+    "outcome": {
+      "returned": "'0fa0afceda852933329a907713f232a16021cb26bf1395108ceba7b5c81259c7'"
+    }
+  },
+  "test_roster_site[duplicates-layer]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.ValueError",
+      "text": "a unit roster holds unique qnames"
+    }
+  },
+  "test_roster_site[empty-head]#0": {
+    "encoded_hex": [
+      ""
+    ],
+    "outcome": {
+      "returned": "'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'"
+    }
+  },
+  "test_roster_site[empty-layer]#0": {
+    "encoded_hex": [
+      ""
+    ],
+    "outcome": {
+      "returned": "'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'"
+    }
+  },
+  "test_roster_site[empty_name-head]#0": {
+    "encoded_hex": [
+      ""
+    ],
+    "outcome": {
+      "returned": "'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'"
+    }
+  },
+  "test_roster_site[empty_name-layer]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.ValueError",
+      "text": "a unit roster holds nonempty qname strings"
+    }
+  },
+  "test_roster_site[float-head]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.TypeError",
+      "text": "sequence item 0: expected str instance, float found"
+    }
+  },
+  "test_roster_site[float-layer]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.ValueError",
+      "text": "a unit roster holds nonempty qname strings"
+    }
+  },
+  "test_roster_site[mixed-head]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.TypeError",
+      "text": "'<' not supported between instances of 'float' and 'str'"
+    }
+  },
+  "test_roster_site[mixed-layer]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.TypeError",
+      "text": "'<' not supported between instances of 'float' and 'str'"
+    }
+  },
+  "test_roster_site[nested-head]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.TypeError",
+      "text": "sequence item 0: expected str instance, dict found"
+    }
+  },
+  "test_roster_site[nested-layer]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.ValueError",
+      "text": "a unit roster holds nonempty qname strings"
+    }
+  },
+  "test_roster_site[newlines-head]#0": {
+    "encoded_hex": [
+      "610a620a620a"
+    ],
+    "outcome": {
+      "returned": "'c74f9ee7d42d4d6d89e9ff9f7d1593011198a6099029569fed65c1ab6bded3df'"
+    }
+  },
+  "test_roster_site[newlines-layer]#0": {
+    "encoded_hex": [
+      "610a620a620a"
+    ],
+    "outcome": {
+      "returned": "'c74f9ee7d42d4d6d89e9ff9f7d1593011198a6099029569fed65c1ab6bded3df'"
+    }
+  },
+  "test_roster_site[none-head]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.TypeError",
+      "text": "'NoneType' object is not iterable"
+    }
+  },
+  "test_roster_site[none-layer]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.TypeError",
+      "text": "'NoneType' object is not iterable"
+    }
+  },
+  "test_roster_site[one-head]#0": {
+    "encoded_hex": [
+      "6d6f64656c2e6c61796572732e302e715f70726f6a"
+    ],
+    "outcome": {
+      "returned": "'de5e2b9c1413f81ef73b42c719abe66b81c4020951355da63a6292234be7d4a6'"
+    }
+  },
+  "test_roster_site[one-layer]#0": {
+    "encoded_hex": [
+      "6d6f64656c2e6c61796572732e302e715f70726f6a"
+    ],
+    "outcome": {
+      "returned": "'de5e2b9c1413f81ef73b42c719abe66b81c4020951355da63a6292234be7d4a6'"
+    }
+  },
+  "test_roster_site[path-head]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.TypeError",
+      "text": "sequence item 0: expected str instance, PurePosixPath found"
+    }
+  },
+  "test_roster_site[path-layer]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.ValueError",
+      "text": "a unit roster holds nonempty qname strings"
+    }
+  },
+  "test_roster_site[reverse-head]#0": {
+    "encoded_hex": [
+      "610a6d6964646c650a7a"
+    ],
+    "outcome": {
+      "returned": "'76d4bdde0d65ba794fc29e075502798f0690014f0181e4e9d3caa165e54c7514'"
+    }
+  },
+  "test_roster_site[reverse-layer]#0": {
+    "encoded_hex": [
+      "610a6d6964646c650a7a"
+    ],
+    "outcome": {
+      "returned": "'76d4bdde0d65ba794fc29e075502798f0690014f0181e4e9d3caa165e54c7514'"
+    }
+  },
+  "test_roster_site[surrogate-head]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.UnicodeEncodeError",
+      "text": "'utf-8' codec can't encode character '\\ud800' in position 1: surrogates not allowed"
+    }
+  },
+  "test_roster_site[surrogate-layer]#0": {
+    "encoded_hex": [],
+    "outcome": {
+      "cause": null,
+      "raised": "builtins.UnicodeEncodeError",
+      "text": "'utf-8' codec can't encode character '\\ud800' in position 1: surrogates not allowed"
+    }
+  },
+  "test_roster_site[text-head]#0": {
+    "encoded_hex": [
+      "610a7a"
+    ],
+    "outcome": {
+      "returned": "'64c921e065cd064a44d3489523757c632d4ce09132e80a1ef6d58cee9456e913'"
+    }
+  },
+  "test_roster_site[text-layer]#0": {
+    "encoded_hex": [
+      "610a7a"
+    ],
+    "outcome": {
+      "returned": "'64c921e065cd064a44d3489523757c632d4ce09132e80a1ef6d58cee9456e913'"
+    }
+  },
+  "test_roster_site[tuple-head]#0": {
+    "encoded_hex": [
+      "610a7a"
+    ],
+    "outcome": {
+      "returned": "'64c921e065cd064a44d3489523757c632d4ce09132e80a1ef6d58cee9456e913'"
+    }
+  },
+  "test_roster_site[tuple-layer]#0": {
+    "encoded_hex": [
+      "610a7a"
+    ],
+    "outcome": {
+      "returned": "'64c921e065cd064a44d3489523757c632d4ce09132e80a1ef6d58cee9456e913'"
+    }
+  },
+  "test_roster_site[unicode-head]#0": {
+    "encoded_hex": [
+      "610ac3a90ae6bca2e5ad970af09f9880"
+    ],
+    "outcome": {
+      "returned": "'3098cc0f56ca421c7c259e24142a67009d407cc6af91303fca86ce8667c36785'"
+    }
+  },
+  "test_roster_site[unicode-layer]#0": {
+    "encoded_hex": [
+      "610ac3a90ae6bca2e5ad970af09f9880"
+    ],
+    "outcome": {
+      "returned": "'3098cc0f56ca421c7c259e24142a67009d407cc6af91303fca86ce8667c36785'"
+    }
+  }
+}

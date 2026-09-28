@@ -411,3 +411,64 @@ def test_a_multi_node_receipt_states_the_peer_argv_its_own_engine_implies(
         seen, node_rank=1)
     assert manifest["headless_peer_argv"][:5] == [
         "serve", "artifact", "--node-rank", "1", "--headless"]
+
+
+def _glm_tr3_scorer_kwargs():
+    """The engine kwargs the GLM TR3 scorer builds for a TP2 NoPE run (#1473)."""
+    return {"model": "/models/glm", "trust_remote_code": True, "dtype": "bfloat16",
+            "language_model_only": True, "kv_cache_dtype": "fp8_ds_mla",
+            "enforce_eager": True, "enable_prefix_caching": False, "enable_chunked_prefill": False,
+            "max_model_len": 2049, "max_num_batched_tokens": 2049, "max_num_seqs": 1,
+            "max_logprobs": 1, "disable_log_stats": True, "logprobs_mode": "raw_logprobs",
+            "gpu_memory_utilization": 0.5, "tensor_parallel_size": 2, "nnodes": 2,
+            "node_rank": 0, "master_addr": "192.0.2.1", "master_port": 29531,
+            "distributed_executor_backend": "mp", "data_parallel_backend": "mp",
+            "moe_backend": "triton", "kv_cache_memory_bytes": 1073741824,
+            "attention_backend": "CUSTOM",
+            "kernel_config": {"enable_flashinfer_autotune": False}}
+
+
+def test_peer_argv_spells_the_glm_attention_backend_and_kernel_config():
+    """PQ #1473: both NoPE selections reach the peer with stock spellings."""
+    from tools.gold_engine_options import headless_peer_argv
+
+    argv = headless_peer_argv(_glm_tr3_scorer_kwargs(), node_rank=1)
+    assert argv[argv.index("--attention-backend") + 1] == "CUSTOM"
+    assert argv[argv.index("--kernel-config") + 1] == '{"enable_flashinfer_autotune":false}'
+
+
+def test_peer_argv_round_trips_to_the_coordinators_engine_kwargs():
+    """Parsing the peer argv back yields exactly the coordinator's kwargs
+    minus rank 0's own (model positional, node_rank)."""
+    from tools.gold_engine_options import headless_peer_argv, parse_headless_peer_argv
+
+    kwargs = _glm_tr3_scorer_kwargs()
+    model, node_rank, back = parse_headless_peer_argv(headless_peer_argv(kwargs, node_rank=1))
+    assert (model, node_rank) == (kwargs["model"], 1)
+    want = {k: v for k, v in kwargs.items() if k not in ("model", "node_rank")}
+    assert set(back) == set(want)
+    for key, value in want.items():
+        if isinstance(value, (bool, dict)):
+            assert back[key] == value, key
+        else:
+            assert back[key] == str(value), key
+
+
+def test_kernel_config_must_be_a_json_object():
+    from tools.gold_engine_options import headless_peer_argv
+
+    with pytest.raises(ValueError, match="kernel_config"):
+        headless_peer_argv({"model": "/models/stub", "kernel_config": '{"a":1}'}, node_rank=1)
+
+
+@pytest.mark.parametrize("argv", [
+    ["serve", "/m", "--node-rank", "1", "--headless", "--invented-flag", "1"],
+    ["serve", "/m", "--node-rank", "1", "--headless", "--dtype", "bf16", "--dtype", "bf16"],
+    ["serve", "/m", "--node-rank", "1", "--headless", "--dtype"],
+    ["serve", "/m", "--node-rank", "1"],
+])
+def test_parse_peer_argv_refuses_what_the_tables_cannot_spell(argv):
+    from tools.gold_engine_options import parse_headless_peer_argv
+
+    with pytest.raises(ValueError):
+        parse_headless_peer_argv(argv)

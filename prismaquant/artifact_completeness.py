@@ -42,6 +42,7 @@ __all__ = [
     "CompletenessReport",
     "check_artifact_completeness",
     "read_artifact_header",
+    "read_artifact_shard_headers",
 ]
 
 #: Element dtypes that CANNOT be read without a scale plane. A tensor stored in
@@ -186,8 +187,16 @@ def _read_safetensors_header(path: Path) -> dict[str, dict]:
     }
 
 
-def read_artifact_header(artifact_dir: str | Path) -> dict[str, dict]:
-    """``{tensor name: safetensors metadata}`` across every shard. Headers only."""
+def read_artifact_shard_headers(artifact_dir: str | Path) -> dict[str, dict[str, dict]]:
+    """``{shard file name: {tensor name: safetensors metadata}}``. Headers only.
+
+    The shards are the index's ``weight_map`` values, or the one
+    ``model.safetensors`` of an unindexed checkpoint, in sorted order. Each
+    tensor is attributed to the file whose header names it, so a caller that
+    needs to know which file a read opens (source authentication hashes whole
+    files, RobTand/prismaquant#1491) reads it here instead of re-deriving the
+    index rule.
+    """
 
     root = Path(artifact_dir)
     index = root / "model.safetensors.index.json"
@@ -195,9 +204,15 @@ def read_artifact_header(artifact_dir: str | Path) -> dict[str, dict]:
         shards = sorted(set(json.loads(index.read_text())["weight_map"].values()))
     else:
         shards = ["model.safetensors"]
+    return {shard: _read_safetensors_header(root / shard) for shard in shards}
+
+
+def read_artifact_header(artifact_dir: str | Path) -> dict[str, dict]:
+    """``{tensor name: safetensors metadata}`` across every shard. Headers only."""
+
     header: dict[str, dict] = {}
-    for shard in shards:
-        header.update(_read_safetensors_header(root / shard))
+    for shard_header in read_artifact_shard_headers(artifact_dir).values():
+        header.update(shard_header)
     return header
 
 

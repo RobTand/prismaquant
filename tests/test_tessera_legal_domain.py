@@ -2,7 +2,7 @@
 
 Every test here checks a *derivation*, not a constant.  The audited counts
 1,793 and 3,841, the table-width transitions at R3585 and R3841, and the
-singleton native set are compared against what the pinned producer and reader
+native qualification set are compared against what the pinned producer and reader
 actually say; none of them is read back out of the module that would have to
 be wrong for the check to matter.
 
@@ -288,48 +288,40 @@ def test_every_fact_names_the_table_that_answered_it():
 # Native qualification is exact membership, and does not shrink the domain
 # ---------------------------------------------------------------------------
 
-def test_native_qualification_is_exactly_the_v38_cells_for_the_primary_families():
-    """Exact membership at the pin (contract v38, Tessera #604).
+def test_native_qualification_is_exactly_the_reviewed_primary_cells():
+    """Project the reviewed pin's cells, not a second hand-maintained roster.
 
-    Until the v31 withdrawals this was three triples; the withdrawal removed
-    the dense E4 rows and the whole BF16 roster, leaving E4 R1024 routed alone
-    through the v32 pin.  v34 (Tessera #579) re-minted E4 R1024 and BF R1792
-    dense; v37 withdrew BF R1792 dense again; v38 minted the GLM image's
-    resident dense pairs at {832, 1024, 1088} for both families, the BF
-    routed pair at 1024, and moved the routed E4 pair from 1024 to 896 under
-    the same cell ids.  Nothing else, and in particular no neighbouring rate:
-    attestation does not extrapolate from the rungs a cell names.
+    The v39 scope decision is pinned in test_tessera_pin_v38_scope.py. Here
+    the inventory must reproduce that independent owner's reviewed answer:
+    every named rung, with no extrapolation to its legal neighbours.
     """
+    from prismaquant.tessera_runtime_contract import TESSERA_DEV_PIN_ANSWER
+
+    cells = [cell for cell in TESSERA_DEV_PIN_ANSWER['cells']
+             if cell[2] in domain.PRIMARY_FAMILIES]
+    assert cells and all(cell[8] == 'device_qualified' for cell in cells)
+    expected = {(cell[2], rate, cell[3]) for cell in cells for rate in cell[5]}
     triples = domain.native_qualification_set()
     primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
-    assert primary == {
-        (E4, 832, "dense"), (E4, 1024, "dense"), (E4, 1088, "dense"),
-        (E4, 896, "routed_moe"),
-        (BF, 832, "dense"), (BF, 1024, "dense"), (BF, 1088, "dense"),
-        (BF, 1024, "routed_moe"),
-    }
-    assert (E4, 1024, "routed_moe") not in primary
+    assert primary == expected
     assert (BF, 1792, "dense") not in primary
 
 
 def test_the_native_set_does_not_shrink_the_legal_domain(rates):
     """The count is computed without the attestation and is unaffected by it.
 
-    The strong form: the rates that are natively qualified are a seven-element
-    subset of a 5,634-element domain at the v38 pin, and the domain walk never
-    reads the attestation.  A regression that let the menu's attested mode
-    leak into the domain would collapse these counts to 0.
+    Natively qualified rates form a proper subset of the 5,634-element legal
+    domain, whose walk never reads attestation. Widening the v39 cell roster
+    does not change the wire grammar or collapse it to an attested-only menu.
     """
     triples = domain.native_qualification_set()
     qualified_rates = {
         (family, rate) for (family, rate, _s) in triples
         if family in domain.PRIMARY_FAMILIES
     }
-    assert qualified_rates == {
-        (E4, 832), (E4, 896), (E4, 1024), (E4, 1088),
-        (BF, 832), (BF, 1024), (BF, 1088)}
     total = sum(len(legal) for legal, _holes in rates.values())
     assert total == 1793 + 3841
+    assert 0 < len(qualified_rates) < total
     for family, rate in qualified_rates:
         assert rate in rates[family][0]
 
@@ -750,6 +742,9 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
         # The 2026-09-26 v38 re-pin for the MTP cached cohort: export.py
         # moved by the Hessian collection owner only (ActivationSource).
         "09d6559d7f386c94d69cf61f080cc7fac5bf0eb0",
+        # The 2026-09-27 re-pin for tessera#662: export.py gained the served
+        # recipe per structure; wire_recipe and the WINDOW constants did not move.
+        "f94929defd9fa00b8726160a2cd436f02733b6dc",
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -805,7 +800,7 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
     """
     assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
         "reader-pin-387eda36", "study-producer-d403cc5a",
-        "reader-pin-cc739a55", "reader-pin-09d6559d",
+        "reader-pin-cc739a55", "reader-pin-09d6559d", "reader-pin-f94929de",
     }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)

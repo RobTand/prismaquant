@@ -240,3 +240,72 @@ def test_prepare_reaches_the_generator_with_the_scope_the_proofs_seal(tmp_path, 
     before = {p.name: p.read_bytes() for p in root.iterdir() if p.is_file()}
     pe.prepare(args)
     assert before == {p.name: p.read_bytes() for p in root.iterdir() if p.is_file()}
+
+
+# -- control closure over v1 and v2 catalogs (PQ #1437) ------------------------
+
+def _file(root, name, value):
+    import hashlib
+    import json
+    path = root / name
+    raw = json.dumps(value, sort_keys=True).encode() if not isinstance(value, bytes) else value
+    path.write_bytes(raw)
+    return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def _closure_case(root, catalog_fields):
+    """The files ``control_digests`` reads, around a catalog with ``catalog_fields``."""
+    root.mkdir(parents=True, exist_ok=True)
+    leaf = {name: _file(root, name, name.encode()) for name in (
+        'old-prepared.json', 'old-pwc.pkl', 'census.json', 'res-in.json', 'cache.pkl')}
+    catalog = _file(root, 'catalog.json', {'old_prepared': leaf['old-prepared.json'],
+                                           'old_pwc': leaf['old-pwc.pkl'], 'cells': [],
+                                           **catalog_fields(root)})
+    resources = _file(root, 'resources.json', {'inputs': {'x': leaf['res-in.json']}})
+    activation = _file(root, 'activation.json', {
+        'original_prepared': leaf['old-prepared.json'], 'original_cache': leaf['old-pwc.pkl'],
+        'census': leaf['census.json']})
+    plan = {'stage_b_resource_policy': resources, 'served_activation_policy': activation,
+            'inputs': {'candidate_overlay': catalog}}
+    return {}, plan, {'production_cache': leaf['cache.pkl']}
+
+
+def _reseal_proof(root, name):
+    fixture = _file(root, name + '.fixture.json', {'fixture': name})
+    arm = _file(root, name + '.arm.json', {'arm': name})
+    return _file(root, name + '.json', {'fixture_id': {'result': fixture['path']},
+                                        'arms': [{'result': arm['path']}]})
+
+
+def test_control_closure_reads_a_v1_catalog_as_before(tmp_path):
+    from tools.prepare_extended_joint_quanta import control_digests
+
+    def v1(root):
+        return {'schema': 'prismaquant.t4_adopted_catalog.v1', 'format': 'TESSERA_E2M1_K2_R896',
+                'cost': _file(root, 'cost.pkl', b'cost'), 'reseal_proof': _reseal_proof(root, 'proof')}
+    inputs, plan, prepared = _closure_case(tmp_path, v1)
+    digests = control_digests(inputs, plan, prepared)
+    names = {path.rsplit('/', 1)[1] for path in digests}
+    assert {'cost.pkl', 'proof.json', 'proof.fixture.json', 'proof.arm.json',
+            'old-prepared.json', 'old-pwc.pkl', 'census.json', 'res-in.json', 'cache.pkl'} <= names
+    assert digests[str(tmp_path / 'proof.arm.json')] is None
+
+
+def test_control_closure_reads_every_source_of_a_v2_catalog(tmp_path):
+    """A v2 catalog binds one cost run per source and a proof only where a
+    source has one; a source with no proof adds no proof dependency."""
+    from tools.prepare_extended_joint_quanta import control_digests
+
+    def v2(root):
+        return {'schema': 'prismaquant.t4_adopted_catalog.v2', 'formats': ['A', 'B'], 'carried_from': [],
+                'cell_sources': [], 'sources': [
+                    {'cost': _file(root, 'cost-a.pkl', b'a'), 'anchor_journal': None,
+                     'reseal_proof': _reseal_proof(root, 'proof-a')},
+                    {'cost': _file(root, 'cost-b.pkl', b'b'), 'anchor_journal': None,
+                     'reseal_proof': None}]}
+    inputs, plan, prepared = _closure_case(tmp_path, v2)
+    digests = control_digests(inputs, plan, prepared)
+    names = {path.rsplit('/', 1)[1] for path in digests}
+    assert {'cost-a.pkl', 'cost-b.pkl', 'proof-a.json', 'proof-a.fixture.json', 'proof-a.arm.json'} <= names
+    assert not any(name.startswith('proof-b') for name in names)
+    assert 'cost.pkl' not in names

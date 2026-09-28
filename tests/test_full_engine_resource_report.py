@@ -108,9 +108,9 @@ def test_the_consumer_reads_the_artifact_and_never_the_serving_runtime():
     assert mentions, "the schema the artifact declares about itself should be named"
     for mention in mentions:
         # Every mention is part of a schema identifier, never a module path.
-        assert re.match(r"tessera\.(full_engine_resource_report\.v[12]"
+        assert re.match(r"tessera\.(full_engine_resource_report\.v[123]"
                         r"|full_engine_resource_(identity|partition)\.v1"
-                        r"|full_engine_(ownership_observation|dense_startup_check)\.v1"
+                        r"|full_engine_(ownership_observation|dense_startup_check|rank_world)\.v1"
                         r"|native_moe_workspace\.v1)",
                         mention), mention
 
@@ -188,7 +188,7 @@ def test_a_changed_observed_live_peak_refuses_as_not_the_simultaneous_maximum(tm
 
 @pytest.mark.parametrize("schema", [None, "", "tessera.full_engine_resource_capture.v1",
                                     "tessera.full_engine_raw_resource_ledger.v1",
-                                    "tessera.full_engine_resource_report.v3"])
+                                    "tessera.full_engine_resource_report.v4"])
 def test_a_foreign_schema_refuses(tmp_path, schema):
     report = supplied()
     if schema is None:

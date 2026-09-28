@@ -78,7 +78,8 @@ def _fixture(root):
                 "render_origin": "encoded", "render_comparison": "independent_render_vs_wire",
                 "catalog_source_adoption": {"schema": "adoption"}, "anchor": {"dloss": 1e-5},
                 "wire": str(wire), "wire_stat": _stat(wire),
-                "render": str(render), "render_stat": _stat(render)}
+                "render": str(render), "render_stat": _stat(render),
+                "record": {"blob_sha256": hashlib.sha256(b"wire" * (index + 1)).hexdigest()}}
         cells.append(cell)
         receipt = {key: cell[key] for key in ("source_weight", "activation", "encoding_identity_sha256",
                                               "render_origin", "render_comparison",
@@ -210,7 +211,8 @@ def _multi_format(fx, *, declare_carried=True):
         _write(wire, b"w2" * (index + 1))
         _write(render, b"r2" * (index + 1))
         cell = {**cells[index], "format": FMT2, "wire": str(wire), "wire_stat": _stat(wire),
-                "render": str(render), "render_stat": _stat(render)}
+                "render": str(render), "render_stat": _stat(render),
+                "record": {"blob_sha256": hashlib.sha256(b"w2" * (index + 1)).hexdigest()}}
         added.append(cell)
         _write(second / (_sha(qname.encode()) + ".json"), _result_bytes(cell, cell))
     catalog = {"cells": cells + added, **({"carried_from": [carried]} if declare_carried else {})}

@@ -3,6 +3,9 @@
 
 Run a one-window native hook qualification first, then replay its exact
 candidate/runtime/topology binding for the whole panel. No core patches.
+``--qualify-then-score`` does both in one engine load: it writes the standard
+hook qualification, passes it through the same replay check, and only then
+scores the rest of the panel.
 """
 from __future__ import annotations
 
@@ -121,18 +124,50 @@ def install_capture(model, *, tile_rows, logits_layout="legacy_single"):
                              "gpu_model_runner": sha256(inspect.getfile(gpu_runner))}}
 
 
+def load_teacher_window(path, descriptor):
+    """One read of a sealed ``.npy`` window: hash the buffer, then view it.
+
+    ``np.load(io.BytesIO(path.read_bytes()))`` holds the window twice on the
+    host; on unified memory that second 1.18 GiB copy counts against the GPU.
+    The array returned here is a view into the single buffer that was hashed.
+    """
+    size = descriptor["bytes"]
+    buffer = bytearray(size)
+    with open(path, "rb") as handle:
+        view = memoryview(buffer)
+        filled = 0
+        while filled < size:
+            count = handle.readinto(view[filled:])
+            if not count:
+                break
+            filled += count
+        if filled != size or handle.read(1):
+            raise ValueError("teacher window bytes changed before GPU preload")
+    if hashlib.sha256(buffer).hexdigest() != descriptor["sha256"]:
+        raise ValueError("teacher window bytes changed before GPU preload")
+    header = io.BytesIO(memoryview(buffer)[:65536])  # header bytes only; small copy
+    version = np.lib.format.read_magic(header)
+    readers = {(1, 0): np.lib.format.read_array_header_1_0, (2, 0): np.lib.format.read_array_header_2_0}
+    if version not in readers:
+        raise ValueError("teacher array has an unsupported .npy version")
+    shape, fortran_order, dtype = readers[version](header)
+    offset = header.tell()
+    count = int(np.prod(shape, dtype=np.int64))
+    if dtype.hasobject or offset + count * dtype.itemsize != size:
+        raise ValueError("teacher array geometry/dtype mismatch")
+    array = np.frombuffer(buffer, dtype=dtype, count=count, offset=offset)
+    return array.reshape(shape[::-1]).transpose() if fortran_order else array.reshape(shape)
+
+
 def arm_capture(model, *, index, window_id, descriptor, teacher_root, target_ids):
     state = model._tr3_capture
     teacher = targets = None
     if state.rank == 0:
-        path = Path(teacher_root) / descriptor["path"]
-        raw = path.read_bytes()
-        if len(raw) != descriptor["bytes"] or hashlib.sha256(raw).hexdigest() != descriptor["sha256"]:
-            raise ValueError("teacher window bytes changed before GPU preload")
-        a = np.load(io.BytesIO(raw), allow_pickle=False)
+        a = load_teacher_window(Path(teacher_root) / descriptor["path"], descriptor)
         if a.dtype != np.float32 or list(a.shape) != descriptor["shape"]:
             raise ValueError("teacher array geometry/dtype mismatch")
         teacher = torch.from_numpy(a).to("cuda")
+        del a
         targets = torch.tensor(target_ids, dtype=torch.long, device="cuda")
         torch.cuda.synchronize()
     state.arm(index, window_id, teacher, targets)
@@ -402,10 +437,18 @@ def measure(args):
     producer = producer_identity()
     topology = gold_engine_kwargs(args)
     kwargs = scorer_engine_kwargs(args, model=model, topology=topology)
-    if not args.qualify_hook and (args.qualification is None or args.qualification_sha256 is None):
+    in_process = getattr(args, "qualify_then_score", None) is not None
+    if in_process and (args.qualify_hook or args.qualification is not None
+                       or args.qualification_sha256 is not None):
+        raise ValueError("--qualify-then-score qualifies in this process; it takes no other qualification mode")
+    if in_process and Path(args.qualify_then_score).resolve() == Path(args.output).resolve():
+        raise ValueError("in-process qualification and full result need distinct paths")
+    if (not args.qualify_hook and not in_process
+            and (args.qualification is None or args.qualification_sha256 is None)):
         raise ValueError("whole panel requires the matching native one-window hook qualification")
     qualification = (bound_json(args.qualification, args.qualification_sha256)
-                     if not args.qualify_hook else None)
+                     if not args.qualify_hook and not in_process else None)
+    qualification_record = None
     from vllm import LLM, SamplingParams
     llm = LLM(**kwargs)
     installed = False
@@ -444,6 +487,37 @@ def measure(args):
             require_native_qualification(qualification, runtime_binding)
         vectors, alignment, rank_calls = [], [], []
         count = 1 if args.qualify_hook else len(inputs)
+
+        def recheck_identities():
+            if cached_checkpoint_identity(model, args.candidate_digest_cache) != candidate_identity:
+                raise ValueError("candidate checkpoint changed while scoring")
+            if (tokenizer_identity(model) != token_identity or producer_identity() != producer
+                    or bound_json(args.teacher, args.teacher_sha256) != teacher):
+                raise ValueError("teacher/tokenizer/producer changed while scoring")
+            load_panel(args.panel, arrays_root=args.arrays_root)
+            after = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
+            if args.require_exl3_diag:
+                verify_exl3_route_delta(diagnostics_before, after,
+                                       world_size=topology["tensor_parallel_size"])
+            if observed_engine_configuration(
+                    llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
+                    requested_kv_cache_dtype=args.kv_cache_dtype) != observed_configuration:
+                raise ValueError("native engine configuration changed during scoring")
+            return after
+
+        def build_result(schema, scored, diagnostics_after):
+            manifest = self_manifest(image=args.serve_image,
+                                     extra={"measurement_tool": "experimental_glm_tr3_full_vocabulary",
+                                            "runtime_binding": runtime_binding})
+            return {"schema": schema,
+                    "passed": True, "runtime_binding": runtime_binding, "serve_manifest": manifest,
+                    "estimator": "KL(reference||candidate), raw logits normalized and summed in FP64 over full vocabulary",
+                    "per_position_kl": vectors[:scored], "prompt_alignment": alignment[:scored],
+                    "rank_calls": rank_calls[:scored],
+                    "route_diagnostics": {"before": diagnostics_before, "after": diagnostics_after},
+                    "teacher_source_execution": teacher["source_execution"],
+                    "summary": summarize_panel({"windows": panel["windows"][:scored]}, vectors[:scored])}
+
         for index in range(count):
             window, row = panel["windows"][index], teacher["windows"][index]
             tokens = inputs[index][0].tolist()
@@ -466,31 +540,24 @@ def measure(args):
             alignment.append(verify_prompt_alignment(outputs[0], tokens, reports))
             rank_calls.append([{k: r[k] for k in ("rank", "world_size", "window_id", "calls", "logits_layout")} for r in reports])
             print(f"[tr3-full-kl] measured {window['window_id']}", flush=True)
-        if cached_checkpoint_identity(model, args.candidate_digest_cache) != candidate_identity:
-            raise ValueError("candidate checkpoint changed while scoring")
-        if (tokenizer_identity(model) != token_identity or producer_identity() != producer
-                or bound_json(args.teacher, args.teacher_sha256) != teacher):
-            raise ValueError("teacher/tokenizer/producer changed while scoring")
-        load_panel(args.panel, arrays_root=args.arrays_root)
-        diagnostics_after = llm.apply_model(partial(route_diagnostics, require_exl3=args.require_exl3_diag))
-        if args.require_exl3_diag:
-            verify_exl3_route_delta(diagnostics_before, diagnostics_after,
-                                   world_size=topology["tensor_parallel_size"])
-        if observed_engine_configuration(
-                llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
-                requested_kv_cache_dtype=args.kv_cache_dtype) != observed_configuration:
-            raise ValueError("native engine configuration changed during scoring")
-        manifest = self_manifest(image=args.serve_image,
-                                 extra={"measurement_tool": "experimental_glm_tr3_full_vocabulary",
-                                        "runtime_binding": runtime_binding})
-        result = {"schema": ("prismaquant.glm_tr3_hook_qualification/1" if args.qualify_hook
-                              else "prismaquant.glm_tr3_full_vocabulary_kl/1"),
-                  "passed": True, "runtime_binding": runtime_binding, "serve_manifest": manifest,
-                  "estimator": "KL(reference||candidate), raw logits normalized and summed in FP64 over full vocabulary",
-                  "per_position_kl": vectors, "prompt_alignment": alignment, "rank_calls": rank_calls,
-                  "route_diagnostics": {"before": diagnostics_before, "after": diagnostics_after},
-                  "teacher_source_execution": teacher["source_execution"],
-                  "summary": summarize_panel({"windows": panel["windows"][:count]}, vectors)}
+            if in_process and index == 0:
+                # The same record --qualify-hook writes, gated by the same
+                # replay check a separate full-panel process would apply.
+                # Window 0 is not re-armed: the capture hook's strict window
+                # order refuses it, and this vector is the one qualified.
+                record = build_result("prismaquant.glm_tr3_hook_qualification/1", 1,
+                                      recheck_identities())
+                atomic_json_write(record, args.qualify_then_score)
+                digest = hashlib.sha256(Path(args.qualify_then_score).read_bytes()).hexdigest()
+                require_native_qualification(bound_json(args.qualify_then_score, digest), runtime_binding)
+                qualification_record = {"mode": "in_process", "path": str(args.qualify_then_score),
+                                        "sha256": digest, "window_reused": True}
+                print(f"[tr3-full-kl] qualified in process {digest}", flush=True)
+        diagnostics_after = recheck_identities()
+        result = build_result(("prismaquant.glm_tr3_hook_qualification/1" if args.qualify_hook
+                               else "prismaquant.glm_tr3_full_vocabulary_kl/1"), count, diagnostics_after)
+        if qualification_record is not None:
+            result["qualification"] = qualification_record
         atomic_json_write(result, args.output)
         return result
     finally:
@@ -519,6 +586,9 @@ def main():
     p.add_argument("--qualify-hook", action="store_true")
     p.add_argument("--qualification")
     p.add_argument("--qualification-sha256")
+    p.add_argument("--qualify-then-score", metavar="QUALIFICATION_OUTPUT",
+                   help="write the one-window hook qualification here, check it in this process, "
+                        "then score the whole panel in the same engine")
     add_gold_engine_arguments(p)
     args = p.parse_args()
     if args.tile_rows <= 0 or args.tile_rows > 64:

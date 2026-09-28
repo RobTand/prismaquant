@@ -234,13 +234,14 @@ def _v5_contract(monkeypatch, *, with_experts=True):
     # TESSERA_E4M3_K1 -- the rung these tests select -- entirely once
     # contract v23 (lane schema v10) made coverage structure-specific: the
     # dense cells publish TESSERA_E2M1_K2 only and E4M3 only as routed_moe.
-    # One real image's roster first (``lane_cells_on_one_image``): every cell
-    # is flattened onto IMAGE below, and since contract v38 the stock image
-    # and the GLM image publish the same dense E4M3 scopes.
+    # One real image's roster first: this fixture selects A4 as well as A8,
+    # so choose the uniquely published A4 image, not the v39 default (A8 only).
+    # Every kept cell is flattened onto IMAGE below; no cross-image union.
     payload = down_convert_lane_table(
         project_lane_cells_onto_structures(
             lane_cells_on_one_image(
-                json.loads(contract.contract_path().read_text())),
+                json.loads(contract.contract_path().read_text()),
+                family="TESSERA_E2M1_K2"),
             ("dense", "routed_moe") if with_experts else ("dense",)),
         "tessera.lane-eligibility.v5")
     block = payload["lane_eligibility"]

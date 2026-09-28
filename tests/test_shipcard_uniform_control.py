@@ -179,8 +179,13 @@ def _control_arm(control_kl=_CONTROL_KL, **overrides):
 
 
 def _artifact(tmp_path, *, name="exported", rate_axis=True):
+    from test_publish_artifact import _license_card
+
     model_dir = tmp_path / name
     model_dir.mkdir()
+    # Meet the independent publication policy before binding model identity;
+    # these tests still isolate and assert the unchanged uniform-control gate.
+    _license_card(model_dir)
     config = {"model_type": "qwen3"}
     if rate_axis:
         # One priced module, so `route.trace` (#575) has a price to compare

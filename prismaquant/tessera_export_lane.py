@@ -842,17 +842,23 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             costs=handoff.get("costs"))
     except ExpertProjectionError as exc:
         raise TesseraExportLaneError(f"selected cache projection: {exc}") from exc
-    if set(selected) != set(data.census["unit_shapes"]):
-        raise TesseraExportLaneError("selected cache assignment does not cover the full source roster")
+    from .tessera_census_cache import census_roster_selection
+    selected = census_roster_selection(selected, data.census["unit_shapes"], TesseraExportLaneError)
     wire_dir = Path(provenance["wire_dir"]).resolve()
-    if (metadata.get(WIRE_DIR_KEY) != str(wire_dir) or
-            data.payload.get("provenance", {}).get("wire_dir") != str(wire_dir)):
+    # The allocator's recorded root must still name the handoff root: both
+    # sides describe WHICH root the selection was priced against.  The
+    # loader payload's provenance wire_dir names the root the receipts were
+    # measured under and may legitimately differ as a string; the per-unit
+    # content identity against those receipts is carried by the priced
+    # records and enforced at intake, so it is recorded by callers rather
+    # than gated here by path equality.
+    if metadata.get(WIRE_DIR_KEY) != str(wire_dir):
         raise TesseraExportLaneError("selected cache wire directory differs from the joint handoff")
     selected_expert_receipts = metadata.get(EXPERT_WIRES_KEY, {})
     if not isinstance(selected_expert_receipts, Mapping):
         raise TesseraExportLaneError("selected cache expert receipts are missing")
     from contextlib import nullcontext
-    from .joint_catalog_extension import (EncoderAdoptionValidation,
+    from .joint_catalog_extension import (EncoderAdoptionValidation, streamed_fences,
         require_selected_catalog_cell, require_extension, extension_run_header, _json)
     rooted = schema == "tessera.cached_units.v2"
     if rooted:
@@ -879,7 +885,11 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
         policy = verify_policy(policy_bound, original_prepared=extension["inputs"]["original_prepared"])
     records, wire_roots, unit_roots, adoptions, proofs = {}, {}, {}, {}, {}
     served_activations = {}
-    with EncoderAdoptionValidation() if rooted else nullcontext() as validation:
+    # A selected overlay wire whose stat fence drifted is re-hashed on the
+    # assigned-CPU pool while the walk continues; every re-hash is proven
+    # when this block exits, before the manifest is built (PQ #1522).
+    with (EncoderAdoptionValidation() if rooted else nullcontext()) as validation, \
+            (streamed_fences() if rooted else nullcontext()) as fences:
         for name, fmt in sorted(selected.items()):
             if fmt == "BF16":
                 continue
@@ -899,11 +909,19 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
             sealed_unit = data.manifest["identity"]["units"][name]
             if record["identity"].get("source") != sealed_unit["weight"]:
                 raise TesseraExportLaneError(f"{name}@{fmt}: selected wire source differs from checkpoint seal")
+            # The root this cell's bytes are read from: the handoff root, or,
+            # for a catalog-adopted cell, its catalog row's own directory
+            # (chosen below). ``locate_expert_wire`` gates that final root once
+            # (present, regular, non-symlink, directly in the root, receipted
+            # size) against ``record``, which ``require_selected_catalog_cell``
+            # holds equal to the catalog row's record. Content identity is
+            # enforced at intake by ``verify_cached_unit`` (#1513, #641/#643).
             cell_wire_dir = wire_dir
             if record["identity"].get("encoder_source_sha256") != data.manifest["identity"]["encoder_source_sha256"]:
                 if not rooted:
                     raise TesseraExportLaneError(f"{name}@{fmt}: selected wire encoder differs from checkpoint seal")
-                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation)
+                accepted = require_selected_catalog_cell(data, name, fmt, validation=validation,
+                                                         fences=fences)
                 adoptions[name] = accepted["adoption"]
                 if policy is None:
                     raise TesseraExportLaneError(f"{name}: added A4 selection needs the accepted served activation policy")
@@ -915,11 +933,16 @@ def selected_cached_units_manifest(assignment: Mapping[str, str], metadata: Mapp
                     "group": row["joint_operator_identity"]["served_activation_policy"]["group"],
                     "input_global_scale": scale}
                 cell_wire_dir = Path(accepted["wire_root"])
-                seal = record["identity"]["encoder_source_sha256"]
-                if producer_packages.get(seal) != accepted["producer_package"]:
-                    raise TesseraExportLaneError(f"{name}: producer package differs from accepted migration proof")
+                # A cell no reseal proof covers was admitted unproven, in dev
+                # mode only (``validated_encoder_adoption``, PQ #1147): it has
+                # no proof and no proof-bound producer package to compare. The
+                # exporter still needs this seal's producer package below.
                 proof = accepted["proof"]
-                proofs[proof["sha256"]] = proof
+                if proof is not None:
+                    seal = record["identity"]["encoder_source_sha256"]
+                    if producer_packages.get(seal) != accepted["producer_package"]:
+                        raise TesseraExportLaneError(f"{name}: producer package differs from accepted migration proof")
+                    proofs[proof["sha256"]] = proof
             expected_hessian = (sealed_unit.get("hessian") if
                                 measured_row.get("hessian_identity", {}).get("applied") is True else None)
             if (record["identity"].get("calibration") or {}).get("hessian") != expected_hessian:
@@ -2287,6 +2310,27 @@ def _write_plan_assignment(assignment_path: str | Path, *, expected_sha256: str,
 # ---------------------------------------------------------------------------
 # The driver's entry point
 # ---------------------------------------------------------------------------
+def cached_unit_encoder_source_proof_mode() -> str:
+    """Translate this producer's dev switch into the reader's explicit input."""
+    from .dev_mode import dev_mode_enabled
+
+    return 'permissive' if dev_mode_enabled() else 'strict'
+
+
+def read_cached_unit_bundle(manifest, directory, expected_units, source):
+    """Read with the producer's mode, retaining and surfacing every warning."""
+    import sys
+    from tessera.cached_unit import CachedUnitBundle
+
+    bundle = CachedUnitBundle(
+        manifest, directory, expected_units, source,
+        encoder_source_proof_mode=cached_unit_encoder_source_proof_mode())
+    for warning in bundle.warnings:
+        print('[cached-unit warning] ' + json.dumps(warning, sort_keys=True),
+              file=sys.stderr)
+    return bundle
+
+
 def require_composed_cached_units(path: str | Path, *, scope: Mapping,
                                   metadata: Mapping) -> dict:
     """Bind an original-cohort bundle to this selection before export intake.
@@ -2297,8 +2341,7 @@ def require_composed_cached_units(path: str | Path, *, scope: Mapping,
     and derives their source/H/recipe identities at intake.
     """
     import hashlib
-    from tessera.cached_unit import (COMPOSED_CACHE_SCHEMA, CachedUnitBundle,
-                                     read_manifest)
+    from tessera.cached_unit import COMPOSED_CACHE_SCHEMA, read_manifest
 
     path = Path(path)
     if not path.is_absolute() or path.is_symlink() or path.resolve() != path:
@@ -2314,7 +2357,7 @@ def require_composed_cached_units(path: str | Path, *, scope: Mapping,
     if body.get('source') != mtp.get('source'):
         raise TesseraExportLaneError('body and MTP producer checkpoint sources differ')
     expected = set(scope['by_unit'])
-    bundle = CachedUnitBundle(manifest, path.parent, expected, body['source'])
+    bundle = read_cached_unit_bundle(manifest, path.parent, expected, body['source'])
     selection = metadata.get('mtp_selection', {})
     priced_mtp = selection.get('mtp_expert_wires') if isinstance(selection, Mapping) else None
     priced_body = body.get('units')
@@ -2328,7 +2371,9 @@ def require_composed_cached_units(path: str | Path, *, scope: Mapping,
                 raise TesseraExportLaneError(
                     f'{name}: composed cached {cohort} receipt differs from selected price')
     return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
-            'units': len(bundle.units), 'children': bundle.child_manifests}
+            'units': len(bundle.units), 'children': bundle.child_manifests,
+            'encoder_source_proof_mode': bundle.encoder_source_proof_mode,
+            'warnings': bundle.warnings}
 
 
 def preflight(model_path: str | Path, *, target=None,
@@ -2395,6 +2440,7 @@ def preflight(model_path: str | Path, *, target=None,
         build = {
             "source_model": str(model_path), "layer_config": str(assignment_path),
             "layer_config_sha": assignment_sha,
+            "cached_encoder_source_proof_mode": cached_unit_encoder_source_proof_mode(),
             **prefill_frontier_replay_claim(read_layer_config_metadata(assignment_path)),
             "priced_inputs": {
                 "schema": ('tessera.priced_export_inputs.v2'
@@ -2450,7 +2496,9 @@ def preflight(model_path: str | Path, *, target=None,
                 build['cached_units_sha256'] = composed_cache['sha256']
                 build['cached_units_selected'] = {
                     'units': composed_cache['units'],
-                    'children': composed_cache['children']}
+                    'children': composed_cache['children'],
+                    'encoder_source_proof_mode': composed_cache['encoder_source_proof_mode'],
+                    'warnings': composed_cache['warnings']}
             # Copied from the scope receipt, never recomputed: the anchor is
             # the only machine-readable thing this CLI writes, and
             # `lane_shipcard open --build-json` stamps it whole onto the

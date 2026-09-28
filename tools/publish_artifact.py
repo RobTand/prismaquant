@@ -5,6 +5,10 @@ Model publication is deliberately stricter than a convenience ``hf upload``:
 
 * the artifact's canonical ``shipcard.json`` must be a readable, regular,
   non-symlink file (this structural rule is not force-overrideable);
+* new uploads require the repository-filled PrismaQuant weights LICENSE and
+  matching README license metadata/TL;DR, checked again on frozen bytes;
+* real publication sets and reads back ``gated="auto"`` before uploading any
+  bytes, then rechecks the setting before announcing success;
 * the complete local file set is frozen before the authoritative shipcard
   replay. Small files are captured as bytes. Large files stay zero-copy, but
   are held by no-follow file descriptors and content-addressed blockwise; the
@@ -43,6 +47,8 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Mapping
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.shipcard import (  # noqa: E402
@@ -61,6 +67,95 @@ SNAPSHOT_BLOCK_BYTES = 8 * 1024 * 1024
 SNAPSHOT_INLINE_BYTES = 16 * 1024 * 1024
 SNAPSHOT_PREFIX = ".prismaquant-publish-snapshot-"
 _FULL_COMMIT_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+_LICENSE_TEMPLATE = Path(__file__).resolve().parents[1] / "licenses" / "PRISMAQUANT-WEIGHTS-LICENSE-1.0.md"
+_MAX_POLICY_FILE_BYTES = SNAPSHOT_INLINE_BYTES
+
+
+class _CardMetadataLoader(yaml.SafeLoader):
+    """Do not accept duplicate or merge keys that can hide license metadata."""
+
+    def construct_mapping(self, node, deep=False):
+        if not isinstance(node, yaml.MappingNode):
+            raise ValueError("card metadata must be a mapping")
+        keys = [key.value for key, _ in node.value]
+        if any(key.tag != "tag:yaml.org,2002:str" for key, _ in node.value):
+            raise ValueError("card metadata requires explicit string keys (no YAML merges)")
+        if len(keys) != len(set(keys)):
+            raise ValueError("card metadata has duplicate keys")
+        return super().construct_mapping(node, deep=deep)
+
+
+def _policy_text(path: Path, snapshot: _FrozenSnapshot | None = None) -> str:
+    """Read ordinary source files, or replay the existing frozen-byte reader."""
+    if snapshot is None:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise ValueError(f"{path.name} must be a regular file")
+            raw = handle.read(_MAX_POLICY_FILE_BYTES + 1)
+    else:
+        entry = next((e for e in snapshot.entries if e.relative_path == path.name), None)
+        if entry is None or entry.size > _MAX_POLICY_FILE_BYTES:
+            raise ValueError(f"frozen {path.name} is missing or oversized")
+        if entry.content is not None:
+            raw = entry.content
+        else:
+            with snapshot.reader_for(entry) as handle:
+                raw = handle.read(_MAX_POLICY_FILE_BYTES + 1)
+    if len(raw) > _MAX_POLICY_FILE_BYTES:
+        raise ValueError(f"{path.name} exceeds the policy-file size bound")
+    return raw.decode("utf-8")
+
+
+def _publication_license_problem(
+    artifact_dir: Path, repo_id: str, *, snapshot: _FrozenSnapshot | None = None,
+) -> str | None:
+    """Apply #1268 only to the artifact explicitly submitted for publication.
+
+    LICENSE stays in model_sha: stage it before opening the authoritative
+    shipcard. This neither edits existing cards nor retroactively gates repos.
+    """
+    try:
+        if re.fullmatch(r"rdtand/[A-Za-z0-9][A-Za-z0-9._-]*", repo_id) is None:
+            raise ValueError("destination must match the canonical license's rdtand/<repository> URL")
+        template = _LICENSE_TEMPLATE.read_text(encoding="utf-8")
+        expected = template.replace("<repository>", repo_id.split("/", 1)[1])
+        if _policy_text(artifact_dir / "LICENSE", snapshot) != expected:
+            raise ValueError("LICENSE must equal the canonical template with the target repository filled in")
+        readme = _policy_text(artifact_dir / "README.md", snapshot)
+        lines = readme.splitlines()
+        if not lines or lines[0] != "---":
+            raise ValueError("README.md requires YAML front matter")
+        end = lines.index("---", 1)
+        metadata = yaml.load("\n".join(lines[1:end]), Loader=_CardMetadataLoader)
+        if not isinstance(metadata, dict):
+            raise ValueError("README.md front matter must be an object")
+        for name, value in {
+            "license": "other",
+            "license_name": "prismaquant-weights-license-1.0",
+            "license_link": f"https://huggingface.co/{repo_id}/blob/main/LICENSE",
+        }.items():
+            if metadata.get(name) != value:
+                raise ValueError(f"README.md {name} must equal {value!r}")
+        tldr = template[template.index("> **TL;DR.**"):].split("\n\n", 1)[0]
+        # Permit ordinary Markdown reflow and blockquote presentation, not a
+        # different summary of the legal terms. Match in the body, never YAML.
+        def normalize(text: str) -> str:
+            return " ".join(" ".join(line.removeprefix("> ").strip()
+                                     for line in text.splitlines()).split())
+
+        if normalize(tldr) not in normalize("\n".join(lines[end + 1:])):
+            raise ValueError("README.md must include the canonical license TL;DR")
+    except (OSError, UnicodeError, ValueError, yaml.YAMLError, FrozenSnapshotError) as exc:
+        return f"license policy: {exc}"
+    return None
+
+
+def _require_auto_gate(api: Any, args: argparse.Namespace) -> None:
+    observed = api.repo_info(repo_id=args.repo_id, repo_type=args.repo_type,
+                             revision=args.revision)
+    if getattr(observed, "gated", None) != "auto":
+        raise RuntimeError('Hub gate read-back is not gated="auto"')
 
 
 class FrozenSnapshotError(RuntimeError):
@@ -940,6 +1035,17 @@ def _publish_snapshot(
         )
         return 1
 
+    # Never upload even an uncommitted LFS object before gating is observed.
+    # Only the real-publish branch reaches this API; dry-run stays offline.
+    try:
+        api.update_repo_settings(repo_id=args.repo_id, repo_type=args.repo_type,
+                                 gated="auto")
+        _require_auto_gate(api, args)
+    except Exception as exc:
+        print(f"[publish] REFUSED: auto-approve gate could not be verified before upload: {exc!r}",
+              file=sys.stderr)
+        return 1
+
     additions = _make_additions(snapshot, prefix=prefix, bindings=bindings)
     local_remote_paths = {operation.path_in_repo for operation in additions}
     if len(local_remote_paths) != len(additions):
@@ -1102,11 +1208,18 @@ def _publish_snapshot(
         )
         return 1
 
+    try:
+        _require_auto_gate(api, args)
+    except Exception as exc:
+        print(f"[publish] ERROR: commit exists but auto-approve gate is no longer verified: {exc!r}; "
+              f"commit={commit_oid}; inspect the repository before announcing", file=sys.stderr)
+        return 1
+
     url = getattr(result, "commit_url", None) or commit_oid
     print(
         f"[publish] done: {url} (parent={parent_commit}, "
         f"snapshot_sha256={snapshot.manifest_sha256}, "
-        f"stale_deleted={len(stale_paths)}, "
+        f"stale_deleted={len(stale_paths)}, gated=\"auto\" (read-back verified), "
         ".gitattributes retained when Hub-managed)"
     )
     return 0
@@ -1188,6 +1301,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     if canonical_problem is not None:
         print(f"[publish] ERROR: {canonical_problem}", file=sys.stderr)
+        return 2
+    license_problem = _publication_license_problem(artifact_dir, args.repo_id)
+    if license_problem is not None:
+        print(f"[publish] ERROR: {license_problem}", file=sys.stderr)
         return 2
     card, problems = check_shipcard(artifact_dir, shipcard_path)
     if card is None:
@@ -1289,6 +1406,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     with snapshot_cm as snapshot:
+        license_problem = _publication_license_problem(snapshot.root, args.repo_id, snapshot=snapshot)
+        if license_problem is not None:
+            print(f"[publish] ERROR: frozen {license_problem}; nothing was uploaded", file=sys.stderr)
+            return 2
         frozen_card_path = snapshot.root / SHIPCARD_FILENAME
         frozen_card, frozen_problems = check_shipcard(
             snapshot.root,
