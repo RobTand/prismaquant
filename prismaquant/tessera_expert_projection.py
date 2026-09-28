@@ -93,18 +93,20 @@ def producer_plan_tool(env: Mapping[str, str] | None = None) -> Path:
     files the campaign shells out to that the export arm does not call; a
     tool absent from it is one nobody can check for.  ``TESSERA_REPO``
     locates the pinned checkout, as it does for the plan writer and the
-    exporter.  Both rosters are scanned -- the export roster first -- so a
-    future move of the tool back onto the arm's path keeps resolving.
+    exporter.  Only the campaign roster is scanned: the export roster
+    refuses Tessera trees from before #687 (no
+    ``src/tessera/export_serving.py``), and the projection tool is a
+    campaign dependency that those trees still carry -- the recorded GLM
+    campaign spec mounts tessera-382a1a97, and a campaign re-run or resume
+    must not break at projection.
     """
     from .tessera_export_lane import (
         TesseraExportLaneError,
         require_campaign_tools,
-        require_producer_tools,
     )
 
     try:
-        resolved = (*require_producer_tools(env=env),
-                    *require_campaign_tools(env=env))
+        resolved = require_campaign_tools(env=env)
     except TesseraExportLaneError as exc:
         raise ExpertProjectionError(str(exc)) from exc
     for path in resolved:
