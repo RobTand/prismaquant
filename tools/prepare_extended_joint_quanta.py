@@ -153,7 +153,7 @@ def control_digests(inputs, plan, prepared, extension=None):
     The preparation's data manifest declares a digest for every entry
     (PQ #1092); a bound digest is taken from its binding, not rehashed.
     """
-    from prismaquant.tessera_joint_allocation import _read_bound
+    from prismaquant.stage_inputs import read_bound as _read_bound
     bindings = [*inputs.values(), *([] if extension is None else [extension]),
                 prepared['production_cache']]
     if extension is not None:

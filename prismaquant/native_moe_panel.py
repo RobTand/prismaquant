@@ -367,7 +367,7 @@ def decoded_rank_member(blob, shape, role, *, device, where):
 #: ``prepare_moe_inputs`` and ``freeze_moe_panel`` each qualify the same
 #: panel, so without this the whole production cache is read, hashed and
 #: unpickled twice per panel (P3 #682). The bytes are still authenticated by
-#: :func:`tessera_joint_allocation._read_bound` on the miss path; a hit
+#: :func:`stage_inputs.read_bound` on the miss path; a hit
 #: additionally requires the PWC file's stat fence to be unchanged, and a
 #: drifted fence re-reads and re-verifies. The memoized objects are read,
 #: never mutated, by the qualifier below.
@@ -378,7 +378,7 @@ def _memoized_qualified_cache(completion, pickle, ProductionWeightCache):
     """Return the bound preparation's ``ProductionWeightCache``, unpickled once."""
     from pathlib import Path
 
-    from .tessera_joint_allocation import _bound_stat_fence, _read_bound
+    from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
 
     record = completion["production_cache"]
     try:
@@ -405,7 +405,7 @@ def _qualified_quality_members(binding, *, members, source_model, calibration):
     that is what the joint quality row must name. This reads that proof out of
     the ORIGINAL preparation the caller binds -- the prepared completion and
     the ``ProductionWeightCache`` it names, each authenticated by its own
-    digest through :func:`tessera_joint_allocation._read_bound` -- rather than
+    digest through :func:`stage_inputs.read_bound` -- rather than
     from anything this producer wrote about itself. Nothing is rendered, no
     cache is created, and the encoder identity is joined through the producer's
     own canonical-JSON grammar rather than a second spelling of one hash.
@@ -413,7 +413,7 @@ def _qualified_quality_members(binding, *, members, source_model, calibration):
     import pickle
     from .cost_stage_checkpoint import canonical_json_sha256
     from .production_weight_cache import ProductionWeightCache
-    from .tessera_joint_allocation import _read_bound
+    from .stage_inputs import read_bound as _read_bound
     from .tessera_joint_aura import (HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA,
                                      RENDER_COMPARISON_BY_ORIGIN)
 
@@ -834,8 +834,8 @@ def _calibration_and_capture(calibration, capture, *, unit, shape, routing):
                           ("calibration_shape", calibration["shape"]),
                           ("calibration_dtype", calibration["dtype"])):
         _equal(capture[key], expected, f"capture {key}")
-    from .tessera_expert_projection import _require_source_identity
-    source = _require_source_identity(capture["producer_source"])
+    from .stage_inputs import require_source_identity
+    source = require_source_identity(capture["producer_source"])
     _sha(source["config_sha256"], "capture source config")
     for digest in (*source["files"].values(), *source["auxiliary_sha256"].values()):
         _sha(digest, "capture source file")
@@ -1454,7 +1454,7 @@ def captured_moe_boundary(module, args, kwargs, coordinates, *, unit, source_mod
     from . import pretrained_initialization_contract
     from .model_profiles import profile_from_model
     from .production_weight_cache import _cb_cache_tensor_identity
-    from .tessera_expert_projection import _require_source_identity
+    from .stage_inputs import require_source_identity
     if (type(prefill_rows) is not int or prefill_rows < 1
             or calibration_receipt.get("schema") != "prismaquant.calibration_input.v1"
             or calibration_receipt["shape"][1] < prefill_rows):
@@ -1501,7 +1501,7 @@ def captured_moe_boundary(module, args, kwargs, coordinates, *, unit, source_mod
             or list(bias.shape) != [shape["experts"]] or bias.device != x.device
             or not bool(torch.isfinite(bias).all())):
         raise ValueError("native MoE capture requires the actual FP32-biased LFM router")
-    source = _require_source_identity(producer_source)
+    source = require_source_identity(producer_source)
     routing = {"activation": "silu", "scoring_func": "sigmoid", "renormalize": router.norm_topk_prob,
         "routed_scaling_factor": router.routed_scaling_factor, "apply_router_weight_on_input": False,
         "expert_map": None, "input_dtype": str(x.dtype), "topk_weights_dtype": str(weights.dtype),

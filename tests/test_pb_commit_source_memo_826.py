@@ -2,7 +2,8 @@
 
 Stage A v14 (action 398c81b4, 2026-09-20) spent its whole attempt at ~0.3
 units/s with the main thread inside ``_production_cache_source_sha256``'s
-rglob/sort/hash, called from ``_pb_commit``'s dev stamp: every durable unit
+rglob/sort/hash, called from ``_pb_commit``'s dev stamp (now
+``prismabuild_progress.commit``, PQ #1555): every durable unit
 re-derived the executing package's identity. The walk's stall budget held
 only because the commits trickled out at all.
 
@@ -19,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from prismaquant import tessera_joint_aura
+from prismaquant import prismabuild_progress
 
 
 def test_dev_source_sha256_computed_once_across_many_commits(monkeypatch):
@@ -32,15 +33,15 @@ def test_dev_source_sha256_computed_once_across_many_commits(monkeypatch):
     import prismaquant.aura_cost as aura_cost
 
     monkeypatch.setattr(aura_cost, "_aura_source_sha256", fake_sha, raising=True)
-    monkeypatch.setattr(tessera_joint_aura, "_DEV_SOURCE_SHA256_MEMO", None, raising=True)
+    monkeypatch.setattr(prismabuild_progress, "_DEV_SOURCE_SHA256_MEMO", None, raising=True)
     try:
-        first = tessera_joint_aura._progress_dev_source_sha256()
+        first = prismabuild_progress._progress_dev_source_sha256()
         for _ in range(1000):
-            assert tessera_joint_aura._progress_dev_source_sha256() == first
+            assert prismabuild_progress._progress_dev_source_sha256() == first
         assert calls == [1]
         assert first == "a" * 64
     finally:
-        tessera_joint_aura._DEV_SOURCE_SHA256_MEMO = None
+        prismabuild_progress._DEV_SOURCE_SHA256_MEMO = None
 
 
 def test_pb_commit_dev_stamp_reuses_the_memo(monkeypatch, tmp_path):
@@ -50,17 +51,19 @@ def test_pb_commit_dev_stamp_reuses_the_memo(monkeypatch, tmp_path):
     monkeypatch.setenv("PRISMABUILD_ACTION_PROGRESS_TOKEN", "tok")
 
     calls = []
-    monkeypatch.setattr(tessera_joint_aura, "_DEV_SOURCE_SHA256_MEMO", "b" * 64, raising=True)
-    real_stamp = tessera_joint_aura.dev_stamp
+    monkeypatch.setattr(prismabuild_progress, "_DEV_SOURCE_SHA256_MEMO", "b" * 64, raising=True)
+    from prismaquant import dev_mode
+
+    real_stamp = dev_mode.dev_stamp
 
     def counting(value):
         calls.append(value)
         return real_stamp(value)
 
-    monkeypatch.setattr(tessera_joint_aura, "dev_stamp", counting, raising=True)
+    monkeypatch.setattr(dev_mode, "dev_stamp", counting, raising=True)
     try:
-        assert tessera_joint_aura._pb_commit(1, "head", unit="layers.0.a")
-        assert tessera_joint_aura._pb_commit(2, "head", unit="layers.0.b")
+        assert prismabuild_progress.commit(1, "head", unit="layers.0.a")
+        assert prismabuild_progress.commit(2, "head", unit="layers.0.b")
         assert calls == ["b" * 64, "b" * 64]
         import json
 
@@ -70,7 +73,7 @@ def test_pb_commit_dev_stamp_reuses_the_memo(monkeypatch, tmp_path):
         assert row["units_completed"] == 2
         assert row["unit"] == "layers.0.b"
     finally:
-        tessera_joint_aura._DEV_SOURCE_SHA256_MEMO = None
+        prismabuild_progress._DEV_SOURCE_SHA256_MEMO = None
 
 
 def test_pb_commit_default_dev_path_never_hashes_the_source(monkeypatch, tmp_path):
@@ -88,10 +91,10 @@ def test_pb_commit_default_dev_path_never_hashes_the_source(monkeypatch, tmp_pat
     def refuse_hash():
         raise AssertionError("default dev progress commits must not hash the source tree")
 
-    monkeypatch.setattr(tessera_joint_aura, "_progress_dev_source_sha256",
+    monkeypatch.setattr(prismabuild_progress, "_progress_dev_source_sha256",
                         refuse_hash, raising=True)
-    assert tessera_joint_aura._pb_commit(1, "head", unit="layers.0.a")
-    assert tessera_joint_aura._pb_commit(2, "head", unit="layers.0.b")
+    assert prismabuild_progress.commit(1, "head", unit="layers.0.a")
+    assert prismabuild_progress.commit(2, "head", unit="layers.0.b")
 
     import json
 

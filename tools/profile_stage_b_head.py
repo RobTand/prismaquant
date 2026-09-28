@@ -64,8 +64,9 @@ def walk_intake(config, *, prepared, plan_sha256, scratch):
     from prismaquant.aura_cost import _aura_source_sha256
     from prismaquant.calibration_data import load_calibration_input
     from prismaquant.production_weight_cache import ProductionWeightCache
+    from prismaquant.stage_inputs import bound as _bound, same as _same
     from prismaquant.tessera_joint_aura import (
-        _bound, _prepare_file_read_bound, _same, _seed_source_identity_cache,
+        _prepare_file_read_bound, _seed_source_identity_cache,
         load_measured_anchor_input)
     from prismaquant.tessera_reader import load_declared_reader
 
@@ -171,7 +172,7 @@ def main(argv=None) -> int:
         parser.error("--scratch must be host-local, never the pool")
     args.scratch.mkdir(parents=True, exist_ok=True)
     from prismaquant.io_spans import read_proc_io, read_proc_status
-    from prismaquant.tessera_joint_aura import _load_plan
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
     record = load_record(args.quantum, args.quantum_sha256)
     # The projection-runtime qualification gates GPU arithmetic, which

@@ -89,7 +89,7 @@ def capture_streamed_glm_routes(runner, calibration_ids, *, calibration,
                                 producer_source, source_acquisition, consume):
     """Capture every routed layer; publish each before computing the next one."""
     from .native_moe_panel import _validate_prefix_capture
-    from .tessera_expert_projection import _require_source_identity
+    from .stage_inputs import require_source_identity
 
     if (runner.profile.name != "glm5_next" or runner.num_layers != 45
             or runner.dtype != torch.bfloat16
@@ -100,7 +100,7 @@ def capture_streamed_glm_routes(runner, calibration_ids, *, calibration,
         raise ValueError("routed capture requires the GLM body and exact 512x512 draw")
     if getattr(runner.model.config, "_attn_implementation", None) != "eager":
         raise ValueError("routed capture requires actual eager source attention")
-    source = _require_source_identity(producer_source)
+    source = require_source_identity(producer_source)
     runner.context.begin_source_initialization_audit()
 
     def consume_arguments(layer, module, args, kwargs):

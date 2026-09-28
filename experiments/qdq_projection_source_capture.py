@@ -22,7 +22,7 @@ from prismaquant.model_profiles import detect_profile
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
 from prismaquant.sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
-from prismaquant.tessera_joint_aura import _source_prefetch
+from prismaquant.stage_inputs import source_prefetch as _source_prefetch
 from prismaquant import format_registry as fr
 
 

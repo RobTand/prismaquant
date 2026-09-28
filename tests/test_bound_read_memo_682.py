@@ -1,7 +1,7 @@
 """Bound preparation reads happen once per process, not once per panel (#682).
 
 ``native_moe_panel._qualified_quality_members`` reaches the bound
-``ProductionWeightCache`` through ``tessera_joint_allocation._read_bound``,
+``ProductionWeightCache`` through ``stage_inputs.read_bound``,
 which did a full ``read_bytes`` plus ``pickle.loads`` of the entire cache --
 once per ``prepare_moe_inputs`` and once per ``freeze_moe_panel``, so twice
 per panel, unprofiled at real PWC size. Two properties pin the fix:
@@ -29,15 +29,15 @@ def _bind(path: Path):
 
 
 def _clear_memos():
-    from prismaquant import tessera_joint_allocation as allocation
+    from prismaquant import stage_inputs
     from prismaquant import native_moe_panel as panel
-    allocation._BOUND_BYTES.clear()
+    stage_inputs._BOUND_BYTES.clear()
     panel._QUALIFIED_QUALITY_MEMO.clear()
 
 
 def test_bound_bytes_are_read_and_hashed_once_per_process(tmp_path, monkeypatch):
     """The second load of the same bound file does no I/O."""
-    from prismaquant import tessera_joint_allocation as allocation
+    from prismaquant import stage_inputs
 
     _clear_memos()
     target = tmp_path / "completion.json"
@@ -52,24 +52,24 @@ def test_bound_bytes_are_read_and_hashed_once_per_process(tmp_path, monkeypatch)
         return real_read_bytes(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_bytes", counting)
-    first = allocation._read_bound(record, "test completion")
-    second = allocation._read_bound(record, "test completion")
+    first = stage_inputs.read_bound(record, "test completion")
+    second = stage_inputs.read_bound(record, "test completion")
     assert first == second == b'{"status": "complete"}'
     assert len(reads) == 1, "the second load must not re-read the file"
 
 
 def test_drifted_bound_bytes_are_reverified_not_trusted(tmp_path):
     """A changed file under the same record re-reads and refuses."""
-    from prismaquant import tessera_joint_allocation as allocation
+    from prismaquant import stage_inputs
 
     _clear_memos()
     target = tmp_path / "completion.json"
     target.write_bytes(b'{"status": "complete"}')
     record = _bind(target)
-    assert allocation._read_bound(record, "test completion")
+    assert stage_inputs.read_bound(record, "test completion")
     target.write_bytes(b'{"status": "tampered with!!"}')
     try:
-        allocation._read_bound(record, "test completion")
+        stage_inputs.read_bound(record, "test completion")
     except ValueError:
         pass
     else:

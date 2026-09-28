@@ -15,7 +15,7 @@ def resolve_forward_campaign(document, *, plan_sha256, prepared_sha256,
                              calibration_shape):
     from .cost_stage_checkpoint import canonical_json_sha256
     from .joint_layer_quanta import check_quantum_for_campaign, roster_digest
-    from .tessera_joint_aura import _bound
+    from .stage_inputs import bound as _bound
 
     bound = document['source_campaign_record']
     path = _bound(bound, 'forward recovery source campaign record')

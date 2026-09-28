@@ -62,14 +62,14 @@ def capture_replayed_glm_routes(runner, hidden, calibration_ids, *, layer, calib
     """Run a source layer only until the real packed-expert call is reached."""
     from . import pretrained_initialization_contract
     from .cost_streaming import StreamedForwardBoundaries
-    from .tessera_expert_projection import _require_source_identity
+    from .stage_inputs import require_source_identity
 
     if runner.profile.name != "glm5_next" or not (3 <= layer < runner.num_layers):
         raise ValueError("routing replay requires a body GLM MoE layer")
     if (calibration_ids.shape != (1, 512) or hidden.shape[0] != 1 or hidden.shape[1] != 512
             or calibration.get("shape") != [512, 512] or hidden.dtype != torch.bfloat16):
         raise ValueError("routing replay requires sample zero of the exact 512x512 calibration")
-    source = _require_source_identity(producer_source)
+    source = require_source_identity(producer_source)
     unit = f"model.language_model.layers.{layer}.mlp.experts"
     module = runner.model.get_submodule(unit)
     parent = runner.model.get_submodule(unit.rsplit(".", 1)[0])

@@ -3,7 +3,7 @@ import argparse, collections, json, os, pickle
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prismaquant.tessera_joint_allocation import _read_bound
+from prismaquant.stage_inputs import read_bound as _read_bound
 from prismaquant.joint_aura import activation_identity
 from prismaquant import format_registry
 p=argparse.ArgumentParser();p.add_argument('--plan',required=True);p.add_argument('--plan-sha256',required=True);p.add_argument('--prepared',required=True);p.add_argument('--prepared-sha256',required=True);a=p.parse_args()
