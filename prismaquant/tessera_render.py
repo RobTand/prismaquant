@@ -637,7 +637,7 @@ def _plan(family: TesseraFamily, body_rate_q256: int, n_columns: int, recipe):
     return grid, rates, forests, channel_sigma
 
 
-def planned_wire_facts(family, rung: int, *, recipe=None) -> dict:
+def planned_wire_facts(family, rung: int, *, recipe=None, structure=None) -> dict:
     """The wire this producer WILL encode for ``family`` at ``rung``, as lane facts.
 
     The byte-side vocabulary of ``tessera.serving.scheme.wire_facts_of_parsed``
@@ -659,6 +659,14 @@ def planned_wire_facts(family, rung: int, *, recipe=None) -> dict:
     every width, so the SET is known before the shape is.  ``start_state`` is
     ``False`` unconditionally: a plain ``EncodedUnit`` carries none, and this
     producer never writes the sliced-shard form that does.
+
+    ``structure`` (``dense`` | ``routed_moe``) is the decision unit's own
+    structure, handed in by the caller from the serving profile / decision
+    unit and NEVER inferred from bytes or shapes.  When given it is stated as
+    the ``structure`` fact, which Tessera's structure-scoped requirements
+    (``column_rates_routed_moe``, v45) read.  When absent the key is omitted,
+    so the decision core refuses such a requirement by name: absent evidence
+    is not a pass.
     """
     from tessera.grammar import rate_set
     from tessera.manifest import BodyKind, ScalePlaneKind
@@ -666,7 +674,7 @@ def planned_wire_facts(family, rung: int, *, recipe=None) -> dict:
     spec = get_tessera_family(family)
     wire = tessera_wire_recipe(spec, rung) if recipe is None else recipe
     root = spec.root_rate(int(rung), recipe=wire)
-    return {
+    facts = {
         "rates": rate_set(root, cap=family_rate_cap(spec, wire)),
         "window_bits": int(wire.window_bits),
         "body": BodyKind(wire.body).name,
@@ -677,6 +685,16 @@ def planned_wire_facts(family, rung: int, *, recipe=None) -> dict:
         "start_state": False,
         "grid_arity": int(spec.arity),
     }
+    if structure is not None:
+        from .lane_eligibility import STRUCTURES
+
+        if structure not in STRUCTURES:
+            raise ValueError(
+                f"planned_wire_facts: structure {structure!r} is not one of "
+                f"{sorted(STRUCTURES)}; the unit's structure is stated by its "
+                "serving profile, never guessed")
+        facts["structure"] = structure
+    return facts
 
 
 def render_tessera_weight(

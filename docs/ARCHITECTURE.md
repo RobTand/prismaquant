@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1618, `claude/pq-1618-routed-rates`): the lane
+roster mirror learns Tessera v45's structure-scoped `column_rates_routed_moe`
+requirement. `lane_eligibility.parse_lane_claim` reads it (an ascending subset
+of `column_rates`), `tessera_render.planned_wire_facts` states the unit's
+structure from the eligibility cell, and Tessera's decision core decides it for
+`routed_moe` units only; a unit with no structure fact is refused by name. No
+pipeline default, stage, format or ship gate changes and the Tessera pin does
+not move. See the lane predicate paragraph and the "lane the cell launches
+through" item.
+
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`, exact probe): the
 PACT hull's binding-budget probe is now `prismaquant/exact_mckp.py`, an exact
 single-budget multiple-choice knapsack in integer arithmetic, in place of a
@@ -21943,7 +21953,7 @@ alone:
    A cell's `executes` names a lane launch only for the rungs the ATTESTED
    wire stamp reaches, and that stamp is not this producer's plan.
    `lane_eligibility.cell_lane_admits(cell, rung, table.lanes)` therefore
-   reads the plan off `tessera_render.planned_wire_facts(family, rung)` — the
+   reads the plan off `tessera_render.planned_wire_facts(family, rung, structure=...)` — the
    rate set (`tessera.grammar.rate_set` over the family's root and cap), the
    recipe's window width, body and plane, and the render's own decoration
    constants (`TESSERA_PLANNED_ROTATION / _DIAGONALS / _RELEASE_OVERRIDES`,
@@ -21963,6 +21973,21 @@ alone:
    rows travel into `EligibilityTable.provenance()["lanes"]` and into the
    reviewed dev-pin answer (`native_extensions[].lane`), so a lane that
    widens or narrows what it reads is a re-review, not a silent widening.
+   **Structure-scoped rates (Tessera v45, PQ #1618).** A fused lane may
+   publish `column_rates_routed_moe` beside `column_rates`: the routed
+   gate/up two-table launch does not fit sm_121 shared memory above rate 6, so
+   the lane reads `[1..6]` for a routed unit and `[1..8]` for a dense one.
+   `parse_lane_claim` now knows the name and holds it to an ascending subset of
+   `column_rates` (Tessera's validator rule). `planned_wire_facts(family, rung,
+   structure=...)` states the unit's structure — `dense` or `routed_moe`, read
+   off the eligibility cell (the serving profile's fact, never inferred from
+   bytes) and omitted when the cell states none — and Tessera's
+   `decide_lane_requirements` decides the field only for `routed_moe`: absent
+   structure is refused by name, dense ignores it, and a routed unit outside the
+   set is refused with the compact adapter named as the route it keeps. The
+   installed pin (contract v44 and earlier) publishes no such field, so nothing
+   changes hands until the pin moves; a v45 table is read, not refused as an
+   unknown requirement (`tests/test_tessera_lane_routed_rates.py`).
    Consequence on the pinned table today: nothing changes hands — the only
    cells that launch through the window-GEMV lane are the two streamed dense
    E4M3 cells at rung 1024, whose plan (`rates (4,)`, 14-bit window, WINDOW /
