@@ -102,6 +102,18 @@ GLM rows use pinned venvs, so this does not reach them. No default, stage,
 format, serving lane or ship gate changes. Tests:
 `tests/test_tolerant_tessera_readers.py`.
 
+The native panel readers follow the same rule (2026-09-28,
+`claude/decouple3-panel-readers`, PQ #1565). `native_operator_panel.py` reads
+Tessera's dense preflight and operator receipt, and `native_moe_panel.py` reads
+the routed-MoE preflight, its workspace block and its operator receipt, through
+`record_fields.admit_fields`. The runtime's echoed `execution` and
+`distributed` blocks are compared on the fields this tree declared, so a field
+the runtime adds cannot contradict the declaration. An empty workspace slot
+still refuses any allocated slot's geometry, and PrismaQuant's own closed
+records (capture runtime, numerics, transport) are unchanged. No default,
+stage, format, serving lane or ship gate changes. Tests:
+`tests/test_native_operator_panel.py`, `tests/test_native_moe_panel.py`.
+
 Stage A rows adopt the campaign's source proof (2026-09-27,
 `claude/pq-1497-stage-a-adopt-identity`, PQ #1497): a selected-source
 `tessera_campaign` row hashed every source shard it read, whole, through its

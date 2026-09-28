@@ -16,8 +16,9 @@ import re
 
 from .joint_aura import identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import RuntimeBinding
-from .native_operator_panel import (PHASES, _bytes, _equal, _number, _sha,
-                                    operator_route_identity)
+from .native_operator_panel import (PHASES, ROUTE_FIELDS, ROUTE_OPTIONAL_FIELDS, RUNTIME_FIELDS,
+                                    RUNTIME_OPTIONAL_FIELDS, _admit, _bytes, _equal, _executed,
+                                    _number, _sha, operator_route_identity)
 from .tessera_formats import parse_tessera_format_name
 
 INPUT_SCHEMA = "prismaquant.native_moe_inputs.v1"
@@ -1144,6 +1145,26 @@ def _transport_identity(phase):
             _equal(source, supplied, f"{name} unchanged transport")
 
 
+#: What this reader consumes from Tessera's published routed-MoE records; the
+#: rule is the dense reader's (#1548, #1565). An empty workspace slot is the one
+#: place a missing field is the meaning: it must not carry an allocated slot's
+#: geometry, whatever else a runtime adds to it.
+MOE_PREFLIGHT_FIELDS = ("schema", "status", "operator", "runtime", "runtime_sha256",
+                        "native_tensors_sha256", "scheme_sha256", "workspace", "workspace_sha256")
+MOE_OPERATOR_FIELDS = ("members", "shape", "routing", "profile_role_order", "routing_capture_sha256",
+                       "serving_config_sha256", "native_tensors", "scheme", "config", "config_sha256")
+MOE_PREFLIGHT_OPERATOR_FIELDS = MOE_OPERATOR_FIELDS + ("declared_route", "phases")
+WORKSPACE_FIELDS = ("schema", "owner", "num_ubatches", "num_lanes", "locked", "slots", "resident_bytes")
+WORKSPACE_SLOT_FIELDS = ("index", "storage_bytes", "logical_bytes", "storage_offset", "device", "dtype",
+                         "shape", "stride")
+MOE_RECEIPT_FIELDS = ("schema", "status", "panel", "panel_sha256", "runtime", "runtime_sha256",
+                      "operator", "resources", "phases")
+MOE_RESOURCE_FIELDS = ("status", "phases", "workspace_resident_bytes", "workspace_sha256", "resident_bytes")
+MOE_RESOURCE_OPTIONAL_FIELDS = ("trace_sha256",)
+MOE_RECEIPT_PHASE_FIELDS = ("input", "topk_ids", "topk_weights", "reference_qdq", "reference_output",
+                            "transport", "route", "numerics", "qdq_numerics", "measurement")
+
+
 def _workspace_identity(workspace):
     if (workspace.get("schema") != "tessera.native_moe_workspace.v1"
             or workspace.get("owner") != "vllm.WorkspaceManager"
@@ -1151,6 +1172,7 @@ def _workspace_identity(workspace):
             or type(workspace.get("num_lanes")) is not int or workspace["num_lanes"] != 1
             or workspace.get("locked") is not True or not isinstance(workspace.get("slots"), list)):
         raise ValueError("native MoE workspace is not a frozen single-lane runtime allocation")
+    _admit(workspace, "MoE workspace", WORKSPACE_FIELDS)
     _bytes(workspace["resident_bytes"], "workspace resident")
     seen = set()
     for slot in workspace["slots"]:
@@ -1159,9 +1181,12 @@ def _workspace_identity(workspace):
             raise ValueError("native MoE workspace slot identity repeats")
         seen.add(index)
         if "allocation" in slot:
-            if set(slot) != {"index", "allocation"} or slot["allocation"] is not None:
+            _admit(slot, "MoE empty workspace slot", ("index", "allocation"))
+            if (slot["allocation"] is not None
+                    or set(slot) & (set(WORKSPACE_SLOT_FIELDS) - {"index"})):
                 raise ValueError("native MoE empty workspace slot is not an unallocated slot")
             continue
+        _admit(slot, "MoE workspace slot", WORKSPACE_SLOT_FIELDS)
         for name in ("storage_bytes", "logical_bytes", "storage_offset"):
             _bytes(slot[name], f"workspace {name}")
         if (slot["device"] != "cuda:0" or not isinstance(slot["dtype"], str)
@@ -1287,6 +1312,9 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     if (preflight.get("schema") != "tessera.native_moe_preflight.v1"
             or preflight.get("status") != "untimed_preparation"):
         raise ValueError("native MoE panel requires untimed producer preparation")
+    _admit(preflight, "MoE preflight", MOE_PREFLIGHT_FIELDS)
+    _admit(preflight["operator"], "MoE preflight operator", MOE_PREFLIGHT_OPERATOR_FIELDS)
+    _admit(preflight["runtime"], "MoE preflight runtime", RUNTIME_FIELDS, RUNTIME_OPTIONAL_FIELDS)
     members = _member_roster(inputs["unit"], inputs["members"], inputs["shape"])
     validate_routing(inputs["routing"])
     _equal(inputs["execution"], owner_execution(inputs["shape"], format_name=inputs["format"]),
@@ -1380,7 +1408,7 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
     _equal(preflight["native_tensors_sha256"], identity_sha256(operator["native_tensors"]), "native tensors")
     _equal(preflight["scheme_sha256"], identity_sha256(operator["scheme"]), "native scheme")
     _equal(operator["config_sha256"], identity_sha256(operator["config"]), "native MoE config")
-    _equal(preflight["runtime"]["execution"], inputs["execution"], "native execution")
+    _executed(preflight["runtime"]["execution"], inputs["execution"], "native execution")
     _equal(preflight["runtime"]["image"], inputs["runtime_image"], "native image")
     _equal(operator["serving_config_sha256"], _sha(inputs["serving_config_sha256"], "serving configuration"), "native serving config")
     _workspace_identity(preflight["workspace"])
@@ -1552,7 +1580,8 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
         raise ValueError("native MoE receipt has no admitted whole-apply observation")
     if expected_panel.get("schema") != PANEL_SCHEMA:
         raise ValueError("native MoE receipt requires its independently frozen panel")
-    _equal(receipt["panel"], expected_panel, "receipt panel")
+    _equal(receipt.get("panel"), expected_panel, "receipt panel")
+    _admit(receipt, "MoE receipt", MOE_RECEIPT_FIELDS)
     _equal(receipt["panel_sha256"], identity_sha256(expected_panel), "receipt panel digest")
     _equal(receipt["runtime"], expected_panel["runtime"], "receipt runtime")
     _equal(receipt["runtime_sha256"], identity_sha256(expected_panel["runtime"]), "receipt runtime digest")
@@ -1574,7 +1603,7 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
            {member["unit"]: tuple(rank_local_member_shape(expected_panel["shape"], member["role"]))
             for member in members},
            "runtime member shapes")
-    operator = receipt["operator"]
+    operator = _admit(receipt["operator"], "MoE receipt operator", MOE_OPERATOR_FIELDS)
     _equal(operator["members"], [_native_member_identity(member) for member in members], "receipt native members")
     for key in ("shape", "routing", "profile_role_order", "routing_capture_sha256", "serving_config_sha256"):
         _equal(operator[key], expected_panel[key], f"receipt {key}")
@@ -1582,7 +1611,8 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     _equal(identity_sha256(operator["scheme"]), expected_panel["scheme_sha256"], "receipt scheme")
     _equal(identity_sha256(operator["config"]), expected_panel["config_sha256"], "receipt MoE config")
     _equal(operator["config_sha256"], expected_panel["config_sha256"], "receipt MoE config digest")
-    resources = receipt["resources"]
+    resources = _admit(receipt["resources"], "MoE receipt resources", MOE_RESOURCE_FIELDS,
+                       MOE_RESOURCE_OPTIONAL_FIELDS)
     complete = resources.get("status") == "complete_operator_bound"
     workspace_bytes = _bytes(resources["workspace_resident_bytes"], "runtime workspace resident")
     _equal(workspace_bytes, expected_panel["workspace"]["resident_bytes"], "workspace accounting")
@@ -1597,9 +1627,11 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     observations = {}
     for phase in PHASES:
         observed, expected = receipt["phases"][phase], expected_panel["phases"][phase]
+        _admit(observed, f"MoE receipt {phase}", MOE_RECEIPT_PHASE_FIELDS)
         for name in ("input", "topk_ids", "topk_weights", "reference_qdq", "reference_output", "transport"):
             _equal(observed[name], expected[name], f"{phase} {name}")
-        route = observed["route"]
+        route = _admit(observed["route"], f"MoE receipt {phase} route",
+                       ROUTE_FIELDS + tuple(expected["expected_route"]), ROUTE_OPTIONAL_FIELDS)
         _equal({key: route[key] for key in expected["expected_route"]}, expected["expected_route"], f"{phase} route")
         geometry = expected_panel["shape"]
         shape = f"M{expected['m']}:N{2 * geometry['intermediate_size']}:K{geometry['hidden_size']}"

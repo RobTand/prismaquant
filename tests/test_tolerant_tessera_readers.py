@@ -8,7 +8,7 @@ the same way on the full-engine report (#927): a producer observation it had
 never heard of refused the whole report.
 
 The rule these tests pin is one rule, applied through one helper
-(:func:`prismaquant.record_fields.admit_fields`) by all four readers:
+(:func:`prismaquant.record_fields.admit_fields`) by all six readers:
 
 * a field or block the reader does not know is accepted, and every value the
   reader does use is unchanged;
@@ -370,22 +370,37 @@ def test_a_runtime_field_marked_must_understand_is_refused(emitted, where):
 
 
 # ---------------------------------------------------------------------------
-# One helper, four readers
+# One helper, six readers
 # ---------------------------------------------------------------------------
-def test_all_four_readers_admit_fields_through_the_one_helper(monkeypatch, tmp_path, emitted):
+def test_all_six_readers_admit_fields_through_the_one_helper(monkeypatch, tmp_path, emitted, joined):
     from prismaquant import record_fields
 
     callers = set()
     real = record_fields.admit_fields
 
     def spy(*args, **kwargs):
-        callers.add(sys._getframe(1).f_globals["__name__"])
+        # The native panels share one thin wrapper (``_admit``/``_executed``);
+        # the reader is the frame that called it.
+        frame = sys._getframe(1)
+        while frame.f_code.co_name in ("_admit", "_executed"):
+            frame = frame.f_back
+        callers.add(frame.f_globals["__name__"])
         return real(*args, **kwargs)
 
     monkeypatch.setattr(record_fields, "admit_fields", spy)
     _parse(_installed_contract())
     consume(tmp_path, _v2())
     _context(emitted)
+    # The two native panel readers (#1565): the dense preflight through a
+    # freeze, and the routed-MoE workspace block through its own reader.
+    from prismaquant import native_moe_panel
+    from prismaquant.native_operator_panel import freeze_native_panel
+    freeze_native_panel(*joined, cost_sha256="4" * 64)
+    native_moe_panel._workspace_identity({
+        "schema": "tessera.native_moe_workspace.v1", "owner": "vllm.WorkspaceManager",
+        "num_ubatches": 1, "num_lanes": 1, "locked": True, "resident_bytes": 0,
+        "slots": [{"index": 0, "allocation": None}]})
     assert {"prismaquant.lane_eligibility", "prismaquant.tessera_runtime_contract",
             "prismaquant.full_engine_resource_report",
-            "prismaquant.native_receipt_table"} <= callers, sorted(callers)
+            "prismaquant.native_receipt_table", "prismaquant.native_operator_panel",
+            "prismaquant.native_moe_panel"} <= callers, sorted(callers)
