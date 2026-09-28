@@ -119,7 +119,7 @@ def _checked_group(group, *, queue, instance, template, sdk):
                 'owner': instance['owner_action_key'], 'batch_id': batch,
                 'manifest_sha256': record['manifest_sha256']}):
         raise ForwardRecoveryRefused('export action does not seal this group')
-    sdk['produced_spool']._check_receipt(receipt, manifest, record)
+    sdk['produced_spool'].check_export_receipt(receipt, manifest, record)
     try:
         descriptors = sdk['produced_output'].batch_record(
             queue, instance, template, batch_id=batch)['entries']

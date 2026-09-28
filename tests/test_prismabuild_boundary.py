@@ -21,8 +21,11 @@ finds:
   imported from PB directly. The binding is resolved within one module,
   flow-insensitively: import aliases, names and ``self.x`` attributes
   assigned from a PB import, and module functions that return one (the
-  ``_pool_module()._read_json`` form). A static guard, not execution;
-  a binding carried across modules is out of its reach;
+  ``_pool_module()._read_json`` form). A subscript of a PB value is one,
+  and so is a dict or dict comprehension holding one, so the dict-of-modules
+  loaders are followed (the ``sdk['pool']._x`` and ``_sdk()["pool"]._x``
+  forms, #1572). A static guard, not execution; a binding carried across
+  modules, or only through a function parameter, is out of its reach;
 - **literals**: ``str``/``bytes`` constants outside docstrings that contain
   ``prismabuild-fleet/pb-queue`` or ``prismabuild-fleet/cas``, or match
   ``prismaquant.prismabuild.(cas_receipt|worker_attestation|pool_outcome|
@@ -131,8 +134,13 @@ def findings(source: str) -> list[tuple[str, str]]:
             return False
         if _loaded(node) is not None or _target(node) in bound:
             return True
-        if isinstance(node, ast.Attribute):     # prismabuild.pool._x
+        if isinstance(node, (ast.Attribute, ast.Subscript)):
+            # prismabuild.pool._x; sdk['pool']._x (#1572)
             return pb_valued(node.value)
+        if isinstance(node, ast.DictComp):      # {n: sdk_submodule(n) for n in ...}
+            return pb_valued(node.value)
+        if isinstance(node, ast.Dict):
+            return any(pb_valued(value) for value in node.values)
         return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in returning)
 
@@ -198,16 +206,27 @@ def test_scanner_sees_every_reference_form():
         "def g():\n"
         "    import prismabuild.pool\n"
         "    return prismabuild.pool._read_json\n"
+        "def _sdk():\n"
+        "    return {n: sdk_submodule(n) for n in ('pool', 'produced_spool')}\n"
+        "def _sdk2():\n"
+        "    return {'core': sdk_submodule('core'), 'n': 1}\n"
+        "def h():\n"
+        "    sdk = _sdk()\n"
+        "    sdk['produced_spool']._check_receipt(); sdk['pool'].PoolQueue\n"
+        "    return _sdk()[\"pool\"]._read_json, _sdk2()['core']._seal, {'a': 1}['a']._x\n"
     )
     assert sorted(findings(source)) == [
         ("import", "prismabuild.*"), ("import", "prismabuild.*"),
+        ("import", "prismabuild.*"),
         ("import", "prismabuild.core"), ("import", "prismabuild.core"),
+        ("import", "prismabuild.core"),
         ("import", "prismabuild.pool"), ("import", "prismabuild.pool"),
         ("import", "prismabuild.pool"), ("import", "prismabuild.reader_lease"),
         ("literal", "prismabuild-fleet/pb-queue"),
         ("literal", "prismaquant.prismabuild.cas_receipt.v3"),
-        ("private", "_ID_RE"), ("private", "_commit"), ("private", "_pin"),
-        ("private", "_read_json"), ("private", "_read_json"),
+        ("private", "_ID_RE"), ("private", "_check_receipt"), ("private", "_commit"),
+        ("private", "_pin"), ("private", "_read_json"), ("private", "_read_json"),
+        ("private", "_read_json"), ("private", "_seal"),
     ]
 
 
