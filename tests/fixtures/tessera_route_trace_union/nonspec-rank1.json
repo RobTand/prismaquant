@@ -1,0 +1,166 @@
+{
+ "schema": "tessera.route_trace/1",
+ "identity_version": 1,
+ "rank": 1,
+ "world_size": 2,
+ "rank_source": "torch.distributed",
+ "rank_conflict": null,
+ "platform": "sm_121",
+ "pid": 427,
+ "started_utc": "2026-09-28T18:27:15.991403+00:00",
+ "flushed_utc": "2026-09-28T18:37:58.422491+00:00",
+ "flushes": 199,
+ "note": "launches counted per module per served dispatch; a shape of M* means the record was written while torch.compile was tracing, where one graph serves every M and a count is not a launch count.  Since identity_version 1 each entry also names the modules it counted (module_names, sorted).  module_names holds real prefixes ONLY: a layer with no usable prefix is unnamed, reported as the count unnamed_modules (with dispatches_without_prefix for how many dispatches came from them) and never given a made-up name.  'modules' is len(module_names) + unnamed_modules, which is the same number it carried before this version.  A complete per-module identity needs unnamed_modules == 0; otherwise the names present are exact and the rest are honestly unknown.",
+ "entries": [
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N12288:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "decoder": "native_window_gemm",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 3,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.0.mlp.gate_up_proj"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N2048:K4096",
+   "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__",
+   "decoder": "native_window_moe_compact",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "moe",
+   "launches": 42,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.10.mlp.experts"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N2048:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "decoder": "native_window_gemm",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 42,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.gate_up_proj"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N4096:K1024",
+   "symbol": "tessera::window_gemm_dense",
+   "decoder": "native_window_gemm",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 42,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.down_proj"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M1:N4096:K6144",
+   "symbol": "tessera::window_gemm_dense",
+   "decoder": "native_window_gemm",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 3,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.0.mlp.down_proj"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N12288:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "decoder": "native_window_gemm",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 75,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.0.mlp.gate_up_proj"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N2048:K4096",
+   "symbol": "tessera.native_window_moe.NativeWindowMoE.__call__",
+   "decoder": "native_window_moe_compact",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "moe",
+   "launches": 1050,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.10.mlp.experts"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N2048:K4096",
+   "symbol": "tessera::window_gemm_dense",
+   "decoder": "native_window_gemm",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1050,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.gate_up_proj"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N4096:K1024",
+   "symbol": "tessera::window_gemm_dense",
+   "decoder": "native_window_gemm",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 1050,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.10.mlp.shared_experts.down_proj"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  },
+  {
+   "policy": "TESSERA_FP8:resident",
+   "shape": "M2048:N4096:K6144",
+   "symbol": "tessera::window_gemm_dense",
+   "decoder": "native_window_gemm",
+   "contract": "fp8_per_token_dynamic",
+   "kind": "dense",
+   "launches": 75,
+   "modules": 1,
+   "module_names": [
+    "language_model.model.layers.0.mlp.down_proj"
+   ],
+   "unnamed_modules": 0,
+   "dispatches_without_prefix": 0
+  }
+ ]
+}
