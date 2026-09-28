@@ -125,14 +125,19 @@ SCHEMA = "prismaquant.tessera_campaign_cost.v1"
 CURRENCY = "output_mse_under_route_activation_contract"
 
 #: The stream head's journal before finalize (PQ #1403), beside the checkpoint
-#: and never inside ``<checkpoint>.parts``: a present ``.parts`` means a
-#: finalized run identity exists and sends the row to the load-all head.
+#: and never inside ``<checkpoint>.parts``: a present checkpoint means a run
+#: identity was already bound, and the stream head resumes that journal instead,
+#: taking each unit's receipts from its manifest (PQ #1613).
 STREAM_JOURNAL_SUFFIX = ".stream"
 STREAM_JOURNAL_STAGE = "Tessera campaign stream head"
 #: What the stream journal's identity holds in place of each unit's W, X and H
 #: receipts. The unit's own shard carries them, and adoption compares them
 #: with the relaunch's read of the same entry.
 STREAM_JOURNAL_RECEIPT = "bound per unit in its stream journal shard"
+#: What a resumed checkpoint's expected identity holds for a receipt its
+#: manifest does not record. It equals no receipt, so ``prepare_journal``
+#: refuses that manifest by the field's name (PQ #1613).
+CHECKPOINT_RECEIPT_ABSENT = "absent from the checkpoint manifest"
 
 #: Round 1's anchors: both endpoints plus the middle.  The endpoints are
 #: mandatory rather than chosen -- a surface that does not span its family's
@@ -2057,6 +2062,26 @@ def _checkpoint_identity_api():
             "Tessera campaign checkpoint identity requires the producer's "
             "cached_unit input/byte receipt API; refusing unbound resume") from exc
     return cached_unit
+
+
+def _manifest_unit_receipts(identity, names):
+    """Each unit's W, X and H receipts as a checkpoint manifest recorded them.
+
+    ``identity`` is the manifest's stored identity, or ``None`` when it has
+    none. A receipt it does not record reads as ``CHECKPOINT_RECEIPT_ABSENT``,
+    which equals no receipt, so the journal refuses that manifest by the
+    field's name rather than this function guessing at it.
+    """
+    from .tessera_row_stream import RECEIPT_FIELDS
+    units = identity.get("units") if isinstance(identity, Mapping) else None
+    units = units if isinstance(units, Mapping) else {}
+    receipts = {}
+    for name in sorted(names):
+        recorded = units.get(name)
+        recorded = recorded if isinstance(recorded, Mapping) else {}
+        receipts[name] = {field: recorded.get(field, CHECKPOINT_RECEIPT_ABSENT)
+                          for field in RECEIPT_FIELDS}
+    return receipts
 
 
 def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
@@ -5571,7 +5596,8 @@ def _main(argv, *, source_scope) -> int:
         Path(args.out).with_suffix(".anchors.json")
     )
 
-    from .tessera_row_stream import (EXECUTION_FILENAME, EXECUTION_SCHEMA, ROW_HEAD_LOAD_ALL,
+    from .tessera_row_stream import (EXECUTION_FILENAME, EXECUTION_SCHEMA, MEMORY_PLANS,
+                                     RECEIPT_FIELDS, ROW_HEAD_LOAD_ALL, ROW_HEAD_STREAM,
                                      checkpoint_present, resolve_identity_threads,
                                      stream_head_dependency)
     # One reader/builder count for the plan and both heads: argv's, else the
@@ -5583,8 +5609,7 @@ def _main(argv, *, source_scope) -> int:
             row_head=args.row_head, selected_source=selected_source,
             capture_load_policy=args.capture_load_policy,
             export_hessian_reference_policy=args.export_hessian_reference_policy,
-            max_rounds=args.max_rounds, seed_checkpoint=args.seed_checkpoint,
-            checkpoint_exists=checkpoint_present(checkpoint))
+            max_rounds=args.max_rounds, seed_checkpoint=args.seed_checkpoint)
         streaming_head = row_head_dependency is None
         if streaming_head:
             print(f"[campaign] row head: stream "
@@ -5597,7 +5622,8 @@ def _main(argv, *, source_scope) -> int:
             from .cost_stage_checkpoint import atomic_write_bytes
             atomic_write_bytes(cache_dir / EXECUTION_FILENAME, (json.dumps(dict(
                 schema=EXECUTION_SCHEMA, row_head=ROW_HEAD_LOAD_ALL,
-                dependency=row_head_dependency), indent=2, sort_keys=True) + "\n").encode())
+                dependency=row_head_dependency, memory_plan=MEMORY_PLANS[ROW_HEAD_LOAD_ALL]),
+                indent=2, sort_keys=True) + "\n").encode())
 
     source_authentication = None
     selected_guard = None
@@ -5863,8 +5889,9 @@ def _main(argv, *, source_scope) -> int:
             # there would count the floor twice.
             selected_guard.check('before_selected_capture_identity')
             # The stream head holds a window, not the population, and is
-            # admitted against the plan for the head it will actually run.
-            plan_key = 'stream_memory_bytes' if streaming_head else 'memory_bytes'
+            # admitted against the plan for the head it will actually run --
+            # a resumed checkpoint included (PQ #1613).
+            plan_key = MEMORY_PLANS[ROW_HEAD_STREAM if streaming_head else ROW_HEAD_LOAD_ALL]
             if (selected_resources[plan_key] >
                     selected_guard.cap_bytes - selected_guard.baseline_bytes()):
                 # Every term of the predicate, in the message and on disk.
@@ -6282,17 +6309,34 @@ def _main(argv, *, source_scope) -> int:
     stream_journal = stream_identity_sha256 = None
     stream_resumed = {}
     dirty_stream_units = set()
+    # A checkpoint an earlier attempt left, under either head, resumes on the
+    # stream head (PQ #1613). Its manifest records every unit's W, X and H
+    # receipts, which this run can only re-derive one entry at a time, so they
+    # are taken from the manifest and every other field of the run identity is
+    # compared by name here, before the first entry is read. The stream then
+    # requires each entry's first read to reproduce its unit's receipts before
+    # the consumer sees it, and finalize compares the whole identity again,
+    # built from this run's own receipts. The journal is open from here on, so
+    # a unit encoded now is journalled under the checkpoint's identity as soon
+    # as it flushes: its own receipts were already checked when it was read.
+    window_resumed = {}
     if not streaming_head:
         checkpoint_identity = run_identity(
             **({"bound_units": bound_checkpoint_units} if bound_checkpoint_units else {}))
         journal, identity_sha256, resumed = open_journal(checkpoint_identity)
+    elif checkpoint_present(checkpoint):
+        from .cost_stage_checkpoint import stored_manifest_identity
+        recorded_receipts = _manifest_unit_receipts(stored_manifest_identity(checkpoint), weights)
+        checkpoint_identity = run_identity(unit_receipts=recorded_receipts)
+        journal, identity_sha256, window_resumed = open_journal(checkpoint_identity)
+        row_stream.expect_identities({name: recorded_receipts[name] for name in targets})
     else:
         stream_journal, stream_identity_sha256, stream_resumed = prepare_journal(
             checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX),
             stage=STREAM_JOURNAL_STAGE, resume=True, qnames=targets,
             identity=run_identity(unit_receipts={
-                name: dict.fromkeys(("weight", "scoring_rows", "hessian"),
-                                    STREAM_JOURNAL_RECEIPT) for name in weights}))
+                name: dict.fromkeys(RECEIPT_FIELDS, STREAM_JOURNAL_RECEIPT)
+                for name in weights}))
     measured: dict[str, dict[str, list[CampaignAnchor]]] = {}
     # Rows adopted from another campaign whose rungs THIS run's menu does not
     # admit.  They are measurements of the same rate/distortion law and cost
@@ -6466,6 +6510,47 @@ def _main(argv, *, source_scope) -> int:
               f"for {len(names)} units from {checkpoint.name}{STREAM_JOURNAL_SUFFIX} in "
               f"{_time.monotonic() - adopt_started:.1f} s", flush=True)
 
+    if window_resumed:
+        # A resumed checkpoint on the stream head (PQ #1613): the load-all
+        # resume's gates, one window at a time. Each unit's entry is read and
+        # verified like any batch, and ``expect_identities`` has required its
+        # receipts to be the ones the manifest recorded before this sees it.
+        # Then every row passes ``adopt_state``: its input identity against
+        # this entry, its wire receipt against the file on disk, verified on
+        # the row's threads a chunk at a time, while the chunk is resident. The
+        # units' shards already cite the checkpoint's identity, so, as on the
+        # load-all resume, they are not rewritten.
+        adopt_started = _time.monotonic()
+        names = sorted(window_resumed)
+        chunks = [names[start:start + args.anchor_batch_size]
+                  for start in range(0, len(names), args.anchor_batch_size)]
+        row_stream.plan(chunks)
+        for index, chunk in enumerate(chunks):
+            row_stream.admit(index)
+            deferred_chunk = [] if identity_threads > 1 else None
+            for name in chunk:
+                entry = row_stream.entry(name)
+                if entry.holder is None:
+                    raise RuntimeError(
+                        f"checkpoint unit {name}: this run's read of its entry binds no "
+                        "producer identity; refusing to adopt its anchors")
+                adopt_state(name, window_resumed[name], where="checkpoint",
+                            deferred=deferred_chunk, entry=entry)
+            if deferred_chunk:
+                records = _verify_wire_records_on_threads(
+                    [(anchor, identity, existing)
+                     for _name, anchor, identity, existing in deferred_chunk],
+                    wire_dir, threads=identity_threads)
+                for (name, anchor, _identity, _existing), record in zip(deferred_chunk, records):
+                    wire_records[name][anchor.format_name] = record
+                # The input identities cite this chunk's sources; drop them
+                # before the window moves on.
+                deferred_chunk.clear()
+        print(f"[campaign] resumed {sum(len(state['anchors']) for state in window_resumed.values())} "
+              f"verified anchors for {len(names)} units from {checkpoint.name} through the "
+              f"window in {_time.monotonic() - adopt_started:.1f} s ({identity_threads} threads)",
+              flush=True)
+
     seed_provenance = None
     if args.seed_checkpoint:
         seed_provenance = _adopt_seed_checkpoint(
@@ -6552,10 +6637,21 @@ def _main(argv, *, source_scope) -> int:
             args, capture=row_stream.capture, execution=row_stream.load_execution(),
             resources=selected_resources, guard=selected_guard)
         checkpoint_identity = run_identity(unit_receipts=receipts)
-        journal, identity_sha256, adopted = open_journal(checkpoint_identity)
-        if adopted:
-            raise RuntimeError("a checkpoint appeared under the stream head while it encoded; "
-                               "refusing to adopt it at finalize")
+        if journal is None:
+            journal, identity_sha256, adopted = open_journal(checkpoint_identity)
+            if adopted:
+                raise RuntimeError("a checkpoint appeared under the stream head while it "
+                                   "encoded; refusing to adopt it at finalize")
+        else:
+            # A resumed checkpoint (PQ #1613): its journal has been open since
+            # before the first read, under receipts its manifest recorded. The
+            # whole run identity is compared again here, now built from this
+            # run's own receipts, exactly as a fresh journal's is; its shards
+            # are this run's and the checkpoint's, so they are not refused.
+            _root, resumed_identity_sha256, _shards = open_journal(checkpoint_identity)
+            if resumed_identity_sha256 != identity_sha256:
+                raise RuntimeError("the resumed checkpoint's identity changed at finalize; "
+                                   "refusing to write under either")
         if selected_guard is not None:
             phase = selected_resources['stream_phases']['stream_finalize']
             selected_guard.check('before_selected_export_input_write', reserve_bytes=

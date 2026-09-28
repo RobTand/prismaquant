@@ -599,9 +599,10 @@ def _row_memory_demand(spec: dict, members: list[str], census: dict, *,
         # A selected row that runs the streaming row head holds a window, not
         # the population, and is admitted against the window's plan
         # (RobTand/prismaquant#640).
-        stream = bool(selected_source and 'stream_memory_bytes' in resource
+        from prismaquant.tessera_row_stream import MEMORY_PLANS, ROW_HEAD_LOAD_ALL, ROW_HEAD_STREAM
+        stream = bool(selected_source and MEMORY_PLANS[ROW_HEAD_STREAM] in resource
                       and _row_head_dependency(spec['campaign_argv']) is None)
-        plan_bytes = int(resource['stream_memory_bytes' if stream else 'memory_bytes'])
+        plan_bytes = int(resource[MEMORY_PLANS[ROW_HEAD_STREAM if stream else ROW_HEAD_LOAD_ALL]])
         headroom_gb = 0
     else:
         shapes = census.get("unit_shapes") or {}
@@ -671,9 +672,9 @@ def _row_head_dependency(argv):
     """What makes a selected row's argv run the load-all head, or ``None``.
 
     The campaign's own rule (``tessera_row_stream.stream_head_dependency``)
-    applied to what argv can say. A plan cannot see a checkpoint an earlier
-    attempt leaves behind: a row that resumes one runs the load-all head, and
-    its own admission then refuses a stream-sized reservation by name.
+    applied to what argv can say. A checkpoint an earlier attempt leaves
+    behind is not a dependency: the row resumes it on the stream head, under
+    the same window plan this demand is derived from (PQ #1613).
     """
     from prismaquant.tessera_row_stream import stream_head_dependency
 
@@ -683,8 +684,7 @@ def _row_head_dependency(argv):
         row_head=value('--row-head', 'stream'), selected_source=True,
         capture_load_policy='--capture-load-policy' in argv,
         export_hessian_reference_policy='--export-hessian-reference-policy' in argv,
-        max_rounds=int(value('--max-rounds', 0)), seed_checkpoint=value('--seed-checkpoint'),
-        checkpoint_exists=False)
+        max_rounds=int(value('--max-rounds', 0)), seed_checkpoint=value('--seed-checkpoint'))
 
 
 class DemandRefused(RuntimeError):
