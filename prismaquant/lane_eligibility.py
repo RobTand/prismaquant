@@ -471,9 +471,15 @@ LANE_FIELDS = frozenset({"decoder", "requires"})
 LANE_REQUIREMENT_FIELDS = (
     "column_rates", "window_bits", "body", "plane", "release_overrides",
     "diagonals", "rotation", "start_state", "grid_arities",
+    # Tessera v45: the rates the ROUTED-EXPERT launch reaches, a subset of
+    # ``column_rates`` (the gate/up launch's two tables do not fit the
+    # target's shared memory at the higher rates).  STRUCTURE-scoped: decided
+    # only for a ``routed_moe`` unit, over the unit's stated structure.
+    "column_rates_routed_moe",
 )
 #: Non-empty ascending unique positive integer lists.
-LANE_REQUIREMENT_LISTS = frozenset({"column_rates", "window_bits", "grid_arities"})
+LANE_REQUIREMENT_LISTS = frozenset({
+    "column_rates", "window_bits", "grid_arities", "column_rates_routed_moe"})
 #: JSON booleans: whether the lane reads units that CARRY the thing.
 LANE_REQUIREMENT_CARRIES = frozenset({"release_overrides", "diagonals", "start_state"})
 #: Checkpoint-dialect spellings, exactly as ``formats[].attested_wire`` and
@@ -1570,6 +1576,19 @@ def parse_lane_claim(payload: Any, where: str, *, extension: str) -> LaneClaim:
                 raise LaneEligibilityError(
                     f"{at} must be one of {sorted(LANE_PLANES)}, got {value!r}")
             parsed[name] = str(value)
+    routed = parsed.get("column_rates_routed_moe")
+    if routed is not None:
+        # Tessera's contract validator holds the routed set to a subset of
+        # ``column_rates``: a routed launch cannot reach a rate the lane does
+        # not read at all.  Mirror it so a table the loader refuses is refused
+        # here at parse time, not decided against.
+        base = parsed.get("column_rates")
+        if base is None or not set(routed) <= set(base):
+            raise LaneEligibilityError(
+                f"{where}.requires ({extension}) publishes column_rates_routed_moe "
+                f"{list(routed)} that is not a subset of its column_rates "
+                f"{None if base is None else list(base)}; a routed-expert launch "
+                "cannot reach a rate the lane does not read")
     return LaneClaim(extension=extension, decoder=decoder, requires=parsed)
 
 
@@ -1693,6 +1712,14 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
     (the module, not its validator's dispatch tables; neither imports torch or
     vLLM). A contract is LOADED without either -- this runs at admission.
 
+    The unit's STRUCTURE (``dense`` | ``routed_moe``) is one of those facts,
+    read off the cell (a serving-profile / decision-unit fact, never inferred
+    from bytes) and stated to ``planned_wire_facts``. The structure-scoped
+    ``column_rates_routed_moe`` requirement is decided by Tessera's core over
+    it: a ``routed_moe`` unit outside the set is refused, naming the compact
+    adapter the unit keeps; a dense unit ignores the field; a unit with no
+    structure fact is refused by name, since absent evidence is not a pass.
+
     Fail-closed at every edge: a requirement the decision core has not
     learned RAISES (its own rule, re-raised with the lane named) rather than
     being skipped; a family this producer cannot plan, or a cell asked
@@ -1721,7 +1748,8 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
     from .tessera_formats import TesseraFormatError
 
     try:
-        facts = tessera_render.planned_wire_facts(family, int(rate_q256))
+        facts = tessera_render.planned_wire_facts(
+            family, int(rate_q256), structure=getattr(cell, "structure", None))
     except TesseraFormatError as exc:
         return False, (
             f"{head(claims[0])} cannot be decided against: this producer "

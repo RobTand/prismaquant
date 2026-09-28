@@ -6,6 +6,17 @@ candidate/runtime/topology binding for the whole panel. No core patches.
 ``--qualify-then-score`` does both in one engine load: it writes the standard
 hook qualification, passes it through the same replay check, and only then
 scores the rest of the panel.
+
+``--execution-mode compiled`` builds the same engine with ``enforce_eager`` off
+and one declared ``--compilation-config`` (PQ #1634). The declared config is
+recorded in the engine kwargs, checked against the configuration the
+coordinator and every worker resolved, and stamped on the runtime binding as
+``execution_mode``, so a compiled qualification never replays an eager run or
+the reverse. Speculative decoding stays refused in both modes. Scope: the
+scorer reads prompt log-probabilities from one prefill per window. Under
+FULL_DECODE_ONLY that prefill runs outside the captured graphs, so a compiled
+receipt measures the engine the compiled serve builds, not its graph-replayed
+decode steps.
 """
 from __future__ import annotations
 
@@ -37,6 +48,72 @@ from tools.full_kl_teacher_payload import atomic_json_write, canonical_sha256, t
 from tools.gold_engine_options import add_gold_engine_arguments, gold_engine_kwargs
 from tools.serve_fingerprint import self_manifest
 from tools.spec_decode_guard import refuse_if_spec_decode
+
+
+#: How the scorer's engine executes. ``eager`` is the historical contract and its
+#: engine kwargs and runtime binding are unchanged; ``compiled`` turns
+#: ``enforce_eager`` off and declares one compilation config (PQ #1634).
+EXECUTION_MODES = ("eager", "compiled")
+
+#: The compilation-config keys a compiled run states, and the only ones it may
+#: state: ``LLM()`` filters a dict compilation config through ``is_init_field``
+#: and drops any other key silently, so an extra key is refused, not lost.
+COMPILATION_FIELDS = ("mode", "cudagraph_mode", "cudagraph_capture_sizes")
+
+
+def parse_compilation_config(text):
+    """The declared compilation config of a compiled run, in its one spelling.
+
+    Every field is stated: ``mode`` and ``cudagraph_mode`` as upper-case member
+    names, the capture sizes as a strictly ascending list of positive integers
+    no larger than the scorer's batch. The engine must resolve to exactly these
+    values. A field the runtime overrides refuses at observation rather than
+    scoring another configuration: GLM-5.3 auto-enables breakable CUDA graphs,
+    which force ``mode`` to NONE, so a declared VLLM_COMPILE refuses there.
+    """
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"compilation config must be JSON: {exc.msg}") from None
+    if not isinstance(value, dict):
+        raise ValueError("compilation config must be a JSON object")
+    if sorted(value) != sorted(COMPILATION_FIELDS):
+        raise ValueError("compilation config must state exactly " + ", ".join(COMPILATION_FIELDS)
+                         + "; got " + (", ".join(sorted(value)) or "no field"))
+    for key in ("mode", "cudagraph_mode"):
+        name = value[key]
+        if not isinstance(name, str) or not name or name != name.upper():
+            raise ValueError(f"compilation config {key} must be an upper-case member name")
+    if value["cudagraph_mode"] == "NONE":
+        raise ValueError("a compiled run captures CUDA graphs; cudagraph_mode NONE is the eager contract")
+    sizes = value["cudagraph_capture_sizes"]
+    if (not isinstance(sizes, list) or not sizes
+            or any(type(size) is not int or not 0 < size <= CONTEXT_LENGTH + 1 for size in sizes)
+            or sizes != sorted(set(sizes))):
+        raise ValueError("cudagraph_capture_sizes must be a strictly ascending list of positive "
+                         f"integers no larger than the scorer's batch of {CONTEXT_LENGTH + 1} tokens")
+    return {key: copy.deepcopy(value[key]) for key in COMPILATION_FIELDS}
+
+
+def declared_compilation(args):
+    """None for an eager run; the parsed compilation config of a compiled run."""
+    mode = getattr(args, "execution_mode", "eager")
+    text = getattr(args, "compilation_config", None)
+    if mode not in EXECUTION_MODES:
+        raise ValueError("execution mode must be one of " + ", ".join(EXECUTION_MODES))
+    if mode == "eager":
+        if text is not None:
+            raise ValueError("--compilation-config applies only to --execution-mode compiled")
+        return None
+    if text is None:
+        raise ValueError("--execution-mode compiled requires --compilation-config")
+    return parse_compilation_config(text)
+
+
+def _member_name(value):
+    """An enum member's name; any other value unchanged, so it cannot pass as a name."""
+    name = getattr(value, "name", None)
+    return name if isinstance(name, str) else value
 
 
 def load_teacher(path, digest, panel):
@@ -198,7 +275,8 @@ def remove_capture(model):
     return True
 
 
-def observed_engine_configuration(llm, *, expected_kv_cache_dtype, requested_kv_cache_dtype=None):
+def observed_engine_configuration(llm, *, expected_kv_cache_dtype, requested_kv_cache_dtype=None,
+                                  compilation=None):
     config = getattr(llm.llm_engine, "vllm_config", None)
     # Worker-local MLA construction can promote the cache without mutating the
     # coordinator's copied configuration. Keep the requested and resolved
@@ -209,13 +287,19 @@ def observed_engine_configuration(llm, *, expected_kv_cache_dtype, requested_kv_
         allowed.add(requested_kv_cache_dtype)
     if actual not in allowed:
         raise ValueError("native coordinator cache_config is neither requested nor declared resolved dtype")
-    return observed_configuration(config, expected_kv_cache_dtype=actual)
+    return observed_configuration(config, expected_kv_cache_dtype=actual, compilation=compilation)
 
 
-def observed_configuration(config, *, expected_kv_cache_dtype):
+def observed_configuration(config, *, expected_kv_cache_dtype, compilation=None):
+    """The resolved engine configuration, refused unless it is the isolated prompt contract.
+
+    ``compilation`` is None for the eager contract (``enforce_eager`` on) and the
+    declared compilation config for a compiled run (``enforce_eager`` off), whose
+    resolved values are then recorded under ``compilation_config``.
+    """
     if config is None:
         raise ValueError("cannot observe the native engine configuration")
-    required = {"model_config": {"enforce_eager": True, "max_model_len": CONTEXT_LENGTH + 1,
+    required = {"model_config": {"enforce_eager": compilation is None, "max_model_len": CONTEXT_LENGTH + 1,
                                  "logprobs_mode": "raw_logprobs"},
                 "cache_config": {"enable_prefix_caching": False, "cache_dtype": expected_kv_cache_dtype},
                 "scheduler_config": {"enable_chunked_prefill": False, "max_num_seqs": 1,
@@ -232,13 +316,31 @@ def observed_configuration(config, *, expected_kv_cache_dtype):
     if getattr(getattr(config.model_config, "multimodal_config", None), "language_model_only", None) is not True:
         raise ValueError("native engine did not observe the explicit language-model-only contract")
     observed["language_model_only"] = True
+    if compilation is not None:
+        owner = getattr(config, "compilation_config", None)
+        sizes = getattr(owner, "cudagraph_capture_sizes", None)
+        resolved = {"mode": _member_name(getattr(owner, "mode", None)),
+                    "cudagraph_mode": _member_name(getattr(owner, "cudagraph_mode", None)),
+                    "cudagraph_capture_sizes": list(sizes) if isinstance(sizes, (list, tuple)) else sizes}
+        differing = [key for key in COMPILATION_FIELDS if resolved[key] != compilation[key]]
+        if differing:
+            raise ValueError("native engine compilation differs from the declared compiled contract: "
+                             + ", ".join(differing))
+        observed["compilation_config"] = resolved
     return observed
 
 
-def observed_worker_configuration(worker, *, expected_kv_cache_dtype, logits_layout="legacy_single"):
-    """Public control RPC observes worker-local promotion after model loading."""
+def observed_worker_configuration(worker, *, expected_kv_cache_dtype, logits_layout="legacy_single",
+                                  compilation=None):
+    """Public control RPC observes worker-local promotion after model loading.
+
+    The worker's own configuration is checked, so a CUDA-graph mode the model
+    runner resolves differently from the coordinator (a backend that cannot
+    capture it) refuses here.
+    """
     config = observed_configuration(getattr(worker, "vllm_config", None),
-                                    expected_kv_cache_dtype=expected_kv_cache_dtype)
+                                    expected_kv_cache_dtype=expected_kv_cache_dtype,
+                                    compilation=compilation)
     runner = getattr(worker, "model_runner", None)
     worker_dtype = getattr(getattr(worker, "cache_config", None), "cache_dtype", None)
     runner_dtype = getattr(getattr(runner, "cache_config", None), "cache_dtype", None)
@@ -422,9 +524,10 @@ def require_native_qualification(qualification, runtime_binding):
 
 def scorer_engine_kwargs(args, *, model, topology):
     """Build the recorded native-engine request before model construction."""
+    compilation = declared_compilation(args)
     kwargs = {"model": str(model), "trust_remote_code": True, "dtype": "bfloat16",
               "language_model_only": True, "kv_cache_dtype": args.kv_cache_dtype,
-              "enforce_eager": True, "enable_prefix_caching": False, "enable_chunked_prefill": False,
+              "enforce_eager": compilation is None, "enable_prefix_caching": False, "enable_chunked_prefill": False,
               "max_model_len": CONTEXT_LENGTH + 1, "max_num_batched_tokens": CONTEXT_LENGTH + 1,
               "max_num_seqs": 1, "max_logprobs": 1, "disable_log_stats": True,
               "logprobs_mode": "raw_logprobs",
@@ -435,6 +538,8 @@ def scorer_engine_kwargs(args, *, model, topology):
         kwargs["kernel_config"] = json.loads(args.kernel_config)
     if args.quantization:
         kwargs["quantization"] = args.quantization
+    if compilation is not None:
+        kwargs["compilation_config"] = compilation
     return kwargs
 
 
@@ -455,6 +560,7 @@ def measure(args):
     candidate_identity = cached_checkpoint_identity(model, args.candidate_digest_cache)
     producer = producer_identity()
     topology = gold_engine_kwargs(args)
+    compilation = declared_compilation(args)
     kwargs = scorer_engine_kwargs(args, model=model, topology=topology)
     in_process = getattr(args, "qualify_then_score", None) is not None
     if in_process and (args.qualify_hook or args.qualification is not None
@@ -476,7 +582,7 @@ def measure(args):
             raise ValueError("speculative decoding must be observed disabled")
         observed_configuration = observed_engine_configuration(
             llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
-            requested_kv_cache_dtype=args.kv_cache_dtype)
+            requested_kv_cache_dtype=args.kv_cache_dtype, compilation=compilation)
         worker_runtime = llm.apply_model(partial(install_capture, tile_rows=args.tile_rows,
                                                 logits_layout=args.logits_layout))
         installed = True
@@ -484,10 +590,12 @@ def measure(args):
         if ([row["rank"] for row in worker_runtime] != list(range(topology["tensor_parallel_size"]))
                 or any(row["world_size"] != topology["tensor_parallel_size"] for row in worker_runtime)):
             raise ValueError("native hook installation lacks complete TP rank evidence")
-        worker_configuration = llm.collective_rpc(
-            observed_worker_configuration,
-            kwargs={"expected_kv_cache_dtype": args.expected_kv_cache_dtype,
-                    "logits_layout": args.logits_layout})
+        worker_kwargs = {"expected_kv_cache_dtype": args.expected_kv_cache_dtype,
+                         "logits_layout": args.logits_layout}
+        if compilation is not None:
+            # Sent only when compiled, so an eager run's RPC is the one it always was.
+            worker_kwargs["compilation"] = compilation
+        worker_configuration = llm.collective_rpc(observed_worker_configuration, kwargs=worker_kwargs)
         worker_configuration.sort(key=lambda row: row["rank"])
         if [row["rank"] for row in worker_configuration] != list(range(topology["tensor_parallel_size"])):
             raise ValueError("native configuration observation lacks every TP worker")
@@ -504,6 +612,11 @@ def measure(args):
             # Added only with a second teacher, so single-teacher bindings (and the
             # qualification records compared against them) are unchanged.
             runtime_binding["teacher2_sha256"] = t2_sha
+        if compilation is not None:
+            # Added only when compiled, for the same reason: an eager binding (and
+            # every eager qualification) is unchanged, and an absent key reads as
+            # eager. A qualification from the other mode differs here and refuses.
+            runtime_binding["execution_mode"] = "compiled"
         observation = write_runtime_observation(args.output, runtime_binding)
         print(f"[tr3-full-kl] initialized runtime observation {observation}", flush=True)
         if qualification is not None:
@@ -526,7 +639,8 @@ def measure(args):
                                        world_size=topology["tensor_parallel_size"])
             if observed_engine_configuration(
                     llm, expected_kv_cache_dtype=args.expected_kv_cache_dtype,
-                    requested_kv_cache_dtype=args.kv_cache_dtype) != observed_configuration:
+                    requested_kv_cache_dtype=args.kv_cache_dtype,
+                    compilation=compilation) != observed_configuration:
                 raise ValueError("native engine configuration changed during scoring")
             return after
 
@@ -619,6 +733,15 @@ def main():
                    help="explicit stock-vLLM attention backend; CUSTOM selects a registered plugin backend")
     p.add_argument("--kernel-config", default=None,
                    help="JSON object forwarded to vLLM (GLM53 NoPE requires enable_flashinfer_autotune=false)")
+    p.add_argument("--execution-mode", choices=EXECUTION_MODES, default="eager",
+                   help="eager: enforce_eager, the historical contract. compiled: enforce_eager off with "
+                        "the declared --compilation-config. Speculative decoding is refused in both")
+    p.add_argument("--compilation-config", default=None,
+                   help="compiled only: a JSON object stating exactly mode, cudagraph_mode and "
+                        "cudagraph_capture_sizes, for example "
+                        '{"mode":"NONE","cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[1,2,3,4]}. '
+                        "The resolved engine must match it; GLM-5.3 auto-enables breakable CUDA graphs, "
+                        "which force mode NONE, so a declared VLLM_COMPILE refuses")
     p.add_argument("--require-exl3-diag", action="store_true")
     p.add_argument("--gpu-memory-utilization", type=float, default=.9)
     p.add_argument("--tile-rows", type=int, default=32)
@@ -647,6 +770,10 @@ def main():
             p.error("kernel config must be a JSON object")
     if "@sha256:" not in args.serve_image:
         p.error("serve image must be immutable digest-qualified")
+    try:
+        declared_compilation(args)
+    except ValueError as exc:
+        p.error(str(exc))
     measure(args)
 
 
