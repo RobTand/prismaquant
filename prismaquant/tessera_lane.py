@@ -93,7 +93,7 @@ def group_option_name(promotion_class: str, index: int) -> str:
     return tessera_group_option_name(promotion_class, index)
 
 
-def fused_shared_signature(fmt: object, shared_fields):
+def fused_signature(fmt: object, shared_fields):
     """What ``fmt`` commits one fused module to, over the licence's shared set."""
     from .tessera_formats import fused_shared_signature as signature
 
@@ -109,14 +109,14 @@ def parse_format_name(fmt: object):
 
 # -- candidate admission (allocator_candidates) ------------------------------
 
-def route_admission(name: str, **scope):
+def rung_admission(name: str, **scope):
     """The pinned runtime's verdict on one rung, under an optional serving scope."""
     from .tessera_menu import route_admission as admission
 
     return admission(name, **scope)
 
 
-def menu_mode(value: "str | None" = None) -> str:
+def menu_mode_in_force(value: "str | None" = None) -> str:
     """The menu mode in force; ``value`` overrides the environment."""
     from .tessera_menu import menu_mode as mode
 
@@ -188,7 +188,7 @@ def tensor_parallel_applicability(fmt: str, *, qname, target_profile,
 
 # -- the fused-module licence (allocator_candidates, allocator_solver) -------
 
-def fused_module_licence():
+def fused_licence():
     """What the pinned runtime lets one fused module's roles disagree about.
 
     ``None`` is the absence of a licence (no contract pinned), never a
@@ -223,7 +223,7 @@ def hessian_identity(costs, *, references=None) -> dict:
     return assert_uniform_hessian_identity(costs, references=references)
 
 
-def restamp_unit_topology(payload, profile, *, input_sha256=None):
+def restamp_topology(payload, profile, *, input_sha256=None):
     """Stamp each row without producer topology from the profile grammar."""
     from .tessera_serving_scope import restamp_unit_topology as restamp
 

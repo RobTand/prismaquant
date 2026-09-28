@@ -24781,24 +24781,27 @@ plus a plugin module.
   `ServingRuntimePinError` and `serving_runtime_contract_path`, which
   `serving_profiles._load_pinned_lane_tables` reads.
 - **What the DP receives (PQ #1552).** A family's name grammar is answered
-  by its plugin through `format_registry`: `format_promotion_class` (what a
+  by its plugin through `format_registry`: `promotion_class_for` (what a
   serving unit's members must share; a registry format is its own class),
-  `is_group_option`, `group_option_name`, `fused_shared_signature` and
-  `parse_family_rung` (raising on an illegal rung of a family-shaped name),
-  from the family hooks `promotion_class`, `is_group_option`,
-  `group_option_name`, `fused_shared_signature` and `parse_format_name`.
-  Candidate admission uses the family hooks `route_admission` and
-  `menu_mode`, and the shard gate `tensor_parallel_applicability`. The
+  `is_whole_group_option`, `whole_group_option_name`, `fused_signature_for`
+  and `parse_family_rung` (raising on an illegal rung of a family-shaped
+  name), from the family hooks `promotion_class`, `is_group_option`,
+  `group_option_name`, `fused_signature` and `parse_format_name`.
+  Candidate admission uses the family hooks `rung_admission` and
+  `menu_mode_in_force`, and the shard gate `tensor_parallel_applicability`.
+  No hook or registry function reuses the name of the lane function it
+  forwards to, so `tools/duplication_inventory.py` finds no new same-name
+  group. The
   fused-module licence and its field vocabulary reach promotion and the group
   knapsack through `allocator_solver.lane_fused_module_licence` and
-  `lane_fused_module_fields` (run-level hooks `fused_module_licence` and
+  `lane_fused_module_fields` (run-level hooks `fused_licence` and
   `fused_module_fields`); no licence means one rung per group. The DP's exact
   reductions, `prune_dominated` and `collapse_to_dp_bins`, live in
   `allocator_solver` beside `_charged_bins`; the lane's only input to them is
   which candidates sit on a rate axis (promotion class differs from name).
   The currency gate reads `cost_currency` off the family declaration, and
   `prepriced_cost` and `unit_topology_restamp` reach the run-level hooks
-  `hessian_identity` and `restamp_unit_topology`.
+  `hessian_identity` and `restamp_topology`.
 - **Neutral homes for shared helpers.** `digests.SOURCE_HASH_BLOCK_BYTES`
   (the guarded source hash's read block, which admission charges) and
   `joint_eval_observation` (the pilot panel's `STATUS` and

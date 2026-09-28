@@ -80,7 +80,7 @@ def lane_fused_module_licence():
     """
     from .lane_spec import single_lane_hook
 
-    read = single_lane_hook("fused_module_licence")
+    read = single_lane_hook("fused_licence")
     return None if read is None else read()
 
 
@@ -1020,7 +1020,7 @@ def _resolve_family_group(
     def format_promotion_class(fmt):
         cls = classes.get(fmt)
         if cls is None:
-            cls = classes[fmt] = fr.format_promotion_class(fmt)
+            cls = classes[fmt] = fr.promotion_class_for(fmt)
         return cls
 
     out: dict[str, str] = {}
@@ -1084,7 +1084,7 @@ def _promote_group_components(
     :func:`lane_fused_module_licence` -- lazily, so a stock run never
     imports the menu reader.
     """
-    format_promotion_class = fr.format_promotion_class
+    format_promotion_class = fr.promotion_class_for
 
     if group_kinds is not None:
         if len(group_kinds) != len(groups):
@@ -1339,7 +1339,7 @@ def promote_fused(assignment: dict[str, str],
         guessing either way -- the same fail-closed read
         ``_resolve_family_group`` performs.
         """
-        if len({fr.format_promotion_class(out[m])
+        if len({fr.promotion_class_for(out[m])
                 for m in members_present}) != 1:
             return False
         nonlocal licence
@@ -1422,7 +1422,7 @@ def _charged_bins(d_avg_bits: float, bit_precision: float) -> int:
 # Both reductions are the DP's own: they drop only rows this solver could never
 # choose, so a lane with a continuous rate axis hands the DP its full priced
 # menu and the DP reduces it. Which candidates are on a rate axis is the one
-# input a lane supplies (``format_registry.format_promotion_class``).
+# input a lane supplies (``format_registry.promotion_class_for``).
 
 def prune_dominated(
     rows: Sequence[tuple[int, float, object]],

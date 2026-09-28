@@ -1413,7 +1413,7 @@ def rate_axis_format(name: object) -> bool:
 # answers through its lane plugin, looked up when asked, so a test that
 # substitutes the lane's function still reaches every caller.
 
-def format_promotion_class(fmt: object) -> str:
+def promotion_class_for(fmt: object) -> str:
     """The identity every member of one serving unit must share.
 
     A registry format is its own class. A family rung answers with the part
@@ -1431,7 +1431,7 @@ def format_promotion_class(fmt: object) -> str:
     return family_hook(family, "promotion_class")(fmt)
 
 
-def is_group_option(fmt: object) -> bool:
+def is_whole_group_option(fmt: object) -> bool:
     """Is ``fmt`` a whole-group option (a rung per member), not one format?"""
     family = format_family_of(fmt)
     if family is None:
@@ -1441,7 +1441,7 @@ def is_group_option(fmt: object) -> bool:
     return bool(family_hook(family, "is_group_option")(fmt))
 
 
-def group_option_name(promotion_class: str, index: int) -> str:
+def whole_group_option_name(promotion_class: str, index: int) -> str:
     """The name of the ``index``-th whole-group option of one promotion class."""
     family = format_family_of(promotion_class)
     if family is None:
@@ -1453,7 +1453,7 @@ def group_option_name(promotion_class: str, index: int) -> str:
     return family_hook(family, "group_option_name")(promotion_class, index)
 
 
-def fused_shared_signature(fmt: object, shared_fields):
+def fused_signature_for(fmt: object, shared_fields):
     """What ``fmt`` commits one fused module to over ``shared_fields``.
 
     ``None`` for a name no family claims: the question does not apply.
@@ -1463,7 +1463,7 @@ def fused_shared_signature(fmt: object, shared_fields):
         return None
     from .lane_spec import family_hook
 
-    return family_hook(family, "fused_shared_signature")(fmt, shared_fields)
+    return family_hook(family, "fused_signature")(fmt, shared_fields)
 
 
 def parse_family_rung(fmt: object):

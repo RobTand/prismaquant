@@ -2128,7 +2128,7 @@ def reduce_continuous_menu(
     def on_rate_axis(fmt: str) -> bool:
         cls = promotion_class.get(fmt)
         if cls is None:
-            cls = promotion_class[fmt] = fr.format_promotion_class(fmt)
+            cls = promotion_class[fmt] = fr.promotion_class_for(fmt)
         return cls != fmt
 
     per_unit: dict[str, dict] = {}
@@ -2385,12 +2385,12 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                 cache_key = (spec.name, context_key)
                 if cache_key not in admission_cache:
                     admission_cache[cache_key] = family_hook(
-                        family, "route_admission")(spec.name, **scope_kwargs)
+                        family, "rung_admission")(spec.name, **scope_kwargs)
                 admission = admission_cache[cache_key]
                 if (
                     (admission.requires_serving_context or serving_context is not None)
                     and not admission.admits(
-                        family_hook(family, "menu_mode")(tessera_menu_mode))
+                        family_hook(family, "menu_mode_in_force")(tessera_menu_mode))
                 ):
                     reason = "tessera_serving_context"
                     if mask_records is not None:
@@ -3073,8 +3073,8 @@ def tessera_group_composites(
       support for uncertainty repricing across this separate option path.
     """
     # The family's name grammar, answered by its lane.
-    format_promotion_class = fr.format_promotion_class
-    fused_shared_signature = fr.fused_shared_signature
+    format_promotion_class = fr.promotion_class_for
+    fused_shared_signature = fr.fused_signature_for
 
     if len(members) < 2:
         return []
@@ -3194,7 +3194,7 @@ def tessera_group_composites(
         for total_bytes, total_cost, fmts in frontier:
             member_formats = dict(zip(members, fmts))
             out.append(Candidate(
-                fmt=fr.group_option_name(family, index),
+                fmt=fr.whole_group_option_name(family, index),
                 bits_per_param=8.0 * total_bytes / max(int(n_params), 1),
                 memory_bytes=int(total_bytes),
                 predicted_dloss=max(float(total_cost), 0.0),
@@ -3399,8 +3399,8 @@ def aggregate_fused_siblings(
         # exactly what the NAME intersection is. Counting the family here on
         # an unpinned run would let the group past this gate on a permission
         # nothing granted, and it would then reach the fold and get nothing.
-        _promo = fr.format_promotion_class
-        _sig = fr.fused_shared_signature
+        _promo = fr.promotion_class_for
+        _sig = fr.fused_signature_for
         if _q256_licence == "per_member":
             # The same CELL key the fold uses, so this gate and the fold agree
             # on what "the members share a foldable class" means.
@@ -3713,7 +3713,7 @@ def expand_fused_sibling_assignment(assignment: dict[str, str],
     for name, fmt in assignment.items():
         if _FUSED_SIBLING_MARKER in name:
             members = stats_ext[name].get("_fused_siblings", [])
-            if fr.is_group_option(fmt):
+            if fr.is_whole_group_option(fmt):
                 member_formats = (
                     stats_ext[name].get("_fused_member_formats") or {}
                 ).get(fmt)

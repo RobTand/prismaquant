@@ -40,16 +40,16 @@ _NAMES = (
 def test_registry_grammar_hooks_agree_with_the_lane(name):
     from prismaquant import tessera_formats as tf
 
-    assert fr.format_promotion_class(name) == tf.format_promotion_class(name)
-    assert fr.is_group_option(name) == tf.is_tessera_group_option(name)
+    assert fr.promotion_class_for(name) == tf.format_promotion_class(name)
+    assert fr.is_whole_group_option(name) == tf.is_tessera_group_option(name)
     shared = ("family", "grid", "body", "plane", "q256")
     try:
         expected_sig = tf.fused_shared_signature(name, shared)
     except Exception as exc:  # noqa: BLE001 -- the hook must raise alike
         with pytest.raises(type(exc)):
-            fr.fused_shared_signature(name, shared)
+            fr.fused_signature_for(name, shared)
     else:
-        assert fr.fused_shared_signature(name, shared) == expected_sig
+        assert fr.fused_signature_for(name, shared) == expected_sig
     try:
         expected = tf.parse_tessera_format_name(name)
     except ValueError as exc:
@@ -69,10 +69,10 @@ def test_an_illegal_rung_of_a_family_shaped_name_still_raises():
 def test_group_option_names_come_from_the_family():
     from prismaquant.tessera_formats import tessera_group_option_name
 
-    assert (fr.group_option_name("TESSERA_E2M1_K2", 4)
+    assert (fr.whole_group_option_name("TESSERA_E2M1_K2", 4)
             == tessera_group_option_name("TESSERA_E2M1_K2", 4))
     with pytest.raises(ValueError, match="registry format"):
-        fr.group_option_name("NVFP4", 0)
+        fr.whole_group_option_name("NVFP4", 0)
 
 
 def test_the_dp_reductions_live_in_the_solver():
@@ -111,12 +111,12 @@ def test_a_licence_without_a_vocabulary_refuses(monkeypatch):
 def test_every_dp_hook_core_calls_exists_on_the_tessera_plugin():
     family = lane_spec.format_family_by_id("tessera")
     for hook in ("promotion_class", "is_group_option", "group_option_name",
-                 "fused_shared_signature", "parse_format_name",
-                 "route_admission", "menu_mode",
+                 "fused_signature", "parse_format_name",
+                 "rung_admission", "menu_mode_in_force",
                  "tensor_parallel_applicability"):
         assert callable(lane_spec.family_hook(family, hook))
-    for hook in ("fused_module_licence", "fused_module_fields",
-                 "hessian_identity", "restamp_unit_topology"):
+    for hook in ("fused_licence", "fused_module_fields",
+                 "hessian_identity", "restamp_topology"):
         assert callable(lane_spec.single_lane_hook(hook))
 
 
@@ -126,9 +126,9 @@ def test_registry_names_need_no_lane_import():
         import sys
         from prismaquant import format_registry as fr
         from prismaquant import allocator_solver as solver
-        assert fr.format_promotion_class("NVFP4") == "NVFP4"
-        assert not fr.is_group_option("FP8_DYNAMIC")
-        assert fr.fused_shared_signature("BF16", ("family",)) is None
+        assert fr.promotion_class_for("NVFP4") == "NVFP4"
+        assert not fr.is_whole_group_option("FP8_DYNAMIC")
+        assert fr.fused_signature_for("BF16", ("family",)) is None
         assert fr.parse_family_rung("NVFP4") is None
         rows = [(10, 1.0, "a"), (12, 2.0, "b"), (8, 3.0, "c")]
         assert [r[2] for r in solver.prune_dominated(rows)] == ["c", "a"]
