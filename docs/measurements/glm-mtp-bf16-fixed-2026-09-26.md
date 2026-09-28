@@ -167,3 +167,13 @@ smaller per-rank footprint or about 8 to 17 GiB more free memory on sparky.
 
 The runtime-plus-activation term and passthrough sharding are estimates, not
 measurements. A real TP2 load is still the only per-rank measurement.
+
+## Path expansion correction — 2026-09-27
+
+The relative `m6/...` and `integration/...` evidence paths above are under
+`/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/`,
+not directly under `/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/`.
+For example, the bound MTP cost is
+`/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/ws-mtp-20260925/m6/layer45/merged-cost.pkl`.
+This corrects path expansion only; it changes no historical digest, measurement,
+selection, gate or runtime claim.
