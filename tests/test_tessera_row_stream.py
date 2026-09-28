@@ -531,10 +531,10 @@ def _resident_capture_probe(monkeypatch):
     return probe
 
 
-def _killed_load_all_run(monkeypatch, tmp_path):
+def _killed_load_all_run(monkeypatch, tmp_path, fixture=None):
     """A load-all row killed at its third encode, as a pilot or an earlier
     attempt leaves one: the checkpoint manifest and the first unit's shard."""
-    campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
+    campaign, argv, state = fixture or stream_fixture(monkeypatch, tmp_path)
     _pin_clock(campaign, monkeypatch)
     calls, original = _kill_at(campaign, monkeypatch, 3)
     with pytest.raises(_Killed):
@@ -562,12 +562,13 @@ def test_a_resumed_checkpoint_streams_under_its_window_plan(monkeypatch, tmp_pat
     adopted as its entry is read and its receipts match the manifest's, only
     the rest is encoded, and the row is admitted against the window plan."""
     from prismaquant.tessera_row_stream import EXECUTION_FILENAME
-    campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
+    fixture = stream_fixture(monkeypatch, tmp_path)
+    campaign, argv, _state = fixture
     _pin_clock(campaign, monkeypatch)
     assert campaign.main(argv) == 0
     clean = produced(tmp_path)
     _clear_outputs(tmp_path)
-    campaign, argv, _state, relaunch = _killed_load_all_run(monkeypatch, tmp_path)
+    campaign, argv, _state, relaunch = _killed_load_all_run(monkeypatch, tmp_path, fixture)
     capsys.readouterr()
 
     probe = _resident_capture_probe(monkeypatch)
