@@ -72,14 +72,9 @@ _CORPUS_CONSTRUCTION = {
 
 
 def _canonical_sha256(value: object) -> str:
-    encoded = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    from prismaquant.digests import DIRECT_UTF8_STRICT
+
+    return DIRECT_UTF8_STRICT.sha256(value)
 
 
 def _strict_json(value: object) -> str:
