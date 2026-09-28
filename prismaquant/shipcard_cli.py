@@ -28,9 +28,7 @@ from pathlib import Path
 from prismaquant.shipcard import (
     GOLD_SLOTS,
     OPTIONAL_SLOTS,
-    ROUTE_CENSUS_SLOT,
     ROUTE_SWEEP_SLOT,
-    ROUTE_TRACE_SLOT,
     UNIFORM_CONTROL_METRIC_KEYS,
     UNIFORM_CONTROL_SLOT,
     _verify_gold_record,
@@ -40,7 +38,6 @@ from prismaquant.shipcard import (
     fill_slot,
     load_shipcard,
     make_record,
-    make_route_census_record,
     make_uniform_control_record,
     record_uniform_control_override,
     required_slots,
@@ -340,147 +337,11 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_fill_route_census(args: argparse.Namespace) -> int:
-    """Close `route.census` from the priced routes and the served records."""
-    from prismaquant.tessera_route_receipt import (
-        TesseraRouteReceiptError,
-        parse_census_json,
-        substitute_decoders_from_contract_answer,
-    )
-
-    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
-    try:
-        records = parse_census_json(Path(args.census).read_bytes().decode("utf-8"), where=str(args.census))
-    except (OSError, ValueError) as exc:
-        print(f"[shipcard] ERROR: cannot read census rows from "
-              f"{args.census}: {exc}", file=sys.stderr)
-        return 2
-    card = load_shipcard(args.shipcard)
-    scoped = isinstance(records, dict)
-    binding = None
-    if scoped:
-        try:
-            if not args.layer_config:
-                raise TesseraRouteReceiptError("v2 census requires --layer-config exact allocation input")
-            binding = {"layer_config_json": Path(args.layer_config).read_bytes().decode("utf-8"),
-                       "config_json": (Path(model_dir) / "config.json").read_bytes().decode("utf-8"),
-                       "manifest_json": (Path(model_dir) / "tessera_serving_manifest.json").read_bytes().decode("utf-8")}
-        except (OSError, ValueError) as exc:
-            print(f"[shipcard] REFUSED: cannot bind scoped census: {exc}", file=sys.stderr)
-            return 2
-    substitutes = list(args.substitute_decoder or ())
-    if not substitutes and not scoped:
-        try:
-            from prismaquant import tessera_runtime_contract as trc
-
-            contract = trc.load_tessera_contract()
-            if contract is not None:
-                substitutes = list(
-                    substitute_decoders_from_contract_answer(
-                        trc.contract_answer(contract)))
-        except trc.TesseraContractError as exc:
-            print(f"[shipcard] ERROR: {exc}", file=sys.stderr)
-            return 2
-    if not substitutes and not scoped:
-        print("[shipcard] ERROR: no substitute decoder is known -- pass "
-              "--substitute-decoder explicitly (repeatable) or set "
-              "PRISMAQUANT_TESSERA_DEV_PIN so the pinned contract answer "
-              "can be read. A gate that knows no substitute detects "
-              "nothing.", file=sys.stderr)
-        return 2
-    try:
-        record = make_route_census_record(
-            tool=args.tool or f"route-census:{Path(args.census).name}",
-            model_sha=compute_model_sha(model_dir),
-            priced_routes=list(args.priced_route),
-            route_records=records,
-            substitute_decoders=substitutes,
-            binding=binding,
-            build=card.get("build"),
-            model_dir=model_dir,
-        )
-    except TesseraRouteReceiptError as exc:
-        print(f"[shipcard] REFUSED: {args.census} cannot be a census "
-              f"receipt: {exc}", file=sys.stderr)
-        return 2
-    # Lane-scoped, not optional: the slot exists on cards the lane opened
-    # (`lane_shipcard open --lane tessera`).  Filling a card that never
-    # opened it is a refusal, not an auto-added key -- a slot the card does
-    # not owe is a slot the receipt does not belong on.
-    if ROUTE_CENSUS_SLOT not in (card.get("slots") or {}):
-        print(f"[shipcard] REFUSED: {args.shipcard} has no "
-              f"{ROUTE_CENSUS_SLOT} slot; open a Tessera lane card first "
-              f"(python -m prismaquant.lane_shipcard open --lane tessera "
-              f"--artifact {model_dir})", file=sys.stderr)
-        return 2
-    fill_slot(args.shipcard, ROUTE_CENSUS_SLOT, record)
-    print(f"[shipcard] filled {ROUTE_CENSUS_SLOT} from {args.census} "
-          f"(passed={record['passed']})")
-    print(f"[shipcard]   {record['detail']}")
-    return 0
-
-
-#: `fill-route-trace` exit status when no usable observation exists.  Distinct
-#: from a refusal (1) and a usage error (2), so a wrapper cannot read "not
-#: verified" as either a pass or a disagreement.
+#: A route-evidence fill's exit status when no usable observation exists
+#: (`fill-route-sweep`, and the lane commands that fill `route.trace`).
+#: Distinct from a refusal (1) and a usage error (2), so a wrapper cannot read
+#: "not verified" as either a pass or a disagreement.
 EXIT_NOT_VERIFIED = 3
-
-
-def _cmd_fill_route_trace(args: argparse.Namespace) -> int:
-    """Close `route.trace` from every rank's served route trace (#575)."""
-    from prismaquant.shipcard import make_route_trace_record
-    from prismaquant.tessera_route_trace_gate import (
-        RouteTraceNotVerified,
-        TesseraRouteTraceError,
-    )
-
-    model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
-    card = load_shipcard(args.shipcard)
-    if ROUTE_TRACE_SLOT not in (card.get("slots") or {}):
-        print(f"[shipcard] REFUSED: {args.shipcard} has no {ROUTE_TRACE_SLOT} "
-              "slot; open a Tessera lane card first (python -m "
-              f"prismaquant.lane_shipcard open --lane tessera --artifact "
-              f"{model_dir})", file=sys.stderr)
-        return 2
-    try:
-        config_json = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
-    except (OSError, ValueError) as exc:
-        print(f"[shipcard] REFUSED: cannot read the artifact's config.json: "
-              f"{exc}", file=sys.stderr)
-        return 2
-    traces = []
-    for rank, path in enumerate(args.trace):
-        label = f"rank{rank}:{Path(path).name}"
-        try:
-            traces.append((label, Path(path).read_bytes().decode("utf-8")))
-        except FileNotFoundError:
-            traces.append((label, None))
-        except (OSError, ValueError) as exc:
-            print(f"[shipcard] NOT VERIFIED: cannot read {path}: {exc}",
-                  file=sys.stderr)
-            return EXIT_NOT_VERIFIED
-    try:
-        record = make_route_trace_record(
-            tool=args.tool or "fill-route-trace",
-            model_sha=compute_model_sha(model_dir),
-            traces=traces,
-            expected_ranks=args.expected_ranks,
-            config_json=config_json,
-            build=card.get("build"),
-            platform=args.platform,
-        )
-    except RouteTraceNotVerified as exc:
-        print("[shipcard] NOT VERIFIED -- route.trace stays unfilled and the "
-              f"card stays unpublishable: {exc}", file=sys.stderr)
-        return EXIT_NOT_VERIFIED
-    except TesseraRouteTraceError as exc:
-        print(f"[shipcard] REFUSED -- route.trace: {exc}", file=sys.stderr)
-        return 1
-    fill_slot(args.shipcard, ROUTE_TRACE_SLOT, record)
-    print(f"[shipcard] filled {ROUTE_TRACE_SLOT} from {len(traces)} rank "
-          f"trace(s) (passed={record['passed']})")
-    print(f"[shipcard]   {record['detail']}")
-    return 0
 
 
 def _cmd_fill_route_sweep(args: argparse.Namespace) -> int:
@@ -699,50 +560,14 @@ def main(argv: list[str] | None = None) -> int:
     p_override.add_argument("--model-dir", default=None)
     p_override.set_defaults(func=_cmd_override_control)
 
-    p_census = sub.add_parser(
-        "fill-route-census",
-        help="close route.census from the priced routes and the serve's "
-             "route records (Tessera lane: priced-vs-served decoder gate)",
-    )
-    p_census.add_argument("shipcard")
-    p_census.add_argument(
-        "--census", required=True,
-        help="Complete Tessera route_census/2 JSON (scoped), or historical unscoped row array")
-    p_census.add_argument("--layer-config", default=None,
-                         help="Exact allocation JSON bound by card.build.layer_config_sha; required for v2")
-    p_census.add_argument(
-        "--priced-route", action="append", default=[],
-        help="legacy priced route (repeatable, required for flat rows); optional cross-check for v2")
-    p_census.add_argument(
-        "--substitute-decoder", action="append", default=[],
-        help="a decoder a serve falls back to (repeatable; default: derived "
-             "from the pinned Tessera contract answer, which needs "
-             "PRISMAQUANT_TESSERA_DEV_PIN)")
-    p_census.add_argument("--model-dir", default=None)
-    p_census.add_argument("--tool", default=None)
-    p_census.set_defaults(func=_cmd_fill_route_census)
+    # A lane's own evidence slots are filled by commands its plugin registers
+    # (decoupling step 6, PQ #1553): `fill-route-census` and
+    # `fill-route-trace` come from the Tessera lane, which is why this module
+    # names neither.
+    from prismaquant.lane_spec import lane_hooks
 
-    p_trace = sub.add_parser(
-        "fill-route-trace",
-        help="close route.trace from every rank's TESSERA_ROUTE_TRACE file "
-             "(Tessera lane: priced-vs-served activation-contract gate). "
-             "Exit 0 agree, 1 refused, 2 usage, 3 not verified",
-    )
-    p_trace.add_argument("shipcard")
-    p_trace.add_argument(
-        "--trace", action="append", required=True,
-        help="one rank's tessera.route_trace/1 JSON, in rank order "
-             "(repeatable; a path that does not exist is a missing rank)")
-    p_trace.add_argument(
-        "--expected-ranks", type=int, required=True,
-        help="the serve's world size; fewer traces than this is NOT VERIFIED")
-    p_trace.add_argument(
-        "--platform", default=None,
-        help="serving platform to price on (default: the card's "
-             "tessera_serving_scope target; both, when present, must agree)")
-    p_trace.add_argument("--model-dir", default=None)
-    p_trace.add_argument("--tool", default=None)
-    p_trace.set_defaults(func=_cmd_fill_route_trace)
+    for _lane, register in lane_hooks("shipcard_cli_commands"):
+        register(sub)
 
     p_sweep = sub.add_parser(
         "fill-route-sweep",

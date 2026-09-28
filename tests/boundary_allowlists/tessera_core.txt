@@ -8,13 +8,3 @@ prismaquant/pipeline.py	literal	TESSERA_PLATFORM
 prismaquant/pipeline.py	literal	TESSERA_RESIDENCY
 prismaquant/pipeline.py	literal	TESSERA_RUNTIME_IMAGE
 prismaquant/pipeline.py	literal	TESSERA_TARGET_PROFILE
-prismaquant/shipcard.py	import	prismaquant.tessera_route_receipt
-prismaquant/shipcard.py	import	prismaquant.tessera_route_receipt
-prismaquant/shipcard.py	import	prismaquant.tessera_route_receipt
-prismaquant/shipcard.py	import	prismaquant.tessera_route_receipt
-prismaquant/shipcard.py	import	prismaquant.tessera_route_trace_gate
-prismaquant/shipcard.py	import	prismaquant.tessera_route_trace_gate
-prismaquant/shipcard.py	literal	tessera.uniform_control.v1
-prismaquant/shipcard_cli.py	import	prismaquant.tessera_route_receipt
-prismaquant/shipcard_cli.py	import	prismaquant.tessera_route_trace_gate
-prismaquant/shipcard_cli.py	import	prismaquant.tessera_runtime_contract

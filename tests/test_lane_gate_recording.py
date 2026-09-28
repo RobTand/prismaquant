@@ -456,12 +456,13 @@ def test_every_derived_lane_slot_names_a_verifier_verify_replays():
     })
     assert derived, (
         "no lane declares a slot beyond the base set; the property is vacuous")
-    verifiers = getattr(shipcard_mod, "LANE_SLOT_VERIFIERS", {})
+    verifiers = shipcard_mod.lane_slot_verifiers()
     missing = [slot for slot in derived if slot not in verifiers]
     assert not missing, (
         f"lane-declared slot(s) {missing} name no verifier: a record with "
         "passed=True would close them on the generic checks alone. Register "
-        "the verifier beside the slot (shipcard.LANE_SLOT_VERIFIERS)")
+        "the verifier with the lane's plugin (shipcard_slot_verifiers), or in "
+        "shipcard.LANE_SLOT_VERIFIERS for a data-only lane")
     for slot in derived:
         assert callable(verifiers[slot]), f"{slot}: verifier is not callable"
 
@@ -481,7 +482,8 @@ def test_verify_replays_route_census_evidence(tmp_path, monkeypatch):
     refusal the pinned table gives the same rows).
     """
     import prismaquant.tessera_route_receipt as receipt
-    from prismaquant.shipcard import make_record, make_route_census_record
+    from prismaquant.shipcard import make_record
+    from prismaquant.tessera_shipcard import make_route_census_record
 
     def _absent():
         raise ModuleNotFoundError("No module named 'tessera'", name="tessera")

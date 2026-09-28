@@ -12,7 +12,9 @@ Lane-scoped slots (``shipcard.lane_scoped_slots()``, read as
 :data:`LANE_SCOPED_SLOTS`) are opened by the lane's own
 ``lane_specs/<lane>.json`` ``gates[]`` and are required of cards stamped with
 that ``lane``.  The vocabulary is derived from every lane spec, and each
-derived slot names its replay in ``shipcard.LANE_SLOT_VERIFIERS`` (#162).
+derived slot names its replay in ``shipcard.lane_slot_verifiers()`` (#162):
+core's own ``LANE_SLOT_VERIFIERS`` plus the replays a lane's plugin registers
+(``shipcard_slot_verifiers``, PQ #1553).  This module imports no lane module.
 
 Base slots (required for every artifact):
 
@@ -98,26 +100,6 @@ REQUIRED_SLOTS: tuple[str, ...] = (
 #: The byte-matched uniform control's verdict (RobTand/prismaquant#121).
 UNIFORM_CONTROL_SLOT = "uniform_control"
 
-#: The priced-vs-served route census verdict (PrismaQuant #136).  Tessera's
-#: plugin stamps which decoder ran on every route record, and a serve whose
-#: extension did not build keeps serving on a named substitute -- so a KL
-#: priced as TESSERA_NVFP4 but measured on torch_materialize_stock is a
-#: different number wearing the right name.  The slot carries the priced
-#: routes, the served records and the known substitute set, and `verify`
-#: replays the comparison from those carried values rather than trusting the
-#: carried boolean.
-ROUTE_CENSUS_SLOT = "route.census"
-
-#: Principle 14's serve-side leg (RobTand/prismaquant#575): the activation
-#: contracts a live serve dispatched, read from every rank's
-#: ``TESSERA_ROUTE_TRACE`` file, against the contracts the artifact's own
-#: ``config.json`` prices on its platform.  A separate slot from
-#: `route.census`: the census is a dedicated offline run judged per cell; the
-#: trace is what the served process itself counted.  The record carries the
-#: traces and the config text, and `verify` replays the comparison against the
-#: current packaged contract (`tessera_route_trace_gate`).
-ROUTE_TRACE_SLOT = "route.trace"
-
 #: Principle 14's serve-side leg on the COMPRESSED-TENSORS lane (#631).  Stock
 #: vLLM emits no route telemetry, so this lane's served side is read off the
 #: running engine through vLLM's own ``LLM.apply_model`` by
@@ -158,9 +140,10 @@ OPTIONAL_SLOTS: tuple[str, ...] = (UNIFORM_CONTROL_SLOT,)
 #: set (:func:`all_slots`, served to attribute readers as ``ALL_SLOTS``).
 #: WHICH lanes open which slot is read from that lane's own ``gates[]``
 #: (:func:`lane_gate_slots`); WHETHER a derived slot is admittable is read
-#: from :data:`LANE_SLOT_VERIFIERS` -- the verifier :func:`verify` replays
-#: for it, defined beside the verifiers below.  ``route.census``'s entry is
-#: the #136 priced-vs-served replay.  A lane that declares a slot with no
+#: from :func:`lane_slot_verifiers` -- the verifier :func:`verify` replays for
+#: it, registered by the lane's plugin (``route.census``'s is the #136
+#: priced-vs-served replay, in ``tessera_shipcard``) or, for a data-only lane,
+#: in :data:`LANE_SLOT_VERIFIERS`.  A lane that declares a slot with no
 #: verifier is REFUSED at parse time -- a slot with no verifier is a slot any
 #: record closes -- so adding a fourth lane with a novel gate is one spec
 #: file plus one verifier entry, and there is no second list to forget.
@@ -175,7 +158,7 @@ def lane_scoped_slots() -> tuple[str, ...]:
     """Slots lanes open beyond the base set, derived from every lane spec.
 
     Every ``shipcard_slot`` any ``lane_specs/<lane>.json`` declares, minus the
-    base set.  A derived slot with no entry in :data:`LANE_SLOT_VERIFIERS`
+    base set.  A derived slot with no entry in :func:`lane_slot_verifiers`
     RAISES: admitting it would give it the generic record checks and no
     replay, which is the "written into the receipt and replayed by nothing"
     shape (RobTand/prismaquant#162).
@@ -188,11 +171,12 @@ def lane_scoped_slots() -> tuple[str, ...]:
         for slot in spec.shipcard_slots():
             if slot not in base and slot not in seen:
                 seen.append(slot)
-    missing = [slot for slot in seen if slot not in LANE_SLOT_VERIFIERS]
+    verifiers = lane_slot_verifiers()
+    missing = [slot for slot in seen if slot not in verifiers]
     if missing:
         raise KeyError(
             f"lane spec(s) declare shipcard slot(s) {missing} with no "
-            "verifier in shipcard.LANE_SLOT_VERIFIERS; a slot with no "
+            "verifier in shipcard.lane_slot_verifiers(); a slot with no "
             "verifier is a slot any record closes "
             "(RobTand/prismaquant#162)"
         )
@@ -285,11 +269,31 @@ WIKITEXT_PPL_CALIBRATION_SCHEMA = "prismaquant.wikitext_ppl_calibration/1"
 GOLD_PRODUCER_IDENTITY_SCHEMA = "prismaquant.gold_producer_identity/1"
 TOPK_COVERAGE_POLICY_SCHEMA = "prismaquant.topk_tail_coverage_policy/1"
 
-#: The block ``tessera.control.control_block()`` emits, carried verbatim.  The
-#: shipcard never imports Tessera (this module is stdlib-only by contract), so
-#: the schema string is the whole of what is taken on trust: every number in
-#: the block is replayed here from integers.
-UNIFORM_CONTROL_SCHEMA = "tessera.uniform_control.v1"
+
+
+def uniform_control_schemas() -> tuple[str, ...]:
+    """The uniform-control block schemas a ship record accepts.
+
+    A rate-axis format family names the block its producer emits
+    (``uniform_control_schema`` in its lane spec; the Tessera lane's is
+    ``tessera.control.control_block()``'s).  The block is carried verbatim.
+    The shipcard never imports the producer, so the schema string is the whole
+    of what is taken on trust: every number in the block is replayed here from
+    integers.
+    """
+    from prismaquant.lane_spec import rate_axis_lanes
+
+    return tuple(dict.fromkeys(
+        family.uniform_control_schema
+        for spec in rate_axis_lanes()
+        for family in spec.format_families
+        if family.rate_axis and family.uniform_control_schema))
+
+
+def _schema_names(schemas: Sequence[str]) -> str:
+    return " or ".join(repr(schema) for schema in schemas) or "(no rate-axis lane)"
+
+
 #: The override that lets a measured loss ship anyway.
 UNIFORM_CONTROL_OVERRIDE_SCHEMA = "prismaquant.uniform_control_override/1"
 #: The widest a control's bytes may miss the candidate's and still be a
@@ -1404,7 +1408,7 @@ def lane_gate_slots(lane: str | None) -> tuple[str, ...]:
     base requirement by under-declaring (the GGUF lane declares no
     ``native_export.graph`` gate and is still required to close that slot).
 
-    A declared slot with no verifier in :data:`LANE_SLOT_VERIFIERS` RAISES.
+    A declared slot with no verifier in :func:`lane_slot_verifiers` RAISES.
     Filtering it away would mean the lane declared a gate, the card never
     opened it and ``verify`` passed an artifact that closed nothing -- the
     same silence one link earlier that RobTand/prismaquant#119 reported.
@@ -1438,15 +1442,16 @@ def lane_gate_slots(lane: str | None) -> tuple[str, ...]:
     # verifier beside the slot. Base slots need no entry: their replay is the
     # generic checks (plus the gold/uniform branches in `verify`).
     base = set(REQUIRED_SLOTS) | set(OPTIONAL_SLOTS)
+    verifiers = lane_slot_verifiers()
     unknown = [
         slot for slot in declared
-        if slot not in base and slot not in LANE_SLOT_VERIFIERS
+        if slot not in base and slot not in verifiers
     ]
     if unknown:
         raise KeyError(
             f"lane {lane!r} declares shipcard slot(s) {unknown} with no "
-            f"verifier in shipcard.LANE_SLOT_VERIFIERS; known: "
-            f"{sorted(base | set(LANE_SLOT_VERIFIERS))}. Register the "
+            f"verifier in shipcard.lane_slot_verifiers(); known: "
+            f"{sorted(base | set(verifiers))}. Register the "
             "verifier `verify` must replay for the slot -- a slot with no "
             "verifier is a slot any record closes "
             "(RobTand/prismaquant#162)"
@@ -1588,10 +1593,11 @@ def make_record(
 
     The vocabulary is derived (:func:`all_slots`): base slots plus every
     lane-declared slot with a registered verifier.  The check here reads the
-    live base set plus :data:`LANE_SLOT_VERIFIERS` rather than a roster, so a
+    live base set plus :func:`lane_slot_verifiers` rather than a roster, so a
     fourth lane's verified slot is fillable with no edit here.
     """
-    known = set(REQUIRED_SLOTS) | set(OPTIONAL_SLOTS) | set(LANE_SLOT_VERIFIERS)
+    known = (set(REQUIRED_SLOTS) | set(OPTIONAL_SLOTS)
+             | set(lane_slot_verifiers()))
     if slot not in known:
         raise KeyError(
             f"unknown shipcard slot {slot!r}; known: {sorted(known)}")
@@ -1733,6 +1739,7 @@ def verify(
 
     if required is None:
         required = required_slots(card, model_dir=model_dir)
+    plugin_verifiers = lane_plugin_slot_verifiers()
     for slot in required:
         record = slots.get(slot)
         if not record:
@@ -1761,14 +1768,15 @@ def verify(
             problems.extend(_verify_uniform_control_record(
                 slot, record, card=card, model_dir=model_dir))
             continue
-        if slot in (ROUTE_CENSUS_SLOT, ROUTE_TRACE_SLOT):
-            # Routed PAST the generic `passed` check for the same reason:
-            # the verdict lives in the carried route records (census) or
-            # route traces (trace), and the verifier below replays the
+        if slot in plugin_verifiers:
+            # Routed PAST the generic `passed` check for the same reason: a
+            # lane plugin's replay owns its slot's whole verdict.  The
+            # Tessera lane's `route.census` and `route.trace` carry their
+            # route records or route traces, and the replay recomputes the
             # priced-vs-served comparison from them, so a hand-set flag buys
             # nothing.  Dispatched through the lane-slot registry (#162) so
             # the admission invariant and the replay read the same entry.
-            problems.extend(LANE_SLOT_VERIFIERS[slot](
+            problems.extend(plugin_verifiers[slot](
                 slot, record, card=card, model_dir=model_dir))
             continue
         if record.get("passed") is not True:
@@ -1816,13 +1824,13 @@ def verify(
             # key; nothing compared `metrics.arm` to the slot suffix, so a
             # fabricated or mislabeled arm record passed. Replay it here.
             problems.extend(_verify_native_export_record(slot, record))
-        # Lane-scoped slots beyond the ones routed past the generic checks
-        # above replay through the verifier the slot names in
-        # LANE_SLOT_VERIFIERS (#162): a fourth lane's novel slot is replayed
-        # the moment its verifier is registered, and a derived slot with no
-        # verifier never reaches here because lane_gate_slots / make_record /
-        # lane_scoped_slots refuse it.  Lane-slot verifiers take
-        # ``(slot, record)``, the same convention as the base-slot replays.
+        # Lane-scoped slots whose replay core owns run through the verifier
+        # the slot names in LANE_SLOT_VERIFIERS (#162): a fourth lane's novel
+        # slot is replayed the moment its verifier is registered, and a
+        # derived slot with no verifier never reaches here because
+        # lane_gate_slots / make_record / lane_scoped_slots refuse it.  These
+        # verifiers take ``(slot, record)``, the same convention as the
+        # base-slot replays.
         verifier = LANE_SLOT_VERIFIERS.get(slot)
         if verifier is not None:
             problems.extend(verifier(slot, record))
@@ -2190,15 +2198,24 @@ def _is_rate_axis_artifact(
     an obligation.  The archived Gridbook lane pinned exactly this shape
     (``test_required_slots_rederives_strict_obligation_after_card_erasure``).
 
-    Today the only rate-axis container is Tessera, whose checkpoints declare
-    ``quantization_config.quant_method: "tessera"``.  A future container with
-    a continuous rung axis adds itself here, in the commit that declares its
-    lane.
+    Which containers have a rate axis is lane data: a lane whose spec
+    declares a rate-axis format family, matched by its ``export_container``
+    or by the ``quantization_config.quant_method`` its checkpoints declare
+    (``lane_spec.rate_axis_lanes``).  Today that is the Tessera lane.  A
+    future container with a continuous rung axis declares its family in its
+    lane spec; nothing here changes (decoupling step 6, PQ #1553).
     """
+    from prismaquant.lane_spec import rate_axis_lanes
+
+    lanes = rate_axis_lanes()
+    methods = {spec.quant_method.strip().lower()
+               for spec in lanes if spec.quant_method}
+    containers = {spec.export_container.strip().lower() for spec in lanes}
     build = card.get("build")
     if isinstance(build, Mapping):
-        for key in ("quant_method", "export_container"):
-            if str(build.get(key) or "").strip().lower() == "tessera":
+        for key, names in (("quant_method", methods),
+                           ("export_container", containers)):
+            if str(build.get(key) or "").strip().lower() in names:
                 return True
     if model_dir is None:
         return False
@@ -2211,7 +2228,7 @@ def _is_rate_axis_artifact(
     quant = config.get("quantization_config") if isinstance(
         config, Mapping) else None
     if isinstance(quant, Mapping):
-        return str(quant.get("quant_method") or "").strip().lower() == "tessera"
+        return str(quant.get("quant_method") or "").strip().lower() in methods
     return False
 
 
@@ -2523,16 +2540,17 @@ def _verify_uniform_control_record(
     """Refuse an allocation that lost to spending the same bytes uniformly."""
     problems: list[str] = []
     block = record.get("uniform_control")
+    schemas = uniform_control_schemas()
     if not isinstance(block, Mapping):
         return [
             f"{slot}: carries no uniform_control block "
-            f"(tessera.control.control_block(), schema "
-            f"{UNIFORM_CONTROL_SCHEMA!r}), so there is nothing to replay"
+            f"(the rate-axis producer's control block, schema "
+            f"{_schema_names(schemas)}), so there is nothing to replay"
         ]
-    if block.get("schema") != UNIFORM_CONTROL_SCHEMA:
+    if block.get("schema") not in schemas:
         return [
             f"{slot}: block schema {block.get('schema')!r} != "
-            f"{UNIFORM_CONTROL_SCHEMA!r}"
+            f"{_schema_names(schemas)}"
         ]
 
     control = block.get("control")
@@ -2736,10 +2754,11 @@ def make_uniform_control_record(
             f"gold_metric_key must be one of {list(UNIFORM_CONTROL_METRIC_KEYS)}"
         )
     block = json.loads(json.dumps(dict(control_block)))
-    if block.get("schema") != UNIFORM_CONTROL_SCHEMA:
+    schemas = uniform_control_schemas()
+    if block.get("schema") not in schemas:
         raise ValueError(
             f"control block schema {block.get('schema')!r} != "
-            f"{UNIFORM_CONTROL_SCHEMA!r}"
+            f"{_schema_names(schemas)}"
         )
     verdict = block.get("verdict") or {}
     beat = bool(verdict.get("measured")) and bool(verdict.get("beat_control"))
@@ -2992,313 +3011,6 @@ def unfilled_slots(
     ]
 
 
-# ---------------------------------------------------------------------------
-# The priced-vs-served route census receipt (#136)
-# ---------------------------------------------------------------------------
-def make_route_census_record(
-    *,
-    tool: str,
-    model_sha: str | None,
-    priced_routes: Sequence[str] = (),
-    route_records: Any,
-    substitute_decoders: Sequence[str] = (),
-    serve_fingerprint: str | None = None,
-    git_commit: str | None = None,
-    binding: Mapping[str, str] | None = None,
-    build: Mapping[str, Any] | None = None,
-    model_dir: str | os.PathLike | None = None,
-) -> dict[str, Any]:
-    """Close `route.census` from the priced routes and the served records.
-
-    The comparison runs HERE, at fill time, and its verdict is what the
-    record carries -- but `verify` replays it from the carried values
-    (`_verify_route_census_record`), so filling a `passed=true` over
-    substitute-decoder records still refuses at publication.
-    """
-    from prismaquant.tessera_route_receipt import (
-        TesseraRouteReceiptError, check_route_receipt, check_scoped_route_receipt,
-        current_table_refuses_flat_census,
-    )
-
-    if isinstance(route_records, Mapping):
-        from copy import deepcopy
-        verdict = check_scoped_route_receipt(route_records, binding, build=build, model_dir=model_dir)
-        if priced_routes and sorted(set(priced_routes)) != verdict["served_routes"]:
-            raise TesseraRouteReceiptError("caller priced routes differ from independently bound price projections")
-        return make_record(slot=ROUTE_CENSUS_SLOT, tool=tool, passed=True, model_sha=model_sha,
-            metrics={"n_records": verdict["n_records"], "n_served_routes": len(verdict["served_routes"])},
-            detail=verdict["detail"], serve_fingerprint=serve_fingerprint, git_commit=git_commit,
-            extra={"route_census": deepcopy(route_records), "census_binding": deepcopy(binding),
-                   "scoped_verdict": verdict, "served_routes": verdict["served_routes"],
-                   "served_decoders": verdict["served_decoders"]})
-    if binding is not None or (build or {}).get("tessera_serving_scope") is not None:
-        raise TesseraRouteReceiptError("scoped artifact cannot fill route.census from an unbound legacy flat list")
-    # The rule `verify` replays, applied here first (#214): a producer that
-    # says passed=True where the verifier on the same box then refuses is two
-    # homes for one decision.
-    try:
-        refusal = current_table_refuses_flat_census()
-    except (ValueError, OSError) as exc:
-        raise TesseraRouteReceiptError(f"cannot inspect current census contract: {exc}") from exc
-    if refusal is not None:
-        raise TesseraRouteReceiptError(refusal)
-
-    verdict = check_route_receipt(
-        priced_routes=list(priced_routes),
-        route_records=[dict(row) for row in route_records],
-        substitute_decoders=list(substitute_decoders),
-    )
-    return make_record(
-        slot=ROUTE_CENSUS_SLOT,
-        tool=tool,
-        passed=bool(verdict["passed"]),
-        model_sha=model_sha,
-        metrics={
-            "n_records": verdict["n_records"],
-            "n_served_routes": len(verdict["served_routes"]),
-            "n_substitute_hits": len(verdict["substitute_hits"]),
-        },
-        detail=verdict["detail"],
-        serve_fingerprint=serve_fingerprint,
-        git_commit=git_commit,
-        extra={
-            "priced_routes": verdict["priced_routes"],
-            "route_records": [
-                {"route": row["route"], "decoder": row["decoder"],
-                 "count": row["count"]}
-                for row in parse_route_records_for_card(route_records)
-            ],
-            "served_routes": verdict["served_routes"],
-            "served_decoders": verdict["served_decoders"],
-            "substitute_decoders": sorted(set(substitute_decoders)),
-        },
-    )
-
-
-def parse_route_records_for_card(
-    route_records: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """The carried rows in canonical form (parse once, replay forever)."""
-    from prismaquant.tessera_route_receipt import parse_route_records
-
-    return parse_route_records(list(route_records),
-                               where="route.census route_records")
-
-
-def _verify_route_census_record(
-    slot: str,
-    record: Mapping[str, Any],
-    *,
-    card: Mapping[str, Any] | None = None,
-    model_dir: str | os.PathLike | None = None,
-) -> list[str]:
-    """Replay the priced-vs-served comparison from the carried values."""
-    from prismaquant.tessera_route_receipt import (
-        TesseraRouteReceiptError,
-        check_route_receipt,
-        check_scoped_route_receipt,
-    )
-
-    problems: list[str] = []
-    build = (card or {}).get("build") or {}
-    if "route_census" in record or "census_binding" in record or "scoped_verdict" in record:
-        try:
-            replay = check_scoped_route_receipt(record.get("route_census"), record.get("census_binding"),
-                                               build=build, model_dir=model_dir)
-        except TesseraRouteReceiptError as exc:
-            return [f"{slot}: scoped census REFUSED: {exc}"]
-        if record.get("passed") is not True or record.get("scoped_verdict") != replay:
-            problems.append(f"{slot}: carried scoped verdict differs from current-contract replay")
-        for key in ("served_routes", "served_decoders"):
-            if record.get(key) != replay[key]:
-                problems.append(f"{slot}: carried {key} differs from scoped replay")
-        return problems
-    if build.get("tessera_serving_scope") is not None:
-        return [f"{slot}: scoped artifact carries an unbound legacy census; retain the producer's v2 receipt"]
-    # The same rule fill applies (`make_route_census_record`, #214), from its
-    # one home; live since the pin moved to a table of the scoped schema (v8,
-    # first packaged at b8b1cb38), dead before it when the pinned table was
-    # v4.  With no
-    # runtime installed there is no current table to refuse on and the flat
-    # rows keep their historical v4 comparison.
-    from prismaquant.tessera_route_receipt import current_table_refuses_flat_census
-    try:
-        refusal = current_table_refuses_flat_census()
-    except (ValueError, OSError) as exc:
-        return [f"{slot}: cannot inspect current census contract: {exc}"]
-    if refusal is not None:
-        return [f"{slot}: {refusal}"]
-    priced = record.get("priced_routes")
-    rows = record.get("route_records")
-    substitutes = record.get("substitute_decoders")
-    if not isinstance(priced, list) or not priced:
-        problems.append(
-            f"{slot}: record carries no priced_routes; the receipt must say "
-            "which routes the artifact priced")
-    if not isinstance(rows, list) or not rows:
-        problems.append(
-            f"{slot}: record carries no route_records; an absent census is "
-            "not a clean bill")
-    if not isinstance(substitutes, list) or not substitutes:
-        problems.append(
-            f"{slot}: record carries no substitute_decoders; a gate that "
-            "knows no substitute detects nothing")
-    if problems:
-        return problems
-    try:
-        verdict = check_route_receipt(
-            priced_routes=priced,
-            route_records=rows,
-            substitute_decoders=substitutes,
-        )
-    except TesseraRouteReceiptError as exc:
-        return [f"{slot}: carried census is malformed: {exc}"]
-    if not verdict["passed"]:
-        problems.append(f"{slot}: FAILED — {verdict['detail']}")
-    if record.get("passed") is not True and verdict["passed"]:
-        problems.append(
-            f"{slot}: record carries passed={record.get('passed')!r} but "
-            "its own records replay to agreement; re-fill the slot")
-    if record.get("passed") is True and not verdict["passed"]:
-        problems.append(
-            f"{slot}: record claims passed=true but its own records replay "
-            f"to refusal: {verdict['detail']}")
-    for key, carried_key in (("served_routes", "served_routes"),
-                             ("served_decoders", "served_decoders")):
-        if record.get(carried_key) != verdict[key]:
-            problems.append(
-                f"{slot}: carried {carried_key} "
-                f"{record.get(carried_key)!r} disagrees with the replay "
-                f"{verdict[key]!r}")
-    return problems
-
-
-#: The verifier :func:`verify` replays for each lane-scoped slot, keyed by
-#: slot name.  This is the one code-side entry a fourth lane with a novel gate
-#: adds: the slot's vocabulary membership is derived from the lane's own spec
-#: (:func:`lane_scoped_slots`), and the replay is named here.  A derived slot
-#: with no entry here is REFUSED wherever it is declared, filled, or verified
-#: (RobTand/prismaquant#162). Lane-slot verifiers take ``(slot, record)``;
-#: the scoped census also receives the independent ``card``/``model_dir``.
-def make_route_trace_record(
-    *,
-    tool: str,
-    model_sha: str | None,
-    traces: Sequence[tuple[str, Any]],
-    expected_ranks: int,
-    config_json: str,
-    build: Mapping[str, Any] | None = None,
-    platform: str | None = None,
-    serve_fingerprint: str | None = None,
-    git_commit: str | None = None,
-) -> dict[str, Any]:
-    """Close `route.trace` from every rank's served trace (#575).
-
-    Raises ``RouteTraceNotVerified`` when no usable observation exists and
-    ``TesseraRouteTraceError`` when the observation disagrees with the price:
-    neither produces a record, so the slot stays unfilled and publication
-    refuses.  Only an agreeing verdict is written, and `verify` replays it.
-    """
-    from copy import deepcopy
-
-    from prismaquant import tessera_route_trace_gate as gate
-
-    executes, formats = gate.load_trace_contract()
-    resolved = gate.resolve_platform(build, platform)
-    try:
-        config = json.loads(config_json)
-    except ValueError as exc:
-        raise gate.TesseraRouteTraceError(f"config.json is not JSON: {exc}") from exc
-    verdict = gate.compare_route_traces(
-        list(traces), expected_ranks=expected_ranks, config=config,
-        platform=resolved, executes_by_platform=executes, formats=formats)
-    if verdict["status"] == gate.NOT_VERIFIED:
-        raise gate.RouteTraceNotVerified(verdict["detail"])
-    if verdict["status"] != gate.AGREE:
-        raise gate.TesseraRouteTraceError(verdict["detail"])
-    carried = []
-    for label, payload in traces:
-        if isinstance(payload, (str, bytes)):
-            payload = json.loads(payload)
-        carried.append({"rank": label, "trace": deepcopy(payload)})
-    return make_record(
-        slot=ROUTE_TRACE_SLOT,
-        tool=tool,
-        passed=True,
-        model_sha=model_sha,
-        metrics={
-            "n_ranks": len(carried),
-            "n_priced_modules": sum(verdict["priced"].values()),
-            "n_served_modules": sum((verdict["served"] or {}).values()),
-        },
-        detail=verdict["detail"],
-        serve_fingerprint=serve_fingerprint,
-        git_commit=git_commit,
-        extra={
-            "route_traces": carried,
-            "expected_ranks": expected_ranks,
-            "platform": resolved,
-            "config_json": config_json,
-            "trace_verdict": verdict,
-        },
-    )
-
-
-def _verify_route_trace_record(
-    slot: str,
-    record: Mapping[str, Any],
-    *,
-    card: Mapping[str, Any] | None = None,
-    model_dir: str | os.PathLike | None = None,
-) -> list[str]:
-    """Replay the served-vs-priced contract histogram from the carried traces."""
-    from prismaquant import tessera_route_trace_gate as gate
-
-    traces = record.get("route_traces")
-    config_json = record.get("config_json")
-    expected = record.get("expected_ranks")
-    problems: list[str] = []
-    if not isinstance(traces, list) or not traces or not all(
-            isinstance(row, Mapping) and isinstance(row.get("rank"), str)
-            for row in traces):
-        problems.append(
-            f"{slot}: record carries no route_traces; an absent observation is "
-            "not a clean bill")
-    if not isinstance(config_json, str) or not config_json:
-        problems.append(f"{slot}: record carries no config_json to price against")
-    if type(expected) is not int:
-        problems.append(f"{slot}: record carries no expected_ranks")
-    if problems:
-        return problems
-    if model_dir is not None:
-        try:
-            on_disk = (Path(model_dir) / "config.json").read_bytes().decode("utf-8")
-        except (OSError, ValueError) as exc:
-            return [f"{slot}: cannot read the artifact's config.json: {exc}"]
-        if on_disk != config_json:
-            problems.append(
-                f"{slot}: carried config_json differs from the artifact's "
-                "config.json; the traces were compared against another price")
-    try:
-        executes, formats = gate.load_trace_contract()
-        platform = gate.resolve_platform((card or {}).get("build"), record.get("platform"))
-        verdict = gate.compare_route_traces(
-            [(row["rank"], row.get("trace")) for row in traces],
-            expected_ranks=expected, config=json.loads(config_json),
-            platform=platform, executes_by_platform=executes, formats=formats)
-    except (gate.TesseraRouteTraceError, ValueError) as exc:
-        return problems + [f"{slot}: REFUSED on replay: {exc}"]
-    if verdict["status"] != gate.AGREE:
-        problems.append(f"{slot}: {verdict['detail']}")
-    if record.get("passed") is not True:
-        problems.append(f"{slot}: record carries passed={record.get('passed')!r}")
-    if record.get("trace_verdict") != verdict:
-        problems.append(
-            f"{slot}: carried trace_verdict differs from the replay against "
-            "the current packaged contract")
-    return problems
-
-
 def make_route_sweep_record(
     *,
     tool: str,
@@ -3411,11 +3123,51 @@ def _verify_route_sweep_record(
     return problems
 
 
+#: The replays core itself owns for lane-declared slots, keyed by slot name.
+#: ``route.sweep`` is here because the compressed-tensors lane is data only
+#: and its sweep gate is a core module.  A lane with a plugin registers its
+#: slots' replays there instead (``shipcard_slot_verifiers``, decoupling step
+#: 6, PQ #1553), and :func:`lane_slot_verifiers` is the merged view every
+#: check reads.  The slot's vocabulary membership is derived from the lane's
+#: own spec (:func:`lane_scoped_slots`); a derived slot with no replay in the
+#: merged view is REFUSED wherever it is declared, filled, or verified
+#: (RobTand/prismaquant#162).
+#:
+#: Entries here take ``(slot, record)`` after the generic ``passed`` check.
+#: A plugin's replays take ``(slot, record, *, card, model_dir)`` and own the
+#: slot's whole verdict, so :func:`verify` routes them past that check.
 LANE_SLOT_VERIFIERS: dict[str, Callable[..., list[str]]] = {
-    ROUTE_CENSUS_SLOT: _verify_route_census_record,
-    ROUTE_TRACE_SLOT: _verify_route_trace_record,
     ROUTE_SWEEP_SLOT: _verify_route_sweep_record,
 }
+
+
+def lane_plugin_slot_verifiers() -> dict[str, Callable[..., list[str]]]:
+    """The slot replays lane plugins register, keyed by slot name.
+
+    Each lane plugin that provides ``shipcard_slot_verifiers`` answers with
+    ``{slot: replay}``.  A slot two owners claim -- two plugins, or a plugin
+    and :data:`LANE_SLOT_VERIFIERS` -- RAISES: choosing one replay would be a
+    guess about which lane's evidence the slot holds.
+    """
+    from prismaquant.lane_spec import lane_hooks
+
+    found: dict[str, Callable[..., list[str]]] = {}
+    owners: dict[str, str] = {slot: "shipcard" for slot in LANE_SLOT_VERIFIERS}
+    for lane, hook in lane_hooks("shipcard_slot_verifiers"):
+        for slot, replay in dict(hook()).items():
+            if slot in owners:
+                raise KeyError(
+                    f"shipcard slot {slot!r} has two replays, from "
+                    f"{owners[slot]!r} and lane {lane!r}; one slot has one "
+                    "verifier")
+            owners[slot] = lane
+            found[slot] = replay
+    return found
+
+
+def lane_slot_verifiers() -> dict[str, Callable[..., list[str]]]:
+    """Every lane-declared slot's replay: core's own plus each plugin's."""
+    return {**LANE_SLOT_VERIFIERS, **lane_plugin_slot_verifiers()}
 
 
 def required_slots(
@@ -3495,28 +3247,51 @@ def _count_table(value: Any) -> dict[str, int] | None:
     return dict(value)
 
 
+def _lane_owes_route_histogram(lane: Any) -> bool:
+    """Does the card's lane declare ``route_histogram_required``?
+
+    The card carries the lane's ``export_container``; a spec id is accepted
+    too, as :func:`lane_gate_slots` accepts it.  An unknown lane owes nothing
+    here -- the rate-axis read beside it still applies.
+    """
+    name = str(lane or "").strip().lower()
+    if not name:
+        return False
+    from prismaquant.lane_spec import lane_spec_for_container, load_lane_spec
+
+    try:
+        spec = lane_spec_for_container(name)
+    except KeyError:
+        try:
+            spec = load_lane_spec(name)
+        except KeyError:
+            return False
+    return bool(spec.route_histogram_required)
+
+
 def _verify_route_histogram(
     card: Mapping[str, Any], *, model_dir: str | os.PathLike | None = None,
 ) -> list[str]:
-    """Replay ``build.route_histogram``, and require it on a Tessera card.
+    """Replay ``build.route_histogram``, and require it where the lane owes it.
 
-    Every Tessera allocation writes ``serving_lane_provenance`` into its
-    recipe, so a Tessera card that carries no histogram lost it between the
-    recipe and the card. The obligation is read the way the uniform-control
-    obligation is (``_is_rate_axis_artifact``): from the card's lane, its build
-    block or the artifact's own config, OR-ed, so one erasure does not remove
-    it. A native compressed-tensors card owes none yet, because its allocation
-    writes no provenance (#1387). A histogram, wherever present, must be
+    A lane whose spec sets ``route_histogram_required`` (the Tessera lane)
+    writes ``serving_lane_provenance`` into every allocation's recipe, so its
+    card that carries no histogram lost it between the recipe and the card.
+    The obligation is read the way the uniform-control obligation is
+    (``_is_rate_axis_artifact``): from the card's lane, its build block or the
+    artifact's own config, OR-ed, so one erasure does not remove it. A native
+    compressed-tensors card owes none yet, because its allocation writes no
+    provenance (#1387). A histogram, wherever present, must be
     self-consistent: positive integer counts under string keys, route statuses
     summing to ``units_total``, and no more contracted units than units.
     """
     build = card.get("build")
     histogram = build.get("route_histogram") if isinstance(build, Mapping) else None
     if histogram is None:
-        owed = (str(card.get("lane") or "").strip().lower() == "tessera"
+        owed = (_lane_owes_route_histogram(card.get("lane"))
                 or _is_rate_axis_artifact(card, model_dir=model_dir))
         if owed:
-            return ["build.route_histogram is missing: a Tessera card carries the "
+            return ["build.route_histogram is missing: this lane's card carries the "
                     "recipe's route-status and activation-contract counts beside "
                     "its bpp (principle 12); re-open the card from the exporter's "
                     "build anchor"]
