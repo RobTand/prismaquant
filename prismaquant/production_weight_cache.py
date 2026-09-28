@@ -1272,8 +1272,8 @@ class ProductionWeightCache:
 
     @staticmethod
     def _file_signature(value):
-        from .perturbed_x_cache import cache_file_stat_signature
-        return cache_file_stat_signature(value)
+        from .file_identity import file_stat_signature
+        return file_stat_signature(value)
 
     @staticmethod
     def _file_tensor_guard(tensor):
