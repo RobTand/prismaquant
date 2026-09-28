@@ -2703,6 +2703,13 @@ class TesseraRouteCell:
     runtime_vllm: str = ""
     runtime_torch: str = ""
     evidence: "CellEvidence | None" = None
+    #: The Tessera code the evidence was taken on (contract v41, #1561), as
+    #: ``lane_eligibility.EligibilityCell`` parses it; empty when the cell
+    #: names none. ``cell_matches_serving_context`` compares the digest with
+    #: the pinned serving code. Not part of :func:`contract_answer` yet: the
+    #: reviewed answer gains this column at the bump that activates a v3 pin.
+    runtime_tessera_commit: str = ""
+    runtime_serving_source_sha256: str = ""
 
     @property
     def native(self) -> bool:
@@ -4593,6 +4600,8 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             runtime_vllm=cell.runtime_vllm,
             runtime_torch=cell.runtime_torch,
             evidence=cell.evidence,
+            runtime_tessera_commit=cell.runtime_tessera_commit,
+            runtime_serving_source_sha256=cell.runtime_serving_source_sha256,
         ))
 
     world, loader_axes = _parse_tensor_parallel(payload, path)

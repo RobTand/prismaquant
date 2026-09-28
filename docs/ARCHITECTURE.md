@@ -1,5 +1,34 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #1561, the #1549 follow-up,
+`claude/pq-1561-serving-code-identity`): PrismaQuant reads
+Tessera's serving code identity (Tessera #678, contract v41). The change is
+dormant under the tracked v2 pin, and every gate answers as before.
+
+- **Pin schema v3** (`prismaquant.tessera_serving_runtime_pin.v3`) splits
+  `commit` into `producer_commit` (the venv's Tessera, equal to
+  `TESSERA_DEV_PIN_COMMIT`), `serving_commit`, and `serving_source_sha256`
+  (the `tessera.package_source.v1` digest of the serving tree). A v3 pin
+  admits no PENDING sentinel. A v2 pin reads as one commit and no digest.
+- **The cell matcher.** `lane_eligibility.cell_matches_serving_context`, the
+  one matcher every admission path shares, also requires a cell's
+  `runtime.serving_source_sha256` to equal the pinned digest. A cell that
+  names no code does not match a v3 pin. `resolve_unit_route` keeps a
+  mismatched cell as a regime refusal that names the cell and both digests.
+  The default reads the tracked pin, so a caller that passes nothing is
+  checked rather than skipped. `None` (a v2 pin) skips the check.
+- **The trace gate.** Under a v3 pin, `route.trace` requires every rank's
+  header `serving_source_sha256` to equal the pinned digest. A different or
+  malformed digest is refused, and an absent one is not verified. The check
+  is eager-only, like the rest of the gate.
+- **Scope.** On the pinned v40 bytes, a before/after snapshot of the pin,
+  all 14 cells, their 56 unit routes, the development answer and eight trace
+  verdicts is byte-identical (`tests/test_tessera_serving_code_identity.py`).
+  A cell that names its code is now parsed and shape-checked, both fields or
+  neither, where it was accepted and ignored before. `contract_answer` gains
+  the code column at the bump that activates v3, and that bump needs the
+  cells re-censused at `serving_commit`.
+
 Primitive digest-site ratchet (2026-09-27, `astra/digest-site-ratchet`, PQ
 #1508): the #1298 shrink-only duplication baseline now also records every raw
 `hashlib` constructor site and literal `sort_keys=True` JSON encoding outside
@@ -25222,7 +25251,9 @@ are NAMED by the lane spec, never vendored.
 
 **The boundary is two objects, both machine-readable.** The pin,
 `prismaquant/tessera_runtime/tessera_serving_runtime_pin.json`
-(`prismaquant.tessera_serving_runtime_pin.v2`), read by
+(`prismaquant.tessera_serving_runtime_pin.v2`; the reader also accepts v3,
+which splits the commit into producer commit, serving commit and serving code
+digest, PQ #1561), read by
 `tessera_serving_runtime_pin.py`; and the contract the plugin packages,
 `tessera/serving/runtime_contract.json` (`tessera.runtime-contract.v1`, lane
 table `tessera.lane-eligibility.v10` as installed, with the consumer also
