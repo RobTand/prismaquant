@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import os
 import threading
 import time
 
@@ -238,16 +239,80 @@ def test_workers_follow_the_measured_rates():
     stream = io_engine.ReadStream(
         engine, entries, io_engine.FixedBudget(buffer_bytes=8000), None)
     with stream._cond:
-        # Nothing measured yet: the whole pool.
-        assert stream._workers() == 8
+        # Nothing measured yet: the pool less the consumer's core.
+        assert stream._workers() == 7
         stream.counters["bytes_read"], stream.counters["read_s"] = 100, 1.0
         stream._busy_min_s = 10.0
         stream._took_at = time.monotonic()
         stream._cursor = 4
         # 3600 bytes at 100 B/s per read must land within 10 s: 4 reads.
         assert stream._workers() == 4
+        # A waiting consumer gets the whole width, which has held its core
+        # back until the consumer measures a work interval (PQ #1533).
         stream._consumer_waiting = True
-        assert stream._workers() == 8
+        assert stream._workers() == 7
+
+
+def test_the_consumer_core_is_held_back_only_while_the_consumer_works():
+    """PQ #1533: a consumer that mostly waits frees its core; a busy one keeps it.
+
+    The width is the engine's own accounting of the consumer's time in
+    ``take`` against its time working between takes, never a caller cap,
+    and never the consumer's state at one instant.
+    """
+    engine = io_engine.IOEngine()
+    engine.width = 8
+    entries = [io_engine.ReadEntry(key=i, path="unused", size=900, limit=900,
+                                   held_bytes=900, expected_sha256=None,
+                                   decoder=_decode, group=i)
+               for i in range(4)]
+    stream = io_engine.ReadStream(
+        engine, entries, io_engine.FixedBudget(buffer_bytes=8000), None)
+    with stream._cond:
+        # No work interval measured: the consumer's core is held back, as
+        # before #1533, even while the consumer waits.
+        assert stream._width() == 7
+        stream._consumer_waiting = True
+        assert stream._width() == 7
+        stream._consumer_waiting = False
+        stream._worked = True
+        # A consumer that mostly waits (the fence: sha256 in the pool, the
+        # consumer only admits) gives its core to the reads.
+        stream.counters["consumer_work_s"] = 0.1
+        stream.counters["consumer_steady_wait_s"] = 2.0
+        assert stream._width() == 8
+        # A CPU-heavy consumer keeps its core, waiting or not: a read started
+        # during a short wait runs on into its next work interval.
+        stream.counters["consumer_work_s"] = 5.0
+        assert stream._width() == 7
+        stream._consumer_waiting = True
+        assert stream._width() == 7
+        # The first take's fill wait never weighs the core.
+        stream.counters["consumer_steady_wait_s"] = 0.0
+        stream.counters["consumer_wait_s"] = 60.0
+        stream.counters["consumer_work_s"] = 0.5
+        assert stream._width() == 7
+
+
+def test_work_is_measured_take_to_take_even_when_the_consumer_releases_early(tmp_path):
+    """Work after an early release() still counts as the consumer's (PQ #1533)."""
+    entries, _contents = _stream_files(tmp_path)
+    budget = io_engine.FixedBudget(buffer_bytes=2 * SIZE, headroom=1 << 30)
+    with io_engine.read_stream(entries, budget=budget) as stream:
+        for group in range(3):
+            stream.take(group)
+            stream.release()
+            time.sleep(0.05)
+    counters = stream.counters
+    groups = len(counters["groups_taken"])
+    assert groups >= 2
+    assert counters["consumer_work_s"] >= 0.05 * (groups - 1)
+    assert counters["consumer_busy_s"] < 0.05
+    assert counters["consumer_steady_wait_s"] <= counters["consumer_wait_s"]
+
+
+def test_the_engine_pool_spans_the_whole_affinity():
+    assert io_engine.IOEngine().width == max(1, len(os.sched_getaffinity(0)))
 
 
 def test_a_closed_stream_refuses_and_holds_nothing(tmp_path):
