@@ -47,6 +47,11 @@ CASE_INPUTS = [
     3.14,
     True,
     None,
+    # Int keys sort NUMERICALLY in the base single-dumps spelling; the
+    # normalized owner sorts them as STRINGS. RED at 87839cc5 by design.
+    {10: "a", 9: "b"},
+    {"x": {10: 1, 9: 2, 100: 3}},
+    {-1: 1, 5: 2, 10: 3},
 ]
 
 

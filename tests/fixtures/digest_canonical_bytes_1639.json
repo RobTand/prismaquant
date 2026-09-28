@@ -33,6 +33,26 @@
     },
     "sha": "d9734db93b6c9e109409e2f517ab572d44ab79d47b8bf902c1774d8400f06580"
   },
+  "case10": {
+    "hex": "7b2278223a7b2239223a322c223130223a312c22313030223a337d7d",
+    "input": {
+      "x": {
+        "10": 1,
+        "100": 3,
+        "9": 2
+      }
+    },
+    "sha": "5a7394d5e70ccb7c7f47621d420b788b147f35d2737c975c4f3a6b6a306ff909"
+  },
+  "case11": {
+    "hex": "7b222d31223a312c2235223a322c223130223a337d",
+    "input": {
+      "-1": 1,
+      "10": 3,
+      "5": 2
+    },
+    "sha": "b34afb1849a3928da50b3ef5a3f750c5abdacef651e23d487801690dd8858799"
+  },
   "case2": {
     "hex": "7b7d",
     "input": {},
@@ -68,6 +88,15 @@
     "input": null,
     "sha": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
   },
+  "case9": {
+    "hex": "7b2239223a2262222c223130223a2261227d",
+    "input": {
+      "10": "a",
+      "9": "b"
+    },
+    "sha": "32c76047634ee8d61aeb727dee6fcb2507b60cc4fe6ecce96d04274d6a9c8c03"
+  },
+  "int_key_note": "int keys sort NUMERICALLY in base (single dumps); the normalized owner sorts them as STRINGS -- these cases fail at 87839cc5 by design (RED)",
   "refusals": {
     "nan": "TeacherPayloadError",
     "set": "TeacherPayloadError"
