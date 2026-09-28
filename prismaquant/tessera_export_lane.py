@@ -521,7 +521,7 @@ def require_producer_repo_is_pinned(
                 "the Tessera the serving pin attests. This repository names "
                 "Tessera's tools instead of vendoring them; point "
                 f"{tool.repo_env} at the pinned commit "
-                f"({pin.commit})."
+                f"({pin.producer_commit})."
             )
         digest = file_sha256(found)
         if digest != pin.contract_sha256:
@@ -532,7 +532,7 @@ def require_producer_repo_is_pinned(
                 "and the checkout that WRITES the bytes must be one object "
                 "(principle 8); a producer-side import satisfying the pin "
                 "while a second checkout encodes is exactly the split this "
-                f"gate refuses. Check out {pin.commit}, or move the pin in "
+                f"gate refuses. Check out {pin.producer_commit}, or move the pin in "
                 "ONE reviewed commit."
             )
     return tuple(roots)

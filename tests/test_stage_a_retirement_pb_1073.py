@@ -210,3 +210,36 @@ def test_a_changed_pinned_file_refuses(tmp_path, monkeypatch, capsys):
     assert retire_main(argv(root, succ, [bindings])) == 3
     assert "is not the file its commit recorded" in capsys.readouterr().err
     assert all(os.path.exists(path) for path in pinned)
+
+
+def test_a_rerun_refuses_when_a_reclaimed_batch_record_is_gone(tmp_path, monkeypatch, capsys):
+    """PB's public batch reader reads every committed batch, reclaimed ones too (PQ #1571).
+
+    Reclaim keeps the batch record: it clears the charge and never unlinks the
+    record.  A reclaimed batch whose record is gone is therefore damaged PB state.
+    The public reader's census rule is that unknown is never read as empty, so a
+    rerun refuses instead of skipping the batch.
+    """
+    pb_repo = _pb(monkeypatch)
+    from prismabuild import produced_output as po
+    from prismaquant import stage_a_chain_resume as resume_mod
+
+    root = tmp_path / "run"
+    space = completed(root, monkeypatch)
+    succ = successor(tmp_path, monkeypatch)
+    pinned, _digests = plane_paths(space)
+    q, publication = _owner(tmp_path, pb_repo, _template(space / "exact-boundaries"))
+    _commit(publication, "cotangent-pins", pinned)
+    _name_producer(space, resume_mod.producer_binding(publication))
+    monkeypatch.setattr(resume_mod, "require_producer_contained", lambda producer: None)
+    bindings = tmp_path / "bindings"
+    bindings.mkdir()
+    assert retire_main(argv(root, succ, [bindings])) == 0
+    assert last_json(capsys)["batches"] == {"cotangent-pins": "reclaimed"}
+
+    record = (Path(q.root) / "residency" / po.OUTPUT_BATCHES_SUBDIR
+              / po.instance_namespace(publication.instance) / "cotangent-pins.json")
+    assert record.is_file()
+    record.unlink()
+    assert retire_main(argv(root, succ, [bindings])) == 3
+    assert "batch-record-missing" in capsys.readouterr().err

@@ -373,6 +373,41 @@ both exists and is read by a gate on this side. When Tessera publishes wheels, a
 
 ---
 
+## Pin schema v3: the serving code identity (#1561)
+
+The reader accepts a second schema, `prismaquant.tessera_serving_runtime_pin.v3`,
+which splits `commit` into three members. The tracked pin stays v2 until a
+reviewed bump activates v3.
+
+| Member | What it names | Who reads it |
+|---|---|---|
+| `producer_commit` | The Tessera the producer venv carries. It equals `TESSERA_DEV_PIN_COMMIT`, and it is the only member that names a venv. | `require_producer_repo_is_pinned`, the venv name |
+| `serving_commit` | The Tessera the serve installs. `pin.commit` reads it. | People, and the serve recipe |
+| `serving_source_sha256` | `tessera.serving.source_identity.serving_source_sha256()` of `serving_commit`: every source file in the package, algorithm `tessera.package_source.v1` (Tessera #678, contract v41). | The cell matcher and the `route.trace` gate |
+| `contract_sha256` | Unchanged: the contract bytes every export and admission gate reads. | Every gate |
+
+A v3 pin admits no PENDING sentinel. The module constants split to match:
+`TESSERA_SERVING_RUNTIME_PINNED_COMMIT` is the serving commit, and
+`TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT` and
+`TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256` join it. The pin file
+and the constants are still one reviewed change.
+
+Under a v3 pin, a lane cell matches only if its `runtime.serving_source_sha256`
+equals the pinned digest. A cell that names no code does not match. Every rank
+of a traced serve must stamp the pinned digest in its trace header: a
+different digest is refused, and an absent one is not verified. A v2 pin names
+no digest, so neither check runs.
+
+**Activating v3 needs a cell re-census.** No cell in contract v41 names its
+code, so a v3 pin admits nothing until the cells are censused with
+`tessera_commit` and `serving_source_sha256` stamped at `serving_commit`. The
+same bump adds the code column to `contract_answer`, so the development pin's
+answer is re-reviewed then. A code-only bump needs no contract re-take only
+when the package's source files are unchanged; every pin bump so far changed
+them.
+
+---
+
 ## Moving the pin
 
 Verified against `RobTand/tessera` master on 2026-09-28, at the merge of

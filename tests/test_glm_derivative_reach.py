@@ -34,6 +34,14 @@ from prismaquant.model_profiles.glm5_next import Glm5NextProfile  # noqa: E402
 from tests.test_glm_mtp_layer import _randomize, _text_config  # noqa: E402
 
 NAME = "transformers.models.glm5_next.modeling_glm5_next"
+# The correction is derived from one pinned modeling source, and the product
+# refuses any other. A newer transformers also ships glm5_next (dl380g10's
+# venv carries 5.17.0), so importability alone does not scope these tests.
+if (hashlib.sha256(Path(importlib.import_module(NAME).__file__).read_bytes())
+        .hexdigest() != derivative.ORIGINAL_MODELING_SHA256):
+    pytest.skip("the installed glm5_next modeling source is not the pinned "
+                f"one ({derivative.ORIGINAL_MODELING_SHA256}, transformers "
+                "5.16.1); run under the -tf516 venv", allow_module_level=True)
 PROFILE = Glm5NextProfile()
 MTP_CLASSES = {"Glm5NextTextAttention", "Glm5NextTextIndexer", "Glm5NextTextMoE",
                "Glm5NextTextExperts", "Glm5NextTextTopkRouter", "Glm5NextTextMLP",

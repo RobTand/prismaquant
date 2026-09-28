@@ -292,6 +292,8 @@ _LAUNCH_SCHEMAS = frozenset({
 } | SCOPED_LANE_SCHEMAS)
 _DIGEST_IMAGE = re.compile(
     r"[a-z0-9][a-z0-9._/-]*[a-z0-9]@sha256:[0-9a-f]{64}")
+_COMMIT = re.compile(r"[0-9a-f]{40}")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 #: Schema of the provenance payload this module produces. It was
 #: ``prismaquant.cb_route_attestation.v2`` until 2026-09-02, when the Gridbook
@@ -545,14 +547,79 @@ class ServingContext:
         return tuple(self.as_dict().values())
 
 
-def cell_matches_serving_context(cell: Any, context: ServingContext) -> bool:
-    """Match a parsed v5 cell's whole scope, shared by every admission path."""
+#: The default of every serving-code check: read the tracked pin's digest
+#: (:func:`tessera_serving_runtime_pin.pinned_serving_source_sha256`). It is a
+#: sentinel rather than ``None`` because ``None`` means "skip", and a caller
+#: that omits the keyword must be checked against the pin, not skipped.
+PINNED_SERVING_SOURCE = object()
+
+
+def resolve_serving_source_sha256(value: Any = PINNED_SERVING_SOURCE) -> str | None:
+    """The digest a code check compares against: the argument, or the tracked pin's.
+
+    ``None`` is the v2 answer (no code check); a string is a v3 pin's digest.
+    """
+    if value is PINNED_SERVING_SOURCE:
+        from .tessera_serving_runtime_pin import pinned_serving_source_sha256
+
+        return pinned_serving_source_sha256()
+    if value is not None and (not isinstance(value, str) or not _SHA256.fullmatch(value)):
+        raise LaneEligibilityError(
+            f"serving_source_sha256 must be None or 64 lowercase hex digits, got {value!r}")
+    return value
+
+
+def cell_serving_code_admits(
+    cell: Any, serving_source_sha256: Any = PINNED_SERVING_SOURCE,
+) -> tuple[bool, str]:
+    """Whether a cell's evidence was taken on the code the pin serves (#1561).
+
+    ``serving_source_sha256`` is the pinned serving code digest. ``None`` (a
+    v2 pin) skips the check. A string (a v3 pin) requires the cell's
+    ``runtime.serving_source_sha256`` to equal it; a cell that names no code
+    was measured on code nobody recorded, so it does not match either. The
+    refusal names the cell and both digests, so a unit left unattested by it
+    says which code the evidence was taken on and which code serves.
+    """
+    pinned = resolve_serving_source_sha256(serving_source_sha256)
+    if pinned is None:
+        return True, ""
+    stamped = getattr(cell, "runtime_serving_source_sha256")
+    cell_id = getattr(cell, "id", None) or getattr(cell, "cell_id", "")
+    if not stamped:
+        return False, (
+            f"cell {cell_id!r} names no serving code (runtime.serving_source_sha256 "
+            f"is absent), and the pinned serving code is {pinned}; a cell measured "
+            "on unrecorded code does not attest the pinned code")
+    if stamped != pinned:
+        return False, (
+            f"cell {cell_id!r} was measured on serving code {stamped} "
+            f"(tessera commit {getattr(cell, 'runtime_tessera_commit', '')}), "
+            f"and the pinned serving code is {pinned}; evidence taken on other "
+            "code does not attest the pinned code")
+    return True, ""
+
+
+def cell_matches_serving_context(
+    cell: Any,
+    context: ServingContext,
+    *,
+    serving_source_sha256: Any = PINNED_SERVING_SOURCE,
+) -> bool:
+    """Match a parsed v5 cell's whole scope, shared by every admission path.
+
+    Since #1561 the scope includes the serving code: see
+    :func:`cell_serving_code_admits`. The default reads the tracked pin, so a
+    v2 pin (no digest) matches exactly as before and a v3 pin cannot be
+    skipped by a caller that passes nothing.
+    """
     return (
         cell.platform == context.platform
         and cell.structure == context.structure
         and context.residency in cell.residency_modes
         and cell.runtime_image == context.runtime_image
         and context.execution_mode in cell.execution_modes
+        and cell_serving_code_admits(cell, serving_source_sha256)[0]
     )
 
 
@@ -1696,6 +1763,12 @@ class EligibilityCell:
     #: v6's required ``evidence`` block. ``None`` for pre-v6 grammars, which
     #: published no such field; see :func:`cell_evidence_admits`.
     evidence: CellEvidence | None = None
+    #: The Tessera code the cell's evidence was taken on (Tessera contract
+    #: v41, optional, both or neither): the 40-hex commit for a person, and
+    #: the ``tessera.package_source.v1`` digest a v3 pin compares
+    #: (:func:`cell_serving_code_admits`). Empty when the cell names no code.
+    runtime_tessera_commit: str = ""
+    runtime_serving_source_sha256: str = ""
 
     @classmethod
     def from_dict(
@@ -1791,10 +1864,13 @@ class EligibilityCell:
         execution_modes: tuple[str, ...] = ()
         runtime_vllm = ""
         runtime_torch = ""
+        runtime_commit = runtime_digest = ""
         if is_scoped:
             runtime_image, execution_modes, runtime_vllm, runtime_torch = (
                 parse_runtime_scope(payload["runtime"], where + ".runtime",
                                     require_versions=has_evidence))
+            runtime_commit, runtime_digest = parse_runtime_code(
+                payload["runtime"], where + ".runtime")
         evidence: CellEvidence | None = None
         if has_evidence:
             evidence = parse_cell_evidence(
@@ -1836,6 +1912,8 @@ class EligibilityCell:
             runtime_vllm=runtime_vllm,
             runtime_torch=runtime_torch,
             evidence=evidence,
+            runtime_tessera_commit=runtime_commit,
+            runtime_serving_source_sha256=runtime_digest,
         )
 
     def covers_rung(self, facts: UnitStructuralFacts) -> bool:
@@ -1885,6 +1963,12 @@ class EligibilityCell:
             payload["runtime"] = {
                 "image": self.runtime_image, "execution_modes": list(self.execution_modes),
             }
+            if self.runtime_serving_source_sha256:
+                # Emitted only when the cell names its code, so a cell that
+                # names none serializes exactly as it did before v41.
+                payload["runtime"]["tessera_commit"] = self.runtime_tessera_commit
+                payload["runtime"]["serving_source_sha256"] = (
+                    self.runtime_serving_source_sha256)
         return payload
 
 
@@ -2270,6 +2354,7 @@ def resolve_unit_route(
     residency: str | None = None,
     runtime_image: str | None = None,
     execution_mode: str | None = None,
+    serving_source_sha256: Any = PINNED_SERVING_SOURCE,
 ) -> UnitRoute:
     """Resolve one unit's route status against the pinned eligibility table.
 
@@ -2288,6 +2373,12 @@ def resolve_unit_route(
     V5 also requires ``runtime_image`` and ``execution_mode``. Every regime
     must resolve on that same complete target; cells from different runtime
     scopes cannot jointly attest one artifact.
+
+    ``serving_source_sha256`` is the pinned serving code digest (#1561); the
+    default reads the tracked pin. A scoped cell that names this unit but was
+    measured on other code, or on none, is kept as a refusal beside its
+    regime, naming the cell and both digests, exactly as a cell refused by
+    its own evidence is. ``None`` (a v2 pin) skips the check.
     """
     if not table.present:
         return UnitRoute(
@@ -2368,10 +2459,14 @@ def resolve_unit_route(
         and cell.family == facts.payload_family
         and cell.structure == facts.structure
         and (not is_v4 or residency in cell.residency_modes)
-        and (not is_scoped or cell_matches_serving_context(cell, serving_context))
+        and (not is_scoped or cell_matches_serving_context(
+            cell, serving_context, serving_source_sha256=None))
         and cell.covers_rung(facts)
         and cell.matches(facts)
     ]
+    # Every table, scoped or not: a legacy grammar has no runtime block, so
+    # its cells name no code and a v3 pin admits none of them.
+    pinned_code = resolve_serving_source_sha256(serving_source_sha256)
     # A cell whose own published evidence refuses it is NOT dropped silently
     # into "no cell names this unit": the two are different facts and the
     # shipcard has to be able to tell them apart. Keep the refusal beside its
@@ -2382,7 +2477,11 @@ def resolve_unit_route(
     candidates: list[EligibilityCell] = []
     refusals: dict[str, tuple[str, str]] = {}
     for cell in matched:
-        admits, why = cell_evidence_admits(cell)
+        # The code scope first: evidence taken on other code says nothing
+        # about the pinned code, whatever the evidence itself says.
+        admits, why = cell_serving_code_admits(cell, pinned_code)
+        if admits:
+            admits, why = cell_evidence_admits(cell)
         if admits:
             admits, why = cell_lane_admits(cell, facts.rate_q256, table.lanes)
         if admits:
@@ -3025,6 +3124,40 @@ def parse_runtime_scope(payload: Any, where: str, *, require_versions: bool = Fa
     return image, tuple(modes), str(vllm), str(torch_version)
 
 
+#: The code half of a cell's ``runtime`` block (Tessera contract v41), spelled
+#: as Tessera's ``contract.RUNTIME_CODE_KEYS``: optional, both or neither.
+RUNTIME_CODE_KEYS = ("tessera_commit", "serving_source_sha256")
+
+
+def parse_runtime_code(payload: Any, where: str) -> tuple[str, str]:
+    """``(tessera_commit, serving_source_sha256)`` a cell names, or ``("", "")``.
+
+    Both or neither, exactly as the publisher's ``cell_runtime_code`` reads
+    them: a commit with no digest gives a program nothing to compare, and a
+    digest with no commit gives a person no tree to find. The shapes are
+    checked because a malformed digest can never equal a pinned one, and a
+    table that carries one is not the table the publisher's validator admits.
+    """
+    if not isinstance(payload, Mapping):
+        raise LaneEligibilityError(f"{where} must be a JSON object")
+    present = [key for key in RUNTIME_CODE_KEYS if key in payload]
+    if not present:
+        return "", ""
+    if len(present) != len(RUNTIME_CODE_KEYS):
+        missing = [key for key in RUNTIME_CODE_KEYS if key not in present]
+        raise LaneEligibilityError(
+            f"{where} names {present} without {missing}; a cell names the "
+            "Tessera code it was measured on with both fields or neither")
+    commit, digest = payload["tessera_commit"], payload["serving_source_sha256"]
+    if not isinstance(commit, str) or not _COMMIT.fullmatch(commit):
+        raise LaneEligibilityError(
+            f"{where}.tessera_commit must be a 40-hex lowercase commit, got {commit!r}")
+    if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+        raise LaneEligibilityError(
+            f"{where}.serving_source_sha256 must be 64 lowercase hex digits, got {digest!r}")
+    return commit, digest
+
+
 def parse_v5_runtime(payload: Any, where: str) -> tuple[str, tuple[str, ...]]:
     """The v5 spelling, kept for callers that want only the two v5 fields."""
     image, modes, _, _ = parse_runtime_scope(payload, where)
@@ -3220,13 +3353,16 @@ __all__ = [
     "SmokeRecordRow",
     "cell_evidence_admits",
     "cell_lane_admits",
+    "cell_serving_code_admits",
     "lane_claim_for_cell",
     "parse_lane_claim",
     "parse_lane_claims",
     "derive_evidence_grade",
     "derive_smoke_attribution",
     "parse_cell_evidence",
+    "parse_runtime_code",
     "parse_runtime_scope",
+    "resolve_serving_source_sha256",
     "parse_v4_cell_contract",
     "ROUTE_ATTESTATION_SCHEMA",
     "ROUTE_STATUS_BACKED",

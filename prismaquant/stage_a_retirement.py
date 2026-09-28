@@ -45,10 +45,13 @@ steps, and every check comes before the first unlink:
    record and finishes: a path already gone is not a refusal.
 
 The queue root comes from each producer record, so the tool needs no
-produced-output binding of its own. It reads two private PrismaBuild helpers
-(``_load_batch_record``, ``_read_commitments``) because PrismaBuild publishes
-no reader for a staged batch's descriptors; the batch record is the only
-place the committed paths and identities live.
+produced-output binding of its own. It reads each staged batch's descriptors
+and charge through PrismaBuild's public batch reader
+(``produced_output.batch_records``, prismabuild#955, PQ #1571): the batch
+record is the only place the committed paths and identities live. That
+reader reads every batch, reclaimed ones too, and refuses a record it cannot
+read, so a reclaimed batch whose record is gone refuses a rerun. Reclaim
+never unlinks a record, so a missing one is damaged PrismaBuild state.
 """
 from __future__ import annotations
 
@@ -311,36 +314,31 @@ def producer_instances(producer: Mapping) -> list[tuple]:
     return found
 
 
-def _batches(queue, instance, template) -> list[dict]:
+def _charged_records(queue, instance, template) -> list[dict]:
+    """PB's public records for every batch it still charges this instance."""
     po = _sdk()["produced_output"]
     try:
-        commitments = po._read_commitments(po._commitments_path(queue.root, instance))
+        records = po.batch_records(queue, instance, template)
     except po.ProducedOutputError as exc:
-        raise RetirementRefused(f"unreadable commitments: {exc}") from exc
-    rows = []
-    for batch_id, entry in sorted(commitments["batches"].items()):
-        classes = dict(entry.get("class_bytes") or {})
-        if entry.get("origin_reclaimed"):
-            continue
-        try:
-            filed, sealed = po._load_batch_record(queue.root, instance, template, entry, batch_id)
-        except po.ProducedOutputError as exc:
-            raise RetirementRefused(f"batch {batch_id}: {exc}") from exc
-        rows.append({"batch_id": batch_id, "filed": filed,
-                     "paths": sorted(os.path.normpath(str(d["path"])) for d in sealed),
-                     "bytes": sum(int(classes.get(k) or 0)
-                                  for k in ("payload", "checkpoint", "temp"))})
-    return rows
+        raise RetirementRefused(f"unreadable batch records: {exc}") from exc
+    return [record for record in records if record["state"] != po.BATCH_STATE_RECLAIMED]
 
 
-def durable_charge(queue, instance) -> int:
+def _batch_charge(record: Mapping) -> int:
+    classes = record["commitment"].get("class_bytes") or {}
+    return sum(int(classes.get(name) or 0) for name in ("payload", "checkpoint", "temp"))
+
+
+def _batches(queue, instance, template) -> list[dict]:
+    return [{"batch_id": record["batch_id"], "filed": record["record"],
+             "paths": sorted(os.path.normpath(entry["path"]) for entry in record["entries"]),
+             "bytes": _batch_charge(record)}
+            for record in _charged_records(queue, instance, template)]
+
+
+def durable_charge(queue, instance, template) -> int:
     """Committed origin bytes PrismaBuild still charges this instance."""
-    po = _sdk()["produced_output"]
-    commitments = po._read_commitments(po._commitments_path(queue.root, instance))
-    return sum(int((entry.get("class_bytes") or {}).get(name) or 0)
-               for entry in commitments["batches"].values()
-               if not entry.get("origin_reclaimed")
-               for name in ("payload", "checkpoint", "temp"))
+    return sum(map(_batch_charge, _charged_records(queue, instance, template)))
 
 
 def _identity_holds(filed: Mapping, path: str) -> bool:
@@ -353,7 +351,7 @@ def _identity_holds(filed: Mapping, path: str) -> bool:
         return True
     if not isinstance(recorded, Mapping):
         return False
-    live = sdk["produced_output"]._portable_identity_of(info)
+    live = sdk["reader_lease"].portable_identity(info)
     return bool(sdk["reader_lease"].file_id_matches(recorded, live))
 
 
@@ -480,9 +478,9 @@ def apply_retirement(plan: Retirement) -> dict:
         raise RetirementRefused(f"{path} already seals another retirement")
     po = _sdk()["produced_output"]
     charged_before = {}
-    for queue, instance, _template, _row in plan.batches:
+    for queue, instance, template, _row in plan.batches:
         key = (str(queue.root), instance["owner_action_key"], instance["template_id"])
-        charged_before.setdefault(key, durable_charge(queue, instance))
+        charged_before.setdefault(key, durable_charge(queue, instance, template))
 
     checkpoints = plan.space / "checkpoints"
     if checkpoints.exists():
@@ -502,9 +500,9 @@ def apply_retirement(plan: Retirement) -> dict:
         out = dict(po.reclaim_origin(queue, instance, template, batch_id=row["batch_id"]))
         outcomes[row["batch_id"]] = "reclaimed" if out.get("ok") else str(out.get("refusal"))
     charged_after = {}
-    for queue, instance, _template, _row in plan.batches:
+    for queue, instance, template, _row in plan.batches:
         key = (str(queue.root), instance["owner_action_key"], instance["template_id"])
-        charged_after.setdefault(key, durable_charge(queue, instance))
+        charged_after.setdefault(key, durable_charge(queue, instance, template))
     refused = {batch: state for batch, state in outcomes.items() if state != "reclaimed"}
     report = {
         "schema": "prismaquant.stage_a.retirement_report.v1",
