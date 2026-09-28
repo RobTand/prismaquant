@@ -43,7 +43,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCANNED = ("prismaquant", "tools")
-EXCLUDED_PARTS = {"vendored", "archive", "__pycache__"}
+#: ``serving_runtime_patches`` holds image-side build scripts: they run inside a
+#: pinned serving image, where ``prismaquant`` is not importable, so they cannot
+#: reuse the digest owners or any other helper here, and their bytes are bound
+#: to the built image's digest by the patch set's MANIFEST.json, so they cannot
+#: be consolidated without rebuilding the image (the ``must_differ`` reason,
+#: PQ #1302, applied to a whole directory of sealed build inputs).
+EXCLUDED_PARTS = {"vendored", "archive", "__pycache__", "serving_runtime_patches"}
 BASELINE = ROOT / "tests" / "fixtures" / "duplication_baseline.json"
 THRESHOLD = 0.9
 MIN_LINES = 6
