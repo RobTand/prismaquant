@@ -112,3 +112,54 @@ def test_the_map_imports_no_serving_runtime():
                    "model.language_model.layers.3.mlp.experts"):
         profile.served_module_name(target, config)
     assert ("vllm" in sys.modules) == before
+
+
+# ---------------------------------------------------------------------------
+# One source for "which layers are MTP": the streamed loader's drop rule
+# ---------------------------------------------------------------------------
+def _glm_config(first, count):
+    return {"model_type": "glm5_next", "architectures": ["Glm5NextForConditionalGeneration"],
+            **_text(first, count)}
+
+
+def test_detection_declares_the_config_and_the_loader_drops_its_draft_range(tmp_path):
+    from prismaquant.model_profiles.registry import detect_profile
+
+    (tmp_path / "config.json").write_text(json.dumps(_glm_config(10, 1)))
+    profile = detect_profile(str(tmp_path))
+    assert isinstance(profile, Glm5NextProfile)
+    draft = "model.language_model.layers.10.mlp.experts.0.down_proj.weight"
+    body = "model.language_model.layers.45.mlp.experts.0.down_proj.weight"
+    assert profile.is_mtp_checkpoint_key(draft)
+    assert profile.checkpoint_to_live_name(draft) is None
+    # Layer 45 is body here: the literal no longer decides for a detected profile.
+    assert not profile.is_mtp_checkpoint_key(body)
+    assert profile.checkpoint_to_live_name(body) == body
+
+
+def test_a_config_given_to_detection_is_the_one_declared(tmp_path):
+    from prismaquant.model_profiles.registry import detect_profile
+
+    (tmp_path / "config.json").write_text(json.dumps(_glm_config(45, 1)))
+    profile = detect_profile(str(tmp_path), config=_glm_config(3, 2))
+    assert profile.is_mtp_checkpoint_key("model.language_model.layers.4.self_attn.o_proj.weight")
+    assert not profile.is_mtp_checkpoint_key("model.language_model.layers.45.mlp.gate.weight")
+
+
+def test_config_only_detection_declares_the_config():
+    profile = profile_from_config(_glm_config(45, 0))
+    assert not profile.is_mtp_checkpoint_key("model.language_model.layers.45.mlp.gate.weight")
+
+
+def test_a_declared_config_that_states_no_range_raises_rather_than_guessing():
+    profile = profile_from_config({"model_type": "glm5_next",
+                                   "text_config": {"num_hidden_layers": 45}})
+    with pytest.raises(ValueError, match="num_nextn_predict_layers"):
+        profile.checkpoint_to_live_name("model.language_model.layers.45.mlp.gate.weight")
+
+
+def test_a_hand_built_profile_falls_back_to_the_glm53_flash_layer():
+    """No config.json was declared, so the documented literal decides."""
+    profile = Glm5NextProfile()
+    assert profile.is_mtp_checkpoint_key("model.language_model.layers.45.mlp.gate.weight")
+    assert not profile.is_mtp_checkpoint_key("model.language_model.layers.44.mlp.gate.weight")

@@ -179,6 +179,10 @@ from .base import ModelProfile
 
 # Body-indexed nextn/MTP block. transformers refuses these keys
 # (modeling_glm5_next.py:1359), so the skeleton has no home for them.
+# Which layers are MTP comes from `Glm5NextProfile.mtp_draft_layer_range`
+# over the config.json detection declared (PQ #1490). This literal is GLM-5.3-
+# Flash's value of that range and is read ONLY by a profile that has no
+# config.json to derive it from (one built by hand, not by detection).
 _MTP_LAYER_RE = re.compile(r"^model\.language_model\.layers\.45\.")
 _SHARED_HEAD_RE = re.compile(r"\.shared_head\.")
 
@@ -323,10 +327,27 @@ class Glm5NextProfile(ModelProfile):
         checkpoint namespace is read, because ``config_groups`` targets are
         checkpoint names.
         """
-        match = self._CHECKPOINT_LAYER_RE.match(checkpoint_name)
-        if match is None or int(match.group(1)) not in self.mtp_draft_layer_range(config):
+        if not self._in_layer_range(checkpoint_name, self.mtp_draft_layer_range(config)):
             return None
         return "model." + checkpoint_name[len(self._CHECKPOINT_BODY_PREFIX):]
+
+    @classmethod
+    def _in_layer_range(cls, checkpoint_name: str, layers: range) -> bool:
+        match = cls._CHECKPOINT_LAYER_RE.match(checkpoint_name)
+        return match is not None and int(match.group(1)) in layers
+
+    def is_mtp_checkpoint_key(self, ckpt_key: str) -> bool:
+        """True for a checkpoint key of the body-indexed MTP layer(s).
+
+        The layers are :meth:`mtp_draft_layer_range` of the config.json
+        detection declared (``detect_profile`` / ``profile_from_config``).
+        A profile built by hand has none, and only then does the module's
+        ``_MTP_LAYER_RE`` literal (GLM-5.3-Flash's layer 45) decide.
+        """
+        config = self._declared_config
+        if config is None:
+            return bool(_MTP_LAYER_RE.match(ckpt_key))
+        return self._in_layer_range(ckpt_key, self.mtp_draft_layer_range(config))
 
     def served_module_name(self, checkpoint_name: str, config) -> str:
         # Two models serve one GLM artifact, each under its own mapper: the
@@ -518,7 +539,7 @@ class Glm5NextProfile(ModelProfile):
         if ckpt_key.endswith(".weight_scale_inv"):
             # Consumed by the FP8 scale map (base fp8_scale_pairs discovery).
             return None
-        if _MTP_LAYER_RE.match(ckpt_key) or _SHARED_HEAD_RE.search(ckpt_key):
+        if self.is_mtp_checkpoint_key(ckpt_key) or _SHARED_HEAD_RE.search(ckpt_key):
             return None
         if ckpt_key.startswith(_VISUAL_PREFIX):
             return ckpt_key if multimodal else None

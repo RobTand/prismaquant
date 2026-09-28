@@ -102,10 +102,19 @@ class ModelProfile(ABC):
         # an on-disk census to disambiguate two source layouts that share the
         # same HF config declaration.
         self._declared_model_path: Path | None = None
+        # The parsed config.json detection resolved this profile from, when
+        # detection had one (`detect_profile`, `profile_from_config`). Empty
+        # for a hand-built profile. Private intake context, like the path: a
+        # family reads layer counts from it rather than restating them.
+        self._declared_config: dict | None = None
 
     def _declare_model_path(self, model_path: str | Path) -> None:
         """Attach path-only checkpoint evidence after config resolution."""
         self._declared_model_path = Path(model_path)
+
+    def _declare_config_document(self, config: dict | None) -> None:
+        """Attach the parsed config.json detection resolved this profile from."""
+        self._declared_config = config if isinstance(config, dict) else None
 
     def declare_config(
         self,

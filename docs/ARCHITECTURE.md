@@ -44,6 +44,14 @@ with served prefixes: it had agreed only because both sides used the checkpoint
 namespace. Gates: `tests/test_tessera_route_trace_gate_namespace.py` on the
 U4 BAL traces (`tests/fixtures/tessera_route_trace_1490/`, measured plus a
 SYNTHETIC post-#680 naming) and `tests/test_glm5_next_served_namespace.py`.
+The same range is now the one source for "which layers are MTP":
+`detect_profile` and `profile_from_config` declare the parsed `config.json` on
+the profile (`_declare_config_document`), and
+`Glm5NextProfile.is_mtp_checkpoint_key` (the streamed loader's drop rule in
+`checkpoint_to_live_name`) reads the range from it. Only a profile built by
+hand, with no config declared, falls back to the GLM-5.3-Flash literal
+`_MTP_LAYER_RE` (layer 45). `specs/glm5_next.json` `passthrough_prefixes`
+still names layer 45 as spec data.
 
 Re-stamped 2026-09-28 (PQ #1553, decoupling step 6 part 3): a lane's ship-record
 slots reach core through its plugin (§8.10). `shipcard` and `shipcard_cli`
