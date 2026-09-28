@@ -48,7 +48,7 @@ def _fadvise_drop(path):
         os.close(fd)
 
 
-def _build(root, n, mib):
+def _write_drifted_wires(root, n, mib):
     root.mkdir(parents=True, exist_ok=True)
     block = os.urandom(1 << 20)
     wires = []
@@ -111,7 +111,7 @@ def main(argv=None):
 
     from prismaquant import joint_catalog_extension as jce
     root = Path(args.dir) / f"bench-{os.getpid()}"
-    wires = _build(root, args.n, args.mib)
+    wires = _write_drifted_wires(root, args.n, args.mib)
     total = sum(recorded["bytes"] for _, recorded, _ in wires)
     report = {"n": args.n, "mib": args.mib, "total_bytes": total, "cold": args.cold,
               "affinity": len(os.sched_getaffinity(0)), "host": os.uname().nodename,
