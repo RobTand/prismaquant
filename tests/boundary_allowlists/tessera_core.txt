@@ -3,19 +3,6 @@
 # TESSERA_* settings.
 # One line per occurrence: path<TAB>kind<TAB>value. Delete lines; never add.
 # CI refuses a pull request that adds a line here.
-prismaquant/allocator.py	import	.tessera_expert_projection
-prismaquant/allocator.py	import	.tessera_formats
-prismaquant/allocator.py	import	.tessera_materialization
-prismaquant/allocator.py	import	.tessera_menu
-prismaquant/allocator.py	import	.tessera_menu
-prismaquant/allocator.py	import	.tessera_menu
-prismaquant/allocator.py	import	.tessera_runtime_contract
-prismaquant/allocator.py	import	.tessera_serving_scope
-prismaquant/allocator.py	import	.tessera_serving_scope
-prismaquant/allocator.py	literal	TESSERA_
-prismaquant/allocator.py	literal	TESSERA_
-prismaquant/allocator.py	literal	TESSERA_
-prismaquant/allocator.py	literal	TESSERA_
 prismaquant/pipeline.py	literal	TESSERA_EXECUTION_MODE
 prismaquant/pipeline.py	literal	TESSERA_PLATFORM
 prismaquant/pipeline.py	literal	TESSERA_RESIDENCY

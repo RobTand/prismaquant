@@ -95,15 +95,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import format_registry as fr
-from .tessera_menu import (
-    expand_menu_tokens_report,
-    menu_mode,
-    menu_width_report,
-    partition_attested,
-    surrogate_selection_caveat,
-    tessera_refusal_cause,
-    unattested_diagnosis,
-)
 from .allocator_solver import (
     Candidate,
     _shape_from_stats,
@@ -172,10 +163,6 @@ from .decision_units import block_id_from_qname
 from .layer_config import LAYER_CONFIG_META_KEY
 from .saturation_select import log_error_values as _log_error_values
 from .schemas import validate_cost_payload, validate_probe_payload
-from .tessera_expert_projection import (
-    ExpertProjectionError,
-    allocation_expert_projection_block,
-)
 
 
 _KNEE_DIAGNOSTIC_MIN_LOG_SPAN_DECADES = 1.0
@@ -688,6 +675,85 @@ def apply_mtp_format_override(
     return out
 
 
+class _StockAllocationLane:
+    """The allocation protocol's answers when no lane plugin provides it.
+
+    Each method is the stock half of a step a lane plugin can take over
+    (``lane_specs/<lane>.json`` ``plugin``; for Tessera,
+    ``prismaquant.tessera_lane``): no lane flags, no serving target, a menu
+    the registry resolves as given, and no lane metadata. It is also the
+    protocol's one written statement, so a fourth lane knows what to provide.
+    """
+
+    @staticmethod
+    def allocation_arguments(parser) -> None:
+        return None
+
+    @staticmethod
+    def allocation_serving_target(args, *, target_platform):
+        return None
+
+    @staticmethod
+    def allocation_contexts(serving_target, stats, profile):
+        return None
+
+    @staticmethod
+    def allocation_unit_context(serving_target, unit, profile):
+        raise LookupError("no lane provides a serving target, so no unit has a serving context")
+
+    @staticmethod
+    def allocation_scope_meta(serving_target, context_by_unit) -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_hessian_identity(costs, cost_data) -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_runtime_identity() -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_menu(fmt_names, priced_formats, *, context_by_unit):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(formats=fmt_names, widths={}, refusal_cause="")
+
+    @staticmethod
+    def allocation_layer_config_meta(**_blocks) -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_selection_meta(**_blocks) -> dict:
+        return {}
+
+    @staticmethod
+    def allocation_selection_request_path(args):
+        return None
+
+    @staticmethod
+    def write_allocation_selection_request(path, **_outputs) -> None:
+        raise LookupError("no lane writes a selection request")
+
+    @staticmethod
+    def allocation_expert_projection(cost_data, assignment) -> dict:
+        return {}
+
+
+def _allocation_lane():
+    """The lane plugin that scopes, expands and stamps an allocation.
+
+    The one plugin providing ``allocation_menu`` (``lane_spec`` refuses two),
+    or :class:`_StockAllocationLane` when no lane does. The allocator imports
+    no lane module; everything a lane adds to an allocation -- its flags, its
+    serving scope, its menu token, its cost-table identity checks, its
+    metadata blocks and its selection side outputs -- arrives through here.
+    """
+    from .lane_spec import single_lane_plugin
+
+    return single_lane_plugin("allocation_menu") or _StockAllocationLane
+
+
 def _mtp_rung_attestation(serving_target, profile):
     """``eligible(unit, rung)`` from the pinned runtime's contract (principle 14).
 
@@ -695,14 +761,14 @@ def _mtp_rung_attestation(serving_target, profile):
     about one unit's serving context when a Tessera scope is declared. BF16
     passthrough is not a Tessera route and is always offered.
     """
-    from .tessera_serving_scope import unit_structure_from_profile
+    lane = _allocation_lane()
 
     def eligible(unit, rung):
         if fr.format_family_of(fr.canonical_format_name(rung)) is None:
             return True
         if serving_target is None:
             return fr.format_is_producer_eligible(rung)
-        context = serving_target.context(unit_structure_from_profile(unit, profile))
+        context = lane.allocation_unit_context(serving_target, unit, profile)
         return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
     return eligible
 
@@ -760,9 +826,7 @@ def _canonical_candidate_format(fmt: str) -> str:
     the identity comparisons below stay exact without asking the registry a
     question it should refuse.
     """
-    from .tessera_formats import is_tessera_group_option
-
-    if is_tessera_group_option(fmt):
+    if fr.is_whole_group_option(fmt):
         return str(fmt)
     return fr.get_format(fmt).name
 
@@ -1685,13 +1749,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     selection. ``None`` -- every existing caller -- is the unchanged
     single-solve path.
     """
-    from .tessera_serving_scope import (
-        add_serving_scope_arguments, serving_target_from_args,
-        context_by_unit_from_stats, scope_provenance,
-    )
     from .measured_runtime_prices import FIXED_RESOURCE_SCOPES, SHAPE_ONLY_SCOPE
+    lane = _allocation_lane()
     ap = argparse.ArgumentParser()
-    add_serving_scope_arguments(ap)
+    lane.allocation_arguments(ap)
     ap.add_argument("--probe", required=True, help="sensitivity_probe pickle")
     ap.add_argument("--costs", required=True, help="measure_quant_cost pickle")
     ap.add_argument(
@@ -1814,9 +1875,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--layer-config", required=True,
                     help="Output AutoRound layer_config JSON")
     ap.add_argument("--pareto-csv", required=True, help="Output Pareto CSV")
-    ap.add_argument("--tessera-materialization-plan", default=None,
-                    help="Write a non-exportable selected-wire request here instead of layer-config; "
-                         "finalize through prismaquant.tessera_materialization after selected wires exist")
     ap.add_argument("--knee-refine-tol", type=float, default=0.03,
                     help="Golden-section knee refinement tolerance in bpp "
                          "(default 0.03). The coarse Pareto grid only lands the "
@@ -2396,7 +2454,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         raise SystemExit(f"[alloc] ERROR: unknown target profile {target_profile!r}")
     print(f"[alloc] target profile: {target_profile}", flush=True)
     from .serving_profiles import load_serving_profile
-    tessera_serving_target = serving_target_from_args(
+    tessera_serving_target = lane.allocation_serving_target(
         args, target_platform=load_serving_profile(target_profile).target_platform)
 
     with open(args.probe, "rb") as f:
@@ -2463,50 +2521,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     costs = cost_data["costs"]
     print(f"[alloc] stats: {len(stats)} Linears, costs: {len(costs)} Linears")
 
-    # One Hessian identity per cost table, or refuse. The Tessera encoder's
-    # shipping default consumes a per-unit XtX, so rows priced with and
-    # without one describe different bytes at the same format name, and the
-    # DP would trade them against each other. Raises on a mix; reports what
-    # it found otherwise, so "no claim" stays distinguishable from "a
-    # matching claim" (principle 14).
-    # A joined table whose overlay rows carry another reference file's seal
-    # over the same per-unit H is one identity (RobTand/prismaquant#1270);
-    # the files are found through the table's own hash-bound inputs, and only
-    # when a second seal appears.
-    from .tessera_menu import (assert_uniform_hessian_identity, priced_static_scales,
-                               project_hessian_identity)
-    from .joint_catalog_extension import hessian_references
-    tessera_hessian_identity = assert_uniform_hessian_identity(
-        costs, references=lambda: hessian_references(cost_data))
-    if tessera_hessian_identity.get("stamped_rows") or \
-            tessera_hessian_identity.get("unstamped_rows"):
-        print(f"[alloc] tessera hessian identity: "
-              f"supplied={tessera_hessian_identity['supplied']} "
-              f"tokens={tessera_hessian_identity['token_count']} "
-              f"sha={str(tessera_hessian_identity['text_sha'])[:12]} "
-              f"({tessera_hessian_identity['stamped_rows']} stamped, "
-              f"{tessera_hessian_identity['unstamped_rows']} unstamped rows)")
-        if tessera_hessian_identity.get("captures"):
-            print("[alloc] tessera hessian captures (per-unit content equal): "
-                  + ", ".join(f"{digest[:12]}={n}" for digest, n in
-                              tessera_hessian_identity["captures"].items())
-                  + f"; export binds {str(tessera_hessian_identity['capture_sha256'])[:12]}")
+    # One Hessian identity per cost table, or refuse: the lane whose rungs
+    # consume a per-unit XtX owns the rule and reports what it found, so "no
+    # claim" stays distinguishable from "a matching claim" (principle 14).
+    tessera_hessian_identity = lane.allocation_hessian_identity(costs, cost_data)
 
-    # Which runtime contract answered this run's Tessera route queries, if any.
-    # The block names the exact Tessera commit and consumed contract digest;
-    # its presence does not by itself identify a development override or prove
-    # that every candidate route was attested for the requested context.
-    # Read through tessera_menu's ONE read, not through load_tessera_contract
-    # directly: the menu's every attestation goes through that function, and
-    # a provenance block that read the pin a second time could name a table
-    # the menu never consulted (or, as it did, name none while the menu had
-    # one). "Which table answered" is one fact per run, so it is read once.
-    from .tessera_menu import tessera_runtime_contract
-    _tessera_contract = tessera_runtime_contract()
-    tessera_dev_pin = {} if _tessera_contract is None else _tessera_contract.identity()
-    if tessera_dev_pin:
-        from .tessera_runtime_contract import describe_dev_pin
-        print(f"[alloc] tessera dev pin: {describe_dev_pin(tessera_dev_pin)}")
+    # Which runtime contract answered this run's route queries, if any: one
+    # fact per run, read once through the lane's one contract read.
+    tessera_dev_pin = lane.allocation_runtime_identity()
 
     # ---- Fisher renormalization ----
     # One shared denominator (the global calib token count) recomputed
@@ -2608,96 +2630,21 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         )
     stats = _mark_weight_only_nvfp4_stats(stats, model_profile)
     accounting_stats = dict(stats)
-    tessera_context_by_unit = context_by_unit_from_stats(
+    tessera_context_by_unit = lane.allocation_contexts(
         tessera_serving_target, accounting_stats, model_profile)
 
     if args.formats:
         fmt_names = [s.strip() for s in args.formats.split(",") if s.strip()]
     else:
         fmt_names = cost_data["formats"]
-    # ``TESSERA`` is a menu TOKEN, not a format. It cannot expand to a fixed
-    # list the way ``NVFP4`` names one rung: a Tessera family addresses a
-    # continuous rate axis, the realisable set depends on the unit's column
-    # count, and one 0.6B Linear carries thousands of legal rungs across the
-    # four families. So the token expands to exactly the rungs THIS RUN PRICED --
-    # the cost table's own Tessera columns -- which is both the widest menu
-    # the DP could honestly consider and a set that needs no second copy of
-    # the campaign's legality decisions. A rung the campaign did not price
-    # would be dropped by ``build_candidates`` anyway (no cost row); naming it
-    # here would only have ``require_producer_formats`` refuse the whole run.
-    # The expansion is intersected with what the pinned runtime attests, so a
-    # research-priced table read back on the default path allocates over the
-    # backed axis instead of refusing wholesale. The narrowing is printed, not
-    # inferred: an allocation over 2 rungs and one over 3060 must not look the
-    # same in a log (P9, P12).
-    priced_tessera = [
-        n for n in cost_data.get("formats", ())
-        if isinstance(n, str) and n.startswith("TESSERA_")
-    ]
-    fmt_names, unattested = expand_menu_tokens_report(
+    # A lane's menu TOKEN (``TESSERA``) is not a format: the lane expands it to
+    # the rungs this run priced that its pinned runtime attests, prints the
+    # narrowing, and refuses a token that expands to nothing.
+    menu = lane.allocation_menu(
         fmt_names, cost_data.get("formats", ()),
-        **({"context_by_unit": tessera_context_by_unit}
-           if tessera_context_by_unit is not None else {}))
-    tessera_menu_widths: dict = {}
-    tessera_diagnosis: dict | None = None
-    if priced_tessera:
-        kept = [n for n in fmt_names if n.startswith("TESSERA_")]
-        # The count is the admission predicate's, not the caller's: an
-        # explicitly named rung stays on the menu so the eligibility gate can
-        # refuse it out loud, and it is not "attested" until then (#278).
-        admitted, explicit_unattested = partition_attested(
-            kept, **({"context_by_unit": tessera_context_by_unit}
-                     if tessera_context_by_unit is not None else {}))
-        # A refusal that cannot name its own cause costs an investigation
-        # (#572: "0 of 16" was read three ways at once). Both causes the
-        # contract can tell apart are structured -- whether it needs a serving
-        # scope, and which rungs it attests instead -- so the report reads
-        # them rather than leaving the reader to guess. It admits nothing:
-        # `admitted` above is already the predicate's answer.
-        tessera_diagnosis = (unattested_diagnosis(
-            list(unattested) + list(explicit_unattested), priced=priced_tessera,
-            context_by_unit=tessera_context_by_unit)
-            if (unattested or explicit_unattested) else None)
-        widths, line = menu_width_report(
-            priced_tessera, admitted, unattested, explicit_unattested, menu_mode(),
-            diagnosis=tessera_diagnosis)
-        if kept:
-            tessera_menu_widths = widths
-        print(line, flush=True)
-        # The measured status of the ranking this DP is about to do. Printed
-        # here rather than at the end because it governs how the whole run's
-        # output is to be read, and stamped into provenance below because a
-        # terminal line is not a property of the artifact (P12).
-        if kept:
-            print(
-                "[alloc] WARNING: Tessera rungs are on this menu and the DP "
-                "ranks them on a surrogate MEASURED to mis-rank them at "
-                "matched bytes -- served KL 2.00x worse than a byte-matched "
-                "uniform arm at 4.0 bpp (2.33x at 3.0, 2.88x at 5.0), and "
-                "1.93x on the priced units alone. See "
-                "tessera_menu.surrogate_selection_caveat() and "
-                "docs/measurements/tessera-allocated-served-2026-09-02.md. "
-                "This assignment is a CANDIDATE, not a selection: promote it "
-                "only through SELECTION_MODE=validated-surrogate with a "
-                "byte-matched uniform arm served beside it.",
-                flush=True,
-            )
-        if unattested and not kept:
-            raise SystemExit(
-                "[alloc] ERROR: the cost table prices "
-                f"{len(priced_tessera)} Tessera rungs and the pinned runtime "
-                "attests none of them, so the TESSERA menu token expands to "
-                "nothing. Either widen the runtime's attested rungs "
-                "(attested_rungs_q256 in the packaged runtime_contract.json) "
-                "or price a table under the attested menu; "
-                "PRISMAQUANT_TESSERA_MENU=readable allocates over the rungs "
-                "the pinned decoder accepts and "
-                "PRISMAQUANT_TESSERA_MENU=research over the whole realisable "
-                "axis -- both for research runs that do not export."
-                # "attests none of them" is only true if the contract was asked
-                # under a scope it can answer; say which case this is.
-                + tessera_refusal_cause(tessera_diagnosis)
-            )
+        context_by_unit=tessera_context_by_unit)
+    fmt_names = menu.formats
+    tessera_menu_widths = menu.widths
     try:
         specs = fr.require_producer_formats(
             fmt_names, where="new allocator assignment menu",
@@ -2709,7 +2656,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # rides on it too rather than only on the menu line above it: a list of
         # refused names with no cause is the confession log P9 warns about.
         raise SystemExit(
-            f"[alloc] ERROR: {exc}" + tessera_refusal_cause(tessera_diagnosis)
+            f"[alloc] ERROR: {exc}" + menu.refusal_cause
         ) from None
     specs_sorted, serialized_rates = _sort_specs_by_serialized_rate(
         specs,
@@ -4172,7 +4119,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         layer_cfg[LAYER_CONFIG_META_KEY] = {
             "schema": "prismaquant.layer_config_meta.v1",
             "target_profile": target_profile,
-            **({"tessera_serving_scope": scope_provenance(
+            **({**lane.allocation_scope_meta(
                     tessera_serving_target, tessera_context_by_unit),
                 "serving_lane_provenance": selection_serving_lane_provenance(
                     assignment_expanded, candidates, target_profile,
@@ -4206,54 +4153,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "additive_candidate_proposal_then_exact_assignment_filter"
             ),
             "global_optimality_claimed": False,
-            # Continuous-menu provenance, written on EVERY run rather than only on
-            # the byte-budget path: how wide the Tessera menu was before the DP saw
-            # it, which of the two exact reductions shrank it (per-Linear and, for
-            # aggregated super items, again after aggregation), and what the solve
-            # cost in wall time. On a menu of thousands of rungs those are the
-            # numbers that say whether a coarse-looking result is the allocator's
-            # answer or the menu's. Absent keys mean no Tessera rung was on the
-            # menu, so a stock run's metadata is unchanged.
-            **({"tessera_menu": {
-                    "per_linear": dict(tessera_menu_report),
-                    "aggregated": dict(tessera_menu_report_agg),
-                    **tessera_menu_widths,
-                    **({"selection_caveat": surrogate_selection_caveat()}
-                       if tessera_menu_widths else {}),
-                }} if (tessera_menu_report or tessera_menu_report_agg
-                       or tessera_menu_widths) else {}),
-            **({"tessera_group_knapsack": dict(tessera_group_menu_report)}
-               if tessera_group_menu_report else {}),
-            # Per selection: a content-equal second seal names only the selected
-            # units priced under it (``unit_capture_sha256``), never the whole
-            # table's row map (RobTand/prismaquant#1270).
-            **({"tessera_hessian": project_hessian_identity(
-                    tessera_hessian_identity, assignment_expanded)}
-               if (tessera_hessian_identity.get("stamped_rows")
-                   or tessera_hessian_identity.get("unstamped_rows")) else {}),
-            # The static A-side scale VALUE each selected Tessera unit was priced
-            # under, read from its own cost row (RobTand/prismaquant#204). The
-            # export gate compares the exporter's --input-scales file against
-            # this, value for value; until it existed the gate could only check
-            # that a key was present. Absent when no Tessera unit is selected, so
-            # a stock run's metadata is unchanged. Read from the unfiltered table
-            # (`cost_data["costs"]`): every selected unit's row is there whatever
-            # the lm_head / visual filters removed from the DP's view.
-            **({"tessera_activation_static_scales": priced_static_scales(
-                    {name: fmt for name, fmt in assignment_expanded.items()
-                     if str(fmt).startswith("TESSERA_")},
-                    cost_data["costs"],
-                    # The FORMULA those values came out of, read from the table
-                    # that priced them and never from this process's environment:
-                    # a legacy value under a full-E4M3 label is a scale nothing
-                    # served (RobTand/prismaquant#624).
-                    policy=(cost_data.get("provenance", {})
-                            .get("activation_static_scales", {})
-                            .get("policy")),
-                    served_activation_policy=cost_data.get("provenance", {}).get("served_activation_policy"))}
-               if any(str(fmt).startswith("TESSERA_")
-                      for fmt in assignment_expanded.values()) else {}),
-            **({"tessera_dev_pin": dict(tessera_dev_pin)} if tessera_dev_pin else {}),
+            # The lane's blocks: its menu widths and reductions (per-Linear and
+            # after aggregation), its group knapsack, the Hessian identity and
+            # static activation scales of the selected units, and the runtime
+            # contract that answered. Absent when no lane rung is on the menu,
+            # so a stock run's metadata is unchanged.
+            **lane.allocation_layer_config_meta(
+                menu_report=tessera_menu_report,
+                menu_report_agg=tessera_menu_report_agg,
+                menu_widths=tessera_menu_widths,
+                group_menu_report=tessera_group_menu_report,
+                hessian_identity=tessera_hessian_identity,
+                dev_pin=tessera_dev_pin,
+                assignment=assignment_expanded,
+                cost_data=cost_data),
             **({"solve_diagnostics": {
                     str(k): {
                         "solver_seconds": v.get("solver_seconds"),
@@ -4315,18 +4228,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         if args.mtp_joint_cost:
             _stamp_mtp_selection(args, layer_cfg, assignment_expanded,
                                  serving_target=tessera_serving_target, profile=model_profile)
-        if args.tessera_materialization_plan:
-            from .tessera_materialization import write_selection_request
-            write_selection_request(args.tessera_materialization_plan,
+        selection_request = lane.allocation_selection_request_path(args)
+        if selection_request:
+            lane.write_allocation_selection_request(selection_request,
                 layer_config=layer_cfg, assignment=assignment_expanded,
                 cost_path=args.costs, cost_payload=cost_data, output_path=args.layer_config)
-            print(f"[alloc] non-exportable selected-wire request → {args.tessera_materialization_plan}")
             return
-        try:
-            layer_cfg[LAYER_CONFIG_META_KEY].update(
-                allocation_expert_projection_block(cost_data, assignment_expanded))
-        except ExpertProjectionError as exc:
-            raise SystemExit(f"[alloc] ERROR: expert projection: {exc}") from exc
+        layer_cfg[LAYER_CONFIG_META_KEY].update(
+            lane.allocation_expert_projection(cost_data, assignment_expanded))
 
         out = Path(args.layer_config)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -4417,7 +4326,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return record
 
         def _emit_replay(slo_ms, target_bits, expected_assignment, provenance):
-            if args.tessera_materialization_plan:
+            if lane.allocation_selection_request_path(args):
                 raise ValueError("prefill frontier replay requires materialized wires, not a selection request")
             record = _solve_at_prefill_slo(slo_ms, target_bits)
             if not record["feasible"] or record["assignment"] != expected_assignment:
@@ -5549,24 +5458,19 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "serving_lane_provenance": selection_serving_lane_provenance(
                 chosen_info["assignment"], candidates, target_profile,
                 context_by_unit=tessera_context_by_unit),
-            **({"tessera_serving_scope": scope_provenance(
-                tessera_serving_target, tessera_context_by_unit)}
+            **(lane.allocation_scope_meta(
+                tessera_serving_target, tessera_context_by_unit)
                if tessera_serving_target is not None else {}),
-            # How big the per-unit menu was BEFORE the DP saw it, and which
-            # of the two reductions shrank it (see reduce_continuous_menu).
-            # Empty on a run with no Tessera rung on the menu. Without this a
-            # coarse-looking set of selected rates cannot be attributed: a
-            # campaign that priced few rungs and a bin width that swallowed
-            # many look identical in the output.
-            "tessera_group_knapsack": dict(tessera_group_menu_report),
-            **({"tessera_dev_pin": dict(tessera_dev_pin)} if tessera_dev_pin else {}),
-            "tessera_menu": {
-                "per_linear": dict(tessera_menu_report),
-                "aggregated": dict(tessera_menu_report_agg),
-                **tessera_menu_widths,
-                **({"selection_caveat": surrogate_selection_caveat()}
-                   if tessera_menu_widths else {}),
-            },
+            # The lane's menu widths and reductions before the DP saw them (see
+            # reduce_continuous_menu), its group knapsack and the runtime
+            # contract that answered: without them a coarse-looking set of
+            # selected rates cannot be attributed.
+            **lane.allocation_selection_meta(
+                menu_report=tessera_menu_report,
+                menu_report_agg=tessera_menu_report_agg,
+                menu_widths=tessera_menu_widths,
+                group_menu_report=tessera_group_menu_report,
+                dev_pin=tessera_dev_pin),
             # DP wall time per solved target, summed over the tightening
             # retries that target needed. `_solve_diagnostics` was previously
             # read only by the infeasibility message, so the cost of a solve
