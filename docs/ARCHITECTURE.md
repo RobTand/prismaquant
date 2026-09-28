@@ -3869,6 +3869,11 @@ can emit the export's PB read paths. The v1 single-root path is unchanged. The
 reader is the pinned Tessera (`acf9eafa6a…`, #966); see "Selected cached wires
 from an additive historical catalog". No format, default, stage or ship gate
 changes.
+Its `--plan`/`--plan-sha256` (2026-09-28, PQ #1488) read the original joint
+plan by digest, admit it only when the handoff was joined under that digest
+with the same inputs, and pass only its `historical_encoder_reuse` to the
+anchor loader, as the allocation handoff does. Without `--plan` the loader's
+strict encoder check is unchanged.
 
 Tessera pin (2026-09-22, `ws-j2/tessera-pin-v34`, Refs #944 #939): the
 serving-runtime pin and the reader dev pin move from `cc739a5516…` (contract
