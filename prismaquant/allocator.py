@@ -90,7 +90,7 @@ import pickle
 import re
 import time as _time
 from collections import Counter, defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -712,6 +712,11 @@ class _StockAllocationLane:
     @staticmethod
     def allocation_runtime_identity() -> dict:
         return {}
+
+    @staticmethod
+    def allocation_shape_price_scope(serving_target, *, tensor_parallel):
+        raise LookupError("no lane publishes a pinned runtime contract, so no shape-time "
+                          "table can be admitted")
 
     @staticmethod
     def allocation_menu(fmt_names, priced_formats, *, context_by_unit):
@@ -1748,6 +1753,46 @@ class MeasuredRuntimeSweep:
     emit_replay: Callable[[float, float, dict, dict], None] | None = None
 
 
+@dataclass(frozen=True)
+class PactHullSweep:
+    """What ``main(measured_runtime_sweep=...)`` hands its caller in PACT mode.
+
+    ``build_hull()`` runs the exact dichotomic hull (``pact_hull``) over the
+    shape-priced candidate set under this run's byte budget and returns
+    ``{"hull": LowerHull, "vertices": [record, ...]}``, one record per vertex
+    after the same exact checks a measured solve applies (promotion identity,
+    exact payload bpp <= target). ``emit_replay(weights, assignment,
+    provenance)`` re-runs the ONE probe that found a vertex and writes it
+    through the allocator's only layer-config writer. Nothing here certifies
+    time or placement: every time is an operator-sum proposal at one regime M.
+    """
+
+    build_hull: Callable[[], dict]
+    emit_replay: Callable[[Sequence[float], dict, dict], None]
+    #: ``shape_runtime_prices.ShapePricing``: bootstrap, gap report, identity.
+    pricing: object
+    table_identity: dict
+    scope: dict
+    regime_m: int
+    tensor_parallel: int
+    time_ceiling_ms: float | None
+    max_memory_bytes: int
+    #: The exact probe's bounds (``--pact-max-states`` / ``--pact-max-transitions``);
+    #: a replay re-runs its probe under the same ones.
+    max_states: int
+    max_transitions: int
+    #: ``None`` when the budget is ``--target-bits``; with ``--target-disk-gb``
+    #: the card, the reserve, the payload outside the units, and the unit budget.
+    whole_artifact_budget: dict | None
+    #: Assignment members outside every DP unit (their format is fixed); the
+    #: operator sum prices none of them, and the curve adds nothing for them.
+    fixed_members: tuple[str, ...]
+    n_units: int
+    target_bits: float
+    cost_path: str
+    probe_path: str
+
+
 def require_no_research_exact_member_scalar(cost_data: dict) -> None:
     """An exact-member endpoint is a scalar observation, not an allocation table."""
     if cost_data.get("provenance", {}).get("research_exact_member_scope") is not None:
@@ -2151,12 +2196,89 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "it. It requires the prefill frontier sweep and no "
                          "--serve-device-budget-bytes, and it certifies no "
                          "placement.")
+    # ---- PACT: the shape-time price table and its exact hull (PQ #1584) ----
+    ap.add_argument("--pact-shape-table", default=None,
+                    help="Research-only shape-time price table "
+                         "(prismaquant.shape_runtime_prices.v1). Prices every option "
+                         "by its served operator's rank-local shape at one regime M "
+                         "and hands the exact lower convex hull of (operator-sum "
+                         "time, predicted Δloss) to the prefill_frontier caller. "
+                         "Available only through prismaquant.prefill_frontier; a "
+                         "single solve refuses it.")
+    ap.add_argument("--pact-regime", type=int, default=None,
+                    help="The regime M (tokens per prefill step) the table's rows "
+                         "are read at. Required with --pact-shape-table; there is "
+                         "no default, because the regime is the workload's.")
+    ap.add_argument("--pact-tensor-parallel", type=int, default=None,
+                    help="The serving world size the table was measured at. "
+                         "Required with --pact-shape-table; it is part of the scope "
+                         "the table must equal and sets each routed member's "
+                         "rank-local cut.")
+    ap.add_argument("--pact-time-ceiling-ms", type=float, default=None,
+                    help="A REPORT bound on operator-sum time: hull vertices above "
+                         "it are flagged, never removed. The constrained set's own "
+                         "boundary vertex is not generated.")
+    ap.add_argument("--pact-max-states", type=int, default=None,
+                    help="The exact hull probe's max_states bound (default: the "
+                         "solver's own, pact_hull.DEFAULT_MAX_STATES). A probe over "
+                         "it is refused, never truncated.")
+    ap.add_argument("--pact-max-transitions", type=int, default=None,
+                    help="The exact hull probe's max_transitions bound (default: "
+                         "the solver's own, pact_hull.DEFAULT_MAX_TRANSITIONS).")
     args = ap.parse_args(argv)
+
+    pact_flags = (("--pact-regime", args.pact_regime),
+                  ("--pact-tensor-parallel", args.pact_tensor_parallel),
+                  ("--pact-time-ceiling-ms", args.pact_time_ceiling_ms),
+                  ("--pact-max-states", args.pact_max_states),
+                  ("--pact-max-transitions", args.pact_max_transitions))
+    if args.pact_shape_table is None:
+        for flag, value in pact_flags:
+            if value is not None:
+                ap.error(f"{flag} requires --pact-shape-table")
+    else:
+        if measured_runtime_sweep is None:
+            ap.error("--pact-shape-table is available only to prismaquant.prefill_frontier, "
+                     "whose hull vertices are research-only; a single solve would write a "
+                     "layer config from an operator-sum proposal")
+        if args.pact_regime is None or args.pact_regime < 1:
+            ap.error("--pact-shape-table requires a positive --pact-regime (no default: "
+                     "the regime M is the workload's, not the allocator's)")
+        if args.pact_tensor_parallel is None or args.pact_tensor_parallel < 1:
+            ap.error("--pact-shape-table requires a positive --pact-tensor-parallel (no "
+                     "default: the table is admitted only at the world it was measured at)")
+        for flag, value in (("--pact-max-states", args.pact_max_states),
+                            ("--pact-max-transitions", args.pact_max_transitions)):
+            if value is not None and value < 1:
+                ap.error(f"{flag} must be a positive integer")
+        if args.pact_time_ceiling_ms is not None and (
+                not math.isfinite(args.pact_time_ceiling_ms) or args.pact_time_ceiling_ms <= 0):
+            ap.error("--pact-time-ceiling-ms must be positive and finite")
+        if args.serve_device_budget_bytes is not None or args.rank_device_budget_bytes is not None:
+            ap.error("--pact-shape-table prices no device residency, scratch or activation, "
+                     "so no device budget is evaluated in PACT mode; the resident-bytes "
+                     "table is Tessera's (RobTand/tessera#624)")
+        for flag, value in (("--measured-runtime-table", args.measured_runtime_table),
+                            ("--measured-runtime-context", args.measured_runtime_context),
+                            ("--measured-runtime-rank-partition",
+                             args.measured_runtime_rank_partition),
+                            ("--serve-dispatch-table", args.serve_dispatch_table),
+                            ("--serve-workload-mix", args.serve_workload_mix),
+                            ("--slo-prefill-p95-ttft-ms", args.slo_prefill_p95_ttft_ms),
+                            ("--slo-decode-p95-itl-ms", args.slo_decode_p95_itl_ms),
+                            ("--slo-decode-p05-tps", args.slo_decode_p05_tps)):
+            if value is not None:
+                ap.error(f"--pact-shape-table is mutually exclusive with {flag}: the hull "
+                         "is the candidate set, and no budget on its time axis is a "
+                         "solver constraint")
+        if args.measured_runtime_fixed_scope != "admitted":
+            ap.error("--measured-runtime-fixed-scope belongs to --measured-runtime-table")
 
     if args.measured_runtime_context and not args.measured_runtime_table:
         ap.error("--measured-runtime-context requires --measured-runtime-table")
-    if measured_runtime_sweep is not None and not args.measured_runtime_table:
-        ap.error("a measured runtime sweep requires --measured-runtime-table")
+    if (measured_runtime_sweep is not None and not args.measured_runtime_table
+            and args.pact_shape_table is None):
+        ap.error("a measured runtime sweep requires --measured-runtime-table or --pact-shape-table")
     if args.measured_runtime_table:
         if args.serve_dispatch_table or args.serve_workload_mix:
             ap.error("--measured-runtime-table is mutually exclusive with "
@@ -2232,6 +2354,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # table / no SLOs) makes every downstream call a no-op that only stamps
     # "constraints were absent" — the pre-P5c behaviour, byte for byte.
     measured_runtime_table = None
+    # PACT keeps the same candidate rows the measured search keeps: an option
+    # a byte-and-loss screen would drop can still be the faster one.
+    runtime_frontier_candidates = (args.measured_runtime_table is not None
+                                   or args.pact_shape_table is not None)
     serve_slos = ServeSLOs(
         p95_ttft_ms=args.slo_prefill_p95_ttft_ms,
         p95_itl_ms=args.slo_decode_p95_itl_ms,
@@ -2919,7 +3045,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
         defer_menu_reduction=packed_members_deferred | fused_members_deferred,
-        **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}),
+        **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
     )
     print(f"[alloc] candidates built for {len(candidates)} Linears"
           + (f" ({len(packed_members_deferred)} packed-group and "
@@ -3294,7 +3420,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats, costs, specs_sorted, candidates, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
-            **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}))
+            **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
         packed_groups = sum(
             1 for n in candidates if _PACKED_GROUP_MARKER in n)
         packed_member_rows = sum(
@@ -3327,7 +3453,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats, costs, specs_sorted, candidates, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
-            **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}))
+            **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
         sib_groups = sum(1 for n in candidates if _FUSED_SIBLING_MARKER in n)
         print(f"[alloc] fused-sibling aggregation: {sib_groups} groups "
               f"(qkv_proj / gate_up_proj / ...)")
@@ -3372,7 +3498,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         candidates, stats,
         bit_precision=float(args.bit_precision),
         report=tessera_menu_report_agg,
-        **({"preserve_runtime_frontier": True} if measured_runtime_table is not None else {}),
+        **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
     )
 
     post_aggregation_availability = {
@@ -3571,6 +3697,53 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 expected_bindings=expected_bindings)
         except (ValueError, KeyError) as exc:
             raise SystemExit(f"[alloc] ERROR: measured runtime: {exc}") from None
+
+    # PACT (PQ #1584): price each DP option by its served operator's shape from
+    # the admitted shape-time table. Every option expands to its members exactly
+    # as the measured path expands it; an option the table does not price is
+    # left out of the time-aware candidate set and reported as a gap.
+    pact_pricing = None
+    pact_candidates = None
+    pact_option_members = {}
+    pact_scope = None
+    if args.pact_shape_table is not None:
+        from .shape_runtime_prices import (
+            ShapeRuntimeError, admit_shape_table, build_shape_runtime_resources, load_shape_table,
+        )
+        try:
+            pact_scope, pact_eligibility, pact_formats = lane.allocation_shape_price_scope(
+                tessera_serving_target, tensor_parallel=args.pact_tensor_parallel)
+        except (LookupError, ValueError) as exc:
+            raise SystemExit(f"[alloc] ERROR: PACT shape table scope: {exc}") from None
+        try:
+            shape_table = admit_shape_table(load_shape_table(args.pact_shape_table),
+                                            scope=pact_scope, eligibility=pact_eligibility)
+            member_shapes, member_structure = {}, {}
+            for unit, options in sorted(candidates.items()):
+                for option in options:
+                    members = expand_fused_sibling_assignment(
+                        expand_packed_group_assignment({unit: option.fmt}, stats), stats)
+                    pact_option_members[(unit, option.fmt)] = members
+                    for name in members:
+                        if name in member_shapes:
+                            continue
+                        entry = _stats_entry_for_assignment_name(name)
+                        if entry is None:
+                            raise ValueError(f"{name}: PACT has no independent shape")
+                        member_shapes[name] = _shape_from_stats(entry)
+                        member_structure[name] = lane.allocation_unit_context(
+                            tessera_serving_target, name, model_profile).structure
+            pact_pricing = build_shape_runtime_resources(
+                shape_table, candidates, option_members=pact_option_members,
+                member_shapes=member_shapes, member_structure=member_structure,
+                regime_m=args.pact_regime, published_formats=pact_formats)
+            pact_candidates = pact_pricing.time_candidates(candidates)
+        except (ShapeRuntimeError, ValueError, KeyError, LookupError) as exc:
+            raise SystemExit(f"[alloc] ERROR: PACT shape table: {exc}") from None
+        gaps = pact_pricing.gap_report()
+        print(f"[alloc] PACT shape table ACTIVE (research): {gaps['priced_options']} options "
+              f"priced at M={args.pact_regime}, {gaps['unpriced_options']} unpriced "
+              f"({gaps['by_kind']}); operator sums are proposals, not placements", flush=True)
 
     _serve_lane_cache: dict[tuple, object] = {}
 
@@ -4244,6 +4417,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "certifies_placement": False,
                 "prefill_frontier_replay": replay,
                 "fixed_resource_scope": fixed_resource_scope_stamp,
+                # A PACT vertex also names how it was generated and what its
+                # time is (PQ #1584); the replay block carries both too, so
+                # the claim that reaches the build record keeps them.
+                **({"candidate_generator": replay["candidate_generator"],
+                    "time_claim": replay["time_claim"]}
+                   if "candidate_generator" in replay else {}),
             })
         # What this allocation carries about the priced expert population
         # (PrismaQuant #183): the campaign's population statement (which units
@@ -4302,7 +4481,322 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         )
 
 
+    # --- deterministic tensor payload + conservative artifact bound --------
+    # The byte budget is the CONSTRAINT and measured KL is the OBJECTIVE, but
+    # `select_validated_frontier` cannot see the card: it reads only the
+    # per-point KL rows. Pricing each candidate here — through the SAME
+    # footprint.assignment_artifact_bytes the allocator's own byte-budget
+    # selector uses.  That function prices safetensors tensor-data spans, not
+    # a directory.  Under a whole-artifact budget we add the explicit operator
+    # reserve; the exporter later measures every regular file and hard-fails.
+    _footprint_ctx: dict[str, object] = {}
+
+    def _partition_source_total(_fp, src_total, src_manifest, *, where,
+                                assigned_names=()):
+        """Apply --exclude-source-prefix and the MTP selection's bytes (PQ #1610).
+
+        Raises SystemExit (not ValueError) on a bad prefix ON PURPOSE: both
+        callers of the pricing scalars sit behind `except Exception` clauses
+        that degrade to "pricing unavailable", and a prefix that silently
+        excluded nothing is the exact failure this flag exists to prevent —
+        it under-fills the budget by the excluded mass and every downstream
+        number stays self-consistent. SystemExit is a BaseException, so it
+        passes through those clauses to the operator.
+        """
+        total, part = _excluded_source_total(
+            _fp, src_total, src_manifest, where=where, assigned_names=assigned_names)
+        if not args.mtp_joint_cost:
+            return total, part
+        # PQ #1610: the MTP layer ships its selected rungs, not its source
+        # bytes; the floor must hold what ships.
+        payload, record = _mtp_selection()
+        excluded = tuple(getattr(args, "exclude_source_prefix", None) or ())
+        overlap = sorted(n for n in payload["params"] if n.startswith(excluded)) \
+            if excluded else []
+        if overlap:
+            raise SystemExit(f"[alloc] ERROR: --exclude-source-prefix also removes "
+                             f"{len(overlap)} selected MTP unit(s): {overlap[:4]}")
+        try:
+            rebase = _fp.mtp_selection_rebased_bytes(
+                total, payload, record["resident_bytes"], context=where,
+                manifest=src_manifest, assigned_names=assigned_names)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: {exc}") from None
+        print(
+            f"[alloc] MTP rebase ({where}): {rebase['n_units']} MTP units priced "
+            f"at the selected {rebase['mtp_resident_bytes']:,} B instead of "
+            f"their source {rebase['mtp_source_bytes']:,} B", flush=True)
+        return rebase["total_bytes"], part
+
+    def _excluded_source_total(_fp, src_total, src_manifest, *, where,
+                               assigned_names=()):
+        if not getattr(args, "exclude_source_prefix", None):
+            return int(src_total), None
+        try:
+            part = _fp.partitioned_source_total_bytes(
+                src_manifest, int(src_total), args.exclude_source_prefix,
+                context=where, assigned_names=assigned_names)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: {exc}") from None
+        print(
+            f"[alloc] source partition ({where}): excluding "
+            f"{', '.join(part['excluded_prefixes'])} removes "
+            f"{part['n_excluded']} source tensors / "
+            f"{part['excluded_source_bytes'] / 1e9:.3f} GB; this artifact is "
+            f"priced against {part['source_total_bytes'] / 1e9:.3f} GB of "
+            f"{int(src_total) / 1e9:.3f} GB",
+            flush=True)
+        return int(part["source_total_bytes"]), part
+
+    def _footprint_scalars():
+        if _footprint_ctx or not probe_model_path:
+            return _footprint_ctx or None
+        from . import footprint as _fp
+        try:
+            src_total, src_by_dtype = _fp.source_checkpoint_bytes(probe_model_path)
+            src_manifest = _fp.source_tensor_bytes_manifest(
+                probe_model_path,
+                name_map=getattr(model_profile, "checkpoint_to_live_name", None),
+                expert_parent_for_projection=getattr(
+                    model_profile, "packed_expert_parent_for_projection", None),
+            )
+            priced_total, _part = _partition_source_total(
+                _fp, src_total, src_manifest,
+                where="pareto candidate footprint",
+                assigned_names={**accounting_stats, **fixed_stats, **stats})
+            _footprint_ctx.update({
+                "fp": _fp,
+                "source_total_bytes": priced_total,
+                "regime": _fp.source_regime(src_by_dtype),
+                "source_manifest": src_manifest,
+                "stats": {**accounting_stats, **fixed_stats, **stats},
+            })
+        except Exception as exc:  # pricing is additive; never break allocation
+            print(f"[alloc] WARNING: Pareto footprint pricing unavailable: {exc}",
+                  flush=True)
+            return None
+        return _footprint_ctx
+
+    def _artifact_size_for(expanded_assignment):
+        ctx = _footprint_scalars()
+        if not ctx:
+            return None
+        try:
+            info = ctx["fp"].assignment_artifact_bytes(
+                expanded_assignment, ctx["stats"],
+                source_total_bytes=ctx["source_total_bytes"],
+                source_manifest=ctx["source_manifest"],
+                regime=ctx["regime"],
+                context="pareto candidate footprint",
+            )
+            if info["n_missing_stats"]:
+                sample = ", ".join(info["missing_stats_names"][:10])
+                raise ValueError(
+                    f"{info['n_missing_stats']} assigned Linear(s) have no "
+                    f"shape stats and cannot receive an exact artifact price: "
+                    f"{sample}"
+                )
+            tensor_payload_bytes = int(info["artifact_payload_bytes"])
+            reserve_bytes = int(args.artifact_overhead_reserve_bytes or 0)
+            return {
+                "artifact_tensor_payload_bytes": tensor_payload_bytes,
+                "artifact_tensor_payload_scope": info["artifact_byte_scope"],
+                **({
+                    "whole_artifact_upper_bound_bytes": (
+                        tensor_payload_bytes + reserve_bytes
+                    ),
+                    "artifact_bytes": tensor_payload_bytes + reserve_bytes,
+                    "artifact_byte_scope": (
+                        "selection_upper_bound_tensor_payload_plus_"
+                        "operator_non_tensor_reserve"
+                    ),
+                } if args.target_disk_gb is not None else {}),
+            }
+        except Exception as exc:
+            if args.target_disk_gb is not None:
+                raise SystemExit(
+                    "[alloc] ERROR: exact Pareto artifact pricing failed "
+                    f"under --target-disk-gb: {exc}"
+                ) from None
+            print(f"[alloc] WARNING: could not price a Pareto candidate: {exc}",
+                  flush=True)
+            return None
+
     pareto_seed_records: list[dict] = []
+
+    if pact_pricing is not None:
+        # PACT (PQ #1584): the exact lower convex hull of (operator-sum time,
+        # predicted Δloss) is the candidate set. λ only generates it; no
+        # selection objective reads λ, and no layer config, Pareto CSV or
+        # selection is written here. A replay writes one vertex.
+        from .allocator_solver import RuntimeFrontierLimitError
+        from .pact_hull import (
+            DEFAULT_MAX_STATES, DEFAULT_MAX_TRANSITIONS, PactHullError,
+            dichotomic_lower_hull, probe_assignment,
+        )
+        pact_time_ms = {key: float(r.prefill_ms) for key, r in pact_pricing.resources.items()}
+        pact_options = {(unit, c.fmt): c for unit, cs in pact_candidates.items() for c in cs}
+
+        def _pact_unit_bytes(assignment: Mapping[str, str]) -> int:
+            return sum(int(pact_options[(unit, fmt)].memory_bytes)
+                       for unit, fmt in assignment.items())
+
+        def _pact_payload_bytes(expanded: Mapping[str, str]) -> int:
+            """Whole-artifact tensor payload of one expanded assignment (footprint.py)."""
+            ctx = _footprint_scalars()
+            if not ctx:
+                raise SystemExit(
+                    "[alloc] ERROR: --target-disk-gb in PACT mode prices the bytes outside "
+                    "the DP units from the source checkpoint (probe meta.model or "
+                    "--model-override), and that checkpoint could not be priced")
+            try:
+                info = ctx["fp"].assignment_artifact_bytes(
+                    dict(expanded), ctx["stats"], source_total_bytes=ctx["source_total_bytes"],
+                    source_manifest=ctx["source_manifest"], regime=ctx["regime"],
+                    context="PACT whole-artifact budget")
+            except ValueError as exc:
+                raise SystemExit(f"[alloc] ERROR: {exc}") from None
+            if info["n_missing_stats"]:
+                raise SystemExit(
+                    f"[alloc] ERROR: {info['n_missing_stats']} allocated Linear(s) have no "
+                    "stats, so the PACT whole-artifact budget cannot price them: "
+                    + ", ".join(info["missing_stats_names"][:10]))
+            return int(info["artifact_payload_bytes"])
+
+        # The byte budget. Without --target-disk-gb it is the measured solve's:
+        # target bpp over the mutable parameters. With it, it is the on-disk
+        # whole-artifact cap (footprint.py), less the operator reserve, less the
+        # bytes outside the DP units. That last term is read off the exact
+        # accountant at the smallest and the largest unit assignment and must be
+        # one constant; every vertex is then re-priced exactly against the cap.
+        pact_disk = None
+        if args.target_disk_gb is not None:
+            from . import footprint as _pact_fp
+            ends = {
+                "smallest": {u: min(cs, key=lambda c: (c.memory_bytes, c.fmt)).fmt
+                             for u, cs in pact_candidates.items()},
+                "largest": {u: max(cs, key=lambda c: (c.memory_bytes, c.fmt)).fmt
+                            for u, cs in pact_candidates.items()},
+            }
+            outside = {name: _pact_payload_bytes(_expand_assignment_for_seed_json(dict(a)))
+                       - _pact_unit_bytes(a) for name, a in ends.items()}
+            if outside["smallest"] != outside["largest"]:
+                raise SystemExit(
+                    "[alloc] ERROR: PACT --target-disk-gb: the whole-artifact payload is not "
+                    "the units' candidate bytes plus one constant (the smallest assignment "
+                    f"leaves {outside['smallest']} bytes outside the units, the largest "
+                    f"{outside['largest']}), so no unit byte budget states the cap exactly")
+            cap_bytes = int(math.floor(float(args.target_disk_gb) * _pact_fp.GB))
+            reserve_bytes = int(args.artifact_overhead_reserve_bytes)
+            pact_budget = cap_bytes - reserve_bytes - outside["smallest"]
+            pact_disk = {"budget_bytes": cap_bytes, "reserve_bytes": reserve_bytes,
+                         "non_unit_payload_bytes": int(outside["smallest"]),
+                         "unit_budget_bytes": int(pact_budget)}
+            print(f"[alloc] PACT byte budget: card {cap_bytes} B - reserve {reserve_bytes} B - "
+                  f"{outside['smallest']} B outside the units = {pact_budget} B for the units",
+                  flush=True)
+        else:
+            pact_budget = math.floor(float(args.target_bits) * mutable_total_params / 8)
+
+        def _pact_vertex_record(assignment: Mapping[str, str]) -> dict:
+            raw_expanded = {}
+            for unit, fmt in assignment.items():
+                raw_expanded.update(pact_option_members[(unit, fmt)])
+            raw_expanded.update(fixed_format_assignment)
+            expanded = _expand_assignment_for_seed_json(dict(assignment))
+            if expanded != raw_expanded:
+                return {"feasible": False, "reason": "serving_promotion_changed_the_vertex"}
+            exact = _assignment_payload_totals(
+                {name: fmt for name, fmt in expanded.items()
+                 if name not in fixed_format_assignment}, require_all_stats=True)
+            achieved = float(exact["bits_per_param"])
+            record = {"assignment": dict(expanded), "achieved_bits": achieved,
+                      "payload_bytes": int(exact["bits_total"]) // 8,
+                      "quantizable_params": int(exact["quantizable_params"])}
+            if pact_disk is None:
+                feasible = achieved <= float(args.target_bits)
+                reason = "exact_assignment_payload_over_target"
+            else:
+                artifact = _pact_payload_bytes(expanded)
+                upper = artifact + pact_disk["reserve_bytes"]
+                feasible = upper <= pact_disk["budget_bytes"]
+                reason = "whole_artifact_upper_bound_over_card"
+                record.update({"artifact_tensor_payload_bytes": artifact,
+                               "whole_artifact_upper_bound_bytes": upper})
+            record.update({"feasible": feasible, "reason": None if feasible else reason})
+            return record
+
+        pact_limits = {"max_states": int(args.pact_max_states or DEFAULT_MAX_STATES),
+                       "max_transitions": int(args.pact_max_transitions
+                                              or DEFAULT_MAX_TRANSITIONS)}
+
+        def _pact_build_hull() -> dict:
+            import resource
+            rss_before_kib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            start = _time.perf_counter()
+            try:
+                hull = dichotomic_lower_hull(pact_candidates, pact_time_ms,
+                                             max_memory_bytes=pact_budget, **pact_limits)
+            except (PactHullError, RuntimeFrontierLimitError) as exc:
+                sizes = (getattr(exc, "diagnostics", None) or {}).get("frontier_sizes")
+                if sizes:
+                    print(f"[alloc] PACT hull refused after {len(sizes)} unit(s); "
+                          f"frontier sizes by unit: {sizes}", flush=True)
+                raise SystemExit(f"[alloc] ERROR: PACT hull: {exc}") from None
+            seconds = _time.perf_counter() - start
+            # ru_maxrss is the process peak: the hull raised it only if the
+            # after-reading exceeds the before-reading (PQ #1584, principle 15).
+            return {"hull": hull, "seconds": seconds, "peak_rss_kib": {
+                        "before_hull": rss_before_kib,
+                        "after_hull": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},
+                    "vertices": [_pact_vertex_record(v.assignment) for v in hull.vertices]}
+
+        def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
+            if lane.allocation_selection_request_path(args):
+                raise ValueError("PACT replay requires materialized wires, not a selection request")
+            try:
+                assign = probe_assignment(pact_candidates, pact_time_ms, weights,
+                                          max_memory_bytes=pact_budget, **pact_limits)
+            except (PactHullError, RuntimeFrontierLimitError) as exc:
+                raise ValueError(f"PACT replay probe refused: {exc}") from None
+            record = _pact_vertex_record(assign)
+            if not record["feasible"] or record["assignment"] != expected_assignment:
+                raise ValueError("PACT replay: the recorded probe re-derives a different "
+                                 "assignment than the hull vertex")
+            dloss = math.fsum(float(pact_options[(unit, fmt)].predicted_dloss)
+                              for unit, fmt in assign.items())
+            budget_stamp = None
+            if pact_disk is not None:
+                budget_stamp = whole_artifact_budget_stamp(
+                    budget_bytes=pact_disk["budget_bytes"],
+                    selection_tensor_payload_bytes=record["artifact_tensor_payload_bytes"],
+                    selection_non_tensor_reserve_bytes=pact_disk["reserve_bytes"],
+                    selection_assignment=record["assignment"],
+                    excluded_source_prefixes=getattr(args, "exclude_source_prefix", None) or ())
+            # Replay owns only its explicit output, never sweep-side attribution files.
+            args.bit_attribution_json = args.bit_attribution_csv = None
+            _write_layer_config(assign, record["achieved_bits"], dloss, dloss, replay=provenance,
+                                selected_whole_artifact_budget_stamp=budget_stamp)
+
+        measured_runtime_sweep(PactHullSweep(
+            build_hull=_pact_build_hull,
+            emit_replay=_pact_emit_replay,
+            pricing=pact_pricing,
+            table_identity=dict(pact_pricing.table_identity),
+            scope=dict(vars(pact_scope)),
+            regime_m=int(args.pact_regime),
+            tensor_parallel=int(args.pact_tensor_parallel),
+            time_ceiling_ms=args.pact_time_ceiling_ms,
+            max_memory_bytes=int(pact_budget),
+            **pact_limits,
+            whole_artifact_budget=pact_disk,
+            fixed_members=tuple(sorted(fixed_format_assignment)),
+            n_units=len(pact_candidates),
+            target_bits=float(args.target_bits),
+            cost_path=str(args.costs),
+            probe_path=str(args.probe),
+        ))
+        return
 
     if measured_runtime_sweep is not None:
         # Prefill frontier sweep (prismaquant.prefill_frontier): several
@@ -4503,147 +4997,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
               f"{_c['achieved_bits']:.3f} → refined achieved={_r['achieved_bits']:.3f} "
               f"(target={_r['target_bits']:.3f}, {_r['evals']} DP evals, "
               f"±{_r['tol_bits']}b)")
-
-    # --- deterministic tensor payload + conservative artifact bound --------
-    # The byte budget is the CONSTRAINT and measured KL is the OBJECTIVE, but
-    # `select_validated_frontier` cannot see the card: it reads only the
-    # per-point KL rows. Pricing each candidate here — through the SAME
-    # footprint.assignment_artifact_bytes the allocator's own byte-budget
-    # selector uses.  That function prices safetensors tensor-data spans, not
-    # a directory.  Under a whole-artifact budget we add the explicit operator
-    # reserve; the exporter later measures every regular file and hard-fails.
-    _footprint_ctx: dict[str, object] = {}
-
-    def _partition_source_total(_fp, src_total, src_manifest, *, where,
-                                assigned_names=()):
-        """Apply --exclude-source-prefix and the MTP selection's bytes (PQ #1610).
-
-        Raises SystemExit (not ValueError) on a bad prefix ON PURPOSE: both
-        callers of the pricing scalars sit behind `except Exception` clauses
-        that degrade to "pricing unavailable", and a prefix that silently
-        excluded nothing is the exact failure this flag exists to prevent —
-        it under-fills the budget by the excluded mass and every downstream
-        number stays self-consistent. SystemExit is a BaseException, so it
-        passes through those clauses to the operator.
-        """
-        total, part = _excluded_source_total(
-            _fp, src_total, src_manifest, where=where, assigned_names=assigned_names)
-        if not args.mtp_joint_cost:
-            return total, part
-        # PQ #1610: the MTP layer ships its selected rungs, not its source
-        # bytes; the floor must hold what ships.
-        payload, record = _mtp_selection()
-        excluded = tuple(getattr(args, "exclude_source_prefix", None) or ())
-        overlap = sorted(n for n in payload["params"] if n.startswith(excluded)) \
-            if excluded else []
-        if overlap:
-            raise SystemExit(f"[alloc] ERROR: --exclude-source-prefix also removes "
-                             f"{len(overlap)} selected MTP unit(s): {overlap[:4]}")
-        try:
-            rebase = _fp.mtp_selection_rebased_bytes(
-                total, payload, record["resident_bytes"], context=where,
-                manifest=src_manifest, assigned_names=assigned_names)
-        except ValueError as exc:
-            raise SystemExit(f"[alloc] ERROR: {exc}") from None
-        print(
-            f"[alloc] MTP rebase ({where}): {rebase['n_units']} MTP units priced "
-            f"at the selected {rebase['mtp_resident_bytes']:,} B instead of "
-            f"their source {rebase['mtp_source_bytes']:,} B", flush=True)
-        return rebase["total_bytes"], part
-
-    def _excluded_source_total(_fp, src_total, src_manifest, *, where,
-                               assigned_names=()):
-        if not getattr(args, "exclude_source_prefix", None):
-            return int(src_total), None
-        try:
-            part = _fp.partitioned_source_total_bytes(
-                src_manifest, int(src_total), args.exclude_source_prefix,
-                context=where, assigned_names=assigned_names)
-        except ValueError as exc:
-            raise SystemExit(f"[alloc] ERROR: {exc}") from None
-        print(
-            f"[alloc] source partition ({where}): excluding "
-            f"{', '.join(part['excluded_prefixes'])} removes "
-            f"{part['n_excluded']} source tensors / "
-            f"{part['excluded_source_bytes'] / 1e9:.3f} GB; this artifact is "
-            f"priced against {part['source_total_bytes'] / 1e9:.3f} GB of "
-            f"{int(src_total) / 1e9:.3f} GB",
-            flush=True)
-        return int(part["source_total_bytes"]), part
-
-    def _footprint_scalars():
-        if _footprint_ctx or not probe_model_path:
-            return _footprint_ctx or None
-        from . import footprint as _fp
-        try:
-            src_total, src_by_dtype = _fp.source_checkpoint_bytes(probe_model_path)
-            src_manifest = _fp.source_tensor_bytes_manifest(
-                probe_model_path,
-                name_map=getattr(model_profile, "checkpoint_to_live_name", None),
-                expert_parent_for_projection=getattr(
-                    model_profile, "packed_expert_parent_for_projection", None),
-            )
-            priced_total, _part = _partition_source_total(
-                _fp, src_total, src_manifest,
-                where="pareto candidate footprint",
-                assigned_names={**accounting_stats, **fixed_stats, **stats})
-            _footprint_ctx.update({
-                "fp": _fp,
-                "source_total_bytes": priced_total,
-                "regime": _fp.source_regime(src_by_dtype),
-                "source_manifest": src_manifest,
-                "stats": {**accounting_stats, **fixed_stats, **stats},
-            })
-        except Exception as exc:  # pricing is additive; never break allocation
-            print(f"[alloc] WARNING: Pareto footprint pricing unavailable: {exc}",
-                  flush=True)
-            return None
-        return _footprint_ctx
-
-    def _artifact_size_for(expanded_assignment):
-        ctx = _footprint_scalars()
-        if not ctx:
-            return None
-        try:
-            info = ctx["fp"].assignment_artifact_bytes(
-                expanded_assignment, ctx["stats"],
-                source_total_bytes=ctx["source_total_bytes"],
-                source_manifest=ctx["source_manifest"],
-                regime=ctx["regime"],
-                context="pareto candidate footprint",
-            )
-            if info["n_missing_stats"]:
-                sample = ", ".join(info["missing_stats_names"][:10])
-                raise ValueError(
-                    f"{info['n_missing_stats']} assigned Linear(s) have no "
-                    f"shape stats and cannot receive an exact artifact price: "
-                    f"{sample}"
-                )
-            tensor_payload_bytes = int(info["artifact_payload_bytes"])
-            reserve_bytes = int(args.artifact_overhead_reserve_bytes or 0)
-            return {
-                "artifact_tensor_payload_bytes": tensor_payload_bytes,
-                "artifact_tensor_payload_scope": info["artifact_byte_scope"],
-                **({
-                    "whole_artifact_upper_bound_bytes": (
-                        tensor_payload_bytes + reserve_bytes
-                    ),
-                    "artifact_bytes": tensor_payload_bytes + reserve_bytes,
-                    "artifact_byte_scope": (
-                        "selection_upper_bound_tensor_payload_plus_"
-                        "operator_non_tensor_reserve"
-                    ),
-                } if args.target_disk_gb is not None else {}),
-            }
-        except Exception as exc:
-            if args.target_disk_gb is not None:
-                raise SystemExit(
-                    "[alloc] ERROR: exact Pareto artifact pricing failed "
-                    f"under --target-disk-gb: {exc}"
-                ) from None
-            print(f"[alloc] WARNING: could not price a Pareto candidate: {exc}",
-                  flush=True)
-            return None
 
     if args.pareto_output_dir:
         for record in pareto_seed_records:
