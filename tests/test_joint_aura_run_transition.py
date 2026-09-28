@@ -10,6 +10,7 @@ import pytest
 
 from prismaquant import aura_cost as aura
 from prismaquant import joint_aura_run_transition as transition
+from prismaquant.joint_aura_transition_base import _BYTES
 from prismaquant.digests import DIRECT_UTF8_STRICT, file_sha256hex
 from prismaquant import joint_aura_transitions as transitions
 from prismaquant import joint_aura_source_transition as resume_transition
@@ -263,7 +264,7 @@ def test_actual_execution_binds_the_checkpoint_commit_to_the_sealed_head(tmp_pat
     assert transition.checkout_head_commit(root) == head
     _git(root, "checkout", "-q", "--detach")
     assert transition.checkout_head_commit(root) == head
-    monkeypatch.setattr(transition, "source_proof", lambda: {key: "7" * 64 for key in transition._BYTES})
+    monkeypatch.setattr(transition, "source_proof", lambda: {key: "7" * 64 for key in _BYTES})
     monkeypatch.setattr(transition, "__file__", str(root / "prismaquant" / "joint_aura_run_transition.py"))
     monkeypatch.setattr(aura, "_checkpoint_git_commit", lambda: head)
     assert transition._actual_execution()["git_commit"] == head
