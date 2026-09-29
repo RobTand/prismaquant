@@ -91,6 +91,8 @@ import re
 import threading
 import time
 
+from .digests import is_sha256hex
+
 HANDOFF_SCHEMA = "prismaquant.joint_quantum_handoff.v1"
 HANDOFF_OWNER_STATES_SCHEMA = "prismaquant.joint_quantum_handoff.owner_states.v1"
 HANDOFF_SESSION_SCHEMA = "prismaquant.joint_quantum_handoff.session.v1"
@@ -736,8 +738,7 @@ def _kernel_stamp_refusal(stamp) -> str | None:
         return f"the KDA capture kernel stamp {stamp!r} is not a name and an identity digest"
     if not isinstance(stamp["name"], str) or not stamp["name"]:
         return f"the KDA capture kernel stamp names no kernel: {stamp!r}"
-    if not isinstance(stamp["identity_sha256"], str) or not _HEX64.fullmatch(
-            stamp["identity_sha256"]):
+    if not is_sha256hex(stamp["identity_sha256"]):
         return f"the KDA capture kernel stamp's identity is not a sha256: {stamp!r}"
     return None
 

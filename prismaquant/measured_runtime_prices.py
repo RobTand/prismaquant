@@ -24,7 +24,7 @@ from typing import Any, Mapping, Sequence
 from .lane_eligibility import ServingContext
 from .serve_dispatch_table import DispatchTableError
 from .schemas import strict_json_loads
-from .digests import DIRECT_ASCII_STRICT
+from .digests import DIRECT_ASCII_STRICT, is_sha256hex
 
 SCHEMA = "prismaquant.measured_runtime_prices.v1"
 CONTEXT_SCHEMA = "prismaquant.measured_runtime_context.v1"
@@ -140,7 +140,7 @@ def _string(value: Any, where: str) -> str:
 
 
 def _sha(value: Any, where: str) -> str:
-    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+    if not is_sha256hex(value):
         raise RuntimePriceError(f"{where}: expected lowercase SHA-256")
     return value
 

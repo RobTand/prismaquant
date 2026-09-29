@@ -49,6 +49,7 @@ import re
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
 from .dev_mode import seal_check
+from .digests import is_sha256hex
 
 SEED_SPEC_SCHEMA = "prismaquant.stage_a.chain_seed.v1"
 SEED_MARKER_SCHEMA = "prismaquant.stage_a.chain_seed_marker.v1"
@@ -78,8 +79,7 @@ def seed_receipt_path(space) -> Path:
 def _pinned(binding, where) -> dict:
     if (not isinstance(binding, dict) or set(binding) != {"path", "sha256"}
             or not isinstance(binding["path"], str) or not binding["path"]
-            or not isinstance(binding["sha256"], str)
-            or not _SHA256.fullmatch(binding["sha256"])):
+            or not is_sha256hex(binding["sha256"])):
         raise ChainSeedRefused(f"the seed's {where} is not a {{path, sha256}} binding")
     return {"path": binding["path"], "sha256": binding["sha256"]}
 

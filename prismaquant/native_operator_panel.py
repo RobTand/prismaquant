@@ -17,7 +17,7 @@ from typing import Mapping
 from . import record_fields
 from .joint_aura import identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import OperatorMeasurement
-from .digests import DIRECT_ASCII_STRICT
+from .digests import DIRECT_ASCII_STRICT, is_sha256hex
 
 INPUT_SCHEMA = "prismaquant.native_dense_inputs.v1"
 PANEL_SCHEMA = "tessera.native_dense_panel.v1"
@@ -48,7 +48,7 @@ def operator_route_identity(route):
 
 
 def _sha(value, name):
-    if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+    if not is_sha256hex(value):
         raise ValueError(f"{name}: lowercase SHA256 required")
     return value
 

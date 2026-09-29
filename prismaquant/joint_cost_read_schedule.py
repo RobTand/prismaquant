@@ -18,6 +18,7 @@ import stat
 from typing import Callable, Mapping
 import zlib
 
+from .digests import is_sha256hex
 from .joint_retained_window_plan import RetainedWindowBudget
 from .schemas import Contract, strict_json_loads
 
@@ -55,7 +56,7 @@ def _int(value: object, label: str, *, positive: bool = False) -> int:
 
 
 def _sha(value: object, label: str) -> str:
-    _require(type(value) is str and _HEX.fullmatch(value) is not None,
+    _require(is_sha256hex(value),
              f"{label} must be a lowercase SHA-256 digest")
     return value
 
