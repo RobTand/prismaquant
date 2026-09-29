@@ -154,21 +154,6 @@ def test_surface_verifier_refuses_single_seal_mismatch_with_original_text(tmp_pa
                   "fit_tokens": 8}
     with pytest.raises(ReplayError, match=r"Hessian capture_sha256 mismatch"):
         surface._verify_measured_hessian(hessian, None, provenance, frozenset())
-    import torch
-
-    from prismaquant import tessera_anchored_surface as surface
-    from tests.test_hessian_identity_content_equal import ADDED_FMT, UNITS  # noqa
-
-    shared_h = torch.eye(2) * 3
-    costs, references, panel, _overlay = _joined_fixture()(
-        tmp_path, override={UNITS[0]: shared_h * 7})
-    name = UNITS[0]
-    hessian = dict(costs[name][ADDED_FMT]["hessian_identity"])
-    provenance = dict(panel, capture_sha256=panel["capture_sha256"])
-    from prismaquant.tessera_anchored_surface import ReplayError
-
-    with pytest.raises(ReplayError, match=r"Hessian capture_sha256 mismatch"):
-        surface._verify_measured_hessian(hessian, None, provenance, frozenset())
 
 
 def test_surface_verifier_refuses_mixed_content_with_original_text(tmp_path):
