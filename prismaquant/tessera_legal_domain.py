@@ -568,7 +568,7 @@ def live_pins() -> DomainPins:
 #: ``grammar.py`` (``9ae1f824…``) are byte-identical, so
 #: ``reader-pin-a21d74d8`` joins the equivalent states and no count moves
 #: (PQ #1702).
-#: **Re-taken 2026-09-29 for ``83460680ed`` (contract v45), a rename of that
+#: **Re-pinned 2026-09-29 for ``83460680ed`` (contract v45), a rename of that
 #: byte-state.**  Tessera #725 (tessera#724, the window intake repacks in place
 #: into the loader's scratch) leaves ``export.py`` at ``2127e82b…`` and
 #: ``grammar.py`` at ``9ae1f824…``, so ``reader-pin-a21d74d8`` is renamed
