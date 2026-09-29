@@ -69,8 +69,11 @@ derives the provenance from the exported assignment through
 `allocator_candidates.recompute_serving_lane_provenance`, and it stamps nothing
 when that function refuses: no `target_profile` in the recipe (a derivation
 under profile None would be a different claim than the allocator made), or any
-unit whose route needs a serving context the bare assignment does not carry
-(a scoped Tessera lane, or a report with `by_unit`). A recompute reads
+unit whose route needs a serving context the bare assignment does not carry.
+That refusal is the generic `requires_serving_context` signal (set by the pinned
+runtime's own admission and carried on `ResolvedServingLane`, not serialised
+into the route), counted per unit by the summariser; no lane name is compared.
+A report with `by_unit` is also refused. A recompute reads
 `activation_pricing_branches` as `{"unrecorded": N}` because the chosen
 candidate's branch is not recoverable; every other field equals the
 allocator's (`tests/test_route_histogram_native_1387.py` runs the allocator,

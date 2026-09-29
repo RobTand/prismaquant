@@ -292,10 +292,39 @@ def test_recompute_refuses_a_scoped_tessera_assignment(monkeypatch):
         fallback_route="native", fused_mid_m_backed=False,
         fused_mid_m_rungs=(), fused_mid_m_range=None,
         runtime_version="test-runtime", rungs_source="test-contract",
-        route_status="backed", route_status_source="test-contract")
+        route_status="backed", route_status_source="test-contract",
+        requires_serving_context=True)
     monkeypatch.setattr(ac, "serving_lane_route", lambda *a, **kw: lane)
     assert ac.recompute_serving_lane_provenance(
         {"unit.a": _FORMAT}, _PROFILE) is None
+
+
+def test_recompute_refuses_any_lane_that_requires_a_serving_context(
+        monkeypatch):
+    """The refusal is the generic ``requires_serving_context`` signal, not a
+    lane-name check: a lane the core has never heard of is refused the same
+    way, and the same lane without the flag is derived."""
+    def _lane(requires):
+        return ResolvedServingLane(
+            lane_id="some_other_runtime_lane", format="NVFP4",
+            activation_contract="W4A4", fallback_route="native",
+            fused_mid_m_backed=False, fused_mid_m_rungs=(),
+            fused_mid_m_range=None, runtime_version="test-runtime",
+            rungs_source="test-contract", route_status="backed",
+            route_status_source="test-contract",
+            requires_serving_context=requires)
+
+    monkeypatch.setattr(
+        ac, "serving_lane_route", lambda *a, **kw: _lane(True))
+    assert ac.recompute_serving_lane_provenance(
+        {"unit.a": "NVFP4"}, "vllm_packed_moe") is None
+
+    monkeypatch.setattr(
+        ac, "serving_lane_route", lambda *a, **kw: _lane(False))
+    report = ac.recompute_serving_lane_provenance(
+        {"unit.a": "NVFP4"}, "vllm_packed_moe")
+    assert report is not None
+    assert report["by_format"]["NVFP4"]["units"] == 1
 
 
 @pytest.mark.parametrize("profile", [None, ""])

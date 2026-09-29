@@ -2616,6 +2616,25 @@ def selection_serving_lane_provenance(
     and routed units ride different ones, where ``route`` alone reads None
     (#1289).
     """
+    return _summarize_serving_lanes(
+        assignment, candidates, target_profile, context_by_unit)[0]
+
+
+def _summarize_serving_lanes(
+    assignment: dict[str, str],
+    candidates: dict[str, list[Candidate]] | None,
+    target_profile: str | None,
+    context_by_unit: Mapping[str, ServingContext] | None,
+) -> tuple[dict, int]:
+    """The provenance report plus ``context_required_units``.
+
+    The count is the number of selected units whose resolved lane says, through
+    the generic ``requires_serving_context`` flag the pinned runtime's own
+    admission sets, that its route depends on a serving context. It is a
+    return value rather than a report key so the shipped report shape does not
+    change. No lane name is compared.
+    """
+    context_required_units = 0
     lane_cache: dict[tuple, object] = {}
     by_format: dict[str, dict] = {}
     route_hist: dict[str, dict[str, dict]] = {}
@@ -2652,6 +2671,11 @@ def selection_serving_lane_provenance(
         route = None if lane is None else lane.as_dict()
         unit_row = {"format": fmt, "route": route}
         lane_context = getattr(lane, "serving_context", None)
+        if (
+            getattr(lane, "requires_serving_context", False)
+            or lane_context is not None
+        ):
+            context_required_units += 1
         if lane_context is not None:
             # The chosen candidate's recorded context owns its route even if
             # a caller now supplies a different context for the same unit.
@@ -2718,7 +2742,7 @@ def selection_serving_lane_provenance(
         ]
     if include_by_unit:
         report["by_unit"] = by_unit
-    return report
+    return report, context_required_units
 
 
 def recompute_serving_lane_provenance(
@@ -2731,10 +2755,12 @@ def recompute_serving_lane_provenance(
     not the allocator's candidates or its per-unit serving contexts. Two things
     the allocator read from those are therefore unrecoverable here:
 
-    * a scoped (Tessera) unit's route depends on its serving context, which is
-      not in the assignment, so resolving it without one prices a different
-      route than the allocator did. Such an assignment returns None: stamping
-      the wrong histogram is worse than stamping none.
+    * a unit whose lane or admission requires a serving context (the generic
+      ``requires_serving_context`` flag the pinned runtime sets; no lane name
+      is compared) has a route that depends on a context the assignment does
+      not carry, so resolving it without one prices a different route than
+      the allocator did. Such an assignment returns None: stamping the wrong
+      histogram is worse than stamping none.
     * ``activation_pricing_branches`` comes from the chosen ``Candidate``; here
       every unit reads ``unrecorded``. The card copies only
       ``route_status_counts`` and ``activation_contracts``, which are equal to
@@ -2745,17 +2771,10 @@ def recompute_serving_lane_provenance(
     """
     if not isinstance(target_profile, str) or not target_profile or not assignment:
         return None
-    from .tessera_menu import TESSERA_LANE_ID
-
-    report = selection_serving_lane_provenance(
-        dict(assignment), None, target_profile)
-    if "by_unit" in report:
+    report, context_required_units = _summarize_serving_lanes(
+        dict(assignment), None, target_profile, None)
+    if "by_unit" in report or context_required_units:
         return None
-    for row in report["by_format"].values():
-        for entry in row.get("routes", ()):
-            route = entry.get("route") or {}
-            if route.get("lane_id") == TESSERA_LANE_ID:
-                return None
     return report
 
 

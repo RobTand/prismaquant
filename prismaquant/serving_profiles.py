@@ -540,6 +540,10 @@ class ResolvedServingLane:
     requires_serve_flags: tuple[str, ...] = ()
     route_status_source: str = ""
     serving_context: "ServingContext | None" = None
+    # The pinned runtime's own statement that this rung's route depends on a
+    # serving context. Deliberately absent from ``as_dict``: it is a gate
+    # input for callers that lack a context, not part of the route identity.
+    requires_serving_context: bool = False
 
     def as_dict(self) -> dict:
         payload = {
