@@ -573,7 +573,7 @@ def live_pins() -> DomainPins:
 #: into the loader's scratch) leaves ``export.py`` at ``2127e82b…`` and
 #: ``grammar.py`` at ``9ae1f824…``, so ``reader-pin-a21d74d8`` is renamed
 #: ``reader-pin-83460680`` and no count moves (PQ #1719).
-#: **Re-taken 2026-09-29 for ``b40c93cb73`` (contract v45), a rename of that
+#: **Re-pinned 2026-09-29 for ``b40c93cb73`` (contract v45), a rename of that
 #: byte-state.**  Tessera #730 (tessera#729, the routed loader keeps the
 #: row-cut start state in the permuted column order) leaves ``export.py`` at
 #: ``2127e82b…`` and ``grammar.py`` at ``9ae1f824…``, so

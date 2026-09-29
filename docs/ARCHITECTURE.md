@@ -12,7 +12,10 @@ contract stays v45 (`0869f326…`) and the pin stays schema v2.
   The package diff is `export_serving.py`, `native_window_moe.py` and
   `serving_parts.py`. #730 fixes the routed MoE loader, which stored the
   tensor-parallel row-cut start state in the original column order and so
-  corrupted rank-1 gate/up weights on mixed-rate stacks.
+  corrupted rank-1 gate/up weights on mixed-rate stacks. The route-census
+  source (`tools/tessera_route_census.py`) now hashes to
+  `e449db34197d2e415a00de9c91a6abde0e3030f381e7a7be25946fc97fcb1c14`;
+  this records source identity, not a new census run.
 - **What does not move.** The packaged contract, `export.py` (`2127e82b…`)
   and `grammar.py` (`9ae1f824…`) are byte-identical, so the reviewed answer,
   every rate count and the Tessera `layer.json` pin stay as they are. The
@@ -20,12 +23,16 @@ contract stays v45 (`0869f326…`) and the pin stays schema v2.
   `reader-pin-b40c93cb`.
 - **Evidence.** The serving-identity snapshot
   (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`) differs from
-  the previous fixture in `pin.commit` only; the PB action keys are in the
-  PR body of #1739.
+  the previous fixture in `pin.commit` only (PB `8321ca113e50`). The
+  normalized #1304 allocator outputs match all four frozen digests
+  (PB `c0d0779923a9`, 1 passed, 0 failed, 0 skipped). Full keys, commands
+  and CAS receipts are in PR #1740 (closes #1739).
 - **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb`, plus a
   `-tf516` sibling on each Spark. Each is a copy of the `83460680`
-  interpreter with only Tessera reinstalled, built by a host-pinned PB
-  action.
+  interpreter with only Tessera reinstalled. Host-pinned PB builds are
+  dl380g10 `04db45b6e214`, sparky `6e595022a3d5` and sparklina
+  `18820b4622bf`; pin publication is `d4c602dbe103`. All five interpreters
+  passed exact dependency-pin preflight, the provision check and import.
 
 Re-stamped 2026-09-29 (PQ #1745, `sol/dedup-ci-grace`): the load-phase
 bound cites the checkpoint reader's deadline at line 1868 after #1729.

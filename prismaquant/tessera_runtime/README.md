@@ -51,7 +51,13 @@ producer authority's digest instead of its path) and #730. The package diff is
 contract (v45, `0869f326…`), `export.py` and `grammar.py` are byte-identical
 to `83460680`, so the reviewed answer does not move, the legal inventory
 renames the `reader-pin-83460680` byte-state `reader-pin-b40c93cb`, and no
-rate count moves. The pin stays schema v2.
+rate count moves. The pin stays schema v2. The route-census tool moves to SHA-256
+`e449db34197d2e415a00de9c91a6abde0e3030f381e7a7be25946fc97fcb1c14`
+(`tools/tessera_route_census.py`); this is a source identity, not a new census run.
+The serving-identity snapshot was re-taken under the installed pin by PB
+`8321ca113e50` and differs only in `pin.commit`. PB `c0d0779923a9` repeated
+the #1304 check: 1 passed, 0 failed, 0 skipped, with all four normalized
+allocator output digests unchanged. Full keys and commands are in PR #1740.
 
 The previous pin was Tessera `83460680ed84e33c82eb62b31345381cc151aa58`,
 master's merge of #725 on 2026-09-29 (tessera#724, PQ #1719): the routed
@@ -181,8 +187,13 @@ interpreter for the current pin is
 tree tests against: Tessera `b40c93cb` and PrismaBuild `059953bc`
 (`staged_lease.PB_READER_LEASE_PIN_COMMIT`, PQ #1541). It is a copy of
 `pq-pb059953bc-tessera-83460680` with only Tessera reinstalled, non-editable,
-provisioned by host-pinned PB build actions on 2026-09-29 (action keys in
-PQ #1739's PR). Each Spark action also builds the `-tf516` sibling.
+provisioned by host-pinned PB build actions on 2026-09-29: dl380g10
+`04db45b6e214`, sparky `6e595022a3d5` and sparklina `18820b4622bf`.
+Each Spark action also builds the `-tf516` sibling. All five interpreters
+passed the exact dependency-pin preflight, `provision_tessera_pin.py
+--check-only`, and the Tessera import check. Pin publication is PB
+`d4c602dbe103`; the full keys, commands and receipts are recorded in PR #1740
+(closes #1739).
 The `83460680` interpreters (PQ #1719) are copies of the `a21d74d8` ones
 built the same way: dl380g10 `05240c885661`, sparklina `a2f3caa3007c` and
 sparky `3a14fa1bb30c`.
