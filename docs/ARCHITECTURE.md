@@ -7,10 +7,10 @@ the stream head byte-checks the producer projection on its reader threads.**
 no `--source-identity-cache`, and every planned row then hashed each shard it
 read, whole, under its GPU reservation. It now refuses to plan one, and it
 refuses a proof the row would refuse at adoption:
-`cost_streaming.validate_cached_streamed_model_identity` must pass
-(checkpoint coverage, tensor-to-shard map, live config, every shard's stat
-fingerprint) and every proved shard SHA must equal the bound capture's
-`source_files`. `check` and `submit` refuse a manifest whose selected-source
+`tessera_calibration_cache.streamed_identity_proof_digests` -- the check
+`adopt_streamed_identity_cache` runs on the row -- must pass (schema, checkpoint
+index digest, the proof's shard set equal to the capture roster, every shard's
+live stat fingerprint, every proved SHA equal to the capture's `source_files`). `check` and `submit` refuse a manifest whose selected-source
 rows carry no proof (`require_source_identity_proofs`), naming every such row.
 The proof stays outside the campaign checkpoint identity (#1532), so a
 re-planned row resumes its journal; its PrismaBuild action key moves, because
