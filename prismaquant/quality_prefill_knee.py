@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+import math
 from types import MappingProxyType
 
 from .quality_prefill_contract import (
@@ -47,6 +48,8 @@ __all__ = [
     "FrontierPoint",
     "Normalisation",
     "KneeSelection",
+    "frontier_endpoints",
+    "is_finite_number",
     "read_points",
     "feasible_points",
     "nondominated",
@@ -310,7 +313,12 @@ def nondominated(points: Sequence[FrontierPoint]) -> tuple[FrontierPoint, ...]:
     )
 
 
-def _endpoints(
+def is_finite_number(value: object) -> bool:
+    """Strict int/float finiteness: ``bool`` is not a number here."""
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def frontier_endpoints(
     frontier: Sequence[FrontierPoint],
 ) -> tuple[FrontierPoint, FrontierPoint]:
     """The fastest feasible point and the best-quality feasible point.
@@ -364,7 +372,7 @@ def select_development_point(
             f"{len(frontier)}, and the rule needs at least 3"
         )
 
-    fastest, best = _endpoints(frontier)
+    fastest, best = frontier_endpoints(frontier)
     if fastest.point_id == best.point_id:
         _fail(
             "the fastest and the best-quality feasible points are the same point; "
