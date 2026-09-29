@@ -794,3 +794,59 @@ def test_a_reclaimer_names_what_the_guard_reads(tmp_path, monkeypatch, lowers):
                                    available=80 * GiB)
     with pytest.raises(ValueError, match="nonempty subset"):
         guard.add_reclaimer(lambda need: 0, lowers=lowers)
+
+
+@pytest.mark.parametrize("where", ["reader", "gate"])
+def test_terminal_read_ahead_error_survives_reclaim_without_retry(where):
+    import weakref
+
+    class Scratch:
+        pass
+
+    calls = []
+    held = []
+
+    def fail_once():
+        calls.append(where)
+        if len(calls) == 1:
+            scratch = Scratch()
+            held.append(weakref.ref(scratch))
+            # The pre-fix engine retries this RuntimeError. The new marker
+            # changes only irrecoverable read failures, not transient errors.
+            error_type = getattr(io_engine, "TerminalReadError", RuntimeError)
+            raise error_type("original terminal range diagnostic")
+        return b"later success", ()
+
+    def ready(group, cancel):
+        del cancel
+        if where == "gate" and group == 1:
+            fail_once()
+        return True
+
+    def reader():
+        return fail_once() if where == "reader" else (b"range", ())
+
+    entries = [
+        io_engine.ReadEntry(key="prefix", path=None, size=SIZE, limit=SIZE, held_bytes=SIZE,
+                           expected_sha256=None, decoder=None,
+                           group=0, reader=lambda: (b"prefix", ())),
+        io_engine.ReadEntry(key="victim", path=None, size=SIZE, limit=SIZE, held_bytes=SIZE,
+                           expected_sha256=None, decoder=None,
+                           group=1, reader=reader),
+    ]
+    budget = io_engine.FixedBudget(buffer_bytes=SIZE, headroom=2 * SIZE)
+    with io_engine.read_stream(entries, budget=budget, ready=ready) as stream:
+        _quiet(stream)
+        assert calls == [where] and not stream._demanded
+        # A terminal exception must not retain a reader/gate frame's scratch
+        # buffer outside the stream's byte budget while waiting for demand.
+        assert held[0]() is None
+        stream.reclaim(2 * SIZE)
+        stream.take(0)
+        stream.release()
+        with pytest.raises(io_engine.EntryError, match="original terminal range diagnostic"):
+            stream.take(1)
+        assert calls == [where]
+        assert stream._reads[1] == (1 if where == "reader" else 0)
+        error = stream._errors[1]
+        assert error is not None and error.__traceback__ is None
