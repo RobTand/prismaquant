@@ -56,6 +56,7 @@ MODULES = (
     "prismaquant/joint_cost_quantum.py",
     "prismaquant/joint_cost_read_schedule.py",
     "prismaquant/joint_cost_stage_a.py",
+    "prismaquant/joint_dispatch_pilot.py",
     "prismaquant/joint_forward_resume.py",
     "prismaquant/joint_layer_quanta.py",
     "prismaquant/joint_projection_backend.py",
@@ -223,6 +224,9 @@ ALLOWLIST = {
         1, INTEGRITY, "staged wire bytes against the receipt digest"),
     ("prismaquant/tessera_joint_aura.py", "_read_wire_bytes"): (
         1, INTEGRITY, "staged wire bytes against the receipt digest"),
+    ("tools/dispatch_joint_quanta.py", "_admit_dispatch_pilots"): (
+        1, INTEGRITY, "pilot counters bytes against the operator's bound receipt digest "
+        "(#1293); source/regime/shape admission is the explicitly overridable pilot gate"),
     ("tools/dispatch_joint_quanta.py", "_executable_prepared_input"): (
         5, AMBIGUOUS, "the manifest wire against its digest (integrity); the prepared "
         "payload, its render prerequisite, the bound prepared contract and the Stage A "
