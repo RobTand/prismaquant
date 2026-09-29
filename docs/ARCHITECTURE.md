@@ -26,7 +26,10 @@ contract stays v45 (`0869f326…`) and the pin stays schema v2.
   the previous fixture in `pin.commit` only (PB `8321ca113e50`). The
   normalized #1304 allocator outputs match all four frozen digests
   (PB `c0d0779923a9`, 1 passed, 0 failed, 0 skipped). Full keys, commands
-  and CAS receipts are in PR #1740 (closes #1739).
+  and CAS receipts are in PR #1740 (closes #1739). The full x86 CPU suite
+  under the new interpreter is GREEN (PB `4cbd37811088`, `c552682c2843`):
+  15,473 passed, 354 skipped, 1 xfailed, 0 failed and 88 passed subtests
+  across 872 files. These CPU receipts do not qualify GPU/serving behavior.
 - **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb`, plus a
   `-tf516` sibling on each Spark. Each is a copy of the `83460680`
   interpreter with only Tessera reinstalled. Host-pinned PB builds are

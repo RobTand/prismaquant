@@ -58,6 +58,12 @@ The serving-identity snapshot was re-taken under the installed pin by PB
 `8321ca113e50` and differs only in `pin.commit`. PB `c0d0779923a9` repeated
 the #1304 check: 1 passed, 0 failed, 0 skipped, with all four normalized
 allocator output digests unchanged. Full keys and commands are in PR #1740.
+The full x86 CPU suite under the new interpreter is GREEN: PB `4cbd37811088`
+and `c552682c2843`, 15,473 passed, 354 skipped, 1 xfailed and 0 failed, plus
+88 passed subtests across 872 files. Skips do not qualify GPU or serving
+behavior. An inherited stale citation was resolved by the #1748 rebase;
+a separate test-only correction distinguishes concurrent reader callback
+starts from ordered stream delivery. No production IO behavior changed.
 
 The previous pin was Tessera `83460680ed84e33c82eb62b31345381cc151aa58`,
 master's merge of #725 on 2026-09-29 (tessera#724, PQ #1719): the routed
