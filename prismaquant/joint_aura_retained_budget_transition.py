@@ -73,7 +73,6 @@ from .joint_aura_transition_base import (
     _committed_package,
     _require,
     actual_execution,
-    checkout_head_commit,
 )
 
 VERSION = "meta_skeleton_render_proof_retained_budget_v1"
