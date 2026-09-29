@@ -2494,11 +2494,9 @@ EXPORT_ENTRY_POINT = "tessera.experiments.export_tessera_serving"
 
 
 def _sha256_of(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    from prismaquant.digests import file_sha256hex
+
+    return file_sha256hex(path)
 
 
 def _bound_sha256(path: Path, declared: str | None, *, label: str) -> str:
