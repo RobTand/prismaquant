@@ -88,9 +88,9 @@ def test_a_format_on_dense_and_routed_units_names_both_routes(monkeypatch):
     # histogram is what names them.
     assert row["route"] is None
     routes = row["routes"]
-    assert sorted(r["fallback_route"] for r in routes) == [
+    assert sorted(r["route"]["fallback_route"] for r in routes) == [
         "native-dense", "native-routed_moe"]
-    by_route = {r["fallback_route"]: r for r in routes}
+    by_route = {r["route"]["fallback_route"]: r for r in routes}
     assert by_route["native-dense"]["units"] == 2
     assert by_route["native-routed_moe"]["units"] == 1
     assert by_route["native-dense"]["structures"] == {"dense": 2}

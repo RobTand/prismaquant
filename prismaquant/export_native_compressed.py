@@ -8640,16 +8640,28 @@ def _write_shipcard(
         "render_levers": _render_lever_provenance(),
         "kv_shared_fisher": _shipcard.kv_shared_fisher_echo(),
     }
-    # Principle 12: the recipe's route histogram travels beside the bpp. A
-    # native allocation writes no serving_lane_provenance yet (#1387), so this
-    # stamps only when the recipe carries one.
+    # Principle 12: the recipe's route histogram travels beside the bpp. Every
+    # allocation writes serving_lane_provenance into its recipe (#1387); a
+    # recipe from before that fix carries none, so the histogram is then
+    # derived from the assignment being exported, under the recipe's target
+    # profile, by the same summariser the allocator uses.
+    recipe_meta: dict = {}
     if layer_config_path:
         from .layer_config import read_layer_config_metadata
 
-        route_histogram = _shipcard.route_histogram_claim(
-            read_layer_config_metadata(layer_config_path).get("serving_lane_provenance"))
-        if route_histogram is not None:
-            build["route_histogram"] = route_histogram
+        recipe_meta = read_layer_config_metadata(layer_config_path) or {}
+    provenance = recipe_meta.get("serving_lane_provenance")
+    if not isinstance(provenance, dict) and config_assignment:
+        from .allocator_candidates import selection_serving_lane_provenance
+
+        provenance = selection_serving_lane_provenance(
+            config_assignment, None, recipe_meta.get("target_profile"))
+    route_histogram = _shipcard.route_histogram_claim(provenance)
+    if route_histogram is not None:
+        build["route_histogram"] = route_histogram
+        # A card that carries the histogram is held to it by `verify`;
+        # historical cards carry no marker and keep verifying (#1387).
+        build["route_histogram_owed"] = True
     # Stamp the lane the card was opened on.  This exporter writes exactly
     # one container, and until #631 it stamped none -- so `lane_gate_slots`
     # answered `()` for every native card and the lane's own declarations

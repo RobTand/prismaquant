@@ -93,10 +93,16 @@ def test_a_malformed_route_histogram_is_refused(tmp_path, damage):
     assert _route_problems(card)
 
 
-def test_a_native_card_owes_no_histogram_until_its_allocation_writes_one(tmp_path):
-    # #1387: native allocations write no serving_lane_provenance yet.
+def test_a_historical_native_card_without_the_owed_marker_still_verifies(tmp_path):
+    # #1387: only cards the native exporter marks (build.route_histogram_owed)
+    # owe a histogram; a card that predates the marker keeps verifying.
     card = _card(tmp_path, lane=None)
     assert _route_problems(card) == []
+
+
+def test_a_marked_native_card_owes_its_histogram(tmp_path):
+    card = _card(tmp_path, lane=None, build={"route_histogram_owed": True})
+    assert any("route_histogram is missing" in p for p in _route_problems(card))
 
 
 def test_the_report_answers_the_route_question_once():

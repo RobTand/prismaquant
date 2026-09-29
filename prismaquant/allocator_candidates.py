@@ -2609,9 +2609,15 @@ def selection_serving_lane_provenance(
     serving context; equal format names need not have equal routes. A format
     summary carries one route only when all its selected units agree, while
     ``by_unit`` preserves each route when contexts or conflicting routes exist.
+    Every format summary also carries ``routes``: a histogram with one entry
+    per distinct route (``route``, ``units``, and ``structures`` counting the
+    units by serving structure). It names both routes when a format's dense
+    and routed units ride different ones, where ``route`` alone reads None
+    (#1289).
     """
     lane_cache: dict[tuple, object] = {}
     by_format: dict[str, dict] = {}
+    route_hist: dict[str, dict[str, dict]] = {}
     by_unit: dict[str, dict] = {}
     include_by_unit = context_by_unit is not None
     branch_counts: Counter[str] = Counter()
@@ -2660,6 +2666,12 @@ def selection_serving_lane_provenance(
             row["route"] = None
             include_by_unit = True
         row["units"] += 1
+        route_key = json.dumps(route, sort_keys=True, default=str)
+        entry = route_hist.setdefault(fmt, {}).setdefault(
+            route_key, {"route": route, "units": 0, "structures": Counter()})
+        entry["units"] += 1
+        entry["structures"][
+            getattr(serving_context, "structure", None) or "unspecified"] += 1
         branch_counts[str(branch) if branch else "unrecorded"] += 1
         if lane is None:
             # A unit whose profile declares no lane has no route status either.
@@ -2695,6 +2707,12 @@ def selection_serving_lane_provenance(
             fmt: row for fmt, row in sorted(by_format.items())
         },
     }
+    for fmt, entries in route_hist.items():
+        by_format[fmt]["routes"] = [
+            {"route": e["route"], "units": e["units"],
+             "structures": dict(sorted(e["structures"].items()))}
+            for _key, e in sorted(entries.items())
+        ]
     if include_by_unit:
         report["by_unit"] = by_unit
     return report
