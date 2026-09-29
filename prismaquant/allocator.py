@@ -4425,6 +4425,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             from .measured_runtime_prices import identity_sha256
             if identity_sha256(assignment_expanded) != replay["assignment_sha256"]:
                 raise ValueError("prefill frontier replay: final writer changed the assignment")
+            # The PACT selection record (PQ #1585) rides beside the replay
+            # block, not inside it: the replay names the one vertex, the record
+            # names the roster that vertex was chosen from. The replay keeps
+            # the record's identity so the two cannot be separated.
+            replay = dict(replay)
+            pact_selection = replay.pop("pact_selection", None)
+            if pact_selection is not None:
+                layer_cfg[LAYER_CONFIG_META_KEY]["pact_selection"] = pact_selection
             layer_cfg[LAYER_CONFIG_META_KEY].update({
                 "research_only": True,
                 "certifies_placement": False,
