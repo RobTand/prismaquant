@@ -29,6 +29,9 @@ class _Sampler:
 
     def __init__(self):
         self.samples = []
+        # ``GpuPowerSampler.times``: the host time of each sample, read by
+        # the counters' exposed-wait report (#1292).
+        self.times = []
         self.stopped = 0
 
     def start(self):

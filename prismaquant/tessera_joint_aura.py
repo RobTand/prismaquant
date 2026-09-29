@@ -2295,7 +2295,7 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
     Stage B layer quantum, PQ #1024): the plan's other inputs are admitted by
     shape only, and nothing but the plan itself is read. The source identity
     cache is then digest-checked where the caller reads it -- the head
-    slice's declared entry, or ``_seed_source_identity_cache`` on the legacy
+    slice's declared entry, or ``seed_source_identity_cache`` on the legacy
     walk. The boundary directory is never resolved here in either mode: the
     admission discards it, and its owner resolves it when it opens storage.
     """
@@ -2485,7 +2485,7 @@ def build_source_digest_cache(model, out):
             "content_sha256": identity["content_sha256"]}
 
 
-def _seed_source_identity_cache(config, root):
+def seed_source_identity_cache(config, root):
     """Carry an explicitly bound old digest record into this pass's cache slot.
 
     A new output root otherwise makes ``build_streamed_model_identity`` hash
@@ -2766,7 +2766,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     bind_residency_manifest(
         data_manifest_sha256
         or (cost_read_manifest or prewarm_manifest or {}).get('sha256'))
-    identity_cache_path = _seed_source_identity_cache(config, root)
+    identity_cache_path = seed_source_identity_cache(config, root)
     result = {"schema": "prismaquant.tessera_joint_aura.execution.v1", "command": command,
               "plan_sha256": plan_sha256, "env": {"host": socket.gethostname(),
                   "started_epoch": time.time(), "torch": str(torch.__version__),

@@ -282,23 +282,33 @@ def test_a_whole_artifact_card_binds_the_hull_and_stamps_the_replay(tmp_path, mo
         struct.pack("<Q", len(blob)) + blob + b"\x00" * offset)
     floor = 64 * 2  # the norm ships verbatim
     unit = {fmt: fr.get_format(fmt).memory_bytes_for_shape((256, 256)) for fmt in MENU}
+    # A Tessera unit ships as one TSRFUSE1 member, and the member frame carries
+    # the projection role (the last component of the tensor name, no leaf) as
+    # UTF-8.  A unit candidate's bytes leave that name to the caller (#1609),
+    # so the whole-artifact accountant adds it per unit; it is neither a unit
+    # candidate byte nor part of the non-unit payload (#1716).
+    from prismaquant.name_projection import strip_weight_leaf
+    role = strip_weight_leaf(case.dense).rsplit(".", 1)[-1]
+    assert role and role != "weight"  # a projection role, never the parameter leaf
+    names = len(role.encode("utf-8"))
     reserve = 1000
     # The card admits MID and FAST, never SLOW.
-    disk_gb = repr((floor + unit[MID] + reserve + 500) / footprint.GB)
+    disk_gb = repr((floor + names + unit[MID] + reserve + 500) / footprint.GB)
     card = math.floor(float(disk_gb) * footprint.GB)
-    assert floor + unit[MID] + reserve <= card < floor + unit[SLOW] + reserve
+    assert (floor + names + unit[MID] + reserve <= card
+            < floor + names + unit[SLOW] + reserve)
     frontier, doc = _hull(tmp_path, [*case.argv, "--target-disk-gb", disk_gb,
                                      "--artifact-overhead-reserve-bytes", str(reserve)],
                           "--bootstrap-draws", "50")
 
     assert doc["whole_artifact_budget"] == {
         "budget_bytes": card, "reserve_bytes": reserve, "non_unit_payload_bytes": floor,
-        "unit_budget_bytes": card - reserve - floor}
-    assert doc["max_memory_bytes"] == card - reserve - floor
+        "unit_name_bytes": names, "unit_budget_bytes": card - reserve - floor - names}
+    assert doc["max_memory_bytes"] == card - reserve - floor - names
     got = [load_assignment(v["assignment_path"])[case.dense] for v in doc["vertices"]]
     assert got == [MID, FAST]
     assert [v["whole_artifact_upper_bound_bytes"] for v in doc["vertices"]] == [
-        floor + unit[MID] + reserve, floor + unit[FAST] + reserve]
+        floor + names + unit[MID] + reserve, floor + names + unit[FAST] + reserve]
     assert all(v["feasible"] for v in doc["vertices"])
 
     output = tmp_path / "replayed.json"
@@ -306,7 +316,7 @@ def test_a_whole_artifact_card_binds_the_hull_and_stamps_the_replay(tmp_path, mo
     assert load_assignment(output) == {case.dense: MID}
     stamp = json.loads(output.read_text())[LAYER_CONFIG_META_KEY]["whole_artifact_budget"]
     assert stamp["budget_bytes"] == card
-    assert stamp["selection_tensor_payload_bytes"] == floor + unit[MID]
+    assert stamp["selection_tensor_payload_bytes"] == floor + names + unit[MID]
     assert stamp["selection_non_tensor_reserve_bytes"] == reserve
 
 
