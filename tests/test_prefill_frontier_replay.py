@@ -72,6 +72,9 @@ def test_replay_metadata_matches_normal_writer_for_an_admitted_fixed_charge(tmp_
     expected = json.loads(ordinary.read_text())
     for key in ("research_only", "certifies_placement", "prefill_frontier_replay", "fixed_resource_scope"):
         replayed[LAYER_CONFIG_META_KEY].pop(key)
+    # The sweep replay attaches its PACT selection record (PQ #1659); the
+    # ordinary single-solve writer has no selection to attach.
+    replayed[LAYER_CONFIG_META_KEY].pop("pact_selection", None)
     # The measured solver wall clock is not part of the metadata comparison.
     for config in (replayed, expected):
         meta = config[LAYER_CONFIG_META_KEY]

@@ -75,8 +75,10 @@ def test_repeated_samples_resolve_material_never_unresolved():
 
 def test_repeated_samples_resolve_flat_never_unresolved():
     boot = bootstrap_sum(SAMPLES, draws=DRAWS, seed=BOOTSTRAP_SEED)
+    spread = boot["p97.5"] - boot["p2.5"]
     fast = _interval_point("fast", "a" * 64, boot["p50"], boot, 0.5)
-    best = _interval_point("best", "b" * 64, boot["p50"], boot, 0.1)
+    # Same interval, a quarter-width apart: distinct endpoints, overlapping bounds.
+    best = _interval_point("best", "b" * 64, boot["p50"] + spread / 4, boot, 0.1)
     record = _select([fast, best], regime_m=2048, table_identity=TABLE,
                      frontier_scope="test_scope", draws=DRAWS, seed=BOOTSTRAP_SEED)
     assert record["materiality"]["verdict"] == "flat"
@@ -115,8 +117,8 @@ def test_sweep_selection_dedupes_by_digest_keeps_feasible_only():
              "payload_bytes": 1000, "attained_prefill_ms": 150.0, **blob}
     loose = dict(tight, attained_prefill_ms=999.0)
     refused = dict(tight, feasible=False, assignment_sha256="e" * 64)
-    # Loosest-SLO duplicate first: the tightest point must still stand for it.
-    selected = sweep_selection_points([loose, refused, tight])
+    # Points arrive tightest-SLO first, so the first occurrence stands for the digest.
+    selected = sweep_selection_points([tight, refused, loose])
     assert [p["assignment_sha256"] for p in selected] == ["d" * 64]
     assert selected[0]["time_ms"] == 150.0
 
