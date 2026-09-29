@@ -49,7 +49,7 @@ import re
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
 from .dev_mode import seal_check
-from .digests import is_sha256hex
+from .digests import bytes_sha256hex, indent2_json_file_bytes, is_sha256hex
 
 SEED_SPEC_SCHEMA = "prismaquant.stage_a.chain_seed.v1"
 SEED_MARKER_SCHEMA = "prismaquant.stage_a.chain_seed_marker.v1"
@@ -120,7 +120,7 @@ def load_seed_spec(path, sha256) -> dict:
         raw = Path(path).read_bytes()
     except OSError as exc:
         raise ChainSeedRefused(f"the chain seed spec is not readable at {path}") from exc
-    if hashlib.sha256(raw).hexdigest() != str(sha256):
+    if bytes_sha256hex(raw) != str(sha256):
         raise ChainSeedRefused(f"{path} does not have the pinned digest {sha256}")
     try:
         document = json.loads(raw)
@@ -150,7 +150,7 @@ def _sealed_checkpoint(binding, where) -> tuple[dict, Path]:
         raw = path.read_bytes()
     except OSError as exc:
         raise ChainSeedRefused(f"the seed's {where} is not readable at {path}") from exc
-    if hashlib.sha256(raw).hexdigest() != binding["sha256"]:
+    if bytes_sha256hex(raw) != binding["sha256"]:
         raise ChainSeedRefused(
             f"the seed's {where} {path} does not have the pinned digest "
             f"{binding['sha256']}")
@@ -389,12 +389,11 @@ def write_seed_marker(space, plan: ChainSeed, *, run_identity) -> dict:
     """Mark the scratch root as a seed run's before anything else is written."""
     document = {"schema": SEED_MARKER_SCHEMA, "seed": plan.binding,
                 "run_identity": run_identity}
-    payload = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False)
-               + "\n").encode()
+    payload = indent2_json_file_bytes(document)
     path = seed_marker_path(space)
     if not publish_new_bytes(path, payload):
         raise ChainSeedRefused(f"{path} already exists: a scratch root holds one seed")
-    return {"path": str(path), "sha256": hashlib.sha256(payload).hexdigest()}
+    return {"path": str(path), "sha256": bytes_sha256hex(payload)}
 
 
 def write_seed_receipt(space, receipt) -> dict:
@@ -403,12 +402,11 @@ def write_seed_receipt(space, receipt) -> dict:
         raise ChainSeedRefused("only a seed receipt is written as one")
     if not seed_marker_path(space).is_file():
         raise ChainSeedRefused(f"{space} holds no seed marker")
-    payload = (json.dumps(receipt, sort_keys=True, indent=2, allow_nan=False)
-               + "\n").encode()
+    payload = indent2_json_file_bytes(receipt)
     path = seed_receipt_path(space)
     if not publish_new_bytes(path, payload):
         raise ChainSeedRefused(f"{path} already exists: a seed receipt is written once")
-    return {"path": str(path), "sha256": hashlib.sha256(payload).hexdigest()}
+    return {"path": str(path), "sha256": bytes_sha256hex(payload)}
 
 
 def tensor_payload_sha256(tensor, *, chunk_bytes: int = 1 << 26) -> str:
