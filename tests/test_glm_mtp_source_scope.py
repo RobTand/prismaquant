@@ -192,8 +192,8 @@ def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, monkeypat
                                             build_streamed_causal_lm)
 
     assert set(SELECTED_SOURCE_MEMBERS) == {
-        "source_layers", "num_layers", "layer_index_for_qname", "snapshot_selected_weights",
-        "shutdown", "context"}
+        "source_layers", "num_layers", "layer_index_for_qname", "selected_weight_specs",
+        "snapshot_selected_weights", "shutdown", "context"}
     env = mtp_source
     body = _runner(env, name="offload-body")
     try:

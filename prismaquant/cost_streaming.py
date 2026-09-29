@@ -5198,7 +5198,8 @@ def prefetched_boundary_batches(storage, batches, boundary_index, incoming=None,
 
 #: What a selected-source consumer may use of its source runner (PQ #1316).
 SELECTED_SOURCE_MEMBERS = ("source_layers", "num_layers", "layer_index_for_qname",
-                           "snapshot_selected_weights", "shutdown", "context")
+                           "selected_weight_specs", "snapshot_selected_weights",
+                           "shutdown", "context")
 
 
 @runtime_checkable
@@ -5218,6 +5219,8 @@ class SelectedSource(Protocol):
     def source_layers(self) -> tuple[int, ...]: ...
 
     def layer_index_for_qname(self, qname: str) -> int: ...
+
+    def selected_weight_specs(self, names) -> dict: ...
 
     def snapshot_selected_weights(self, names, *, max_resident_bytes: int, **kwargs): ...
 
@@ -5285,6 +5288,36 @@ class StreamedCausalLM:
             )
         return layer
 
+    def selected_weight_specs(self, names):
+        """``{unit: (shape, dtype, nbytes)}`` of each selected source Linear, with no I/O.
+
+        The shape comes from the skeleton's (meta) parameter view and the dtype
+        from the one the layer install would materialize it in, so these are the
+        values a snapshot copy carries. The streaming row head reads a projected
+        expert's source tensor on its reader threads instead of snapshotting its
+        layer, and checks what it read against this (PQ #1654).
+        """
+        from .routed_experts import profile_declared_packed_expert_projections
+
+        modules = dict(self.model.named_modules())
+        projected = {member.qname: member for member in
+                     profile_declared_packed_expert_projections(self.model, self.profile)}
+        specs = {}
+        for name in sorted(names):
+            if name in projected:
+                weight = projected[name].weight
+                parameter_name = projected[name].module_qname+'.'+projected[name].param_name
+            elif isinstance(modules.get(name), torch.nn.Linear):
+                weight = modules[name].weight
+                parameter_name = name+'.weight'
+            else:
+                raise RuntimeError(f"selected source unit is not a declared Linear: {name}")
+            dtype = getattr(self.context, 'buffer_dtypes', {}).get(parameter_name, self.dtype)
+            specs[name] = (tuple(weight.shape), dtype,
+                           weight.numel()*torch.empty((), dtype=dtype).element_size())
+            del weight
+        return specs
+
     def snapshot_selected_weights(self, names, *, max_resident_bytes: int,
                                   resource_check=None, expected_source_keys=None,
                                   host=False):
@@ -5316,22 +5349,10 @@ class StreamedCausalLM:
         modules = dict(self.model.named_modules())
         projected = {member.qname: member for member in
                      profile_declared_packed_expert_projections(self.model, self.profile)}
-        shapes, layers = {}, {}
+        shapes = self.selected_weight_specs(names)
+        layers = {}
         for name in sorted(names):
-            layer = self.layer_index_for_qname(name)
-            if name in projected:
-                weight = projected[name].weight
-                parameter_name = projected[name].module_qname+'.'+projected[name].param_name
-            elif isinstance(modules.get(name), torch.nn.Linear):
-                weight = modules[name].weight
-                parameter_name = name+'.weight'
-            else:
-                raise RuntimeError(f"selected source unit is not a declared Linear: {name}")
-            dtype = getattr(self.context, 'buffer_dtypes', {}).get(parameter_name, self.dtype)
-            shapes[name] = (tuple(weight.shape), dtype,
-                            weight.numel()*torch.empty((), dtype=dtype).element_size())
-            layers.setdefault(layer, []).append(name)
-        del weight
+            layers.setdefault(self.layer_index_for_qname(name), []).append(name)
         required = sum(shape[2] for shape in shapes.values())
         if required > max_resident_bytes:
             raise RuntimeError("selected source weights exceed their resident byte budget")

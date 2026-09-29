@@ -501,9 +501,15 @@ def test_selected_glm_source_copies_dense_and_logical_expert_without_forward(glm
         pytest.fail('selected source must not run a calibration forward')
     monkeypatch.setattr(runner.model, 'forward', no_forward)
     try:
+        # What the stream head's placeholders are built from (PQ #1654): the
+        # snapshot's own shape, dtype and bytes, read off the skeleton alone.
+        specs = runner.selected_weight_specs(list(expected))
+        assert runner.context.layer_cache._cache == {} and runner.context._inflight == {}
         weights, receipt = runner.snapshot_selected_weights(list(expected),
             max_resident_bytes=resources['selected_source_weight_bytes'])
         for name in expected:
+            assert specs[name] == (tuple(weights[name].shape), weights[name].dtype,
+                                   weights[name].numel()*weights[name].element_size()), name
             assert torch.equal(weights[name], expected[name])
             assert weights[name].untyped_storage().nbytes() == weights[name].numel()*weights[name].element_size()
         assert receipt['source_forward_count'] == 0
