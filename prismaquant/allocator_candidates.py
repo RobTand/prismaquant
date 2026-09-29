@@ -2666,7 +2666,8 @@ def selection_serving_lane_provenance(
             row["route"] = None
             include_by_unit = True
         row["units"] += 1
-        route_key = json.dumps(route, sort_keys=True, default=str)
+        # ``as_dict`` builds a fixed key order, so its repr is a stable grouping key.
+        route_key = repr(route)
         entry = route_hist.setdefault(fmt, {}).setdefault(
             route_key, {"route": route, "units": 0, "structures": Counter()})
         entry["units"] += 1

@@ -23318,7 +23318,7 @@ prints producer-declared fields (`candidate_bpp`, `control_bpp`,
 `relative_slack_ppm`) beside the bpp rather than the replayed values; `verify`
 still refuses on the replay.
 
-**`build.route_histogram` (Tessera cards; PrismaQuant #1377).** Principle 12's
+**`build.route_histogram` (Tessera cards, PrismaQuant #1377; native compressed-tensors cards, #1387).** Principle 12's
 route histogram on the card. The allocator's `serving_lane_provenance`
 (`allocator_candidates.selection_serving_lane_provenance`) answers the route
 question once, through `route_status_counts` and `activation_contracts`; the

@@ -68,6 +68,14 @@ layer.json. Exactly two fields change, both inside
 ``__prismaquant__.tessera_dev_pin``: ``contract_version`` (42 to 44) and
 ``reviewed_contract_sha256`` (4aeba5dc to 47b01355). The allocation, the
 applicability file and the Pareto outputs are byte-identical.
+
+Re-taken 2026-09-28 for PQ #1387 and #1289. The allocator now writes
+``serving_lane_provenance`` into every layer_config meta (the stock menu had
+none) and each ``by_format`` row gains a ``routes`` histogram. Only the two
+layer files change: the stock ``layer_config.json`` gains the
+``serving_lane_provenance`` meta block, and the Tessera ``layer.json`` gains
+``routes`` inside ``by_format``. The allocations, the applicability files, the
+Pareto CSVs, the knees and every Pareto seed are byte-identical.
 """
 from __future__ import annotations
 
@@ -83,7 +91,7 @@ STOCK_DIGESTS = {
         "d9c224a47508eceafdb39f3f1bbdf1b4c4ee9c37c9b228dff836c063c2743cba"
     ),
     "layer_config.json": (
-        "8adac3a9655fbf2b783b98ad04142ee9ddac725ce600ad39bcb7fd312392d6a2"
+        "02dd31cb8d41f36146994f41d63b3699e33dfca7140fd67900d88ff0692ed469"
     ),
     "pareto.csv": (
         "0805fbc4dbffb240025dc5bfb8a4e97ddb241eda8e3c80818f07cdec425cfb32"
@@ -112,7 +120,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "510823f101c90a30515b783f3bb60a52cb948fed3527aa7a63333d6df2de7acd"
+        "b76ba7834d997542b2db6ff20f20690ed4e695ac4a045ff301edb3ec118f47bc"
     ),
     "pareto.csv": (
         "0abb6a82a89d9cd9686c6a250368bb77603d3904dc2707ccb69a13c9eec70c5a"
