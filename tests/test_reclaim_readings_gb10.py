@@ -33,10 +33,13 @@ replay's drops must be the freed pages, and the device cache's must be none.
 MemAvailable is the whole host's reading, and other processes move it too, so
 it is held only to the midpoint.
 
-Each line also records the free pages on the kernel's per-CPU lists, which
-MemAvailable does not count, and both host readings again two seconds later.
-Neither is held to anything: they say where freed pages went that
-MemAvailable did not show.
+The host reading has a second source. A freed page can park on the kernel's
+per-CPU free lists, which MemAvailable does not count until the kernel trims
+them, so the same free reads as +755 MB at once on one run and as -1 MB on the
+next (#1431: both were measured). Those pages are free memory the host can
+allocate, so the host reading is the guard's own: MemAvailable plus the
+per-CPU list pages (``io_spans.host_memory``), and the probe takes its rise. Each line also records both host readings
+again two seconds later, held to nothing: they say where freed pages went.
 
 It needs CUDA and its own cgroup. A run that hides every GPU on purpose sets
 ``CUDA_VISIBLE_DEVICES`` to the empty string, as CI and PrismaBuild's CPU-only
@@ -52,18 +55,17 @@ import json
 import os
 import time
 from functools import partial
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
 
-from prismaquant import io_engine
+from prismaquant import io_engine, io_spans
 from prismaquant import joint_replay_spill as spill_mod
 from prismaquant import joint_statistics_replay as replay
 from prismaquant import memory_management as mm
 
-from cgroup_readings import PAGE, READING_GRAIN, committed, own_cgroup, pages, quiet, renders
+from cgroup_readings import READING_GRAIN, committed, own_cgroup, pages, quiet, renders
 
 pytestmark = pytest.mark.own_cgroup
 
@@ -94,13 +96,10 @@ def device():
 
 
 def _host():
-    """MemAvailable, and the free pages on the kernel's per-CPU lists."""
+    """The guard's host reading; the per-CPU pages inside it, for diagnosis."""
     host = mm._host_memory_info()
     assert host is not None, "MemAvailable is unreadable"
-    lines = Path("/proc/zoneinfo").read_text().splitlines()
-    per_cpu = sum(int(line.split()[1]) for line in lines
-                  if line.strip().startswith("count:"))
-    return {"available": host[0], "per_cpu_free": per_cpu * PAGE}
+    return {"available": host[0], "per_cpu_free": io_spans.per_cpu_free_bytes()}
 
 
 def _reading(scope, device):

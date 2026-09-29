@@ -59,6 +59,92 @@ def chain_policy(chain):
     return copy.deepcopy(chain["chain_regime"]), copy.deepcopy(chain["shapes"])
 
 
+def cotangent_policy(cotangent):
+    """A policy's ``cotangent`` block, checked: the host-held plane's bytes.
+
+    ``{"host_plane_bytes": int >= 0}`` (PQ #1141). The checkpoint load holds
+    the whole cotangent plane on the host unless the scratch ceiling
+    (``PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES``) spills it; a run that holds
+    it prices it here, so the render bound leaves room beside it.
+    """
+    _require(isinstance(cotangent, dict) and set(cotangent) == {"host_plane_bytes"},
+             "cotangent block needs exactly host_plane_bytes")
+    plane = cotangent["host_plane_bytes"]
+    _require(type(plane) is int and plane >= 0, "cotangent host_plane_bytes must be a nonnegative int")
+    return plane
+
+
+COTANGENT_SCRATCH_ENV = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT",
+                         "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
+
+
+def cotangent_scratch(environ):
+    """The declared cotangent scratch, ``(root, max_bytes)``, or ``None``.
+
+    The one reader of ``COTANGENT_SCRATCH_ENV`` (PQ #1141): the dispatcher's
+    admission, the run's own check and ``checkpoint_cotangent_sink`` all
+    parse the pair here. Neither variable set means no scratch; one without
+    the other, an empty root, or a non-positive-decimal ceiling raises
+    ``ValueError``.
+    """
+    root, ceiling = (environ.get(name) for name in COTANGENT_SCRATCH_ENV)
+    if root is None and ceiling is None:
+        return None
+    if not root or not ceiling or not str(ceiling).isdecimal() or int(ceiling) <= 0:
+        raise ValueError("cotangent scratch requires explicit root and positive max bytes")
+    return root, int(ceiling)
+
+
+def checkpoint_plane_bytes(checkpoint_record) -> int:
+    """The bytes of a checkpoint's cotangent plane, as one load would hold them.
+
+    Sums each row's ``tensor_bytes`` (the exact reader's measure of the
+    resident tensor), through the one reader of the plane's layout.
+    """
+    from .joint_adjoint_slices import checkpoint_cotangent_plane
+
+    total = 0
+    for row in checkpoint_cotangent_plane(checkpoint_record).values():
+        size = row.get("tensor_bytes")
+        _require(type(size) is int and size > 0,
+                 "a cotangent row must state a positive tensor_bytes")
+        total += size
+    return total
+
+
+def verify_cotangent_plane_fits(plane_bytes, policy, environ):
+    """Refuse a quantum whose cotangent plane the host cannot hold (PQ #1141).
+
+    ``environ`` is the environment the load reads (the sealed spec's ``env``
+    at dispatch, ``os.environ`` in the run). With the scratch pair declared
+    the plane spills to the scratch and its ceiling must cover it; without
+    it the whole plane is host resident, beside the host owners and the
+    retained render cap, inside the host bound the policy derived. Both
+    callers share this one derivation, so the dispatcher's admission and the
+    run's own check cannot disagree. Raises ``ValueError``.
+    """
+    scratch = cotangent_scratch(environ)
+    if scratch is not None:
+        ceiling = scratch[1]
+        if ceiling < plane_bytes:
+            raise ValueError(
+                f"the {plane_bytes}-byte cotangent plane exceeds the {ceiling}-byte "
+                "cotangent scratch ceiling: raise PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
+        return
+    from .joint_retained_window_plan import HOST_RESIDENT_BUDGET_FIELDS
+
+    budget, limits = policy["budget"], policy["limits"]
+    owners = sum(int(budget[name]) for name in HOST_RESIDENT_BUDGET_FIELDS)
+    held = plane_bytes + owners + int(budget["retained_render_cap_bytes"])
+    if held > int(limits["host_bytes"]):
+        raise ValueError(
+            f"the {plane_bytes}-byte cotangent plane is held on the host (no cotangent scratch "
+            f"declared) and with {owners} bytes of host owners and the "
+            f"{int(budget['retained_render_cap_bytes'])}-byte render cap needs {held} bytes, "
+            f"over the {int(limits['host_bytes'])}-byte host bound: declare "
+            "PRISMAQUANT_STAGE_B_COTANGENT_ROOT and _MAX_BYTES to spill it")
+
+
 def chain_owner_from_receipt(path, *, action_key, layer, layers, basis=None):
     """The measured chain owner a ``--stop-after-chain`` receipt states for ``layer``.
 
@@ -97,7 +183,7 @@ def chain_owner_from_receipt(path, *, action_key, layer, layers, basis=None):
 
 
 def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_bytes=72 * GIB, candidate_files=None,
-                  capture=None, chain=None):
+                  capture=None, chain=None, cotangent=None):
     """Use the existing statistics planner and retained-window budget owner.
 
     ``capture`` (PQ #1151, see :func:`capture_policy`) replaces the original
@@ -105,7 +191,9 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
     the capture pass at its ``capture_batch``. ``chain`` (PQ #1163, see
     :func:`chain_policy`) plans the chain phase per chain layer shape, against
     the policy's device ceiling ``gpu_bytes`` and its physical bound. Without
-    either the policy is the one before #1151, byte for byte.
+    either the policy is the one before #1151, byte for byte. ``cotangent``
+    (PQ #1141, see :func:`cotangent_policy`) prices the host-held cotangent
+    plane against the container cap before the render bound is derived.
     """
     import torch
     from . import format_registry as fr
@@ -229,6 +317,8 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
         regime, shapes = chain_policy(chain)
         chain_kwargs = {"chain_regime": regime, "chain_workspace": shapes,
                         "chain_device_limit_bytes": gpu_bytes}
+    if cotangent is not None:
+        chain_kwargs["host_cotangent_bytes"] = cotangent_policy(cotangent)
     declared = {key: getattr(old_budget, key) for key in DECLARED_BUDGET_FIELDS
                 if measured is None or key not in MEASURED_BUDGET_FIELDS}
     declared["physical_limit_bytes"] = physical_bytes
@@ -246,6 +336,8 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
         policy["capture"] = copy.deepcopy(capture)
     if chain is not None:
         policy["chain"] = copy.deepcopy(chain)
+    if cotangent is not None:
+        policy["cotangent"] = copy.deepcopy(cotangent)
     return policy
 
 
@@ -266,7 +358,8 @@ def verify_policy(bound, *, verify_files=False):
     _require(before[0] == key, "resource policy changed while read")
     _require(policy == derive_policy(policy["inputs"], **policy["limits"],
         candidate_files=None if verify_files else policy["candidate_files"],
-        capture=policy.get("capture"), chain=policy.get("chain")),
+        capture=policy.get("capture"), chain=policy.get("chain"),
+        cotangent=policy.get("cotangent")),
         "independent resource derivation differs")
     _require(before == tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies),
              "resource metadata changed during derivation")
@@ -368,7 +461,12 @@ def main(argv=None):
     parser.add_argument("--workspace-action-key", help="the PrismaBuild action that wrote the receipt")
     parser.add_argument("--chain", help="a JSON file holding the policy's chain block (PQ #1163): "
                                         "the chain regime and each chain layer shape's owner")
+    parser.add_argument("--cotangent-host-plane-bytes", type=int,
+                        help="price a host-held cotangent plane of this many bytes into the "
+                             "render bound (PQ #1141); omit when the scratch pair spills it")
     args = parser.parse_args(argv)
+    cotangent = (None if args.cotangent_host_plane_bytes is None
+                 else {"host_plane_bytes": args.cotangent_host_plane_bytes})
     capture = None
     if (args.capture_batch, args.workspace_receipt, args.workspace_action_key).count(None) not in (0, 3):
         parser.error("--capture-batch, --workspace-receipt and --workspace-action-key go together")
@@ -379,7 +477,7 @@ def main(argv=None):
     chain = None if args.chain is None else json.loads(Path(args.chain).read_bytes())
     policy = derive_policy(json.loads(Path(args.inputs).read_bytes()), host_bytes=args.host_bytes,
                            physical_bytes=args.physical_bytes, gpu_bytes=args.gpu_bytes,
-                           capture=capture, chain=chain)
+                           capture=capture, chain=chain, cotangent=cotangent)
     raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
     _require(publish_new_bytes(Path(args.out), raw), "policy output already exists")
     print(json.dumps({"status": "resource_geometry_derived", "out": args.out,

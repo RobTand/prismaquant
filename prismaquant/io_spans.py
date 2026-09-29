@@ -510,6 +510,45 @@ def mem_available_bytes(path: str | Path = "/proc/meminfo") -> int:
     return value
 
 
+#: The kernel files the host reading is taken from. Looked up at call time.
+PROC_MEMINFO = Path("/proc/meminfo")
+PROC_ZONEINFO = Path("/proc/zoneinfo")
+
+
+def per_cpu_free_bytes(path: str | Path | None = None) -> int:
+    """Free pages parked on the kernel's per-CPU lists, in bytes.
+
+    A freed page can sit on a per-CPU list, which ``MemAvailable`` does not
+    count until the kernel trims the list. ``/proc/zoneinfo`` gives each list's
+    length as a ``count:`` line (in pages). A host without the file has none
+    to count and reads 0.
+    """
+    try:
+        lines = Path(PROC_ZONEINFO if path is None else path).read_text().splitlines()
+    except FileNotFoundError:
+        return 0
+    pages = sum(int(line.split()[1]) for line in lines
+                if line.strip().startswith("count:"))
+    return pages * os.sysconf("SC_PAGE_SIZE")
+
+
+def host_memory(meminfo: str | Path | None = None,
+                zoneinfo: str | Path | None = None) -> tuple[int, int]:
+    """``(available, MemTotal)`` in bytes: the one host reading.
+
+    ``available`` is ``MemAvailable`` plus the pages on the per-CPU free lists
+    (:func:`per_cpu_free_bytes`), so a free returns its bytes to it wherever
+    the pages land. The capture guard and the GB10 reclaim probe both read
+    this. Raises ``OSError`` when ``/proc/meminfo`` cannot be read and
+    ``RuntimeError`` when it lacks ``MemAvailable`` or ``MemTotal``.
+    """
+    values = read_meminfo(PROC_MEMINFO if meminfo is None else meminfo)
+    if "MemAvailable" not in values or "MemTotal" not in values:
+        raise RuntimeError("/proc/meminfo has no MemAvailable or MemTotal")
+    return (values["MemAvailable"] + per_cpu_free_bytes(zoneinfo),
+            values["MemTotal"])
+
+
 def read_mountstats(path: str | Path = "/proc/self/mountstats") -> dict[str, dict]:
     """Per mount point, the NFS client's ``bytes`` row and every per-op row.
 
@@ -759,7 +798,272 @@ def drop_page_cache(paths, *, missing_ok: bool = False) -> int:
     return done
 
 
+# --------------------------------------------------------------------------
+# Exposed wait (PQ #1292): the consumer blocked on a load while the GPU idles
+# --------------------------------------------------------------------------
+
+EXPOSED_WAIT_SCHEMA = "prismaquant.exposed_wait.v1"
+
+
+class ExposedWaitLedger:
+    """Thread-safe record of the intervals a consumer spent blocked on a load.
+
+    ``add`` records one blocked interval under a ``kind``; ``take`` records a
+    stream take, which is an interval plus the rates the bound needs. The
+    ledger keeps host ``time.time()`` stamps only, so :func:`exposed_wait_report`
+    can lay the intervals against the power series afterwards. It imports
+    nothing from PrismaQuant and costs one lock and one dict per blocked event.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._intervals: list[dict] = []
+        self._takes: list[dict] = []
+
+    def add(self, kind: str, start_unix: float, end_unix: float) -> None:
+        row = {"kind": str(kind), "start_unix": float(start_unix),
+               "end_unix": float(end_unix)}
+        with self._lock:
+            self._intervals.append(row)
+
+    def take(self, kind: str, start_unix: float, end_unix: float,
+             info: Mapping[str, Any] | None = None) -> None:
+        wait_s = max(0.0, float(end_unix) - float(start_unix))
+        row = {"kind": str(kind), "start_unix": float(start_unix),
+               "end_unix": float(end_unix), "wait_s": wait_s, **dict(info or {})}
+        with self._lock:
+            self._intervals.append({"kind": row["kind"],
+                                    "start_unix": row["start_unix"],
+                                    "end_unix": row["end_unix"]})
+            self._takes.append(row)
+
+    def sink(self, kind: str, start_unix: float, end_unix: float,
+             info: Mapping[str, Any] | None = None) -> None:
+        """The one callable producers hold: a take when it carries rates."""
+        if info:
+            self.take(kind, start_unix, end_unix, info)
+        else:
+            self.add(kind, start_unix, end_unix)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return {"intervals": [dict(r) for r in self._intervals],
+                    "takes": [dict(r) for r in self._takes]}
+
+
+def idle_baseline(power_times, power_samples, baseline_end_unix) -> dict | None:
+    """The GPU's observed idle power range, from the row's own pre-work samples.
+
+    Every sample taken before ``baseline_end_unix`` (the instant the row first
+    touches CUDA) was taken while the row's startup ran CPU-only, so the GPU
+    was idle. ``idle_ceiling_w`` is the highest of them: the observed idle
+    range, with no free constant. No stamp or no sample before it is no
+    baseline, and returns ``None``.
+    """
+    if baseline_end_unix is None:
+        return None
+    end = float(baseline_end_unix)
+    pairs = [(float(t), float(w)) for t, w in zip(power_times, power_samples)
+             if float(t) < end]
+    if not pairs:
+        return None
+    watts = [w for _t, w in pairs]
+    return {"n": len(pairs), "min_w": min(watts), "max_w": max(watts),
+            "mean_w": math.fsum(watts) / len(watts),
+            "start_unix": pairs[0][0], "end_unix": pairs[-1][0],
+            "span_s": pairs[-1][0] - pairs[0][0],
+            "window_end_unix": end, "idle_ceiling_w": max(watts)}
+
+
+def derive_wait_bound(*, wait_s: float, nbytes: float, work_before_s: float | None,
+                      load_bytes_per_s: float | None) -> dict:
+    """The exposed wait one steady-state take may owe, derived from rates.
+
+    With ``consume = bytes / work_before_s`` the rate the consumer drained the
+    previous unit and ``load`` the measured read rate: when ``load >= consume``
+    the load hides fully behind compute and the bound is 0; otherwise the load
+    takes ``bytes / load`` and ``work_before_s`` of it overlaps compute, so the
+    bound is ``bytes / load - work_before_s`` and nothing more. A take with no
+    measured load rate has no derivable bound and says so.
+    """
+    work = None if work_before_s is None else max(0.0, float(work_before_s))
+    consume = (float(nbytes) / work) if work else None
+    load = float(load_bytes_per_s) if load_bytes_per_s else None
+    row = {"wait_s": float(wait_s), "bytes": nbytes, "work_before_s": work,
+           "consume_bytes_per_s": consume, "load_bytes_per_s": load}
+    if load is None or load <= 0:
+        return {**row, "regime": "unmeasured", "bound_s": None, "excess_s": None}
+    if consume is not None and load >= consume:
+        bound, regime = 0.0, "load_ge_consume"
+    else:
+        bound, regime = max(0.0, float(nbytes) / load - (work or 0.0)), "load_lt_consume"
+    return {**row, "regime": regime, "bound_s": bound,
+            "excess_s": max(0.0, float(wait_s) - bound)}
+
+
+def _merge_intervals(spans) -> list[tuple[float, float]]:
+    merged: list[list[float]] = []
+    for start, end in sorted((s, e) for s, e in spans if e > s):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(s, e) for s, e in merged]
+
+
+def _clip(spans, lo: float, hi: float):
+    return [(max(s, lo), min(e, hi)) for s, e in spans if min(e, hi) > max(s, lo)]
+
+
+def _power_cells(times, samples, interval_s: float) -> list[tuple[float, float, float]]:
+    """Each sample's cell: half an interval either side, never past the
+    midpoint to a neighbour, so a stalled sampler leaves a gap, not a guess."""
+    half = float(interval_s) / 2.0
+    cells = []
+    n = len(times)
+    for i in range(n):
+        lo = times[i] - half
+        hi = times[i] + half
+        if i > 0:
+            lo = max(lo, (times[i - 1] + times[i]) / 2.0)
+        if i + 1 < n:
+            hi = min(hi, (times[i] + times[i + 1]) / 2.0)
+        cells.append((lo, hi, float(samples[i])))
+    return cells
+
+
+def _band_split(segments, cells, ends, idle_ceiling_w) -> tuple[float, float, float]:
+    import bisect
+    idle = busy = unsampled = 0.0
+    for start, end in segments:
+        covered = 0.0
+        if idle_ceiling_w is not None:
+            for k in range(bisect.bisect_right(ends, start), len(cells)):
+                lo, hi, watts = cells[k]
+                if lo >= end:
+                    break
+                overlap = min(end, hi) - max(start, lo)
+                if overlap <= 0:
+                    continue
+                covered += overlap
+                if watts <= idle_ceiling_w:
+                    idle += overlap
+                else:
+                    busy += overlap
+        unsampled += max(0.0, (end - start) - covered)
+    return idle, busy, unsampled
+
+
+def exposed_wait_report(intervals, takes, *, power_times, power_samples,
+                        interval_s: float, phase_windows, envelope_w: float,
+                        baseline_end_unix: float | None = None) -> dict:
+    """The row's ``exposed_wait`` block: wait per phase, split by GPU power band.
+
+    ``intervals`` are the blocked intervals (``kind``, ``start_unix``,
+    ``end_unix``). Overlapping intervals of different kinds are counted once
+    (their union is ``wait_s``) and the double coverage is reported as
+    ``overlap_s``. Each interval is clipped into the phase windows and laid
+    against the power cells: time in a cell at or below the idle ceiling is
+    ``idle_band_s``, above it ``busy_band_s``, and time no sample covers is
+    ``unsampled_s`` -- never guessed. Resolution is the sampler interval.
+    The idle ceiling is measured, not chosen: the highest power sample taken
+    before ``baseline_end_unix`` (see :func:`idle_baseline`). A wait second is
+    idle when its cell is at or below it. With no baseline there is no band
+    split and all wait time is ``unsampled_s``.
+    ``takes`` carry the rates behind :func:`derive_wait_bound`; the first take
+    of a stream is its first fill and is exempt.
+    """
+    times = [float(t) for t in power_times]
+    watts = [float(w) for w in power_samples]
+    count = min(len(times), len(watts))
+    times, watts = times[:count], watts[:count]
+    baseline = idle_baseline(times, watts, baseline_end_unix)
+    ceiling = baseline["idle_ceiling_w"] if baseline else None
+    cells = _power_cells(times, watts, interval_s) if ceiling is not None else []
+    ends = [cell[1] for cell in cells]
+
+    by_kind_spans: dict[str, list[tuple[float, float]]] = {}
+    for row in intervals:
+        start, end = float(row["start_unix"]), float(row["end_unix"])
+        if end > start:
+            by_kind_spans.setdefault(str(row["kind"]), []).append((start, end))
+
+    def _block(lo: float, hi: float) -> dict:
+        kinds = {}
+        kind_sum = 0.0
+        for kind, spans in sorted(by_kind_spans.items()):
+            clipped = _clip(spans, lo, hi)
+            if not clipped:
+                continue
+            wait = math.fsum(e - s for s, e in _merge_intervals(clipped))
+            kinds[kind] = {"wait_s": wait, "count": len(clipped)}
+            kind_sum += wait
+        union = _merge_intervals(
+            [span for spans in by_kind_spans.values() for span in _clip(spans, lo, hi)])
+        wait_s = math.fsum(e - s for s, e in union)
+        idle, busy, unsampled = _band_split(union, cells, ends, ceiling)
+        return {"wait_s": wait_s, "idle_band_s": idle, "busy_band_s": busy,
+                "unsampled_s": unsampled, "overlap_s": max(0.0, kind_sum - wait_s),
+                "by_kind": kinds}
+
+    phases: dict[str, dict] = {}
+    for window in phase_windows:
+        start, end = window.get("start_unix"), window.get("end_unix")
+        if start is None or end is None:
+            phases[str(window["name"])] = {
+                "wait_s": 0.0, "idle_band_s": 0.0, "busy_band_s": 0.0,
+                "unsampled_s": 0.0, "overlap_s": 0.0, "by_kind": {}}
+        else:
+            phases[str(window["name"])] = _block(float(start), float(end))
+    total = _block(-math.inf, math.inf)
+    total["outside_phases_s"] = max(
+        0.0, total["wait_s"] - math.fsum(p["wait_s"] for p in phases.values()))
+
+    rows = []
+    first_fill_wait = steady_wait = bound_sum = excess_sum = 0.0
+    unmeasured = 0
+    for take in takes:
+        wait_s = float(take.get("wait_s") or 0.0)
+        base = {"kind": take.get("kind"), "start_unix": take.get("start_unix"),
+                "end_unix": take.get("end_unix")}
+        if take.get("first_fill"):
+            first_fill_wait += wait_s
+            rows.append({**base, "wait_s": wait_s, "bytes": take.get("bytes"),
+                         "work_before_s": None, "regime": "first_fill",
+                         "bound_s": None, "excess_s": None,
+                         "load_bytes_per_s": take.get("load_bytes_per_s"),
+                         "consume_bytes_per_s": None})
+            continue
+        steady_wait += wait_s
+        derived = derive_wait_bound(
+            wait_s=wait_s, nbytes=take.get("bytes") or 0,
+            work_before_s=take.get("work_before_s"),
+            load_bytes_per_s=take.get("load_bytes_per_s"))
+        rows.append({**base, **derived})
+        if derived["bound_s"] is None:
+            unmeasured += 1
+        else:
+            bound_sum += derived["bound_s"]
+            excess_sum += derived["excess_s"]
+    return {
+        "schema": EXPOSED_WAIT_SCHEMA,
+        "gpu_power_envelope_w": float(envelope_w),
+        "idle_ceiling_w": ceiling,
+        "baseline": baseline,
+        "sample_interval_s": float(interval_s),
+        "power_samples": count,
+        "phases": phases,
+        "total": total,
+        "bound": {"takes": len(rows), "first_fill_wait_s": first_fill_wait,
+                  "steady_wait_s": steady_wait, "bound_s": bound_sum,
+                  "excess_s": excess_sum, "unmeasured_takes": unmeasured,
+                  "per_take": rows},
+    }
+
+
 __all__ = [
+    "EXPOSED_WAIT_SCHEMA", "ExposedWaitLedger", "derive_wait_bound",
+    "exposed_wait_report", "idle_baseline",
     "GB10_POWER_ENVELOPE_W", "GpuPowerSampler", "GpuPowerSpanSource",
     "IO_SPAN_MARKER", "IO_SPAN_SCHEMA", "IoSpan", "IoSpanLog",
     "MemAvailableFloor", "PROC_IO_FIELDS", "PeriodicSampler",

@@ -6,8 +6,9 @@ they now import them from here. The sealed source proofs pin each transition's
 own contract and rewrite table, and those tables describe the campaign branch,
 not ``main`` (see ``docs/design/joint_run_source_transition_2026-09-18.md``),
 so moving a helper here changes no sealed bytes: every body below is verbatim
-what the twins carried, and ``_actual_execution`` still lives per module
-because it calls that module's own ``source_proof``.
+what the twins carried. ``_actual_execution`` takes the caller's own
+``source_proof`` and the caller-side repo root, so each module's proof and
+its ``__file__``-derived root still bind exactly as before.
 """
 from __future__ import annotations
 
@@ -33,6 +34,23 @@ def _bound(record, label):
     path = Path(record["path"])
     _require(path.is_file() and file_sha256hex(path) == record["sha256"], f"{label} bytes changed")
     return path
+
+
+def actual_execution(source_proof, repo_root):
+    """The package that is executing: its bytes, and the commit it runs as.
+
+    ``source_proof`` is the caller's own proof builder; ``repo_root`` is the
+    caller-side ``Path(__file__).resolve().parents[1]``. ``_checkpoint_git_commit``
+    is the identity the checkpoint manifest will carry: the override when the
+    launcher supplied one, else git's answer with its exactness check, else a
+    refusal. Whichever it is, it must be the sealed checkout's own HEAD; a
+    caller-chosen label is refused here.
+    """
+    observed = checkout_head_commit(repo_root)
+    from .aura_cost import _checkpoint_git_commit
+    commit = _checkpoint_git_commit()
+    _require(commit == observed, "checkpoint Git identity contradicts the sealed checkout HEAD")
+    return {"git_commit": commit, **source_proof()}
 
 
 def _bytes_identity(execution):

@@ -2396,6 +2396,19 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         raise DispatchRefused(
             f"quantum {quantum_id!r} stage-A slice unreadable at "
             f"{slice_path}: {exc}") from exc
+    if resource_policy is not None and handoff is None:
+        # PQ #1141: the checkpoint load holds the whole cotangent plane on the
+        # host unless the scratch pair spills it, so the row refuses here, not
+        # at the container's cgroup, when the plane cannot be held.
+        from prismaquant.joint_stageb_resources import (
+            checkpoint_plane_bytes, verify_cotangent_plane_fits)
+        try:
+            verify_cotangent_plane_fits(
+                checkpoint_plane_bytes(_read_bound_slice(record)["checkpoint"]),
+                resource_policy, parsed_spec().get("env") or {})
+        except (ValueError, KeyError, TypeError) as exc:
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} cotangent plane: {exc}") from exc
     band_payload: list[str] = []
     if handoff is not None:
         band_payload += ["--adjoint-handoff", str(handoff["path"]),

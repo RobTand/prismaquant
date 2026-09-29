@@ -851,8 +851,9 @@ def cuda_memory_info(device: torch.device | None = None) -> tuple[int, int] | No
             # Integrated CUDA devices share the host memory pool.  On GB10,
             # mem_get_info() reports reclaimable page cache as unavailable,
             # which makes cache and lane guardrails far too conservative
-            # after streamed weight snapshots.  MemAvailable already includes
-            # reclaimable cache, so use it as the better free-memory signal.
+            # after streamed weight snapshots.  The host reading is MemAvailable
+            # (which already includes reclaimable cache) plus the pages on the
+            # per-CPU free lists: the better free-memory signal.
             free_bytes = max(int(free_bytes), int(host_available))
             free_bytes = min(int(free_bytes), int(total_bytes))
     return int(free_bytes), int(total_bytes)
@@ -873,10 +874,14 @@ def _use_host_available_for_uma(device: torch.device | None = None) -> bool:
 
 
 def _host_memory_info() -> tuple[int, int] | None:
-    """``(MemAvailable, MemTotal)`` in bytes, or ``None`` when unreadable."""
+    """``(available, MemTotal)`` in bytes, or ``None`` when unreadable.
+
+    ``available`` is ``MemAvailable`` plus the pages on the per-CPU free lists
+    (:func:`io_spans.host_memory`): the reading the capture guard's host term
+    acts on, and the one the GB10 reclaim probe certifies (PQ #1431).
+    """
     try:
-        values = io_spans.read_meminfo()
-        return values["MemAvailable"], values["MemTotal"]
+        return io_spans.host_memory()
     except Exception:
         return None
 

@@ -485,14 +485,218 @@ def test_a_corrupt_late_entry_refuses_before_any_identity_bound_write(monkeypatc
         campaign._wire_path(cache / "wire", name, FORMAT).name for name in UNITS[:-1])
 
 
-def test_a_present_checkpoint_runs_load_all_and_names_it(monkeypatch, tmp_path, capsys):
+def _checkpoint_shard(root, name):
+    from prismaquant.cost_stage_checkpoint import unit_path
+    return unit_path(root / "campaign.anchors.json.parts", name)
+
+
+def _clear_outputs(root):
+    for base in (*OUTPUTS, "campaign.anchors.json.stream"):
+        shutil.rmtree(root / base, ignore_errors=True)
+        (root / base).unlink(missing_ok=True)
+
+
+def _resident_capture_probe(monkeypatch):
+    """Measure the capture X and H bytes alive at once, on either head.
+
+    Both heads read entries through the one verified loader
+    (``_verified_capture_entry``): the load-all prefetch and the row stream's
+    readers. Each returned X and H is counted from the moment the loader hands
+    it over until the tensor object is freed.
+    """
+    from prismaquant import tessera_calibration_cache as cc
+    original = cc._verified_capture_entry
+    probe = dict(live=0, peak=0, reads=0, entry_bytes=0)
+    lock = threading.Lock()
+
+    def release(nbytes):
+        with lock:
+            probe["live"] -= nbytes
+
+    def verified(*args, **kwargs):
+        payload, receipt = original(*args, **kwargs)
+        with lock:
+            probe["reads"] += 1
+            size = 0
+            for key in ("inputs", "hessian"):
+                nbytes = payload[key].untyped_storage().nbytes()
+                weakref.finalize(payload[key], release, nbytes)
+                size += nbytes
+            probe["live"] += size
+            probe["entry_bytes"] = max(probe["entry_bytes"], size)
+            probe["peak"] = max(probe["peak"], probe["live"])
+        return payload, receipt
+
+    monkeypatch.setattr(cc, "_verified_capture_entry", verified)
+    return probe
+
+
+def _killed_load_all_run(monkeypatch, tmp_path, fixture=None):
+    """A load-all row killed at its third encode, as a pilot or an earlier
+    attempt leaves one: the checkpoint manifest and the first unit's shard."""
+    campaign, argv, state = fixture or stream_fixture(monkeypatch, tmp_path)
+    _pin_clock(campaign, monkeypatch)
+    calls, original = _kill_at(campaign, monkeypatch, 3)
+    with pytest.raises(_Killed):
+        campaign.main([*argv, "--row-head", "load-all"])
+    assert calls == UNITS
+    assert (tmp_path / "campaign.anchors.json").is_file()
+    assert _checkpoint_shard(tmp_path, UNITS[0]).is_file()
+    assert not _checkpoint_shard(tmp_path, UNITS[1]).exists()
+    relaunch = []
+
+    def measure(**kwargs):
+        relaunch.append(kwargs["qname"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(campaign, "_measure_anchor", measure)
+    return campaign, argv, state, relaunch
+
+
+def test_a_resumed_checkpoint_streams_under_its_window_plan(monkeypatch, tmp_path, capsys):
+    """PQ #1613: a row whose checkpoint an earlier attempt left ran the load-all
+    head, which holds every selected X and H at once. On GLM-5.3 w03 row-0053
+    that plan is 113.79 GB, more than a GB10 holds, against the 69 GiB window
+    plan the row was declared with, so no checkpointed full-routed row could
+    resume. The row now resumes on the stream head: each journalled unit is
+    adopted as its entry is read and its receipts match the manifest's, only
+    the rest is encoded, and the row is admitted against the window plan."""
+    from prismaquant.tessera_row_stream import EXECUTION_FILENAME
+    fixture = stream_fixture(monkeypatch, tmp_path)
+    campaign, argv, _state = fixture
+    _pin_clock(campaign, monkeypatch)
+    assert campaign.main(argv) == 0
+    clean = produced(tmp_path)
+    _clear_outputs(tmp_path)
+    campaign, argv, _state, relaunch = _killed_load_all_run(monkeypatch, tmp_path, fixture)
+    capsys.readouterr()
+
+    probe = _resident_capture_probe(monkeypatch)
+    status = campaign.main(argv)
+    out = capsys.readouterr().out
+    gc.collect()
+    measured = (f"resume peak resident capture X+H {probe['peak']} B over {probe['reads']} "
+                f"reads; one entry {probe['entry_bytes']} B; {len(UNITS)} units")
+    print(measured)
+    assert "[campaign] row head: stream (" in out, measured
+    assert status == 0
+    assert relaunch == UNITS[1:]
+    assert ("[campaign] resumed 1 verified anchors for 1 units from campaign.anchors.json "
+            "through the window") in out
+    record = json.loads((tmp_path / "cache" / EXECUTION_FILENAME).read_text())
+    assert record["row_head"] == "stream"
+    assert record["memory_plan"] == "stream_memory_bytes"
+    assert record["peak_resident_units"] <= record["window_units"] == 2
+    # Measured, not inferred from the stream's own count: the X and H bytes
+    # the loader handed out and were still alive at once.
+    assert probe["reads"] == len(UNITS)
+    assert probe["peak"] <= record["window_units"] * probe["entry_bytes"] \
+        < len(UNITS) * probe["entry_bytes"], measured
+    resumed = produced(tmp_path)
+    assert sorted(resumed) == sorted(clean)
+    assert [name for name in sorted(clean) if clean[name] != resumed[name]] == [], \
+        _differences(clean["cost.pkl"], resumed["cost.pkl"])
+
+
+def test_a_finalized_row_relaunches_on_the_stream_head_and_encodes_nothing(
+        monkeypatch, tmp_path, capsys):
+    """A complete row, relaunched: every unit is adopted through the window, no
+    unit is encoded, and the row writes what it wrote before. This is the
+    issue's adopt-and-exit case: the receipts are content digests, so a
+    verified adoption reads every entry once whichever way it is spelled."""
+    from prismaquant.tessera_row_stream import EXECUTION_FILENAME
+    campaign, argv, _state = stream_fixture(monkeypatch, tmp_path)
+    _pin_clock(campaign, monkeypatch)
+    assert campaign.main(argv) == 0
+    clean = produced(tmp_path)
+    capsys.readouterr()
+    calls, _original = _kill_at(campaign, monkeypatch, len(UNITS) + 1)
+    probe = _resident_capture_probe(monkeypatch)
+    assert campaign.main(argv) == 0
+    out = capsys.readouterr().out
+    assert "[campaign] row head: stream (" in out
+    assert calls == []
+    record = json.loads((tmp_path / "cache" / EXECUTION_FILENAME).read_text())
+    assert record["memory_plan"] == "stream_memory_bytes"
+    assert probe["reads"] == len(UNITS)
+    assert probe["peak"] <= record["window_units"] * probe["entry_bytes"]
+    after = produced(tmp_path)
+    assert sorted(after) == sorted(clean)
+    assert [name for name in sorted(clean) if clean[name] != after[name]
+            and name != "cost.pkl"] == []
+    # The one difference is execution telemetry, not identity: the per-step
+    # growth list is stamped only when a round plans encode steps, and the
+    # round loop leaves before planning any when nothing is pending.
+    import pickle
+    before, relaunched = pickle.loads(clean["cost.pkl"]), pickle.loads(after["cost.pkl"])
+    preparation = before["provenance"]["selected_source_preparation"]
+    assert "anchor_batch_growth_bytes" in preparation
+    del preparation["anchor_batch_growth_bytes"]
+    assert "anchor_batch_growth_bytes" not in \
+        relaunched["provenance"]["selected_source_preparation"]
+    assert relaunched == before
+
+
+@pytest.mark.parametrize("unit", [UNITS[0], UNITS[1]], ids=["journalled", "pending"])
+def test_an_entry_whose_receipt_is_not_the_manifests_is_refused_by_name(
+        monkeypatch, tmp_path, capsys, unit):
+    """The manifest binds every unit's W, X and H receipts, and a resume takes
+    them from it rather than re-deriving them first. So each entry's own read
+    must reproduce them before the consumer sees it: a journalled unit is not
+    adopted, and a pending one is not encoded. The manifest is re-signed and
+    every shard re-enveloped here so that the journal gate accepts it and the
+    per-entry gate is the one that refuses."""
+    import pickle
+    from prismaquant import cost_stage_checkpoint as journal
+    campaign, argv, _state, relaunch = _killed_load_all_run(monkeypatch, tmp_path)
+    manifest_path = tmp_path / "campaign.anchors.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["identity"]["units"][unit]["hessian"] = {"changed": True}
+    manifest["identity_sha256"] = journal.canonical_json_sha256(
+        manifest["identity"], where="test identity")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    parts = tmp_path / "campaign.anchors.json.parts"
+    for path in sorted((parts / "units").glob("*.pkl")):
+        envelope = pickle.loads(path.read_bytes())
+        journal.write_unit(parts, stage="Tessera campaign", qname=envelope["qname"],
+                           identity_sha256=manifest["identity_sha256"],
+                           state=pickle.loads(envelope["payload"]))
+    capsys.readouterr()
+    with pytest.raises(RuntimeError, match=rf"{unit}: .*hessian receipt"):
+        campaign.main(argv)
+    assert "[campaign] row head: stream (" in capsys.readouterr().out
+    assert relaunch == []
+    assert not _checkpoint_shard(tmp_path, UNITS[1]).exists()
+    assert not (tmp_path / "cost.pkl").exists()
+
+
+def test_a_resumed_checkpoint_under_other_settings_is_refused_before_any_read(
+        monkeypatch, tmp_path, capsys):
+    """Every field but the three per-entry receipts is compared by name before
+    the first entry is read, so a checkpoint priced under other settings costs
+    no capture read at all."""
+    campaign, argv, _state, relaunch = _killed_load_all_run(monkeypatch, tmp_path)
+    capsys.readouterr()
+    probe = _resident_capture_probe(monkeypatch)
+    with pytest.raises(RuntimeError,
+                       match="Tessera campaign checkpoint identity mismatch at settings"):
+        campaign.main([*argv, "--anchor-budget", "11"])
+    assert "[campaign] row head: stream (" in capsys.readouterr().out
+    assert probe["reads"] == 0
+    assert relaunch == []
+
+
+def test_checkpoint_shards_without_a_manifest_are_refused_on_the_stream_head(
+        monkeypatch, tmp_path, capsys):
     campaign, argv, state = stream_fixture(monkeypatch, tmp_path)
     units = state["root"] / "campaign.anchors.json.parts" / "units"
     units.mkdir(parents=True)
     (units / "stale.pkl").write_bytes(b"left by an earlier attempt")
+    probe = _resident_capture_probe(monkeypatch)
     with pytest.raises(RuntimeError, match="without a manifest"):
         campaign.main(argv)
-    assert "[campaign] row head: load-all (a checkpoint exists" in capsys.readouterr().out
+    assert "[campaign] row head: stream (" in capsys.readouterr().out
+    assert probe["reads"] == 0
 
 
 def test_the_window_holds_two_batches_and_releases_x_and_h(monkeypatch, tmp_path):
@@ -538,7 +742,7 @@ def test_each_load_all_dependency_is_named(tmp_path):
     from prismaquant.tessera_row_stream import checkpoint_present, stream_head_dependency
     eligible = dict(row_head="stream", selected_source=True, capture_load_policy=LOAD_POLICY,
                     export_hessian_reference_policy=REFERENCE_POLICY, max_rounds=1,
-                    seed_checkpoint=None, checkpoint_exists=False)
+                    seed_checkpoint=None)
     assert stream_head_dependency(**eligible) is None
     for change, words in (
             (dict(row_head="load-all"), "--row-head load-all"),
@@ -546,8 +750,7 @@ def test_each_load_all_dependency_is_named(tmp_path):
             (dict(capture_load_policy=None), "--capture-load-policy"),
             (dict(export_hessian_reference_policy=None), "hessian_capture.pt"),
             (dict(max_rounds=0), "--max-rounds"),
-            (dict(seed_checkpoint="/seed"), "--seed-checkpoint"),
-            (dict(checkpoint_exists=True), "a checkpoint exists")):
+            (dict(seed_checkpoint="/seed"), "--seed-checkpoint")):
         assert words in stream_head_dependency(**{**eligible, **change})
     with pytest.raises(ValueError, match="unknown row head"):
         stream_head_dependency(**{**eligible, "row_head": "sideways"})
