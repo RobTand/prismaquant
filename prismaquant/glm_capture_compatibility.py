@@ -15,7 +15,7 @@ from .glm_source_derivative import (
     CORRECTED_MODELING_SHA256, ORIGINAL_EXPRESSION, CORRECTED_EXPRESSION,
     bound_json, _require, source_derivative_identity,
 )
-from .digests import DIRECT_UTF8_STRICT
+from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, indent2_json_file_bytes
 from .staged_lease import client_sdk
 
 SCHEMA = 'prismaquant.glm_capture_derivative_compatibility.v1'
@@ -238,10 +238,10 @@ def create_capture_compatibility(*, capture, producer, forward_equivalence, mode
     record = dict(schema=SCHEMA, version=VERSION, capture=capture, derivative_identity_sha256=_digest(derivative),
                   producer=producer, forward_equivalence=forward_equivalence)
     _verify(record, capture=capture, derivative=derivative)
-    raw = (json.dumps(record, sort_keys=True, indent=2, allow_nan=False)+'\n').encode()
+    raw = indent2_json_file_bytes(record)
     with Path(output).open('xb') as stream:
         stream.write(raw)
-    return dict(path=str(output), sha256=hashlib.sha256(raw).hexdigest())
+    return dict(path=str(output), sha256=bytes_sha256hex(raw))
 
 
 def _plan_binding(value, label):
