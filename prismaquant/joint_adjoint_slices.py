@@ -13,7 +13,6 @@ lives here too, and ``joint_adjoint_checkpoints`` re-exports it.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -25,6 +24,7 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256,
     publish_new_bytes,
 )
+from .digests import bytes_sha256hex, indent2_json_file_bytes
 
 ADJOINT_RECEIPT_SCHEMA = "prismaquant.joint_adjoint_capture.v1"
 ADJOINT_CHECKPOINT_SCHEMA = "prismaquant.joint_adjoint_checkpoint.v1"
@@ -228,8 +228,7 @@ def checkpoint_manifest_bytes(record) -> bytes:
     """
     if not isinstance(record, dict) or set(record) != set(_CHECKPOINT_MANIFEST_FIELDS):
         raise ValueError("not an adjoint checkpoint record: refusing")
-    return (json.dumps(record, sort_keys=True, indent=2, allow_nan=False)
-            + "\n").encode()
+    return indent2_json_file_bytes(record)
 
 
 def checkpoint_is_referenced(record) -> bool:
@@ -334,7 +333,7 @@ def checkpoint_manifest_entry(record) -> dict:
     directory = _checkpoint_own_directory(record)
     return {"name": CHECKPOINT_MANIFEST_NAME,
             "path": str(directory / CHECKPOINT_MANIFEST_NAME),
-            "sha256": hashlib.sha256(payload).hexdigest(),
+            "sha256": bytes_sha256hex(payload),
             "file_bytes": len(payload)}
 
 
@@ -656,13 +655,13 @@ def write_band_receipt(path: str | os.PathLike, band: dict) -> str:
     a band, like the receipt, is never overwritten.
     """
     validate_band_receipt(band)
-    payload = (json.dumps(band, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    payload = indent2_json_file_bytes(band)
     path = Path(path)
     if not publish_new_bytes(path, payload) and path.read_bytes() != payload:
         raise RuntimeError(
             f"a different checkpoint band already exists at {path}; a band "
             "is never overwritten")
-    return hashlib.sha256(payload).hexdigest()
+    return bytes_sha256hex(payload)
 
 
 def load_stage_a_receipt_like(path: str | os.PathLike, sha256: str | None = None,
@@ -673,7 +672,7 @@ def load_stage_a_receipt_like(path: str | os.PathLike, sha256: str | None = None
     Stage B preparation's staged reads (PQ #1092). None reads the path.
     """
     raw = Path(path).read_bytes() if read is None else read(path, sha256)
-    if sha256 is not None and hashlib.sha256(raw).hexdigest() != str(sha256):
+    if sha256 is not None and bytes_sha256hex(raw) != str(sha256):
         raise RuntimeError(f"Stage A receipt digest mismatch at {path}")
     document = json.loads(raw)
     if stage_a_receipt_kind(document) == "band":
@@ -704,7 +703,7 @@ def write_adjoint_slice(path: str | os.PathLike, adjoint_slice, *, layer: int) -
         raise RuntimeError(
             f"a different Stage A slice already exists at {path}; a slice "
             "is never overwritten")
-    return hashlib.sha256(payload).hexdigest()
+    return bytes_sha256hex(payload)
 
 
 def load_adjoint_slice(path: str | os.PathLike, sha256: str, *, layer: int,
@@ -717,7 +716,7 @@ def load_adjoint_slice(path: str | os.PathLike, sha256: str, *, layer: int,
     reads.
     """
     raw = Path(path).read_bytes()
-    if hashlib.sha256(raw).hexdigest() != str(sha256):
+    if bytes_sha256hex(raw) != str(sha256):
         raise AdjointSliceRefused(f"Stage A slice digest mismatch at {path}")
     adjoint_slice = json.loads(raw)
     if adjoint_slice_bytes(adjoint_slice) != raw:
