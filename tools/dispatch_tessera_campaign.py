@@ -1893,22 +1893,84 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
 #: ``test_the_planner_and_the_campaign_agree_on_the_selection_schemas``, which
 #: runs where the package is importable.
 UNITS_SCHEMA = "prismaquant.tessera_campaign_units.v1"
-def _source_identity_cache_binding(path, model):
+#: Why ``plan`` refuses a streaming campaign with no source proof (PQ #1654).
+SOURCE_IDENTITY_REQUIRED = (
+    "streaming anchor rows require --source-identity-cache: without a proof "
+    "every row hashes each source shard it reads, whole, under its GPU "
+    "reservation before its first encode (PQ #1497; about 2.5 minutes of idle "
+    "GPU per GLM-5.3 row, PQ #1654). Bind the campaign's "
+    "prismaquant.streamed_model.identity_cache.v1 proof of every source shard, "
+    "for example the source-identity.json a joint pass over this model wrote")
+
+
+def _source_identity_cache_binding(path, model, calibration_cache=None):
     """Bind the campaign's full-file source SHA proof by digest, or ``None``.
 
     A selected-source row adopts this proof before its first payload read
     instead of hashing every shard it reads under its GPU reservation
-    (PQ #1497). The row re-checks every shard's stat fingerprint and SHA
-    against the canonical capture when it adopts, so this only refuses a
-    file that is not a streamed identity proof of ``model`` at all.
+    (PQ #1497). A proof the row cannot adopt makes the row fall back to that
+    hash, so this refuses, at plan time, every proof adoption would refuse:
+    ``validate_cached_streamed_model_identity`` requires complete coverage of
+    the checkpoint index, its tensor-to-shard map, the live config and every
+    shard's stat fingerprint, and each shard's SHA must be the one the bound
+    capture's source roster declares (PQ #1654). The row re-checks all of it
+    against the objects it holds when it adopts.
     """
     if not path:
         return None
-    from prismaquant.cost_streaming import _read_streamed_model_identity_cache
-    from prismaquant.tessera_calibration_cache import sha256
+    from prismaquant.cost_streaming import validate_cached_streamed_model_identity
+    from prismaquant.tessera_calibration_cache import require_capture_contract, sha256
     path = Path(path).resolve()
-    _read_streamed_model_identity_cache(path, source_model=str(model))
+    identity = validate_cached_streamed_model_identity(
+        str(model), path, require_complete_checkpoint=True)
+    if calibration_cache is not None:
+        roster = require_capture_contract(
+            calibration_cache["path"],
+            expected_sha256=calibration_cache["sha256"])["identity"]["source_files"]
+        declared = {name: digest for name, digest in roster.items()
+                    if name.endswith(".safetensors")}
+        proved = {Path(str(row["path"])).name: row.get("sha256")
+                  for row in identity["shards"]}
+        differing = sorted(name for name in set(declared) | set(proved)
+                           if declared.get(name) != proved.get(name))
+        if differing:
+            raise RuntimeError(
+                f"{path} does not prove the capture's source: {len(differing)} "
+                f"shard(s) differ from its roster, e.g. {differing[:4]}; a row "
+                "would refuse it and hash every shard it reads")
     return dict(path=str(path), sha256=sha256(path))
+
+
+def _row_is_selected_source(inner_argv: list) -> bool:
+    """Whether a campaign row reuses a hash-bound selected capture.
+
+    ``tessera_campaign``'s own ``selected_source``: streaming, a unit
+    selection and a bound capture, and neither census nor capture output.
+    """
+    return ("--streaming" in inner_argv and "--units" in inner_argv
+            and "--calibration-cache" in inner_argv
+            and "--calibration-cache-sha256" in inner_argv
+            and "--census-out" not in inner_argv
+            and "--capture-calibration-out" not in inner_argv)
+
+
+def require_source_identity_proofs(rows: list) -> None:
+    """Refuse a manifest whose selected-source rows carry no source proof.
+
+    ``plan`` refuses to write such a row (PQ #1654); a manifest planned
+    before that, or edited since, is refused here, naming every row at once,
+    before anything is submitted.
+    """
+    missing = []
+    for index, row in enumerate(rows):
+        inner = _inner_campaign_argv(row)
+        if _row_is_selected_source(inner) and "--source-identity-cache" not in inner:
+            missing.append(_row_label(inner, index))
+    if missing:
+        raise DemandRefused(
+            f"{len(missing)} selected-source row(s) carry no --source-identity-cache "
+            f"({', '.join(missing[:8])}{', ...' if len(missing) > 8 else ''}). "
+            + SOURCE_IDENTITY_REQUIRED + "; re-plan with it")
 
 
 UNITS_SCHEMA_V2 = "prismaquant.tessera_campaign_units.v2"
@@ -1963,14 +2025,13 @@ def cmd_plan(args) -> int:
     selected_source = '--streaming' in spec['campaign_argv']
     if selected_source and calibration_cache is None:
         raise RuntimeError('streaming anchor rows require a hash-bound complete calibration cache')
-    source_identity_cache = _source_identity_cache_binding(
-        getattr(args, "source_identity_cache", None), spec["model"])
-    if source_identity_cache is not None and not selected_source:
+    proof = getattr(args, "source_identity_cache", None)
+    if proof and not selected_source:
         raise RuntimeError('--source-identity-cache binds streaming anchor rows only')
-    if selected_source and source_identity_cache is None:
-        print("[dispatch] WARNING: no --source-identity-cache: every row hashes each "
-              "source shard it reads, whole, on its GPU reservation before its first "
-              "encode (PQ #1497)", flush=True)
+    if selected_source and not proof:
+        raise RuntimeError(SOURCE_IDENTITY_REQUIRED)
+    source_identity_cache = _source_identity_cache_binding(
+        proof, spec["model"], calibration_cache)
     seed_rows, seed_workspace = None, None
     if getattr(args, 'seed_workspace', None):
         if args.seed_checkpoint or args.seed_wire_dir:
@@ -2186,6 +2247,7 @@ def _checked_manifest(args, *, manifest: Path) -> list:
     if box_memory_gb is None:
         box_memory_gb = spec.get("box_memory_gb")
     rows = json.loads(Path(manifest).read_text())
+    require_source_identity_proofs(rows)
     records = verify_manifest_demands(spec, census, rows,
                                       box_memory_gb=box_memory_gb)
     for record in records:
@@ -3988,7 +4050,9 @@ def main(argv=None) -> int:
                            "(prismaquant.streamed_model.identity_cache.v1) to "
                            "hash-bind into every selected-source row, which "
                            "adopts it instead of hashing the shards it reads "
-                           "(PQ #1497)")
+                           "(PQ #1497). Required for a streaming campaign, and "
+                           "checked against the live source and the capture's "
+                           "roster before any row is written (PQ #1654)")
     plan.add_argument("--groups-per-row", type=int, default=1)
     plan.add_argument("--rows-per-box", type=int, default=1,
                       help="how many of these rows one box is meant to run at "
