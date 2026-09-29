@@ -884,7 +884,7 @@ def _stale_served_wire(anchor, record, *, structure) -> "str | None":
 
 
 def _served_route_refusals(family, rungs, members, *, encode_structure,
-                           projected_units) -> "dict[str, dict]":
+                           projected_units, route_cache=None) -> "dict[str, dict]":
     """The rungs of ``family`` some member cannot be served on, with why.
 
     ``{str(rung): {"reason": ..., "members": [...]}}`` for every refused rung.
@@ -902,20 +902,31 @@ def _served_route_refusals(family, rungs, members, *, encode_structure,
     from .tessera_formats import (
         tessera_served_route_refusal, tessera_served_wire_recipe, tessera_wire_recipe)
 
+    # The pinned contract answer is shared by every member of a structure.
+    # A caller may share this memo across one row's groups, never across runs.
+    # Projection membership is still checked separately for each member.
+    memo = {} if route_cache is None else route_cache
     refused: dict[str, dict] = {}
     for rung in sorted(int(r) for r in rungs):
         reasons: dict[str, list[str]] = {}
         for member in members:
             structure = (encode_structure or {}).get(member)
-            reason = tessera_served_route_refusal(family, rung, structure=structure)
+            key = (family, rung, structure)
+            if key not in memo:
+                memo[key] = tessera_served_route_refusal(family, rung, structure=structure)
+            reason = memo[key]
             if (reason is None and structure == "routed_moe"
-                    and member not in (projected_units or {})
-                    and tessera_served_wire_recipe(family, rung, structure=structure,
-                                                   refuse_unattested=False)
-                    != tessera_wire_recipe(family, rung)):
-                reason = (f"{family}_R{rung}: a routed unit with no producer projection is "
-                          "adopted by Tessera's export intake on the dense receipt, which "
-                          "cannot stamp the routed served wire")
+                    and member not in (projected_units or {})):
+                unprojected_key = (*key, "unprojected")
+                if unprojected_key not in memo:
+                    differs = (tessera_served_wire_recipe(
+                        family, rung, structure=structure, refuse_unattested=False)
+                        != tessera_wire_recipe(family, rung))
+                    memo[unprojected_key] = (
+                        f"{family}_R{rung}: a routed unit with no producer projection is "
+                        "adopted by Tessera's export intake on the dense receipt, which "
+                        "cannot stamp the routed served wire" if differs else None)
+                reason = memo[unprojected_key]
             if reason is not None:
                 reasons.setdefault(reason, []).append(member)
         if reasons:
@@ -3725,8 +3736,11 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
 
 
 def anchor_group_rate_grids(groups: Mapping, rates_by_unit: Mapping, *,
-                           encode_structure, projected_units) -> tuple[dict, dict]:
+                           encode_structure, projected_units,
+                           route_cache: dict[tuple, str | None] | None = None) -> tuple[dict, dict]:
     """The existing full-group legal intersection, shared with partitions."""
+    if route_cache is None:
+        route_cache = {}
     group_rates, route_refused = {}, {}
     for key, members in groups.items():
         per_family = {}
@@ -3736,7 +3750,7 @@ def anchor_group_rate_grids(groups: Mapping, rates_by_unit: Mapping, *,
             shared = set.intersection(*[rates_by_unit[m][family] for m in members])
             refused = _served_route_refusals(
                 family, shared, members, encode_structure=encode_structure,
-                projected_units=projected_units)
+                projected_units=projected_units, route_cache=route_cache)
             if refused:
                 route_refused.setdefault(key, {})[family] = refused
                 shared = shared - {int(rung) for rung in refused}
@@ -7454,12 +7468,14 @@ def _main(argv, *, source_scope) -> int:
     # read off the pinned contract: kept in the menu, not measured, and
     # recorded here with the contract's reason rather than hidden.
     route_refused: dict[str, dict[str, dict[str, dict]]] = {}
+    route_cache: dict[tuple, str | None] = {}
     rate_groups = ({entry["key"]: entry["members"] for entry in selection["groups"]}
                    if partition_menu_targets is not None else anchor_groups)
     group_rates, route_refused = anchor_group_rate_grids(
         rate_groups, rates_by_unit,
         encode_structure=(partition_encode_structure if partition_menu_targets is not None else encode_structure),
-        projected_units=(partition_unit_records if partition_menu_targets is not None else projected_units))
+        projected_units=(partition_unit_records if partition_menu_targets is not None else projected_units),
+        route_cache=route_cache)
     if partition_menu_targets is not None:
         fixed_rate = parse_rate_band(args.rate_band)[0]
         if any(not any(fixed_rate in rates for rates in families.values())

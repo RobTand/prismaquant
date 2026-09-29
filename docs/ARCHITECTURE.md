@@ -656,6 +656,15 @@ binding documents and directory-scan errors. Gzip decoding is bounded by the
 same 64 MiB document limit. This CPU proof slice adds no deletion target or
 forward/dead-owner reclaim; it changes no numerical, wire or serving gate.
 
+Re-stamped 2026-09-29 (PQ #1741, `sol/1654-startup-neutral`): served-route
+planning memoizes pinned-contract refusals by `(family, rung, structure)`
+across one row's anchor groups. The unprojected routed-member gate is still
+per member; only its structure-dependent wire comparison is reused. Sorted
+refusal records, admitted rungs, numerical costs, anchors and wire bytes are
+unchanged by this planning change. The memo is not retained across runs.
+Tests: `tests/test_row_startup_routes.py`; frozen A/B output neutrality has
+subsequently been checked. A measured delta and newly rebased artifact
+qualification still require their own gates (no speed claim here).
 Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
 legal-domain pin provenance now transcribes v3's independently reviewed
 producer commit and serving-source digest. `DomainPins` omits absent split
@@ -18254,6 +18263,16 @@ block-128 checkpoint source route is W8A16.
 document is wrong — fix it, or record the divergence in §12; never propagate it.
 
 ---
+
+Re-stamped 2026-09-30 (PQ #1741, `sol/1654-startup-current-pin`): the existing
+`anchor_group_rate_grids` helper shares row-local served-route facts across
+its full-group intersections, including expert-partition planning. Main retains
+the complete group's legal grid and pinned-rate refusal; the memo does not
+relax per-member projection gates or persist across invocations. This is a
+startup CPU planning change, not a new cache, numerical method, serving gate,
+pin, menu or stage. The frozen A/B output-neutrality evidence does not qualify
+a newly rebased artifact or a measured startup delta; current-head CPU and
+approved profile gates remain independent.
 
 ## Contents
 
