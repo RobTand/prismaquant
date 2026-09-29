@@ -146,7 +146,7 @@ def test_prepare_worker_source_cache_creates_then_exactly_reuses(
         events.append(("runner", source, kwargs))
         return _Runner()
 
-    def _build_identity(runner, source, *, identity_cache_path):
+    def _build_identity(runner, source, *, identity_cache_path, **_proof):
         assert isinstance(runner, _Runner)
         events.append(("identity", source))
         Path(identity_cache_path).write_bytes(b"host-local-cache\n")
