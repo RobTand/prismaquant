@@ -2159,7 +2159,12 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                  "publication_overlap_bytes", "campaign_identity_bytes",
                  "campaign_identity_threads", "source_snapshot_policy",
                  "streaming_cache_slots", "streaming_prefetch_workers",
-                 "streaming_cache_headroom_gb", "row_head"):
+                 "streaming_cache_headroom_gb", "row_head",
+                 # PQ #1532: the source-identity proof is a *read shortcut* (it
+                 # seeds the streamed source identity the run re-derives), not a
+                 # setting of the run; binding its path or digest would fork the
+                 # checkpoint identity between a proved and an unproved launch.
+                 "source_identity_cache", "source_identity_cache_sha256"):
         settings.pop(name, None)
     if unit_receipts is not None and (bound_units is not None
                                       or set(unit_receipts) != set(weights)):

@@ -29,6 +29,16 @@ Its stdout is that one JSON document; every log line goes to stderr.
 It writes nothing either: a band-serial row's handoff template and readset
 are derived and printed with their digests, never published (PQ #1200).
 
+Source-identity proof (PQ #1374, #1392): a GPU row refuses before hashing a
+byte when its checkpoint shards lack an identity proof.  Submit it as two
+rows -- a CPU-only identity quantum
+(``pbrun ... python -m prismaquant.tessera_joint_aura identity --model M
+--out D``, which writes the ``prismaquant.source_checkpoint.digest_cache.v1``
+proof) and the GPU row behind it (``pbrun --after <identity action key>``),
+whose plan binds the proof as ``source_digest_cache``.  Stage A, Stage B and
+the sample-parallel workers share one mechanism
+(``tessera_joint_aura.source_identity_proof_kwargs``).
+
 Shapes owned elsewhere (fixtures here, never imports): the layer-quantum
 record (§3, built in parallel by the producer) and the stage-A receipt
 (§3.3, built in parallel by stage A). Real dispatch is the coordinator's
@@ -2396,6 +2406,19 @@ def quantum_argv(record: dict, *, record_path: Path, output_root: Path,
         raise DispatchRefused(
             f"quantum {quantum_id!r} stage-A slice unreadable at "
             f"{slice_path}: {exc}") from exc
+    if resource_policy is not None and handoff is None:
+        # PQ #1141: the checkpoint load holds the whole cotangent plane on the
+        # host unless the scratch pair spills it, so the row refuses here, not
+        # at the container's cgroup, when the plane cannot be held.
+        from prismaquant.joint_stageb_resources import (
+            checkpoint_plane_bytes, verify_cotangent_plane_fits)
+        try:
+            verify_cotangent_plane_fits(
+                checkpoint_plane_bytes(_read_bound_slice(record)["checkpoint"]),
+                resource_policy, parsed_spec().get("env") or {})
+        except (ValueError, KeyError, TypeError) as exc:
+            raise DispatchRefused(
+                f"quantum {quantum_id!r} cotangent plane: {exc}") from exc
     band_payload: list[str] = []
     if handoff is not None:
         band_payload += ["--adjoint-handoff", str(handoff["path"]),

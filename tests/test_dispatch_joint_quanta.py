@@ -134,6 +134,11 @@ def records_dir(tmp_path, campaign):
     return directory
 
 
+def _zero_budget():
+    from prismaquant.joint_retained_window_plan import HOST_RESIDENT_BUDGET_FIELDS
+    return {name: 0 for name in (*HOST_RESIDENT_BUDGET_FIELDS, "retained_render_cap_bytes")}
+
+
 def _receipt(campaign, *, plan_sha256=None, **overrides):
     """A completed stride-1 stage-A receipt for the fixture campaign."""
     assert ADJOINT_SCHEMA == "prismaquant.joint_adjoint_capture.v1"
@@ -1197,7 +1202,8 @@ def test_stage_a_argv_refuses_foreign_read_parent(tmp_path, campaign):
 def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, campaign, monkeypatch):
     import dispatch_joint_quanta as dispatch
     from prismaquant import joint_stageb_resources as resources
-    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30}}
+    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30},
+              "budget": _zero_budget()}
     monkeypatch.setattr(resources, 'verify_policy', lambda _: policy)
     plan = {"stage_b_resource_policy": {"path": "/resource", "sha256": "0"*64},
         "source_prefetch": {"prefetch_workers": 1}, "execution": {"operator_windows": {"prefetch_workers": 4}}}
@@ -1207,7 +1213,8 @@ def test_resource_policy_controls_real_container_and_pb_envelopes(tmp_path, camp
         "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
         "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
     dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path),
+                   _huge_plane_receipt(campaign, row_bytes=1 << 20),
                    tmp_path / 'adjoint-slices')
     path = tmp_path/'record.json'; path.write_text(json.dumps(record))
     args = dict(record_path=path, output_root=tmp_path/'out')
@@ -1226,7 +1233,8 @@ def test_dev_mode_dispatches_a_re_declared_resource_plan(tmp_path, campaign, mon
     """PQ #1147: a plan re-declared after the quantum was sealed stamps by default."""
     import dispatch_joint_quanta as dispatch
     from prismaquant import joint_stageb_resources as resources
-    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30}}
+    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": 28 << 30, "gpu_bytes": 72 << 30},
+              "budget": _zero_budget()}
     monkeypatch.setattr(resources, 'verify_policy', lambda _: policy)
     plan = {"stage_b_resource_policy": {"path": "/resource", "sha256": "0"*64},
         "source_prefetch": {"prefetch_workers": 1}, "execution": {"operator_windows": {"prefetch_workers": 4}}}
@@ -1236,7 +1244,8 @@ def test_dev_mode_dispatches_a_re_declared_resource_plan(tmp_path, campaign, mon
         "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": 28,
         "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10"}}
     dispatch.SPEC_PATH.write_text(json.dumps(spec))
-    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _receipt(campaign),
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path),
+                   _huge_plane_receipt(campaign, row_bytes=1 << 20),
                    tmp_path / 'adjoint-slices')
     path = tmp_path/'record.json'; path.write_text(json.dumps(record))
     # The plan is re-declared after the record sealed its digest.
@@ -1269,6 +1278,79 @@ def test_extended_catalog_cannot_launch_historical_bare_parent_readset(tmp_path,
     record['catalog_extension'] = {'path': '/proof', 'sha256': 'e'*64}
     with pytest.raises(DispatchRefused, match='requires executable prepared-input'):
         quantum_argv(record, record_path=tmp_path/'record', output_root=tmp_path/'out')
+
+
+def _huge_plane_receipt(campaign, row_bytes=8 << 30):
+    """The fixture receipt with every cotangent row sized ``row_bytes``.
+
+    The fixture plane is 2 probes x 2 batches, so 8 GiB rows make the 32 GiB
+    plane the layer-044 v4 gate row held on a 28 GiB host (PQ #1141).
+    """
+    receipt = _receipt(campaign)
+    for checkpoint in receipt["checkpoints"]:
+        for row in checkpoint["activation_entries"]:
+            row["tensor_bytes"] = row_bytes
+            row["file_bytes"] = row_bytes + 65536
+        checkpoint["cotangent_sha256"] = canonical_json_sha256(
+            {key: checkpoint[key] for key in ("schema", "boundary", "session",
+                                              "activation_entries", "shared_state_entries")},
+            where="adjoint checkpoint")
+    return receipt
+
+
+def _plane_dispatch(tmp_path, campaign, monkeypatch, *, env=None, host=28 << 30, retained=0):
+    """Dispatch one quantum under a verified 28 GiB-host policy; return the argv call."""
+    import dispatch_joint_quanta as dispatch
+    from prismaquant import joint_stageb_resources as resources
+    budget = _zero_budget()
+    budget["retained_render_cap_bytes"] = retained
+    policy = {"limits": {"physical_bytes": 100 << 30, "host_bytes": host, "gpu_bytes": 72 << 30},
+              "budget": budget}
+    monkeypatch.setattr(resources, 'verify_policy', lambda _: policy)
+    plan = {"stage_b_resource_policy": {"path": "/resource", "sha256": "0"*64},
+        "source_prefetch": {"prefetch_workers": 1}, "execution": {"operator_windows": {"prefetch_workers": 4}}}
+    raw = json.dumps(plan).encode(); Path(campaign['plan_path']).write_bytes(raw)
+    campaign['plan_sha256'] = hashlib.sha256(raw).hexdigest()
+    spec = {"container": {"image": "sha256:" + "0"*64, "content_sha256": "b"*64,
+                          "mounts": [{"source": "/home/rob/pb-scratch/glm-stageb",
+                                      "target": "/home/rob/pb-scratch/glm-stageb",
+                                      "readonly": False}]},
+        "container_admission_reference": "content:sha256:" + "c"*64, "cpu_memory_gb": host >> 30,
+        "env": {"PRISMAQUANT_MAX_GPU_MEM_GB": "72", "PRISMAQUANT_LAYER_READ_THREADS": "10",
+                **(env or {})}}
+    dispatch.SPEC_PATH.write_text(json.dumps(spec))
+    record = _bind(_record(campaign, 1, slice_dir=tmp_path), _huge_plane_receipt(campaign),
+                   tmp_path / 'adjoint-slices')
+    path = tmp_path / 'record.json'; path.write_text(json.dumps(record))
+    return lambda: quantum_argv(record, record_path=path, output_root=tmp_path / 'out')
+
+
+def test_a_host_held_cotangent_plane_over_the_cap_is_refused_at_dispatch(
+        tmp_path, campaign, monkeypatch):
+    """PQ #1141: no scratch pair means the plane sits on the host; 32 GiB > 28 GiB."""
+    with pytest.raises(DispatchRefused, match='cotangent plane'):
+        _plane_dispatch(tmp_path, campaign, monkeypatch)()
+
+
+def test_a_cotangent_scratch_ceiling_below_the_plane_is_refused_at_dispatch(
+        tmp_path, campaign, monkeypatch):
+    env = {'PRISMAQUANT_STAGE_B_COTANGENT_ROOT': '/home/rob/pb-scratch/glm-stageb',
+           'PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES': str(16 << 30)}
+    with pytest.raises(DispatchRefused, match='cotangent plane'):
+        _plane_dispatch(tmp_path, campaign, monkeypatch, env=env)()
+
+
+def test_a_cotangent_scratch_that_covers_the_plane_dispatches(tmp_path, campaign, monkeypatch):
+    env = {'PRISMAQUANT_STAGE_B_COTANGENT_ROOT': '/home/rob/pb-scratch/glm-stageb',
+           'PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES': str(36 << 30)}
+    assert '--' in _plane_dispatch(tmp_path, campaign, monkeypatch, env=env)()
+
+
+def test_a_host_held_plane_that_fits_beside_the_render_cap_dispatches(
+        tmp_path, campaign, monkeypatch):
+    assert '--' in _plane_dispatch(tmp_path, campaign, monkeypatch, host=64 << 30, retained=8 << 30)()
+    with pytest.raises(DispatchRefused, match='cotangent plane'):
+        _plane_dispatch(tmp_path, campaign, monkeypatch, host=36 << 30, retained=8 << 30)()
 
 
 @pytest.mark.parametrize('readonly', [False, True])

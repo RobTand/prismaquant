@@ -212,6 +212,32 @@ def test_a_capture_that_does_not_fit_refuses_the_policy(resource_fixture):
         derive_policy(inputs, **limits, capture=_capture(4, 16 << 20))
 
 
+def test_a_host_held_cotangent_plane_is_priced_into_the_render_bound(resource_fixture, tmp_path):
+    """PQ #1141: the plane the checkpoint load holds on the host is a host owner."""
+    from prismaquant.joint_retained_window_plan import HOST_RESIDENT_BUDGET_FIELDS
+    inputs, _original, _extended, _binding, legacy = resource_fixture
+    assert 'cotangent' not in legacy and 'cotangent' not in legacy['derivation']
+    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    plane = 6 << 20
+    policy = derive_policy(inputs, **limits, cotangent={'host_plane_bytes': plane})
+    assert policy['cotangent'] == {'host_plane_bytes': plane}
+    budget = policy['budget']
+    resident = sum(budget[name] for name in HOST_RESIDENT_BUDGET_FIELDS)
+    assert budget['retained_render_cap_bytes'] + resident + plane <= limits['host_bytes']
+    assert verify_policy(bound(tmp_path / 'plane.json', policy)) == policy
+    forged = copy.deepcopy(policy)
+    forged['cotangent']['host_plane_bytes'] = 1
+    with pytest.raises(ValueError, match='independent resource derivation'):
+        verify_policy(bound(tmp_path / 'forged-plane.json', forged))
+
+
+def test_a_cotangent_plane_that_exhausts_the_host_refuses_the_policy(resource_fixture):
+    inputs, *_ = resource_fixture
+    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    with pytest.raises(RuntimeError, match='cotangent plane'):
+        derive_policy(inputs, **limits, cotangent={'host_plane_bytes': 16 << 20})
+
+
 def test_the_receipt_is_read_once_for_its_bytes_and_digest(tmp_path):
     import hashlib
     from prismaquant.joint_stageb_resources import workspace_from_receipt
@@ -352,3 +378,47 @@ def test_a_v2_catalog_refuses_a_routed_a4_rung_the_policy_does_not_price(tmp_pat
     inputs, _plan, _ = _inputs(tmp_path, monkeypatch, added=added, activation_formats=[R768, FORMAT])
     with pytest.raises(ValueError, match=match):
         derive_policy(inputs, **LIMITS)
+
+
+_PLANE_POLICY = {"limits": {"host_bytes": 28 << 30},
+                 "budget": {"safety_margin_bytes": 1 << 30, "metadata_reserve_bytes": 0,
+                            "load_buffer_bytes": 0, "read_page_reserve_bytes": 0,
+                            "retained_render_cap_bytes": 4 << 30}}
+_SCRATCH = ("PRISMAQUANT_STAGE_B_COTANGENT_ROOT", "PRISMAQUANT_STAGE_B_COTANGENT_MAX_BYTES")
+
+
+def test_cotangent_plane_check_prices_host_owners_and_the_render_cap():
+    from prismaquant.joint_stageb_resources import verify_cotangent_plane_fits
+    verify_cotangent_plane_fits(23 << 30, _PLANE_POLICY, {})  # 23 + 1 + 4 == 28
+    with pytest.raises(ValueError, match="cotangent plane"):
+        verify_cotangent_plane_fits((23 << 30) + 1, _PLANE_POLICY, {})
+
+
+@pytest.mark.parametrize("env, ok", [
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: str(40 << 30)}, True),
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: str(32 << 30)}, True),
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: str((32 << 30) - 1)}, False),
+    ({_SCRATCH[0]: "/s"}, False),
+    ({_SCRATCH[1]: str(40 << 30)}, False),
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: "0"}, False),
+    ({_SCRATCH[0]: "/s", _SCRATCH[1]: "-5"}, False),
+    ({_SCRATCH[0]: "", _SCRATCH[1]: str(40 << 30)}, False),
+])
+def test_cotangent_scratch_pair_must_cover_the_plane(env, ok):
+    from prismaquant.joint_stageb_resources import verify_cotangent_plane_fits
+    if ok:
+        verify_cotangent_plane_fits(32 << 30, _PLANE_POLICY, env)
+    else:
+        with pytest.raises(ValueError, match="cotangent"):
+            verify_cotangent_plane_fits(32 << 30, _PLANE_POLICY, env)
+
+
+def test_checkpoint_plane_bytes_sums_rows_and_refuses_an_unsized_row(monkeypatch):
+    from prismaquant import joint_adjoint_slices as slices
+    from prismaquant.joint_stageb_resources import checkpoint_plane_bytes
+    rows = {(0, 0): {"tensor_bytes": 5}, (0, 1): {"tensor_bytes": 7}}
+    monkeypatch.setattr(slices, "checkpoint_cotangent_plane", lambda record: rows)
+    assert checkpoint_plane_bytes({}) == 12
+    rows[(0, 1)] = {"file_bytes": 7}
+    with pytest.raises(ValueError, match="tensor_bytes"):
+        checkpoint_plane_bytes({})

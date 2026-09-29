@@ -185,7 +185,6 @@ def test_moved_budget_and_run_helpers_are_the_shared_owner():
     for module in (budget, run):
         assert module._bound is base._bound
         assert module._bytes_identity is base._bytes_identity
-        assert module.checkout_head_commit is base.checkout_head_commit
         assert module._committed_package is base._committed_package
         assert module._COMMIT == base._COMMIT
 

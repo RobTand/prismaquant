@@ -43,7 +43,8 @@ import torch
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .cost_currency import probe_identity_seals, probe_identity_walls_differ
 from .dev_mode import seal_check
-from .io_spans import (GpuPowerSampler, IoSpanLog, failure_outcome, read_proc_io,
+from .io_spans import (ExposedWaitLedger, GpuPowerSampler, IoSpanLog,
+                       exposed_wait_report, failure_outcome, read_proc_io,
                        stage_span_log)
 from .joint_adjoint_checkpoints import (
     QUANTUM_COUNTERS_SCHEMA,
@@ -574,6 +575,13 @@ class QuantumCounters:
         # (PQ #1291): entries and bytes read, the per-stream rate, rereads
         # and reclaims, and every wait the replay spent on a window's loads.
         self.io_engine = None
+        # Every interval the consumer blocked on a load (PQ #1292): the
+        # window-load takes and the spill waits land here through ``sink``;
+        # span-derived kinds are read from ``self.io`` at the finish.
+        self.exposed_wait = ExposedWaitLedger()
+        # The instant the row first touches CUDA. Power samples before it are
+        # the measured idle baseline; ``None`` means no baseline (PQ #1292).
+        self.gpu_work_started_unix: float | None = None
         self.phases = [{"name": str(chunk["name"]),
                         "start_bytes": int(chunk["start_bytes"]),
                         "end_bytes": int(chunk["end_bytes"]),
@@ -594,6 +602,36 @@ class QuantumCounters:
         self.kda_capture_kernel = None
         self._phase_cursor = None
         self._window_cursor = None
+
+    # Spans whose whole duration is the consumer blocked on a load.
+    EXPOSED_WAIT_SPANS = (CHECKPOINT_LOAD_PHASE, HANDOFF_LOAD_PHASE,
+                          "own-source", "window-wait")
+
+    def exposed_wait_block(self, finished_unix: float) -> dict:
+        """The row's ``exposed_wait`` block (PQ #1292), from the stopped sampler."""
+        snapshot = self.exposed_wait.snapshot()
+        intervals = list(snapshot["intervals"])
+        for record in self.io.records:
+            kind = record.get("span")
+            if kind in self.EXPOSED_WAIT_SPANS:
+                intervals.append({"kind": kind,
+                                  "start_unix": record.get("start_unix"),
+                                  "end_unix": record.get("end_unix")})
+        entered = [block["entered_unix"] for block in self.phases]
+        windows = []
+        for index, block in enumerate(self.phases):
+            start = entered[index]
+            end = next((t for t in entered[index + 1:] if t is not None),
+                       finished_unix)
+            windows.append({"name": block["name"], "start_unix": start,
+                            "end_unix": None if start is None else end})
+        return exposed_wait_report(
+            intervals, snapshot["takes"],
+            power_times=list(self.sampler.times),
+            power_samples=list(self.sampler.samples),
+            interval_s=float(getattr(self.sampler, "interval_s", 1.0)),
+            phase_windows=windows, envelope_w=140.0,
+            baseline_end_unix=self.gpu_work_started_unix)
 
     def kda_capture_kernel_record(self) -> dict | None:
         block = self.kda_capture_kernel
@@ -689,7 +727,8 @@ class QuantumCounters:
     def finish(self, *, units_done: int | None, units_total: int) -> dict:
         """The counters document. ``units_done`` is ``None`` for a failed run."""
         gpu = self.sampler.stop()
-        wall_s = time.time() - self.started
+        finished_unix = time.time()
+        wall_s = finished_unix - self.started
         kernel_active_s = (self.total_kernel_active_s
                            if self._kernel_error is None else None)
         joules = gpu.get("gpu_joules")
@@ -727,6 +766,7 @@ class QuantumCounters:
             **({} if self.handoff_incoming is None
                else {"handoff_incoming": self.handoff_incoming}),
             **({} if self.io_engine is None else {"io_engine": self.io_engine}),
+            "exposed_wait": self.exposed_wait_block(finished_unix),
             "phases": self.phases,
             "windows": self.windows,
             # Every closed span, in close order (prismaquant.io_spans).
@@ -2094,6 +2134,8 @@ def run_layer_quantum_core(
                 chunk_rows=replay_regime["chunk_rows"], max_block=sealed_grid)
         except SpillGridRefused as exc:
             raise QuantumIdentityRefused(f"quantum {quantum_id}: {exc}") from exc
+        # PQ #1292: the spill's blocked intervals join the row's exposed wait.
+        spill.wait_sink = counters.exposed_wait.sink
         counters.replay.update(mode=REPLAY_SPILL, spill_geometry=spill_bound.as_dict())
         if capture_batch > 1:
             counters.replay["capture_groups"] = len(capture_groups)
@@ -2124,6 +2166,17 @@ def run_layer_quantum_core(
                         if adjoint_handoff is not None and spill_config is not None
                         else None)
     incoming_budget = None
+    if resource_policy is not None and (adjoint_handoff is None
+                                        or handoff_incoming is None):
+        # PQ #1141: this launch loads the whole cotangent plane through the
+        # checkpoint sink (or, under a handoff without the one-pass spill,
+        # through the handoff load). Refuse before the load when the sealed
+        # host envelope cannot hold it and no scratch pair spills it.
+        from prismaquant.joint_stageb_resources import (
+            checkpoint_plane_bytes, verify_cotangent_plane_fits)
+        verify_cotangent_plane_fits(
+            checkpoint_plane_bytes(checkpoint_record), resource_policy,
+            os.environ)
     with storage, (spill if spill is not None else nullcontext()), \
             ExitStack() as handoff_exit:
         with counters.io.span(CHECKPOINT_LOAD_PHASE if adjoint_handoff is None
@@ -2364,6 +2417,7 @@ def run_layer_quantum_core(
                 ready=(partial(_retained_window_ready, record=record)
                        if executable else None),
                 lease_counters=PWC_WINDOW_LEASE_COUNTERS)
+            render_stream.wait_sink = counters.exposed_wait.sink
             handoff_exit.callback(render_stream.close)
         if spill is not None and guard is not None:
             # PQ #1348: the spill replay reads its chunks through the IO
@@ -3441,6 +3495,45 @@ def publish_quantum_outputs(record, *, payload, result, counters,
     return status_record
 
 
+
+def _build_quantum_source_identity(runner, config, *, run_dir,
+                                   identity_cache_bytes=None,
+                                   digest_cache_bytes=None):
+    """Build a Stage B quantum's source identity behind the #1374 proof.
+
+    A quantum whose identity proof does not cover every source shard refuses
+    before it hashes a byte (PQ #1392); the proof arguments come from
+    ``tessera_joint_aura.source_identity_proof_kwargs``, the same helper
+    Stage A and the sample-parallel worker use. On the head-slice path the
+    identity cache and the digest proof arrive as declared head-file bytes:
+    the identity cache is used in place (nothing is copied or written back)
+    and the digest proof is staged into the run directory, because the
+    digest reader takes a path.
+    """
+    from .cost_streaming import build_streamed_model_identity
+    from .tessera_joint_aura import (
+        _seed_source_identity_cache,
+        source_identity_proof_kwargs,
+    )
+
+    if identity_cache_bytes is not None:
+        identity_cache = {"identity_cache_bytes": identity_cache_bytes}
+    else:
+        identity_cache = {"identity_cache_path": _seed_source_identity_cache(
+            config, run_dir)}
+    if digest_cache_bytes is not None:
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        staged = run_dir / "source-digest-cache.json"
+        staged.write_bytes(digest_cache_bytes)
+        proof = source_identity_proof_kwargs(config["model"], digest_cache_path=staged)
+    else:
+        proof = source_identity_proof_kwargs(
+            config["model"], config.get("source_digest_cache"))
+    return build_streamed_model_identity(
+        runner, config["model"], **identity_cache, **proof)
+
+
 def run_layer_quantum(
     config, *, record, adjoint_slice, plan_sha256, prepared, output_root,
     data_manifest_sha256=None, resume=False, adjoint_handoff=None,
@@ -3641,6 +3734,9 @@ def run_layer_quantum(
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()
+        # Everything above ran CPU-only, so the power samples before this
+        # instant are the GPU's own idle range (PQ #1292 baseline).
+        gpu_work_started = time.time()
         projection_backend = prewarm_projection_backend(
             execution.get("projection_backend"), device="cuda")
         result["projection_backend"] = projection_backend.identity
@@ -3667,6 +3763,7 @@ def run_layer_quantum(
             head_units, head_cells = head.units, head.measured_cells
             progress_base = head.progress_units
             identity_cache_bytes = head.identity_cache_bytes
+            digest_cache_bytes = head.digest_cache_bytes
         else:
             _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
                                     implementation_sha256=implementation,
@@ -3739,21 +3836,17 @@ def run_layer_quantum(
             head_units, head_cells = len(data.formats_by_qname), len(data.cells)
             progress_base = data.progress_committed
             identity_cache_bytes = None
+            digest_cache_bytes = None
 
-        from .cost_streaming import build_streamed_model_identity
-        if identity_cache_bytes is not None:
-            # The slice declared the bound cache and the head read it: no
-            # copy into the output space, and nothing is written back.
-            identity_cache = {"identity_cache_bytes": identity_cache_bytes}
-        else:
-            identity_cache = {"identity_cache_path": _seed_source_identity_cache(
-                config, space / "run")}
         runner = build_quantum_source_runner(
             config, offload_folder=space / "run" / "offload",
             sealed_head_tensors=((record.get("executable_readset") or {})
                                  .get("head_source") or {}).get("tensors"))
 
-        source = build_streamed_model_identity(runner, config["model"], **identity_cache)
+        source = _build_quantum_source_identity(
+            runner, config, run_dir=space / "run",
+            identity_cache_bytes=identity_cache_bytes,
+            digest_cache_bytes=digest_cache_bytes)
         # A run seal (PQ #1147): dev mode stamps a source other than the
         # prepared one and continues.
         seal_check("prepared source identity", completion.get("source_model_identity"),
@@ -3802,6 +3895,7 @@ def run_layer_quantum(
             frontier=ChunkFrontier(chunks=record["chunks"],
                                    windows=resolved_windows),
             io_spans=io_spans, sampler=power, started=started)
+        counters.gpu_work_started_unix = gpu_work_started
         # Head-phase currency continues from the head-committed base (§6.2
         # step 5): the same cumulative units the single run reports.
         progress = QuantumProgress(frontier=counters._frontier,

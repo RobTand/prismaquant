@@ -652,6 +652,13 @@ class OperatorMeasurement:
                 "receipt_sha256": self.receipt_sha256}
 
 
+# The two choices a bootstrap interval leaves open; everything else comes from the
+# receipts' own repeated samples (#1659).
+BOOTSTRAP_CONFIDENCE = 0.95   # two-sided level; the conventional one, and it names the p2.5/p97.5 keys
+BOOTSTRAP_DRAWS = 10000       # Monte Carlo error of a 2.5% tail index is then about 0.16 percentage points
+BOOTSTRAP_SEED = 237          # fixed so the same receipts give the same interval on every replay
+
+
 def bootstrap_sum(samples_per_row, *, draws: int, seed: int, offset_ms: float = 0.0,
                   multiplicities=None) -> dict:
     """The distribution of an operator sum under each row's own samples.
@@ -693,7 +700,7 @@ def bootstrap_sum(samples_per_row, *, draws: int, seed: int, offset_ms: float = 
             totals.append(offset_ms + sum(count * statistics.median(rng.choices(samples, k=len(samples)))
                                           for samples, count in zip(samples_per_row, multiplicities)))
     totals.sort()
-    return {"draws": draws, "seed": seed,
+    return {"draws": draws, "seed": seed, "confidence": BOOTSTRAP_CONFIDENCE,
             "p2.5": totals[int(0.025 * draws)], "p50": totals[draws // 2],
             "p97.5": totals[min(draws - 1, int(0.975 * draws))],
             "offset_ms": float(offset_ms),

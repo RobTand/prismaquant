@@ -47,7 +47,7 @@ from .joint_aura_transition_base import (
     _bytes_identity,
     _committed_package,
     _require,
-    checkout_head_commit,
+    actual_execution,
 )
 
 VERSION = "meta_skeleton_render_proof_v1"
@@ -241,11 +241,7 @@ def _actual_execution():
     sealed checkout's own HEAD; a caller-chosen label is refused here.
     """
     root = Path(__file__).resolve().parents[1]
-    observed = checkout_head_commit(root)
-    from .aura_cost import _checkpoint_git_commit
-    commit = _checkpoint_git_commit()
-    _require(commit == observed, "checkpoint Git identity contradicts the sealed checkout HEAD")
-    return {"git_commit": commit, **source_proof()}
+    return actual_execution(source_proof, root)
 
 
 def _load_inputs(bindings):

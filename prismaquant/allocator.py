@@ -130,6 +130,7 @@ from .allocator_candidates import (
     summarize_applicability_masks,
     reduce_continuous_menu,
 )
+from .digests import file_sha256hex
 from .fixed_head import (
     allow_pinned_lifts_lm_head,
     is_lm_head_name,
@@ -826,8 +827,14 @@ def _stamp_mtp_selection(args, layer_cfg: dict, body_assignment: Mapping,
                          f"body allocation also assigned: {clash[:4]}")
     for name, fmt in sorted(assignment.items()):
         layer_cfg[name] = fr.get_format(fmt).autoround_config()
+    # The preflight binds every selected MTP receipt back to the measured cost
+    # (PQ #1665): the stamper names the bound file, so it seals the file's
+    # digest beside the path instead of leaving the sha to a later backfill.
+    # Owner read (digests.file_sha256hex): no new raw hashlib site (#1667).
+    cost_sha256 = file_sha256hex(args.mtp_joint_cost)
     layer_cfg[LAYER_CONFIG_META_KEY]["mtp_selection"] = {
-        **record, "cost_path": str(args.mtp_joint_cost), "units": len(assignment)}
+        **record, "cost_path": str(args.mtp_joint_cost),
+        "mtp_joint_cost_sha256": cost_sha256, "units": len(assignment)}
     print(f"[alloc] MTP selection: {record['rung']} "
           f"{record['resident_bytes']:,} B of {record['byte_budget']:,} B "
           f"({record['selection']['regime']})", flush=True)
@@ -4428,6 +4435,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             from .measured_runtime_prices import identity_sha256
             if identity_sha256(assignment_expanded) != replay["assignment_sha256"]:
                 raise ValueError("prefill frontier replay: final writer changed the assignment")
+            # The PACT selection record (PQ #1585) rides beside the replay
+            # block, not inside it: the replay names the one vertex, the record
+            # names the roster that vertex was chosen from. The replay keeps
+            # the record's identity so the two cannot be separated.
+            replay = dict(replay)
+            pact_selection = replay.pop("pact_selection", None)
+            if pact_selection is not None:
+                layer_cfg[LAYER_CONFIG_META_KEY]["pact_selection"] = pact_selection
             layer_cfg[LAYER_CONFIG_META_KEY].update({
                 "research_only": True,
                 "certifies_placement": False,
