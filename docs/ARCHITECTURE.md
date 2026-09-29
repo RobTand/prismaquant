@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1608, `sol/issues-pq-ts-2`): the three closed
+source-transition contracts remain separate. Identical helpers stay in
+`joint_aura_transition_base.py`; checkpoint adoption, run-source proof, and
+retained-budget substitution retain their own checks and verified capability
+types. [The decision](design/closed_source_transitions_1608.md) records the
+contract differences. No runtime behavior, sealed input, gate, schema, or
+pipeline default changes.
+
 Re-stamped 2026-09-29 (PQ #1745, `sol/dedup-ci-grace`): the load-phase
 bound cites the checkpoint reader's deadline at line 1868 after #1729.
 Grace arithmetic, schemas and pipeline defaults are unchanged.
