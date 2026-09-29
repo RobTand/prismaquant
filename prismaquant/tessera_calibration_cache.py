@@ -695,20 +695,40 @@ def merge_load_execution(total, partial):
         total['ordered_load_identities_sha256'], partial['ordered_load_identities_sha256'])
 
 
-def preflight_verified_capture_entries(root, entries, *, names, policy, census, max_rows):
-    """Check the complete selected roster's file/geometry bounds before loading."""
-    import stat
+def preflight_verified_capture_entries(root, entries, *, names, policy, census, max_rows,
+                                       threads=1):
+    """Check the complete selected roster's file/geometry bounds before loading.
+
+    ``threads`` workers issue the ``lstat`` calls; on a network mount one
+    round trip per entry was a serial 7.3 s for a 864-unit GLM-5.3 row before
+    its first encode (PQ #1654). The checks still run in name order on this
+    thread, so the first failure raised is the one the serial loop raised.
+    """
+    from concurrent.futures import ThreadPoolExecutor
     from .perturbed_x_cache import activation_cache_filename, normalize_verified_activation_load
     policy = normalize_verified_activation_load(policy)
     if policy is None:
         raise ValueError('verified capture preflight requires an explicit load policy')
+    if type(threads) is not int or threads < 1:
+        raise ValueError('verified capture preflight requires a positive thread count')
+    names = list(names)
+    expected = {name: str(Path('inputs') / activation_cache_filename(name)) for name in names}
+    canonical = [name for name in names if entries[name].get('path') == expected[name]]
+    with ThreadPoolExecutor(max_workers=max(1, min(threads, len(canonical))),
+                            thread_name_prefix='capture-preflight') as pool:
+        stats = {name: pool.submit((Path(root)/expected[name]).lstat) for name in canonical}
+        return _checked_preflight(names, stats, policy=policy, census=census,
+                                  max_rows=max_rows)
+
+
+def _checked_preflight(names, stats, *, policy, census, max_rows):
+    """The serial loop's checks, in name order, over already-issued ``lstat`` calls."""
+    import stat
     largest_file = largest_storage = 0
     for name in names:
-        expected = str(Path('inputs') / activation_cache_filename(name))
-        record = entries[name]
-        if record.get('path') != expected:
+        if name not in stats:
             raise RuntimeError(f'{name}: noncanonical capture artifact path')
-        observed = (Path(root)/expected).lstat()
+        observed = stats[name].result()
         if not stat.S_ISREG(observed.st_mode):
             raise RuntimeError(f'{name}: verified capture requires a regular nonsymlink file')
         if observed.st_size <= 0 or observed.st_size > policy['max_buffer_bytes']:

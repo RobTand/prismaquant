@@ -1895,12 +1895,28 @@ def sample_stack_groups(groups, probe_rows, *, profile, stack_sample: int,
 UNITS_SCHEMA = "prismaquant.tessera_campaign_units.v1"
 #: Why ``plan`` refuses a streaming campaign with no source proof (PQ #1654).
 SOURCE_IDENTITY_REQUIRED = (
-    "streaming anchor rows require --source-identity-cache: without a proof "
-    "every row hashes each source shard it reads, whole, under its GPU "
-    "reservation before its first encode (PQ #1497; about 2.5 minutes of idle "
-    "GPU per GLM-5.3 row, PQ #1654). Bind the campaign's "
+    "streaming anchor rows require --source-identity-cache (or the spec's "
+    "source_identity_cache): without a proof every row hashes each source shard "
+    "it reads, whole, under its GPU reservation before its first encode "
+    "(PQ #1497, #1654). Bind the campaign's "
     "prismaquant.streamed_model.identity_cache.v1 proof of every source shard, "
     "for example the source-identity.json a joint pass over this model wrote")
+
+
+def _planned_source_identity_cache(flag, declared):
+    """The proof ``plan`` binds: the flag's, else the spec's ``source_identity_cache``.
+
+    A spec that names its campaign's proof keeps a re-plan from dropping it;
+    a flag that names another file than the spec is refused rather than
+    silently preferred (PQ #1654).
+    """
+    if declared is not None and (not isinstance(declared, str) or not declared):
+        raise RuntimeError("spec source_identity_cache must be a nonempty path string")
+    if flag and declared and Path(flag).resolve() != Path(declared).resolve():
+        raise RuntimeError(
+            f"--source-identity-cache {flag} differs from the spec's "
+            f"source_identity_cache {declared}")
+    return flag or declared
 
 
 def _source_identity_cache_binding(path, model, calibration_cache=None):
@@ -2019,7 +2035,8 @@ def cmd_plan(args) -> int:
     selected_source = '--streaming' in spec['campaign_argv']
     if selected_source and calibration_cache is None:
         raise RuntimeError('streaming anchor rows require a hash-bound complete calibration cache')
-    proof = getattr(args, "source_identity_cache", None)
+    proof = _planned_source_identity_cache(
+        getattr(args, "source_identity_cache", None), spec.get("source_identity_cache"))
     if proof and not selected_source:
         raise RuntimeError('--source-identity-cache binds streaming anchor rows only')
     if selected_source and not proof:

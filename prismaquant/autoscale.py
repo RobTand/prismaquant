@@ -779,13 +779,13 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         stream_phases = dict(
             # Menus and the producer projection run with only the weights
             # resident. Since PQ #1654 the stream head binds the projection
-            # here but byte-checks each unit on its reader thread instead
-            # (tessera_row_stream ``check_unit``), so this phase reads no source
-            # bytes; the charge is kept, as an upper bound, so the demand every
-            # planned row derives does not move. The reader-side check holds
-            # one source tensor and the live view, released before the
-            # entry's buffer is allocated, which reader_working_bytes'
-            # 2*widest_weight per reader already bounds.
+            # here and reads each projected unit's source tensor on its reader
+            # thread (tessera_row_stream ``load_unit``), so this phase reads no
+            # source bytes; the charge is kept, as an upper bound, so the
+            # demand every planned row derives does not move. A streamed
+            # weight is charged where it ends up, in ``common``'s selected
+            # source weights, and the reader's transient read of it is inside
+            # reader_working_bytes' 2*widest_weight per reader.
             stream_projection=dict(common,
                 source_validation_bytes=encoding['source_validation_bytes']),
             stream_window=dict(common,

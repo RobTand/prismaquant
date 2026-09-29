@@ -24,18 +24,19 @@ entries are resident or completed at once, and batch ``b + 1`` is read while
 batch ``b`` encodes. A unit that a later, non-adjacent batch needs again is
 read again, and its receipts must equal the first read's or the row refuses.
 
-**The projection byte check rides the readers (PQ #1654).** A unit the
-producer projected has its source tensor re-read and compared byte for byte
-with the live weight view (``tessera_campaign._check_projected_unit``). That
-used to be one serial pass over every priced unit before the first encode,
-about 30 s re-reading 13.8 GB on a GLM-5.3 routed row. Here it is the first
-thing a reader does for its unit, so a unit is checked before its entry is
-read and long before it is encoded, the reads run on every reader in
-parallel, and only the first batch's checks sit in front of the first encode.
-The unit set and the comparison are the serial pass's own; a mismatch refuses
-the row at the unit's batch instead of before any encode. Every unit encoded
-before that batch passed its own check, and a row that refuses writes none of
-the six identity-bound outputs below.
+**Projected source weights stream too (PQ #1654).** On a GLM-5.3 routed row
+the head used to install the whole layer (13.8 GB) to snapshot its 864 expert
+views, then re-read every one of them from its shard to compare it byte for
+byte with the snapshot: about 110 s of the ~165 s the GPU sat idle. The
+campaign now hands such a unit to the stream as a ``meta`` placeholder, and
+the unit's reader reads the producer's source tensor
+(``tessera_campaign._read_projected_unit``, ``source_unit_weight``) as the
+first thing it does for the unit. That tensor is the one the exporter re-reads,
+so it is what is priced: there is no second view left to compare, and the
+serial pass's refusal (a snapshot that differs from the shard) has nothing to
+refuse. A unit is receipted and encoded on those bytes, the reads run on every
+reader in parallel, and only the first batch's reads sit in front of the first
+encode.
 
 **What is deferred, and why only that.** Six writes cite the run identity, and
 the run identity binds every priced unit's W, X and H receipts, so they cannot
@@ -174,8 +175,10 @@ class _Entry:
     count: int
     max_abs: float
     read_seconds: float
-    checked: bool = False
-    check_seconds: float = 0.0
+    #: The source weight the reader read for a placeholder unit, until the
+    #: consumer installs it into the stream's ``weights``.
+    weight: object = None
+    weight_seconds: float = 0.0
 
 
 class RowStream:
@@ -189,21 +192,23 @@ class RowStream:
     calls ``admit``: the readers' future working set is reserved there, before
     their reads are submitted.
 
-    ``check_unit(name, weight)``, when given, runs on the reader thread first,
-    before the unit's capture entry is read: the producer projection's
-    per-unit source byte check (``tessera_campaign._check_projected_unit``,
-    PQ #1654). It returns whether it read anything and raises to refuse the
-    unit, so no entry reaches the consumer until its unit's source bytes have
-    been compared, and ``finish`` checks every unit the loop never admitted.
-    Its transient (one source tensor and the live view) is released before the
-    entry's serialized buffer is allocated, so it sits inside the reader's
-    working set rather than beside it.
+    A unit whose ``weights`` entry is a ``meta`` placeholder has its source
+    weight read here too, on the reader thread, by ``load_unit(name)``, before
+    its capture entry is read: the producer's projected expert tensor, which
+    is the tensor the exporter re-reads (``tessera_campaign._read_projected_unit``,
+    PQ #1654). The tensor must have the placeholder's shape and dtype and live
+    on the host, or the unit is refused. It is bound in place of the
+    placeholder, and the consumer installs it into ``weights`` when it collects
+    the entry, so the encoder and every later reader see exactly the bytes
+    that were receipted. A unit already installed is never read twice. Its
+    bytes are part of the reader's reserved working set
+    (``reader_reserve_bytes``).
     """
 
     def __init__(self, *, capture_path, expected_sha256, expected_identity, census, names,
                  policy, weights, hessian_identity, bind, threads, batch_size, device,
                  memo_capacity, resource_check=None, factor_scratch_bytes=0,
-                 check_unit=None, clock=time.monotonic):
+                 load_unit=None, clock=time.monotonic):
         from . import tessera_calibration_cache as store
         from .perturbed_x_cache import normalize_verified_activation_load
         self._store = store
@@ -228,8 +233,9 @@ class RowStream:
                 not set(names) <= set(expected_identity["units"])):
             raise RuntimeError("calibration capture identity, completeness or scope mismatch")
         self._max_rows = expected_identity["max_act_rows"]
+        # The readers' own count issues the roster's lstat calls (PQ #1654).
         store.preflight_verified_capture_entries(path.parent, manifest["entries"], names=names,
-            policy=policy, census=census, max_rows=self._max_rows)
+            policy=policy, census=census, max_rows=self._max_rows, threads=int(threads))
         self.capture = dict(path=str(path.resolve()), sha256=digest)
         self._path, self._manifest, self._census = path, manifest, census
         self._policy, self._identity = policy, expected_identity
@@ -237,7 +243,11 @@ class RowStream:
         self._weights = weights
         self._hessian_identity = dict(hessian_identity)
         self._bind = bind
-        self._check_unit = check_unit
+        placeholders = [name for name in names if weights[name].is_meta]
+        if placeholders and load_unit is None:
+            raise ValueError("placeholder weights require a load_unit reader: "
+                             + ", ".join(placeholders[:4]))
+        self._load_unit = load_unit
         self._device = device
         self._resource_check = resource_check
         self._factor_scratch_bytes = int(factor_scratch_bytes)
@@ -257,7 +267,7 @@ class RowStream:
         self.stats = dict(entries_read=0, rereads=0, hash_only_entries=0,
                           peak_resident_units=0, read_seconds=0.0, wait_seconds=0.0,
                           first_batch_ready_seconds=None, finish_seconds=None,
-                          projection_checked_reads=0, projection_check_seconds=0.0)
+                          source_weight_reads=0, source_weight_read_seconds=0.0)
 
     # -- readers -----------------------------------------------------------
     def entry_bytes(self, name) -> int:
@@ -267,16 +277,28 @@ class RowStream:
     def reader_reserve_bytes(self, name) -> int:
         """What one submitted read may still allocate: its entry, the serialized
         buffer and its source pages, and the loader's scratch."""
+        weight = self._weights[name]
+        source_bytes = weight.numel() * weight.element_size() if weight.is_meta else 0
         return (self.entry_bytes(name) + 2 * self._policy["max_buffer_bytes"]
-                + self._policy["max_scratch_bytes"])
+                + self._policy["max_scratch_bytes"] + source_bytes)
 
     def _read(self, name):
+        import torch
+
         from . import tessera_hessian as th
         started = self._clock()
-        checked = False
-        if self._check_unit is not None:
-            checked = bool(self._check_unit(name, self._weights[name]))
-        check_seconds = self._clock() - started
+        weight = self._weights[name]
+        loaded = None
+        if weight.is_meta:
+            loaded = self._load_unit(name)
+            if (not isinstance(loaded, torch.Tensor) or loaded.is_meta
+                    or loaded.device.type != "cpu" or tuple(loaded.shape) != tuple(weight.shape)
+                    or loaded.dtype != weight.dtype):
+                raise RuntimeError(
+                    f"{name}: the source weight read on the row stream is not the "
+                    f"planned host tensor {tuple(weight.shape)} {weight.dtype}")
+            weight = loaded
+        load_seconds = self._clock() - started
         store = self._store
         artifact = store._capture_entry_artifact(self._path, self._manifest, name)
         payload, receipt = store._verified_capture_entry(artifact, name,
@@ -287,12 +309,12 @@ class RowStream:
         count, max_abs = payload["count"], payload["max_abs"]
         payload.clear()
         source = th.activation_source({name: hessian}, self._hessian_identity)
-        holder, identities = self._bind(name, weight=self._weights[name], inputs=inputs,
+        holder, identities = self._bind(name, weight=weight, inputs=inputs,
                                         hessian=hessian, source=source)
         return _Entry(name=name, inputs=inputs, hessian=hessian, source=source, holder=holder,
                       identities=identities, load=receipt, count=count, max_abs=max_abs,
-                      read_seconds=self._clock() - started, checked=checked,
-                      check_seconds=check_seconds)
+                      read_seconds=self._clock() - started, weight=loaded,
+                      weight_seconds=load_seconds)
 
     def _submit(self, name):
         if self._closed:
@@ -307,8 +329,9 @@ class RowStream:
         entry = future.result()
         self.stats["entries_read"] += 1
         self.stats["read_seconds"] += entry.read_seconds
-        self.stats["projection_checked_reads"] += int(entry.checked)
-        self.stats["projection_check_seconds"] += entry.check_seconds
+        if entry.weight is not None:
+            self.stats["source_weight_reads"] += 1
+            self.stats["source_weight_read_seconds"] += entry.weight_seconds
         record = dict(load=entry.load, identities=entry.identities,
                       count=entry.count, max_abs=entry.max_abs)
         first = self._first.get(name)
@@ -323,6 +346,12 @@ class RowStream:
                 raise RuntimeError(
                     f"{name}: a second read of the capture entry disagrees with the first "
                     "read's receipts, so the unit's inputs changed during this run")
+        if entry.weight is not None:
+            # The consumer thread is the only writer, and it installs a unit
+            # before any later read of it is submitted, so the next reader of
+            # this unit sees the installed tensor and reads no source byte.
+            self._weights[name] = entry.weight
+            entry.weight = None
         self._live[name] = entry
         return entry
 

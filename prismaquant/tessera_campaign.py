@@ -827,8 +827,10 @@ def _anchor_batches(pending, *, weights, batch_size, structures=None):
     for item in pending:
         name, family, rung = item
         weight = weights[name]
+        # A ``meta`` placeholder is a host weight the row stream has not read
+        # yet (PQ #1654); it batches exactly as the host copy it stands for.
         base = (family, (structures or {}).get(name), tuple(weight.shape),
-                weight.dtype, weight.device)
+                weight.dtype, _host_device() if weight.is_meta else weight.device)
         key = (family, rung, *base[1:])
         groups.setdefault(key, (base, []))[1].append(item)
     # Sort key: the base (the key minus its rung) in first-appearance order,
@@ -4476,10 +4478,10 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
     covers every declared stack, because that is what the allocation rebinds.
 
     ``check_units=False`` returns the same records without reading a source
-    byte, for a caller that runs ``_check_projected_unit`` on every one of
-    them before the unit is encoded: the stream head, on its reader threads
-    (PQ #1654). The records are the ones the serial check returns when it
-    passes, and a failed check refuses the row in either place.
+    byte, for the stream head, which has no snapshot view of these units: its
+    readers read each unit's source tensor (``_read_projected_unit``) and
+    price exactly that (PQ #1654). The records are the ones the serial check
+    returns when it passes.
     """
     from .tessera_expert_projection import (
         ExpertProjectionError, bind_expert_projection, carried_projection,
@@ -4609,9 +4611,9 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
 def _measured_projected_units(bound, measured=None) -> dict[str, dict]:
     """The bound unit records this run prices, in the order the check reads them.
 
-    One definition of *which* units the byte check covers, for both places it
-    runs: the serial pass (``_checked_projected_units``) and the stream head's
-    reader threads (``RowStream(check_unit=...)``, PQ #1654).
+    One definition of *which* units are priced from the producer's source
+    tensors, for both heads: the serial byte check (``_checked_projected_units``)
+    and the stream head's readers (``RowStream(load_unit=...)``, PQ #1654).
     """
     return {name: unit for _stack, units in sorted(bound.items())
             for name, unit in sorted(units.items())
@@ -4633,11 +4635,34 @@ def _check_projected_unit(name, unit, *, live, model_path, source,
     refusal names. The bytes read are the shard the producer hashed, through
     the owner the snapshot read it with. With ``release_source_pages`` the
     unit's own consumed span is advised as soon as it compares equal. Nothing
-    here reserves memory: the serial caller reserves around it, and the stream
-    head reserves the reader's working set before it submits the read.
+    here reserves memory: the serial caller reserves around it.
     """
     import torch
 
+    weight, release = _read_projected_unit(
+        name, unit, model_path=model_path, source=source,
+        release_source_pages=release_source_pages,
+        source_authentication=source_authentication)
+    live = live.detach().cpu()
+    if live.dtype != weight.dtype or not torch.equal(live, weight):
+        return (f"{name} (live {tuple(live.shape)} {live.dtype} vs source "
+                f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
+    del weight, live
+    release()
+    return None
+
+
+def _read_projected_unit(name, unit, *, model_path, source, release_source_pages=False,
+                         source_authentication=None):
+    """The producer's source tensor for one projected unit, and its page release.
+
+    Returns ``(weight, release)``: ``weight`` is ``source_unit_weight``'s own
+    tensor -- the bytes the exporter re-reads -- and ``release()`` advises the
+    unit's consumed span away when ``release_source_pages`` is set (else it
+    does nothing). The serial byte check compares this tensor with a snapshot
+    view; the stream head prices it directly on a reader thread, so there is
+    no second view to compare (PQ #1654).
+    """
     from .tessera_expert_projection import ExpertProjectionError, source_unit_weight
 
     try:
@@ -4656,18 +4681,94 @@ def _check_projected_unit(name, unit, *, live, model_path, source,
         raise RuntimeError(
             f"Tessera campaign cannot read the producer's source tensor for "
             f"{name}: {exc} (PrismaQuant #183).") from exc
-    live = live.detach().cpu()
-    if live.dtype != weight.dtype or not torch.equal(live, weight):
-        return (f"{name} (live {tuple(live.shape)} {live.dtype} vs source "
-                f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
-    del weight, live
-    if release_source_pages:
-        from .layer_streaming import _advise_consumed_safetensors_pages
-        _advise_consumed_safetensors_pages(
-            str(path) if source_authentication is None
-            else source_authentication.descriptor_path(path),
-            [unit['source_tensor']], source_stat)
-    return None
+
+    def release():
+        if release_source_pages:
+            from .layer_streaming import _advise_consumed_safetensors_pages
+            _advise_consumed_safetensors_pages(
+                str(path) if source_authentication is None
+                else source_authentication.descriptor_path(path),
+                [unit['source_tensor']], source_stat)
+    return weight, release
+
+
+def _host_device():
+    import torch
+    return torch.device("cpu")
+
+
+#: What the stream head records beside the snapshot's own preparation record
+#: for the projected units it left to the row stream's readers (PQ #1654).
+STREAMED_SOURCE_POLICY = "row-stream-producer-source-v1"
+
+
+def _streamed_source_weights(runner, *, profile, dense_targets, expert_targets, resources,
+                             snapshot_policy, resource_check=None):
+    """The stream head's weights: dense snapshots, projected-unit placeholders.
+
+    A projected expert unit gets a ``meta`` tensor with the shape and dtype a
+    snapshot copy would carry (``selected_weight_specs``); its reader reads
+    the producer's source tensor in its place (``_read_projected_unit``), so
+    no layer is installed for it here. Dense targets, if any, are snapshotted
+    as before, restricted to their own source keys, which must be admitted
+    keys. Returns ``(weights, preparation)`` in the snapshot's own record
+    shape, with the streamed units named (PQ #1654).
+    """
+    import torch
+
+    specs = runner.selected_weight_specs([*dense_targets, *expert_targets])
+    required = sum(spec[2] for spec in specs.values())
+    if required > resources['selected_source_weight_bytes']:
+        raise RuntimeError("selected source weights exceed their resident byte budget")
+    snapshot_only = snapshot_policy == 'selected-tensors-v1'
+    weights, preparation = {}, None
+    if dense_targets:
+        dense_keys = None
+        if snapshot_only:
+            from .layer_streaming import selected_weight_source_keys
+            dense_keys = selected_weight_source_keys(
+                dense_targets, profile, runner.context.weight_ckpt)
+            if not set(dense_keys) <= set(resources['source_tensor_keys']):
+                raise RuntimeError('snapshot source dependencies differ from the admitted plan')
+        weights, preparation = runner.snapshot_selected_weights(
+            dense_targets, max_resident_bytes=resources['selected_source_weight_bytes'],
+            **({'expected_source_keys': dense_keys} if snapshot_only else {}),
+            resource_check=resource_check, host=True)
+    for name in expert_targets:
+        shape, dtype, _nbytes = specs[name]
+        weights[name] = torch.empty(shape, dtype=dtype, device='meta')
+    record = dict(schema="prismaquant.selected_source_weights.v1",
+        units=sorted(weights), layers=[] if preparation is None else preparation['layers'],
+        resident_bytes=required, source_forward_count=0, packed_parent_storage_retained=False,
+        **({'source_snapshot_policy': 'selected-tensors-v1',
+            'source_tensor_keys': [] if preparation is None else preparation['source_tensor_keys'],
+            'nonbody_materialized': False} if snapshot_only else {}),
+        streamed_source_policy=STREAMED_SOURCE_POLICY,
+        streamed_source_units=sorted(expert_targets))
+    return weights, record
+
+
+def _require_streamed_projection(streamed, projected_units, source, admitted_keys):
+    """Every streamed unit has a producer record whose tensor the plan admitted.
+
+    A placeholder whose unit the producer did not project could never be read,
+    and a source tensor outside the admitted keys would be a read the row's
+    memory and residency plan never priced (PQ #1654).
+    """
+    missing = sorted(set(streamed) - set(projected_units))
+    if missing:
+        raise RuntimeError("streamed source units have no producer projection: "
+                           + ", ".join(missing[:4]))
+    tensors = {projected_units[name]['source_tensor'] for name in streamed}
+    unrostered = sorted(tensors - set(source['tensors']))
+    if unrostered:
+        raise RuntimeError("streamed source tensors are not in the producer's roster: "
+                           + ", ".join(unrostered[:4]))
+    if admitted_keys is not None:
+        unadmitted = sorted(tensors - set(admitted_keys))
+        if unadmitted:
+            raise RuntimeError("streamed source tensors are not admitted source keys: "
+                               + ", ".join(unadmitted[:4]))
 
 
 def _checked_projected_units(bound, *, weights, model_path, source,
@@ -4682,8 +4783,8 @@ def _checked_projected_units(bound, *, weights, model_path, source,
     and claiming it had would be the assertion the check exists to replace.
 
     This is the serial pass the load-all head and the census run. The stream
-    head runs the same per-unit check on its reader threads instead
-    (``_check_projected_unit``, PQ #1654).
+    head snapshots no projected unit, so it has nothing to compare: its readers
+    price the source tensor itself (``_read_projected_unit``, PQ #1654).
     """
     projected: dict[str, dict] = {}
     mismatched: list[str] = []
@@ -5979,12 +6080,19 @@ def _main(argv, *, source_scope) -> int:
         if manifest['identity'] != capture_identity:
             raise RuntimeError('selected source capture identity differs from the canonical census')
         try:
-            selected_weights, selected_source_preparation = runner.snapshot_selected_weights(
-                targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
-                **({'expected_source_keys': selected_resources['source_tensor_keys']}
-                   if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
-                resource_check=None if selected_guard is None else selected_guard.check,
-                **({'host': True} if streaming_head else {}))
+            if streaming_head and expert_targets:
+                selected_weights, selected_source_preparation = _streamed_source_weights(
+                    runner, profile=profile, dense_targets=dense_targets,
+                    expert_targets=expert_targets,
+                    resources=selected_resources, snapshot_policy=args.source_snapshot_policy,
+                    resource_check=None if selected_guard is None else selected_guard.check)
+            else:
+                selected_weights, selected_source_preparation = runner.snapshot_selected_weights(
+                    targets, max_resident_bytes=selected_resources['selected_source_weight_bytes'],
+                    **({'expected_source_keys': selected_resources['source_tensor_keys']}
+                       if args.source_snapshot_policy == 'selected-tensors-v1' else {}),
+                    resource_check=None if selected_guard is None else selected_guard.check,
+                    **({'host': True} if streaming_head else {}))
         finally:
             runner.shutdown()
         selected_source_preparation.update(resources=selected_resources,
@@ -6179,13 +6287,13 @@ def _main(argv, *, source_scope) -> int:
             **(dict(resource_check=None if selected_guard is None else selected_guard.check,
                     release_source_pages=True, source_authentication=source_authentication)
                if selected_source else {}),
-            # The stream head byte-checks each unit on its reader threads,
-            # before the unit's entry reaches the encoder, instead of in one
-            # serial pass over every unit before the first encode (PQ #1654).
+            # The stream head reads each unit's source tensor on its reader
+            # threads and prices it directly, so there is no snapshot view to
+            # check against it (PQ #1654).
             check_units=not streaming_head)
         print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
               f"{len(projected_units)} expert units priced here"
-              + ("; their source bytes are checked on the row stream's readers"
+              + ("; their source tensors are read on the row stream's readers"
                  if streaming_head and projected_units else ""), flush=True)
     # A projected unit is a routed stack member whatever the run declares:
     # Tessera's export intake reads a projection as ``routed_moe`` and expects
@@ -6320,23 +6428,26 @@ def _main(argv, *, source_scope) -> int:
             selected_guard.check('before_row_stream_identity_window',
                                  reserve_bytes=window_metadata_bytes)
 
-        def check_projected_source(name, weight):
-            """The projection byte check for one unit, on a reader thread (PQ #1654).
+        streamed_units = [name for name in targets if weights[name].is_meta]
+        if streamed_units:
+            _require_streamed_projection(
+                streamed_units, projected_units, expert_projection['producer']['source'],
+                selected_resources.get('source_tensor_keys')
+                if args.source_snapshot_policy == 'selected-tensors-v1' else None)
 
-            The same read and comparison ``_checked_projected_units`` makes, for
-            the same unit set; it runs before the unit's entry is read, so no
-            unit reaches the encoder unchecked, and a mismatch refuses the row.
+        def load_projected_source(name):
+            """One projected unit's source tensor, on a reader thread (PQ #1654).
+
+            The tensor the exporter re-reads, through the owner the row
+            authenticated its shards with; its pages are advised away once the
+            copy is taken.
             """
-            unit = projected_units.get(name)
-            if unit is None:
-                return False
-            mismatch = _check_projected_unit(
-                name, unit, live=weight, model_path=args.model,
+            weight, release = _read_projected_unit(
+                name, projected_units[name], model_path=args.model,
                 source=expert_projection['producer']['source'], release_source_pages=True,
                 source_authentication=source_authentication)
-            if mismatch is not None:
-                raise RuntimeError(PROJECTED_BYTES_REFUSAL.format(units=mismatch))
-            return True
+            release()
+            return weight
 
         row_stream = RowStream(
             capture_path=args.calibration_cache, expected_sha256=args.calibration_cache_sha256,
@@ -6347,7 +6458,7 @@ def _main(argv, *, source_scope) -> int:
                 source=source if want_h else None, menu=menus[name],
                 projected_unit=projected_units.get(name), static_scales=static_scales,
                 metadata_bound=window_bounds[name]),
-            check_unit=check_projected_source if projected_units else None,
+            load_unit=load_projected_source if streamed_units else None,
             threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
             memo_capacity=selected_resources['encoder_memo_capacity'],
             resource_check=None if selected_guard is None else selected_guard.check,
@@ -6753,8 +6864,8 @@ def _main(argv, *, source_scope) -> int:
               f"(first batch ready {record['first_batch_ready_seconds']} s, "
               f"reads {record['read_seconds']} s, waited {record['wait_seconds']} s, "
               f"{record['hash_only_entries']} receipt-only, {record['rereads']} re-read, "
-              f"{record['projection_checked_reads']} source-checked in "
-              f"{record['projection_check_seconds']} s, "
+              f"{record['source_weight_reads']} source weights read in "
+              f"{record['source_weight_read_seconds']} s, "
               f"peak {record['peak_resident_units']} units; finalize "
               f"{record['finalize_seconds']} s)", flush=True)
 
