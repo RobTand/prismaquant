@@ -734,15 +734,67 @@ def _acquire_bulk_window(path, expected_sha256, *, resolver=None, declared_size=
     return window, key, staged, resolver
 
 
-def _enter_and_open_window(resolver, window, key, path):
+def _acquire_open_bulk_window(path, expected_sha256, *, resolver=None,
+                              declared_size=None, deadline=None):
+    """Acquire, enter and open a bulk window, riding out a retired cover (PQ #1248).
+
+    PrismaBuild can retire a cover's fragment after the map answered and
+    before ``acquire_for`` runs; the enter then refuses ``unpublished``
+    (availability). That is a race a recopy resolves within seconds, so one
+    such refusal waits for the entry to land (:func:`_await_entry_landing`),
+    builds a NEW window (a released window is never reused) and enters
+    again, bounded by ``deadline`` (default: the staged-range wait). Every
+    other refusal, and an ``unpublished`` one that outlives the wait, is
+    recorded and raised on the spot: integrity refusals fail clear and the
+    pool is never read.
+
+    Returns ``(window, key, staged, resolver, fd, serving, tier)``.
+    """
+    import time
+    from .residency_shard_reader import staged_range_wait_s
+    from .staged_lease import LeaseRefused
+    if deadline is None:
+        deadline = time.monotonic() + staged_range_wait_s()
+    while True:
+        window, key, staged, lease_resolver = _acquire_bulk_window(
+            path, expected_sha256, resolver=resolver,
+            declared_size=declared_size, deadline=deadline)
+        try:
+            fd, serving, tier = _enter_and_open_window(
+                lease_resolver, window, key, path, record_refusal=False)
+        except LeaseRefused as refusal:
+            retry = (refusal.kind == "availability"
+                     and refusal.reason.split(":", 1)[0] == "unpublished"
+                     and time.monotonic() < deadline)
+            if retry:
+                size = declared_size
+                if size is None:
+                    try:
+                        size = os.lstat(path).st_size
+                    except OSError:
+                        size = None
+                retry = size is not None and _await_entry_landing(
+                    lease_resolver, [(path, size)], deadline=deadline)
+            if not retry:
+                lease_resolver.record_fallback(path, str(refusal))
+                raise
+            time.sleep(0.05)
+            continue
+        return window, key, staged, lease_resolver, fd, serving, tier
+
+
+def _enter_and_open_window(resolver, window, key, path, *, record_refusal=True):
     """Enter exactly once, then open one pinned key with the SDK serving
     record; exit the window on any failure so no pin leaks. The caller
-    owns the entered window from here (reads, then close-then-release)."""
+    owns the entered window from here (reads, then close-then-release).
+    ``record_refusal=False`` leaves the fallback record to a caller that
+    may retry (:func:`_acquire_open_bulk_window`)."""
     from .staged_lease import LeaseRefused
     try:
         window.__enter__()
     except LeaseRefused as refusal:
-        resolver.record_fallback(path, str(refusal))
+        if record_refusal:
+            resolver.record_fallback(path, str(refusal))
         raise
     try:
         fd, serving = window.open(key)
@@ -816,10 +868,9 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
     window = None
     tier = None
     if strict:
-        window, key, _staged, lease_resolver = _acquire_bulk_window(
-            path, expected_sha256, declared_size=before.st_size)
-        descriptor, serving, tier = _enter_and_open_window(
-            lease_resolver, window, key, path)
+        window, key, _staged, lease_resolver, descriptor, serving, tier = (
+            _acquire_open_bulk_window(
+                path, expected_sha256, declared_size=before.st_size))
         source_signature = file_stat_signature(os.fstat(descriptor))
         source, source_before = Path(window.stage_path(key) or path), os.fstat(descriptor)
     else:
