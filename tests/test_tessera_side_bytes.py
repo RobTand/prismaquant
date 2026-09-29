@@ -83,6 +83,7 @@ def test_the_price_covers_the_container_the_writer_produced(family, rung, shape)
     price = tessera_tensor_payload_breakdown(
         shape, family=spec, body_rate_q256=rung
     )["total_bytes"]
+    assert isinstance(price, int)
     assert price >= len(exported.blob), (
         f"priced {price} B, the container is {len(exported.blob)} B "
         f"(plane region {exported.exact_bytes} B)"
@@ -101,6 +102,7 @@ def test_the_price_covers_the_fused_wire_and_is_tight(family, rung, shape):
     price = tessera_tensor_payload_breakdown(
         shape, family=spec, body_rate_q256=rung
     )["total_bytes"]
+    assert isinstance(price, int)
     slack = price + len(member) - len(wire)
     assert 0 <= slack <= SLACK_BOUND, (
         f"priced {price} B (+{len(member)} B name), wire is {len(wire)} B, "
@@ -115,6 +117,8 @@ def test_the_member_name_is_priced_exactly_from_the_caller(family, rung, shape):
     named = tessera_tensor_payload_breakdown(
         shape, family=spec, body_rate_q256=rung, member_name="down_proj"
     )
+    assert isinstance(named["total_bytes"], int)
+    assert isinstance(bare["total_bytes"], int)
     assert named["total_bytes"] - bare["total_bytes"] == len("down_proj")
     assert named["member_name_bytes"] == len("down_proj")
 
