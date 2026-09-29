@@ -39,7 +39,7 @@ HEAD_SLICE_SCHEMA = "prismaquant.joint_stage_b_head_slice.v1"
 #: ``prepared`` and ``production_cache`` are always present; the other two
 #: exist exactly when the plan binds them.
 HEAD_FILE_ROLES = ("prepared", "production_cache", "served_activation_policy",
-                   "source_identity_cache")
+                   "source_identity_cache", "source_digest_cache")
 
 #: The calibration draw fields the quantum compares with the original full
 #: draw the campaign's Hessians were fitted on (``run_layer_quantum``).
@@ -195,6 +195,12 @@ def build_head_slices(*, config, plan_sha256, prepared, completion,
     if config.get("source_identity_cache") is not None:
         head_files.append(_file_binding("source_identity_cache",
                                         config["source_identity_cache"], where=where))
+    if config.get("source_digest_cache") is not None:
+        # The identity quantum's proof (PQ #1374/#1392): the GPU row reads it
+        # through the declared set, so an uncovered shard refuses before a
+        # byte is hashed rather than after an undeclared pool read.
+        head_files.append(_file_binding("source_digest_cache",
+                                        config["source_digest_cache"], where=where))
 
     campaign = {
         "plan_sha256": plan_sha256,
@@ -273,7 +279,8 @@ def verify_head_slice(head_slice, *, layer, prepared_sha256, config,
     _same(files.get("production_cache", {}).get("sha256"),
           campaign.get("production_pkl_sha256"), f"{where} production pickle")
     for role, key in (("served_activation_policy", "served_activation_policy"),
-                      ("source_identity_cache", "source_identity_cache")):
+                      ("source_identity_cache", "source_identity_cache"),
+                      ("source_digest_cache", "source_digest_cache")):
         bound = config.get(key)
         row = files.get(role)
         _seal(None if row is None else {"path": row["path"], "sha256": row["sha256"]},
@@ -444,6 +451,10 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
     if "source_identity_cache" in files:
         identity_cache = read_head_file(files["source_identity_cache"],
                                         label="source-identity-cache")
+    digest_cache = None
+    if "source_digest_cache" in files:
+        digest_cache = read_head_file(files["source_digest_cache"],
+                                      label="source-digest-cache")
     progress_units = int(intake["progress_units"])
     if progress_phase is not None:
         # The slice attests the units the prepare-time walk verified; the
@@ -454,6 +465,7 @@ def load_quantum_head(config, *, record, head_slice, files, completion,
         producer_implementation_sha256=producer, completion=completion, formats_by_qname=formats_by_qname,
         calibration_ids=ids, calibration=calibration, cache=cache,
         identity_cache_bytes=identity_cache,
+        digest_cache_bytes=digest_cache,
         units=int(intake["units"]), measured_cells=int(intake["measured_cells"]),
         progress_units=progress_units,
         max_render_file_bytes=int(intake["max_render_file_bytes"]))

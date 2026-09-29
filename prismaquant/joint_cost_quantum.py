@@ -3495,6 +3495,45 @@ def publish_quantum_outputs(record, *, payload, result, counters,
     return status_record
 
 
+
+def _build_quantum_source_identity(runner, config, *, run_dir,
+                                   identity_cache_bytes=None,
+                                   digest_cache_bytes=None):
+    """Build a Stage B quantum's source identity behind the #1374 proof.
+
+    A quantum whose identity proof does not cover every source shard refuses
+    before it hashes a byte (PQ #1392); the proof arguments come from
+    ``tessera_joint_aura.source_identity_proof_kwargs``, the same helper
+    Stage A and the sample-parallel worker use. On the head-slice path the
+    identity cache and the digest proof arrive as declared head-file bytes:
+    the identity cache is used in place (nothing is copied or written back)
+    and the digest proof is staged into the run directory, because the
+    digest reader takes a path.
+    """
+    from .cost_streaming import build_streamed_model_identity
+    from .tessera_joint_aura import (
+        _seed_source_identity_cache,
+        source_identity_proof_kwargs,
+    )
+
+    if identity_cache_bytes is not None:
+        identity_cache = {"identity_cache_bytes": identity_cache_bytes}
+    else:
+        identity_cache = {"identity_cache_path": _seed_source_identity_cache(
+            config, run_dir)}
+    if digest_cache_bytes is not None:
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        staged = run_dir / "source-digest-cache.json"
+        staged.write_bytes(digest_cache_bytes)
+        proof = source_identity_proof_kwargs(config["model"], digest_cache_path=staged)
+    else:
+        proof = source_identity_proof_kwargs(
+            config["model"], config.get("source_digest_cache"))
+    return build_streamed_model_identity(
+        runner, config["model"], **identity_cache, **proof)
+
+
 def run_layer_quantum(
     config, *, record, adjoint_slice, plan_sha256, prepared, output_root,
     data_manifest_sha256=None, resume=False, adjoint_handoff=None,
@@ -3724,6 +3763,7 @@ def run_layer_quantum(
             head_units, head_cells = head.units, head.measured_cells
             progress_base = head.progress_units
             identity_cache_bytes = head.identity_cache_bytes
+            digest_cache_bytes = head.digest_cache_bytes
         else:
             _preflight_run_prepared(prepared, plan_sha256=plan_sha256,
                                     implementation_sha256=implementation,
@@ -3796,21 +3836,17 @@ def run_layer_quantum(
             head_units, head_cells = len(data.formats_by_qname), len(data.cells)
             progress_base = data.progress_committed
             identity_cache_bytes = None
+            digest_cache_bytes = None
 
-        from .cost_streaming import build_streamed_model_identity
-        if identity_cache_bytes is not None:
-            # The slice declared the bound cache and the head read it: no
-            # copy into the output space, and nothing is written back.
-            identity_cache = {"identity_cache_bytes": identity_cache_bytes}
-        else:
-            identity_cache = {"identity_cache_path": _seed_source_identity_cache(
-                config, space / "run")}
         runner = build_quantum_source_runner(
             config, offload_folder=space / "run" / "offload",
             sealed_head_tensors=((record.get("executable_readset") or {})
                                  .get("head_source") or {}).get("tensors"))
 
-        source = build_streamed_model_identity(runner, config["model"], **identity_cache)
+        source = _build_quantum_source_identity(
+            runner, config, run_dir=space / "run",
+            identity_cache_bytes=identity_cache_bytes,
+            digest_cache_bytes=digest_cache_bytes)
         # A run seal (PQ #1147): dev mode stamps a source other than the
         # prepared one and continues.
         seal_check("prepared source identity", completion.get("source_model_identity"),

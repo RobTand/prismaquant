@@ -1,5 +1,27 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1392/#1532, `sonnet/1392-refusals-declared-reads`):
+**the #1374 uncovered-source refusal now guards every GPU entry point that
+builds a source identity, and the source-identity cache flags no longer enter
+the campaign checkpoint identity.** Stage B (`joint_cost_quantum`), Stage A
+(`joint_cost_stage_a`) and the sample-parallel workers
+(`sample_parallel_probe prepare-worker-source-cache`) pass
+`tessera_joint_aura.source_identity_proof_kwargs(model, ...)` to
+`build_streamed_model_identity`, so a row that holds neither an identity cache
+nor a digest proof covering every shard refuses before hashing a byte, with the
+identity quantum's command in the message. It is the one #1374 mechanism, not
+a second one. The Stage B head slice declares `source_digest_cache` as a head
+file role, so the proof arrives as declared bytes; the worker CLI takes
+`--source-digest-cache` and `--source-digest-cache-sha256`.
+`tools/dispatch_joint_quanta.py` documents the two-row pattern (a CPU-only
+identity quantum through `pbrun`, the GPU row behind it with `pbrun --after`).
+`tessera_campaign._campaign_checkpoint_identity` drops `source_identity_cache`
+and `source_identity_cache_sha256`, so the identity is byte-identical with and
+without them. **Migration:** checkpoints written by trees containing #1520
+carry those keys, so their identity changes; resume needs a restart or
+`tools/reseal_campaign_identity.py` `drop_settings`. No stored format, rendered
+byte, pipeline default or ship gate changes.
+
 Re-stamped 2026-09-28 (PQ #738, `claude/738-forward-capture-fanout`): a
 fresh Stage A run's forward boundary capture fans out across PrismaBuild. A
 forward split is one prep row (`--forward-split-prep S:E,...`), one quantum
@@ -4457,6 +4479,14 @@ re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
 resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
+
+As of: 2026-09-29 · `sonnet/1392-refusals-declared-reads`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-29, `sonnet/1392-refusals-declared-reads`) for **the
+uncovered-source refusal on Stage A, Stage B and the probe workers** (PQ
+#1392) and **the campaign identity without the source-identity cache flags**
+(PQ #1532); see the stamp at the top of this document.
 
 As of: 2026-09-28 · `claude/1613-streaming-resume`.
 Stamps follow, newest first, each recording its own branch and date.

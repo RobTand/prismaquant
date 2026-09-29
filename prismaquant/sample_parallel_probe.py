@@ -458,11 +458,42 @@ def _open_directory_nofollow(path: Path, *, where: str) -> int:
     return descriptor
 
 
+def _build_worker_source_identity(
+    runner, source: Path, staged: Path, *,
+    source_digest_cache: str | Path | None = None,
+    source_digest_cache_sha256: str | None = None,
+):
+    """Build the worker's streamed-model identity behind the #1374 proof.
+
+    A worker whose digest proof does not cover every source shard refuses
+    before it hashes a byte (PQ #1392): the proof and the refusal come from
+    ``tessera_joint_aura.source_identity_proof_kwargs``, the helper Stage A
+    and Stage B also use. The proof is the CPU-only identity quantum's
+    ``source_digest_cache``; give its sha256 to have it digest-checked.
+    """
+    from prismaquant.cost_streaming import build_streamed_model_identity
+    from prismaquant.tessera_joint_aura import source_identity_proof_kwargs
+
+    if source_digest_cache is not None and source_digest_cache_sha256 is not None:
+        proof = source_identity_proof_kwargs(str(source), {
+            "path": str(source_digest_cache),
+            "sha256": source_digest_cache_sha256})
+    else:
+        proof = source_identity_proof_kwargs(
+            str(source), digest_cache_path=(
+                Path(source_digest_cache) if source_digest_cache is not None
+                else None))
+    return build_streamed_model_identity(
+        runner, str(source), identity_cache_path=staged, **proof)
+
+
 def prepare_worker_source_cache(
     *,
     model: str | Path,
     output: str | Path,
     offload_folder: str | Path,
+    source_digest_cache: str | Path | None = None,
+    source_digest_cache_sha256: str | None = None,
 ) -> dict[str, object]:
     """Create one host-local complete streamed-model identity cache.
 
@@ -476,7 +507,6 @@ def prepare_worker_source_cache(
     """
     from prismaquant.cost_streaming import (
         build_streamed_causal_lm,
-        build_streamed_model_identity,
         compact_streamed_model_identity,
         validate_cached_streamed_model_identity,
     )
@@ -566,8 +596,10 @@ def prepare_worker_source_cache(
             max_cache_slots=1,
             prefetch_lookahead=0,
         )
-        build_streamed_model_identity(
-            runner, str(source), identity_cache_path=staged,
+        _build_worker_source_identity(
+            runner, source, staged,
+            source_digest_cache=source_digest_cache,
+            source_digest_cache_sha256=source_digest_cache_sha256,
         )
         validated = validate_cached_streamed_model_identity(
             source, staged, require_complete_checkpoint=True,
@@ -2994,6 +3026,12 @@ def _build_parser() -> argparse.ArgumentParser:
     source_cache.add_argument("--model", required=True)
     source_cache.add_argument("--output", required=True)
     source_cache.add_argument("--offload-folder", required=True)
+    source_cache.add_argument(
+        "--source-digest-cache", default=None,
+        help="the identity quantum's digest proof; without full coverage "
+             "the command refuses before hashing a byte (PQ #1392)",
+    )
+    source_cache.add_argument("--source-digest-cache-sha256", default=None)
 
     importance = commands.add_parser("merge-importance")
     importance.add_argument("--local-stats", nargs="+", required=True)
@@ -3028,6 +3066,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             model=args.model,
             output=args.output,
             offload_folder=args.offload_folder,
+            source_digest_cache=args.source_digest_cache,
+            source_digest_cache_sha256=args.source_digest_cache_sha256,
         )
         print(json.dumps(receipt, sort_keys=True))
         return 0
