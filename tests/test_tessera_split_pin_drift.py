@@ -47,7 +47,12 @@ def test_legacy_drift_preserves_the_existing_serialization_order():
         producer_installed_contract_sha256="d" * 64,
     )
     report = domain.pin_drift(frozen, live)
-    assert list(report["frozen"]) == list(report["live"]) == [
+    frozen_fields, live_fields = report["frozen"], report["live"]
+    differences = report["differences"]
+    assert isinstance(frozen_fields, dict)
+    assert isinstance(live_fields, dict)
+    assert isinstance(differences, dict)
+    assert list(frozen_fields) == list(live_fields) == [
         "reader_dev_pin_commit",
         "reader_dev_pin_contract_sha256",
         "serving_runtime_pinned_commit",
@@ -55,7 +60,7 @@ def test_legacy_drift_preserves_the_existing_serialization_order():
         "serving_runtime_pinned_contract_sha256",
         "producer_installed_contract_sha256",
     ]
-    assert list(report["differences"]) == [
+    assert list(differences) == [
         "reader_dev_pin_commit",
         "serving_runtime_pinned_commit",
         "producer_installed_contract_sha256",
@@ -95,9 +100,11 @@ def test_v2_v3_transition_is_symmetric_explicit_drift_not_a_key_error(activate):
     frozen, live = (legacy, split) if activate else (split, legacy)
     report = domain.pin_drift(frozen, live)
     assert report["matches"] is False
-    assert set(report["differences"]) == {PRODUCER_FIELD, SOURCE_FIELD}
+    differences = report["differences"]
+    assert isinstance(differences, dict)
+    assert set(differences) == {PRODUCER_FIELD, SOURCE_FIELD}
     for field in (PRODUCER_FIELD, SOURCE_FIELD):
-        assert report["differences"][field] == {
+        assert differences[field] == {
             "frozen": frozen.as_dict().get(field),
             "live": live.as_dict().get(field),
         }
