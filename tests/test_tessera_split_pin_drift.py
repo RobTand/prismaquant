@@ -38,6 +38,30 @@ def test_current_v2_frozen_transcription_keeps_exactly_the_legacy_fields():
     assert report["frozen"] == report["live"] == domain.FROZEN_PINS.as_dict()
 
 
+def test_legacy_drift_preserves_the_existing_serialization_order():
+    frozen = domain.FROZEN_PINS
+    live = replace(
+        frozen,
+        reader_dev_pin_commit="b" * 40,
+        serving_runtime_pinned_commit="c" * 40,
+        producer_installed_contract_sha256="d" * 64,
+    )
+    report = domain.pin_drift(frozen, live)
+    assert list(report["frozen"]) == list(report["live"]) == [
+        "reader_dev_pin_commit",
+        "reader_dev_pin_contract_sha256",
+        "serving_runtime_pinned_commit",
+        "serving_runtime_pinned_version",
+        "serving_runtime_pinned_contract_sha256",
+        "producer_installed_contract_sha256",
+    ]
+    assert list(report["differences"]) == [
+        "reader_dev_pin_commit",
+        "serving_runtime_pinned_commit",
+        "producer_installed_contract_sha256",
+    ]
+
+
 def test_split_transcription_retains_both_independently_reviewed_values():
     pins = _split_pins()
     fields = pins.as_dict()
