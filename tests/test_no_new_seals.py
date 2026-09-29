@@ -239,6 +239,11 @@ ALLOWLIST = {
         1, INTEGRITY, "a file's bytes against its bound digest"),
     ("tools/dispatch_tessera_campaign.py", "_bound_pickle"): (
         1, INTEGRITY, "a pickle's bytes against its bound digest"),
+    # The same pre-existing #1754 comparison becomes visible when #1769 routes
+    # its opaque inline hashlib expression through the named byte owner.
+    ("tools/dispatch_tessera_campaign.py", "work_profile_bundles"): (
+        1, INTEGRITY, "the explicit timing-profile input binds these exact census "
+        "bytes; reject a profile for another census, not a recorded run identity"),
     ("tools/dispatch_tessera_campaign.py", "verify_joint_campaign_scope"): (
         1, STRUCTURE, "the campaign identity has the expected schema"),
     ("tools/dispatch_tessera_campaign.py", "_calibration_cache_binding"): (

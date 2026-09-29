@@ -87,7 +87,7 @@ import torch.nn as nn
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
-from prismaquant.digests import canonical_json
+from prismaquant.digests import LengthFramedSourceSha256, canonical_json
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
@@ -3010,7 +3010,7 @@ def _production_cache_source_sha256(
         raise RuntimeError(
             f"production source identity found no files under {root}"
         )
-    digest = hashlib.sha256()
+    digest = LengthFramedSourceSha256()
     for path in identity_paths:
         relative = path.relative_to(root).as_posix()
         try:
@@ -3019,11 +3019,7 @@ def _production_cache_source_sha256(
             raise RuntimeError(
                 f"production source identity cannot read {relative}"
             ) from exc
-        encoded_name = relative.encode("utf-8")
-        digest.update(len(encoded_name).to_bytes(4, "big"))
-        digest.update(encoded_name)
-        digest.update(len(payload).to_bytes(8, "big"))
-        digest.update(payload)
+        digest.update(relative, payload)
     return digest.hexdigest()
 
 

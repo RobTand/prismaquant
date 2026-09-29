@@ -111,7 +111,6 @@
   "hashlib:prismaquant/prismasnap_validation.py::attest_fold_fidelity",
   "hashlib:prismaquant/production_weight_cache.py::_canonical_json_sha256",
   "hashlib:prismaquant/production_weight_cache.py::_cb_cache_tensor_identity",
-  "hashlib:prismaquant/production_weight_cache.py::_production_cache_source_sha256",
   "hashlib:prismaquant/production_weight_cache.py::_qname_set_sha256",
   "hashlib:prismaquant/production_weight_cache.py::_source_weight_value_identity",
   "hashlib:prismaquant/proposal_validation.py::_bootstrap_differences",

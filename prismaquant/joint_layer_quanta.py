@@ -135,8 +135,8 @@ _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 # Canonical JSON: the one encoding (sort_keys, compact separators,
-# unescaped UTF-8, no NaN), imported from cost_stage_checkpoint -- the one
-# implementation in the tree (#787 B5). The thin wrappers keep this module's
+# unescaped UTF-8, no NaN), imported through cost_stage_checkpoint's wrappers
+# over the shared digests owner (#1301). The thin wrappers keep this module's
 # default ``where`` label; digests are byte-identical to the shared helpers
 # (verified against all 45 sealed takeover records).
 
