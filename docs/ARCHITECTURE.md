@@ -656,6 +656,17 @@ binding documents and directory-scan errors. Gzip decoding is bounded by the
 same 64 MiB document limit. This CPU proof slice adds no deletion target or
 forward/dead-owner reclaim; it changes no numerical, wire or serving gate.
 
+Re-stamped 2026-09-30 (PQ #1742, `sol/1654-startup-current-pin`): pricing rows
+start Tessera's exact `encoder_source_sha256()` on the existing affinity-bound
+I/O executor after source authentication and before model preparation, then
+join before producer binding and run identity. The producer's own one-entry
+cache and all identity fields remain unchanged; this is not a new digest or
+cross-row memo. Every exit drains the future; a seal failure propagates at
+the explicit join. Census/capture-only heads submit no unused seal work.
+Tests: `tests/test_row_startup_encoder_seal.py`; frozen A/B output neutrality
+has been checked. Newly rebased artifact and profiled phase deltas require
+their own gates (no speed claim here).
+
 Re-stamped 2026-09-29 (PQ #1741, `sol/1654-startup-neutral`): served-route
 planning memoizes pinned-contract refusals by `(family, rung, structure)`
 across one row's anchor groups. The unprojected routed-member gate is still
@@ -665,6 +676,7 @@ unchanged by this planning change. The memo is not retained across runs.
 Tests: `tests/test_row_startup_routes.py`; frozen A/B output neutrality has
 subsequently been checked. A measured delta and newly rebased artifact
 qualification still require their own gates (no speed claim here).
+
 Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
 legal-domain pin provenance now transcribes v3's independently reviewed
 producer commit and serving-source digest. `DomainPins` omits absent split

@@ -2554,6 +2554,42 @@ def _identity_threads_for_this_process(requested) -> int:
     return max(1, min(requested, admitted))
 
 
+class _EncoderSourceSealAhead:
+    """Overlap the producer's exact cold source seal, using its own cache.
+
+    This is a row-owned future on the existing affinity-bound I/O executor,
+    not another digest or memo. Join before a producer identity can first read
+    the seal; the unchanged identity/bind API then sees the producer's cache.
+    """
+
+    def __init__(self):
+        from .io_engine import ENGINE
+        self._future = ENGINE.submit(self._take)
+
+    @staticmethod
+    def _take():
+        return _checkpoint_identity_api().encoder_source_sha256()
+
+    def wait(self) -> str:
+        return self._future.result()
+
+    def finish(self) -> None:
+        # Drain on every exit, but do not mask a prior preparation failure.
+        # Successful pricing MUST wait explicitly and propagate seal failure.
+        try:
+            self._future.result()
+        except BaseException:
+            pass
+
+
+def _start_encoder_source_seal_ahead(args, source_scope):
+    if args.census_out or args.capture_calibration_out:
+        return None
+    ahead = _EncoderSourceSealAhead()
+    source_scope.callback(ahead.finish)
+    return ahead
+
+
 class _SealAhead:
     """Take the calibration owner's capture seal on a helper thread.
 
@@ -6136,6 +6172,11 @@ def _main(argv, *, source_scope) -> int:
             args.capture_calibration_out, census_path=args.calibration_census, model=args.model,
             release_read_pages=args.streaming_capture_policy == 'shared-inputs-bounded-v1'))
 
+    # The source proof is adopted before this point. The producer's immutable
+    # package seal can run under skeleton/tokenizer/calibration preparation
+    # instead of serially at the head of run_identity (PQ #1742).
+    encoder_seal_ahead = _start_encoder_source_seal_ahead(args, source_scope)
+
     from .model_profiles import detect_profile
     profile = detect_profile(args.model)
     runner = None
@@ -6614,6 +6655,11 @@ def _main(argv, *, source_scope) -> int:
             factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
                                   if selected_source else 0))
 
+    # Before the first producer binding/metadata plan or run identity. Keep
+    # those APIs and every identity field unchanged; only their cold seal's
+    # scheduling moves. No unused work is submitted for census/capture heads.
+    if encoder_seal_ahead is not None:
+        encoder_seal_ahead.wait()
     _activation_kwargs_for = activation_kwargs_for(calibration_source)
 
     cache = ProductionWeightCache(
