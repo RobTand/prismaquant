@@ -63,6 +63,44 @@ def test_plan_reuses_partial_seed_and_prices_unstarted_row(tmp_path, monkeypatch
     assert (workspace/'manifest.json').read_bytes() == before
 
 
+def test_plan_derives_demand_from_the_seeded_argv(tmp_path, monkeypatch):
+    """A seed changes the row head, so the plan's demand must see the seed flags.
+
+    ``verify_row_demand`` re-derives each row's demand from the row's own argv
+    at submit. The plan has to derive it from that same argv, or a seeded row
+    is planned at its stream window and refused at submit (PQ #1686).
+    """
+    d, root, census, _ = fixture(tmp_path)
+    workspace = tmp_path/'new'
+    workspace.mkdir()
+    (workspace/'census.json').write_text(json.dumps(census))
+    spec = {'model': '/model', 'campaign_argv': ['--nsamples', '8'], 'cwd': '/repo',
+            'python': 'python', 'env': {}}
+    seen = []
+
+    def memory_gb(row_spec, members, census, **kw):
+        seen.append((sorted(members), list(row_spec['campaign_argv'])))
+        return 1
+    monkeypatch.setattr(d, 'load_spec', lambda _: spec)
+    monkeypatch.setattr(d, '_row_memory_gb', memory_gb)
+    monkeypatch.setattr(d, '_row', lambda spec, argv, **kw: {'argv': argv, 'demand': {'mem_gb': kw['mem_gb']}})
+    monkeypatch.setattr(d, 'planned_data_manifests',
+                        lambda workspace, plan, selections, rows: (rows, []))
+    args = SimpleNamespace(spec='unused', workspace=str(workspace), calibration_cache=None,
+        stack_sample=None, seed_checkpoint=None, seed_wire_dir=None, seed_workspace=str(root),
+        groups_per_row=1, rows_per_box=1, timeout_s=60, stack_sample_seed=0, audit_rate=10, probe=None)
+    assert d.cmd_plan(args) == 0
+    manifest = json.loads((workspace/'manifest.json').read_text())
+    by_members = dict((tuple(m), argv) for m, argv in seen)
+    seeded, unseeded = by_members[('a',)], by_members[('b',)]
+    # The demand saw the row's argv, seed flags included, and the spec's own.
+    assert seeded == manifest[0]['argv']
+    assert seeded[seeded.index('--seed-checkpoint')+1] == str(root/'a/cost.anchors.json')
+    assert '--nsamples' in seeded
+    assert '--seed-checkpoint' not in unseeded
+    assert unseeded == manifest[1]['argv']
+
+
 @pytest.mark.parametrize('field', ['model', 'census', 'capture', 'duplicate'])
 def test_seed_workspace_refuses_incompatible_source(tmp_path, field):
     d, root, census, plan = fixture(tmp_path)
