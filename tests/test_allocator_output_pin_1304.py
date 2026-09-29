@@ -76,6 +76,19 @@ layer files change: the stock ``layer_config.json`` gains the
 ``serving_lane_provenance`` meta block, and the Tessera ``layer.json`` gains
 ``routes`` inside ``by_format``. The allocations, the applicability files, the
 Pareto CSVs, the knees and every Pareto seed are byte-identical.
+
+Re-taken 2026-09-29 for PQ #1609 / #1690 (Tessera side-byte pricing; first red
+commit c2cb79d7, the #1690 merge; the seven commits before it, 165b8a2a
+through 5d662207, are green). The change is footprint pricing only
+(``footprint.py``, ``tessera_footprint.py``, ``tessera_legal_domain.py``);
+no allocator source moved. Only the Tessera ``layer.json`` and ``pareto.csv``
+change, and only the payload accounting inside them: in ``layer.json``
+``achieved_bits`` (4.0625 to 4.1492919921875),
+``body_assignment_payload_bits_total`` and ``assignment_payload_bits_total``
+(both 798720.0 to 815784.0, i.e. +17064 bits of side bytes); in ``pareto.csv``
+the ``achieved_bits`` column of the single row (4.0625 to 4.1492919921875).
+The assignment (3 layers, all TESSERA_E2M1_K2_R896), every predicted_dloss
+column, the applicability file and the knees are byte-identical.
 """
 from __future__ import annotations
 
@@ -120,10 +133,10 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "b76ba7834d997542b2db6ff20f20690ed4e695ac4a045ff301edb3ec118f47bc"
+        "5b2a12166cba8927750dab5ecbfa27b53cb0db3915c588a6c4516e931dc24657"
     ),
     "pareto.csv": (
-        "0abb6a82a89d9cd9686c6a250368bb77603d3904dc2707ccb69a13c9eec70c5a"
+        "e172f4262b5a094db870ed0a904d516d0b030926ee89431fe8472e8a5465583d"
     ),
     "pareto.knees.json": (
         "925991a1a2afcd461ccb3aa026a2135d1487506520f88e78c3bab8c64dedc114"
