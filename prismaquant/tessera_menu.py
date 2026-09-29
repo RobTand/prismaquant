@@ -116,6 +116,7 @@ from .tessera_formats import (
     scale_plane_name,
     tessera_family,
     tessera_serving_route,
+    tessera_served_wire_recipe,
     tessera_wire_recipe,
     Q256_UNIT,
 )
@@ -1055,6 +1056,7 @@ class _ShardGeometry:
 @menu_scaled_cache(shapes=GEOMETRY_CACHE_SHAPES)
 def _shard_geometry(
     family_name: str, body_rate_q256: int, rows: int, cols: int,
+    structure: "str | None" = None,
 ) -> _ShardGeometry:
     """The unit-shaped geometry of one rung at one shape.  Raises if unrealisable.
 
@@ -1073,7 +1075,10 @@ def _shard_geometry(
             f"_shard_geometry is keyed by family name; got {type(family_name).__name__}"
         )
     spec = get_tessera_family(family_name)
-    recipe = tessera_wire_recipe(spec, body_rate_q256)
+    try:
+        recipe = tessera_served_wire_recipe(spec, body_rate_q256, structure=structure)
+    except TesseraFormatError as exc:
+        raise TesseraMenuError(f"wire: {exc}") from exc
     body = BodyKind(recipe.body)
     if rows % spec.arity:
         raise TesseraMenuError(
@@ -1105,6 +1110,8 @@ def tessera_shard_granularity(
     family: "str | TesseraFamily",
     body_rate_q256: int,
     shape: Sequence[int],
+    *,
+    structure: "str | None" = None,
 ) -> tuple[int, int]:
     """``(row_granularity, col_granularity)`` for one rung.  **The one seam.**
 
@@ -1134,7 +1141,7 @@ def tessera_shard_granularity(
     """
     spec = get_tessera_family(family)
     geometry = _shard_geometry(
-        spec.name, int(body_rate_q256), int(shape[-2]), int(shape[-1]),
+        spec.name, int(body_rate_q256), int(shape[-2]), int(shape[-1]), structure,
     )
     from tessera.layout import shard_granularity as _tessera_granularity
 
@@ -1187,6 +1194,7 @@ def tessera_tp_legal(
     parallel_kind: str = PARALLEL_NONE,
     require_attested_world: bool = False,
     unit: "str | None" = None,
+    structure: "str | None" = None,
 ) -> tuple[bool, str]:
     """Is this rung legal on every rank at ``tp_degree``?  ``(legal, reason)``.
 
@@ -1250,7 +1258,7 @@ def tessera_tp_legal(
         axis = tp_cut_axis(parallel_kind)
         try:
             geometry = _shard_geometry(
-                spec.name, int(body_rate_q256), int(shape[-2]), int(shape[-1]),
+                spec.name, int(body_rate_q256), int(shape[-2]), int(shape[-1]), structure,
             )
         except TesseraMenuError as exc:
             return False, f"tp{tp}_geometry:{exc}"
@@ -1258,7 +1266,7 @@ def tessera_tp_legal(
             geometry, tp, axis, SUPERBLOCK_WEIGHTS, int(spec.arity)
         ):
             row_gran, col_gran = tessera_shard_granularity(
-                spec, body_rate_q256, shape,
+                spec, body_rate_q256, shape, structure=structure,
             )
             gran = row_gran if axis == "row" else col_gran
             extent = int(shape[-2]) if axis == "row" else int(shape[-1])
@@ -1266,13 +1274,15 @@ def tessera_tp_legal(
                 f"tp{tp}_{axis}_granularity: {extent} {axis}s cut {tp} ways is "
                 f"not a multiple of {gran} (tessera.layout.shard_granularity)"
             )
-    return tessera_shape_legal(spec, body_rate_q256, sharded)
+    return tessera_shape_legal(spec, body_rate_q256, sharded, structure=structure)
 
 
 def tessera_shape_legal(
     family: "str | TesseraFamily",
     body_rate_q256: int,
     shape: Sequence[int],
+    *,
+    structure: "str | None" = None,
 ) -> tuple[bool, str]:
     """Can Tessera encode this rung on this shape?  ``(legal, reason)``.
 
@@ -1298,7 +1308,10 @@ def tessera_shape_legal(
     rows, cols = dims[-2], dims[-1]
     if rows <= 0 or cols <= 0:
         return False, f"degenerate shape {dims}"
-    recipe = tessera_wire_recipe(spec, body_rate_q256)
+    try:
+        recipe = tessera_served_wire_recipe(spec, body_rate_q256, structure=structure)
+    except TesseraFormatError as exc:
+        return False, f"wire: {exc}"
 
     from tessera.manifest import BodyKind
 
@@ -1457,6 +1470,7 @@ def expand_tessera_menu(
     from .tessera_footprint import tessera_exact_bits_for_shape
 
     dims = tuple(int(d) for d in shape)
+    structure = serving_context.structure if serving_context is not None else None
     specs = tuple(families) if families is not None else menu_families()
     n_params = 1
     for d in dims:
@@ -1474,10 +1488,11 @@ def expand_tessera_menu(
                 spec, rung, dims,
                 tp_degree=tp_degree, parallel_kind=parallel_kind,
                 require_attested_world=(mode == MENU_ATTESTED),
+                structure=structure,
             )
             if not legal:
                 continue
-            recipe = tessera_wire_recipe(spec, rung)
+            recipe = tessera_served_wire_recipe(spec, rung, structure=structure)
             bits = tessera_exact_bits_for_shape(spec, rung, dims, recipe=recipe)
             bpp = bits / n_params
             # W(n<=A): never offer a weight rate wider than the route serves.
