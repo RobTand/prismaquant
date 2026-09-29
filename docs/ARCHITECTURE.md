@@ -1,5 +1,35 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1719, `claude/tessera-pin-v46`): the exact
+Tessera pin is `83460680ed84e33c82eb62b31345381cc151aa58`, Tessera master's
+merge of #725 (tessera#724), so the pin names the Tessera the GLM-5.3 T8R
+release serve runs. It is a code-only re-pin: the contract stays v45
+(`0869f326…`) and the pin stays schema v2.
+
+- **What moves.** The crossing from `a21d74d8` is that one merge, and its
+  package diff is `compact_prep.py` and `kernel_wire.py`. The routed window
+  intake repacks each unit in place into the loader's scratch instead of
+  making three to five fresh large-pool allocations per projection, which
+  under vLLM's `max_split_size_mb=20` killed the T8R TP2 load on host
+  memory (tessera#725 carries the load replay).
+- **What does not move.** The packaged contract, `export.py` (`2127e82b…`)
+  and `grammar.py` (`9ae1f824…`) are byte-identical, so the reviewed answer,
+  every rate count and the Tessera `layer.json` pin stay as they are. The
+  legal inventory renames the `reader-pin-a21d74d8` byte-state
+  `reader-pin-83460680`.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`, PB action
+  `9701133c041a`) differs from the v45 fixture in `pin.commit` only. The
+  `layer.json` pin (`tests/test_allocator_output_pin_1304.py`, PB action
+  `e4418bbe4020`) matches its committed digests under the new
+  interpreter.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-83460680`,
+  plus a `-tf516` sibling on each Spark. Each is a copy of the `a21d74d8`
+  interpreter with only Tessera reinstalled, built by a host-pinned PB
+  action. dl380g10 (`05240c885661`) and sparklina (`a2f3caa3007c`) are
+  built. The sparky action `3a14fa1bb30c` is queued, so sparky has no
+  `83460680` interpreter yet.
+
 Re-stamped 2026-09-29 (PQ #1702, `claude/tessera-pin-v45`): the exact
 Tessera pin is `a21d74d89bd4eca0493a2f913c71b28b03a39d8b`, Tessera master's merge of #701 (contract v45,
 tessera#694). It crosses the 15 master merges since `a5f3b232` (#656, #699,
@@ -4643,6 +4673,13 @@ re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
 resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
+
+As of: 2026-09-29 · `claude/tessera-pin-v46`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-29, `claude/tessera-pin-v46`) for **the Tessera re-pin to
+83460680, the loader fix the T8R release serve runs** (PQ #1719); see the
+stamp at the top of this document.
 
 As of: 2026-09-29 · `claude/tessera-pin-v45`.
 Stamps follow, newest first, each recording its own branch and date.

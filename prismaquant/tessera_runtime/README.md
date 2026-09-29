@@ -40,8 +40,21 @@ The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
 
-The current pin is Tessera `a21d74d89bd4eca0493a2f913c71b28b03a39d8b`, master's merge of #701 on 2026-09-29
-(contract v45, tessera#694, PQ #1702). It crosses the 15 master merges since
+The current pin is Tessera `83460680ed84e33c82eb62b31345381cc151aa58`,
+master's merge of #725 on 2026-09-29 (tessera#724, PQ #1719). It is the
+Tessera the GLM-5.3 T8R release serve runs: the routed window intake repacks
+each unit in place into the loader's scratch instead of making three to five
+fresh large-pool allocations per projection, which under vLLM's
+`max_split_size_mb=20` killed the T8R TP2 load on host memory. The package
+diff is `compact_prep.py` and `kernel_wire.py`. The contract (v45,
+`0869f326…`), `export.py` and `grammar.py` are byte-identical to `a21d74d8`,
+so the reviewed answer does not move, the legal inventory renames the
+`reader-pin-a21d74d8` byte-state `reader-pin-83460680`, and no rate count
+moves. The pin stays schema v2.
+
+The previous pin was Tessera `a21d74d89bd4eca0493a2f913c71b28b03a39d8b`,
+master's merge of #701 on 2026-09-29 (contract v45, tessera#694, PQ #1702).
+It crosses the 15 master merges since
 `a5f3b232cb` (#656, #699, #700, #705, #707, #709, #711, #713, #715-#718, #720,
 #722, #723), all at contract v44, and #701's v45: the two fused routed lanes
 read `column_rates` [1..8] (was [4]) and publish the structure-scoped
@@ -157,13 +170,17 @@ and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 Provision the pin venv from a git URL so the install records the commit
 (`git+https://github.com/RobTand/tessera.git@<pin>`). The PrismaBuild test
 interpreter for the current pin is
-`/home/rob/venvs/pq-pb059953bc-tessera-a21d74d8`. It carries both pins this
-tree tests against: Tessera `a21d74d8` and PrismaBuild `059953bc`
+`/home/rob/venvs/pq-pb059953bc-tessera-83460680`. It carries both pins this
+tree tests against: Tessera `83460680` and PrismaBuild `059953bc`
 (`staged_lease.PB_READER_LEASE_PIN_COMMIT`, PQ #1541). It is a copy of
-`pq-pb059953bc-tessera-a5f3b232` with only Tessera reinstalled, non-editable,
+`pq-pb059953bc-tessera-a21d74d8` with only Tessera reinstalled, non-editable,
 provisioned by host-pinned PB build actions on 2026-09-29: dl380g10
-`177cb8e57a27`, sparky `53dff8124e53` and sparklina `8323b283eb2d`. Each
+`05240c885661` and sparklina `a2f3caa3007c`. The sparky action
+`3a14fa1bb30c` is queued, so sparky has no `83460680` interpreter yet. Each
 Spark action also builds the `-tf516` sibling.
+The `a21d74d8` interpreters (PQ #1702) are copies of the `a5f3b232` ones
+built the same way: dl380g10 `177cb8e57a27`, sparky `53dff8124e53` and
+sparklina `8323b283eb2d`.
 The `a5f3b232` interpreters (PQ #1616) are copies of the `38e96012` ones
 built the same way. The `38e96012` interpreter is a copy of
 `pq-pb059953bc-tessera-db5b6e23` with only Tessera reinstalled, non-editable,
@@ -193,8 +210,8 @@ the copy repoints any `base-shadow` `.pth` file from the source venv to the new
 one:
 
 ```bash
-SRC=/home/rob/venvs/pq-pb059953bc-tessera-a5f3b232  # + "-tf516" for the sibling
-V=/home/rob/venvs/pq-pb059953bc-tessera-a21d74d8    # + "-tf516" for the sibling
+SRC=/home/rob/venvs/pq-pb059953bc-tessera-a21d74d8  # + "-tf516" for the sibling
+V=/home/rob/venvs/pq-pb059953bc-tessera-83460680    # + "-tf516" for the sibling
 test ! -e "$V" || exit 1
 cp -a "$SRC" "$V"
 for pth in "$V"/lib/python*/site-packages/*base-shadow*.pth; do
@@ -202,7 +219,7 @@ for pth in "$V"/lib/python*/site-packages/*base-shadow*.pth; do
   grep -qF "$SRC" "$pth" && sed -i "s#$SRC#$V#" "$pth"
 done
 "$V/bin/python" -m pip install --no-deps --no-build-isolation --force-reinstall \
-  'git+https://github.com/RobTand/tessera.git@a21d74d89bd4eca0493a2f913c71b28b03a39d8b'
+  'git+https://github.com/RobTand/tessera.git@83460680ed84e33c82eb62b31345381cc151aa58'
 ```
 
 dl380g10's x86 interpreter descends from `pq881-pb461728e4` (Python 3.14,
@@ -219,13 +236,14 @@ from it and skip with it: `test_glm_campaign_streaming`,
 `test_collector_source_release` and `test_streamed_capture_admission`. Until
 2026-09-23 none of the six had run in a PrismaBuild test run.
 
-The sibling interpreter `/home/rob/venvs/pq-pb059953bc-tessera-a21d74d8-tf516`
+The sibling interpreter `/home/rob/venvs/pq-pb059953bc-tessera-83460680-tf516`
 is the interpreter above with transformers 5.16.1, tokenizers 0.23.1 and
 safetensors 0.8.0, the versions in the campaign's `prismaquant-tf516` venv.
 Tessera, PrismaBuild, torch and every other package are the same, so
 `pbtest` checks the same exact pin. Each pin move copies the previous pin's
-`-tf516` sibling in the Spark build actions above; the `a21d74d8` siblings
-descend from `a5f3b232-tf516`, the `a5f3b232` ones from `38e96012-tf516`, the
+`-tf516` sibling in the Spark build actions above; the `83460680` siblings
+descend from `a21d74d8-tf516`, the `a21d74d8` ones from `a5f3b232-tf516`,
+the `a5f3b232` ones from `38e96012-tf516`, the
 `38e96012` ones from `db5b6e23-tf516`, the `db5b6e23` ones from `43da1c39-tf516` (with PrismaBuild reinstalled at `059953bc`), the
 `43da1c39` ones from `cadc200c-tf516`, the `cadc200c` ones from `20bf5346-tf516`, the `20bf5346` ones from `a3e83875-tf516`, the `a3e83875` ones from `f94929de-tf516`, and the `4c4ff1c2` ones from `09d6559d-tf516`. The original
 transformers installations came from actions `fa510fbf5a02` (sparky) and
@@ -256,7 +274,7 @@ A PR that touches those six modules, or what they test, runs them there:
 ```bash
 python3 /mnt/shared/prismabuild-fleet/repo/tools/pbtest.py \
   --checkout <this worktree> --tag gb10 --priority -10 \
-  --python /home/rob/venvs/pq-pb059953bc-tessera-a21d74d8-tf516/bin/python \
+  --python /home/rob/venvs/pq-pb059953bc-tessera-83460680-tf516/bin/python \
   --threads-per-shard 1 --workers-per-shard 2 --cpus-per-shard 2 --mem-gb 8 \
   --timeout-s 1800 \
   tests/test_glm5_next_streamed_forward_parity.py \
@@ -345,7 +363,7 @@ cat-file` command below. Tessera master has since advanced to contract v33
 Re-check the exact commit:
 
 ```bash
-git -C "$TS" cat-file -p a21d74d89bd4eca0493a2f913c71b28b03a39d8b:src/tessera/serving/runtime_contract.json | sha256sum
+git -C "$TS" cat-file -p 83460680ed84e33c82eb62b31345381cc151aa58:src/tessera/serving/runtime_contract.json | sha256sum
 ```
 
 No tag names this commit, so `version_is_release` remains `false`.
@@ -475,10 +493,10 @@ them.
 
 ## Moving the pin
 
-Verified against `RobTand/tessera` master on 2026-09-29, at its merge of #701:
+Verified against `RobTand/tessera` master on 2026-09-29, at its merge of #725:
 
 ```
-commit           a21d74d89bd4eca0493a2f913c71b28b03a39d8b
+commit           83460680ed84e33c82eb62b31345381cc151aa58
 contract_sha256  0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa
 versions.tessera 0.1.0
 contract_version 45

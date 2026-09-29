@@ -408,11 +408,15 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: ``tessera_serving_runtime_pin``), and #701's contract v45, whose two
 #: fused routed lanes read every column rate and gate their routed-expert
 #: launch to rates 1-6.
+#: Re-pinned 2026-09-29 to 83460680ed, Tessera master's merge of #725
+#: (tessera#724), under PQ #1719: the routed window intake repacks in place
+#: into the loader's scratch. The packaged v45 contract and the admission
+#: answer are unchanged.
 #: The literal below
 #: is ``pprint.pformat(contract_answer(c), width=79, sort_dicts=False)`` on
 #: the v45 contract, and its diff against the v44 literal is exactly the two
 #: fused routed rows' ``lane.requires``.
-TESSERA_DEV_PIN_COMMIT = "a21d74d89bd4eca0493a2f913c71b28b03a39d8b"
+TESSERA_DEV_PIN_COMMIT = "83460680ed84e33c82eb62b31345381cc151aa58"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
