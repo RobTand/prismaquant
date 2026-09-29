@@ -444,7 +444,9 @@ def test_idle_seconds_at_the_baseline_level_are_reported():
 def test_idle_ceiling_is_the_max_of_a_noisy_baseline():
     times = [float(t) for t in range(100, 130)]
     samples = [11.0, 12.5, 13.0, 11.5, 12.0] * 2 + [60.0] * 20
-    intervals = [{"kind": "window-load", "start_unix": 100.0, "end_unix": 130.0}]
+    # A sample's cell is half an interval either side, so the cell-aligned
+    # window is 99.5..129.5: ten idle cells, twenty busy.
+    intervals = [{"kind": "window-load", "start_unix": 99.5, "end_unix": 129.5}]
     report = _report(intervals, times=times, samples=samples,
                      phases=_P0, baseline_end=110.0)
     assert report["idle_ceiling_w"] == 13.0
