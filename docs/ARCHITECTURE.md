@@ -64,6 +64,16 @@ contract stays v45 (`0869f326…`) and the pin stays schema v2.
   `18820b4622bf`; pin publication is `d4c602dbe103`. All five interpreters
   passed exact dependency-pin preflight, the provision check and import.
 
+Re-stamped 2026-09-29 (PQ #1369, `sol/pq-stageb-1`): Stage B's disposable
+spill records xxh3_64 for each tensor payload on its existing writer and
+verifies it on the IO engine reader before delivery. A mismatch raises
+`io_engine.TerminalReadError`: even an undemanded read-ahead failure is
+retained without retry and fails the row with its window, probe and byte
+range. `xxhash` is a declared dependency;
+checksum CPU time and verified-byte counts are telemetry. No device
+arithmetic, spill layout, export format, pipeline default or ship gate
+changes. Representative GPU overhead profiling remains pending approval.
+
 Re-stamped 2026-09-29 (PQ #1007, `sol/pq-pbio-1014-20260929`): PrismaBuild
 #946 is closed, so it is no longer an upstream implementation blocker for
 band-serial consumer declarations. PrismaQuant still stages these handoffs
@@ -1510,11 +1520,30 @@ reader threads, two 64 MiB buffers deep, and its consumer waited 90 s of its
   the direct-I/O grid (`_aligned`, `:1575`) and a short read, and `_fill`
   refuses a tensor off its replay residue and overlapping envelopes. Probe
   inputs are digested on the device at capture, and each later probe's are
-  compared with probe 0's (`_check_inputs`, `joint_replay_spill.py:1429`).
-  Nothing compares the bytes read back from the file with the bytes written;
-  PQ #1369 tracks a per-range checksum verified in the engine at read.
+  compared with probe 0's (`StageBReplaySpill._check_inputs`). For file
+  integrity, `_write_arena` records xxh3_64 over each tensor's host payload
+  after its device copy finishes, before the direct write. `_fill` verifies
+  the same payload bytes on the IO engine reader, before `_read_chunk`
+  returns a buffer. Padding is excluded because it is not an operand.
+  Checksums stay in job-local metadata, distinct from probe-input digests;
+  gradient checksums use packed 64-bit arrays per probe. A bit flip or
+  same-length misdirected read fails the row, naming its window, probe and
+  payload byte range; there is no repair or retry. The reader raises
+  `io_engine.TerminalReadError`, which the engine retains for demand instead
+  of discarding it as a transient read-ahead failure. Reclaim cannot erase
+  that failed entry, and its original traceback is dropped so it does not
+  retain the reader's scratch buffer outside the budget. Ordinary transient
+  read-ahead errors keep their existing retry behavior. This is accidental
+  corruption detection, not an identity seal. Telemetry records
+  `checksum_write_cpu_s`, `checksum_read_cpu_s`, `checksum_bytes_written`,
+  `checksum_bytes_verified` and `checksums_verified`. Representative
+  before/after GPU profiling and `reader_wait_s` comparison remain pending
+  approval; no overhead or speed claim follows from the CPU integrity gate.
 
-Gate: `tests/test_io_engine.py`, `tests/test_stageb_one_pass_spill.py`
+Gate: `tests/test_stageb_spill_integrity_1369.py` (real direct-I/O disk
+corruption, restored-byte equality, wrong-offset rejection and engine-reader
+verification; the CPU fixture supplies the kernel's alignment grid),
+`tests/test_io_engine.py`, `tests/test_stageb_one_pass_spill.py`
 (bitwise replay; chunks dropped ahead and read again; the render cache on the
 quantum), `tests/test_joint_retained_statistics_replay.py`,
 `tests/test_io_site_freeze.py`. No format, pipeline default, stage or ship
