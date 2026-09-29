@@ -44,6 +44,9 @@ from prismaquant.stage_a_chain_seed import (  # noqa: E402
     ("0" * 65, False),
     ("g" * 64, False),
     ("0" * 63 + " ", False),
+    # A 64-digit int passed the old str()-coercion sites; the owner refuses
+    # non-str, and the converted sites are stricter by design.
+    (10 ** 63, False),
 ])
 def test_owner_golden_table(value, want):
     assert is_sha256hex(value) is want

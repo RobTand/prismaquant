@@ -29,7 +29,6 @@ MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 MAX_DECODED_BYTES = 512 * 1024 * 1024
 MAX_ENTRIES = 1_000_000
 MAX_READS = 4_000_000
-_HEX = re.compile(r"[0-9a-f]{64}\Z")
 _LAYER = re.compile(r"^.*\.layers\.(\d+)(?:\.|$)")
 _ENTRY_KEYS = {"path", "offset", "bytes", "sha256"}
 _ROOT_KEYS = {"schema", "produced_by", "mount_prefix", "entries", "entry_count",
@@ -135,8 +134,7 @@ def _validate_pb_v2(manifest: object) -> tuple[dict, tuple[str, ...]]:
                  f"entry[{i}] path outside normalized mount")
         offset = _int(row["offset"], f"entry[{i}] offset")
         size = _int(row["bytes"], f"entry[{i}] bytes", positive=True)
-        _require(row["sha256"] is None or (type(row["sha256"]) is str
-                 and _HEX.fullmatch(row["sha256"]) is not None),
+        _require(row["sha256"] is None or is_sha256hex(row["sha256"]),
                  f"entry[{i}] SHA-256 invalid")
         _require((path, offset) not in seen, f"entry[{i}] repeats path and offset")
         seen.add((path, offset))
