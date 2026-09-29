@@ -1086,6 +1086,26 @@ def _overlay_hessian_commitments(overlay_hessian, panel_hessian):
     return overlay_units, panel_units
 
 
+def admitted_hessian_capture_seals(costs, *, references=None) -> frozenset:
+    """Non-primary capture seals a uniform cost table admits, from the gate.
+
+    The seals ``row_capture_sha256`` maps per row (PQ #1270: content-equal
+    captures under several seals). The table's own (primary) seal is NOT
+    included: rows carrying it pass against the provenance by equality, and
+    a row under any other seal refuses unless the gate mapped it here.
+    Raises ``ValueError`` with the gate's text when the table mixes
+    identities -- readers catch that and refuse with their own per-row texts.
+    """
+    from .tessera_menu import assert_uniform_hessian_identity
+
+    identity = assert_uniform_hessian_identity(costs, references=references)
+    seals = set()
+    for per_format in (identity.get("row_capture_sha256") or {}).values():
+        seals.update(per_format.values())
+    seals.discard(None)
+    return frozenset(seals)
+
+
 def hessian_references(payload):
     """Every Hessian reference a cost table's rows can name, found through hash-bound inputs.
 

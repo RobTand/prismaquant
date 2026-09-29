@@ -1125,17 +1125,14 @@ def _activation_index_fingerprint(index, cache_dir: Path) -> dict[str, object]:
     changing the activation cache or pointing at a different cache dir
     invalidates stale layer_NNN.pt files without reading tensor bytes.
     """
-    import hashlib
-    import json as _json
+    from prismaquant.digests import DIRECT_ASCII_LAX
 
     paths = getattr(index, "_paths", {})
     rows = []
     for name, path in sorted(paths.items()):
         st = path.stat()
         rows.append([name, path.name, st.st_size, st.st_mtime_ns])
-    digest = hashlib.sha256(
-        _json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:16]
+    digest = DIRECT_ASCII_LAX.sha256(rows)[:16]
     return {
         "path": str(cache_dir.resolve()),
         "n_files": len(rows),
@@ -1225,8 +1222,10 @@ def _production_cache_fingerprint(
     activation-scale summary so a stale export cache cannot be reused across
     production-cache changes.
     """
-    import hashlib
-    import json as _json
+    from prismaquant.digests import (
+        DIRECT_ASCII_LAX,
+        DIRECT_ASCII_LAX_DEFAULT_STR,
+    )
 
     weights = getattr(cache, "weights", {}) or {}
     cache_dir = getattr(cache, "cache_dir", None)
@@ -1249,21 +1248,10 @@ def _production_cache_fingerprint(
         except OSError:
             rows.append([key[0], key[1], path.name, "missing"])
     act = getattr(cache, "activation_max_abs", None) or {}
-    act_digest = hashlib.sha256(
-        _json.dumps(act, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:16]
+    act_digest = DIRECT_ASCII_LAX.sha256(act)[:16]
     metadata = dict(getattr(cache, "metadata", {}) or {})
-    metadata_digest = hashlib.sha256(
-        _json.dumps(
-            metadata,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        ).encode()
-    ).hexdigest()[:16]
-    digest = hashlib.sha256(
-        _json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:16]
+    metadata_digest = DIRECT_ASCII_LAX_DEFAULT_STR.sha256(metadata)[:16]
+    digest = DIRECT_ASCII_LAX.sha256(rows)[:16]
     # Hook enumeration the shipped bytes were rendered against (#147,
     # consumer 3): a shipped artifact records which enumeration its bytes
     # saw, so a cost table priced from one rendering cannot be silently
@@ -8640,16 +8628,33 @@ def _write_shipcard(
         "render_levers": _render_lever_provenance(),
         "kv_shared_fisher": _shipcard.kv_shared_fisher_echo(),
     }
-    # Principle 12: the recipe's route histogram travels beside the bpp. A
-    # native allocation writes no serving_lane_provenance yet (#1387), so this
-    # stamps only when the recipe carries one.
+    # Principle 12: the recipe's route histogram travels beside the bpp. Every
+    # allocation writes serving_lane_provenance into its recipe (#1387); a
+    # recipe from before that fix carries none, so the histogram is then
+    # derived from the assignment being exported, under the recipe's target
+    # profile, by the same summariser the allocator uses. A recipe that names
+    # no target profile gets no derivation: under profile None every unit
+    # would read ``no_declared_lane``, a card that looks measured and is not,
+    # so the card carries no histogram and no marker. The same holds for an
+    # assignment with scoped (Tessera) units, whose routes need a serving
+    # context the assignment does not carry (recompute_serving_lane_provenance).
+    recipe_meta: dict = {}
     if layer_config_path:
         from .layer_config import read_layer_config_metadata
 
-        route_histogram = _shipcard.route_histogram_claim(
-            read_layer_config_metadata(layer_config_path).get("serving_lane_provenance"))
-        if route_histogram is not None:
-            build["route_histogram"] = route_histogram
+        recipe_meta = read_layer_config_metadata(layer_config_path) or {}
+    provenance = recipe_meta.get("serving_lane_provenance")
+    if not isinstance(provenance, dict) and config_assignment:
+        from .allocator_candidates import recompute_serving_lane_provenance
+
+        provenance = recompute_serving_lane_provenance(
+            config_assignment, recipe_meta.get("target_profile"))
+    route_histogram = _shipcard.route_histogram_claim(provenance)
+    if route_histogram is not None:
+        build["route_histogram"] = route_histogram
+        # A card that carries the histogram is held to it by `verify`;
+        # historical cards carry no marker and keep verifying (#1387).
+        build["route_histogram_owed"] = True
     # Stamp the lane the card was opened on.  This exporter writes exactly
     # one container, and until #631 it stamped none -- so `lane_gate_slots`
     # answered `()` for every native card and the lane's own declarations

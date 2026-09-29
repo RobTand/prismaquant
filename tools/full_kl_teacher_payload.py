@@ -123,11 +123,9 @@ def canonical_sha256(value: object) -> str:
 
 
 def file_sha256(path: str | os.PathLike) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        while block := handle.read(16 * 1024 * 1024):
-            digest.update(block)
-    return digest.hexdigest()
+    from prismaquant.digests import file_sha256hex
+
+    return file_sha256hex(path)
 
 
 def _require_sha256(value: object, *, where: str) -> str:

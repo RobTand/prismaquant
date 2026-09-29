@@ -34,6 +34,7 @@ from .allocator_solver import (
     _shape_from_stats,
     predicted_dloss,
 )
+from .digests import DIRECT_UTF8_STRICT
 from .footprint import (
     format_tensor_payload_breakdown,
     plain_source_dtype_tensor_payload_breakdown,
@@ -2609,9 +2610,34 @@ def selection_serving_lane_provenance(
     serving context; equal format names need not have equal routes. A format
     summary carries one route only when all its selected units agree, while
     ``by_unit`` preserves each route when contexts or conflicting routes exist.
+    Every format summary also carries ``routes``: a histogram with one entry
+    per distinct route (``route``, ``units``, and ``structures`` counting the
+    units by serving structure). It names both routes when a format's dense
+    and routed units ride different ones, where ``route`` alone reads None
+    (#1289).
     """
+    return _summarize_serving_lanes(
+        assignment, candidates, target_profile, context_by_unit)[0]
+
+
+def _summarize_serving_lanes(
+    assignment: dict[str, str],
+    candidates: dict[str, list[Candidate]] | None,
+    target_profile: str | None,
+    context_by_unit: Mapping[str, ServingContext] | None,
+) -> tuple[dict, int]:
+    """The provenance report plus ``context_required_units``.
+
+    The count is the number of selected units whose resolved lane says, through
+    the generic ``requires_serving_context`` flag the pinned runtime's own
+    admission sets, that its route depends on a serving context. It is a
+    return value rather than a report key so the shipped report shape does not
+    change. No lane name is compared.
+    """
+    context_required_units = 0
     lane_cache: dict[tuple, object] = {}
     by_format: dict[str, dict] = {}
+    route_hist: dict[str, dict[str, dict]] = {}
     by_unit: dict[str, dict] = {}
     include_by_unit = context_by_unit is not None
     branch_counts: Counter[str] = Counter()
@@ -2645,6 +2671,11 @@ def selection_serving_lane_provenance(
         route = None if lane is None else lane.as_dict()
         unit_row = {"format": fmt, "route": route}
         lane_context = getattr(lane, "serving_context", None)
+        if (
+            getattr(lane, "requires_serving_context", False)
+            or lane_context is not None
+        ):
+            context_required_units += 1
         if lane_context is not None:
             # The chosen candidate's recorded context owns its route even if
             # a caller now supplies a different context for the same unit.
@@ -2660,6 +2691,14 @@ def selection_serving_lane_provenance(
             row["route"] = None
             include_by_unit = True
         row["units"] += 1
+        # The digests owner's canonical JSON (sorted keys, strict) keys the
+        # group, so the key does not depend on ``as_dict``'s insertion order.
+        route_key = DIRECT_UTF8_STRICT.text(route)
+        entry = route_hist.setdefault(fmt, {}).setdefault(
+            route_key, {"route": route, "units": 0, "structures": Counter()})
+        entry["units"] += 1
+        entry["structures"][
+            getattr(serving_context, "structure", None) or "unspecified"] += 1
         branch_counts[str(branch) if branch else "unrecorded"] += 1
         if lane is None:
             # A unit whose profile declares no lane has no route status either.
@@ -2695,8 +2734,47 @@ def selection_serving_lane_provenance(
             fmt: row for fmt, row in sorted(by_format.items())
         },
     }
+    for fmt, entries in route_hist.items():
+        by_format[fmt]["routes"] = [
+            {"route": e["route"], "units": e["units"],
+             "structures": dict(sorted(e["structures"].items()))}
+            for _key, e in sorted(entries.items(), key=lambda kv: kv[0])
+        ]
     if include_by_unit:
         report["by_unit"] = by_unit
+    return report, context_required_units
+
+
+def recompute_serving_lane_provenance(
+    assignment: dict[str, str],
+    target_profile: str | None,
+) -> dict | None:
+    """Re-derive the provenance from a bare assignment, or None when it cannot.
+
+    The exporter and the frontier selector hold an assignment and a recipe,
+    not the allocator's candidates or its per-unit serving contexts. Two things
+    the allocator read from those are therefore unrecoverable here:
+
+    * a unit whose lane or admission requires a serving context (the generic
+      ``requires_serving_context`` flag the pinned runtime sets; no lane name
+      is compared) has a route that depends on a context the assignment does
+      not carry, so resolving it without one prices a different route than
+      the allocator did. Such an assignment returns None: stamping the wrong
+      histogram is worse than stamping none.
+    * ``activation_pricing_branches`` comes from the chosen ``Candidate``; here
+      every unit reads ``unrecorded``. The card copies only
+      ``route_status_counts`` and ``activation_contracts``, which are equal to
+      the allocator's on every assignment this function accepts.
+
+    A recipe with no ``target_profile`` also returns None: the histogram under
+    "research" is a route the recipe never named.
+    """
+    if not isinstance(target_profile, str) or not target_profile or not assignment:
+        return None
+    report, context_required_units = _summarize_serving_lanes(
+        dict(assignment), None, target_profile, None)
+    if "by_unit" in report or context_required_units:
+        return None
     return report
 
 

@@ -4342,11 +4342,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         layer_cfg[LAYER_CONFIG_META_KEY] = {
             "schema": "prismaquant.layer_config_meta.v1",
             "target_profile": target_profile,
-            **({**lane.allocation_scope_meta(
-                    tessera_serving_target, tessera_context_by_unit),
-                "serving_lane_provenance": selection_serving_lane_provenance(
-                    assignment_expanded, candidates, target_profile,
-                    context_by_unit=tessera_context_by_unit)}
+            # Every allocation names the route each selected unit rides, so
+            # the exporter can stamp the principle-12 histogram on the card
+            # (#1387). Only a Tessera allocation also declares a scope.
+            "serving_lane_provenance": selection_serving_lane_provenance(
+                assignment_expanded, candidates, target_profile,
+                context_by_unit=tessera_context_by_unit),
+            **(lane.allocation_scope_meta(
+                    tessera_serving_target, tessera_context_by_unit)
                if tessera_serving_target is not None else {}),
             "target_profile_requested": args.target_profile,
             "target_profile_default": str(args.target_profile_default or "research"),
