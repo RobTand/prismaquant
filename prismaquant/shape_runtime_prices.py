@@ -693,6 +693,22 @@ class ShapePricing:
         result["distinct_measurements"] = len(ids)
         return result
 
+    def kernel_lane_histogram(self, assignment: Mapping[str, str], *, axis: str = "prefill") -> dict:
+        """How many units of ``assignment`` ride each priced kernel lane.
+
+        Reads the lane each option's own measurement carries (``symbol/decoder``),
+        so the histogram is the priced route, not a derived guess (PQ #1585).
+        """
+        priced = self.prefill if axis == "prefill" else self.decode
+        counts: dict[str, int] = {}
+        for unit, fmt in sorted(assignment.items()):
+            time = priced.get((unit, fmt))
+            if time is None:
+                raise ShapeRuntimeError(f"{unit}@{fmt} has no {axis} time; it has no priced kernel lane")
+            label = f"{time.kernel_lane.symbol}/{time.kernel_lane.decoder}"
+            counts[label] = counts.get(label, 0) + 1
+        return dict(sorted(counts.items()))
+
 
 def build_shape_runtime_resources(table: ShapeRuntimeTable, candidates: Mapping[str, list], *,
                                   option_members: Mapping[tuple[str, str], Mapping[str, str]],

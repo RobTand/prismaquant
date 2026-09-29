@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #738, `claude/738-forward-capture-fanout`): a
+fresh Stage A run's forward boundary capture fans out across PrismaBuild. A
+forward split is one prep row (`--forward-split-prep S:E,...`), one quantum
+per calibration-partition range (`--forward-split-quantum S:E`), and one CPU
+join (`python -m prismaquant.stage_a_forward_split`). Each quantum captures
+its own samples' boundary entries at global coordinates and seals a partial
+tail checkpoint. The join verifies coverage with
+`verify_boundary_partition_coverage`, joins the tail with
+`join_split_checkpoint`, and writes the chain state the single owner writes.
+The chain split then rolls the reverse chain from the tail. A run without the
+flags writes the same bytes. See "Stage A forward split (#738)". No format,
+pipeline default or ship gate changes.
+
 Re-stamped 2026-09-28 (PQ #1141, `sonnet/1141-cotangent-guards`): **a Stage B
 row that loads the whole cotangent plane refuses before the load when the host
 cannot hold it.** Without the cotangent scratch pair the checkpoint load holds
@@ -225,6 +238,14 @@ its inline copy. `--mtp-fixed-formats` passes `fixed_formats` to the selector
 from the allocator. After the swap the card and exported-r2 differ only by the
 Tessera side bytes #1609 names (28,802,632 B). Gate:
 `tests/test_mtp_card_rebase_1610.py`.
+
+Re-stamped 2026-09-28 (PQ #1585, `sonnet/1585-pact-materiality`): a PACT hull
+carries a `prismaquant.pact_selection.v1` record (§4.5, "PACT selection
+record"): a materiality test derived from the table's bootstrap intervals,
+three picks (high accuracy, balanced, high prefill) and a roster, stamped into
+the layer config and the shipcard `build` block, which `shipcard.verify`
+checks against the recipe. The high-prefill rule is a proposal that awaits the
+owner. No default, stage, format or lane changes.
 
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
 gains a research-only PACT mode, reached only through
@@ -19307,7 +19328,61 @@ Limits:
 - `--pact-time-ceiling-ms` is a report bound. It flags vertices above the
   ceiling and does not generate the constrained set's own boundary vertex.
 - `select_development_point`'s top-two min_separation test sees hull
-  vertices, not every point of the exact frontier (PQ #1585).
+  vertices, not every point of the exact frontier. The selection record
+  states this as `frontier_scope: lower_convex_hull_vertices`; a caller that
+  passes the exact frontier states its own scope (PQ #1585).
+- The record rides the hull path only. The sweep path of
+  `prefill_frontier replay` keeps its legacy stamp.
+- The record's `high_prefill` rule is a proposal that awaits the owner's
+  decision (see "PACT selection record").
+
+**PACT selection record (2026-09-28, PQ #1585).**
+`prismaquant/pact_selection.py` turns one frontier per regime M into three
+named picks and a `prismaquant.pact_selection.v1` record. No threshold in it
+is chosen: two decisions that would need one derive from the table's own
+bootstrap intervals.
+
+- **Materiality.** The time axis is flat when the fastest endpoint's upper
+  bootstrap bound (`operator_sum_ms_bootstrap`, key `p97.5`) reaches the best
+  endpoint's lower bound (`p2.5`). A flat axis has no knee, and every pick is
+  the accuracy endpoint. Verdicts: `flat`, `material`, `unresolved` (an
+  endpoint has no interval), `single_point` and `no_feasible_point`. Production
+  refuses `unresolved`. Only interval-less scratch CSVs pass
+  `allow_unresolved=True`. `predicted_dloss` has no interval today, so the
+  record states `quality_axis.interval: null`.
+- **Derived `min_separation`.** `select_development_point` refuses when its top
+  two candidates are closer than `min_separation` in normalised perpendicular
+  units (fastest to (0, 1), best to (1, 0)). A candidate whose time moves by
+  `h` ms moves `h / (span · √2)` along the unit perpendicular, so the
+  resolution is the sum of the top two candidates' interval half widths in
+  those units. Pass 1 ranks with 0. Pass 2 applies the derived value.
+- **Three picks.** High accuracy is argmin `predicted_dloss` within the byte
+  budget. Balanced is `select_development_point`. High prefill is the rule id
+  `chord_perpendicular_recursed_v1`: the same chord rule on the non-dominated
+  points no slower than the balanced pick. It needs three points and
+  otherwise records `status: refused` with a reason. **The high-prefill rule
+  is the owner's decision**; the alternative is a served-KL ceiling
+  (`speed_quality_frontier.select_by_quality_ceiling`). The rule id is inside
+  `identity_sha256`, so a change of rule is visible.
+- **Record.** Rule id, normalisation, roster (picks, neighbours and endpoint
+  controls), regime M, table identity, materiality verdict, kernel-lane
+  histogram of each pick (`ShapePricing.kernel_lane_histogram`) and
+  `identity_sha256`. The hull document embeds it, so the replay stamp's
+  `frontier_sha256` binds it. The replay writes it to
+  `__prismaquant__.pact_selection`, and
+  `layer_config.prefill_frontier_replay_claim` stamps it into the shipcard
+  `build` block. It refuses a record that differs from the recipe's, or that
+  disagrees with the replay on its regime, table or pick. `shipcard.verify`
+  re-runs the claim on the card, so a forged record is refused.
+- **Fixtures.** The scratch frontiers carry no interval columns. On the
+  pre-#685 frontier (`tests/fixtures/pact_frontier_pre685_m2048.csv`) the
+  balanced rule reproduces point 96 (high accuracy 0, high prefill 130). On
+  the after-#640 frontier the balanced pick is point 98 (high prefill 125).
+  Both report `unresolved`, since the scratch tables have no bootstrap.
+
+CPU gates: `tests/test_pact_selection.py`,
+`tests/test_pact_allocator_replay.py` and
+`tests/test_shape_runtime_prices.py`.
 
 On GLM-5.3's 132 units × 3 rungs at M=2048, the hull has 139 vertices, found
 with 277 probes in 0.13 s.
@@ -27808,6 +27883,73 @@ a quantum reads is declared, and every row the builder adds is read. It
 also stages a later round from a joined checkpoint.
 `tests/test_dispatch_stage_a_split.py` seals a round of the fixture run and
 drives the ordering with a fake `pbrun` over the fixture's real receipts.
+
+### Stage A forward split (#738)
+
+The chain split (above) parallelizes the reverse chain of a resumed run. A
+fresh run's forward capture, which walks every layer over every calibration
+partition, ran on one owner. The forward split runs it as PrismaBuild rows
+over disjoint partition ranges (`prismaquant/stage_a_forward_split.py`).
+The layer-major capture carries no state between partitions, so each range
+is independent. PrismaBuild places every row; nothing here picks a machine.
+
+**The prep** (`--forward-split-prep S:E,...`) binds the run's generation
+once, as the owner `forward-prep`, and writes
+`split/forward/prep.json` (`prismaquant.stage_a.forward_split_prep.v1`): the
+bind session, the chain-state fields the join needs, and the ranges. The
+ranges must be whole read windows (`check_ranges`) and must tile `0..N-1`
+exactly (`require_whole_plane`, which calls
+`verify_boundary_partition_coverage`). `even_ranges` plans them with
+`plan_boundary_partition_ranges` over read windows. The prep captures
+nothing, and a second prep refuses.
+
+**A quantum** (`--forward-split-quantum S:E`) refuses a range the prep did
+not launch. It rebinds the prep's generation as its own owner
+(`forward-samples-SSSSSS-EEEEEE`), captures its samples through
+`capture_layer_major_boundaries(batch_offset=S)`, so every entry carries its
+global batch index, computes the tail cotangents of its samples, and seals a
+partial tail checkpoint at `split/boundary-<num_layers>/samples-SSSSSS-EEEEEE`.
+It writes its entry records to `split/forward/samples-SSSSSS-EEEEEE.entries.json`
+instead of a chain state, and marks its owner status `complete`.
+
+**The join** (`python -m prismaquant.stage_a_forward_split --output-root R
+--receipt PATH`, a CPU row, exit 2 on refusal) requires every range's owner
+status to be `complete` under the prep's session, checks each fragment's
+session, coordinates and entry sizes, joins the tail checkpoint with
+`join_split_checkpoint`, and writes the chain state. It runs once. After it,
+`plan_chain_resume` finds the tail as the lowest sealed checkpoint, so the
+chain split's rounds, or a plain resume, roll the reverse chain from
+`num_layers`. The segment above the first stride checkpoint is therefore the
+chain split's first round, not a separate single-owner segment.
+
+A forward split refuses beside a chain resume, a chain seed, a chain split
+or forward recovery. It needs exact boundary storage.
+
+**Manifests and rows.** `tools/build_stagea_split_package.py forward`
+derives the prep's manifest (the source `head`) and each quantum's (the head
+plus every `forward-*` phase) from the fresh run's submitted manifest, and
+writes `forward-package.json`. `tools/dispatch_stage_a_split.py seal-forward`
+seals the round: `forward-prep`, one row per quantum label, and
+`forward-join`. Every row carries the round's `--tag` (default `gb10`) and
+`--priority` (default `-10`); the join demands no GPU. `submit`
+holds the quanta until the prep has ended `executed` with exit 0 and its
+record names the round's ranges, and holds the join until every quantum has
+ended and written its fragment. Each quantum installs every layer, so a round
+of N quanta reads the layer sources N times: duplicated weight reads in
+exchange for N GPUs.
+
+**Tests.** `tests/test_stage_a_forward_split.py` joins the quanta into the
+single owner's chain state, forward entries and tail checkpoint, byte for
+byte, for the dense model, R13's shape (window 4) and a shared-KV model
+(members compared by content, since a pickled pack keys on storage
+addresses). It rolls a joined forward capture through two chain split rounds
+and a resume to the single owner's final bytes, and covers the join's and
+the prep's refusals. `tests/test_dispatch_stage_a_forward_split.py` covers
+the package and the sealed round. `tests/bench_stage_a_forward_split.py`
+(run by name) records wall, compute and exposed wait per row, single owner
+against 2, 4 and 8 quanta; on its CPU fixture the critical path fell from
+11.2 s to 3.7 s at 4 quanta, dominated by entry `fsync`, and every split's
+chain state equals the single owner's.
 
 ### Stage A dispatch requires the paced spool (#1012)
 
