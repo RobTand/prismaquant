@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1014, `sol/pq-pbio-1014-20260929`): the
+undeclared-IO umbrella is closed as retired/deferred tracking, not as a claim
+that every tool was migrated. Stage B preparation (#1070), default fleet-data
+test skipping (#1071), and bounded container cache roots (#1072) are shipped.
+T4 qualification (#1068) and catalog/assembly (#1069) were closed as not
+planned; before either tool runs again, declare its inputs to PrismaBuild,
+produce outputs per batch, and update its readers in the same change. The held
+`campaign/glm-routing-replay-20260922` launcher was never ported to main; a
+future port must use the admitted container launcher and bounded local TMPDIR.
+Separate cache charging and crashed-row cleanup remain open under #1091.
+No runtime behavior, IO admission gate, default, or wire contract changes.
+
 Re-stamped 2026-09-29 (PQ #1608, `sol/issues-pq-ts-2`): the three closed
 source-transition contracts remain separate. Identical helpers stay in
 `joint_aura_transition_base.py`; checkpoint adoption, run-source proof, and
