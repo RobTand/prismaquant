@@ -311,11 +311,9 @@ def _digest(value: Any) -> str:
 
 
 def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(_READ_BLOCK), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    from prismaquant.digests import file_sha256hex
+
+    return file_sha256hex(path)
 
 
 def _equal(label: str, values: Mapping[str, Any]) -> Any:

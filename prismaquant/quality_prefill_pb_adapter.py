@@ -79,6 +79,7 @@ from pathlib import Path
 import re
 
 from prismaquant.cost_stage_checkpoint import canonical_json
+from prismaquant.digests import bytes_sha256hex
 from prismaquant.schemas import Contract, SchemaValidationError, strict_json_loads
 
 
@@ -322,7 +323,7 @@ def document_file_sha256(value: object) -> str:
     a blob's name in the store is the hash of what is on disk, newline included.
     """
 
-    return hashlib.sha256(document_bytes(value)).hexdigest()
+    return bytes_sha256hex(document_bytes(value))
 
 
 # --------------------------------------------------------------------------
