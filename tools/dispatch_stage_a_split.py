@@ -53,7 +53,6 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -82,11 +81,9 @@ class SplitDispatchRefused(RuntimeError):
 
 
 def _sha(path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 22), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    from prismaquant.digests import file_sha256hex
+
+    return file_sha256hex(path)
 
 
 def _pin(path) -> dict:

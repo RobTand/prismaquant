@@ -65,7 +65,7 @@ from prismaquant.routed_experts import (
     resolve_routed_expert_profile,
 )
 from .cost_stage_checkpoint import atomic_write_bytes, unit_path
-from .digests import DIRECT_UTF8_STRICT, canonical_json
+from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, canonical_json
 
 SCHEMA = "prismaquant.aura_cost.v1"
 AURA_CHECKPOINT_IDENTITY_SCHEMA = "prismaquant.aura_checkpoint.identity.v1"
@@ -313,7 +313,7 @@ def _write_aura_unit_checkpoint(
         "schema": AURA_CHECKPOINT_UNIT_SCHEMA,
         "qname": str(qname),
         "identity_sha256": str(identity_sha256),
-        "payload_sha256": hashlib.sha256(state_bytes).hexdigest(),
+        "payload_sha256": bytes_sha256hex(state_bytes),
         "payload": state_bytes,
     }
     encoded = pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL)
@@ -370,7 +370,7 @@ def _load_aura_unit_checkpoint(
             f"AURA unit checkpoint {path} has no byte payload for {qname}; "
             "refusing reuse or recompute"
         )
-    payload_sha256 = hashlib.sha256(payload).hexdigest()
+    payload_sha256 = bytes_sha256hex(payload)
     if envelope.get("payload_sha256") != payload_sha256:
         raise RuntimeError(
             f"AURA unit checkpoint {path} payload_sha256 differs for {qname}; "
@@ -886,9 +886,9 @@ def _build_aura_checkpoint_identity(
     git_commit: str,
     extra_identity: Mapping[str, object] | None,
 ) -> dict[str, object]:
-    raw_calib_sha256 = hashlib.sha256(
+    raw_calib_sha256 = bytes_sha256hex(
         calib_ids.detach().cpu().contiguous().numpy().tobytes()
-    ).hexdigest()
+    )
     cache_metadata = getattr(production_cache, "metadata", None)
     cache_metadata = cache_metadata if isinstance(cache_metadata, Mapping) else {}
     identity = {
@@ -1593,9 +1593,9 @@ def compute_aura_cost(
             "include_lm_head": bool(include_lm_head),
             "n_linear_chunks": int(n_linear_chunks),
             "calib_shape": list(calib_ids.shape),
-            "calib_sha256": hashlib.sha256(
+            "calib_sha256": bytes_sha256hex(
                 calib_ids.detach().cpu().contiguous().numpy().tobytes()
-            ).hexdigest(),
+            ),
             # R14: the canonical cross-stage calibration identity
             # (perturbed_x_cache.calibration_data_hash). validate_assignments_kl
             # intersects its own calib_repeat_hashes against these and refuses
@@ -1725,9 +1725,9 @@ def _assemble_streamed_aura_payload(
             "include_lm_head": False,
             "n_linear_chunks": int(n_linear_chunks),
             "calib_shape": list(calib_ids.shape),
-            "calib_sha256": hashlib.sha256(
+            "calib_sha256": bytes_sha256hex(
                 calib_cpu.numpy().tobytes()
-            ).hexdigest(),
+            ),
             "calib_hash": calibration_data_hash(calib_ids),
             "calib_hashes": [calibration_data_hash(calib_ids)],
             "omitted_packed_experts": list(omitted_packed_experts),
@@ -2161,7 +2161,7 @@ def compute_aura_cost_streamed(
         joint_probe_identity = {
             "schema": "prismaquant.joint_aura.probes.v2",
             "source_model": validate_streamed_model_identity(model_identity, where="joint AURA"),
-            "calibration_sha256": hashlib.sha256(calib_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
+            "calibration_sha256": bytes_sha256hex(calib_ids.detach().cpu().contiguous().numpy().tobytes()),
             "calibration_shape": list(calib_ids.shape),
             "calibration_dtype": str(calib_ids.dtype),
             "n_probes": n_probes, "seed_base": seed_base,
@@ -2730,7 +2730,7 @@ def compute_aura_cost_streamed(
         boundary_storage.bind({
             "source_model": validate_streamed_model_identity(model_identity, where="exact boundary storage"),
             "producer_source_sha256": _aura_source_sha256(),
-            "calibration_sha256": hashlib.sha256(calib_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
+            "calibration_sha256": bytes_sha256hex(calib_ids.detach().cpu().contiguous().numpy().tobytes()),
             "calibration_shape": list(calib_ids.shape), "calibration_dtype": str(calib_ids.dtype),
             "n_probes": n_probes, "seed_base": seed_base, "token_scope": token_scope,
             "temperature": temperature, "execution_partition": execution_partition,
