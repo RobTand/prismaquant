@@ -2032,11 +2032,13 @@ def work_profile_bundles(path: Path, *, census_path: Path, groups: dict,
     """
     if groups_per_row != 1:
         raise RuntimeError('--row-work-profile requires --groups-per-row 1')
+    from prismaquant.digests import bytes_sha256hex
+
     blob = Path(path).read_bytes()
     profile = json.loads(blob)
     if not isinstance(profile, dict) or profile.get('schema') != 'prismaquant.campaign_row_work.v1':
         raise RuntimeError('row work profile schema must be prismaquant.campaign_row_work.v1')
-    if profile.get('census_sha256') != hashlib.sha256(census_path.read_bytes()).hexdigest():
+    if profile.get('census_sha256') != bytes_sha256hex(census_path.read_bytes()):
         raise RuntimeError('row work profile census_sha256 differs from this census')
     if profile.get('campaign_argv') != campaign_argv:
         raise RuntimeError('row work profile campaign_argv differs from the spec')
@@ -2073,7 +2075,7 @@ def work_profile_bundles(path: Path, *, census_path: Path, groups: dict,
     minimum = startup * ((1 - share) / share)
     if not math.isfinite(minimum) or minimum <= 0:
         raise RuntimeError('row work profile max_startup_fraction yields a nonfinite pricing bound')
-    binding = {'path': str(path), 'sha256': hashlib.sha256(blob).hexdigest(),
+    binding = {'path': str(path), 'sha256': bytes_sha256hex(blob),
                'profile': profile, 'minimum_pricing_seconds': minimum}
     bundles = [(indices[key], [key]) for key in ordered if key.startswith('s:')]
     if dense:
