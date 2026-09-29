@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
+legal-domain pin provenance now transcribes v3's independently reviewed
+producer commit and serving-source digest. `DomainPins` omits absent split
+fields from its v2 projection; `live_pins` reads present split values from
+the pin owner, not from another commit or a contract hash. `pin_drift`
+compares the ordered union of frozen/live fields, so either v2/v3
+transition and each independent split-field change is explicit drift.
+The tracked pin and `FROZEN_PINS` remain v2 with their existing six-field
+projection, and no legal-rate, allocator, format, wire, residency or ship
+gate changes. This completes the provenance slice deferred by #1574, not
+v3 activation: the current v45 contract's 14 cells have no code-scope
+stamps. Producer requalification, the answer-column review and a separately
+reviewed activating pin remain prerequisites; CPU tests are not serving
+qualification.
+
 Re-stamped 2026-09-29 (PQ #1755, Refs #495, `sol/pq-tessera-3`):
 `python -m prismaquant.tessera_reduced_schedule` provides a research-only offline
 next-work transition from explicit stack evidence, current allocator winners,

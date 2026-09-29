@@ -159,6 +159,11 @@ class DomainPins:
     literals PrismaQuant tracks.  They are separate on purpose: a producer that
     is not the pinned one is exactly the drift :func:`pin_drift` exists to
     surface, and collapsing the two would hide it.
+
+    The optional split fields transcribe v3's separately reviewed producer
+    commit and serving-source digest (PQ #1768). Missing fields stay absent in
+    the legacy projection; neither is inferred from another pin. A future v3
+    frozen state must record both, rather than inventing a code scope for v2.
     """
 
     reader_dev_pin_commit: str
@@ -167,9 +172,11 @@ class DomainPins:
     serving_runtime_pinned_version: str
     serving_runtime_pinned_contract_sha256: str
     producer_installed_contract_sha256: str
+    serving_runtime_pinned_producer_commit: str | None = None
+    serving_runtime_pinned_serving_source_sha256: str | None = None
 
     def as_dict(self) -> dict[str, str]:
-        return {
+        fields = {
             "reader_dev_pin_commit": self.reader_dev_pin_commit,
             "reader_dev_pin_contract_sha256": self.reader_dev_pin_contract_sha256,
             "serving_runtime_pinned_commit": self.serving_runtime_pinned_commit,
@@ -179,6 +186,15 @@ class DomainPins:
             "producer_installed_contract_sha256":
                 self.producer_installed_contract_sha256,
         }
+        for name, value in (
+            ("serving_runtime_pinned_producer_commit",
+             self.serving_runtime_pinned_producer_commit),
+            ("serving_runtime_pinned_serving_source_sha256",
+             self.serving_runtime_pinned_serving_source_sha256),
+        ):
+            if value is not None:
+                fields[name] = value
+        return fields
 
 
 #: The producer commit the *specification* names as the frozen study producer.
@@ -367,6 +383,8 @@ def live_pins() -> DomainPins:
     from .tessera_serving_runtime_pin import (
         TESSERA_SERVING_RUNTIME_PINNED_COMMIT,
         TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256,
+        TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT,
+        TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256,
         TESSERA_SERVING_RUNTIME_PINNED_VERSION,
         installed_tessera_contract_sha256,
     )
@@ -380,6 +398,14 @@ def live_pins() -> DomainPins:
             TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
         ),
         producer_installed_contract_sha256=installed_tessera_contract_sha256(),
+        serving_runtime_pinned_producer_commit=(
+            TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT
+            if TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256 is not None
+            else None
+        ),
+        serving_runtime_pinned_serving_source_sha256=(
+            TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256
+        ),
     )
 
 
@@ -609,9 +635,9 @@ def pin_drift(
     frozen_fields = frozen.as_dict()
     live_fields = observed.as_dict()
     differences = {
-        name: {"frozen": frozen_fields[name], "live": live_fields[name]}
-        for name in frozen_fields
-        if frozen_fields[name] != live_fields[name]
+        name: {"frozen": frozen_fields.get(name), "live": live_fields.get(name)}
+        for name in dict.fromkeys((*frozen_fields, *live_fields))
+        if frozen_fields.get(name) != live_fields.get(name)
     }
     return {
         "schema": SCHEMA,
