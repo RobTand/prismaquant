@@ -3883,7 +3883,7 @@ directory (an lstat per path component) before the quantum bound its data
 manifest, so neither could resolve through residency. The quantum now calls
 `_load_plan(..., defer_pool_reads=True)`, which admits the identity binding by
 shape; the cache is digest-checked where the quantum reads it (the head
-slice's declared entry, or `_seed_source_identity_cache` on the legacy walk).
+slice's declared entry, or `seed_source_identity_cache` on the legacy walk).
 The plan admission now uses `cost_streaming.check_boundary_storage`, which
 validates the policy without resolving the directory, in every caller;
 `normalize_boundary_storage` still resolves it where storage is opened. The
@@ -5015,7 +5015,7 @@ about 70 minutes at 12.8 W of 140, inside its GPU reservation.
   cache covers a shard, the pass refuses before hashing a byte, with the
   uncovered bytes and the quantum's command in the message. This holds in
   both modes; it is a performance gate, not a seal.
-- **Run seeding.** With nothing bound, `_seed_source_identity_cache` starts a
+- **Run seeding.** With nothing bound, `seed_source_identity_cache` starts a
   pass from `<output_root>/prepare/source-identity.json` when its own slot
   is empty. The capture owner already adopted that file; the run's streamed
   identity build did not, and rehashed the whole source under its GPU. The
