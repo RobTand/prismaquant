@@ -78,10 +78,16 @@ def meminfo(tmp_path):
 
 
 @pytest.fixture
-def owner_reads(monkeypatch, meminfo):
-    """Point the owner's meminfo reader at the text, as every site sees it."""
+def owner_reads(monkeypatch, meminfo, tmp_path):
+    """Point the owner's meminfo reader at the text, as every site sees it.
+
+    The host reading also adds the per-CPU free pages from ``/proc/zoneinfo``
+    (PQ #1431); a host without that file reads 0, so the fixture points it at
+    an absent path and the box running the test cannot leak its own pages in.
+    """
     monkeypatch.setattr(io_spans, "read_meminfo",
                         lambda path=None: io_spans._read_kb_table(meminfo))
+    monkeypatch.setattr(io_spans, "PROC_ZONEINFO", tmp_path / "no-zoneinfo")
     return meminfo
 
 

@@ -2,13 +2,6 @@
  "must_differ": [
   {
    "pair": [
-    "prismaquant/joint_aura_retained_budget_transition.py::_actual_execution",
-    "prismaquant/joint_aura_run_transition.py::_actual_execution"
-   ],
-   "reason": "The joint_aura_*_transition modules are sealed: every transition receipt binds transition_module_sha256 over the module's own bytes, so each stays self-contained and byte-stable, and sharing a helper would change a sealed identity."
-  },
-  {
-   "pair": [
     "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
     "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
    ],
@@ -16,10 +9,6 @@
   }
  ],
  "near_duplicates": [
-  [
-   "prismaquant/joint_aura_retained_budget_transition.py::_actual_execution",
-   "prismaquant/joint_aura_run_transition.py::_actual_execution"
-  ],
   [
    "prismaquant/sample_parallel_probe_contract.py::_mullo32_scalar",
    "prismaquant/sample_parallel_probe_merge.py::_reference_mullo32_scalar"
@@ -279,7 +268,6 @@
   "hashlib:tools/build_stagea_seed_package.py::_pin",
   "hashlib:tools/build_stagea_seed_package.py::build",
   "hashlib:tools/build_stagea_split_package.py::_describe",
-  "hashlib:tools/build_stagea_split_package.py::build",
   "hashlib:tools/build_stagea_split_package.py::load_round",
   "hashlib:tools/build_t4_logical_request.py::sha",
   "hashlib:tools/build_t4_recovery_request.py::sha",
