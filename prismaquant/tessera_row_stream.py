@@ -189,8 +189,8 @@ class RowStream:
     has nothing to encode) and its run-level ``weight``/``scoring_rows``/
     ``hessian`` receipts. It runs on a reader thread and must not touch a
     device. Nothing in this class calls ``resource_check`` off the thread that
-    calls ``admit``: the readers' future working set is reserved there, before
-    their reads are submitted.
+    calls ``prime`` or ``admit``: the readers' future working set is reserved
+    there, before their reads are submitted.
 
     A unit whose ``weights`` entry is a ``meta`` placeholder has its source
     weight read here too, on the reader thread, by ``load_unit(name)``, before
@@ -261,6 +261,8 @@ class RowStream:
         self._first: dict[str, dict] = {}
         self._expected: dict[str, dict] | None = None
         self._batches: list[list[str]] = []
+        self._primed: list[str] | None = None
+        self._prime_plan_checked = False
         self._closed = False
         self._lock = threading.Lock()
         self.stats = dict(entries_read=0, rereads=0, hash_only_entries=0,
@@ -390,12 +392,46 @@ class RowStream:
                 "or encode the unit")
 
     # -- consumer ----------------------------------------------------------
+    def prime(self, names):
+        """Start at most the exact first batch, reserved but not collected.
+
+        Only the existing readers hold these futures. Nothing is published or
+        installed in ``weights`` until ``admit`` checks the actual first plan;
+        a resumed head must still arm expected receipts before calling this.
+        """
+        names = list(dict.fromkeys(names))
+        if len(names) > self.batch_size:
+            raise ValueError("row stream prime is limited to one batch")
+        unknown = set(names) - set(self._names)
+        if unknown:
+            raise ValueError("unknown row stream prime units: " + ", ".join(sorted(unknown)))
+        if not names:
+            return
+        if self._closed or self._primed is not None or self._inflight or self._first or self._live:
+            raise RuntimeError("row stream prime requires an unstarted, open stream")
+        if self._batches and self._batches[0] != names:
+            raise RuntimeError("primed units must match the first planned batch")
+        if self._resource_check is not None:
+            self._resource_check("before_row_stream_prime", reserve_bytes=sum(
+                self.reader_reserve_bytes(name) for name in names))
+        self._primed = names
+        self._prime_plan_checked = bool(self._batches)
+        for name in names:
+            self._submit(name)
+
     def plan(self, batches):
         """The encode order: one list of unit names per batch."""
-        self._batches = [list(dict.fromkeys(batch)) for batch in batches]
+        planned = [list(dict.fromkeys(batch)) for batch in batches]
+        if self._primed is not None and not self._prime_plan_checked:
+            if not planned or planned[0] != self._primed:
+                raise RuntimeError("primed units must match the first planned batch")
+            self._prime_plan_checked = True
+        self._batches = planned
 
     def admit(self, index):
         """Make batch ``index`` resident and start reading batch ``index + 1``."""
+        if self._primed is not None and (index != 0 or self._batches[0] != self._primed):
+            raise RuntimeError("primed units must match the first planned batch")
         current = self._batches[index]
         ahead = self._batches[index + 1] if index + 1 < len(self._batches) else []
         keep = set(current) | set(ahead)
@@ -404,13 +440,18 @@ class RowStream:
         wanted = [name for name in dict.fromkeys([*current, *ahead])
                   if name not in self._live and name not in self._inflight]
         if self._resource_check is not None:
+            # A primed future may not have allocated its entry yet. Include
+            # that promise with the newly submitted ahead window, not just RSS.
+            reserved = list(dict.fromkeys([*wanted, *[
+                name for name in (self._primed or []) if name in self._inflight]]))
             self._resource_check(f"before_row_stream_admit:{index}", reserve_bytes=sum(
-                self.reader_reserve_bytes(name) for name in wanted))
+                self.reader_reserve_bytes(name) for name in reserved))
         for name in wanted:
             self._submit(name)
         started = self._clock()
         for name in current:
             self._collect(name)
+        self._primed = None
         self.stats["wait_seconds"] += self._clock() - started
         if self.stats["first_batch_ready_seconds"] is None:
             self.stats["first_batch_ready_seconds"] = self._clock() - self._opened

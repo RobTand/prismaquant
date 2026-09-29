@@ -883,6 +883,71 @@ def _stale_served_wire(anchor, record, *, structure) -> "str | None":
             f"served on {served} at this rung (#1502); re-priced, not adopted")
 
 
+def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
+                              weights, profile, expert_members, encode_structure,
+                              projected_units, audit_units, route_cache,
+                              partitioned=False):
+    """Overlap a new head's exact first batch; never read ahead of resume gates.
+
+    Use the existing group/anchor/batch mechanisms and row-local refusal memo.
+    Any existing journal, even empty, keeps the before-read identity path. An
+    inaccessible path fails closed instead of being treated as absent.
+    """
+    # A partition's legal grid depends on unpriced full-group siblings. Keep
+    # its existing admit-time reads until this early-batch planner carries that
+    # full-group contract; a subset-derived prime could disagree with admit.
+    if partitioned or args.seed_checkpoint or getattr(args, "finalize_checkpoint", False):
+        return
+    for path in (checkpoint, checkpoint.with_name(checkpoint.name + ".parts"),
+                 checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX)):
+        try:
+            path.stat()
+        except FileNotFoundError:
+            continue
+        else:
+            return
+
+    def snap(rate, allowed):
+        if not allowed:
+            return None
+        return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
+
+    cap = float(args.max_artifact_bpp)
+    rates_by_unit = {}
+    for name in targets:
+        per_family = {}
+        for rung in menus[name]:
+            if cap > 0 and rung.bpp > cap:
+                continue
+            per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
+        rates_by_unit[name] = per_family
+    groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
+    band = parse_rate_band(getattr(args, "rate_band", None))
+    pending = []
+    for _key, members in sorted(groups.items()):
+        families = set.intersection(*[set(rates_by_unit[m]) for m in members]) if members else set()
+        for family in sorted(families):
+            shared = set.intersection(*[rates_by_unit[m][family] for m in members])
+            refused = _served_route_refusals(family, shared, members,
+                encode_structure=encode_structure, projected_units=projected_units,
+                route_cache=route_cache)
+            allowed = sorted(shared - {int(rung) for rung in refused})
+            if not allowed:
+                continue
+            want = round_one_rates(allowed, band=band, anchors=args.anchors,
+                                   snap=snap, exhaustive_band=args.exhaustive_rate_grid)
+            extra = None if not audit_units else audit_extra_rate(allowed, want, snap=snap)
+            for name in members:
+                rates = set(want)
+                if extra is not None and name in audit_units:
+                    rates.add(extra)
+                pending.extend((name, family, rate) for rate in sorted(rates))
+    batches = _anchor_batches(pending, weights=weights, batch_size=args.anchor_batch_size,
+                              structures=encode_structure)
+    if batches:
+        row_stream.prime([item[0] for item in batches[0]])
+
+
 def _served_route_refusals(family, rungs, members, *, encode_structure,
                            projected_units, route_cache=None) -> "dict[str, dict]":
     """The rungs of ``family`` some member cannot be served on, with why.
@@ -6852,6 +6917,7 @@ def _main(argv, *, source_scope) -> int:
               flush=True)
 
     row_stream = None
+    route_cache: dict[tuple, str | None] = {}
     if streaming_head:
         from .tessera_row_stream import RowStream
         stream_threads = identity_threads
@@ -6907,6 +6973,11 @@ def _main(argv, *, source_scope) -> int:
                                   ['factorization_scratch_bytes']))
         source_scope.callback(row_stream.close)
         calibration_cache = row_stream.capture
+        _prime_first_anchor_batch(row_stream, args=args, checkpoint=checkpoint,
+            targets=targets, menus=menus, weights=weights, profile=profile,
+            expert_members=expert_members, encode_structure=encode_structure,
+            projected_units=projected_units, audit_units=audit_units, route_cache=route_cache,
+            partitioned=partition_menu_targets is not None)
 
     def run_identity(**receipts):
         # The resume identity, run level: everything a price is a function of,
@@ -7514,7 +7585,6 @@ def _main(argv, *, source_scope) -> int:
     # read off the pinned contract: kept in the menu, not measured, and
     # recorded here with the contract's reason rather than hidden.
     route_refused: dict[str, dict[str, dict[str, dict]]] = {}
-    route_cache: dict[tuple, str | None] = {}
     rate_groups = ({entry["key"]: entry["members"] for entry in selection["groups"]}
                    if partition_menu_targets is not None else anchor_groups)
     group_rates, route_refused = anchor_group_rate_grids(

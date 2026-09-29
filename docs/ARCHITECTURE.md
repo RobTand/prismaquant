@@ -656,6 +656,21 @@ binding documents and directory-scan errors. Gzip decoding is bounded by the
 same 64 MiB document limit. This CPU proof slice adds no deletion target or
 forward/dead-owner reclaim; it changes no numerical, wire or serving gate.
 
+Re-stamped 2026-09-30 (PQ #1743, `sol/1654-startup-current-pin`): a new,
+non-partitioned stream head starts its exact first anchor batch on the existing
+RowStream readers before run identity and journal preparation. Group/rung/batch
+rules and the row-local refusal memo determine that batch; at most one batch
+is primed, with existing source/capture verification and a pre-read memory
+guard. The actual first encode plan must match before collection, and its
+guard charges primed futures together with the ahead window. No early weight
+installation, receipts, checkpoint writes or second cache. Existing complete,
+partial or even empty journal paths retain the before-read resume gate;
+ambiguous journal access fails closed. Expert partitions also retain their
+existing admit-time reads: their legal rate grid depends on unpriced full-group
+siblings, not a subset-only early plan. Tests: `tests/test_row_startup_prime.py`
+and the existing stream suite. Frozen A/B neutrality is checked; newly rebased
+artifact and profiled delta gates remain independent.
+
 Re-stamped 2026-09-30 (PQ #1742, `sol/1654-startup-current-pin`): pricing rows
 start Tessera's exact `encoder_source_sha256()` on the existing affinity-bound
 I/O executor after source authentication and before model preparation, then
