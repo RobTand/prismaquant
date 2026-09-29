@@ -210,7 +210,7 @@ def test_aura_accepts_joined_table_end_to_end(tmp_path):
         panel_row, applied=False)
     data["costs"][names[1]][fmt]["hessian_identity"] = dict(
         overlay_row, applied=False)
-    data["provenance"]["hessian"] = dict(panel_row)
+    data["provenance"]["hessian"] = dict(panel)  # with capture_path: references open it
     data["provenance"]["catalog_extension"] = extension
     cost_path.write_bytes(pickle.dumps(data))
     config["merged_cost"] = bind(cost_path)
@@ -235,7 +235,7 @@ def test_aura_refuses_mixed_content_end_to_end_with_original_text(tmp_path):
         panel_row, applied=False)
     data["costs"][names[1]][fmt]["hessian_identity"] = dict(
         overlay_row, applied=False)
-    data["provenance"]["hessian"] = dict(panel_row)
+    data["provenance"]["hessian"] = dict(panel)  # with capture_path: references open it
     data["provenance"]["catalog_extension"] = extension
     cost_path.write_bytes(pickle.dumps(data))
     config["merged_cost"] = bind(cost_path)
@@ -298,7 +298,7 @@ def _surface_joined(tmp_path, *, override=None):
         state["wire_records"][real_fmt] = dict(state["wire_records"]["F_R1"])
         write_unit(parts, stage="Tessera campaign", qname=unit,
                    identity_sha256=seal_value, state=state)
-    payload["provenance"]["hessian"] = dict(panel_row)
+    payload["provenance"]["hessian"] = dict(panel)  # with capture_path: references open it
     payload["provenance"]["catalog_extension"] = extension
     cost_path.write_bytes(pickle.dumps(payload))
     plan["input"]["payload_sha256"] = hashlib.sha256(cost_path.read_bytes()).hexdigest()
