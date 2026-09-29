@@ -279,7 +279,10 @@ def _surface_joined(tmp_path, *, override=None):
     # in play are the panel's and the overlay's.
     for unit_rows in payload["costs"].values():
         for row in unit_rows.values():
-            row["hessian_identity"] = dict(panel_row)
+            # Anchors carry no hessian_applied (None); drop the workspace
+            # applied flag so only the seal logic is under test.
+            row["hessian_identity"] = {k: v for k, v in panel_row.items()
+                                       if k != "applied"}
     for unit in units:
         manifest["identity"]["units"][unit]["menu"].append(
             PANEL_FMT if unit == "h" else OVERLAY_FMT)
@@ -289,7 +292,8 @@ def _surface_joined(tmp_path, *, override=None):
     for unit, ident in (("h", panel_row), ("p1", overlay_row)):
         real_fmt = PANEL_FMT if unit == "h" else OVERLAY_FMT
         base_row = dict(payload["costs"][unit]["F_R1"])
-        base_row["hessian_identity"] = dict(ident)
+        base_row["hessian_identity"] = {k: v for k, v in ident.items()
+                                        if k != "applied"}
         payload["costs"][unit][real_fmt] = base_row
         envelope = pickle.loads(unit_path(parts, unit).read_bytes())
         state = pickle.loads(envelope["payload"])
