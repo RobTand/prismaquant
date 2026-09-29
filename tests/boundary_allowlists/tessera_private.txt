@@ -11,9 +11,7 @@ prismaquant/glm_mtp_quantum.py	private-import	.tessera_joint_aura._prepare_sourc
 prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._planned_source_window
 prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._preflight_run_prepared
 prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._prepare_file_read_bound
-prismaquant/joint_cost_quantum.py	private-import	.tessera_joint_aura._seed_source_identity_cache
 prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._preflight_run_prepared
-prismaquant/joint_cost_stage_a.py	private-import	.tessera_joint_aura._seed_source_identity_cache
 prismaquant/joint_stage_b_head.py	private-import	.tessera_joint_aura._prepare_file_read_bound
 prismaquant/joint_stage_b_head.py	private-import	.tessera_joint_aura._prepared_digest_recorded
 prismaquant/joint_stage_b_head.py	private-import	.tessera_joint_aura._prepared_digest_recorded
