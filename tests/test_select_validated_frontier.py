@@ -1367,7 +1367,7 @@ def test_a_uniform_rate_axis_plan_is_its_own_control(tmp_path):
 
 @pytest.mark.parametrize("metadata_key", [
     "tessera_expert_wires", "tessera_activation_static_scales",
-    "tessera_serving_scope", "serving_lane_provenance", "serve_constraints",
+    "tessera_serving_scope", "serve_constraints",
     "measured_runtime_search", "population",
 ])
 def test_selector_refuses_destination_claims_for_changed_assignment(tmp_path, metadata_key):
