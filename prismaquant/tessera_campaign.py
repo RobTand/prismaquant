@@ -6211,6 +6211,11 @@ def _main(argv, *, source_scope) -> int:
 
     if not streaming_head:
         close_source_authentication()
+    elif source_authentication is not None:
+        # The receipt is filled at finalize; its key is placed here so the
+        # preparation record keeps the load-all head's field order, and the
+        # two heads' cost payloads stay byte-identical.
+        selected_source_preparation['source_authentication'] = None
 
     if census_only:
         payload = calibration_census(

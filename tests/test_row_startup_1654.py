@@ -71,74 +71,66 @@ def test_a_streaming_plan_without_a_source_proof_is_refused(tmp_path, monkeypatc
     assert not (workspace / "plan.json").exists()
 
 
-def _proof_fixture(tmp_path, monkeypatch, *, proved_sha, validator=None):
-    """A model with one shard, a capture roster and a proof, the validators faked.
+CAPTURE = {"path": "capture.json", "sha256": "c" * 64}
 
-    ``validate_cached_streamed_model_identity`` is the one fail-closed proof
-    validator (stat fingerprints, coverage, weight map, live config) and has
-    its own tests; here it stands in so the dispatcher's use of it is what is
-    under test.
+
+def _proved_model(tmp_path, monkeypatch, *, roster_sha=None):
+    """A two-shard model, a real proof of it, and a capture roster.
+
+    The proof is built by the production builder (``_write_proof``), so the
+    planner checks the bytes a row would adopt. Only the capture manifest's
+    roster is stood in: ``roster_sha`` replaces one shard's declared SHA.
     """
-    from prismaquant import cost_streaming
+    from safetensors.torch import save_file
+    from test_stage_a_identity_proof_adoption import _write_proof
     from prismaquant import tessera_calibration_cache as cc
 
     model = tmp_path / "model"
     model.mkdir()
-    shard = model / "model-00001-of-00001.safetensors"
-    shard.write_bytes(b"shard")
-    proof = tmp_path / "source-identity.json"
-    proof.write_text("{}")
-    identity = {"shards": [{"path": str(shard), "sha256": proved_sha}]}
-    record = {"identity": identity, "fingerprints": []}
-    calls = []
+    save_file({"a": torch.ones(2, 2)}, str(model / "a.safetensors"))
+    save_file({"b": torch.zeros(2, 2)}, str(model / "b.safetensors"))
+    (model / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"a": "a.safetensors", "b": "b.safetensors"}}))
+    proof, digest = _write_proof(model, tmp_path / "source-identity.json")
+    roster = {name: cc.sha256(model / name) for name in ("a.safetensors", "b.safetensors")}
+    if roster_sha is not None:
+        roster["b.safetensors"] = roster_sha
+    roster["config.json"] = "f" * 64
+    monkeypatch.setattr(cc, "require_capture_contract", lambda path, expected_sha256=None: (
+        {"identity": {"source_files": roster}} if (path, expected_sha256) ==
+        (CAPTURE["path"], CAPTURE["sha256"]) else pytest.fail("another capture")))
+    return model, proof, digest
 
-    def validate(source, path, *, require_complete_checkpoint):
-        calls.append((source, str(path), require_complete_checkpoint))
-        if validator is not None:
-            validator()
-        return identity
 
-    monkeypatch.setattr(cost_streaming, "validate_cached_streamed_model_identity", validate)
-    monkeypatch.setattr(cost_streaming, "_read_streamed_model_identity_cache",
-                        lambda *_a, **_k: (record, identity))
-    monkeypatch.setattr(cc, "require_capture_contract", lambda path, expected_sha256=None: {
-        "identity": {"source_files": {shard.name: "a" * 64, "config.json": "f" * 64}}})
-    return model, proof, calls
+def test_an_adoptable_proof_is_bound_by_its_digest(tmp_path, monkeypatch):
+    import dispatch_tessera_campaign as dispatch
+
+    model, proof, digest = _proved_model(tmp_path, monkeypatch)
+    assert dispatch._source_identity_cache_binding(proof, model, CAPTURE) == {
+        "path": str(proof.resolve()), "sha256": digest}
 
 
 def test_a_proof_that_differs_from_the_capture_roster_is_refused_at_plan(
         tmp_path, monkeypatch):
     import dispatch_tessera_campaign as dispatch
 
-    model, proof, _calls = _proof_fixture(tmp_path, monkeypatch, proved_sha="b" * 64)
-    with pytest.raises(RuntimeError, match="does not prove the capture's source"):
-        dispatch._source_identity_cache_binding(
-            proof, model, {"path": "capture.json", "sha256": "c" * 64})
+    model, proof, _digest = _proved_model(tmp_path, monkeypatch, roster_sha="b" * 64)
+    with pytest.raises(RuntimeError, match="not a source proof a row can adopt.*"
+                       "b.safetensors: streamed source SHA differs"):
+        dispatch._source_identity_cache_binding(proof, model, CAPTURE)
 
 
 def test_a_stale_proof_is_refused_at_plan_not_hashed_around_on_the_row(
         tmp_path, monkeypatch):
+    """A restamped shard: the row's adoption would refuse and hash it fresh."""
     import dispatch_tessera_campaign as dispatch
+    from test_stage_a_identity_proof_adoption import _restamp
 
-    def drifted():
-        raise RuntimeError("streamed model identity source shard stat drifted")
-
-    model, proof, _calls = _proof_fixture(tmp_path, monkeypatch, proved_sha="a" * 64,
-                                          validator=drifted)
-    with pytest.raises(RuntimeError, match="stat drifted"):
-        dispatch._source_identity_cache_binding(
-            proof, model, {"path": "capture.json", "sha256": "c" * 64})
-
-
-def test_an_adoptable_proof_is_bound_by_its_digest(tmp_path, monkeypatch):
-    import dispatch_tessera_campaign as dispatch
-    from prismaquant.tessera_calibration_cache import sha256
-
-    model, proof, calls = _proof_fixture(tmp_path, monkeypatch, proved_sha="a" * 64)
-    binding = dispatch._source_identity_cache_binding(
-        proof, model, {"path": "capture.json", "sha256": "c" * 64})
-    assert binding == {"path": str(proof.resolve()), "sha256": sha256(proof)}
-    assert calls == [(str(model), str(proof.resolve()), True)]
+    model, proof, _digest = _proved_model(tmp_path, monkeypatch)
+    _restamp(model / "a.safetensors")
+    with pytest.raises(RuntimeError, match="a.safetensors: streamed source proof names "
+                                           "another object"):
+        dispatch._source_identity_cache_binding(proof, model, CAPTURE)
 
 
 def _campaign_row(*flags, units="units/row-0003.json"):
