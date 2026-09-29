@@ -785,6 +785,26 @@ def _reclaim_head_walk_allocator(synthesis_device, *, force=False):
               flush=True)
 
 
+def _verify_measured_hessian_identity(name, row, anchor, provenance_hessian,
+                                        admitted_seals) -> None:
+    """One measured row's Hessian identity against the anchor and provenance.
+
+    Field order is the historical one, so the first refusal a mixed row
+    raises is the text it always raised. A capture seal that differs from the
+    provenance's passes only when the uniform-table verdict admits it
+    (PQ #1270: content-equal captures under several seals).
+    """
+    hessian = row["hessian_identity"]
+    _same(hessian.get("applied"), anchor["hessian_applied"], f"{name}: H applicability")
+    for key in ("supplied", "capture_sha256", "text_sha256", "fit_ids_sha256",
+                "fit_tokens"):
+        value = hessian.get(key)
+        if key == "capture_sha256" and value != provenance_hessian.get(key) \
+                and value in admitted_seals:
+            continue
+        _same(value, provenance_hessian.get(key), f"{name}: measured H {key}")
+
+
 def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=True,
                                defer_render_hashes=False, reader=None,
                                synthesis_device="cpu", unit_scope=None,
@@ -1242,9 +1262,8 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
                 _same(row.get(target), anchor.get(source), f"{name}@{fmt}: measured {target}")
             _require(type(anchor["dloss"]) in (int, float) and math.isfinite(anchor["dloss"])
                      and anchor["dloss"] >= 0, f"{name}@{fmt}: invalid measured value")
-            _same(row["hessian_identity"].get("applied"), anchor["hessian_applied"], f"{name}: H applicability")
-            for key in ("supplied", "capture_sha256", "text_sha256", "fit_ids_sha256", "fit_tokens"):
-                _same(row["hessian_identity"].get(key), provenance["hessian"].get(key), f"{name}: measured H {key}")
+            _verify_measured_hessian_identity(
+                name, row, anchor, provenance.get("hessian", {}), admitted_seals)
             if anchor.get("input_global_scale") is not None:
                 _same(anchor["input_global_scale"], unit.get("input_global_scale"), f"{name}: checkpoint scale")
                 _same(anchor["input_global_scale"], provenance["activation_static_scales"]["units"].get(name),
@@ -1350,6 +1369,21 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         _reclaim_head_walk_allocator(synthesis_device)
 
     try:
+        # The uniform-table verdict all measured rows share (PQ #1270):
+        # seals the gate maps per row are admitted in walk_one below.
+        from .joint_catalog_extension import (
+            admitted_hessian_capture_seals,
+            hessian_references,
+        )
+        try:
+            admitted_seals = admitted_hessian_capture_seals(
+                {n: {fmt: row for fmt, row in payload["costs"][n].items()
+                      if row.get("output_mse_measured") is True}
+                 for n in roster},
+                references=lambda: hessian_references(payload))
+        except ValueError:
+            # A mixed table refuses row by row below, with the original texts.
+            admitted_seals = frozenset()
         # However many workers fan the verification out, commitment -- cell
         # insertion, reporting, banking -- stays in the roster's one order,
         # so the journal holds a prefix and the durable sequence means what
