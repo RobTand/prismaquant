@@ -503,10 +503,11 @@ def test_a_refusing_lane_leaves_the_lane_free_launch_beside_it(payload, rung):
 
     Regression for PQ #1274: the gate used to refuse the whole cell whenever
     the lane it launches through refused, which is right only while the
-    lane launch is the cell's only launch (the lane-only leg of
-    ``test_a_window_lane_graft_is_refused_by_the_published_column_rates``
-    still refuses q896).  With a lane-free launch beside it, q896 admits on
-    that launch and the route records it alone; q1024 admits on both.
+    lane launch is the cell's only launch (such a cell is still refused
+    where its lane refuses; see
+    ``test_a_cell_claiming_the_lane_for_a_rung_it_refuses_is_refused_by_name``).
+    With a lane-free launch beside it, q896 admits on that launch and the
+    route records it alone; q1024 admits on both.
     """
     table = _table(_lane_beside_compact(payload, rung))
     cell = _parsed_cell(table, GATED_CARRIER)
