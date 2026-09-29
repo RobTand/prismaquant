@@ -413,7 +413,7 @@ def test_stage_a_threads_the_plan_derivative_and_prefetch(tmp_path, monkeypatch)
     import prismaquant.calibration_data as calib
     monkeypatch.setattr(calib, "load_calibration_input",
                         lambda *a, **k: ([], {"provenance": dict(draw)}))
-    monkeypatch.setattr(aura, "_seed_source_identity_cache",
+    monkeypatch.setattr(aura, "seed_source_identity_cache",
                         lambda *a, **k: None)
     import prismaquant.model_profiles as profiles
     monkeypatch.setattr(profiles, "detect_profile", lambda *a, **k: None)
@@ -561,7 +561,7 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
     import prismaquant.calibration_data as calib
     monkeypatch.setattr(calib, "load_calibration_input",
                         lambda *a, **k: (_Ids(), {"provenance": dict(draw)}))
-    monkeypatch.setattr(aura, "_seed_source_identity_cache",
+    monkeypatch.setattr(aura, "seed_source_identity_cache",
                         lambda *a, **k: None)
     import prismaquant.model_profiles as profiles
     monkeypatch.setattr(profiles, "detect_profile", lambda *a, **k: None)

@@ -559,14 +559,14 @@ def test_build_none_path_hashes_in_certified(monkeypatch, checkpoint):
 # -- seed path -----------------------------------------------------------
 
 def test_seed_copies_the_bound_cache_byte_identical(tmp_path):
-    from prismaquant.tessera_joint_aura import _seed_source_identity_cache
+    from prismaquant.tessera_joint_aura import seed_source_identity_cache
     import hashlib as _hashlib
     source = tmp_path / "plan-cache.json"
     source.write_bytes(b'{"identity": "fixture"}')
     digest = _hashlib.sha256(source.read_bytes()).hexdigest()
     out_root = tmp_path / "run"
     out_root.mkdir()
-    slot = _seed_source_identity_cache(
+    slot = seed_source_identity_cache(
         {"source_identity_cache": {"path": str(source), "sha256": digest}},
         out_root)
     assert slot == out_root / "source-identity.json"
@@ -574,7 +574,7 @@ def test_seed_copies_the_bound_cache_byte_identical(tmp_path):
 
 
 def test_seed_refuses_a_different_preexisting_cache(tmp_path):
-    from prismaquant.tessera_joint_aura import _seed_source_identity_cache
+    from prismaquant.tessera_joint_aura import seed_source_identity_cache
     import hashlib as _hashlib
     source = tmp_path / "plan-cache.json"
     source.write_bytes(b'{"identity": "fixture"}')
@@ -583,7 +583,7 @@ def test_seed_refuses_a_different_preexisting_cache(tmp_path):
     out_root.mkdir()
     (out_root / "source-identity.json").write_bytes(b"something else")
     with pytest.raises(Exception):
-        _seed_source_identity_cache(
+        seed_source_identity_cache(
             {"source_identity_cache": {"path": str(source),
                                        "sha256": digest}},
             out_root)
