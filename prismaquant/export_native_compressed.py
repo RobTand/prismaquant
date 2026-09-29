@@ -1125,17 +1125,14 @@ def _activation_index_fingerprint(index, cache_dir: Path) -> dict[str, object]:
     changing the activation cache or pointing at a different cache dir
     invalidates stale layer_NNN.pt files without reading tensor bytes.
     """
-    import hashlib
-    import json as _json
+    from prismaquant.digests import DIRECT_ASCII_LAX
 
     paths = getattr(index, "_paths", {})
     rows = []
     for name, path in sorted(paths.items()):
         st = path.stat()
         rows.append([name, path.name, st.st_size, st.st_mtime_ns])
-    digest = hashlib.sha256(
-        _json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:16]
+    digest = DIRECT_ASCII_LAX.sha256(rows)[:16]
     return {
         "path": str(cache_dir.resolve()),
         "n_files": len(rows),
@@ -1225,8 +1222,10 @@ def _production_cache_fingerprint(
     activation-scale summary so a stale export cache cannot be reused across
     production-cache changes.
     """
-    import hashlib
-    import json as _json
+    from prismaquant.digests import (
+        DIRECT_ASCII_LAX,
+        DIRECT_ASCII_LAX_DEFAULT_STR,
+    )
 
     weights = getattr(cache, "weights", {}) or {}
     cache_dir = getattr(cache, "cache_dir", None)
@@ -1249,21 +1248,10 @@ def _production_cache_fingerprint(
         except OSError:
             rows.append([key[0], key[1], path.name, "missing"])
     act = getattr(cache, "activation_max_abs", None) or {}
-    act_digest = hashlib.sha256(
-        _json.dumps(act, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:16]
+    act_digest = DIRECT_ASCII_LAX.sha256(act)[:16]
     metadata = dict(getattr(cache, "metadata", {}) or {})
-    metadata_digest = hashlib.sha256(
-        _json.dumps(
-            metadata,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        ).encode()
-    ).hexdigest()[:16]
-    digest = hashlib.sha256(
-        _json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()[:16]
+    metadata_digest = DIRECT_ASCII_LAX_DEFAULT_STR.sha256(metadata)[:16]
+    digest = DIRECT_ASCII_LAX.sha256(rows)[:16]
     # Hook enumeration the shipped bytes were rendered against (#147,
     # consumer 3): a shipped artifact records which enumeration its bytes
     # saw, so a cost table priced from one rendering cannot be silently
