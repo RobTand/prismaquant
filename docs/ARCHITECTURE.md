@@ -23,11 +23,12 @@ release serve runs. It is a code-only re-pin: the contract stays v45
   `layer.json` pin (`tests/test_allocator_output_pin_1304.py`, PB action
   `e4418bbe4020`) matches its committed digests under the new
   interpreter.
-- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-83460680` on
-  every box, plus a `-tf516` sibling on each Spark. Each is a copy of the
-  `a21d74d8` interpreter with only Tessera reinstalled, built by a
-  host-pinned PB action: dl380g10 `05240c885661`, sparky `3a14fa1bb30c`
-  and sparklina `a2f3caa3007c`.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-83460680`,
+  plus a `-tf516` sibling on each Spark. Each is a copy of the `a21d74d8`
+  interpreter with only Tessera reinstalled, built by a host-pinned PB
+  action. dl380g10 (`05240c885661`) and sparklina (`a2f3caa3007c`) are
+  built. The sparky action `3a14fa1bb30c` is queued, so sparky has no
+  `83460680` interpreter yet.
 
 Re-stamped 2026-09-29 (PQ #1702, `claude/tessera-pin-v45`): the exact
 Tessera pin is `a21d74d89bd4eca0493a2f913c71b28b03a39d8b`, Tessera master's merge of #701 (contract v45,

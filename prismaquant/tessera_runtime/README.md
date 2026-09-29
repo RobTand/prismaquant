@@ -175,8 +175,9 @@ tree tests against: Tessera `83460680` and PrismaBuild `059953bc`
 (`staged_lease.PB_READER_LEASE_PIN_COMMIT`, PQ #1541). It is a copy of
 `pq-pb059953bc-tessera-a21d74d8` with only Tessera reinstalled, non-editable,
 provisioned by host-pinned PB build actions on 2026-09-29: dl380g10
-`05240c885661`, sparky `3a14fa1bb30c` and sparklina `a2f3caa3007c`.
-Each Spark action also builds the `-tf516` sibling.
+`05240c885661` and sparklina `a2f3caa3007c`. The sparky action
+`3a14fa1bb30c` is queued, so sparky has no `83460680` interpreter yet. Each
+Spark action also builds the `-tf516` sibling.
 The `a21d74d8` interpreters (PQ #1702) are copies of the `a5f3b232` ones
 built the same way: dl380g10 `177cb8e57a27`, sparky `53dff8124e53` and
 sparklina `8323b283eb2d`.
