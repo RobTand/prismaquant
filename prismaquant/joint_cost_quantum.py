@@ -3468,7 +3468,10 @@ def _build_quantum_source_identity(runner, config, *, run_dir,
     digest reader takes a path.
     """
     from .cost_streaming import build_streamed_model_identity
-    from .tessera_joint_aura import source_identity_proof_kwargs
+    from .tessera_joint_aura import (
+        _seed_source_identity_cache,
+        source_identity_proof_kwargs,
+    )
 
     if identity_cache_bytes is not None:
         identity_cache = {"identity_cache_bytes": identity_cache_bytes}

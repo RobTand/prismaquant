@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant import cost_streaming as cs
 
-REFUSAL = r"would hash 196608 bytes across 2 shard.*run the identity quantum"
+REFUSAL = r"would hash 196608 bytes across 2 shard.*CPU-only quantum upstream"
 
 
 @pytest.fixture
