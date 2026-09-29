@@ -56,7 +56,6 @@ never unlinks a record, so a missing one is damaged PrismaBuild state.
 from __future__ import annotations
 
 import gzip
-import hashlib
 import json
 import os
 import shutil
@@ -65,6 +64,7 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
+from .digests import bytes_sha256hex
 
 RETIREMENT_SCHEMA = "prismaquant.stage_a.retirement.v1"
 RETIREMENT_NAME = "stage-a-retired.json"
@@ -127,7 +127,7 @@ def _load_chain_state(space: Path) -> tuple[dict, str]:
     if (not isinstance(document, dict) or document.get("schema") != CHAIN_STATE_SCHEMA
             or _seal(document)["chain_state_sha256"] != document.get("chain_state_sha256")):
         raise RetirementRefused(f"{path} is not a sealed chain state")
-    return document, hashlib.sha256(raw).hexdigest()
+    return document, bytes_sha256hex(raw)
 
 
 def _producers(space: Path, document) -> list[dict]:
@@ -153,7 +153,7 @@ def _successor(path, sha256, *, space: Path, session: dict) -> dict:
         raw = path.read_bytes()
     except OSError as exc:
         raise RetirementRefused(f"the successor run is not readable at {path}: {exc}") from exc
-    if hashlib.sha256(raw).hexdigest() != str(sha256):
+    if bytes_sha256hex(raw) != str(sha256):
         raise RetirementRefused(f"{path} does not have the pinned digest {sha256}")
     real = Path(os.path.realpath(path))
     if real.is_relative_to(os.path.realpath(space)):
@@ -191,7 +191,7 @@ def _checkpoint_planes(space: Path, session: dict) -> tuple[list[str], dict]:
             raise RetirementRefused(
                 f"checkpoint {boundary} was sealed by another run "
                 f"({record['session'].get('generation')})")
-        digests[boundary] = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        digests[boundary] = bytes_sha256hex(manifest.read_bytes())
         if checkpoint_is_referenced(record):
             try:
                 plane = checkpoint_cotangent_plane(record)
@@ -422,7 +422,7 @@ def plan_retirement(output_root, *, successor_path, successor_sha256,
         digests = {chain_sha: "chain state"}
         receipt = adjoint_receipt_path(space)
         if receipt.is_file():
-            digests[hashlib.sha256(receipt.read_bytes()).hexdigest()] = "receipt"
+            digests[bytes_sha256hex(receipt.read_bytes())] = "receipt"
         for boundary, digest in checkpoint_digests.items():
             digests[digest] = f"checkpoint {boundary}"
         record = None
