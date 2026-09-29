@@ -5,7 +5,7 @@
 bound its data manifest, so neither could resolve through residency. The
 quantum now loads the plan with ``defer_pool_reads=True``: the identity cache is
 digest-checked where it is read (the head slice's declared entry, or
-``_seed_source_identity_cache`` on the legacy walk), and the boundary directory
+``seed_source_identity_cache`` on the legacy walk), and the boundary directory
 is resolved by the quantum's own storage setup, after the bind. The head slice
 itself, the quantum's first head read, now runs after the bind too.
 
