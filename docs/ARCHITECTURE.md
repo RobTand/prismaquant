@@ -63,18 +63,30 @@ Re-stamped 2026-09-28 (PQ #1387 and #1289, `sonnet/1387-route-histogram`): the
 `by_format` summary names every route. Every allocation now writes
 `serving_lane_provenance` into the layer_config meta (`allocator.py`, no longer
 only under a Tessera target). The native exporter stamps `build.route_histogram`
-through `shipcard.route_histogram_claim`, deriving it from the exported
-assignment when the recipe predates the fix, and marks the card
-`build.route_histogram_owed`. `verify` requires the histogram on a marked card;
-a historical card carries no marker and keeps verifying. The lane spec's
-`route_histogram_required` stays unset for compressed-tensors. Each
-`selection_serving_lane_provenance` `by_format` row gains `routes`, a histogram
-with one entry per distinct route (`route`, `units`, `structures`), so a format
-whose dense and routed units ride different routes names both with counts
-where `route` alone reads None. `select_validated_frontier` recomputes a
-laneless destination's provenance for a changed assignment instead of refusing;
-lane-declared claims still refuse. No default, stage, format or byte changes;
-the ship gate gains one refusal, for marked native cards.
+through `shipcard.route_histogram_claim` and marks the card
+`build.route_histogram_owed`. When the recipe predates the fix the exporter
+derives the provenance from the exported assignment through
+`allocator_candidates.recompute_serving_lane_provenance`, and it stamps nothing
+when that function refuses: no `target_profile` in the recipe (a derivation
+under profile None would be a different claim than the allocator made), or any
+unit whose route needs a serving context the bare assignment does not carry
+(a scoped Tessera lane, or a report with `by_unit`). A recompute reads
+`activation_pricing_branches` as `{"unrecorded": N}` because the chosen
+candidate's branch is not recoverable; every other field equals the
+allocator's (`tests/test_route_histogram_native_1387.py` runs the allocator,
+recomputes from its assignment and asserts equality). `verify` requires the
+histogram on a marked card; a historical card carries no marker and keeps
+verifying. The lane spec's `route_histogram_required` stays unset for
+compressed-tensors. Each `selection_serving_lane_provenance` `by_format` row
+gains `routes`, a histogram with one entry per distinct route (`route`,
+`units`, `structures`), grouped and sorted by the digests owner's canonical
+key (`DIRECT_UTF8_STRICT.text`), not `repr`, so a format whose dense and
+routed units ride different routes names both with counts where `route` alone
+reads None. `select_validated_frontier` recomputes a laneless destination's
+provenance for a changed assignment through the same function (dropping it
+when the function refuses) instead of refusing; lane-declared claims still
+refuse. No default, stage, format or byte changes; the ship gate gains one
+refusal, for marked native cards.
 
 Re-stamped 2026-09-28 (PQ #1431, `sonnet/1431-reclaim-declarations`): the
 Stage B render stream and spill replay reclaimers now declare that their
