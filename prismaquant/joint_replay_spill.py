@@ -910,6 +910,9 @@ class StageBReplaySpill:
         self.read_bytes = _ceil(max(pair, min(READ_BYTES - block, per_probe + pair)), block)
         self._replay_stream = None
         self._replay_budget = None
+        # Exposed-wait sink (PQ #1292): ``wait_sink(kind, start_unix, end_unix,
+        # info=None)``, set by the runner; None records nothing.
+        self.wait_sink = None
         # Reader threads add to the telemetry; the lock keeps the sums whole.
         self._telemetry_lock = threading.Lock()
         self._arenas: list[_Arena] = []
@@ -1085,6 +1088,7 @@ class StageBReplaySpill:
         budget = self._replay_budget or FixedBudget(
             buffer_bytes=held, headroom=self.replay_reserve_host_bytes)
         self._replay_stream = read_stream(entries, budget=budget, ready=self._chunk_ready)
+        self._replay_stream.wait_sink = self.wait_sink
         return self._replay_stream
 
     def _chunk_ready(self, group, cancel):
@@ -1279,6 +1283,15 @@ class StageBReplaySpill:
         for window in self._windows:
             window.dedupe.clear()
 
+    def _note_wait(self, kind, started):
+        """Add a blocked interval to its telemetry counter and the wait sink."""
+        ended = time.time()
+        key = "reader_wait_s" if kind == "spill-reader" else "hook_wait_s"
+        self.telemetry[key] += ended - started
+        sink = self.wait_sink
+        if sink is not None:
+            sink(kind, started, ended)
+
     def _flush(self):
         arena = self._arena
         if not arena.parts:
@@ -1290,7 +1303,7 @@ class StageBReplaySpill:
             self._pending.put(arena)
             started = time.time()
             self._arena = self._free.get()
-            self.telemetry["hook_wait_s"] += time.time() - started
+            self._note_wait("spill-hook", started)
             self._require_healthy()
         else:
             self._write_arena(arena)
@@ -1304,7 +1317,7 @@ class StageBReplaySpill:
             started = time.time()
             while len(parked) < len(self._arenas):
                 parked.append(self._free.get())
-            self.telemetry["hook_wait_s"] += time.time() - started
+            self._note_wait("spill-hook", started)
             self._arena = parked[0]
             for arena in parked[1:]:
                 self._free.put(arena)
@@ -1620,7 +1633,7 @@ class StageBReplaySpill:
             for chunk, item in enumerate(window.plan):
                 waited = time.time()
                 delivered = reads.take((window_index, probe_index, chunk))
-                self.telemetry["reader_wait_s"] += time.time() - waited
+                self._note_wait("spill-reader", waited)
                 host = delivered[0].value
                 del delivered
                 owner, (records, new, gradients, used) = item

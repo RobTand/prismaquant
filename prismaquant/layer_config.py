@@ -65,6 +65,9 @@ def prefill_frontier_replay_claim(metadata: Mapping) -> dict:
         raise ValueError("prefill frontier assignment stub requires replay before export")
     scope = metadata.get("fixed_resource_scope")
     replay = metadata.get("prefill_frontier_replay")
+    selection = metadata.get("pact_selection")
+    if selection is not None and "prefill_frontier_replay" not in metadata:
+        raise ValueError("pact_selection requires the prefill_frontier_replay it selected")
     if "prefill_frontier_replay" not in metadata:
         if isinstance(scope, Mapping) and scope.get("scope") == "shape-only":
             raise ValueError("shape-only config requires prefill_frontier_replay provenance")
@@ -82,8 +85,42 @@ def prefill_frontier_replay_claim(metadata: Mapping) -> dict:
     for key, required in (("research_only", True), ("certifies_placement", False)):
         if metadata.get(key) is not required:
             raise ValueError(f"prefill frontier replay requires {key}={required}")
-    return {"prefill_frontier_replay": dict(replay), "research_only": True,
-            "certifies_placement": False}
+    claim = {"prefill_frontier_replay": dict(replay), "research_only": True,
+             "certifies_placement": False}
+    if selection is not None:
+        claim["pact_selection"] = _pact_selection_claim(selection, replay)
+    elif replay.get("pact_selection_sha256") is not None:
+        raise ValueError("replay names a pact_selection_sha256 but no pact_selection is carried")
+    return claim
+
+
+def _pact_selection_claim(selection, replay: Mapping) -> dict:
+    """Validate a PACT selection record against the replay it selected (PQ #1585).
+
+    The record is valid on its own terms (identity hash, picks on the roster,
+    the materiality verdict reproduced), belongs to the replay's regime and
+    table, names the replay's vertex on its roster, and is the record the
+    replay's ``pact_selection_sha256`` names. Anything else is refused: a card
+    that carries a different roster than the one its allocation came from
+    would present a pick nobody made.
+    """
+    from .pact_selection import PactSelectionError, validate_pact_selection
+
+    if not isinstance(selection, Mapping):
+        raise ValueError("pact_selection must be a mapping")
+    try:
+        validate_pact_selection(selection)
+    except PactSelectionError as exc:
+        raise ValueError(f"pact_selection is not a valid selection record: {exc}") from exc
+    if selection.get("identity_sha256") != replay.get("pact_selection_sha256"):
+        raise ValueError("pact_selection identity differs from the replay's pact_selection_sha256")
+    for key in ("regime_m", "table_identity"):
+        if selection.get(key) != replay.get(key):
+            raise ValueError(f"pact_selection {key} differs from the replay's {key}")
+    roster = {p.get("assignment_sha256") for p in selection.get("roster", ())}
+    if replay.get("assignment_sha256") not in roster:
+        raise ValueError("replay assignment_sha256 is not on the pact_selection roster")
+    return dict(selection)
 
 
 # GGUF k-quant + IQ lane (llama.cpp / vLLM-GGUF serving). Kept as an explicit
