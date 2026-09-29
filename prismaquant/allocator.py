@@ -1800,7 +1800,9 @@ class PactHullSweep:
     max_states: int
     max_transitions: int
     #: ``None`` when the budget is ``--target-bits``; with ``--target-disk-gb``
-    #: the card, the reserve, the payload outside the units, and the unit budget.
+    #: the card, the reserve, the payload outside the units, the units' member-name
+    #: bytes (priced by the format, not by a candidate's ``memory_bytes``), and
+    #: the unit budget (card - reserve - both).
     whole_artifact_budget: dict | None
     #: Assignment members outside every DP unit (their format is fixed); the
     #: operator sum prices none of them, and the curve adds nothing for them.
@@ -4690,8 +4692,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             return sum(int(pact_options[(unit, fmt)].memory_bytes)
                        for unit, fmt in assignment.items())
 
-        def _pact_payload_bytes(expanded: Mapping[str, str]) -> int:
-            """Whole-artifact tensor payload of one expanded assignment (footprint.py)."""
+        def _pact_payload_bytes(expanded: Mapping[str, str]) -> tuple[int, int]:
+            """Whole-artifact tensor payload of one expanded assignment (footprint.py),
+            and the member-name bytes inside it (which no unit candidate prices)."""
             ctx = _footprint_scalars()
             if not ctx:
                 raise SystemExit(
@@ -4710,7 +4713,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     f"[alloc] ERROR: {info['n_missing_stats']} allocated Linear(s) have no "
                     "stats, so the PACT whole-artifact budget cannot price them: "
                     + ", ".join(info["missing_stats_names"][:10]))
-            return int(info["artifact_payload_bytes"])
+            return int(info["artifact_payload_bytes"]), int(info["unit_name_bytes"])
 
         # The byte budget. Without --target-disk-gb it is the measured solve's:
         # target bpp over the mutable parameters. With it, it is the on-disk
@@ -4727,8 +4730,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 "largest": {u: max(cs, key=lambda c: (c.memory_bytes, c.fmt)).fmt
                             for u, cs in pact_candidates.items()},
             }
-            outside = {name: _pact_payload_bytes(_expand_assignment_for_seed_json(dict(a)))
-                       - _pact_unit_bytes(a) for name, a in ends.items()}
+            # `outside` is everything the units' candidate bytes do not price:
+            # the non-unit payload plus the units' member names (#1716).  The
+            # card reports the two apart so `non_unit_payload_bytes` stays
+            # honest, but the unit budget must subtract both.
+            priced = {name: _pact_payload_bytes(_expand_assignment_for_seed_json(dict(a)))
+                      for name, a in ends.items()}
+            outside = {name: priced[name][0] - _pact_unit_bytes(a) for name, a in ends.items()}
+            names_outside = {name: priced[name][1] for name in ends}
+            if names_outside["smallest"] != names_outside["largest"]:
+                raise SystemExit(
+                    "[alloc] ERROR: PACT --target-disk-gb: the units' member-name bytes "
+                    f"differ between the smallest ({names_outside['smallest']}) and the "
+                    f"largest ({names_outside['largest']}) assignment, so they are not "
+                    "one constant outside the units")
             if outside["smallest"] != outside["largest"]:
                 raise SystemExit(
                     "[alloc] ERROR: PACT --target-disk-gb: the whole-artifact payload is not "
@@ -4739,7 +4754,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             reserve_bytes = int(args.artifact_overhead_reserve_bytes)
             pact_budget = cap_bytes - reserve_bytes - outside["smallest"]
             pact_disk = {"budget_bytes": cap_bytes, "reserve_bytes": reserve_bytes,
-                         "non_unit_payload_bytes": int(outside["smallest"]),
+                         "non_unit_payload_bytes": int(outside["smallest"])
+                         - int(names_outside["smallest"]),
+                         "unit_name_bytes": int(names_outside["smallest"]),
                          "unit_budget_bytes": int(pact_budget)}
             print(f"[alloc] PACT byte budget: card {cap_bytes} B - reserve {reserve_bytes} B - "
                   f"{outside['smallest']} B outside the units = {pact_budget} B for the units",
@@ -4766,7 +4783,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 feasible = achieved <= float(args.target_bits)
                 reason = "exact_assignment_payload_over_target"
             else:
-                artifact = _pact_payload_bytes(expanded)
+                artifact, _unit_names = _pact_payload_bytes(expanded)
                 upper = artifact + pact_disk["reserve_bytes"]
                 feasible = upper <= pact_disk["budget_bytes"]
                 reason = "whole_artifact_upper_bound_over_card"

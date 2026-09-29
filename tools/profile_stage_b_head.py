@@ -66,7 +66,7 @@ def walk_intake(config, *, prepared, plan_sha256, scratch):
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.stage_inputs import bound as _bound, same as _same
     from prismaquant.tessera_joint_aura import (
-        _prepare_file_read_bound, _seed_source_identity_cache,
+        _prepare_file_read_bound, seed_source_identity_cache,
         load_measured_anchor_input)
     from prismaquant.tessera_reader import load_declared_reader
 
@@ -114,7 +114,7 @@ def walk_intake(config, *, prepared, plan_sha256, scratch):
     bound = _prepare_file_read_bound(data, max_render_bytes=config["max_render_bytes"])
     cache.require_file_load_sha256(expected, max_file_bytes=bound)
     marks["render_bound_s"] = time.monotonic() - started
-    _seed_source_identity_cache(config, Path(scratch) / "run")
+    seed_source_identity_cache(config, Path(scratch) / "run")
     marks["identity_seed_s"] = time.monotonic() - started
     return {"marks": marks, "units": len(data.formats_by_qname),
             "measured_cells": len(data.cells),

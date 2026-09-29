@@ -82,7 +82,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import closing, contextmanager
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -91,7 +90,7 @@ import re
 import threading
 import time
 
-from .digests import is_sha256hex
+from .digests import bytes_sha256hex, indent2_json_file_bytes, is_sha256hex
 
 HANDOFF_SCHEMA = "prismaquant.joint_quantum_handoff.v1"
 HANDOFF_OWNER_STATES_SCHEMA = "prismaquant.joint_quantum_handoff.owner_states.v1"
@@ -146,8 +145,7 @@ def handoff_seal_sha256(record: Mapping) -> str:
 def handoff_record_bytes(record: Mapping) -> bytes:
     if not isinstance(record, Mapping) or set(record) != set(_RECORD_FIELDS):
         raise QuantumHandoffRefused("not a quantum handoff record")
-    return (json.dumps(dict(record), sort_keys=True, indent=2,
-                       allow_nan=False) + "\n").encode()
+    return indent2_json_file_bytes(dict(record))
 
 
 def handoff_chain_regime_refusal(run_identity: Mapping, *,
@@ -705,7 +703,7 @@ class HandoffStream:
                 "owner_states": {
                     "name": HANDOFF_OWNER_STATES_NAME,
                     "path": str(states_path),
-                    "sha256": hashlib.sha256(states).hexdigest(),
+                    "sha256": bytes_sha256hex(states),
                     "file_bytes": len(states),
                 },
             }
@@ -720,7 +718,7 @@ class HandoffStream:
                 kind=HANDOFF_RECORD_BATCH_KIND, boundary_index=layer)
             origin_batches = owner.produced_origin_batches()
         published = {"path": str(path),
-                     "sha256": hashlib.sha256(payload).hexdigest(),
+                     "sha256": bytes_sha256hex(payload),
                      "handoff_sha256": handoff["handoff_sha256"],
                      "boundary": layer,
                      "generation": session["generation"]}
@@ -805,7 +803,7 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
         raw = path.read_bytes()
     except OSError as exc:
         raise QuantumHandoffRefused(f"handoff unreadable at {path}: {exc}") from exc
-    if hashlib.sha256(raw).hexdigest() != sha256:
+    if bytes_sha256hex(raw) != sha256:
         raise QuantumHandoffRefused(
             f"handoff at {path} does not hash to the bound digest")
     try:
@@ -1060,7 +1058,7 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     def staged(path, entry, label):
         _await_checkpoint_entry(entry, deadline=deadline)
         payload = _read_shared_state_payload(Path(path), entry)
-        if (hashlib.sha256(payload).hexdigest() != entry["sha256"]
+        if (bytes_sha256hex(payload) != entry["sha256"]
                 or len(payload) != entry["file_bytes"]):
             raise RuntimeError(f"{label} changed: {entry['name']}")
         return payload
@@ -1415,7 +1413,7 @@ def band_serial_manifest_bytes(record: Mapping, handoff: Mapping,
     except OSError as exc:
         raise QuantumHandoffRefused(
             f"the sealed readset is unreadable at {path}: {exc}") from exc
-    if hashlib.sha256(wire).hexdigest() != block["manifest_sha256"]:
+    if bytes_sha256hex(wire) != block["manifest_sha256"]:
         raise QuantumHandoffRefused(
             f"the sealed readset at {path} does not hash to the record's digest")
     try:
@@ -1444,7 +1442,7 @@ def require_band_serial_readset(record: Mapping, handoff: Mapping,
             "manifest is derived, not the campaign's read manifest")
     wire = band_serial_manifest_bytes(record, handoff, checkpoint_record,
                                       output_root=output_root)
-    if hashlib.sha256(wire).hexdigest() != data_manifest_sha256:
+    if bytes_sha256hex(wire) != data_manifest_sha256:
         raise QuantumHandoffRefused(
             "the staged data manifest is not the band-serial readset this "
             "handoff derives from the sealed readset")

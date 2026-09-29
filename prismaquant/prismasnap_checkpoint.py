@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-import hashlib
 import json
 import math
 import os
@@ -52,7 +51,7 @@ from .prismasnap import (
     search_diagonal_scale,
 )
 from .schemas import strict_json_loads
-from .digests import SHA256_HEX, file_sha256hex, is_sha256hex
+from .digests import SHA256_HEX, bytes_sha256hex, file_sha256hex, is_sha256hex
 from .tensor_digests import tensor_host_bytes
 
 
@@ -462,7 +461,7 @@ def _tensor_payload_sha256(value: torch.Tensor, *, where: str) -> str:
         {
             "shape": list(contiguous.shape),
             "dtype": str(contiguous.dtype),
-            "bytes_sha256": hashlib.sha256(raw).hexdigest(),
+            "bytes_sha256": bytes_sha256hex(raw),
         },
         where=where,
     )
@@ -560,7 +559,7 @@ def _importance_digest(value: object) -> str:
         raise RuntimeError(
             f"PrismaSnap activation importance must be rank 1, got {array.shape}"
         )
-    return hashlib.sha256(array.tobytes(order="C")).hexdigest()
+    return bytes_sha256hex(array.tobytes(order="C"))
 
 
 class _Checkpoint:
@@ -849,7 +848,7 @@ def _validate_source_identity(
     portable = portable_streamed_model_content_identity(
         identity, where="PrismaSnap portable source identity"
     )
-    return identity, portable, hashlib.sha256(identity_bytes).hexdigest()
+    return identity, portable, bytes_sha256hex(identity_bytes)
 
 
 def _validate_config_semantics(
@@ -923,7 +922,7 @@ def _load_probe(
             or not np.any(importance > 0)
         ):
             raise RuntimeError(f"PrismaSnap probe row {qname!r} has invalid importance")
-    return stats, meta, hashlib.sha256(probe_bytes).hexdigest()
+    return stats, meta, bytes_sha256hex(probe_bytes)
 
 
 def _validate_probe_source_contract(
@@ -1089,12 +1088,12 @@ def _validate_probe_binding_receipt(
             receipt.get("original_probe_sha256"),
             where="PrismaSnap legacy probe binding.original_probe_sha256",
         )
-        != hashlib.sha256(original_bytes).hexdigest()
+        != bytes_sha256hex(original_bytes)
         or _require_sha256(
             receipt.get("normalized_probe_sha256"),
             where="PrismaSnap legacy probe binding.normalized_probe_sha256",
         )
-        != hashlib.sha256(normalized_bytes).hexdigest()
+        != bytes_sha256hex(normalized_bytes)
         or normalized_bytes != expected_bytes
         or receipt.get("source_root") != str(source.root)
         or receipt.get("source_local_content_sha256") != identity.get("content_sha256")
@@ -1158,7 +1157,7 @@ def bind_legacy_text_probe(
         "original_probe_path": str(original),
         "original_probe_sha256": _sha256_file(original),
         "normalized_probe_path": str(output),
-        "normalized_probe_sha256": hashlib.sha256(normalized_bytes).hexdigest(),
+        "normalized_probe_sha256": bytes_sha256hex(normalized_bytes),
         "source_root": str(source.root),
         "source_local_content_sha256": identity["content_sha256"],
         "source_portable_content_sha256": portable["portable_content_sha256"],

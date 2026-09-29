@@ -19,7 +19,7 @@ from prismaquant.joint_cost_quantum import build_quantum_source_runner
 from prismaquant.matmul_arithmetic import bf16_reduction_stamp, pin_matmul_arithmetic
 from prismaquant.perturbed_x_cache import prefetch_exact_activation_cache_entries
 from prismaquant.stage_inputs import read_bound as _read_bound
-from prismaquant.tessera_joint_aura import _seed_source_identity_cache
+from prismaquant.tessera_joint_aura import seed_source_identity_cache
 
 
 def main():
@@ -73,7 +73,7 @@ def main():
     try:
         runner = build_quantum_source_runner(plan, offload_folder=root / "offload")
         source = build_streamed_model_identity(runner, plan["model"],
-            identity_cache_path=_seed_source_identity_cache(plan, root))
+            identity_cache_path=seed_source_identity_cache(plan, root))
         if source != prepared["source_model_identity"]:
             raise ValueError("replayed BF16 source identity differs")
         if source_execution_identity(runner.model) != prepared["source_execution"]:

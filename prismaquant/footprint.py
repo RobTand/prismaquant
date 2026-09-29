@@ -987,6 +987,7 @@ def assignment_artifact_bytes(
     # a passthrough is charged the measured span itself, and cross-check the
     # closed form against it below rather than trusting either alone.
     passthrough_spans: dict[str, int] = {}
+    unit_name_total = 0
     # Per-call memos (#1623). A whole-artifact assignment has ~10^4-10^5
     # members but only a few hundred distinct (format, shape) pairs, and
     # ``fr.get_format`` re-synthesizes a Tessera rung's spec on every call
@@ -1061,7 +1062,9 @@ def assignment_artifact_bytes(
             body_quant += span
         else:
             body_quant += _format_bytes(name, shape)
-            body_quant += _unit_name_bytes(name, qname, shape)
+            member_name_bytes = _unit_name_bytes(name, qname, shape)
+            body_quant += member_name_bytes
+            unit_name_total += member_name_bytes
         if name == "NVFP4":
             body_quant += nvfp4_global_sidecar_bytes(
                 qname,
@@ -1090,6 +1093,10 @@ def assignment_artifact_bytes(
         "export_directory_bytes": None,
         "floor_bytes": floor,
         "body_quant_bytes": body_quant,
+        # The part of body_quant_bytes that is member-name bytes (#1716): the
+        # format prices it per unit, but a unit candidate's memory_bytes leaves
+        # it to the caller.
+        "unit_name_bytes": unit_name_total,
         "reencoded_source_bytes": reenc_src,
         "n_reencoded": len(priced),
         "n_missing_stats": len(missing_stats),

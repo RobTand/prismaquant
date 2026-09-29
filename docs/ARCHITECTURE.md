@@ -44,6 +44,36 @@ weights they stand for (`_anchor_batches`). The source owner's receipt is
 taken after `RowStream.finish`. No demand term, stored format, rendered byte
 or pipeline default changes; the new gate is the dispatcher refusal.
 
+Re-stamped 2026-09-29 (PQ #1719, `claude/tessera-pin-v46`): the exact
+Tessera pin is `83460680ed84e33c82eb62b31345381cc151aa58`, Tessera master's
+merge of #725 (tessera#724), so the pin names the Tessera the GLM-5.3 T8R
+release serve runs. It is a code-only re-pin: the contract stays v45
+(`0869f326…`) and the pin stays schema v2.
+
+- **What moves.** The crossing from `a21d74d8` is that one merge, and its
+  package diff is `compact_prep.py` and `kernel_wire.py`. The routed window
+  intake repacks each unit in place into the loader's scratch instead of
+  making three to five fresh large-pool allocations per projection, which
+  under vLLM's `max_split_size_mb=20` killed the T8R TP2 load on host
+  memory (tessera#725 carries the load replay).
+- **What does not move.** The packaged contract, `export.py` (`2127e82b…`)
+  and `grammar.py` (`9ae1f824…`) are byte-identical, so the reviewed answer,
+  every rate count and the Tessera `layer.json` pin stay as they are. The
+  legal inventory renames the `reader-pin-a21d74d8` byte-state
+  `reader-pin-83460680`.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`, PB action
+  `9701133c041a`) differs from the v45 fixture in `pin.commit` only. The
+  `layer.json` pin (`tests/test_allocator_output_pin_1304.py`, PB action
+  `e4418bbe4020`) matches its committed digests under the new
+  interpreter.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-83460680`,
+  plus a `-tf516` sibling on each Spark. Each is a copy of the `a21d74d8`
+  interpreter with only Tessera reinstalled, built by a host-pinned PB
+  action. dl380g10 (`05240c885661`) and sparklina (`a2f3caa3007c`) are
+  built. The sparky action `3a14fa1bb30c` is queued, so sparky has no
+  `83460680` interpreter yet.
+
 Re-stamped 2026-09-29 (PQ #1702, `claude/tessera-pin-v45`): the exact
 Tessera pin is `a21d74d89bd4eca0493a2f913c71b28b03a39d8b`, Tessera master's merge of #701 (contract v45,
 tessera#694). It crosses the 15 master merges since `a5f3b232` (#656, #699,
@@ -3930,7 +3960,7 @@ directory (an lstat per path component) before the quantum bound its data
 manifest, so neither could resolve through residency. The quantum now calls
 `_load_plan(..., defer_pool_reads=True)`, which admits the identity binding by
 shape; the cache is digest-checked where the quantum reads it (the head
-slice's declared entry, or `_seed_source_identity_cache` on the legacy walk).
+slice's declared entry, or `seed_source_identity_cache` on the legacy walk).
 The plan admission now uses `cost_streaming.check_boundary_storage`, which
 validates the policy without resolving the directory, in every caller;
 `normalize_boundary_storage` still resolves it where storage is opened. The
@@ -4699,6 +4729,10 @@ refusal of a streaming campaign without an adoptable source proof** and **the
 stream head reading projected source weights on the row stream's readers**
 (PQ #1654); see the stamp at the top of this document.
 
+Re-stamped (2026-09-29, `claude/tessera-pin-v46`) for **the Tessera re-pin to
+83460680, the loader fix the T8R release serve runs** (PQ #1719); see the
+stamp at the top of this document.
+
 Re-stamped (2026-09-29, `claude/tessera-pin-v45`) for **the Tessera v45 pin
 and the fused routed lane at every mixed-rate rung** (PQ #1702); see the
 stamp at the top of this document.
@@ -5073,7 +5107,7 @@ about 70 minutes at 12.8 W of 140, inside its GPU reservation.
   cache covers a shard, the pass refuses before hashing a byte, with the
   uncovered bytes and the quantum's command in the message. This holds in
   both modes; it is a performance gate, not a seal.
-- **Run seeding.** With nothing bound, `_seed_source_identity_cache` starts a
+- **Run seeding.** With nothing bound, `seed_source_identity_cache` starts a
   pass from `<output_root>/prepare/source-identity.json` when its own slot
   is empty. The capture owner already adopted that file; the run's streamed
   identity build did not, and rehashed the whole source under its GPU. The
