@@ -1,5 +1,151 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1719, `claude/tessera-pin-v46`): the exact
+Tessera pin is `83460680ed84e33c82eb62b31345381cc151aa58`, Tessera master's
+merge of #725 (tessera#724), so the pin names the Tessera the GLM-5.3 T8R
+release serve runs. It is a code-only re-pin: the contract stays v45
+(`0869f326…`) and the pin stays schema v2.
+
+- **What moves.** The crossing from `a21d74d8` is that one merge, and its
+  package diff is `compact_prep.py` and `kernel_wire.py`. The routed window
+  intake repacks each unit in place into the loader's scratch instead of
+  making three to five fresh large-pool allocations per projection, which
+  under vLLM's `max_split_size_mb=20` killed the T8R TP2 load on host
+  memory (tessera#725 carries the load replay).
+- **What does not move.** The packaged contract, `export.py` (`2127e82b…`)
+  and `grammar.py` (`9ae1f824…`) are byte-identical, so the reviewed answer,
+  every rate count and the Tessera `layer.json` pin stay as they are. The
+  legal inventory renames the `reader-pin-a21d74d8` byte-state
+  `reader-pin-83460680`.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`, PB action
+  `9701133c041a`) differs from the v45 fixture in `pin.commit` only. The
+  `layer.json` pin (`tests/test_allocator_output_pin_1304.py`, PB action
+  `e4418bbe4020`) matches its committed digests under the new
+  interpreter.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-83460680`,
+  plus a `-tf516` sibling on each Spark. Each is a copy of the `a21d74d8`
+  interpreter with only Tessera reinstalled, built by a host-pinned PB
+  action. dl380g10 (`05240c885661`) and sparklina (`a2f3caa3007c`) are
+  built. The sparky action `3a14fa1bb30c` is queued, so sparky has no
+  `83460680` interpreter yet.
+
+Re-stamped 2026-09-29 (PQ #1702, `claude/tessera-pin-v45`): the exact
+Tessera pin is `a21d74d89bd4eca0493a2f913c71b28b03a39d8b`, Tessera master's merge of #701 (contract v45,
+tessera#694). It crosses the 15 master merges since `a5f3b232` (#656, #699,
+#700, #705, #707, #709, #711, #713, #715 to #718, #720, #722 and #723), all
+at contract v44. The packaged contract is v45 (`0869f326…`). The pin stays
+schema v2 (no v45 cell stamps serving code), and the pin JSON's extension
+rows are unchanged.
+
+- **What v45 moves.** The two fused routed lanes
+  (`tessera_routed_fused_e4m3`, `tessera_routed_fused_value`) read
+  `column_rates` [1..8] instead of [4], and their routed-expert launch
+  reaches `column_rates_routed_moe` [1..6], the field PQ #1618 taught the
+  reader. No cell id, rung, serve flag or activation contract moves. The
+  regenerated dev-pin answer literal differs from v44 in exactly those two
+  lanes' `requires`.
+- **What changes hands.** Every rung the four window routed cells list
+  (E4M3 q256 832 to 1088, BF16 1024) plans rates 3 to 5, inside both sets,
+  so every rung makes the fused launch beside the compact one. A mixed-rate
+  routed E4M3 stack recorded the compact pair alone through v44; it now
+  records both pairs in `resolve_unit_route`, in the Tessera export scope
+  gate and in PACT's shape table, where a fused R896 row and a lent R896
+  pool now admit. A lent pool prices R896 at R1024's samples, although
+  Tessera measures R896 at 1.65x to 1.80x of R1024's fused time on its PACT
+  bench. A compact-lane row still admits at those rungs. A shape table
+  measured before v45 therefore keeps pricing them on the compact adapter
+  until it carries fused rows, although the serve runs that adapter only
+  when the fused library is absent or `TESSERA_ROUTED_FUSED=0`. Tessera's
+  measurement (tessera#701; TP1, GLM-5.3-Flash layer 3) has the fused lane
+  2.0x to 3.9x faster than the compact adapter at R832, R960 and R1088.
+- **Resident bytes.** These are tessera#701's arithmetic, not a
+  measurement. At TP2 the fused lane holds 112,224 B per expert per rank:
+  32,320,512 B per MoE layer, 1,357,461,504 B over GLM-5.3-Flash's 42 body
+  MoE layers, and 1,389,782,016 B with the MTP layer. A mixed-rate stack
+  gains all of it against a v44 serve; an R1024 stack gains 4,008,960 B per
+  layer per rank (the run pairs and block descriptors).
+  `TESSERA_ROUTED_FUSED=0` serves the compact adapter alone. The lane builds
+  these tensors at load and writes none of them to the checkpoint. The
+  serving manifest's `resident_bytes_resident_mode` differs on a re-export
+  for another reason: the `a5f3b232` exporter charges a routed stack its
+  decoded tile (about twice the compact lane, tessera#624), and since #720
+  the exporter prices the lane's own tensors. Nothing under `prismaquant/`
+  or `tools/` reads that field, and in Tessera's `src/` only the exporter
+  writes it.
+- **Re-export.** Not needed. The unit blobs do not move across the
+  crossing: #723 publishes the fused frame size and the terminal slot id
+  (tessera#719) as constants with the values the writer already used, and
+  #709 and #711 fold identical-bytes spellings. v45 changes which launch
+  reads a routed stack at load. A served artifact's route and memory
+  evidence is therefore re-taken on a v45 serve, and that serve is also the
+  check that an `a5f3b232` export loads there.
+- **Legal inventory.** Tessera #709 folds the Hessian capture digest's
+  header into `hessian_capture.v1_seal_header`, which moves `export.py`
+  inside `ActivationSource` only (`427a8f97…` -> `2127e82b…`).
+  `_window_bits_for`, `wire_recipe`, the WINDOW constants and `grammar.py`
+  (`9ae1f824…`) are byte-identical, so the new `reader-pin-a21d74d8`
+  byte-state joins the equivalent states and no rate count moves.
+- **Tests.** `tests/test_tessera_lane_routed_rates.py` reads the pinned v45
+  core instead of a stand-in, and holds a v44-shaped table to its v44
+  answer. `test_tessera_lane_requires.py`, `test_tessera_pin_v38_scope.py`
+  and `test_shape_runtime_prices.py` expect both launches at every routed
+  E4M3 rung, the fused R896 row and the lent R896 pool, and refuse R896
+  under a v44-shaped lane.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`, PB action
+  `7b90d69a1381`) differs in 34 paths: the pin's commit and digest, the four
+  `requires` leaves of the answer's two fused lanes, and 28 unit-route
+  `executes` paths. Those are the seven mixed-rate rungs (q256 832 to 960
+  and 1088) on both routed E4M3 cells, 14 units, whose decode and batch
+  regimes now record the fused pair beside the compact one. No route
+  status, qualification, cell id or refusal moves. The Tessera `layer.json`
+  pin (`tests/test_allocator_output_pin_1304.py`, PB actions `9639ecdfd1b1`
+  before and `0a3befd7dd5f` after) moves only in `tessera_dev_pin`:
+  `contract_version` (44 to 45) and `reviewed_contract_sha256` (`47b01355`
+  to `0869f326`). The allocation, the applicability file and the Pareto
+  outputs are byte-identical.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-a21d74d8` on
+  every box, plus a `-tf516` sibling on each Spark. Each is a copy of the
+  `a5f3b232` interpreter with only Tessera reinstalled, built by a
+  host-pinned PB action: dl380g10 `177cb8e57a27`, sparky `53dff8124e53` and
+  sparklina `8323b283eb2d`.
+
+Re-stamped 2026-09-29 (PQ #1692, `claude/mtp-formats`): **the GLM MTP layer
+takes a declared menu, `--mtp-formats`, the MTP twin of `--formats`.**
+- **Before:** the selector's menu was the runtime's attestation alone (`allocator._mtp_rung_attestation`). A release that declares one family could not say so for layer 45.
+- **Measured case (PB `c92e2e3a`):** GLM-5.3 v2 is all Tessera-8, but the open menu picked `TESSERA_BF16_K1_R1024` for the routed experts.
+- **Now:** `glm_mtp_selection.select_mtp_rungs(formats=)` intersects every unit's attested rungs with the declaration before any `--mtp-fixed-formats` pin. BF16 passthrough is included, so it stays on the menu only when named.
+- **Record:** `mtp_formats`, `menu_restricted_rungs` (rung: units removed) and `mtp_formats_unoffered`. The groups remain selections, never `fixed`.
+- **Refusals:** an empty or unknown name, or a declaration that leaves a unit or a group without a complete rung, raises `MtpMenuRefused`. The allocator exits 2, and never falls back to the attested menu.
+- **Unset:** the menu and the record are unchanged.
+
+No default, stage or ship gate changes. Gate: `tests/test_mtp_formats_menu_1692.py`.
+
+Re-stamped 2026-09-29 (PQ #1609, `sonnet/1609-side-bytes`):
+**the Tessera byte accountant now prices a Linear's container side bytes, not
+only its plane region.** `tessera.layout` sizes the planes; a unit on the wire is
+`container(24 B header + canonical manifest + plane region)` inside a `TSRFUSE1`
+blob (10 B header, 14 B + name per member). `tessera_footprint.
+tessera_tensor_payload_breakdown` (schema `prismaquant.tessera_tensor_payload.v2`)
+adds `container_frame_bytes` (both headers and the per-member record),
+`ratio_slack_bytes` (the manifest's ratio fields priced at their widest varint,
+derived from Tessera's own `Writer`, so the price is an upper bound with a few
+bytes of slack), `member_name_bytes` (exact, from the caller's tensor name;
+`footprint.assignment_artifact_bytes` supplies it through the format's
+`unit_name_bytes` hook, one name per expert on a packed stack) and their sum
+`container_side_bytes`. `total_bytes` and `exact_bpw` include it; `payload_bytes`
+stays the plane region. On GLM-5.3 uniform R1024 the allocator sat below the
+export by 28.7 MB over 36,288 routed Linears (748 to 812 B each). Two known
+over-prices remain: the fused header is charged per Linear rather than per blob
+(up to 10 B per extra member), and the manifest's terminal-slot literal and the
+`TSRFUSE1` struct widths are private to Tessera, so the tests measure the writer
+instead of restating them. Every priced byte and rate moves by the same term,
+including `_recipe_identity`, which hashes the breakdown; the byte-accounting
+pins in `tests/test_tessera_footprint.py`, `test_tessera_forest_bytes.py` and
+`test_tessera_legal_domain.py` now subtract `container_side_bytes` from the
+plane-only contract. Gate: `tests/test_tessera_side_bytes.py`.
+
 Re-stamped 2026-09-29 (PQ #1392/#1532, `sonnet/1392-refusals-declared-reads`):
 **the #1374 uncovered-source refusal now guards every GPU entry point that
 builds a source identity, and the source-identity cache flags no longer enter
@@ -3767,7 +3913,7 @@ directory (an lstat per path component) before the quantum bound its data
 manifest, so neither could resolve through residency. The quantum now calls
 `_load_plan(..., defer_pool_reads=True)`, which admits the identity binding by
 shape; the cache is digest-checked where the quantum reads it (the head
-slice's declared entry, or `_seed_source_identity_cache` on the legacy walk).
+slice's declared entry, or `seed_source_identity_cache` on the legacy walk).
 The plan admission now uses `cost_streaming.check_boundary_storage`, which
 validates the policy without resolving the directory, in every caller;
 `normalize_boundary_storage` still resolves it where storage is opened. The
@@ -4528,6 +4674,20 @@ resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
+As of: 2026-09-29 · `claude/tessera-pin-v46`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-29, `claude/tessera-pin-v46`) for **the Tessera re-pin to
+83460680, the loader fix the T8R release serve runs** (PQ #1719); see the
+stamp at the top of this document.
+
+As of: 2026-09-29 · `claude/tessera-pin-v45`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-29, `claude/tessera-pin-v45`) for **the Tessera v45 pin
+and the fused routed lane at every mixed-rate rung** (PQ #1702); see the
+stamp at the top of this document.
+
 As of: 2026-09-29 · `sonnet/1392-refusals-declared-reads`.
 Stamps follow, newest first, each recording its own branch and date.
 
@@ -4892,7 +5052,7 @@ about 70 minutes at 12.8 W of 140, inside its GPU reservation.
   cache covers a shard, the pass refuses before hashing a byte, with the
   uncovered bytes and the quantum's command in the message. This holds in
   both modes; it is a performance gate, not a seal.
-- **Run seeding.** With nothing bound, `_seed_source_identity_cache` starts a
+- **Run seeding.** With nothing bound, `seed_source_identity_cache` starts a
   pass from `<output_root>/prepare/source-identity.json` when its own slot
   is empty. The capture owner already adopted that file; the run's streamed
   identity build did not, and rehashed the whole source under its GPU. The
@@ -5127,6 +5287,12 @@ merge. For GLM-5.3, routed E4M3 is attested at R896 and routed BF16 at R1024.
 one probe identity. It carries their rows unchanged, records each part's source,
 and refuses a part that describes another layer, unit set or probe, or that
 prices a rung twice.
+
+`--mtp-formats` (PQ #1692, optional) declares the MTP layer's menu:
+- the attested rungs, BF16 passthrough included, are intersected with the named formats before any `--mtp-fixed-formats` pin;
+- the record names the declaration (`mtp_formats`), each removed rung's unit count (`menu_restricted_rungs`) and any named format offered to no unit (`mtp_formats_unoffered`);
+- a unit or group left without a complete rung exits 2;
+- unset, the menu and the record are unchanged.
 
 Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
 render read-ahead through the IO engine** (PQ #1291, #1294): the retained
@@ -22441,19 +22607,22 @@ alone:
    bytes) and omitted when the cell states none — and Tessera's
    `decide_lane_requirements` decides the field only for `routed_moe`: absent
    structure is refused by name, dense ignores it, and a routed unit outside the
-   set is refused with the compact adapter named as the route it keeps. The
-   installed pin (contract v44 and earlier) publishes no such field, so nothing
-   changes hands until the pin moves; a v45 table is read, not refused as an
-   unknown requirement (`tests/test_tessera_lane_routed_rates.py`).
-   Consequence on the pinned table today: nothing changes hands — the only
-   cells that launch through the window-GEMV lane are the two streamed dense
-   E4M3 cells at rung 1024, whose plan (`rates (4,)`, 14-bit window, WINDOW /
-   CHANNEL, arity 1, no decoration) the lane reads; every E4M3 resident,
-   BF16 and E2M1 cell launches through torch or the NVFP4 lane. The gate has
-   teeth for the row the contract already routes: the lane's `routes` names
-   `TESSERA_BF16`, and BF16's one attested rung (1792 → column rate 7) is
-   outside `column_rates [1,2,4]`, so a BF16 cell that ever claimed the
-   window-GEMV launch would be refused here by name rather than exported to a
+   set is refused with the compact adapter named as the route it keeps.
+   Since the v45 pin (PQ #1702) both fused routed lanes publish the field:
+   `column_rates` [1..8] with `column_rates_routed_moe` [1..6]. A v44-shaped
+   table, whose fused lanes read [4] and publish no such field, still reads
+   and decides as v44 did (`tests/test_tessera_lane_routed_rates.py`).
+   Consequence on the pinned table (v45): the lane-bearing launches are the
+   fused routed pair in the four window routed cells
+   (`tessera_{e4m3,bf16}_k1_routed_moe_sm121_{decode,batch}_resident`). Every
+   rung they list (E4M3 q256 832 to 1088, BF16 1024) plans rates 3 to 5,
+   inside both sets, so every rung makes the fused launch beside the compact
+   one. No pinned cell launches through the window-GEMV lane: the dense
+   window cells launch the in-plugin `tessera::fused_window_dense` and
+   `tessera::window_gemm_dense`, and the E2M1 cells launch
+   `tessera.kernel_a4`. The window-GEMV gate still has teeth: a cell that
+   claimed that lane at a plan outside `column_rates [1,2,4]` (the dense E2M1
+   q896 rung plans rate 7) is refused here by name rather than exported to a
    kernel that cannot read it (`tests/test_tessera_lane_requires.py`).
    **A lane launch is made only at a rung its lane admits** (contract v42, PQ
    #1274). Tessera derives a cell's `executes` as the union, over the rungs it
@@ -24836,6 +25005,7 @@ evidence either way and should be quoted as a range.
 | Metric-era mixing | old harness records measured on wikitext **train** | check `eval_split`/`metric_era` (`validation_harness.py:147-152`) before comparing |
 | Tied embeddings (`tie_word_embeddings`) | the cost stage died on the `lm_head` shard with `NotImplementedError: Cannot copy out of meta tensor` — the checkpoint ships no `lm_head` tensor at all, so the head is a meta alias of `embed_tokens` | `prismaquant/tied_embeddings.py` (landed `d058267`). The head is **materialized** — phase-2's CE backward runs through it, so meta is never acceptable — via transformers' own `get_output_embeddings()`/`get_input_embeddings()`, and **excluded from probe/cost/DP**: a tie means one Parameter, so quantizing the head quantizes the embedding, and probe/cost measure only the head's *output* MSE while the identical perturbation enters every token embedding and thus layer 0 for the whole forward — a cost no surrogate, not even L2 perturbed-X, can observe. There is also nothing to re-encode (no `lm_head.weight` bytes), so `footprint` would either fail to resolve the name or subtract the embedding from the floor while it still ships verbatim. Detection = config declaration AND a source index with no head tensor, never a name guess; a meta head with no declared tie raises immediately. The allocator exclusion (`allocator.py:989-1022`, called `:1465`) also covers probes built before the fix. It ignores `--allow-pinned lm_head` by design — the tie is a property of the checkpoint, not of the serving profile. Gemma4-31B completed probe → cost → allocate → export for the first time on this fix (**enablement, not a quality claim** — unserved, no KL/PPL) |
 | KV-sharing layers (`num_kv_shared_layers > 0`) | phase-3 forwards each layer in isolation and handed the consumer a **detached** K/V, so the storing layer's `k_proj`/`v_proj` Fisher never saw any consumer's contribution — and phase-3 chains each layer's input gradient downward, so the truncation was inherited by every layer *below* the producer too | The KV-cotangent path (`b6ec9cb`): consumers get grad-enabled leaf clones whose `.grad` is the cotangent they contribute, accumulated per storing layer and used to seed that layer's backward alongside its own output cotangent, in one reverse pass (`sensitivity_probe.py:1284-1314`, `:3185-3222`; `incremental_probe.py:1903-2369`). Verified by **exact equivalence** on an fp64 synthetic model — h_trace bit-identical to one end-to-end autograd backward (rel err 0.00e+00) — where the pre-fix protocol under-counts `k_proj` 85.1% and `v_proj` 38.5%. Guard semantics were **inverted, not deleted**: `PRISMAQUANT_ALLOW_KV_SHARED_FISHER` no longer gates KV-sharing models generally; the probe hard-errors only when the path is turned *off* (`PRISMAQUANT_KV_COTANGENT=0`) on a model that needs it, and `PRISMAQUANT_ALLOW_KV_SHARED_FISHER=1` still reproduces a pre-fix probe (`incremental_probe.py:995-1020`). Models without KV sharing are bit-for-bit unaffected either way. **Honest limit:** no real `num_kv_shared_layers > 0` checkpoint has been probed; those percentages are a toy correctness demonstration, not a quality claim |
+| No pytest in the GLM campaign image | The image `localhost/prismaquant/spark-vllm-nccl230@sha256:f8dbe1a0…` (torch 2.13.0+cu130) carries no test tooling: `/usr/bin/python3: No module named pytest`. An in-image GPU tests arm exited 0 because its harness guarded the command with `\|\| echo`, so nothing in the action status showed that no test ran (Tessera #668 A/B, PB `ec986f8c09eeda27`, sparklina; PQ #1526) | An in-image GPU check must fail closed: probe `python -c "import pytest"` first and exit non-zero when it is missing, and never guard the test command with `\|\| echo` or `\|\| true`. Read the pass and skip counts from the log, not the exit status alone. Tests that need the campaign runtime's torch build stay in-image only when the harness fails closed; otherwise run them on a pinned host venv through `pbtest --gpu`, which carries the older torch 2.11. Adding a test layer to a derived image is the alternative; this note does not decide it |
 
 ## 8. Model support: the plugin architecture
 

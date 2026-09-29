@@ -31,6 +31,7 @@ from prismaquant.tessera_allocator import build_tessera_allocator_candidate
 from prismaquant.tessera_footprint import (
     TesseraShapeRate,
     tessera_exact_bits_for_shape,
+    tessera_tensor_payload_breakdown,
 )
 
 tessera_export = pytest.importorskip("tessera.export")
@@ -80,6 +81,24 @@ def _reference_bits(
         window_bits=window_bits,
     )
     return rate * rows * columns
+
+
+def _side_bits(family: str, rung: int, rows: int, columns: int) -> int:
+    """The container side bits one ``(rows, columns)`` unit pays (#1609).
+
+    ``_reference_bits`` is the plane region only.  Since PR #1690 the registry
+    price is the whole unit: that region plus the canonical manifest, the
+    24-byte container header and the TSRFUSE1 frame, which
+    ``tessera_tensor_payload_breakdown`` sizes as ``container_side_bytes``.
+    The member name is the unit's, not the format's, so it is not priced here
+    (no ``member_name``), exactly as the registry leaves it out.
+    """
+
+    side = int(tessera_tensor_payload_breakdown(
+        (rows, columns), family=family, body_rate_q256=rung,
+    )["container_side_bytes"])
+    assert side > 0
+    return 8 * side
 
 
 @pytest.fixture()
@@ -132,12 +151,16 @@ def test_the_flip_makes_the_rung_synthesizable_not_unsynthesizable(flipped_e4m3)
 
 
 def test_the_price_is_a_function_and_it_is_terminal_rate(flipped_e4m3):
-    """``bits_for_shape`` equals Tessera's accountant exactly, at every shape."""
+    """``bits_for_shape`` equals Tessera's accountant exactly, at every shape.
+
+    The plane region is ``terminal_rate``'s; the side bytes ride beside it.
+    """
 
     for rung in RUNGS:
         spec = fr.get_format(f"TESSERA_E4M3_K1_R{rung}")
         for rows, columns in SHAPES:
-            want = _reference_bits(rung, rows, columns)
+            want = (_reference_bits(rung, rows, columns)
+                    + _side_bits("TESSERA_E4M3_K1", rung, rows, columns))
             assert spec.bits_for_shape((rows, columns)) == want
             assert spec.memory_bytes_for_shape((rows, columns)) == math.ceil(
                 want / 8
@@ -154,8 +177,15 @@ def test_the_rate_really_does_depend_on_the_shape(flipped_e4m3):
     spec = fr.get_format("TESSERA_E4M3_K1_R1024")
     wide = spec.effective_bits_for_shape((2048, 4096))
     narrow = spec.effective_bits_for_shape((96, 768))
-    assert wide == pytest.approx(4.0078125)
-    assert narrow == pytest.approx(4.465277777777778)
+    # The plane-region rates (4.0078125 and 4.465277...) plus each unit's
+    # container side bits spread over its own weights.
+    for got, (rows, columns), plane in ((wide, (2048, 4096), 4.0078125),
+                                        (narrow, (96, 768), 4.465277777777778)):
+        assert _reference_bits(1024, rows, columns) / (rows * columns) == (
+            pytest.approx(plane))
+        assert got == pytest.approx(
+            plane + _side_bits("TESSERA_E4M3_K1", 1024, rows, columns)
+            / (rows * columns))
     # A single scalar rate would have priced the narrow tensor 0.457 bpp light,
     # which is the whole reason this axis exists.
     assert narrow - wide > 0.4
@@ -203,7 +233,8 @@ def test_an_allocator_candidate_is_priced_at_its_own_tensor(flipped_e4m3):
             alphabets={},
             predicted_dloss=1e-3,
         )
-        want = _reference_bits(1024, rows, columns)
+        want = (_reference_bits(1024, rows, columns)
+                + _side_bits("TESSERA_E4M3_K1", 1024, rows, columns))
         assert candidate.memory_bytes == math.ceil(want / 8)
         assert candidate.footprint["body_kind"] == "window"
         assert candidate.footprint["window_bits"] == WINDOW_BITS
@@ -239,7 +270,13 @@ def test_an_assignment_footprint_prices_the_unit_at_its_shape(flipped_e4m3):
         regime="bf16",
         source_manifest=None,
     )
-    want = math.ceil(_reference_bits(1024, rows, columns) / 8)
+    # The unit's price, plus the member name the accountant adds per unit
+    # (#1609): the exporter frames the unit under its projection role, the
+    # last component of "layer.w" (no ".weight" leaf to strip), as UTF-8.
+    name_bytes = len("w".encode("utf-8"))
+    want = math.ceil((_reference_bits(1024, rows, columns)
+                      + _side_bits("TESSERA_E4M3_K1", 1024, rows, columns)) / 8)
+    want += name_bytes
     assert report["body_quant_bytes"] == want
     assert report["artifact_bytes"] == 1600 + want
 
@@ -273,9 +310,11 @@ def test_the_e2m1_families_do_not_move_when_e4m3_flips(flipped_e4m3):
     assert spec.bits_for_shape_fn is not None
     with pytest.raises(ValueError, match="shape-dependent"):
         spec.effective_bits
-    # 4.0 in the position domain, plus one 512-byte forest over the unit.
+    # 4.0 in the position domain, plus one 512-byte forest over the unit, plus
+    # the unit's container side bytes.
     assert spec.bits_for_shape((2048, 4096)) == (
-        Fraction(4) * 2048 * 4096 + 512 * 8)
+        Fraction(4) * 2048 * 4096 + 512 * 8
+        + _side_bits("TESSERA_E2M1_K2", 896, 2048, 4096))
     family = tfm.get_tessera_family("TESSERA_E2M1_K2")
     assert tfm.family_rate_cap(family) == 7
     assert tfm.family_q256_bounds(family) == (128, 896)
@@ -308,7 +347,8 @@ def test_the_unpatched_wire_for_e4m3_is_the_window_over_channel():
     assert spec.bits_for_shape_fn is not None
     for shape in SHAPES:
         assert spec.bits_for_shape(shape) == _reference_bits(
-            1024, *shape, window_bits=LIVE_WINDOW_BITS)
+            1024, *shape, window_bits=LIVE_WINDOW_BITS) + _side_bits(
+            "TESSERA_E4M3_K1", 1024, *shape)
     with pytest.raises(ValueError, match="shape-dependent"):
         spec.effective_bits
 
@@ -355,7 +395,8 @@ def test_the_sub_cap_e2m1x2_wire_is_shape_dependent_too():
     assert at_cap.bits_for_shape_fn is not None
     for rows, columns in ((2048, 4096), (96, 768)):
         assert at_cap.bits_for_shape((rows, columns)) == (
-            Fraction(4) * rows * columns + 512 * 8)
+            Fraction(4) * rows * columns + 512 * 8
+            + _side_bits("TESSERA_E2M1_K2", 896, rows, columns))
 
 
 # ---------------------------------------------------------------------------
@@ -380,8 +421,11 @@ GLM_PACKED_SHAPE = (GLM_EXPERTS, *GLM_EXPERT_SHAPE)
 
 def test_a_packed_expert_stack_is_priced_as_one_unit_per_expert():
     spec = fr.get_format("TESSERA_E4M3_K1_R1024")
-    per_expert_bits = _reference_bits(
+    plane_bits = _reference_bits(
         1024, *GLM_EXPERT_SHAPE, window_bits=LIVE_WINDOW_BITS)
+    # Each expert is its own unit on the wire, so each pays its own side bytes.
+    side_bits = _side_bits("TESSERA_E4M3_K1", 1024, *GLM_EXPERT_SHAPE)
+    per_expert_bits = plane_bits + side_bits
     per_expert_bytes = math.ceil(per_expert_bits / 8)
 
     assert spec.bits_for_shape(GLM_PACKED_SHAPE) == GLM_EXPERTS * per_expert_bits
@@ -389,12 +433,13 @@ def test_a_packed_expert_stack_is_priced_as_one_unit_per_expert():
         GLM_EXPERTS * per_expert_bytes
     )
     # The fused reading -- one unit of (experts*out, in) -- would charge one
-    # window table instead of 128.  Naming the difference is what makes this a
-    # test of the convention rather than of the arithmetic.
+    # window table instead of 128.  Naming the difference in the plane region
+    # is what makes this a test of the convention rather than of the arithmetic.
     fused_bits = _reference_bits(
         1024, GLM_EXPERTS * GLM_EXPERT_SHAPE[0], GLM_EXPERT_SHAPE[1],
         window_bits=LIVE_WINDOW_BITS)
-    assert spec.bits_for_shape(GLM_PACKED_SHAPE) - fused_bits == (
+    assert (spec.bits_for_shape(GLM_PACKED_SHAPE) - GLM_EXPERTS * side_bits
+            - fused_bits) == (
         (GLM_EXPERTS - 1) * (1 << LIVE_WINDOW_BITS) * 8
     )
     # 1-D and 4-D remain refused: neither says how many units it is.
@@ -441,9 +486,10 @@ def test_the_allocator_reaches_a_rate_for_a_packed_expert_format():
         }
     }
     _ordered, rates = _sort_specs_by_serialized_rate([spec], stats)
-    want = _reference_bits(
+    want = (_reference_bits(
         1024, *GLM_EXPERT_SHAPE, window_bits=LIVE_WINDOW_BITS
-    ) / (GLM_EXPERT_SHAPE[0] * GLM_EXPERT_SHAPE[1])
+    ) + _side_bits("TESSERA_E4M3_K1", 1024, *GLM_EXPERT_SHAPE)) / (
+        GLM_EXPERT_SHAPE[0] * GLM_EXPERT_SHAPE[1])
     assert rates[spec.name] == pytest.approx(float(want))
 
 
@@ -506,8 +552,9 @@ def test_decision_unit_construction_survives_a_packed_expert():
         assert option.memory_bytes > 0
     want = sum(
         experts * math.ceil(
-            _reference_bits(1024, shape[0], shape[1],
-                            window_bits=LIVE_WINDOW_BITS) / 8
+            (_reference_bits(1024, shape[0], shape[1],
+                             window_bits=LIVE_WINDOW_BITS)
+             + _side_bits("TESSERA_E4M3_K1", 1024, shape[0], shape[1])) / 8
         )
         for shape in ((2 * out_features, in_features), (in_features, out_features))
     )

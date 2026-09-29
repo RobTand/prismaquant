@@ -347,10 +347,15 @@ def fused_key(qname: str, surface):
 
 
 def charged_bits(family: str, rung: int, shape) -> Fraction:
-    """PrismaQuant's own charged wire bits for this unit.
+    """PrismaQuant's own charged plane-region bits for this unit.
 
-    The allocator's byte budget is spent in this currency, so it is the number
-    an export must reproduce.  Computed in-tree with
+    This is the plane region the export must reproduce.  It is not the whole
+    allocator price: since #1609 (PR #1690) the registry price, which the
+    allocator's byte budget is spent in, adds the unit's container side bytes
+    (manifest, container header, fused frame) that
+    ``tessera_footprint.tessera_tensor_payload_breakdown`` sizes beside this
+    region, and the whole-artifact accountant adds the member name per unit.
+    Computed in-tree with
     ``prismaquant.tessera_formats.artifact_bpp`` -- the #1587 inversion of the
     old ``--prismaquant`` tree pointer: two accountings of one wire is the
     drift this sidecar exists to catch, and PrismaQuant owns the accounting.

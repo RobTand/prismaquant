@@ -46,6 +46,10 @@ dependencies = [
     "tqdm",
     # Publisher validates model-card front matter without loading Hub bindings.
     "PyYAML>=6.0",
+    # tools/measure_served_gold.py imports it at module top (:72). It was only
+    # ever installed transitively, so a venv without it aborted collection of
+    # tests/test_measure_served_gold.py (PQ #1454, #1458).
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]

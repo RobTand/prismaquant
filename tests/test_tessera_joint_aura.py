@@ -511,17 +511,17 @@ def test_bound_source_identity_seed_refuses_changed_or_conflicting_bytes(tmp_pat
     binding = {"path": str(source), "sha256": bridge._sha(source)}
     new_root = tmp_path / "new-prepare"
     new_root.mkdir()
-    destination = bridge._seed_source_identity_cache(
+    destination = bridge.seed_source_identity_cache(
         {"source_identity_cache": binding}, new_root)
     assert destination.read_bytes() == source.read_bytes()
 
     destination.write_bytes(b"conflicting local proof")
     with pytest.raises(ValueError, match="existing output source identity cache"):
-        bridge._seed_source_identity_cache({"source_identity_cache": binding}, new_root)
+        bridge.seed_source_identity_cache({"source_identity_cache": binding}, new_root)
     destination.unlink()
     source.write_bytes(b"changed bound proof")
     with pytest.raises(ValueError, match="source identity cache: artifact checksum"):
-        bridge._seed_source_identity_cache({"source_identity_cache": binding}, new_root)
+        bridge.seed_source_identity_cache({"source_identity_cache": binding}, new_root)
 
 
 @pytest.mark.parametrize("defect", ["missing", "disabled", "auto_slots", "zero_workers",
@@ -1226,7 +1226,7 @@ def test_bounded_environment_refuses_before_metadata_and_device(tmp_path, monkey
     monkeypatch.setattr(gpu_guard, "require_cuda_hot_path", lambda *_args: None)
     monkeypatch.setenv("PRISMAQUANT_RELEASE_SOURCE_PAGES", "1")
     monkeypatch.delenv("MIMALLOC_PURGE_DELAY", raising=False)
-    monkeypatch.setattr(bridge, "_seed_source_identity_cache",
+    monkeypatch.setattr(bridge, "seed_source_identity_cache",
                         lambda *args: pytest.fail("metadata intake preceded environment refusal"))
     monkeypatch.setattr(bridge, "_apply_device_envelope",
                         lambda *args, **kwargs: pytest.fail("device touched before environment refusal"))

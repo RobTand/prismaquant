@@ -3512,14 +3512,14 @@ def _build_quantum_source_identity(runner, config, *, run_dir,
     """
     from .cost_streaming import build_streamed_model_identity
     from .tessera_joint_aura import (
-        _seed_source_identity_cache,
+        seed_source_identity_cache,
         source_identity_proof_kwargs,
     )
 
     if identity_cache_bytes is not None:
         identity_cache = {"identity_cache_bytes": identity_cache_bytes}
     else:
-        identity_cache = {"identity_cache_path": _seed_source_identity_cache(
+        identity_cache = {"identity_cache_path": seed_source_identity_cache(
             config, run_dir)}
     if digest_cache_bytes is not None:
         run_dir = Path(run_dir)
@@ -3564,7 +3564,7 @@ def run_layer_quantum(
         ACTIVATION_SCALE_ENV,
         _prepare_file_read_bound,
         _preflight_run_prepared,
-        _seed_source_identity_cache,
+        seed_source_identity_cache,
         load_measured_anchor_input,
         require_prepared_digests,
     )

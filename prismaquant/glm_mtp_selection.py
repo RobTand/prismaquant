@@ -285,9 +285,60 @@ def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
     return rows, {rung: sorted(units) for rung, units in sorted(unattested.items())}
 
 
+class MtpMenuRefused(ValueError):
+    """A declared MTP menu (``formats``) that the priced, attested rows cannot honour."""
+
+
+def _declared_menu(formats) -> list[str]:
+    """The registry spellings of a declared MTP menu; an empty or unknown name refuses."""
+    from . import format_registry as fr
+
+    names = [str(name).strip() for name in formats]
+    if not names or not all(names):
+        raise MtpMenuRefused("MTP formats must name at least one format, and no empty name")
+    declared = set()
+    for name in names:
+        try:
+            fr.get_format(name)
+        except (KeyError, ValueError) as exc:
+            raise MtpMenuRefused(f"MTP formats name an unknown format: {name!r}") from exc
+        declared.add(fr.canonical_format_name(name))
+    return sorted(declared)
+
+
+def _restrict_to_declared(rows: dict, declared) -> tuple[dict, dict, list]:
+    """Intersect each unit's offered rungs with the declared menu.
+
+    BF16 passthrough is a rung like any other here: a declaration that omits
+    it removes it. Returns the kept rows, ``{rung: units removed}`` and the
+    declared names offered to no unit. A unit left with no rung refuses: the
+    declaration is never widened back to the attested menu.
+    """
+    from . import format_registry as fr
+
+    wanted = set(declared)
+    kept, removed, offered = {}, {}, set()
+    for unit, menu in rows.items():
+        kept[unit] = {}
+        for rung, value in menu.items():
+            canonical = fr.canonical_format_name(rung)
+            if canonical in wanted:
+                kept[unit][rung] = value
+                offered.add(canonical)
+            else:
+                removed[rung] = removed.get(rung, 0) + 1
+    empty = sorted(unit for unit, menu in kept.items() if not menu)
+    if empty:
+        raise MtpMenuRefused(
+            f"MTP formats {sorted(wanted)} leave {len(empty)} unit(s) with an empty "
+            f"menu (not priced, not attested, or not a BF16 source): {empty[:3]}")
+    return kept, dict(sorted(removed.items())), sorted(wanted - offered)
+
+
 def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
                      acceptance_points=(), k: int = 1, eligible=None,
-                     fixed_formats: Mapping[str, str] | None = None) -> dict:
+                     fixed_formats: Mapping[str, str] | None = None,
+                     formats=None) -> dict:
     """The MTP assignment and its selection record under ``byte_budget``.
 
     ``constants`` are the caller's declared serve constants
@@ -298,6 +349,12 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     (principle 14); a priced rung it refuses is left off the menu and recorded.
     ``fixed_formats`` restricts named whole groups to one format, intersected
     with that same eligible menu. A missing or unpriced group format refuses.
+    ``formats``, when given, declares the layer's menu (PQ #1692), the MTP
+    twin of the body's ``--formats``: every unit's attested rungs, BF16
+    passthrough included, are intersected with it before any pin, and the
+    record names the declaration and what it removed. The groups remain
+    selections. A declaration that leaves a unit or a group without a rung
+    raises ``MtpMenuRefused``. ``None`` leaves the menu and record unchanged.
     """
     from . import mtp_rung_selection as canon
 
@@ -307,6 +364,12 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     probe_sha256, probe = _mtp_probe(payload)
     rows, unattested = _unit_rows(payload, eligible)
     groups = {name: tuple(members) for name, members in payload["groups"].items()}
+    declared_record = {}
+    if formats is not None:
+        declared = _declared_menu(formats)
+        rows, restricted, unoffered = _restrict_to_declared(rows, declared)
+        declared_record = {"mtp_formats": declared, "menu_restricted_rungs": restricted,
+                           "mtp_formats_unoffered": unoffered}
     if fixed_formats is not None:
         if not isinstance(fixed_formats, Mapping) or any(
                 not isinstance(name, str) or not isinstance(fmt, str) or not fmt
@@ -323,6 +386,15 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
                     f"{len(absent)} member(s): {absent[:3]}")
             for unit in groups[group]:
                 rows[unit] = {fmt: rows[unit][fmt]}
+    if formats is not None:
+        bare = {group: sorted(set().union(*(rows[unit] for unit in members)))
+                for group, members in groups.items()
+                if not set.intersection(*(set(rows[unit]) for unit in members))}
+        if bare:
+            raise MtpMenuRefused(
+                f"MTP formats {declared_record['mtp_formats']} leave group(s) "
+                f"{sorted(bare)} with no complete rung; each member keeps a rung, but no "
+                f"rung is priced and attested for every member: {bare}")
     menu, incomplete = canon.group_product_menu(groups, rows, params=payload["params"])
     serve = canon.ServeConstants(t_ms=float(constants["t_ms"]), d0_ms=float(constants["d0_ms"]),
                                  c_ms_per_bit=float(constants["c_ms_per_bit"]))
@@ -365,6 +437,7 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         "constants_source": str(constants.get("source", "undeclared")),
         "incomplete_rungs": incomplete,
         "unattested_rungs": {rung: len(units) for rung, units in unattested.items()},
+        **declared_record,
         "selection": result.provenance,
         **({"fixed_formats": dict(sorted(fixed_formats.items()))}
            if fixed_formats is not None else {}),

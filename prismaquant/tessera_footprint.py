@@ -25,7 +25,7 @@ audited back to the planes it was priced from.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from fractions import Fraction
 from functools import lru_cache
 
@@ -43,16 +43,20 @@ from .tessera_formats import (
     validate_body_rate_q256,
 )
 from .digests import DIRECT_ASCII_LAX_DEFAULT_STR
+from .name_projection import strip_weight_leaf
 
 __all__ = [
     "TESSERA_TENSOR_PAYLOAD_SCHEMA",
     "TesseraShapeRate",
     "tessera_exact_bits_for_shape",
+    "tessera_member_name_bytes",
     "tessera_tensor_payload_breakdown",
     "validate_tessera_tensor_payload_breakdown",
 ]
 
-TESSERA_TENSOR_PAYLOAD_SCHEMA = "prismaquant.tessera_tensor_payload.v1"
+# v2 (#1609): the breakdown prices the container side bytes (manifest,
+# container header, fused framing, member name) beside the plane region.
+TESSERA_TENSOR_PAYLOAD_SCHEMA = "prismaquant.tessera_tensor_payload.v2"
 
 #: Tessera's group/half geometry: the block scale planes are laid out per 32
 #: weights (the S6b E8M0 base byte) and per 16 (the S6b nibble refinement, or
@@ -68,6 +72,29 @@ try:  # pragma: no cover
     from tessera.grammar import forest_plane_bytes
     from tessera.layout import TerminalSpec, build_planes, build_terminal
     from tessera.manifest import BodyKind, Geometry
+    # The side bytes a unit carries beside its plane region (#1609): the
+    # container header, the canonical manifest and the TSRFUSE1 framing.  All
+    # of it is sized by Tessera's own writers, called and never restated.
+    from tessera.canonical import Writer as _CanonicalWriter, fits_uint
+    from tessera.container import HEADER_BYTES as _CONTAINER_HEADER_BYTES
+    # Underscore-private in Tessera, but they are the published TSRFUSE1 wire
+    # constants (`<8sBB` once per blob, `<HIQ` per member); tessera.fused
+    # publishes no size function to call instead.
+    from tessera.fused import _HEADER as _FUSED_HEADER, _MEMBER as _FUSED_MEMBER
+    from tessera.grammar import bresenham_rate_schedule, root_from_q256
+    from tessera.layout import ZERO_DIGEST
+    from tessera.manifest import (
+        ArrangementMode,
+        BranchIdentity,
+        ContainerClass,
+        Manifest,
+        ReachParams,
+        RotationState,
+        ScalePlane,
+        ScalePlaneKind,
+        TerminalRecord,
+    )
+    from tessera.planes import PlaneDescriptor
 except ImportError as exc:  # pragma: no cover
     raise TesseraFormatError(
         "prismaquant.tessera_footprint requires the `tessera` package, which "
@@ -135,6 +162,132 @@ def _alphabet_bytes(
     return total
 
 
+@lru_cache(maxsize=1)
+def _max_ratio_bytes() -> int:
+    """The widest ``ratio`` the canonical codec can write, from its own writer.
+
+    A ratio is ``sint(numerator) + uint(denominator)``; the widest is the
+    largest numerator and denominator ``fits_uint`` admits.  Asked of
+    ``tessera.canonical.Writer`` rather than written down, so the bound moves
+    when the codec does.
+    """
+    top = 1
+    while fits_uint(top * 2 + 1):
+        top = top * 2 + 1
+    return len(_CanonicalWriter().ratio(Fraction((top - 1) // 2, top)).bytes)
+
+
+def _fused_member_bytes(member_name: str) -> int:
+    """TSRFUSE1 bytes one member costs beside its blob: row plus UTF-8 name."""
+    return _FUSED_MEMBER.size + len(member_name.encode("utf-8"))
+
+
+def _container_side_bytes(
+    *, spec, wire, rung, rows, columns, geometry, rates, planes, record,
+    plane, body, span, window_bits, unit_id,
+) -> "tuple[int, int]":
+    """Bytes one unit carries beside its plane region, as an upper bound.
+
+    Built by encoding a placeholder ``tessera.manifest.Manifest`` of the unit's
+    own shape and rung with Tessera's writer, then adding the container header
+    and the TSRFUSE1 framing that is not the member name.  Every field that
+    depends on weights is a fixed-width digest, so the manifest length is
+    shape-determined except for the ratios (a scale plane's global scale and a
+    reach sigma), which are priced at the codec's widest ratio.  Returns
+    ``(side_bytes_without_member_name, ratio_slack_bytes)``.
+    """
+    def _as(cls, obj, **extra):
+        kw = {f.name: getattr(obj, f.name) for f in fields(cls)
+              if hasattr(obj, f.name)}
+        kw.update(extra)
+        return cls(**kw)
+
+    descs = tuple(
+        p if isinstance(p, PlaneDescriptor)
+        else _as(PlaneDescriptor, p, content_digest=ZERO_DIGEST)
+        for p in planes
+    )
+    terminal = (
+        record if isinstance(record, TerminalRecord)
+        else _as(TerminalRecord, record, payload_digest=ZERO_DIGEST)
+    )
+    ratio = _max_ratio_bytes()
+    placeholder_ratio = len(_CanonicalWriter().ratio(Fraction(1)).bytes)
+    slack = 0
+    if plane == "s6b":
+        scale_plane = ScalePlane.s6b()
+    elif plane == "lut16":
+        scale_plane = ScalePlane.lut(bytes(range(0x08, 0x18)), 1.0)
+        slack += ratio - placeholder_ratio
+    elif plane == "channel":
+        scale_plane = ScalePlane.channel(1.0)
+        slack += ratio - placeholder_ratio
+    else:  # pragma: no cover - the plane names are a closed set upstream
+        raise TesseraFormatError(f"{spec.name}: unknown scale plane {plane!r}")
+    root_q256 = rung * spec.arity
+    arrangement = (
+        ArrangementMode.BRESENHAM
+        if tuple(rates) == tuple(bresenham_rate_schedule(
+            root_from_q256(root_q256), columns, cap=None))
+        else ArrangementMode.STORED
+    )
+    # Reach is stored only when a byte-moving spelling is set; the flag is one
+    # byte either way, and each stored sigma is one presence byte plus a ratio.
+    reach = None
+    reach_slack = 0
+    if body is BodyKind.WINDOW and (
+            getattr(wire, "window_seed", 0)
+            or getattr(wire, "window_sigma", None) is not None):
+        reach = ReachParams(window_seed=int(getattr(wire, "window_seed", 0)),
+                            window_sigma=getattr(wire, "window_sigma", None))
+    if plane == "channel" and getattr(wire, "channel_sigma", None) is not None:
+        reach = ReachParams(
+            window_seed=reach.window_seed if reach else 0,
+            window_sigma=reach.window_sigma if reach else None,
+            channel_sigma=wire.channel_sigma,
+        )
+    if reach is not None:
+        stored = sum(v is not None
+                     for v in (reach.window_sigma, reach.channel_sigma))
+        reach_slack = stored * ratio
+    manifest = Manifest(
+        encoder_profile_id=ZERO_DIGEST,
+        branch=BranchIdentity(
+            unit_id=unit_id, root_q256=root_q256,
+            rotation=RotationState.NONE, container=ContainerClass.GRIDBOOK),
+        geometry=geometry,
+        arrangement=arrangement,
+        rates=tuple(rates),
+        planes=descs,
+        terminals=(terminal,),
+        payload_digest=ZERO_DIGEST,
+        span=span,
+        scale_plane=scale_plane,
+        body=body,
+        window_bits=window_bits,
+        reach=reach,
+        # The exporter stamps a 32-byte fixture id on every real artifact.
+        encoder_fixture_id=ZERO_DIGEST,
+    )
+    # Only sigmas that were priced at 1.0-width placeholders need slack; a
+    # reach sigma is priced by its real value, so its slack is the gap to max.
+    slack += max(0, reach_slack - _reach_ratio_bytes(reach))
+    side = (len(manifest.encode()) + _CONTAINER_HEADER_BYTES
+            + _FUSED_HEADER.size + _FUSED_MEMBER.size)
+    return side, slack
+
+
+def _reach_ratio_bytes(reach) -> int:
+    """Bytes the placeholder's own reach sigmas spent on their ratios."""
+    if reach is None:
+        return 0
+    total = 0
+    for value in (reach.window_sigma, reach.channel_sigma):
+        if value is not None:
+            total += len(_CanonicalWriter().ratio(Fraction(float(value))).bytes)
+    return total
+
+
 def tessera_tensor_payload_breakdown(
     shape: Sequence[int],
     *,
@@ -150,8 +303,19 @@ def tessera_tensor_payload_breakdown(
     span: "int | None" = None,
     scale_plane: "str | None" = None,
     recipe=None,
+    member_name: "str | None" = None,
 ) -> dict[str, object]:
     """Exact serialized bytes for one 2-D Linear weight at one Tessera rung.
+
+    The total is the whole fused wire blob, not only the plane region (#1609):
+    plane bytes, the canonical manifest, the container header and the TSRFUSE1
+    framing, each sized by Tessera's own writer (``_container_side_bytes``).
+    That side figure is an upper bound with a few bytes of slack -- the
+    manifest is shape-determined but for the ratio fields, which are priced at
+    the codec's widest.  ``member_name`` is the tensor's name inside the fused
+    blob; it is not shape-determined, so the caller supplies it and it is priced
+    exactly.  Left unset, the name is not priced (``member_name_priced`` is
+    False) and the caller adds ``member_name_bytes`` for its own name.
 
     ``recipe`` -- a ``tessera.export.WireRecipe`` -- is the wire being priced,
     and it defaults to the one the exporter writes for this family at this
@@ -334,7 +498,10 @@ def tessera_tensor_payload_breakdown(
         quantizable_params=rows * columns,
     )
     terminal_spec = TerminalSpec(
-        slot_id="alloc",
+        # The exporter's terminal slot (`unit_artifact.py`, "t-nvfp4").  The slot
+        # name is written into the manifest's terminal record, so its length is
+        # side bytes; Tessera exports no constant for it.
+        slot_id="t-nvfp4",
         # ``completion`` is the second rate axis, and the default is the
         # exporter's: ``encode_linear(completion=0)``.  It briefly defaulted to
         # the cap instead, because ``unit_artifact`` was writing the COMPLETION
@@ -350,7 +517,7 @@ def tessera_tensor_payload_breakdown(
         ),
         released_positions=0,
         # A LUT plane has no base plane; its table lives in the manifest
-        # (side bytes, outside the plane region this accountant prices).  A
+        # (side bytes, priced by ``_container_side_bytes``, not here).  A
         # CHANNEL plane has no block plane at all: the scale is one fp16 per
         # output row on DIAG_SV (schema minor 3, `tessera.scale_channel`).
         with_scale_base=plane == "s6b",
@@ -387,7 +554,18 @@ def tessera_tensor_payload_breakdown(
                               cap=cap, arity=spec.arity, span=span)
 
     route = tessera_serving_route(spec, wire, rung)
-    total_bytes = record.exact_bytes + sidecar_header_bytes
+    unit_id = spec.format_name(rung, recipe=wire)
+    frame_bytes, ratio_slack_bytes = _container_side_bytes(
+        spec=spec, wire=wire, rung=rung, rows=rows, columns=columns,
+        geometry=geometry, rates=rates, planes=planes, record=record,
+        plane=plane, body=body, span=span, window_bits=window_bits,
+        unit_id=unit_id,
+    )
+    member_name_bytes = (
+        len(member_name.encode("utf-8")) if member_name is not None else 0)
+    container_side_bytes = frame_bytes + ratio_slack_bytes + member_name_bytes
+    total_bytes = (record.exact_bytes + sidecar_header_bytes
+                   + container_side_bytes)
     exact_bpw = Fraction(total_bytes * 8, rows * columns)
     breakdown = {
         "schema": TESSERA_TENSOR_PAYLOAD_SCHEMA,
@@ -414,6 +592,15 @@ def tessera_tensor_payload_breakdown(
         "sidecar_header_bytes": sidecar_header_bytes,
         "plane_elements": list(record.plane_elements),
         "payload_bytes": record.exact_bytes,
+        # Bytes beside the plane region (#1609): manifest + container header +
+        # TSRFUSE1 framing, from Tessera's own writer, with ratio widths at the
+        # codec's maximum (an upper bound; the slack is ``ratio_slack_bytes``).
+        "container_frame_bytes": frame_bytes,
+        "ratio_slack_bytes": ratio_slack_bytes,
+        "member_name": member_name,
+        "member_name_bytes": member_name_bytes,
+        "member_name_priced": member_name is not None,
+        "container_side_bytes": container_side_bytes,
         "total_bytes": total_bytes,
         "exact_bpp_payload": str(record.exact_bpp),
         "exact_bpw": float(exact_bpw),
@@ -477,9 +664,12 @@ def tessera_exact_bits_for_shape(
     recipe, same arithmetic as :func:`tessera_tensor_payload_breakdown` --
     literally the same call -- so a rung cannot be priced one way for a
     ``FormatSpec`` and another way for an allocator candidate.  It is the
-    ``layout="tight"``, canonical-schedule, zero-sidecar figure, which is what
-    a format-level price is: a sidecar header belongs to a unit, not to a
-    format.
+    ``layout="tight"``, canonical-schedule figure, which is what a
+    format-level price is.  It carries the container side bytes every unit
+    pays whatever it is called -- the manifest at its shape-determined
+    maximum, the 24-byte container header and the fused framing -- and not
+    the fused member name, which belongs to a unit, not to a format:
+    :func:`tessera_member_name_bytes` prices that from the tensor's name.
 
     This is the answer for a wire the shape-free accountant cannot state -- a
     CHANNEL plane charges one fp16 per output row, a WINDOW body charges a
@@ -540,6 +730,26 @@ class TesseraShapeRate:
             self.family, self.body_rate_q256, shape, recipe=self.recipe,
         )
 
+    def unit_name_bytes(self, tensor_name: str, shape: Sequence[int]) -> int:
+        """The fused member-name bytes the format price leaves to the unit."""
+        return tessera_member_name_bytes(tensor_name, shape)
+
+
+def tessera_member_name_bytes(tensor_name: str, shape: Sequence[int]) -> int:
+    """Bytes of the TSRFUSE1 member names one tensor's wire carries.
+
+    The exporter frames each unit as ``pack_fused([(projection, rows, blob)])``
+    (``tessera.export_serving``), so a Linear's member name is its projection
+    role -- the last component of the recipe name, without the parameter
+    leaf -- and a packed ``(experts, out, in)`` stack ships one framed unit
+    per expert, each naming the same role.  Priced exactly from the name the
+    caller holds; nothing is guessed.
+    """
+    dims = tuple(int(d) for d in shape)
+    experts = dims[0] if len(dims) == 3 else 1
+    role = strip_weight_leaf(str(tensor_name)).rsplit(".", 1)[-1]
+    return experts * len(role.encode("utf-8"))
+
 
 def validate_tessera_tensor_payload_breakdown(
     payload: Mapping[str, object],
@@ -569,6 +779,7 @@ def validate_tessera_tensor_payload_breakdown(
         layout=str(copied.get("layout", "tight")),
         alphabet_bytes=int(copied.get("alphabet_bytes", 0)),
         sidecar_header_bytes=int(copied.get("sidecar_header_bytes", 0)),
+        member_name=copied.get("member_name"),
         # A report written before minor 1 carries none of these fields and
         # means the wire of its day; one written after names what it priced.
         # The recipe is rebuilt from the report rather than looked up, so a
@@ -587,7 +798,8 @@ def validate_tessera_tensor_payload_breakdown(
             "footprint recipe identity does not address its own contents; the "
             "report has been edited or has drifted from its layout"
         )
-    for field in ("total_bytes", "payload_bytes", "exact_bpw", "format"):
+    for field in ("total_bytes", "payload_bytes", "exact_bpw", "format",
+                  "container_side_bytes", "member_name_bytes"):
         if copied.get(field) != recomputed[field]:
             raise TesseraFormatError(
                 f"footprint {field} is {copied.get(field)!r}, but the layout "

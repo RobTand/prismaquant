@@ -104,8 +104,8 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v42_at_the_pinned_digest():
-    """v24 through v42 fit the v10 grammar, despite changed admission scopes.
+def test_the_packaged_contract_is_v45_at_the_pinned_digest():
+    """v24 through v45 fit the v10 grammar, despite changed admission scopes.
 
     The contract version and the lane schema are two different clocks, and
     v24 was the bump that separated them: it added cells and filled a
@@ -121,9 +121,12 @@ def test_the_packaged_contract_is_v42_at_the_pinned_digest():
     drivers that take ``--producer-authority``), v41 (optional serving-code
     fields on a cell's runtime, stamped by none), v42 (two lane-bearing
     fused routed extensions, and one more launch in four routed cells), v43
-    (the fused dense second launch in the six dense cells) and v44 (the
+    (the fused dense second launch in the six dense cells), v44 (the
     supported exporter move, ``src/tessera/export_serving.py`` beside the
-    shim); none moved the lane schema.  A bump that changed what
+    shim) and v45 (the fused routed lanes read ``column_rates`` [1..8] and
+    publish the structure-scoped ``column_rates_routed_moe`` [1..6] on their
+    ``native_extensions`` rows, a name PQ #1618 taught the lane reader);
+    none moved the lane schema.  A bump that changed what
     a field MEANS would move the schema string and fail this reader closed, as
     v10 itself did to v9 below.
     """
@@ -133,7 +136,7 @@ def test_the_packaged_contract_is_v42_at_the_pinned_digest():
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 44
+    assert payload["contract_version"] == 45
     assert (payload["lane_eligibility"]["schema"]
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10)
 

@@ -399,7 +399,15 @@ def test_byte_total_is_reproduced_from_first_principles(family, rate, shape):
     assert account.table_bytes == table
     assert account.scale_bytes == scale
     assert account.descendant_bytes == 0   # a WINDOW body has no forest
-    assert account.total_bytes == expected
+    # The plane region is the three terms above.  Since #1609 the unit is
+    # priced with its container side bytes too (the frame, the manifest,
+    # priced at its widest ratio varint); those are the one term this rebuild
+    # does not derive, and ``test_tessera_side_bytes`` measures them against
+    # Tessera's own writer.  Here they are only required to be what the
+    # accountant reports, priced once, and a few hundred bytes, not planes.
+    side = account.alignment_and_header_bytes
+    assert 0 < side < 2048
+    assert account.total_bytes == expected + side
 
 
 def test_components_sum_to_the_total_for_every_boundary_witness():
@@ -753,6 +761,12 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
         # by one docstring line (the supported exporter path); wire_recipe
         # and the WINDOW constants did not move.
         "a5f3b232cb3c424b537a06713c728c86153d55fb",
+        # The 2026-09-29 re-pin for the v45 pin a21d74d89b: export.py moved
+        # inside ActivationSource only (the seal-header fold); wire_recipe
+        # and the WINDOW constants did not move.
+        # Renamed 2026-09-29 for the v45 pin 83460680ed: export.py did
+        # not move.
+        "83460680ed84e33c82eb62b31345381cc151aa58",
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -809,7 +823,7 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
     assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
         "reader-pin-387eda36", "study-producer-d403cc5a",
         "reader-pin-cc739a55", "reader-pin-09d6559d", "reader-pin-f94929de",
-        "reader-pin-38e96012", "reader-pin-a5f3b232",
+        "reader-pin-38e96012", "reader-pin-a5f3b232", "reader-pin-83460680",
     }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)

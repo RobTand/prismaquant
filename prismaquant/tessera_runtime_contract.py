@@ -402,18 +402,28 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: window kernel's dense identity as a second launch in the six dense window
 #: cells; v44 (#691) moves the supported exporter into the installed package
 #: and publishes the serving plan schema, moving no answer. (PQ #1616.)
+#: Re-pinned 2026-09-29 to a21d74d89b, Tessera master's merge of #701
+#: (tessera#694), under PQ #1702. It crosses the 15 master merges since
+#: a5f3b232cb, all at contract v44 (listed in
+#: ``tessera_serving_runtime_pin``), and #701's contract v45, whose two
+#: fused routed lanes read every column rate and gate their routed-expert
+#: launch to rates 1-6.
+#: Re-pinned 2026-09-29 to 83460680ed, Tessera master's merge of #725
+#: (tessera#724), under PQ #1719: the routed window intake repacks in place
+#: into the loader's scratch. The packaged v45 contract and the admission
+#: answer are unchanged.
 #: The literal below
 #: is ``pprint.pformat(contract_answer(c), width=79, sort_dicts=False)`` on
-#: the v44 contract, and its diff against the v42 literal is exactly the 24
-#: executes paths of those six cells.
-TESSERA_DEV_PIN_COMMIT = "a5f3b232cb3c424b537a06713c728c86153d55fb"
+#: the v45 contract, and its diff against the v44 literal is exactly the two
+#: fused routed rows' ``lane.requires``.
+TESSERA_DEV_PIN_COMMIT = "83460680ed84e33c82eb62b31345381cc151aa58"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
 #: compared into provenance against the bytes this run read, so prose-only
 #: drift is visible; it is not the refusal.
 TESSERA_DEV_PIN_CONTRACT_SHA256 = (
-    "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
+    "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
 )
 
 #: The ANSWER this pin was reviewed against -- every value the ADMISSION
@@ -508,6 +518,13 @@ TESSERA_DEV_PIN_CONTRACT_SHA256 = (
 #: launch beside the window-GEMM one (v43, tessera#693); v44
 #: (tessera#687) moves no answer -- same rows, same columns, the
 #: fused pair first, the window pair second, in every widened cell.
+#: v45 review (tessera#694): the two fused routed rows'
+#: ``lane.requires`` move and nothing else does. ``column_rates`` widens
+#: from [4] to [1..8] and ``column_rates_routed_moe`` [1..6] joins it: a
+#: routed unit's plan must also fit the routed set, and a dense unit's
+#: need not. Every rung the four window routed cells list plans rates
+#: inside [1..6], so each now launches the fused pair beside the compact
+#: one; no cell id, rung, flag or activation contract moves.
 TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
  'lane_schema': 'tessera.lane-eligibility.v10',
  'required_regimes': ['batch', 'decode'],
@@ -532,14 +549,27 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                              'streamed': {'status': 'substituted',
                                                           'decoder': 'native_window_moe_compact'}},
                         'lane': {'decoder': 'native_routed_fused_window',
-                                 'requires': {'column_rates': [4],
+                                 'requires': {'column_rates': [1,
+                                                               2,
+                                                               3,
+                                                               4,
+                                                               5,
+                                                               6,
+                                                               7,
+                                                               8],
                                               'window_bits': [14],
                                               'body': 'window',
                                               'plane': 'channel',
                                               'release_overrides': False,
                                               'diagonals': False,
                                               'rotation': ['none'],
-                                              'grid_arities': [1]}}},
+                                              'grid_arities': [1],
+                                              'column_rates_routed_moe': [1,
+                                                                          2,
+                                                                          3,
+                                                                          4,
+                                                                          5,
+                                                                          6]}}},
                        {'module_name_prefix': 'tessera_routed_fused_value',
                         'filename_glob': 'tessera_routed_fused_value*.so',
                         'match': 'basename_fnmatch',
@@ -549,14 +579,27 @@ TESSERA_DEV_PIN_ANSWER = {'schema': 'tessera.runtime-contract.v1',
                                              'streamed': {'status': 'substituted',
                                                           'decoder': 'native_window_moe_compact_folded'}},
                         'lane': {'decoder': 'native_routed_fused_window_folded',
-                                 'requires': {'column_rates': [4],
+                                 'requires': {'column_rates': [1,
+                                                               2,
+                                                               3,
+                                                               4,
+                                                               5,
+                                                               6,
+                                                               7,
+                                                               8],
                                               'window_bits': [14],
                                               'body': 'window',
                                               'plane': 'channel',
                                               'release_overrides': False,
                                               'diagonals': False,
                                               'rotation': ['none'],
-                                              'grid_arities': [1]}}},
+                                              'grid_arities': [1],
+                                              'column_rates_routed_moe': [1,
+                                                                          2,
+                                                                          3,
+                                                                          4,
+                                                                          5,
+                                                                          6]}}},
                        {'module_name_prefix': 'tessera_window_gemv',
                         'filename_glob': 'tessera_window_gemv*.so',
                         'match': 'basename_fnmatch',
