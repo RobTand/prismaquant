@@ -165,6 +165,78 @@ SELECTED_SOURCE_LOAD_SCHEMAS = frozenset({
 })
 
 
+def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live_stat,
+                                    expected_sha256=None):
+    """Check a streamed identity proof as adoption checks it; return its digests.
+
+    The one test of whether a ``prismaquant.streamed_model.identity_cache.v1``
+    proof may stand in for hashing ``root``'s shards: the proof's content seal,
+    its declared digest when one is bound, the complete checkpoint index and
+    shard coverage, every shard's SHA against ``source_files`` (a capture's
+    roster), and the six-field stat predicate against ``live_stat(name)``, the
+    stat of the object the caller will read. A capture owner adopts through
+    it (``CaptureSourceAuthentication.adopt_streamed_identity_cache``, with
+    its held descriptors' stats) and the campaign planner refuses through it
+    (``dispatch_tessera_campaign``, with a fresh ``os.stat``, PQ #1654), so a
+    proof the planner binds is one the row adopts unless the source changes
+    in between. Without ``source_files`` the shards are checked against the
+    checkpoint index alone. Returns ``({shard name: sha256}, proof sha256)``.
+    """
+    from .cost_streaming import (_local_checkpoint_shards,
+                                 _read_streamed_model_identity_cache,
+                                 stat_fingerprint, stat_fingerprint_reusable)
+
+    root = Path(os.path.abspath(root))
+    path = Path(cache_path)
+    before = path.stat()
+    raw = path.read_bytes()
+    cached = json.loads(raw)
+    after = path.stat()
+    if file_stat_signature(before) != file_stat_signature(after):
+        raise RuntimeError('streamed source identity cache changed while reading')
+    if expected_sha256 is not None and bytes_sha256hex(raw) != expected_sha256:
+        raise RuntimeError('streamed source identity cache differs from its declared SHA256')
+    checked_cache, identity = _read_streamed_model_identity_cache(
+        path, source_model=str(root))
+    if cached != checked_cache:
+        raise RuntimeError('streamed source identity cache changed while validating')
+    checkpoint_map, indexed_shards = _local_checkpoint_shards(root)
+    if (indexed_shards is None or checkpoint_map is None or
+            identity.get('checkpoint_weight_map') != checkpoint_map):
+        raise RuntimeError('streamed source proof differs from complete checkpoint index')
+    fingerprints = cached.get('fingerprints')
+    if not isinstance(fingerprints, list):
+        raise RuntimeError('streamed source identity cache has no shard fingerprints')
+    fp_by_path = {str(row.get('path')): row for row in fingerprints
+                  if isinstance(row, dict)}
+    shards = identity.get('shards')
+    if (not isinstance(shards, list) or set(fp_by_path) != {
+            str(row.get('path')) for row in shards} or
+            set(fp_by_path) != {str(item.resolve()) for item in indexed_shards}):
+        raise RuntimeError('streamed source identity cache shard coverage differs')
+    expected_shards = ({name for name in source_files if name.endswith('.safetensors')}
+                       if source_files is not None else
+                       {Path(str(item)).name for item in indexed_shards})
+    digests = {}
+    for row in shards:
+        source_path = Path(str(row['path']))
+        name = source_path.name
+        if (source_path.resolve() != (root / name).resolve() or name not in expected_shards
+                or (source_files is not None and row.get('sha256') != source_files[name])):
+            raise RuntimeError(f'{name}: streamed source SHA differs from canonical capture')
+        fingerprint = fp_by_path[str(source_path)]
+        # The same predicate the identity cache is built and validated
+        # with: device may differ only where it is client-local (NFS) or
+        # in dev mode (PQ #1363); anything else names another object.
+        live = stat_fingerprint(str(source_path), live_stat(name))
+        if not stat_fingerprint_reusable(live, fingerprint):
+            raise RuntimeError(f'{name}: streamed source proof names another object')
+        digests[name] = row['sha256']
+    if set(digests) != expected_shards:
+        raise RuntimeError('streamed source proof omits canonical capture shards')
+    return digests, bytes_sha256hex(raw)
+
+
 class CaptureSourceAuthentication:
     """One complete capture's source descriptors, not a weight/digest cache.
 
@@ -289,62 +361,23 @@ class CaptureSourceAuthentication:
         must hash to it, checked before any held state changes. A caller that
         planned a proof by digest (a Stage A row, PQ #1497) passes it.
         """
-        from .cost_streaming import (_local_checkpoint_shards,
-                                     _read_streamed_model_identity_cache,
-                                     stat_fingerprint, stat_fingerprint_reusable)
+        held = {}
 
-        path = Path(cache_path)
-        before = path.stat()
-        raw = path.read_bytes()
-        cached = json.loads(raw)
-        after = path.stat()
-        if file_stat_signature(before) != file_stat_signature(after):
-            raise RuntimeError('streamed source identity cache changed while reading')
-        if expected_sha256 is not None and bytes_sha256hex(raw) != expected_sha256:
-            raise RuntimeError('streamed source identity cache differs from its declared SHA256')
-        checked_cache, identity = _read_streamed_model_identity_cache(
-            path, source_model=str(self.root))
-        if cached != checked_cache:
-            raise RuntimeError('streamed source identity cache changed while validating')
-        checkpoint_map, indexed_shards = _local_checkpoint_shards(self.root)
-        if (indexed_shards is None or checkpoint_map is None or
-                identity.get('checkpoint_weight_map') != checkpoint_map):
-            raise RuntimeError('streamed source proof differs from complete checkpoint index')
-        fingerprints = cached.get('fingerprints')
-        if not isinstance(fingerprints, list):
-            raise RuntimeError('streamed source identity cache has no shard fingerprints')
-        fp_by_path = {str(row.get('path')): row for row in fingerprints
-                      if isinstance(row, dict)}
-        shards = identity.get('shards')
-        if (not isinstance(shards, list) or set(fp_by_path) != {
-                str(row.get('path')) for row in shards} or
-                set(fp_by_path) != {str(item.resolve()) for item in indexed_shards}):
-            raise RuntimeError('streamed source identity cache shard coverage differs')
-        expected_shards = {name for name in self._source_files if name.endswith('.safetensors')}
-        candidate = []
-        for row in shards:
-            source_path = Path(str(row['path']))
-            name = source_path.name
-            if (source_path.resolve() != (self.root / name).resolve()
-                    or name not in expected_shards or row.get('sha256') != self._expected[name]):
-                raise RuntimeError(f'{name}: streamed source SHA differs from canonical capture')
-            fingerprint = fp_by_path[str(source_path)]
-            _, state = self._file(self.root / name)
-            # The same predicate the identity cache is built and validated
-            # with: device may differ only where it is client-local (NFS) or
-            # in dev mode (PQ #1363); anything else names another object.
-            live = stat_fingerprint(str(source_path), state['before'])
-            if not stat_fingerprint_reusable(live, fingerprint):
-                raise RuntimeError(f'{name}: streamed source proof names another object')
-            candidate.append((name, state, row['sha256']))
-        if {name for name, _, _ in candidate} != expected_shards:
-            raise RuntimeError('streamed source proof omits canonical capture shards')
+        def live_stat(name):
+            _, held[name] = self._file(self.root / name)
+            return held[name]['before']
+
+        # ``_expected`` agrees with ``_source_files`` on every roster name (the
+        # constructor refuses otherwise), so the roster is the capture's own.
+        digests, proof_sha256 = streamed_identity_proof_digests(
+            self.root, cache_path, self._source_files, live_stat=live_stat,
+            expected_sha256=expected_sha256)
         self.require_unchanged()
-        for _name, state, digest in candidate:
-            state['sha256'] = digest
-            state['sha256_source'] = 'verified_streamed_identity_cache'
-        self._adopted_cache_sha256 = bytes_sha256hex(raw)
-        return len(candidate)
+        for name, digest in digests.items():
+            held[name]['sha256'] = digest
+            held[name]['sha256_source'] = 'verified_streamed_identity_cache'
+        self._adopted_cache_sha256 = proof_sha256
+        return len(digests)
 
     def adopt_identity_proof_or_hash(self, cache_path, expected_sha256):
         """Adopt a planned identity proof, or leave every read to hash fresh.
@@ -663,19 +696,34 @@ def merge_load_execution(total, partial):
 
 
 def preflight_verified_capture_entries(root, entries, *, names, policy, census, max_rows):
-    """Check the complete selected roster's file/geometry bounds before loading."""
-    import stat
+    """Check the complete selected roster's file/geometry bounds before loading.
+
+    The ``lstat`` calls go out together on the process's IO engine
+    (``io_engine.ENGINE``): on a network mount one round trip per entry was a
+    serial 7.3 s for a 864-unit GLM-5.3 row before its first encode
+    (PQ #1654). The checks still run in name order on this thread, so the
+    first failure raised is the one the serial loop raised.
+    """
+    from .io_engine import ENGINE
     from .perturbed_x_cache import activation_cache_filename, normalize_verified_activation_load
     policy = normalize_verified_activation_load(policy)
     if policy is None:
         raise ValueError('verified capture preflight requires an explicit load policy')
+    names = list(names)
+    expected = {name: str(Path('inputs') / activation_cache_filename(name)) for name in names}
+    stats = {name: ENGINE.submit((Path(root)/expected[name]).lstat)
+             for name in names if entries[name].get('path') == expected[name]}
+    return _checked_preflight(names, stats, policy=policy, census=census, max_rows=max_rows)
+
+
+def _checked_preflight(names, stats, *, policy, census, max_rows):
+    """The serial loop's checks, in name order, over already-issued ``lstat`` calls."""
+    import stat
     largest_file = largest_storage = 0
     for name in names:
-        expected = str(Path('inputs') / activation_cache_filename(name))
-        record = entries[name]
-        if record.get('path') != expected:
+        if name not in stats:
             raise RuntimeError(f'{name}: noncanonical capture artifact path')
-        observed = (Path(root)/expected).lstat()
+        observed = stats[name].result()
         if not stat.S_ISREG(observed.st_mode):
             raise RuntimeError(f'{name}: verified capture requires a regular nonsymlink file')
         if observed.st_size <= 0 or observed.st_size > policy['max_buffer_bytes']:

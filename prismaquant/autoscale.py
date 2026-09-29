@@ -670,8 +670,11 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # in this phase (and in stream_projection, which reuses this term).
         # tessera_campaign._checked_projected_units reads each MEASURED
         # routed-expert unit's source tensor (source_unit_weight) and compares
-        # it with the live view, then advises the consumed pages only after
-        # the loop. Its page window is therefore the stored bytes of the
+        # it with the live view. It used to advise the consumed pages only
+        # after the loop; since PQ #1654 each unit's span is advised as soon
+        # as it compares equal, so the window below is now an upper bound
+        # rather than the peak, and is left as it was so that no row's derived
+        # demand moves with the fix. Its page window is therefore the stored bytes of the
         # tensors it reads, all of them selected source tensors of this row's
         # layers: body_source_file_bytes, which counts exactly the selected
         # tensors (the whole layer under whole-layer-v1). A dense row measures
@@ -775,7 +778,14 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
                             for name, shape in unit_shapes.items())
         stream_phases = dict(
             # Menus and the producer projection run with only the weights
-            # resident: the projection's page window is the one transient.
+            # resident. Since PQ #1654 the stream head binds the projection
+            # here and reads each projected unit's source tensor on its reader
+            # thread (tessera_row_stream ``load_unit``), so this phase reads no
+            # source bytes; the charge is kept, as an upper bound, so the
+            # demand every planned row derives does not move. A streamed
+            # weight is charged where it ends up, in ``common``'s selected
+            # source weights, and the reader's transient read of it is inside
+            # reader_working_bytes' 2*widest_weight per reader.
             stream_projection=dict(common,
                 source_validation_bytes=encoding['source_validation_bytes']),
             stream_window=dict(common,

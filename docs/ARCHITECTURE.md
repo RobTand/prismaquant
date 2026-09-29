@@ -1,5 +1,49 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1654, `claude/1654-row-startup`): **a streaming
+Tessera campaign is refused without an adoptable source-identity proof, and
+the stream head reads projected expert weights on its reader threads instead
+of installing their layer.** A 1 s profile of a GLM-5.3 PACT row (w03, layer
+40, sparklina, 2026-09-29) put its first GPU work 165 s after claim: 87 s in
+`snapshot_selected_weights` installing the whole layer (13.8 GB, every shard
+hashed whole because the row had no proof), 25 s re-reading the 864 expert
+tensors to byte-check the snapshot, and 7 s of serial `lstat` over the
+capture roster. `dispatch_tessera_campaign.py plan` used to warn when a
+streaming campaign had no `--source-identity-cache`, and every planned row then
+hashed each shard it read, whole, under its GPU reservation. It now refuses to
+plan one, reading the proof from the flag or from the spec's
+`source_identity_cache` (a flag that names another file is refused), and it
+refuses a proof the row would refuse at adoption:
+`tessera_calibration_cache.streamed_identity_proof_digests` -- the check
+`adopt_streamed_identity_cache` runs on the row -- must pass (schema, checkpoint
+index digest, the proof's shard set equal to the capture roster, every shard's
+live stat fingerprint, every proved SHA equal to the capture's `source_files`). `check` and `submit` refuse a manifest whose selected-source
+rows carry no proof (`require_source_identity_proofs`), naming every such row.
+The proof stays outside the campaign checkpoint identity (#1532), so a
+re-planned row resumes its journal; its PrismaBuild action key moves, because
+the argv gains the two flags. On the stream head a projected expert unit is a
+`meta` placeholder (`_streamed_source_weights`, shape and dtype from
+`StreamedCausalLM.selected_weight_specs`, which reads no source byte); only
+dense targets are snapshotted, on their own admitted keys. The unit's
+`RowStream` reader calls `load_unit` (`_read_projected_unit`, i.e.
+`source_unit_weight`, the tensor the exporter re-reads) before it reads the
+capture entry, refuses a tensor that is not the placeholder's host shape and
+dtype, binds its receipts on it, and the consumer installs it into `weights`
+when it collects the entry; a later re-read uses the installed tensor.
+`_project_expert_population` binds the projection without reading
+(`check_units=False`), and `_require_streamed_projection` refuses a streamed
+unit with no producer record, or whose source tensor is not rostered or not an
+admitted snapshot key. There is no snapshot view left to byte-check: the priced
+bytes are the source tensor. The load-all head, census and MTP capture keep the
+serial `_checked_projected_units`, now over `_read_projected_unit`. The
+capture preflight (`preflight_verified_capture_entries`) issues its `lstat`
+calls together on the process's IO engine (`io_engine.ENGINE`, no new pool)
+and still checks in name order. The selected-source preparation record gains `streamed_source_policy`
+and `streamed_source_units` (provenance only). Placeholders batch as the host
+weights they stand for (`_anchor_batches`). The source owner's receipt is
+taken after `RowStream.finish`. No demand term, stored format, rendered byte
+or pipeline default changes; the new gate is the dispatcher refusal.
+
 Re-stamped 2026-09-29 (PQ #1719, `claude/tessera-pin-v46`): the exact
 Tessera pin is `83460680ed84e33c82eb62b31345381cc151aa58`, Tessera master's
 merge of #725 (tessera#724), so the pin names the Tessera the GLM-5.3 T8R
@@ -818,9 +862,12 @@ proof that refuses changes no held state and the row continues, hashing each
 shard it reads as before, with the refusal in the
 `selected_source_authentication.v1` receipt
 (`streamed_identity_cache_refused`). Byte integrity is unchanged either way.
-A plan without a proof prints a warning; producing a proof for a source
-that has none is not automated here. No default, stage, stored format or
-ship gate changes. Tests: `tests/test_stage_a_identity_proof_adoption.py`.
+A plan without a proof printed a warning until PQ #1654; it is now refused,
+as is a proof that adoption would refuse, and `check`/`submit` refuse a
+manifest row that carries none (see the #1654 stamp). Producing a proof for a
+source that has none is not automated here. Tests:
+`tests/test_stage_a_identity_proof_adoption.py`,
+`tests/test_row_startup_1654.py`.
 
 SHA-256 lexical validation (2026-09-27, `astra/dedup-hex-1457`, PQ #1457):
 `digests.is_sha256hex` and its compiled `SHA256_HEX` pattern own the exact
@@ -2711,7 +2758,7 @@ row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
 (`prismaquant/joint_adjoint_checkpoints.py:1869`,
-`prismaquant/joint_quantum_handoff.py:1034`), so the phase waits at most W in
+`prismaquant/joint_quantum_handoff.py:1032`), so the phase waits at most W in
 total outside a PrismaBuild landing record. Since PQ #1143 a spill
 consumer's `handoff-load` holds only the owner states and the shared-pass
 entries; each probe's plane is read in its `spill-pP` phase, whose waits
@@ -4674,15 +4721,17 @@ resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
-As of: 2026-09-29 · `claude/tessera-pin-v46`.
+As of: 2026-09-29 · `claude/1654-row-startup`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-29, `claude/1654-row-startup`) for **the dispatcher's
+refusal of a streaming campaign without an adoptable source proof** and **the
+stream head reading projected source weights on the row stream's readers**
+(PQ #1654); see the stamp at the top of this document.
 
 Re-stamped (2026-09-29, `claude/tessera-pin-v46`) for **the Tessera re-pin to
 83460680, the loader fix the T8R release serve runs** (PQ #1719); see the
 stamp at the top of this document.
-
-As of: 2026-09-29 · `claude/tessera-pin-v45`.
-Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-29, `claude/tessera-pin-v45`) for **the Tessera v45 pin
 and the fused routed lane at every mixed-rate rung** (PQ #1702); see the
@@ -4793,8 +4842,14 @@ check reads.
   readahead past the hashed offset is a mount property and is not charged.
 - **`source_validation_bytes` charges the selected tensors.** The term stays in
   `resident_anchors` and `stream_projection`, where the only source read is
-  `_checked_projected_units`: the measured routed-expert tensors, with their
-  pages released after the loop. The term is the selected tensors' stored bytes,
+  `_checked_projected_units`: the measured routed-expert tensors, each unit's
+  pages released as soon as it compares equal (PQ #1654; after the loop
+  before). The stream head snapshots no projected unit and has no such check:
+  each unit's reader reads the producer's source tensor and the row prices it
+  (PQ #1654), so `stream_projection` reads nothing and the term is kept as an
+  upper bound that leaves every derived demand unchanged; the reader's one
+  source tensor sits inside `reader_working_bytes`, and the row stream reserves
+  it at admission (`reader_reserve_bytes`). The term is the selected tensors' stored bytes,
   plus two BF16 copies of the widest weight, plus one serial hash window. It
   used to charge every tensor of every selected layer, about 13.8 GiB for each
   GLM-5.3 MoE layer. Under `whole-layer-v1` the selected tensors are the whole

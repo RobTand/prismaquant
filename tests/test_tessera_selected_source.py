@@ -272,6 +272,13 @@ def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monke
     with pytest.raises(RuntimeError, match='complete calibration cache'):
         dispatch.main(common)
     monkeypatch.setattr(dispatch, '_calibration_cache_binding', lambda *a: dict(path='/capture', sha256='a'*64))
+    # A streaming plan needs the campaign's source proof (PQ #1654); the
+    # proof's own checks are tests/test_row_startup_1654.py's.
+    with pytest.raises(RuntimeError, match='require --source-identity-cache'):
+        dispatch.main([*common, '--calibration-cache', '/capture'])
+    common += ['--source-identity-cache', '/proof.json']
+    monkeypatch.setattr(dispatch, '_source_identity_cache_binding',
+                        lambda path, model, capture: dict(path=path, sha256='d'*64))
     def resources(spec, census, members, *, selected_source):
         assert selected_source and members == ['layers.0.proj']
         return dict(memory_bytes=3*1024**3, selected_layers=['0'])
@@ -290,6 +297,7 @@ def test_streaming_planner_requires_capture_and_stamps_selected_phase_plan(monke
     assert rows[0]['env']['MIMALLOC_PURGE_DELAY'] == '0'
     assert rows[0]['env']['PRISMAQUANT_RELEASE_SOURCE_PAGES'] == '1'
     assert '--calibration-cache-sha256' in rows[0]['argv']
+    assert rows[0]['argv'][rows[0]['argv'].index('--source-identity-cache-sha256') + 1] == 'd'*64
     plan = json.loads((tmp_path/'plan.json').read_text())
     assert plan['rows'][0]['resources']['selected_layers'] == ['0']
 
@@ -518,13 +526,17 @@ def test_row_demand_reserves_the_process_floor_it_will_be_admitted_against(
     census = dict(model='/source', anchor_groups={'u:layers.0.proj': ['layers.0.proj']},
         layer_stride=1, unit_shapes={'layers.0.proj': [3, 4]}, counts={'layers.0.proj': 9})
     (tmp_path/'census.json').write_text(json.dumps(census))
+    # The spec names the campaign's source proof, which a streaming plan
+    # requires (PQ #1654); the proof is not what this test measures.
     spec = dict(model='/source', campaign_argv=['--streaming'], cwd=str(tmp_path),
-                python='python3', env={}, cpus=1)
+                python='python3', env={}, cpus=1, source_identity_cache='/proof.json')
     if reservation is not None:
         spec['process_baseline_bytes'] = reservation
     (tmp_path/'spec.json').write_text(json.dumps(spec))
     monkeypatch.setattr(dispatch, '_calibration_cache_binding',
                         lambda *a: dict(path='/capture', sha256='a'*64))
+    monkeypatch.setattr(dispatch, '_source_identity_cache_binding',
+                        lambda path, model, capture: dict(path=path, sha256='d'*64))
     # A constant plan across every arm: the reservation must move the demand
     # without moving the deltas.  Fold it into ``memory_bytes`` instead and the
     # predicate compares an inflated plan against an inflated cap and nets to
