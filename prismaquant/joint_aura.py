@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import copy
 from dataclasses import dataclass
-import hashlib
 import json
 import math
 import re
@@ -24,7 +23,7 @@ from prismaquant.perturbed_x_cache import (
 )
 from prismaquant.memory_management import env_truthy
 from prismaquant.routed_experts import PackedExpertProjection
-from .digests import DIRECT_ASCII_STRICT
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
 
 
 JOINT_CURRENCY = "joint_aura_predicted_dloss"
@@ -47,14 +46,14 @@ class _ValidatedProbeIdentity(Mapping):
     _sha256: str
 
     def __init__(self, probe):
-        encoded = json.dumps(probe, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        encoded = DIRECT_ASCII_STRICT.encoded(probe)
         snapshot = json.loads(encoded)
         from prismaquant.cost_streaming import validate_streamed_model_identity
         validate_streamed_model_identity(probe["source_model"], where="joint AURA row")
         object.__setattr__(self, "_fields", tuple(
             (key, json.dumps(value, separators=(",", ":"), allow_nan=False))
             for key, value in snapshot.items()))
-        object.__setattr__(self, "_sha256", hashlib.sha256(encoded.encode()).hexdigest())
+        object.__setattr__(self, "_sha256", bytes_sha256hex(encoded))
 
     def __getitem__(self, key):
         for name, encoded in self._fields:
