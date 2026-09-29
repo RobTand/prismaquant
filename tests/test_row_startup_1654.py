@@ -441,32 +441,40 @@ def test_placeholders_batch_as_the_host_weights_they_stand_for():
         assert campaign._anchor_batches(pending, weights=mixed, batch_size=batch_size) == expected
 
 
-def test_the_preflight_lstats_on_threads_and_fails_in_name_order(monkeypatch, tmp_path):
+def test_the_preflight_lstats_on_the_io_engine_and_fails_in_name_order(monkeypatch, tmp_path):
+    from prismaquant import io_engine
     from prismaquant import tessera_calibration_cache as cc
 
     _campaign, _argv, state = stream_fixture(monkeypatch, tmp_path)
     manifest = json.loads(state["manifest"].read_text())
     root, entries = state["manifest"].parent, manifest["entries"]
+    submitted = []
+    original = io_engine.ENGINE.submit
 
-    def preflight(entries, threads):
+    def submit(fn, *args):
+        submitted.append(fn)
+        return original(fn, *args)
+
+    monkeypatch.setattr(io_engine.ENGINE, "submit", submit)
+
+    def preflight(entries):
         return cc.preflight_verified_capture_entries(
             root, entries, names=UNITS, policy=LOAD_POLICY, census=state["census"],
-            max_rows=state["canonical"]["max_act_rows"], threads=threads)
+            max_rows=state["canonical"]["max_act_rows"])
 
-    serial = preflight(entries, 1)
-    assert serial["max_file_bytes"] > 0
-    assert all(preflight(entries, threads) == serial for threads in (2, 8))
-    # Two failures: the earlier unit's is raised, whatever the thread count.
+    sizes = [(root / entries[name]["path"]).lstat().st_size for name in UNITS]
+    result = preflight(entries)
+    assert result["max_file_bytes"] == max(sizes)
+    # Every stat went out on the engine before the first check read one.
+    assert len(submitted) == len(UNITS)
+    # Two failures: the earlier unit's is raised, as the serial loop raised it.
     broken = json.loads(json.dumps(entries))
     broken[UNITS[1]]["path"] = "elsewhere.pt"
     (root / entries[UNITS[2]]["path"]).unlink()
-    for threads in (1, 8):
-        with pytest.raises(RuntimeError, match=f"{UNITS[1]}: noncanonical"):
-            preflight(broken, threads)
-        with pytest.raises(FileNotFoundError):
-            preflight(entries, threads)
-    with pytest.raises(ValueError, match="positive thread count"):
-        preflight(entries, 0)
+    with pytest.raises(RuntimeError, match=f"{UNITS[1]}: noncanonical"):
+        preflight(broken)
+    with pytest.raises(FileNotFoundError):
+        preflight(entries)
 
 
 # ---------------------------------------------------------------------------

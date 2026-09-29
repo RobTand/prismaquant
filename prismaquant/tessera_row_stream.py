@@ -233,9 +233,8 @@ class RowStream:
                 not set(names) <= set(expected_identity["units"])):
             raise RuntimeError("calibration capture identity, completeness or scope mismatch")
         self._max_rows = expected_identity["max_act_rows"]
-        # The readers' own count issues the roster's lstat calls (PQ #1654).
         store.preflight_verified_capture_entries(path.parent, manifest["entries"], names=names,
-            policy=policy, census=census, max_rows=self._max_rows, threads=int(threads))
+            policy=policy, census=census, max_rows=self._max_rows)
         self.capture = dict(path=str(path.resolve()), sha256=digest)
         self._path, self._manifest, self._census = path, manifest, census
         self._policy, self._identity = policy, expected_identity

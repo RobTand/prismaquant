@@ -695,30 +695,25 @@ def merge_load_execution(total, partial):
         total['ordered_load_identities_sha256'], partial['ordered_load_identities_sha256'])
 
 
-def preflight_verified_capture_entries(root, entries, *, names, policy, census, max_rows,
-                                       threads=1):
+def preflight_verified_capture_entries(root, entries, *, names, policy, census, max_rows):
     """Check the complete selected roster's file/geometry bounds before loading.
 
-    ``threads`` workers issue the ``lstat`` calls; on a network mount one
-    round trip per entry was a serial 7.3 s for a 864-unit GLM-5.3 row before
-    its first encode (PQ #1654). The checks still run in name order on this
-    thread, so the first failure raised is the one the serial loop raised.
+    The ``lstat`` calls go out together on the process's IO engine
+    (``io_engine.ENGINE``): on a network mount one round trip per entry was a
+    serial 7.3 s for a 864-unit GLM-5.3 row before its first encode
+    (PQ #1654). The checks still run in name order on this thread, so the
+    first failure raised is the one the serial loop raised.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    from .io_engine import ENGINE
     from .perturbed_x_cache import activation_cache_filename, normalize_verified_activation_load
     policy = normalize_verified_activation_load(policy)
     if policy is None:
         raise ValueError('verified capture preflight requires an explicit load policy')
-    if type(threads) is not int or threads < 1:
-        raise ValueError('verified capture preflight requires a positive thread count')
     names = list(names)
     expected = {name: str(Path('inputs') / activation_cache_filename(name)) for name in names}
-    canonical = [name for name in names if entries[name].get('path') == expected[name]]
-    with ThreadPoolExecutor(max_workers=max(1, min(threads, len(canonical))),
-                            thread_name_prefix='capture-preflight') as pool:
-        stats = {name: pool.submit((Path(root)/expected[name]).lstat) for name in canonical}
-        return _checked_preflight(names, stats, policy=policy, census=census,
-                                  max_rows=max_rows)
+    stats = {name: ENGINE.submit((Path(root)/expected[name]).lstat)
+             for name in names if entries[name].get('path') == expected[name]}
+    return _checked_preflight(names, stats, policy=policy, census=census, max_rows=max_rows)
 
 
 def _checked_preflight(names, stats, *, policy, census, max_rows):

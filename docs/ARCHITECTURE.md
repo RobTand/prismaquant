@@ -36,9 +36,9 @@ unit with no producer record, or whose source tensor is not rostered or not an
 admitted snapshot key. There is no snapshot view left to byte-check: the priced
 bytes are the source tensor. The load-all head, census and MTP capture keep the
 serial `_checked_projected_units`, now over `_read_projected_unit`. The
-capture preflight issues its `lstat` calls on the reader count
-(`preflight_verified_capture_entries(threads=)`) and still checks in name
-order. The selected-source preparation record gains `streamed_source_policy`
+capture preflight (`preflight_verified_capture_entries`) issues its `lstat`
+calls together on the process's IO engine (`io_engine.ENGINE`, no new pool)
+and still checks in name order. The selected-source preparation record gains `streamed_source_policy`
 and `streamed_source_units` (provenance only). Placeholders batch as the host
 weights they stand for (`_anchor_batches`). The source owner's receipt is
 taken after `RowStream.finish`. No demand term, stored format, rendered byte
