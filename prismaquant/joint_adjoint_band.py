@@ -80,7 +80,7 @@ from .stage_a_chain_resume import (
     resume_declarations,
 )
 from .stage_a_chain_seed import seed_marker_path, seed_receipt_path
-from .digests import file_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex
 
 BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
 BAND_RESULT_SCHEMA = "prismaquant.joint_adjoint_band.result.v1"
@@ -98,7 +98,7 @@ _sha256_file = partial(file_sha256hex, block_size=1 << 20)
 
 def _json_file(path, sha256=None, *, where: str):
     raw = Path(path).read_bytes()
-    if sha256 is not None and hashlib.sha256(raw).hexdigest() != sha256:
+    if sha256 is not None and bytes_sha256hex(raw) != sha256:
         raise BandRefused(f"{where} digest mismatch at {path}")
     return json.loads(raw)
 
@@ -152,7 +152,7 @@ def read_sealed_checkpoint(space: Path, boundary: int) -> tuple[dict, dict]:
             raise BandRefused(f"checkpoint entry {entry_path} is not durable") from exc
         if size != entry["file_bytes"]:
             raise BandRefused(f"checkpoint entry {entry_path} size differs from its manifest")
-    return record, {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
+    return record, {"path": str(path), "sha256": bytes_sha256hex(raw)}
 
 
 def checkpoint_batches(record: dict) -> int:
@@ -476,8 +476,8 @@ def stage_a_bind_identity(config: dict, prepared: dict) -> dict:
         "source_model": validate_streamed_model_identity(
             prepared["source_model_identity"], where="adjoint band"),
         "producer_source_sha256": prepared["implementation_sha256"],
-        "calibration_sha256": hashlib.sha256(
-            ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
+        "calibration_sha256": bytes_sha256hex(
+            ids.detach().cpu().contiguous().numpy().tobytes()),
         "calibration_shape": list(ids.shape),
         "calibration_dtype": str(ids.dtype),
         "n_probes": int(execution["n_probes"]), "seed_base": int(execution["seed_base"]),
@@ -585,7 +585,7 @@ def sealed_chain_state(space, *, plan_sha256: str, prepared_sha256: str,
         raw = path.read_bytes()
     except FileNotFoundError:
         return None, None
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     try:
         state = load_chain_state(space, digest)
     except ChainResumeRefused as exc:
@@ -607,7 +607,7 @@ def band_from_request(request_path, *, boundary: int, request_sha256: str | None
 
     request_path = Path(request_path)
     raw = request_path.read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     if request_sha256 is not None and digest != request_sha256:
         raise BandRefused(f"sealed request digest mismatch at {request_path}")
     request = json.loads(raw)
