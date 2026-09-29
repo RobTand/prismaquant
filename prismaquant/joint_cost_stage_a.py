@@ -36,7 +36,6 @@ reserve / write / commit guards stay authoritative for serialized bytes.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import pickle
@@ -49,6 +48,7 @@ import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
+from .digests import bytes_sha256hex, indent2_json_file_bytes
 from .io_spans import EXPOSED_WAIT_SCHEMA, GpuPowerSampler
 from .joint_adjoint_checkpoints import (
     ADJOINT_CAPTURE_ENTRY_POINT,
@@ -305,7 +305,7 @@ def load_prefetch_override(path) -> dict:
         raise ValueError(f"prefetch override {path}: a non-empty reason is "
                          "required -- an unexplained override is a silent one")
     return {"reason": reason, "source_prefetch": _source_prefetch(document),
-            "path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
+            "path": str(path), "sha256": bytes_sha256hex(raw)}
 
 
 def resolve_prefetch_override(config, cli_path=None, environ=None) -> dict:
@@ -1290,8 +1290,8 @@ def run_adjoint_capture_core(
             else validate_streamed_model_identity(
                 source_model_identity, where="adjoint capture")),
         "producer_source_sha256": header_implementation,
-        "calibration_sha256": hashlib.sha256(
-            calib_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
+        "calibration_sha256": bytes_sha256hex(
+            calib_ids.detach().cpu().contiguous().numpy().tobytes()),
         "calibration_shape": list(calib_ids.shape),
         "calibration_dtype": str(calib_ids.dtype),
         "n_probes": n_probes, "seed_base": seed_base,
@@ -2691,8 +2691,8 @@ def run_adjoint_capture(
             write_adjoint_receipt(space, receipt)
             result["adjoint_receipt"] = {
                 "path": str(space / "adjoint-capture.json"),
-                "sha256": hashlib.sha256(
-                    (space / "adjoint-capture.json").read_bytes()).hexdigest(),
+                "sha256": bytes_sha256hex(
+                    (space / "adjoint-capture.json").read_bytes()),
             }
         result["checkpoints"] = [
             {"boundary": entry["boundary"],
@@ -2761,12 +2761,8 @@ def run_adjoint_capture(
     counters_path, results_path = (
         (space / "counters.json", space / "results.json") if split_files is None
         else (Path(split_files["counters"]), Path(split_files["results"])))
-    atomic_write_bytes(counters_path,
-                       (json.dumps(counters, sort_keys=True, indent=2,
-                                   allow_nan=False) + "\n").encode())
-    atomic_write_bytes(results_path,
-                       (json.dumps(result, sort_keys=True, indent=2,
-                                   allow_nan=False) + "\n").encode())
+    atomic_write_bytes(counters_path, indent2_json_file_bytes(counters))
+    atomic_write_bytes(results_path, indent2_json_file_bytes(result))
     return result
 
 
@@ -2784,11 +2780,10 @@ def _write_split_receipt(space, receipt) -> dict:
     else:
         stem = quantum_directory(space) / receipt["split"]["label"]
     stem.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(receipt, sort_keys=True, indent=2, allow_nan=False)
-               + "\n").encode()
+    payload = indent2_json_file_bytes(receipt)
     path = stem.with_name(stem.name + ".json")
     atomic_write_bytes(path, payload)
-    return {"receipt": {"path": str(path), "sha256": hashlib.sha256(payload).hexdigest()},
+    return {"receipt": {"path": str(path), "sha256": bytes_sha256hex(payload)},
             "results": str(stem.with_name(stem.name + ".results.json")),
             "counters": str(stem.with_name(stem.name + ".counters.json"))}
 
