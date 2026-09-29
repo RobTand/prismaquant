@@ -3876,7 +3876,7 @@
   ]
  },
  "pin": {
-  "commit": "83460680ed84e33c82eb62b31345381cc151aa58",
+  "commit": "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
   "contract_sha256": "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa",
   "live_gate": "admits",
   "native_extension_rows": [

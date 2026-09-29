@@ -256,8 +256,8 @@ TESSERA_SOURCE_STATES = {
         "export.py":
             "427a8f973b5d41e65473eeb687bfe4b627021bc95a321fda4059b2c75b8a37c3",
     },
-    "reader-pin-83460680": {
-        "commit": "83460680ed84e33c82eb62b31345381cc151aa58",
+    "reader-pin-b40c93cb": {
+        "commit": "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
         "export.py":
             "2127e82b05ba52538dfae1d043f2d75a9b53dd51b8f2f43cd234d62aec2a587d",
     },
@@ -303,7 +303,7 @@ TESSERA_GRAMMAR_DIGESTS = frozenset({
 TESSERA_EQUIVALENT_SOURCE_STATES = (
     "reader-pin-387eda36", "study-producer-d403cc5a", "reader-pin-cc739a55",
     "reader-pin-09d6559d", "reader-pin-f94929de", "reader-pin-38e96012",
-    "reader-pin-a5f3b232", "reader-pin-83460680",
+    "reader-pin-a5f3b232", "reader-pin-b40c93cb",
 )
 
 
@@ -568,17 +568,23 @@ def live_pins() -> DomainPins:
 #: ``grammar.py`` (``9ae1f824…``) are byte-identical, so
 #: ``reader-pin-a21d74d8`` joins the equivalent states and no count moves
 #: (PQ #1702).
-#: **Re-taken 2026-09-29 for ``83460680ed`` (contract v45), a rename of that
+#: **Re-pinned 2026-09-29 for ``83460680ed`` (contract v45), a rename of that
 #: byte-state.**  Tessera #725 (tessera#724, the window intake repacks in place
 #: into the loader's scratch) leaves ``export.py`` at ``2127e82b…`` and
 #: ``grammar.py`` at ``9ae1f824…``, so ``reader-pin-a21d74d8`` is renamed
 #: ``reader-pin-83460680`` and no count moves (PQ #1719).
+#: **Re-pinned 2026-09-29 for ``b40c93cb73`` (contract v45), a rename of that
+#: byte-state.**  Tessera #730 (tessera#729, the routed loader keeps the
+#: row-cut start state in the permuted column order) leaves ``export.py`` at
+#: ``2127e82b…`` and ``grammar.py`` at ``9ae1f824…``, so
+#: ``reader-pin-83460680`` is renamed ``reader-pin-b40c93cb`` and no count
+#: moves (PQ #1739).
 FROZEN_PINS = DomainPins(
-    reader_dev_pin_commit="83460680ed84e33c82eb62b31345381cc151aa58",
+    reader_dev_pin_commit="b40c93cb73745097e57a1ba4cf5b9eee166c759a",
     reader_dev_pin_contract_sha256=(
         "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
     ),
-    serving_runtime_pinned_commit="83460680ed84e33c82eb62b31345381cc151aa58",
+    serving_runtime_pinned_commit="b40c93cb73745097e57a1ba4cf5b9eee166c759a",
     serving_runtime_pinned_version="0.1.0",
     serving_runtime_pinned_contract_sha256=(
         "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"

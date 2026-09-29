@@ -360,8 +360,16 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: repacks in place into the loader's scratch. The contract bytes do not move
 #: (v45, ``0869f326…``), so no admission answer moves. The pin stays schema
 #: v2.
+#: Re-pinned 2026-09-29 to b40c93cb73, Tessera master's merge of #730
+#: (tessera#729, PQ #1739): the routed MoE loader stored the tensor-parallel
+#: row-cut start state in the original column order, which corrupted rank-1
+#: gate/up weights on mixed-rate stacks. The crossing is three merges (#726,
+#: #728, #730) touching ``export_serving.py``, ``native_window_moe.py``,
+#: ``serving_parts.py`` and the census tool. The contract bytes do not move
+#: (v45, ``0869f326…``), so no admission answer moves. The pin stays schema
+#: v2.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "83460680ed84e33c82eb62b31345381cc151aa58"
+    "b40c93cb73745097e57a1ba4cf5b9eee166c759a"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
@@ -375,7 +383,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "83460680ed84e33c82eb62b31345381cc151aa58"
+    "b40c93cb73745097e57a1ba4cf5b9eee166c759a"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 

@@ -1,5 +1,42 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1739, `claude/tessera-pin-b40c93cb`): the exact
+Tessera pin is `b40c93cb73745097e57a1ba4cf5b9eee166c759a`, Tessera master's
+merge of #730 (tessera#729), so the pin names the Tessera that loads routed
+MoE weights correctly on mixed-rate stacks. It is a code-only re-pin: the
+contract stays v45 (`0869f326…`) and the pin stays schema v2.
+
+- **What moves.** The crossing from `83460680` is three merges: #726 (the
+  census tool passes `--compilation-config` through), #728 (a partition
+  identity records the producer authority's digest, not its path) and #730.
+  The package diff is `export_serving.py`, `native_window_moe.py` and
+  `serving_parts.py`. #730 fixes the routed MoE loader, which stored the
+  tensor-parallel row-cut start state in the original column order and so
+  corrupted rank-1 gate/up weights on mixed-rate stacks. The route-census
+  source (`tools/tessera_route_census.py`) now hashes to
+  `e449db34197d2e415a00de9c91a6abde0e3030f381e7a7be25946fc97fcb1c14`;
+  this records source identity, not a new census run.
+- **What does not move.** The packaged contract, `export.py` (`2127e82b…`)
+  and `grammar.py` (`9ae1f824…`) are byte-identical, so the reviewed answer,
+  every rate count and the Tessera `layer.json` pin stay as they are. The
+  legal inventory renames the `reader-pin-83460680` byte-state
+  `reader-pin-b40c93cb`.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`) differs from
+  the previous fixture in `pin.commit` only (PB `8321ca113e50`). The
+  normalized #1304 allocator outputs match all four frozen digests
+  (PB `c0d0779923a9`, 1 passed, 0 failed, 0 skipped). Full keys, commands
+  and CAS receipts are in PR #1740 (closes #1739). The full x86 CPU suite
+  under the new interpreter is GREEN (PB `4cbd37811088`, `c552682c2843`):
+  15,473 passed, 354 skipped, 1 xfailed, 0 failed and 88 passed subtests
+  across 872 files. These CPU receipts do not qualify GPU/serving behavior.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb`, plus a
+  `-tf516` sibling on each Spark. Each is a copy of the `83460680`
+  interpreter with only Tessera reinstalled. Host-pinned PB builds are
+  dl380g10 `04db45b6e214`, sparky `6e595022a3d5` and sparklina
+  `18820b4622bf`; pin publication is `d4c602dbe103`. All five interpreters
+  passed exact dependency-pin preflight, the provision check and import.
+
 Re-stamped 2026-09-29 (PQ #1007, `sol/pq-pbio-1014-20260929`): PrismaBuild
 #946 is closed, so it is no longer an upstream implementation blocker for
 band-serial consumer declarations. PrismaQuant still stages these handoffs
@@ -4762,8 +4799,12 @@ resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
-As of: 2026-09-29 · `claude/1654-row-startup`.
+As of: 2026-09-29 · `claude/tessera-pin-b40c93cb`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-29, `claude/tessera-pin-b40c93cb`) for **the Tessera
+re-pin to b40c93cb, the routed-loader start-state fix (tessera#729)** (PQ
+#1739); see the stamp at the top of this document.
 
 Re-stamped (2026-09-29, `claude/1654-row-startup`) for **the dispatcher's
 refusal of a streaming campaign without an adoptable source proof** and **the
