@@ -30,6 +30,21 @@ profile. This is not an identity migration, a new seal, or a relaxation of any
 existing refusal. It makes no performance, serving, calibration, KL or bpp
 claim and changes no format menu, stage graph or ship gate.
 
+## Package-source identity consumer — #1764
+
+`production_weight_cache._production_cache_source_sha256` uses the same
+profile for its durable package-input tree. The caller still discovers and
+sorts paths, excludes interpreter bytecode, includes packaged JSON/lattice
+and other non-code data, selects the default installed root, follows the
+same file symlinks, and wraps read errors with the same cause. Only framing
+moves to the existing owner. Rendered weights, tensors, residency, cache
+allocation and prefetch are not changed.
+
+`tests/test_pwc_source_framing_1764.py` independently spells the legacy record
+with `struct.pack`, verifies exact owner inputs, and exercises default/explicit
+roots, Unicode/binary data, followed-file symlinks, bytecode-only/missing roots,
+read-error causes and strict UTF-8 name refusal.
+
 ## Verification
 
 `tests/test_source_framing_1752.py` contains a frozen GoldenTable generated from
