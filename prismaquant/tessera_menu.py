@@ -856,6 +856,7 @@ def tessera_resolved_serving_lane(
         requires_serve_flags=admission.requires_serve_flags,
         route_status_source=admission.source,
         serving_context=getattr(admission, "serving_context", serving_context),
+        requires_serving_context=bool(getattr(admission, "requires_serving_context", False)),
     )
 
 
