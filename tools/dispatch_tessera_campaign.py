@@ -2124,14 +2124,20 @@ def cmd_plan(args) -> int:
             argv += ["--seed-checkpoint", str(args.seed_checkpoint)]
             if args.seed_wire_dir:
                 argv += ["--seed-wire-dir", str(args.seed_wire_dir)]
+        # The demand is derived from the argv the row will run, seed flags
+        # included, exactly as ``verify_row_demand`` re-derives it at submit:
+        # a seed makes the row run the load-all head, and a plan read off the
+        # spec's argv alone priced that row at its stream window instead
+        # (PQ #1686).
+        row_spec = {**spec, "campaign_argv": argv}
         rows.append(_row(spec, argv,
-                         mem_gb=_row_memory_gb(spec, members, census, selected_source=selected_source),
+                         mem_gb=_row_memory_gb(row_spec, members, census, selected_source=selected_source),
                          timeout_s=(None if args.timeout_s is None
                                     else int(args.timeout_s))))
         planned.append({"row_id": row_id, "groups": bundle, "members": sorted(members),
                         "dir": str(row_dir), "units": str(units_path),
                         **({'seed': row_seed} if row_seed is not None else {}),
-                        **({'resources': _streamed_resource_plan(spec, census, members,
+                        **({'resources': _streamed_resource_plan(row_spec, census, members,
                             selected_source=True)} if selected_source else {})})
 
     # PB alone admits and places these independently retryable rows according

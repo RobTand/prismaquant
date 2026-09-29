@@ -60,7 +60,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
-from .digests import newline_utf8_sha256
+from .digests import bytes_sha256hex, newline_utf8_sha256
 from .source_read_plan import uncovered_spans
 
 
@@ -721,7 +721,7 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
             },
             "read_set": {
                 "manifest_path": manifest_path,
-                "manifest_sha256": hashlib.sha256(blob).hexdigest(),
+                "manifest_sha256": bytes_sha256hex(blob),
                 "entry_count": len(layer_entries),
                 "total_bytes": layer_bytes,
                 "source_phase": {"name": name, "start_bytes": row["start_bytes"],
@@ -774,9 +774,9 @@ def layer_quanta(plan: Mapping, prepared: Mapping, parent_manifest: Mapping, *,
                 "schema": "prismaquant.joint_layer_quanta.derivation.v2",
                 "window_partition": {
                     "source": "plan" if partition_from_plan else "explicit",
-                    "sha256": hashlib.sha256(_canonical_partition_bytes(
+                    "sha256": bytes_sha256hex(_canonical_partition_bytes(
                         plan.get("retained_window_budget_derivation")
-                        if partition_from_plan else window_partition)).hexdigest(),
+                        if partition_from_plan else window_partition)),
                     "windows_total": sum(counts.values()),
                 },
                 "chunk_target_bytes": chunk_target_bytes,
@@ -1220,7 +1220,7 @@ def verify_quanta_coverage(records: Sequence[Mapping], parent_manifest: Mapping,
              "layers": sorted(record["layer"] for record in rows),
              "parent_total_bytes": total,
              "quanta": layer_table, "window_total": window_total,
-             "campaign_sha256": hashlib.sha256(first_campaign).hexdigest()}
+             "campaign_sha256": bytes_sha256hex(first_campaign)}
     proof["coverage_sha256"] = canonical_sha256(
         {key: proof[key] for key in ("quantum_ids", "layers", "parent_total_bytes",
                                      "quanta", "window_total", "campaign_sha256")},
@@ -1917,7 +1917,7 @@ def bind_quantum_boundary_readset(record: Mapping, receipt: Mapping, *,
             "the boundary readset entries, phases or counts do not "
             "originate from the bound slice: refusing")
     wire = seal_manifest_bytes(manifest)
-    if hashlib.sha256(wire).hexdigest() != manifest_sha256:
+    if bytes_sha256hex(wire) != manifest_sha256:
         raise ValueError("the boundary readset digest does not reproduce "
                          "from its manifest wire: refusing")
     fresh = copy.deepcopy(record)
@@ -3010,7 +3010,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             "the executable readset entries, phases or counts do not "
             "originate from the bound inputs: refusing")
     wire = seal_manifest_bytes(manifest)
-    if hashlib.sha256(wire).hexdigest() != manifest_sha256:
+    if bytes_sha256hex(wire) != manifest_sha256:
         raise ValueError("the executable readset digest does not reproduce "
                          "from its manifest wire: refusing")
     fresh = copy.deepcopy(record)
