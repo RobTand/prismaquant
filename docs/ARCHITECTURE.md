@@ -160,6 +160,26 @@ PrismaBuild still owns placement and balancing. CPU planner checks do not
 establish speed or output equivalence; #1750's profiled GPU A/B remains open.
 See [the input contract](campaign_row_work_profile.md).
 
+Re-stamped 2026-09-29 (PQ #1503, `sol/pq-tessera-1`): the retained-render
+qualification request builder takes explicit digest-bound per-cell files or CAS
+child manifests instead of an R13 pilot and pinned children. Task/output IDs
+and new output filenames bind `(qname, format)`; residency keys come from the
+catalog formats. Legacy qname-only child identities are refused; legacy
+filenames are reusable explicitly only with modern qualification digest fields
+(the original unbound pilot-era contents are refused). Normalized absolute
+output paths must be distinct across pairs. Fresh temporary paths mirror the
+qualifier's `.with_suffix('.tmp')` convention, must not alias any declared
+prior file, task output or another fresh temporary, and refuse if occupied
+(including stale files, hardlinks and broken symlinks); duplicate equal-digest
+prior paths are protected even when not selected for reuse. Assembly and
+rebinding share pair/qname directory lookup: a unique match is accepted, both present refuse,
+and an explicit `--qualified-key` can select one layout. Custom arbitrary
+prior filenames remain request/qualifier-only, not directory-discoverable.
+Inputs remain read-only, and PB owns partitioning through the unchanged logical
+schemas and resource declarations.
+No pipeline default, export byte, serving lane, pin or ship gate changes. See
+[the builder contract](operations/t4_logical_request.md).
+
 Re-stamped 2026-09-29 (PQ #1608, `sol/issues-pq-ts-2`): the three closed
 source-transition contracts remain separate. Identical helpers stay in
 `joint_aura_transition_base.py`; checkpoint adoption, run-source proof, and

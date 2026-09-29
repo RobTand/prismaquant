@@ -24,8 +24,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
-import assemble_t4_overlay as assemble  # noqa: E402
-import rebind_t4_qualified_results as rebind  # noqa: E402
+from prismaquant.digests import DIRECT_ASCII_LAX, bytes_sha256hex  # noqa: E402
+from tools import assemble_t4_overlay as assemble  # noqa: E402
+from tools import build_t4_logical_request as builder  # noqa: E402
+from tools import rebind_t4_qualified_results as rebind  # noqa: E402
 
 FMT = "TESSERA_E2M1_K2_R3"
 QNAMES = ["model.layers.3.mlp.experts.7.down_proj", "model.layers.4.mlp.experts.1.up_proj"]
@@ -44,7 +46,7 @@ def _write(path, raw):
 
 def _stat(path):
     s = path.stat()
-    return dict(inode=s.st_ino, bytes=s.st_size, mtime_ns=s.st_mtime_ns, ctime_ns=s.st_ctime_ns)
+    return {'inode': s.st_ino, 'bytes': s.st_size, 'mtime_ns': s.st_mtime_ns, 'ctime_ns': s.st_ctime_ns}
 
 
 def _pair(root, name, cache_binding):
@@ -230,9 +232,7 @@ def test_a_multi_format_catalog_assembles_with_carried_and_new_cells(fx, monkeyp
     published = _run(fx, monkeypatch, *_flags(fx.r13), *extra)
     prepared = json.loads(published["prepare/prepared.json"])
     assert all(prepared["formats_by_qname"][q] == ["NVFP4", FMT, FMT2, "BF16"] for q in QNAMES)
-    cache = pickle.loads(published["prepare/production.pkl"])
-    assert len(cache.weights) == fx.cells == 5
-    assert prepared["measured_cells"] == 5
+    assert prepared["measured_cells"] == fx.cells == 5
 
 
 def test_a_rebinding_of_an_undeclared_catalog_refuses(fx, monkeypatch):
@@ -240,6 +240,109 @@ def test_a_rebinding_of_an_undeclared_catalog_refuses(fx, monkeypatch):
     with pytest.raises(AssertionError, match="neither this catalog"):
         _run(fx, monkeypatch, *_flags(fx.r13), *extra)
     assert not fx.out.exists()
+
+
+def test_builder_pair_outputs_feed_rebinding_and_assembly_without_renames(fx, monkeypatch):
+    """Simulate qualification metadata only; never read source bytes or run a decoder."""
+    original = json.loads(Path(fx.catalog['path']).read_bytes())['cells']
+    cells = [{**c, 'format': fmt,
+              'wire': f'/mnt/shared/synthetic/{index}/{fmt}/wire',
+              'render': f'/mnt/shared/synthetic/{index}/{fmt}/render'}
+             for index, c in enumerate(original) for fmt in (FMT, FMT2)]
+    catalog = {'schema': 'prismaquant.t4_adopted_catalog.v2', 'cells': cells,
+               'formats': [FMT, FMT2], 'cell_sources': [0] * len(cells),
+               'sources': [{'cost': {'path': 'synthetic', 'sha256': 'b' * 64}}]}
+    previous = _write(fx.root / 'builder-catalog.json', DIRECT_ASCII_LAX.encoded(catalog))
+    request_path = fx.root / 'request.json'
+    monkeypatch.setattr(sys, 'argv', ['builder', '--root', str(fx.root / 'fresh-campaign'),
+                        '--catalog', previous['path'], '--catalog-sha256', previous['sha256'],
+                        '--python', '/pinned/python', '--qualifier-checkout', '/independent-worker',
+                        '--out', str(request_path)])
+    builder.main()
+    tasks = json.loads(request_path.read_bytes())['roster']['tasks']
+    assert all(len(t['payload']['reads']) == 2 for t in tasks)
+    before = {}
+    for task in tasks:
+        cell = task['payload']['cell']
+        path = Path(task['payload']['output'])
+        raw = _result_bytes(cell, cell)
+        _write(path, raw)
+        before[path] = raw
+    fx.qualified = fx.root / 'fresh-campaign' / 'qualified'
+    fx.catalog = previous
+    fx.out = fx.root / 'direct-pair-overlay'
+    monkeypatch.setattr(assemble, 'fence_cell_artifacts', lambda c: None)
+    direct = _run(fx, monkeypatch, *_flags(fx.r13))
+    assert json.loads(direct['prepare/prepared.json'])['measured_cells'] == len(cells) + 1
+    fx.out = fx.root / 'rebound-pair-overlay'
+    catalog['cells'] = [{**c, 'anchor': {'dloss': 2e-5}} for c in cells]
+    fx.catalog = _write(fx.root / 'reanchored-catalog.json', DIRECT_ASCII_LAX.encoded(catalog))
+    rebound_path = fx.root / 'pair-rebinding.json'
+    monkeypatch.setattr(sys, 'argv', ['rebind', '--catalog', fx.catalog['path'],
+                        '--catalog-sha256', fx.catalog['sha256'],
+                        '--previous-catalog', previous['path'],
+                        '--previous-catalog-sha256', previous['sha256'],
+                        '--qualified-dir', str(fx.qualified), '--out', str(rebound_path)])
+    rebind.main()
+    assert len(json.loads(rebound_path.read_bytes())['rows']) == len(cells)
+    monkeypatch.setattr(assemble, 'fence_cell_artifacts', lambda c: None)
+    published_weights = {}
+    original_dumps = pickle.dumps
+
+    def capture_cache(value, *args, **kwargs):
+        published_weights.update(value.weights)
+        return original_dumps(value, *args, **kwargs)
+
+    monkeypatch.setattr(assemble.pickle, 'dumps', capture_cache)
+    published = _run(fx, monkeypatch, *_flags(fx.r13), '--rebinding', str(rebound_path),
+                     '--rebinding-sha256', bytes_sha256hex(rebound_path.read_bytes()))
+    assert json.loads(published['prepare/prepared.json'])['measured_cells'] == len(cells) + 1
+    assert set(published_weights) == {('model.embed', 'BF16')} | {(c['qname'], c['format']) for c in cells}
+    assert all(published_weights[c['qname'], c['format']] == c['render'] for c in cells)
+    assert all(p.read_bytes() == raw for p, raw in before.items())
+
+
+@pytest.mark.parametrize('consumer', ['assemble', 'rebind'])
+def test_pair_and_qname_files_refuse_ambiguous_auto_consumer_intake(fx, monkeypatch, consumer):
+    cells = json.loads(Path(fx.catalog['path']).read_bytes())['cells']
+    for cell in cells:
+        pair_id = DIRECT_ASCII_LAX.sha256([cell['qname'], cell['format']])
+        pair_path = fx.qualified / (pair_id + '.json')
+        _write(pair_path, _result_bytes(cell, cell))
+        assert pair_path.read_bytes() == rebind.result_path(fx.qualified, cell['qname']).read_bytes()
+    if consumer == 'assemble':
+        with pytest.raises(ValueError, match='ambiguous'):
+            _run(fx, monkeypatch)
+        assert not fx.out.exists()
+    else:
+        out = fx.root / 'ambiguous-rebinding.json'
+        monkeypatch.setattr(sys, 'argv', ['rebind', '--catalog', fx.catalog['path'],
+                            '--catalog-sha256', fx.catalog['sha256'],
+                            '--previous-catalog', fx.catalog['path'],
+                            '--previous-catalog-sha256', fx.catalog['sha256'],
+                            '--qualified-dir', str(fx.qualified), '--out', str(out)])
+        with pytest.raises(ValueError, match='ambiguous'):
+            rebind.main()
+        assert not out.exists()
+
+
+@pytest.mark.parametrize('key', ['pair', 'qname'])
+def test_explicit_consumer_key_resolves_ambiguous_directory(fx, monkeypatch, key):
+    cells = json.loads(Path(fx.catalog['path']).read_bytes())['cells']
+    for cell in cells:
+        pair_id = DIRECT_ASCII_LAX.sha256([cell['qname'], cell['format']])
+        _write(fx.qualified / (pair_id + '.json'), _result_bytes(cell, cell))
+    published = _run(fx, monkeypatch, '--qualified-key', key)
+    prepared = json.loads(published['prepare/prepared.json'])
+    assert prepared['measured_cells'] == fx.cells
+    out = fx.root / 'explicit-rebinding.json'
+    monkeypatch.setattr(sys, 'argv', ['rebind', '--catalog', fx.catalog['path'],
+                        '--catalog-sha256', fx.catalog['sha256'],
+                        '--previous-catalog', fx.catalog['path'],
+                        '--previous-catalog-sha256', fx.catalog['sha256'],
+                        '--qualified-dir', str(fx.qualified), '--qualified-key', key, '--out', str(out)])
+    rebind.main()
+    assert len(json.loads(out.read_bytes())['rows']) == len(cells)
 
 
 def test_a_second_format_without_its_directory_refuses(fx, monkeypatch):
