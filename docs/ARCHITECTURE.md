@@ -3139,8 +3139,8 @@ said nothing about its own reads between the head and the records.
     `idle_ceiling_w` is their maximum, with no free constant, and the receipt
     records the `baseline` (`n`, `min_w`, `max_w`, `mean_w`, `start_unix`,
     `end_unix`, `span_s`). A wait second is idle when its power cell is at or
-    below the ceiling, busy above it. With no baseline sample the band split
-    is `None` and the wait is `unsampled_s`, never guessed. A trace is never
+    below the ceiling, busy above it. With no baseline sample, both measured
+    band counts are zero and all wait time is `unsampled_s`, never guessed. A trace is never
     cut by its own shape, so a row that is busy throughout reports no idle
     seconds. The ceiling is only as clean as the pre-CUDA window: another
     process on the GPU during startup would raise it.
@@ -3152,8 +3152,8 @@ said nothing about its own reads between the head and the records.
     work_before_s)` (`load_lt_consume`), and nothing more. The first take of a
     stream is its first fill (`first_fill`) and is exempt. A take with no
     measured load rate is `unmeasured`, with no bound. `bound` in the block
-    records every take's rates, regime, `bound_s` and `excess_s = wait_s −
-    bound_s`, plus the row totals. A nonzero `excess_s` is the finding.
+    records every take's rates, regime, `bound_s` and
+    `excess_s = max(0, wait_s − bound_s)`, plus the row totals. A nonzero `excess_s` is the finding.
   - **Stage A** has no consumer-side blocked-interval timing. Its counters
     carry `exposed_wait: {instrumented: false, reason, ...}` instead of a
     zero that would read as a measurement.
