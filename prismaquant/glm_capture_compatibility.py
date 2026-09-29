@@ -5,7 +5,6 @@ fields. Issuance requires the completed original PB action and native evidence.
 """
 from __future__ import annotations
 
-import hashlib
 import ast
 import json
 from pathlib import Path
@@ -28,7 +27,7 @@ ISSUANCE_PLAN_SCHEMA = 'prismaquant.glm_capture_compatibility_issuance_plan.v1'
 def _bytes(binding, label):
     _require(isinstance(binding, dict) and set(binding) == {'path', 'sha256'}, label + ' requires path/SHA256')
     raw = Path(binding['path']).read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == binding['sha256'], label + ' bytes changed')
+    _require(bytes_sha256hex(raw) == binding['sha256'], label + ' bytes changed')
     return raw
 
 
@@ -68,7 +67,7 @@ def _verify_cas_receipt(receipt, snapshot, output):
     _require(refusal is None, _RECEIPT_REFUSAL_MESSAGES.get(refusal, f'CAS receipt refused: {refusal}'))
     producer = receipt['producer']
     _require(snapshot['input'] in producer.get('inputs', []), 'CAS producer does not bind the reviewed source snapshot input')
-    _require(receipt['result'] == dict(sha256=hashlib.sha256(output).hexdigest(), bytes=len(output)),
+    _require(receipt['result'] == dict(sha256=bytes_sha256hex(output), bytes=len(output)),
              'original CAS output is not bound by its receipt')
 
 
@@ -114,7 +113,7 @@ def _producer(evidence, capture):
     matched = [row for row in images if isinstance(row, dict) and row.get('Id') == containers[0].get('image_id')]
     _require(len(matched) == 1 and image_content_sha256(matched[0]) == ORIGINAL_IMAGE_CONTENT_SHA256,
              'original image inspection does not bind actual image/config/layers')
-    _require(hashlib.sha256(_bytes(evidence['modeling_source'], 'original modeling source')).hexdigest() == ORIGINAL_MODELING_SHA256,
+    _require(bytes_sha256hex(_bytes(evidence['modeling_source'], 'original modeling source')) == ORIGINAL_MODELING_SHA256,
              'original modeling source differs')
     return dict(action_key=CAPTURE_ACTION, source_snapshot=snapshot,
                 image_content_sha256=ORIGINAL_IMAGE_CONTENT_SHA256, modeling_sha256=ORIGINAL_MODELING_SHA256)
@@ -302,7 +301,7 @@ def _issuance_static_inputs(plan):
     _require(isinstance(inspected, dict) and any(isinstance(row, dict) and
              image_content_sha256(row) == ORIGINAL_IMAGE_CONTENT_SHA256 for row in inspected.values()),
              'original image inspection does not contain the pinned image')
-    _require(hashlib.sha256(_bytes(evidence['modeling_source'], 'original modeling source')).hexdigest() ==
+    _require(bytes_sha256hex(_bytes(evidence['modeling_source'], 'original modeling source')) ==
              ORIGINAL_MODELING_SHA256, 'original modeling source differs')
     graph = bound_json(plan['forward_equivalence']['corrected_graph'], 'corrected graph config source')
     config = plan['model_config']
