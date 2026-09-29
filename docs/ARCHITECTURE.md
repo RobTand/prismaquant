@@ -54,6 +54,14 @@ refill-cost order. See the
 reclaim bullet in the Stage B replay section. No pipeline default, stage,
 format or lane changes.
 
+Re-stamped 2026-09-28 (PQ #1292, `sonnet/1292-exposed-wait`): every Stage B
+row's `counters.json` gains `exposed_wait`, the consumer's time blocked on a
+load, split by GPU power band (idle means at or below the ceiling the row measured
+before its first CUDA call) and judged against a bound derived from the
+row's own measured rates. It is telemetry only: no pipeline default, stage,
+format, lane or ship gate changes. See "Exposed wait" under the Stage B span
+contract. Stage A rows carry a block that says `instrumented: false`.
+
 Re-stamped 2026-09-28 (PQ #1613, `claude/1613-streaming-resume`): **a
 selected-source row resumes a checkpoint on the stream head**, and is admitted
 against the window plan it was declared with. Before this change, a
@@ -2712,6 +2720,50 @@ said nothing about its own reads between the head and the records.
   is otherwise lost when PrismaBuild retires the spool namespace.
   The power sampler now starts before the head, so the counters' `wall_s`
   and `gpu_joules` include the head.
+- **Exposed wait** (PQ #1292). `counters.json` gains `exposed_wait`
+  (`prismaquant.exposed_wait.v1`), on by default in every Stage B row and
+  needing no profiler. Exposed wait is time the consumer is blocked on a load
+  while the GPU is in its idle power band. Blocked intervals come from two
+  places. Sinks time the blocking calls themselves: `window-load` (each
+  `io_engine.ReadStream.take`, the PWC window loads) and `spill-reader` and
+  `spill-hook` (the replay spill's `reader_wait_s` and `hook_wait_s` waits).
+  The spans that already block on a load supply the rest: `checkpoint-load`,
+  `handoff-load`, `own-source` and `window-wait`. Overlapping intervals of
+  different kinds count once (`wait_s` is their union; `overlap_s` reports
+  the double coverage). The block reports each phase's `wait_s` and `by_kind`,
+  then `idle_band_s`, `busy_band_s` and `unsampled_s` against the
+  `gpu-power` sampler's cells, so the resolution is the sampler interval.
+  Waits outside every phase window are in `total.outside_phases_s`.
+  - **The idle ceiling is measured, not chosen.** The row samples GPU power
+    over its own pre-work window: the samples taken before
+    `gpu_work_started_unix`, which the row stamps just before the first
+    CUDA-touching call (`prewarm_projection_backend`). Its startup is
+    GPU-idle, so those samples are the device's observed idle range.
+    `idle_ceiling_w` is their maximum, with no free constant, and the receipt
+    records the `baseline` (`n`, `min_w`, `max_w`, `mean_w`, `start_unix`,
+    `end_unix`, `span_s`). A wait second is idle when its power cell is at or
+    below the ceiling, busy above it. With no baseline sample the band split
+    is `None` and the wait is `unsampled_s`, never guessed. A trace is never
+    cut by its own shape, so a row that is busy throughout reports no idle
+    seconds. The ceiling is only as clean as the pre-CUDA window: another
+    process on the GPU during startup would raise it.
+  - **The bound.** For a steady-state take of `bytes` with `work_before_s`
+    of compute since the previous take, consume rate is `bytes /
+    work_before_s` and load rate is the stream's measured
+    `bytes_read / read_wall_s`. If load rate >= consume rate the bound is 0
+    (`load_ge_consume`). Otherwise it is `max(0, bytes / load_rate −
+    work_before_s)` (`load_lt_consume`), and nothing more. The first take of a
+    stream is its first fill (`first_fill`) and is exempt. A take with no
+    measured load rate is `unmeasured`, with no bound. `bound` in the block
+    records every take's rates, regime, `bound_s` and `excess_s = wait_s −
+    bound_s`, plus the row totals. A nonzero `excess_s` is the finding.
+  - **Stage A** has no consumer-side blocked-interval timing. Its counters
+    carry `exposed_wait: {instrumented: false, reason, ...}` instead of a
+    zero that would read as a measurement.
+  Gate: `tests/test_exposed_wait_1292.py`. The sink costs about 0.7 us per
+  call, and a 96 x 8 file `ReadStream` fixture measured the same take time
+  before and after (median 0.239 s vs 0.231 s; `cProfile` `take` 0.348 s vs
+  0.350 s).
 - **What the counters see.** `/proc/self/io` covers the process's thread
   group, including prefetch threads, and no child process. `read_bytes` is
   storage-layer reads, and `rchar` includes page-cache hits. Neither names a

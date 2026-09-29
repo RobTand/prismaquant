@@ -49,7 +49,7 @@ import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
-from .io_spans import GpuPowerSampler
+from .io_spans import EXPOSED_WAIT_SCHEMA, GpuPowerSampler
 from .joint_adjoint_checkpoints import (
     ADJOINT_CAPTURE_ENTRY_POINT,
     ADJOINT_RECEIPT_SCHEMA,
@@ -2723,6 +2723,15 @@ def run_adjoint_capture(
         "kernel_active_ratio": (
             kernel.kernel_active_s / (result["phases"][0]["end_epoch"] - started)
             if not kernel.error else None),
+        # PQ #1292: the capture's source loads are not timed on the consumer
+        # side (the runner reports a stage change, not the interval the layer
+        # loop blocked), so this row records that, never a zero it did not
+        # measure. The gap is the one named by the issue's Stage A follow-up.
+        "exposed_wait": {
+            "schema": EXPOSED_WAIT_SCHEMA, "instrumented": False,
+            "reason": ("stage A capture reports source-load stage changes, "
+                       "not the consumer's blocked intervals"),
+            "gpu_power_envelope_w": 140.0},
         "phases": [{"name": "adjoint-capture",
                     "bytes_from_ram": (residency or {}).get("bytes_from_ram"),
                     "bytes_from_stage": (residency or {}).get("bytes_from_stage"),
