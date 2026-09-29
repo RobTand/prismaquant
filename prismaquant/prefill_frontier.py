@@ -74,14 +74,10 @@ from typing import Sequence
 from .cost_stage_checkpoint import atomic_write_bytes, publish_new_bytes
 from .digests import bytes_sha256hex, file_sha256hex
 from .layer_config import LAYER_CONFIG_META_KEY
-from .measured_runtime_prices import identity_sha256
+from .measured_runtime_prices import (
+    BOOTSTRAP_CONFIDENCE, BOOTSTRAP_DRAWS, BOOTSTRAP_SEED, identity_sha256)
 
 SCHEMA = "prismaquant.prefill_frontier.v1"
-#: The prefill-vs-accuracy curve's own bootstrap settings
-#: (``experiments/pq_prefill_accuracy_curve.py``), so the two tools describe
-#: the same table's dispersion the same way.
-BOOTSTRAP_DRAWS = 10000
-BOOTSTRAP_SEED = 237
 ASSIGNMENT_SCHEMA = "prismaquant.prefill_frontier.assignment.v1"
 REPLAY_SCHEMA = "prismaquant.prefill_frontier.replay.v1"
 #: The PACT hull document (PQ #1584): the exact lower convex hull of
@@ -483,6 +479,54 @@ def _point_record(record: dict, assignments_dir: Path, *, provenance_stub: dict,
 # Sweep
 # --------------------------------------------------------------------------- #
 
+def _select(points, *, regime_m: int, table_identity, frontier_scope: str,
+            draws: int, seed: int) -> dict:
+    """The one PACT selection call, for the hull and the sweep alike (PQ #1659).
+
+    Both paths hand ``select_pact`` points whose time intervals came from
+    :func:`~prismaquant.measured_runtime_prices.bootstrap_sum` and say how they
+    were drawn, so a record names its own level, resample count and seed.
+    """
+    from .pact_selection import select_pact
+
+    return select_pact(
+        points, regime_m=int(regime_m), table_identity=dict(table_identity),
+        frontier_scope=frontier_scope,
+        time_interval={"method": "per_shape_bootstrap_sum_v1",
+                       "confidence": BOOTSTRAP_CONFIDENCE,
+                       "draws": int(draws), "seed": int(seed)})
+
+
+def sweep_selection_points(points) -> list[dict]:
+    """The distinct feasible assignments of a sweep, as ``select_pact`` points.
+
+    One assignment recurs at every SLO above its attained time, so the sweep's
+    points are deduplicated by digest; the first (tightest-SLO) point stands
+    for it. Every point must carry its bootstrap interval: a sweep built
+    without dispersion has no interval to hand on.
+    """
+    seen: dict[str, dict] = {}
+    for point in points:
+        if point.get("feasible") is not True or point["assignment_sha256"] in seen:
+            continue
+        boot = point.get("attained_prefill_ms_bootstrap")
+        if boot is None:
+            raise PrefillFrontierError(
+                f"sweep point {point['assignment_sha256']} carries no prefill bootstrap interval")
+        seen[point["assignment_sha256"]] = {
+            "point_id": point["assignment_sha256"][:16],
+            "assignment_sha256": point["assignment_sha256"],
+            "bytes": int(point["payload_bytes"]),
+            "time_ms": float(point["attained_prefill_ms"]),
+            "time_interval_ms": [float(boot["p2.5"]), float(boot["p97.5"])],
+            "predicted_dloss": float(point["predicted_dloss"]),
+            "kernel_lanes": None,
+            "time_samples": {"samples_per_row": list(boot["samples_per_row"]),
+                             "distinct_measurements": boot.get("distinct_measurements")},
+        }
+    return list(seen.values())
+
+
 def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
               loss_noise_floor: float, allocator_argv: Sequence[str],
               bootstrap_draws: int = BOOTSTRAP_DRAWS,
@@ -578,6 +622,7 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
                                   if key != "p95_ttft_ms"},
         "grid": {"kind": kind, "spec": spec if kind != "auto" else "prefill_slo_breakpoints_ms"},
         "bootstrap": {"draws": int(bootstrap_draws), "seed": int(bootstrap_seed),
+                      "confidence": BOOTSTRAP_CONFIDENCE,
                       "function": "prismaquant.measured_runtime_prices.bootstrap_sum",
                       "resamples": "each priced row's own samples, with replacement, re-reduced by median",
                       "covers": ("the priced rows this solve summed; the fixed whole-engine term is a "
@@ -594,9 +639,18 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
                                            "because the report schema observes no timing term"),
                 "lower_bound_derivation": "fixed prefill + sum over units of the fastest priced option",
                 "upper_bound_derivation": "fixed prefill + sum over units of the slowest priced option"}
-    return build_frontier_document(points, saturation=saturation, slo_axis=slo_axis,
-                                   loss_noise_floor=loss_noise_floor, provenance=provenance,
-                                   fixed_resource_scope=scope)
+    document = build_frontier_document(points, saturation=saturation, slo_axis=slo_axis,
+                                       loss_noise_floor=loss_noise_floor, provenance=provenance,
+                                       fixed_resource_scope=scope)
+    selection_points = sweep_selection_points(points)
+    if selection_points:
+        regime_m = int(ctx.runtime_context["prompt_tokens"])
+        document["regime_m"] = regime_m
+        document["pact_selection"] = _select(
+            selection_points, regime_m=regime_m, table_identity=ctx.table_identity,
+            frontier_scope="slo_grid_distinct_assignments",
+            draws=bootstrap_draws, seed=bootstrap_seed)
+    return document
 
 
 # --------------------------------------------------------------------------- #
@@ -669,6 +723,10 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
                                      float(entry["operator_sum_ms_bootstrap"]["p97.5"])],
                 "predicted_dloss": float(vertex.predicted_dloss),
                 "kernel_lanes": ctx.pricing.kernel_lane_histogram(assignment),
+                "time_samples": {
+                    "samples_per_row": list(entry["operator_sum_ms_bootstrap"]["samples_per_row"]),
+                    "distinct_measurements":
+                        entry["operator_sum_ms_bootstrap"].get("distinct_measurements")},
             })
         vertices.append(entry)
         boot = entry["operator_sum_ms_bootstrap"]
@@ -676,12 +734,10 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
               f"ops={vertex.time_ms:.6g} ms [{boot['p2.5']:.6g}, {boot['p97.5']:.6g}] "
               + (f"sha={entry['assignment_sha256'][:12]}" if entry["feasible"]
                  else f"REFUSED ({entry['refusal_reason']})"), flush=True)
-    from .pact_selection import select_pact
-
-    selection = select_pact(
-        selection_points, regime_m=int(ctx.regime_m),
-        table_identity=dict(ctx.table_identity),
-        frontier_scope="lower_convex_hull_vertices")
+    selection = _select(
+        selection_points, regime_m=int(ctx.regime_m), table_identity=ctx.table_identity,
+        frontier_scope="lower_convex_hull_vertices",
+        draws=bootstrap_draws, seed=bootstrap_seed)
     print(f"[pact-hull] selection: materiality={selection['materiality']['verdict']} "
           + " ".join(f"{role}={pick['point_id']}" for role, pick in selection["picks"].items()),
           flush=True)
@@ -737,6 +793,7 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
             "allocator_cwd": str(Path.cwd()),
             "target_bits": float(ctx.target_bits),
             "bootstrap": {"draws": int(bootstrap_draws), "seed": int(bootstrap_seed),
+                          "confidence": BOOTSTRAP_CONFIDENCE,
                           "function": "prismaquant.measured_runtime_prices.bootstrap_sum",
                           "resamples": ("each distinct shape row's own samples, once per draw, "
                                         "weighted by how many units read it"),
@@ -955,6 +1012,12 @@ def replay(frontier: Path, digest: str, output: Path) -> None:
             "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
             "probe_bound_by_sweep": "probe_sha256" in provenance,
         }
+        selection = document.get("pact_selection")
+        if selection is not None:
+            # Same claim the hull replay stamps; an old sweep has none and replays as before.
+            stamp["regime_m"] = document["regime_m"]
+            stamp["pact_selection_sha256"] = selection["identity_sha256"]
+            stamp["pact_selection"] = selection
         ctx.emit_replay(point["slo_ms"], point["target_bits"], expected, stamp)
         emitted = True
 

@@ -132,6 +132,23 @@ def _lanes(raw: object, where: str) -> dict[str, int] | None:
     return out
 
 
+def _samples(raw: object, where: str) -> dict[str, object] | None:
+    """The sample counts behind a point's interval: per-row counts and distinct receipts."""
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        _fail(f"{where}.time_samples must be null or a mapping")
+    per_row = raw.get("samples_per_row")
+    if (not isinstance(per_row, Sequence) or isinstance(per_row, (str, bytes))
+            or not per_row or any(type(n) is not int or n < 1 for n in per_row)):
+        _fail(f"{where}.time_samples.samples_per_row must be a non-empty list of positive counts")
+    distinct = raw.get("distinct_measurements")
+    if distinct is not None and (type(distinct) is not int or distinct < 1):
+        _fail(f"{where}.time_samples.distinct_measurements must be null or a positive int")
+    return {"samples_per_row": [int(n) for n in per_row],
+            "distinct_measurements": distinct}
+
+
 def _clean_points(points: Iterable[Mapping[str, object]]) -> list[dict[str, object]]:
     """Validate the input points and return them sorted by point id."""
     cleaned: dict[str, dict[str, object]] = {}
@@ -164,6 +181,7 @@ def _clean_points(points: Iterable[Mapping[str, object]]) -> list[dict[str, obje
             "time_interval_ms": _interval(raw.get("time_interval_ms"), where),
             "predicted_dloss": float(dloss),
             "kernel_lanes": _lanes(raw.get("kernel_lanes"), where),
+            "time_samples": _samples(raw.get("time_samples"), where),
         }
     if not cleaned:
         _fail("a PACT selection needs at least one frontier point")
@@ -371,8 +389,14 @@ def select_pact(
     frontier_scope: str,
     byte_budget: int | None = None,
     allow_unresolved: bool = False,
+    time_interval: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Return the ``prismaquant.pact_selection.v1`` record for one regime.
+
+    ``time_interval`` names how the points' ``time_interval_ms`` was produced
+    (method, confidence, draws, seed); it is recorded under ``time_axis`` so the
+    intervals can be reproduced. Each point may carry ``time_samples``, the sample
+    counts behind its interval (``samples_per_row`` and ``distinct_measurements``).
 
     Each point is a mapping with ``point_id``, ``assignment_sha256``, ``bytes``,
     ``time_ms``, ``time_interval_ms`` (a ``[lo, hi]`` pair or ``None``),
@@ -533,6 +557,7 @@ def select_pact(
                 "time_interval_ms": None if interval is None else list(interval),
                 "predicted_dloss": point["predicted_dloss"],
                 "kernel_lanes": point["kernel_lanes"],
+                "time_samples": point["time_samples"],
                 "roles": sorted(roles[point_id]),
             }
         )
@@ -551,7 +576,8 @@ def select_pact(
             "note": "the quality axis carries no bootstrap interval, so endpoint "
             "quality noise is not part of the resolution",
         },
-        "time_axis": {"name": "attained_prefill_ms", "unit": "ms"},
+        "time_axis": {"name": "attained_prefill_ms", "unit": "ms",
+                      "interval": None if time_interval is None else dict(time_interval)},
         "rule": {
             "high_accuracy": dict(_ACCURACY_RULE),
             "balanced": dict(KNEE_RULE),

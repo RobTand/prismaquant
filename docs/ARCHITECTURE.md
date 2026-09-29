@@ -247,6 +247,21 @@ the layer config and the shipcard `build` block, which `shipcard.verify`
 checks against the recipe. The high-prefill rule is a proposal that awaits the
 owner. No default, stage, format or lane changes.
 
+Re-stamped 2026-09-29 (PQ #1659, `sonnet/1659-frontier-intervals`): frontier
+materiality names where its intervals came from. The bootstrap settings live
+once in `prismaquant/measured_runtime_prices.py` (`BOOTSTRAP_CONFIDENCE` 0.95,
+`BOOTSTRAP_DRAWS` 10000, `BOOTSTRAP_SEED` 237; `bootstrap_sum` also returns
+`confidence`), and one shared `_select` hands `select_pact` the same
+`time_interval` provenance for the hull and the sweep, recorded under
+`time_axis.interval` so the record's identity binds it. Roster points carry
+`time_samples` (per-row counts, distinct receipts). A sweep attaches the
+record too: `sweep_selection_points` dedupes feasible assignments by digest
+and refuses a point without a bootstrap, and the sweep replay stamps
+`regime_m`, `pact_selection_sha256` and `pact_selection`, passing the same
+`layer_config` claim the hull replay passes. The duplicate bootstrap
+constants in `prefill_frontier.py` are removed. No default, stage, format,
+lane or ship gate changes. Gate: `tests/test_pact_frontier_intervals.py`.
+
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
 gains a research-only PACT mode, reached only through
 `prismaquant.prefill_frontier` (`--pact-shape-table`, `--pact-regime`,
