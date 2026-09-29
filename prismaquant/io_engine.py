@@ -60,8 +60,11 @@ states a depth or a worker count:
   entries is read, hashed, held to its digest and decoded; entries come back
   in stream order. The first failure in a taken group raises
   :class:`EntryError` at the consumer, naming the entry. A failure while the
-  group was only read ahead is not final: the group is read again when the
-  consumer asks for it, and that read decides.
+  group was only read ahead is normally not final: the group is read again
+  when the consumer asks for it, and that read decides. A reader or staging
+  gate may instead raise :class:`TerminalReadError` for an irrecoverable
+  failure: the failed entry is retained and is never retried, even if the
+  consumer had not demanded it yet.
 * **Staging.** A group's entries are read only after its ``ready`` callable
   says they are staged, and the group's files are pinned under one lease for
   the reads and released after them. A group that is not ready yet waits until
@@ -73,8 +76,9 @@ Stage B's spill replay reads its chunks this way, byte ranges of its own
 job-local scratch file into a buffer the reader allocates. A range entry has
 no path, so it is neither staged nor pinned, and no serialized buffer, so it
 is charged its held bytes only. It carries no digest, and the stream checks
-none: whatever holds its bytes to what was written is the reader's (the
-spill checks only that each read is whole and on its grid). Depth, workers,
+none: whatever holds its bytes to what was written is the reader's. The
+spill verifies each operand's xxh3_64 and raises :class:`TerminalReadError`
+on a mismatch, in addition to checking the read's length and grid. Depth, workers,
 order, reclaim and the consumer's waits are the stream's, as for a file.
 
 Every consumer wait is timed; ``ReadStream.counters`` is the record the caller
@@ -100,6 +104,14 @@ from typing import Any, Callable, Hashable, Iterable, Protocol
 
 from .file_identity import file_stat_signature as _stat_signature
 from .residency_map import StagedReadRefused
+
+
+class TerminalReadError(RuntimeError):
+    """An irrecoverable entry failure, retained without retry before demand.
+
+    The engine preserves the diagnostic but drops the original traceback:
+    a failed reader's scratch buffer must not stay held outside its budget.
+    """
 
 
 class EntryError(RuntimeError):
@@ -1126,12 +1138,14 @@ class ReadStream:
         except CancelledError:
             ready = False
         except BaseException as exc:  # noqa: BLE001 -- surfaced at the consumer
-            error = exc
+            error = exc.with_traceback(None) if isinstance(exc, TerminalReadError) else exc
         with self._cond:
             self._gating = False
             self._live[group].extend(live)
             if error is not None:
-                if group in self._demanded:
+                if group in self._demanded or isinstance(error, TerminalReadError):
+                    if group not in self._demanded:
+                        self.counters["ahead_failures"] += 1
                     for i in self._members[group]:
                         if self._state[i] == _PENDING:
                             self._state[i] = _FAILED
@@ -1182,7 +1196,7 @@ class ReadStream:
                     f"decoded value holds {actual} bytes, beyond its {entry.held_bytes}-byte charge")
             result = (value, observed, derived)
         except BaseException as exc:  # noqa: BLE001 -- surfaced at the consumer
-            error = exc
+            error = exc.with_traceback(None) if isinstance(exc, TerminalReadError) else exc
         value = observed = derived = None
         with self._cond:
             group = entry.group
@@ -1210,9 +1224,11 @@ class ReadStream:
                 self._held_actual += actual
                 self.counters["peak_held_bytes"] = max(
                     self.counters["peak_held_bytes"], self._held)
-            elif group in self._demanded:
+            elif group in self._demanded or isinstance(error, TerminalReadError):
                 self._state[index] = _FAILED
                 self._errors[index] = error
+                if group not in self._demanded:
+                    self.counters["ahead_failures"] += 1
             else:
                 # Read ahead, not asked for yet: the consumer's own read of
                 # this group decides (module docstring).

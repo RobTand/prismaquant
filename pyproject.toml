@@ -50,6 +50,8 @@ dependencies = [
     # ever installed transitively, so a venv without it aborted collection of
     # tests/test_measure_served_gold.py (PQ #1454, #1458).
     "requests>=2.31",
+    # Stage B spill verifies each replay operand with xxh3_64 (PQ #1369).
+    "xxhash>=3.7.0",
 ]
 
 [project.optional-dependencies]
