@@ -1,5 +1,40 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1692, `claude/mtp-formats`): **the GLM MTP layer
+takes a declared menu, `--mtp-formats`, the MTP twin of `--formats`.**
+- **Before:** the selector's menu was the runtime's attestation alone (`allocator._mtp_rung_attestation`). A release that declares one family could not say so for layer 45.
+- **Measured case (PB `c92e2e3a`):** GLM-5.3 v2 is all Tessera-8, but the open menu picked `TESSERA_BF16_K1_R1024` for the routed experts.
+- **Now:** `glm_mtp_selection.select_mtp_rungs(formats=)` intersects every unit's attested rungs with the declaration before any `--mtp-fixed-formats` pin. BF16 passthrough is included, so it stays on the menu only when named.
+- **Record:** `mtp_formats`, `menu_restricted_rungs` (rung: units removed) and `mtp_formats_unoffered`. The groups remain selections, never `fixed`.
+- **Refusals:** an empty or unknown name, or a declaration that leaves a unit or a group without a complete rung, raises `MtpMenuRefused`. The allocator exits 2, and never falls back to the attested menu.
+- **Unset:** the menu and the record are unchanged.
+
+No default, stage or ship gate changes. Gate: `tests/test_mtp_formats_menu_1692.py`.
+
+Re-stamped 2026-09-29 (PQ #1609, `sonnet/1609-side-bytes`):
+**the Tessera byte accountant now prices a Linear's container side bytes, not
+only its plane region.** `tessera.layout` sizes the planes; a unit on the wire is
+`container(24 B header + canonical manifest + plane region)` inside a `TSRFUSE1`
+blob (10 B header, 14 B + name per member). `tessera_footprint.
+tessera_tensor_payload_breakdown` (schema `prismaquant.tessera_tensor_payload.v2`)
+adds `container_frame_bytes` (both headers and the per-member record),
+`ratio_slack_bytes` (the manifest's ratio fields priced at their widest varint,
+derived from Tessera's own `Writer`, so the price is an upper bound with a few
+bytes of slack), `member_name_bytes` (exact, from the caller's tensor name;
+`footprint.assignment_artifact_bytes` supplies it through the format's
+`unit_name_bytes` hook, one name per expert on a packed stack) and their sum
+`container_side_bytes`. `total_bytes` and `exact_bpw` include it; `payload_bytes`
+stays the plane region. On GLM-5.3 uniform R1024 the allocator sat below the
+export by 28.7 MB over 36,288 routed Linears (748 to 812 B each). Two known
+over-prices remain: the fused header is charged per Linear rather than per blob
+(up to 10 B per extra member), and the manifest's terminal-slot literal and the
+`TSRFUSE1` struct widths are private to Tessera, so the tests measure the writer
+instead of restating them. Every priced byte and rate moves by the same term,
+including `_recipe_identity`, which hashes the breakdown; the byte-accounting
+pins in `tests/test_tessera_footprint.py`, `test_tessera_forest_bytes.py` and
+`test_tessera_legal_domain.py` now subtract `container_side_bytes` from the
+plane-only contract. Gate: `tests/test_tessera_side_bytes.py`.
+
 Re-stamped 2026-09-29 (PQ #1392/#1532, `sonnet/1392-refusals-declared-reads`):
 **the #1374 uncovered-source refusal now guards every GPU entry point that
 builds a source identity, and the source-identity cache flags no longer enter
@@ -5127,6 +5162,12 @@ merge. For GLM-5.3, routed E4M3 is attested at R896 and routed BF16 at R1024.
 one probe identity. It carries their rows unchanged, records each part's source,
 and refuses a part that describes another layer, unit set or probe, or that
 prices a rung twice.
+
+`--mtp-formats` (PQ #1692, optional) declares the MTP layer's menu:
+- the attested rungs, BF16 passthrough included, are intersected with the named formats before any `--mtp-fixed-formats` pin;
+- the record names the declaration (`mtp_formats`), each removed rung's unit count (`menu_restricted_rungs`) and any named format offered to no unit (`mtp_formats_unoffered`);
+- a unit or group left without a complete rung exits 2;
+- unset, the menu and the record are unchanged.
 
 Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
 render read-ahead through the IO engine** (PQ #1291, #1294): the retained
