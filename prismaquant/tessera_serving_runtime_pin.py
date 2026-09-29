@@ -353,8 +353,15 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: ``column_rates_routed_moe`` [1..6], the rates their routed-expert launch
 #: reaches. No cell's executes, rungs or activation contract moves, and the
 #: JSON's extension rows are unchanged. The pin stays schema v2.
+#: Re-pinned 2026-09-29 to 83460680ed, Tessera master's merge of #725
+#: (tessera#724, PQ #1719), so the pin names the Tessera the GLM-5.3 T8R
+#: release serve runs. The crossing is that one merge, and its package diff
+#: is ``compact_prep.py`` and ``kernel_wire.py``: the routed window intake
+#: repacks in place into the loader's scratch. The contract bytes do not move
+#: (v45, ``0869f326…``), so no admission answer moves. The pin stays schema
+#: v2.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "a21d74d89bd4eca0493a2f913c71b28b03a39d8b"
+    "83460680ed84e33c82eb62b31345381cc151aa58"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
@@ -368,7 +375,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "a21d74d89bd4eca0493a2f913c71b28b03a39d8b"
+    "83460680ed84e33c82eb62b31345381cc151aa58"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 
