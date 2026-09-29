@@ -200,8 +200,16 @@ def test_the_e4m3_rung_has_a_size_but_no_rate():
         (1 << 14) * 8, 2048 * 4096)
     assert priced == Fraction(1029, 256)
 
+    # The registry prices the whole unit (#1609, PR #1690): this plane region
+    # plus the container side bytes (manifest, container header, fused frame)
+    # that tessera_footprint sizes beside it.  The member name is the unit's,
+    # not the format's, so neither side carries it.
+    from prismaquant.tessera_footprint import tessera_tensor_payload_breakdown
+    side = int(tessera_tensor_payload_breakdown(
+        shape, family="TESSERA_E4M3_K1", body_rate_q256=1024)["container_side_bytes"])
+    assert side > 0
     spec = fr.get_format("TESSERA_E4M3_K1_R1024")
-    assert spec.bits_for_shape(shape) == priced * shape[0] * shape[1]
+    assert spec.bits_for_shape(shape) == priced * shape[0] * shape[1] + 8 * side
     # A narrower unit pays more for the same two per-unit planes.
     assert artifact_bpp("TESSERA_E4M3_K1", 1024, shape=(96, 768)) > priced
 
