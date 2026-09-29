@@ -250,6 +250,9 @@ ALLOWLIST = {
         "bytes; reject a profile for another census, not a recorded run identity"),
     ("tools/dispatch_tessera_campaign.py", "verify_joint_campaign_scope"): (
         1, STRUCTURE, "the campaign identity has the expected schema"),
+    ("tools/dispatch_tessera_campaign.py", "work_profile_bundles"): (
+        1, WALL, "row-work predictions bind the census roster and shapes they price; "
+        "not a recorded producer identity compared with the running version"),
     ("tools/dispatch_tessera_campaign.py", "_calibration_cache_binding"): (
         1, AMBIGUOUS, "the capture binds this census (calibration data)"),
     ("tools/dispatch_tessera_campaign.py", "_merge_export_hessian_references.accepted_rows"): (
