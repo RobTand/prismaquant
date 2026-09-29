@@ -217,6 +217,25 @@ def test_a_single_phase_covering_the_whole_price_is_the_old_verdict():
     assert verdict["status"] == gate.AGREE
 
 
+# ---------------------------------------------------------------------------
+# The sample helper's (shown, rest) shape at the artifact gate (#1712)
+# ---------------------------------------------------------------------------
+def test_a_fully_observed_agreement_names_the_late_module_in_its_detail():
+    verdict = _judge({"tr3": _phase("nonspec"), "2c": _phase("spec")})
+    assert verdict["status"] == gate.AGREE, verdict["detail"]
+    assert verdict["detail"].endswith(
+        f"; 1 module(s) not dispatched in every phase: {MTP_SERVED}")
+
+
+def test_an_overflowing_unserved_list_counts_the_rest_and_looks_up_no_module(monkeypatch):
+    real = gate._sample
+    monkeypatch.setattr(gate, "_sample", lambda names, *, limit=8: real(names, limit=0))
+    verdict = _judge({"tr3": _phase("nonspec")})
+    assert verdict["status"] == gate.REFUSED
+    assert verdict["detail"].endswith("(1 further module(s) not shown)")
+    assert "served by no phase" not in verdict["detail"]
+
+
 def test_the_inputs_are_not_mutated():
     phases = {"tr3": _phase("nonspec"), "2c": _phase("spec")}
     before = copy.deepcopy(phases)
