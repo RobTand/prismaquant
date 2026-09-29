@@ -84,6 +84,39 @@ not checked. No format, default, stage or ship gate changes; a policy without
 the `cotangent` block derives and verifies as before. Gates:
 `tests/test_joint_stageb_resources.py`, `tests/test_dispatch_joint_quanta.py`.
 
+Re-stamped 2026-09-28 (PQ #1387 and #1289, `sonnet/1387-route-histogram`): the
+**native compressed-tensors card carries the route histogram** and the
+`by_format` summary names every route. Every allocation now writes
+`serving_lane_provenance` into the layer_config meta (`allocator.py`, no longer
+only under a Tessera target). The native exporter stamps `build.route_histogram`
+through `shipcard.route_histogram_claim` and marks the card
+`build.route_histogram_owed`. When the recipe predates the fix the exporter
+derives the provenance from the exported assignment through
+`allocator_candidates.recompute_serving_lane_provenance`, and it stamps nothing
+when that function refuses: no `target_profile` in the recipe (a derivation
+under profile None would be a different claim than the allocator made), or any
+unit whose route needs a serving context the bare assignment does not carry.
+That refusal is the generic `requires_serving_context` signal (set by the pinned
+runtime's own admission and carried on `ResolvedServingLane`, not serialised
+into the route), counted per unit by the summariser; no lane name is compared.
+A report with `by_unit` is also refused. A recompute reads
+`activation_pricing_branches` as `{"unrecorded": N}` because the chosen
+candidate's branch is not recoverable; every other field equals the
+allocator's (`tests/test_route_histogram_native_1387.py` runs the allocator,
+recomputes from its assignment and asserts equality). `verify` requires the
+histogram on a marked card; a historical card carries no marker and keeps
+verifying. The lane spec's `route_histogram_required` stays unset for
+compressed-tensors. Each `selection_serving_lane_provenance` `by_format` row
+gains `routes`, a histogram with one entry per distinct route (`route`,
+`units`, `structures`), grouped and sorted by the digests owner's canonical
+key (`DIRECT_UTF8_STRICT.text`), not `repr`, so a format whose dense and
+routed units ride different routes names both with counts where `route` alone
+reads None. `select_validated_frontier` recomputes a laneless destination's
+provenance for a changed assignment through the same function (dropping it
+when the function refuses) instead of refusing; lane-declared claims still
+refuse. No default, stage, format or byte changes; the ship gate gains one
+refusal, for marked native cards.
+
 Re-stamped 2026-09-28 (PQ #1431, `sonnet/1431-reclaim-declarations`): the
 Stage B render stream and spill replay reclaimers now declare that their
 frees lower `MemAvailable` as well as committed bytes
@@ -23538,7 +23571,7 @@ prints producer-declared fields (`candidate_bpp`, `control_bpp`,
 `relative_slack_ppm`) beside the bpp rather than the replayed values; `verify`
 still refuses on the replay.
 
-**`build.route_histogram` (Tessera cards; PrismaQuant #1377).** Principle 12's
+**`build.route_histogram` (Tessera cards, PrismaQuant #1377; native compressed-tensors cards, #1387).** Principle 12's
 route histogram on the card. The allocator's `serving_lane_provenance`
 (`allocator_candidates.selection_serving_lane_provenance`) answers the route
 question once, through `route_status_counts` and `activation_contracts`; the
@@ -23551,8 +23584,7 @@ declares `route_histogram_required` (Tessera) or whose build or `config.json`
 names a rate-axis container, and replays it: the schema, a positive `units_total`, positive integer counts, the
 route statuses summing to `units_total`, and the contract counts summing to no
 more. `no_declared_lane` units (the plain-BF16 picks no lane declares) are
-carried as counted. A native card owes no histogram yet, because a native
-allocation writes no `serving_lane_provenance` (#1387).
+carried as counted. A native compressed-tensors card owes the histogram when the exporter marked it (`build.route_histogram_owed`, #1387; every allocation now writes `serving_lane_provenance`); an unmarked historical card owes none.
 
 **`build.research_route_override` (Tessera cards; PrismaQuant #1275).** The
 one admission for a route the pinned runtime does not back natively. Principle 9

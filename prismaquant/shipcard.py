@@ -3366,8 +3366,9 @@ def _verify_route_histogram(
     The obligation is read the way the uniform-control obligation is
     (``_is_rate_axis_artifact``): from the card's lane, its build block or the
     artifact's own config, OR-ed, so one erasure does not remove it. A native
-    compressed-tensors card owes none yet, because its allocation writes no
-    provenance (#1387). A histogram, wherever present, must be
+    compressed-tensors card owes one only when the native exporter marked it
+    (``build.route_histogram_owed``, stamped with the histogram, #1387), so a
+    historical card that predates the marker keeps verifying. A histogram, wherever present, must be
     self-consistent: positive integer counts under string keys, route statuses
     summing to ``units_total``, and no more contracted units than units.
     """
@@ -3375,7 +3376,9 @@ def _verify_route_histogram(
     histogram = build.get("route_histogram") if isinstance(build, Mapping) else None
     if histogram is None:
         owed = (_lane_owes_route_histogram(card.get("lane"))
-                or _is_rate_axis_artifact(card, model_dir=model_dir))
+                or _is_rate_axis_artifact(card, model_dir=model_dir)
+                or (isinstance(build, Mapping)
+                    and bool(build.get("route_histogram_owed"))))
         if owed:
             return ["build.route_histogram is missing: this lane's card carries the "
                     "recipe's route-status and activation-contract counts beside "
