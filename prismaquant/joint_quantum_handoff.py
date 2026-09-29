@@ -91,6 +91,8 @@ import re
 import threading
 import time
 
+from .digests import is_sha256hex
+
 HANDOFF_SCHEMA = "prismaquant.joint_quantum_handoff.v1"
 HANDOFF_OWNER_STATES_SCHEMA = "prismaquant.joint_quantum_handoff.owner_states.v1"
 HANDOFF_SESSION_SCHEMA = "prismaquant.joint_quantum_handoff.session.v1"
@@ -123,7 +125,6 @@ _SEALED_FIELDS = (
     "schema", "boundary", "producer", "source", "session", "n_probes",
     "n_batches", "activation_entries", "owner_states")
 _RECORD_FIELDS = (*_SEALED_FIELDS, "handoff_sha256")
-_HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
 class QuantumHandoffRefused(ValueError):
@@ -736,8 +737,7 @@ def _kernel_stamp_refusal(stamp) -> str | None:
         return f"the KDA capture kernel stamp {stamp!r} is not a name and an identity digest"
     if not isinstance(stamp["name"], str) or not stamp["name"]:
         return f"the KDA capture kernel stamp names no kernel: {stamp!r}"
-    if not isinstance(stamp["identity_sha256"], str) or not _HEX64.fullmatch(
-            stamp["identity_sha256"]):
+    if not is_sha256hex(stamp["identity_sha256"]):
         return f"the KDA capture kernel stamp's identity is not a sha256: {stamp!r}"
     return None
 
@@ -798,7 +798,7 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
     from .joint_adjoint_slices import chain_layers_for
     from .joint_layer_quanta import quantum_id
 
-    if not isinstance(sha256, str) or not _HEX64.fullmatch(sha256):
+    if not is_sha256hex(sha256):
         raise QuantumHandoffRefused("the handoff digest is not a sha256")
     path = Path(path)
     try:
@@ -872,8 +872,8 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
         raise QuantumHandoffRefused("the handoff session is not its generation")
     states = handoff["owner_states"]
     if not isinstance(states, dict) or states.get("path") != str(
-            directory / HANDOFF_OWNER_STATES_NAME) or not _HEX64.fullmatch(
-            str(states.get("sha256"))) or type(states.get("file_bytes")) is not int \
+            directory / HANDOFF_OWNER_STATES_NAME) or not is_sha256hex(
+            states.get("sha256")) or type(states.get("file_bytes")) is not int \
             or states["file_bytes"] <= 0:
         raise QuantumHandoffRefused("the handoff names no owner-state file")
 
@@ -1268,8 +1268,7 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
     if not isinstance(sealed_manifest, Mapping) or \
             sealed_manifest.get("schema") != MANIFEST_SCHEMA_V2:
         raise QuantumHandoffRefused("the sealed readset is not an executable manifest")
-    if not isinstance(sealed_manifest_sha256, str) or \
-            not _HEX64.fullmatch(sealed_manifest_sha256):
+    if not is_sha256hex(sealed_manifest_sha256):
         raise QuantumHandoffRefused("the sealed readset digest is not a sha256")
     annotations = sealed_manifest.get("annotations")
     if not isinstance(annotations, Mapping) or "band_serial" in annotations:
@@ -1403,8 +1402,8 @@ def band_serial_manifest_bytes(record: Mapping, handoff: Mapping,
 
     block = record.get("executable_readset")
     if not isinstance(block, Mapping) or not isinstance(
-            block.get("manifest_path"), str) or not _HEX64.fullmatch(
-            str(block.get("manifest_sha256"))):
+            block.get("manifest_path"), str) or not is_sha256hex(
+            block.get("manifest_sha256")):
         raise QuantumHandoffRefused(
             "band-serial quanta are executable rows: this record seals no "
             "executable readset")
@@ -1439,8 +1438,7 @@ def require_band_serial_readset(record: Mapping, handoff: Mapping,
     would also fail at its first unstaged read; this check names the cause
     before any read.
     """
-    if not isinstance(data_manifest_sha256, str) or \
-            not _HEX64.fullmatch(data_manifest_sha256):
+    if not is_sha256hex(data_manifest_sha256):
         raise QuantumHandoffRefused(
             "a band-serial quantum needs --data-manifest-sha256: its staged "
             "manifest is derived, not the campaign's read manifest")

@@ -49,6 +49,7 @@ import re
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
 from .dev_mode import seal_check
+from .digests import is_sha256hex
 
 SEED_SPEC_SCHEMA = "prismaquant.stage_a.chain_seed.v1"
 SEED_MARKER_SCHEMA = "prismaquant.stage_a.chain_seed_marker.v1"
@@ -60,7 +61,6 @@ SEED_MARKER_NAME = "chain-seed.json"
 SEED_RECEIPT_NAME = "seed-receipt.json"
 _SPEC_FIELDS = frozenset({"schema", "checkpoint", "capsule", "through",
                           "implementation_compatibility", "compare"})
-_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class ChainSeedRefused(RuntimeError):
@@ -78,8 +78,7 @@ def seed_receipt_path(space) -> Path:
 def _pinned(binding, where) -> dict:
     if (not isinstance(binding, dict) or set(binding) != {"path", "sha256"}
             or not isinstance(binding["path"], str) or not binding["path"]
-            or not isinstance(binding["sha256"], str)
-            or not _SHA256.fullmatch(binding["sha256"])):
+            or not is_sha256hex(binding["sha256"])):
         raise ChainSeedRefused(f"the seed's {where} is not a {{path, sha256}} binding")
     return {"path": binding["path"], "sha256": binding["sha256"]}
 
@@ -98,7 +97,7 @@ def normalize_seed_spec(spec) -> dict:
     declared = spec["implementation_compatibility"]
     if declared is not None and (
             not isinstance(declared, dict) or set(declared) != {"from", "to"}
-            or not all(isinstance(declared[key], str) and _SHA256.fullmatch(declared[key])
+            or not all(is_sha256hex(declared[key])
                        for key in ("from", "to"))):
         raise ChainSeedRefused(
             "the seed's implementation_compatibility is null or {from, to}, two sha256 "

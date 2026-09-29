@@ -50,6 +50,26 @@ def _positive(value):
     return (type(value) in (float, int) and math.isfinite(value) and value > 0)
 
 
+def _verify_measured_hessian(hessian, anchor_applied, provenance_hessian,
+                              admitted_seals) -> None:
+    """One measured row's Hessian identity against the anchor and provenance.
+
+    Field order is the historical one, so the first refusal a mixed row
+    raises is the text it always raised. A capture seal that differs from the
+    provenance's passes only when the uniform-table verdict admits it
+    (PQ #1270: content-equal captures under several seals).
+    """
+    _require(hessian.get("applied") == anchor_applied,
+             "Hessian applicability mismatch")
+    for field in ("supplied", "capture_sha256", "text_sha256", "fit_ids_sha256",
+                  "fit_tokens"):
+        value = hessian.get(field)
+        if field == "capture_sha256" and value != provenance_hessian.get(field) \
+                and value in admitted_seals:
+            continue
+        _require(value == provenance_hessian.get(field), f"Hessian {field} mismatch")
+
+
 def load_campaign_measurements(cost_path, checkpoint_path, plan):
     """Read trusted local pickle artifacts, bound to the plan's exact hashes.
 
@@ -88,6 +108,19 @@ def load_campaign_measurements(cost_path, checkpoint_path, plan):
     roster = manifest.get("units", [])
     _require({item["qname"] for item in roster} == set(units)
              and len(roster) == len(units), "checkpoint unit roster mismatch")
+    from .joint_catalog_extension import (
+        admitted_hessian_capture_seals,
+        hessian_references,
+    )
+    try:
+        admitted_seals = admitted_hessian_capture_seals(
+            {unit: {key: rows[key] for key in sorted(rows)
+                    if rows[key].get("output_mse_measured") is True}
+             for unit, rows in sorted(payload["costs"].items())},
+            references=lambda: hessian_references(payload))
+    except ValueError:
+        # A mixed table refuses row by row below, with the original texts.
+        admitted_seals = frozenset()
     measurements = {}
     receipts = {}
     for unit, rows in sorted(payload["costs"].items()):
@@ -119,11 +152,8 @@ def load_campaign_measurements(cost_path, checkpoint_path, plan):
                      and (anchor.get("input_global_scale") is None
                           or anchor["input_global_scale"] == static_scale), "static-scale identity mismatch")
             hessian = row.get("hessian_identity", {})
-            _require(hessian.get("applied") == anchor.get("hessian_applied"),
-                     "Hessian applicability mismatch")
-            for field in ("supplied", "capture_sha256", "text_sha256", "fit_ids_sha256", "fit_tokens"):
-                _require(hessian.get(field) == provenance.get("hessian", {}).get(field),
-                         f"Hessian {field} mismatch")
+            _verify_measured_hessian(hessian, anchor.get("hessian_applied"),
+                                     provenance.get("hessian", {}), admitted_seals)
             record = state["wire_records"][key]
             recorded = record["identity"]
             _require(recorded.get("unit") == unit
