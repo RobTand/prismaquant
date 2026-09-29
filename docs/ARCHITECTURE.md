@@ -2,10 +2,17 @@
 
 Re-stamped 2026-09-29 (PQ #1654, `claude/1654-row-startup`): **a streaming
 Tessera campaign is refused without an adoptable source-identity proof, and
-the stream head byte-checks the producer projection on its reader threads.**
-`dispatch_tessera_campaign.py plan` used to warn when a streaming campaign had
-no `--source-identity-cache`, and every planned row then hashed each shard it
-read, whole, under its GPU reservation. It now refuses to plan one, and it
+the stream head reads projected expert weights on its reader threads instead
+of installing their layer.** A 1 s profile of a GLM-5.3 PACT row (w03, layer
+40, sparklina, 2026-09-29) put its first GPU work 165 s after claim: 87 s in
+`snapshot_selected_weights` installing the whole layer (13.8 GB, every shard
+hashed whole because the row had no proof), 25 s re-reading the 864 expert
+tensors to byte-check the snapshot, and 7 s of serial `lstat` over the
+capture roster. `dispatch_tessera_campaign.py plan` used to warn when a
+streaming campaign had no `--source-identity-cache`, and every planned row then
+hashed each shard it read, whole, under its GPU reservation. It now refuses to
+plan one, reading the proof from the flag or from the spec's
+`source_identity_cache` (a flag that names another file is refused), and it
 refuses a proof the row would refuse at adoption:
 `tessera_calibration_cache.streamed_identity_proof_digests` -- the check
 `adopt_streamed_identity_cache` runs on the row -- must pass (schema, checkpoint
@@ -14,17 +21,28 @@ live stat fingerprint, every proved SHA equal to the capture's `source_files`). 
 rows carry no proof (`require_source_identity_proofs`), naming every such row.
 The proof stays outside the campaign checkpoint identity (#1532), so a
 re-planned row resumes its journal; its PrismaBuild action key moves, because
-the argv gains the two flags. On the stream head, `_project_expert_population`
-binds the projection without reading (`check_units=False`) and
-`RowStream(check_unit=...)` runs `_check_projected_unit`, the serial pass's own
-per-unit read and comparison, first on the reader thread for each unit, before
-its capture entry is read. The serial `_checked_projected_units` (load-all
-head, census, MTP capture) calls the same function. A mismatch now refuses the
-row at the unit's batch rather than before any encode; every unit encoded
-before then passed its own check, and no identity-bound output is written. The
-source owner's receipt is taken after `RowStream.finish`. No demand term,
-stored format, rendered byte or pipeline default changes; the new gate is the
-dispatcher refusal.
+the argv gains the two flags. On the stream head a projected expert unit is a
+`meta` placeholder (`_streamed_source_weights`, shape and dtype from
+`StreamedCausalLM.selected_weight_specs`, which reads no source byte); only
+dense targets are snapshotted, on their own admitted keys. The unit's
+`RowStream` reader calls `load_unit` (`_read_projected_unit`, i.e.
+`source_unit_weight`, the tensor the exporter re-reads) before it reads the
+capture entry, refuses a tensor that is not the placeholder's host shape and
+dtype, binds its receipts on it, and the consumer installs it into `weights`
+when it collects the entry; a later re-read uses the installed tensor.
+`_project_expert_population` binds the projection without reading
+(`check_units=False`), and `_require_streamed_projection` refuses a streamed
+unit with no producer record, or whose source tensor is not rostered or not an
+admitted snapshot key. There is no snapshot view left to byte-check: the priced
+bytes are the source tensor. The load-all head, census and MTP capture keep the
+serial `_checked_projected_units`, now over `_read_projected_unit`. The
+capture preflight issues its `lstat` calls on the reader count
+(`preflight_verified_capture_entries(threads=)`) and still checks in name
+order. The selected-source preparation record gains `streamed_source_policy`
+and `streamed_source_units` (provenance only). Placeholders batch as the host
+weights they stand for (`_anchor_batches`). The source owner's receipt is
+taken after `RowStream.finish`. No demand term, stored format, rendered byte
+or pipeline default changes; the new gate is the dispatcher refusal.
 
 Re-stamped 2026-09-29 (PQ #1702, `claude/tessera-pin-v45`): the exact
 Tessera pin is `a21d74d89bd4eca0493a2f913c71b28b03a39d8b`, Tessera master's merge of #701 (contract v45,
@@ -4678,8 +4696,8 @@ Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-29, `claude/1654-row-startup`) for **the dispatcher's
 refusal of a streaming campaign without an adoptable source proof** and **the
-projection byte check on the row stream's readers** (PQ #1654); see the stamp
-at the top of this document.
+stream head reading projected source weights on the row stream's readers**
+(PQ #1654); see the stamp at the top of this document.
 
 Re-stamped (2026-09-29, `claude/tessera-pin-v45`) for **the Tessera v45 pin
 and the fused routed lane at every mixed-rate rung** (PQ #1702); see the
@@ -4792,10 +4810,12 @@ check reads.
   `resident_anchors` and `stream_projection`, where the only source read is
   `_checked_projected_units`: the measured routed-expert tensors, each unit's
   pages released as soon as it compares equal (PQ #1654; after the loop
-  before). On the stream head that check runs on the reader threads, so
-  `stream_projection` reads nothing and the term is kept as an upper bound
-  that leaves every derived demand unchanged; the reader's one source tensor
-  and live view sit inside `reader_working_bytes`. The term is the selected tensors' stored bytes,
+  before). The stream head snapshots no projected unit and has no such check:
+  each unit's reader reads the producer's source tensor and the row prices it
+  (PQ #1654), so `stream_projection` reads nothing and the term is kept as an
+  upper bound that leaves every derived demand unchanged; the reader's one
+  source tensor sits inside `reader_working_bytes`, and the row stream reserves
+  it at admission (`reader_reserve_bytes`). The term is the selected tensors' stored bytes,
   plus two BF16 copies of the widest weight, plus one serial hash window. It
   used to charge every tensor of every selected layer, about 13.8 GiB for each
   GLM-5.3 MoE layer. Under `whole-layer-v1` the selected tensors are the whole
