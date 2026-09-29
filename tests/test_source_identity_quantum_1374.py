@@ -175,15 +175,15 @@ def test_run_is_seeded_from_the_prepare_proof_in_the_same_output_root(tmp_path):
     prepared.write_bytes(b'{"prepare": "proof"}\n')
     run_root = tmp_path / "run"
     run_root.mkdir()
-    slot = bridge._seed_source_identity_cache({"output_root": str(tmp_path)}, run_root)
+    slot = bridge.seed_source_identity_cache({"output_root": str(tmp_path)}, run_root)
     assert slot == run_root / "source-identity.json"
     assert slot.read_bytes() == prepared.read_bytes()
     # A run's own proof is never overwritten by the prepare's.
     slot.write_bytes(b"run's own proof")
-    bridge._seed_source_identity_cache({"output_root": str(tmp_path)}, run_root)
+    bridge.seed_source_identity_cache({"output_root": str(tmp_path)}, run_root)
     assert slot.read_bytes() == b"run's own proof"
     # The prepare's own slot is left alone.
-    bridge._seed_source_identity_cache({"output_root": str(tmp_path)}, prepared.parent)
+    bridge.seed_source_identity_cache({"output_root": str(tmp_path)}, prepared.parent)
     assert prepared.read_bytes() == b'{"prepare": "proof"}\n'
 
 
@@ -196,7 +196,7 @@ def test_an_explicit_binding_outranks_the_prepare_proof(tmp_path):
     bound.write_bytes(b"bound proof")
     run_root = tmp_path / "run"
     run_root.mkdir()
-    slot = bridge._seed_source_identity_cache(
+    slot = bridge.seed_source_identity_cache(
         {"output_root": str(tmp_path),
          "source_identity_cache": {"path": str(bound), "sha256": bridge._sha(bound)}},
         run_root)

@@ -2431,7 +2431,7 @@ def run_adjoint_capture(
     from .tessera_joint_aura import (
         ACTIVATION_SCALE_ENV,
         _preflight_run_prepared,
-        _seed_source_identity_cache,
+        seed_source_identity_cache,
         load_measured_anchor_input,
     )
     from .tessera_reader import load_declared_reader
@@ -2594,7 +2594,7 @@ def run_adjoint_capture(
         result["calibration_input"] = calibration
         result["head"] = head.record
 
-        identity_cache_path = _seed_source_identity_cache(config, space / "run")
+        identity_cache_path = seed_source_identity_cache(config, space / "run")
         # The single-run path threads the plan's derivative binding and its
         # source-prefetch budget into the model build (tessera_joint_aura's
         # execute()); stage A builds the same model and threads the same two
