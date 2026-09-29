@@ -83,6 +83,7 @@ from .nvfp4_activation_contract import (
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
+from .digests import bytes_sha256hex, indent2_json_file_bytes
 from .schemas import strict_json_loads
 
 __all__ = [
@@ -5271,7 +5272,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             attention_implementation=attention_implementation, capture_runtime=capture_runtime)
         from .cost_stage_checkpoint import atomic_write_bytes
         atomic_write_bytes(Path(args.census_out),
-            (json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)+'\n').encode())
+            indent2_json_file_bytes(payload))
         print(f"[campaign] wrote streamed calibration census {args.census_out}", flush=True)
     telemetry_path = Path(args.cache_dir)/'streamed-calibration-telemetry.json'
     telemetry_path.write_text(json.dumps(telemetry, indent=2, sort_keys=True)+'\n')
@@ -5308,8 +5309,8 @@ def _publish_capture_load_execution(args, *, capture, execution, resources, guar
     record = dict(schema='prismaquant.capture_load_run.v1', capture=capture,
         prefetch=execution, resources=resources,
         memory_guard=None if guard is None else guard.snapshot())
-    raw = (json.dumps(record, indent=2, sort_keys=True, allow_nan=False)+'\n').encode()
-    digest = hashlib.sha256(raw).hexdigest()
+    raw = indent2_json_file_bytes(record)
+    digest = bytes_sha256hex(raw)
     # A later refused/interrupted resume must not replace execution evidence
     # already referenced by a surviving priced output.
     output = Path(args.cache_dir)/f'capture-load-execution-{digest}.json'
