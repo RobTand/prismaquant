@@ -58,14 +58,15 @@ from __future__ import annotations
 import argparse
 import copy
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import weakref
 
-from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_UTF8_STRICT, LengthFramedSourceSha256, bytes_sha256hex, file_sha256hex,
+)
 from .joint_aura_transition_base import (
     _COMMIT,
     _bound,
@@ -234,15 +235,8 @@ _INPUT_LABELS = ("prepared_plan", "run_plan", "prepared", "campaign_identity")
 def source_proof(package_root=None):
     """Reconstruct the sealed package's bytes; any other source change fails closed."""
     root = Path(package_root) if package_root is not None else Path(__file__).resolve().parent
-    current, original = hashlib.sha256(), hashlib.sha256()
+    current, original = LengthFramedSourceSha256(), LengthFramedSourceSha256()
     seen = set()
-
-    def update(digest, name, data):
-        encoded = name.encode()
-        digest.update(len(encoded).to_bytes(4, "big"))
-        digest.update(encoded)
-        digest.update(len(data).to_bytes(8, "big"))
-        digest.update(data)
 
     for path in sorted(root.rglob("*")):
         if (not path.is_file() or "__pycache__" in path.relative_to(root).parts
@@ -250,7 +244,7 @@ def source_proof(package_root=None):
             continue
         name = path.relative_to(root).as_posix()
         payload = path.read_bytes()
-        update(current, name, payload)
+        current.update(name, payload)
         if name in _NEW_FILES:
             seen.add(name)
             continue
@@ -258,7 +252,7 @@ def source_proof(package_root=None):
             _require(payload.count(new.encode()) == 1, f"unapproved or missing source hunk in {name}")
             payload = payload.replace(new.encode(), old.encode(), 1)
             seen.add(name)
-        update(original, name, payload)
+        original.update(name, payload)
     _require(seen == set(_SOURCE_REWRITES) | _NEW_FILES, "incomplete source proof")
     _require(original.hexdigest() == _CONTRACT["source_sha256"], "unapproved producer package change")
     return {"producer_source_sha256": current.hexdigest(),
