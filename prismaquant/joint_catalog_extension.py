@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .dev_mode import dev_mode_enabled, dev_warning, seal_check
+from .digests import bytes_sha256hex, file_digest_sha256hex, indent2_json_file_bytes
 from .file_identity import file_stat_signature
 from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
 from .schemas import Contract
@@ -119,7 +120,7 @@ def _fence_drift(stat, recorded, content_sha256, message):
 def _rehash_drifted(path, before, content_sha256, message):
     """Admit a stat-drifted artifact only by its recorded digest, hashed while its stat held still."""
     with open(path, "rb") as handle:
-        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        digest = file_digest_sha256hex(handle)
     _same(catalog_stat_fence(Path(path).stat()), before, f"{message} of {path} (stat while re-hashing)")
     _same(digest, content_sha256, f"{message} (content re-hash after stat drift) of {path}")
     return digest
@@ -244,14 +245,14 @@ def _verify_overlay_payload(observed, blob_sha256, *, rehash, hash_render):
         _rehash_drifted(wire, drift, blob_sha256, "overlay current wire fence")
     else:
         with open(wire, "rb") as handle:
-            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+            digest = file_digest_sha256hex(handle)
         _same(catalog_stat_fence(wire.stat()), observed["wire"][2], f"overlay wire {wire} (stat while hashing)")
         _same(digest, blob_sha256, f"overlay wire bytes of {wire}")
     if not hash_render:
         return None
     render, _, before = observed["render"]
     with open(render, "rb") as handle:
-        digest = hashlib.file_digest(handle, "sha256").hexdigest()
+        digest = file_digest_sha256hex(handle)
     _same(catalog_stat_fence(render.stat()), before, f"overlay render {render} (stat while hashing)")
     return digest
 
@@ -980,10 +981,10 @@ def create_extension(*, inputs, adjoint_capture, output, publish=None, campaign_
         # The creator holds its own block to the consumers' check before publishing it.
         _check_derived_scope(block, inputs, plan)
         document.update(schema=SCHEMA_V3, original_campaign_scope=block)
-    raw = (json.dumps(document, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    raw = indent2_json_file_bytes(document)
     writer = publish_new_bytes if publish is None else publish
     _require(writer(Path(output), raw), "extension output already exists; refusing overwrite")
-    return {"path": str(Path(output).resolve()), "sha256": hashlib.sha256(raw).hexdigest()}
+    return {"path": str(Path(output).resolve()), "sha256": bytes_sha256hex(raw)}
 
 
 def extension_run_header(bound):
