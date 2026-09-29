@@ -399,7 +399,15 @@ def test_byte_total_is_reproduced_from_first_principles(family, rate, shape):
     assert account.table_bytes == table
     assert account.scale_bytes == scale
     assert account.descendant_bytes == 0   # a WINDOW body has no forest
-    assert account.total_bytes == expected
+    # The plane region is the three terms above.  Since #1609 the unit is
+    # priced with its container side bytes too (the frame, the manifest,
+    # priced at its widest ratio varint); those are the one term this rebuild
+    # does not derive, and ``test_tessera_side_bytes`` measures them against
+    # Tessera's own writer.  Here they are only required to be what the
+    # accountant reports, priced once, and a few hundred bytes, not planes.
+    side = account.alignment_and_header_bytes
+    assert 0 < side < 2048
+    assert account.total_bytes == expected + side
 
 
 def test_components_sum_to_the_total_for_every_boundary_witness():

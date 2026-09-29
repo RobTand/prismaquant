@@ -139,7 +139,11 @@ def test_the_accountant_prices_what_the_exporter_writes(family, grid, rung, shap
         breakdown = tessera_tensor_payload_breakdown(
             shape, family=family, body_rate_q256=rung
         )
-        assert breakdown["total_bytes"] == exported, (family, rung, shape)
+        # The accountant also prices the container/fused frame (#1609), which
+        # ``exact_bytes`` (the plane region) excludes by definition.
+        assert breakdown["payload_bytes"] == exported, (family, rung, shape)
+        assert (breakdown["total_bytes"] - int(breakdown["container_side_bytes"])
+                == exported), (family, rung, shape)
 
 
 @pytest.mark.slow
@@ -241,8 +245,13 @@ def test_the_synthesized_format_spec_prices_by_shape_and_never_by_a_scalar():
         assert spec.exact_bits_per_param is None, name
         assert spec.bits_for_shape_fn is not None, name
         family, rung = name.rsplit("_R", 1)
+        # ``memory_bytes_for_shape`` is the whole-unit price: plane region plus
+        # the container/fused frame the breakdown carries (#1609).
+        side = int(tessera_tensor_payload_breakdown(
+            shape, family=family, body_rate_q256=int(rung)
+        )["container_side_bytes"])
         assert spec.memory_bytes_for_shape(shape) == Fraction(
-            _priced_bytes(family, int(rung), shape)
+            _priced_bytes(family, int(rung), shape) + side
         ), (name, shape)
 
 

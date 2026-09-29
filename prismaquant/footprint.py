@@ -1013,6 +1013,20 @@ def assignment_artifact_bytes(
                 name).memory_bytes_for_shape(shape)
         return nbytes
 
+    # A format whose price leaves the per-unit name bytes to the caller
+    # (Tessera's fused member name, #1609) publishes a `unit_name_bytes` hook
+    # on its shape-rate.  The name rides outside `bytes_memo` (keyed on
+    # (format, shape)); the hook lookup itself is memoized per format so the
+    # registry miss above is not paid per member.
+    name_hook_memo: dict[str, object] = {}
+
+    def _unit_name_bytes(name: str, qname: str, shape: tuple[int, ...]) -> int:
+        if name not in name_hook_memo:
+            name_hook_memo[name] = getattr(
+                fr.get_format(name).bits_for_shape_fn, "unit_name_bytes", None)
+        hook = name_hook_memo[name]
+        return int(hook(qname, shape)) if hook is not None else 0
+
     if source_manifest is not None:
         passthrough_names = [
             qname for qname, fmt in assignment.items()
@@ -1047,6 +1061,7 @@ def assignment_artifact_bytes(
             body_quant += span
         else:
             body_quant += _format_bytes(name, shape)
+            body_quant += _unit_name_bytes(name, qname, shape)
         if name == "NVFP4":
             body_quant += nvfp4_global_sidecar_bytes(
                 qname,
