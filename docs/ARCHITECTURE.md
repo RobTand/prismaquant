@@ -1,5 +1,9 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1745, `sol/dedup-ci-grace`): the load-phase
+bound cites the checkpoint reader's deadline at line 1868 after #1729.
+Grace arithmetic, schemas and pipeline defaults are unchanged.
+
 Re-stamped 2026-09-29 (PQ #1654, `claude/1654-row-startup`): **a streaming
 Tessera campaign is refused without an adoptable source-identity proof, and
 the stream head reads projected expert weights on its reader threads instead
@@ -2757,7 +2761,7 @@ It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
 row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
-(`prismaquant/joint_adjoint_checkpoints.py:1869`,
+(`prismaquant/joint_adjoint_checkpoints.py:1868`,
 `prismaquant/joint_quantum_handoff.py:1032`), so the phase waits at most W in
 total outside a PrismaBuild landing record. Since PQ #1143 a spill
 consumer's `handoff-load` holds only the owner states and the shared-pass
