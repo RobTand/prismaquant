@@ -761,6 +761,10 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
         # by one docstring line (the supported exporter path); wire_recipe
         # and the WINDOW constants did not move.
         "a5f3b232cb3c424b537a06713c728c86153d55fb",
+        # The 2026-09-29 re-pin for the v45 pin a21d74d89b: export.py moved
+        # inside ActivationSource only (the seal-header fold); wire_recipe
+        # and the WINDOW constants did not move.
+        "a21d74d89bd4eca0493a2f913c71b28b03a39d8b",
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -817,7 +821,7 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
     assert set(domain.TESSERA_EQUIVALENT_SOURCE_STATES) == {
         "reader-pin-387eda36", "study-producer-d403cc5a",
         "reader-pin-cc739a55", "reader-pin-09d6559d", "reader-pin-f94929de",
-        "reader-pin-38e96012", "reader-pin-a5f3b232",
+        "reader-pin-38e96012", "reader-pin-a5f3b232", "reader-pin-a21d74d8",
     }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)

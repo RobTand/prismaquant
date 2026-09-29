@@ -5,7 +5,11 @@ Since the pin moved to contract v42 (PQ #1274) it carries Tessera #685's fused
 routed lanes itself: the routed E4M3 and BF16 cells name the fused launch
 beside the compact one, and each lane publishes its ``requires`` predicate on
 its own ``native_extensions`` row. The fixtures assert that instead of
-grafting it. The lane decision itself is Tessera's
+grafting it. Since the pin moved to contract v45 (PQ #1702) each fused lane
+reads column rates 1 to 8 and gates its routed-expert launch to rates 1 to 6
+(``column_rates_routed_moe``), so every rung the routed E4M3 cells list,
+q832 to q1088, admits the fused launch; the refusal legs rewind the lanes to
+v44's rate-4 predicate. The lane decision itself is Tessera's
 (``decide_lane_requirements``) reached through
 ``lane_eligibility.cell_lane_admits``; nothing here restates its rule.
 """
@@ -40,9 +44,12 @@ SPAN2_GROUPED = {"symbol": "tessera.kernel_a4.a4_span2_grouped_gemm",
                  "decoder": "native_span2_grouped"}
 ROUTED = "E288:w13=2048x4096:w2=4096x1024"
 FUSED_LANE = {"decoder": "native_routed_fused_window",
-              "requires": {"column_rates": [4], "window_bits": [14], "body": "window",
+              "requires": {"column_rates": [1, 2, 3, 4, 5, 6, 7, 8],
+                           "column_rates_routed_moe": [1, 2, 3, 4, 5, 6],
+                           "window_bits": [14], "body": "window",
                            "plane": "channel", "release_overrides": False, "diagonals": False,
                            "rotation": ["none"], "grid_arities": [1]}}
+FUSED_LANE_PREFIXES = ("tessera_routed_fused_e4m3", "tessera_routed_fused_value")
 
 
 FOLDED_COMPACT = dict(COMPACT, decoder="native_window_moe_compact_folded")
@@ -52,9 +59,10 @@ FOLDED_FUSED = dict(FUSED, decoder="native_routed_fused_window_folded")
 def _payload():
     with as_file(contract.contract_path()) as path:
         payload = json.loads(path.read_bytes())
-    # The pinned v42 contract publishes both fused lanes and names each
-    # beside the compact launch in the routed cells; the fixtures below
-    # depend on exactly that, so a re-pin that moves it fails here.
+    # The pinned contract (v42 on, with v45's rate sets) publishes both fused
+    # lanes and names each beside the compact launch in the routed cells; the
+    # fixtures below depend on exactly that, so a re-pin that moves it fails
+    # here.
     lanes = {row["module_name_prefix"]: row.get("lane")
              for row in payload["native_extensions"]}
     assert lanes["tessera_routed_fused_e4m3"] == FUSED_LANE
@@ -83,6 +91,21 @@ def eligibility(payload):
 @pytest.fixture(scope="module")
 def formats(payload):
     return {row["family"]: row for row in payload["formats"]}
+
+
+def _v44_eligibility(payload):
+    """The pinned table with both fused lanes rewound to v44's predicate
+    (``column_rates`` [4] and no routed set), under the fixture's digest so
+    the pinned-contract check still passes.  The pop has no default, so a pin
+    whose fused lanes do not publish the routed set fails here."""
+    moved = copy.deepcopy(payload)
+    for row in moved["native_extensions"]:
+        if row["module_name_prefix"] in FUSED_LANE_PREFIXES:
+            requires = row["lane"]["requires"]
+            requires.pop("column_rates_routed_moe")
+            requires["column_rates"] = [4]
+    return lane._parse_table(moved["lane_eligibility"], moved["formats"], "", COMMIT, SHA,
+                             native_extensions=moved["native_extensions"])
 
 
 SCOPE = srp.ShapeTableScope(contract_sha256=SHA, tessera_commit=COMMIT, runtime_image_digest=IMAGE,
@@ -133,7 +156,7 @@ def _glm_table(eligibility, rows=GLM_ROWS, ms=(2048,)):
 @pytest.fixture(scope="module")
 def glm_eligibility(eligibility):
     # The after-#640 bench timed BF16 routed stacks on the folded fused lane,
-    # which the pinned v42 contract publishes itself (asserted in _payload).
+    # which the pinned contract publishes itself (asserted in _payload).
     return eligibility
 
 
@@ -213,7 +236,12 @@ def test_admission_refuses_an_eligibility_table_that_is_not_the_pinned_contract(
         srp.admit_shape_table(table, scope=SCOPE, eligibility=other)
 
 
-def test_the_fused_r1024_row_admits_and_the_fused_r896_row_refuses(eligibility):
+def test_fused_r1024_and_r896_rows_admit_and_a_v44_lane_refuses_r896(payload, eligibility):
+    """Since contract v45 the fused routed lane reads the mixed-rate plans the
+    routed cells list, so a fused R896 row admits beside the R1024 one. The
+    lane's predicate still decides: rewound to v44's rate-4 predicate, the same
+    lane refuses the fused R896 row, and R896 on the compact launch admits
+    either way."""
     admitted = srp.admit_shape_table(
         srp.parse_shape_table(_doc([_row("routed_moe", ROUTED, E4M3, 1024, 2048, FUSED,
                                          (17.4, 17.5, 17.6))])),
@@ -224,13 +252,18 @@ def test_the_fused_r1024_row_admits_and_the_fused_r896_row_refuses(eligibility):
     assert admitted.admission["per_unit_weight_identity"] == "not_claimed"
     fused_896 = srp.parse_shape_table(_doc([_row("routed_moe", ROUTED, E4M3, 896, 2048, FUSED,
                                                  (17.4, 17.5, 17.6))]))
+    assert srp.admit_shape_table(fused_896, scope=SCOPE, eligibility=eligibility).admission[
+        "cell_by_key"] == {
+        f"routed_moe|{ROUTED}|{E4M3}|R896|M2048": "tessera_e4m3_k1_routed_moe_sm121_batch_resident"}
+    v44 = _v44_eligibility(payload)
     with pytest.raises(srp.ShapeRuntimeError, match="R896.*tessera_routed_fused_e4m3"):
-        srp.admit_shape_table(fused_896, scope=SCOPE, eligibility=eligibility)
+        srp.admit_shape_table(fused_896, scope=SCOPE, eligibility=v44)
     # The same cell names the compact launch too, and the fused lane's
-    # predicate is not asked about it: R896 on compact admits.
+    # predicate is not asked about it: R896 on compact admits under both.
     compact_896 = srp.parse_shape_table(_doc([_row("routed_moe", ROUTED, E4M3, 896, 2048, COMPACT,
                                                    (109.2, 109.3, 109.4))]))
-    assert srp.admit_shape_table(compact_896, scope=SCOPE, eligibility=eligibility).admitted
+    for table in (eligibility, v44):
+        assert srp.admit_shape_table(compact_896, scope=SCOPE, eligibility=table).admitted
 
 
 def test_a_launch_the_cell_does_not_name_is_refused(eligibility):
@@ -281,18 +314,25 @@ def test_a_rate_pool_prices_its_rates_from_the_concatenated_samples(eligibility)
     assert record["cross_rate_spread_measured"] is False and record["cross_rate_spread_ms"] is None
 
 
-def test_a_rate_pool_across_two_kernel_lanes_is_refused(eligibility):
+def test_a_rate_pool_across_two_kernel_lanes_is_refused(payload, eligibility):
     rows = [_row("routed_moe", ROUTED, E4M3, 1024, 2048, FUSED, (17.4, 17.5, 17.6)),
             _row("routed_moe", ROUTED, E4M3, 896, 2048, COMPACT, (109.2, 109.3, 109.4))]
     pool = {"structure": "routed_moe", "rank_local_shape": ROUTED, "family": E4M3,
             "kernel_lane": FUSED, "rates_q256": [896, 1024]}
     with pytest.raises(srp.ShapeRuntimeError, match="share the pool's kernel lane"):
         srp.parse_shape_table(_doc(rows, [pool]))
-    # A pool that would lend the fused lane to R896 with no R896 row is
-    # refused at admission by the lane's own predicate.
+    # A pool that lends the fused lane to R896 with no R896 row is decided at
+    # admission by the lane's own predicate. The v45 lane reads R896's plan, so
+    # the pool admits both rates, and the pooled R896 carries R1024's samples
+    # with ``cross_rate_spread_measured`` false: the pool, not a measurement,
+    # prices it. Rewound to v44's rate-4 predicate, the lane refuses it.
     lent = srp.parse_shape_table(_doc(rows[:1], [pool]))
+    admitted = srp.admit_shape_table(lent, scope=SCOPE, eligibility=eligibility)
+    assert admitted.admission["pooled_rates_admitted"] == 2
+    record = admitted.lookup(srp.ShapeKey("routed_moe", ROUTED, E4M3, 896, 2048)).pool
+    assert record["cross_rate_spread_measured"] is False
     with pytest.raises(srp.ShapeRuntimeError, match="pooled .*R896"):
-        srp.admit_shape_table(lent, scope=SCOPE, eligibility=eligibility)
+        srp.admit_shape_table(lent, scope=SCOPE, eligibility=_v44_eligibility(payload))
 
 
 # --------------------------------------------------------------------------- #

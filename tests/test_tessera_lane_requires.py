@@ -108,9 +108,10 @@ def _gated_carrier(payload):
     refuses. That refusal applies ONLY to a cell that launches through
     ``window_gemv`` and nothing else. The shipped routed E4M3 cells launch
     through ``native_window_moe_compact`` and, since contract v42, the fused
-    routed lane; at q896 that lane refuses and the compact launch is left, see
-    ``test_the_shipped_routed_e4m3_q896_cells_keep_the_compact_launch`` and the
-    q896 leg of ``test_a_window_lane_graft_is_refused_by_the_published_column_rates``."""
+    routed lane, which since v45 reads every rung they list, q896 included;
+    see ``test_the_shipped_routed_e4m3_cells_make_both_launches_at_every_rung``,
+    and ``test_a_refusing_lane_leaves_the_lane_free_launch_beside_it`` for a
+    window-lane graft that still refuses q896."""
     moved = copy.deepcopy(payload)
     cell = _cell(moved, GATED_CARRIER)
     cell["executes"] = [WINDOW_LAUNCH]
@@ -199,12 +200,16 @@ def test_the_installed_predicate_is_read_closed_at_tesseras_vocabulary(table, pa
     _row(bare, WINDOW_LANE)["lane"] = {"decoder": "window_gemv"}
     bare_claims = {claim.extension: claim for claim in _table(bare).lanes}
     assert bare_claims[WINDOW_LANE].requires is None
-    # The vocabulary this reader closes is what the pinned lane publishes
-    # today plus the one name it has learned ahead of the pin
-    # (``column_rates_routed_moe``, Tessera v45, PQ #1618): a requirement the
-    # lane grows beyond that is refused by name below, never skipped.
-    assert set(lane.LANE_REQUIREMENT_FIELDS) == (
-        set(window.requires) | {"column_rates_routed_moe"})
+    # The vocabulary this reader closes is what the pinned lanes publish: the
+    # window lane's names plus the fused routed lanes' structure-scoped
+    # ``column_rates_routed_moe`` (Tessera v45, learned in PQ #1618, pinned in
+    # PQ #1702).  A requirement a lane grows beyond that is refused by name
+    # below, never skipped.
+    published = set(window.requires)
+    for fused in FUSED_LANES:
+        published |= set(claims[fused].requires)
+    assert "column_rates_routed_moe" in published
+    assert set(lane.LANE_REQUIREMENT_FIELDS) == published
     assert table.provenance()["lanes"] == [
         claim.answer() | {"extension": claim.extension} for claim in table.lanes]
 
@@ -456,15 +461,18 @@ def test_every_lane_gated_cell_on_a_synthesised_table_admits_this_producers_plan
             assert why == ""
 
 
-def test_the_shipped_routed_e4m3_q896_cells_keep_the_compact_launch(payload):
-    """The cells GLM's layer-43 pick rides admit q896 on the compact launch.
+def test_the_shipped_routed_e4m3_cells_make_both_launches_at_every_rung(payload):
+    """The cells GLM's routed E4M3 picks ride launch the fused pair at every
+    rung they list.
 
     They execute ``native_window_moe_compact`` and, since contract v42, the
-    fused routed pair, whose lane (``tessera_routed_fused_e4m3``) reads
-    rate-4 columns only.  At q1024 both launches are made; at q896 the lane
-    refuses the plan and the compact launch alone is left, which is the
-    stack the dispatch keeps on the compact adapter.  The cell admits either
-    way, and the launches it makes differ.
+    fused routed pair.  Through v44 that pair's lane
+    (``tessera_routed_fused_e4m3``) read rate-4 columns only, so q1024 made
+    both launches and every mixed-rate rung (q896 among them) kept the compact
+    launch alone (PQ #1274).  Since v45 (tessera#694) the lane reads
+    ``column_rates`` [1..8] and its routed-expert launch reaches
+    ``column_rates_routed_moe`` [1..6].  The cells list q832 to q1088, whose
+    plans use rates 3 to 5, so every rung makes both launches (PQ #1702).
     """
     table = _table(payload)
     for cell_id in (GATED_CARRIER, GATED_CARRIER.replace("_decode_", "_batch_")):
@@ -476,8 +484,7 @@ def test_the_shipped_routed_e4m3_q896_cells_keep_the_compact_launch(payload):
         for rung in cell.rungs_q256:
             admits, why, launches = lane.cell_rung_launches(cell, rung, table.lanes)
             assert admits and why == "", (cell_id, rung, why)
-            want = {COMPACT_E4M3, FUSED_E4M3} if rung == 1024 else {COMPACT_E4M3}
-            assert set(launches) == want, (cell_id, rung, launches)
+            assert set(launches) == {COMPACT_E4M3, FUSED_E4M3}, (cell_id, rung, launches)
     gated_decoders = {claim.decoder for claim in table.lanes
                       if claim.requires is not None}
     assert gated_decoders == {"window_gemv", "native_routed_fused_window",
@@ -503,10 +510,11 @@ def test_a_refusing_lane_leaves_the_lane_free_launch_beside_it(payload, rung):
 
     Regression for PQ #1274: the gate used to refuse the whole cell whenever
     the lane it launches through refused, which is right only while the
-    lane launch is the cell's only launch (the lane-only leg of
-    ``test_a_window_lane_graft_is_refused_by_the_published_column_rates``
-    still refuses q896).  With a lane-free launch beside it, q896 admits on
-    that launch and the route records it alone; q1024 admits on both.
+    lane launch is the cell's only launch (such a cell is still refused
+    where its lane refuses; see
+    ``test_a_cell_claiming_the_lane_for_a_rung_it_refuses_is_refused_by_name``).
+    With a lane-free launch beside it, q896 admits on that launch and the
+    route records it alone; q1024 admits on both.
     """
     table = _table(_lane_beside_compact(payload, rung))
     cell = _parsed_cell(table, GATED_CARRIER)

@@ -345,12 +345,20 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: ``src/tessera/export_serving.py`` driver beside the shim, and the
 #: admission answer does not move from v43. The pin stays schema v2: no v44
 #: cell stamps serving code.
+#: Re-pinned 2026-09-29 to a21d74d89b, Tessera master's merge of #701
+#: (tessera#694, PQ #1702). It crosses the 15 master merges since a5f3b232cb
+#: (#656, #699, #700, #705, #707, #709, #711, #713, #715-#718, #720, #722,
+#: #723), all at contract v44, and #701's contract v45: the two fused routed
+#: lanes read ``column_rates`` [1..8] (was [4]) and publish
+#: ``column_rates_routed_moe`` [1..6], the rates their routed-expert launch
+#: reaches. No cell's executes, rungs or activation contract moves, and the
+#: JSON's extension rows are unchanged. The pin stays schema v2.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "a5f3b232cb3c424b537a06713c728c86153d55fb"
+    "a21d74d89bd4eca0493a2f913c71b28b03a39d8b"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "47b013550eb882266564f298f81ed2c7c3cd9f249124faca2bdd86f56204429c"
+    "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
 )
 #: The v3 split (#1561).  ``TESSERA_SERVING_RUNTIME_PINNED_COMMIT`` above is
 #: the SERVING commit; the producer commit and the serving code digest are
@@ -360,7 +368,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "a5f3b232cb3c424b537a06713c728c86153d55fb"
+    "a21d74d89bd4eca0493a2f913c71b28b03a39d8b"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 
