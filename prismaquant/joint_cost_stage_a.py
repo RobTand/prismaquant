@@ -2362,6 +2362,22 @@ def _stage_a_device_envelope(config, *, environ=None):
             "requested_bytes": requested, "plan_max_gpu_bytes": limit}
 
 
+def _stage_a_source_identity(runner, config, identity_cache_path):
+    """Build the Stage A source identity behind the #1374 identity proof.
+
+    A GPU row that lacks the identity quantum's proof for a shard refuses
+    before it hashes a byte (PQ #1392); the proof arguments come from the one
+    shared helper, not a second mechanism.
+    """
+    from .cost_streaming import build_streamed_model_identity
+    from .tessera_joint_aura import source_identity_proof_kwargs
+
+    return build_streamed_model_identity(
+        runner, config["model"], identity_cache_path=identity_cache_path,
+        **source_identity_proof_kwargs(
+            config["model"], config.get("source_digest_cache")))
+
+
 def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,
@@ -2402,7 +2418,7 @@ def run_adjoint_capture(
     """
     from .aura_cost import _aura_source_sha256
     from .calibration_data import load_calibration_input
-    from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
+    from .cost_streaming import build_streamed_causal_lm
     from .glm_capture_compatibility import require_capture_compatibility
     from .gpu_guard import require_cuda_hot_path
     from .joint_projection_backend import executing_image, prewarm_projection_backend
@@ -2603,8 +2619,7 @@ def run_adjoint_capture(
             # records NOT_COMPUTED (PQ #1147).
             source = NOT_COMPUTED
         else:
-            source = build_streamed_model_identity(runner, config["model"],
-                                                   identity_cache_path=identity_cache_path)
+            source = _stage_a_source_identity(runner, config, identity_cache_path)
         # A run seal (PQ #1147): dev mode stamps a source other than the
         # prepared one and continues.
         seal_check("prepared source identity", completion.get("source_model_identity"),
