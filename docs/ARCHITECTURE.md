@@ -27,6 +27,21 @@ regret. [The contract](design/tessera_reduced_schedule.md) describes the boundar
 no live campaign dispatch, encoding, repair/re-solve loop, exact-wire admission,
 GPU qualification, pin, serving numerics or production default changes.
 
+Re-stamped 2026-09-29 (PQ #1761, routed backfill admission regression):
+checkpoint presence does not require a load-all row head. The failed
+`ff0b43a5` checkout predates #1613's streaming-resume fix and selected the
+load-all phase after stream-sized dispatch admission. The checked phase plan
+is derived from geometry and declared argv, not host free memory; the latter
+belongs to separate prefetch sizing. `tests/test_routed_resume_admission_1761.py`
+checks the actual runtime head-selection call and planner demand on a synthetic
+864-unit stack at a 69 GiB cap, with two host-free values and three checkpoint
+states. Genuine load-all dependencies still fail before submission when their
+derived demand exceeds box capacity. This adds CPU regression coverage and
+corrects stale prose; it changes no runtime formula, pin, input or default.
+Recovery of the old pinned campaign requires an explicit backport and
+coordinator-approved resubmission. CPU coverage is not a GPU residency,
+numerical-equivalence or campaign-completion measurement.
+
 Re-stamped 2026-09-29 (PQ #1739, `claude/tessera-pin-b40c93cb`): the exact
 Tessera pin is `b40c93cb73745097e57a1ba4cf5b9eee166c759a`, Tessera master's
 merge of #730 (tessera#729), so the pin names the Tessera that loads routed
