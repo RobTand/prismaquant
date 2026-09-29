@@ -1061,9 +1061,11 @@ def stack_transfer_regret_gate(
     predicted values under intercept noise the campaign actually measured.
 
     The gate is p90 over ``draws`` (at least 50, per the study) against
-    ``max_regret_pct``.  A stack that fails falls back to the full three-anchor
-    schedule; that fallback lives in the driver, not here.  ``sensitivity``
-    replays the same draws at scaled budgets and is REPORTED, never gated on.
+    ``max_regret_pct``. The verdict is global, not per-stack. The offline
+    reduced-schedule planner requests the full declared band for all stacks
+    when this verdict fails; this helper emits no fallback work itself.
+    ``sensitivity`` replays the same draws at scaled budgets and is REPORTED,
+    never gated on.
 
     This is a decision instrument, not a measurement: it emits no price, and
     nothing here encodes, allocates, or serves.  No KL or served-quality claim

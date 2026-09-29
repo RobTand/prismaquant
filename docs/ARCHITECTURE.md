@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1755, Refs #495, `sol/pq-tessera-3`):
+`python -m prismaquant.tessera_reduced_schedule` provides a research-only offline
+next-work transition from explicit stack evidence, current allocator winners,
+byte costs and a measured-cell ledger. The existing global regret gate selects
+missing winner cells on pass or the full declared band for all stacks on fail.
+Inputs/configuration are canonically digest-bound; mismatched rosters, incomplete
+base evidence and infeasible winners are refused. Scalar coverage never implies
+wire readiness. The gate retains its greedy diagnostic, not production-DP
+regret. [The contract](design/tessera_reduced_schedule.md) describes the boundary:
+no live campaign dispatch, encoding, repair/re-solve loop, exact-wire admission,
+GPU qualification, pin, serving numerics or production default changes.
+
 Re-stamped 2026-09-29 (PQ #1739, `claude/tessera-pin-b40c93cb`): the exact
 Tessera pin is `b40c93cb73745097e57a1ba4cf5b9eee166c759a`, Tessera master's
 merge of #730 (tessera#729), so the pin names the Tessera that loads routed
