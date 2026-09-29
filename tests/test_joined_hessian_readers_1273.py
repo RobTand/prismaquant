@@ -17,6 +17,8 @@ changed a text, these fail).
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 import sys
 
@@ -31,6 +33,12 @@ def _joined_fixture():
     from tests.test_hessian_identity_content_equal import _joined
 
     return _joined
+
+
+def _bind(path, payload):
+    raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+    path.write_bytes(raw)
+    return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
 
 
 def test_admission_accepts_two_content_equal_captures(tmp_path):
@@ -133,7 +141,7 @@ def test_aura_verifier_refuses_single_seal_mismatch_with_original_text():
         verify("u", row, {"hessian_applied": False}, provenance, frozenset())
 
 
-def test_surface_verifier_refuses_single_seal_mismatch_with_original_text():
+def test_surface_verifier_refuses_single_seal_mismatch_with_original_text(tmp_path):
     from prismaquant import tessera_anchored_surface as surface
     from prismaquant.tessera_anchored_surface import ReplayError
 
