@@ -2022,6 +2022,93 @@ def _seed_for_selection(rows, bundle, selection):
             'identity_sha256': manifest['identity_sha256'], 'row_id': row['row_id']}
 
 
+def work_profile_bundles(path: Path, *, census_path: Path, groups: dict,
+                         campaign_argv: list, groups_per_row: int) -> tuple[list, dict]:
+    """Pack whole dense groups from explicit predictions, never place PB work.
+
+    Profile evidence is recorded, not qualified here. Routed rows keep their
+    original sorted-census indices so their selections and action bytes stay
+    unchanged. Memory demand and fit are still derived after this packing.
+    """
+    if groups_per_row != 1:
+        raise RuntimeError('--row-work-profile requires --groups-per-row 1')
+    blob = Path(path).read_bytes()
+    profile = json.loads(blob)
+    if not isinstance(profile, dict) or profile.get('schema') != 'prismaquant.campaign_row_work.v1':
+        raise RuntimeError('row work profile schema must be prismaquant.campaign_row_work.v1')
+    if profile.get('census_sha256') != hashlib.sha256(census_path.read_bytes()).hexdigest():
+        raise RuntimeError('row work profile census_sha256 differs from this census')
+    if profile.get('campaign_argv') != campaign_argv:
+        raise RuntimeError('row work profile campaign_argv differs from the spec')
+
+    def positive(value, field):
+        try:
+            valid = type(value) in (int, float) and math.isfinite(value) and value > 0
+        except OverflowError:
+            valid = False
+        if not valid:
+            raise RuntimeError(f'row work profile {field} must be positive and finite')
+        return float(value)
+
+    startup = positive(profile.get('startup_seconds'), 'startup_seconds')
+    share = positive(profile.get('max_startup_fraction'), 'max_startup_fraction')
+    if share >= 1:
+        raise RuntimeError('row work profile max_startup_fraction must be below 1')
+    slots = profile.get('gpu_slots')
+    if type(slots) is not int or slots < 1:
+        raise RuntimeError('row work profile gpu_slots must be a positive integer')
+    evidence = profile.get('evidence')
+    if not isinstance(evidence, dict) or any(
+            not isinstance(evidence.get(key), str) or not evidence[key].strip()
+            for key in ('startup', 'pricing')):
+        raise RuntimeError('row work profile evidence needs startup and pricing references')
+
+    ordered = sorted(groups)
+    indices = {key: index for index, key in enumerate(ordered)}
+    dense = [key for key in ordered if not key.startswith('s:')]
+    times = profile.get('group_pricing_seconds')
+    if not isinstance(times, dict) or set(times) != set(dense):
+        raise RuntimeError('row work profile group_pricing_seconds must cover exactly the non-routed groups')
+    times = {key: positive(times[key], f'group_pricing_seconds[{key}]') for key in dense}
+    minimum = startup * ((1 - share) / share)
+    if not math.isfinite(minimum) or minimum <= 0:
+        raise RuntimeError('row work profile max_startup_fraction yields a nonfinite pricing bound')
+    binding = {'path': str(path), 'sha256': hashlib.sha256(blob).hexdigest(),
+               'profile': profile, 'minimum_pricing_seconds': minimum}
+    bundles = [(indices[key], [key]) for key in ordered if key.startswith('s:')]
+    if dense:
+        try:
+            total = math.fsum(times.values())
+        except OverflowError as exc:
+            raise RuntimeError('row work profile group_pricing_seconds total is nonfinite') from exc
+        if total < minimum:
+            raise RuntimeError('row work profile: insufficient dense work for the startup-share objective')
+        # Maximize independently retryable rows within the objective, then
+        # favor full slot waves when feasible. The slots do not pin a host.
+        count = len(dense) if total / len(dense) >= minimum else int(total / minimum)
+
+        def wave_count(value):
+            return value - value % slots if value >= slots else value
+
+        count = wave_count(count)
+        longest = sorted(dense, key=lambda key: (-times[key], key))
+        while count:
+            bins = [[] for _ in range(count)]
+            loads = [0.0] * count
+            for key in longest:
+                index = min(range(count), key=lambda i: (loads[i], i))
+                bins[index].append(key)
+                loads[index] = math.fsum(times[name] for name in bins[index])
+            if all(1.0 / (1.0 + load / startup) <= share for load in loads):
+                bundles.extend((min(indices[key] for key in bundle), sorted(bundle))
+                               for bundle in bins)
+                break
+            count = wave_count(count - 1)
+        else:
+            raise RuntimeError('row work profile: insufficient dense work for the startup-share objective')
+    return sorted(bundles), binding
+
+
 def cmd_plan(args) -> int:
     spec = load_spec(Path(args.spec))
     workspace = Path(args.workspace)
@@ -2073,13 +2160,20 @@ def cmd_plan(args) -> int:
 
     units_dir = workspace / "units"
     ordered = sorted(groups)
-    bundles = [ordered[index:index + args.groups_per_row]
-               for index in range(0, len(ordered), args.groups_per_row)]
+    bundles = list(enumerate(
+        ordered[index:index + args.groups_per_row]
+        for index in range(0, len(ordered), args.groups_per_row)))
+    work_profile = None
+    if getattr(args, 'row_work_profile', None):
+        bundles, work_profile = work_profile_bundles(
+            Path(args.row_work_profile), census_path=workspace / 'census.json',
+            groups=groups, campaign_argv=spec['campaign_argv'],
+            groups_per_row=args.groups_per_row)
 
     rows: list[dict] = []
     planned: list[dict] = []
     selection_writes: list[tuple[Path, str]] = []
-    for index, bundle in enumerate(bundles):
+    for index, bundle in bundles:
         row_id = f"row-{index:04d}"
         entries = []
         for key in bundle:
@@ -2134,8 +2228,17 @@ def cmd_plan(args) -> int:
                          mem_gb=_row_memory_gb(row_spec, members, census, selected_source=selected_source),
                          timeout_s=(None if args.timeout_s is None
                                     else int(args.timeout_s))))
+        predicted_work = {}
+        if work_profile is not None and not bundle[0].startswith('s:'):
+            timing = work_profile['profile']
+            pricing = math.fsum(timing['group_pricing_seconds'][key] for key in bundle)
+            startup = timing['startup_seconds']
+            predicted_work = {'predicted_work': {
+                'startup_seconds': startup, 'pricing_seconds': pricing,
+                'startup_fraction': 1.0 / (1.0 + pricing / startup)}}
         planned.append({"row_id": row_id, "groups": bundle, "members": sorted(members),
                         "dir": str(row_dir), "units": str(units_path),
+                        **predicted_work,
                         **({'seed': row_seed} if row_seed is not None else {}),
                         **({'resources': _streamed_resource_plan(row_spec, census, members,
                             selected_source=True)} if selected_source else {})})
@@ -2172,6 +2275,7 @@ def cmd_plan(args) -> int:
            if source_identity_cache is not None else {}),
         "manifest": str(manifest),
         "groups_per_row": int(args.groups_per_row),
+        **({'row_work_profile': work_profile} if work_profile is not None else {}),
         "rows_per_box": per_box,
         "row_memory_gb": row_memory_gb,
         # The reservation those demands carry, stated once for the whole plan
@@ -4069,6 +4173,11 @@ def main(argv=None) -> int:
                            "checked against the live source and the capture's "
                            "roster before any row is written (PQ #1654)")
     plan.add_argument("--groups-per-row", type=int, default=1)
+    plan.add_argument("--row-work-profile", default=None,
+                      help="opt-in census/argv-bound measured-work JSON profile; "
+                           "pack whole dense groups to its predicted startup-share "
+                           "objective and retain routed row bytes. Requires "
+                           "--groups-per-row 1; memory/fit gates still apply")
     plan.add_argument("--rows-per-box", type=int, default=1,
                       help="how many of these rows one box is meant to run at "
                            "once. It does not change a row's demand -- PB "

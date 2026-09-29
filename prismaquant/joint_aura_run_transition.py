@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -40,7 +39,9 @@ import re
 import weakref
 
 from .dev_mode import dev_mode_enabled, dev_stamp, dev_warning
-from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_UTF8_STRICT, LengthFramedSourceSha256, bytes_sha256hex, file_sha256hex,
+)
 from .joint_aura_transition_base import (
     _COMMIT,
     _bound,
@@ -183,15 +184,8 @@ def source_proof(package_root=None):
     digest -- even a dev run records what ran, a record never a gate.
     """
     root = Path(package_root) if package_root is not None else Path(__file__).resolve().parent
-    current, original = hashlib.sha256(), hashlib.sha256()
+    current, original = LengthFramedSourceSha256(), LengthFramedSourceSha256()
     seen = set()
-
-    def update(digest, name, data):
-        encoded = name.encode()
-        digest.update(len(encoded).to_bytes(4, "big"))
-        digest.update(encoded)
-        digest.update(len(data).to_bytes(8, "big"))
-        digest.update(data)
 
     if dev_mode_enabled():
         # The executing package is what it is; the seal returns at the
@@ -202,7 +196,7 @@ def source_proof(package_root=None):
             if (not path.is_file() or "__pycache__" in path.relative_to(root).parts
                     or path.suffix in {".pyc", ".pyo"}):
                 continue
-            update(current, path.relative_to(root).as_posix(), path.read_bytes())
+            current.update(path.relative_to(root).as_posix(), path.read_bytes())
         digest = current.hexdigest()
         dev_warning(
             f"source_proof admits any executing package under dev mode; "
@@ -216,7 +210,7 @@ def source_proof(package_root=None):
             continue
         name = path.relative_to(root).as_posix()
         payload = path.read_bytes()
-        update(current, name, payload)
+        current.update(name, payload)
         if name in _NEW_FILES:
             seen.add(name)
             continue
@@ -224,7 +218,7 @@ def source_proof(package_root=None):
             _require(payload.count(new.encode()) == 1, f"unapproved or missing source hunk in {name}")
             payload = payload.replace(new.encode(), old.encode(), 1)
             seen.add(name)
-        update(original, name, payload)
+        original.update(name, payload)
     _require(seen == set(_SOURCE_REWRITES) | _NEW_FILES, "incomplete source proof")
     _require(original.hexdigest() == _CONTRACT["source_sha256"], "unapproved producer package change")
     return {"producer_source_sha256": current.hexdigest(),
