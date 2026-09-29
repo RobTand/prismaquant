@@ -468,7 +468,9 @@ def build_stage_a_produced_template(*, output_prefix, tier: str,
 
 
 def _sha_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+    from prismaquant.digests import bytes_sha256hex
+
+    return bytes_sha256hex(data)
 
 
 def _load_json(path: Path, *, where: str) -> dict:
@@ -1200,6 +1202,7 @@ def _argv_file_sha256(campaign: Mapping, key: str, *, where: str,
     mode cannot read keeps the record's digest, and the worker reports it.
     """
     from prismaquant.dev_mode import dev_mode_enabled, seal_check
+    from prismaquant.digests import bytes_sha256hex
 
     sealed = str(campaign[f"{key}_sha256"])
     # Certified mode names the record's digest, byte-identical to main; a
@@ -1211,7 +1214,7 @@ def _argv_file_sha256(campaign: Mapping, key: str, *, where: str,
             raw = Path(campaign[f"{key}_path"]).read_bytes()
         except OSError:
             return sealed
-    actual = hashlib.sha256(raw).hexdigest()
+    actual = bytes_sha256hex(raw)
     seal_check(f"record {key}", sealed, actual, where=f"{where} argv")
     return actual
 
