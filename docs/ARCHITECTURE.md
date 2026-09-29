@@ -1,5 +1,32 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1739, `claude/tessera-pin-b40c93cb`): the exact
+Tessera pin is `b40c93cb73745097e57a1ba4cf5b9eee166c759a`, Tessera master's
+merge of #730 (tessera#729), so the pin names the Tessera that loads routed
+MoE weights correctly on mixed-rate stacks. It is a code-only re-pin: the
+contract stays v45 (`0869f326…`) and the pin stays schema v2.
+
+- **What moves.** The crossing from `83460680` is three merges: #726 (the
+  census tool passes `--compilation-config` through), #728 (a partition
+  identity records the producer authority's digest, not its path) and #730.
+  The package diff is `export_serving.py`, `native_window_moe.py` and
+  `serving_parts.py`. #730 fixes the routed MoE loader, which stored the
+  tensor-parallel row-cut start state in the original column order and so
+  corrupted rank-1 gate/up weights on mixed-rate stacks.
+- **What does not move.** The packaged contract, `export.py` (`2127e82b…`)
+  and `grammar.py` (`9ae1f824…`) are byte-identical, so the reviewed answer,
+  every rate count and the Tessera `layer.json` pin stay as they are. The
+  legal inventory renames the `reader-pin-83460680` byte-state
+  `reader-pin-b40c93cb`.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`) differs from
+  the previous fixture in `pin.commit` only; the PB action keys are in the
+  PR body of #1739.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb`, plus a
+  `-tf516` sibling on each Spark. Each is a copy of the `83460680`
+  interpreter with only Tessera reinstalled, built by a host-pinned PB
+  action.
+
 Re-stamped 2026-09-29 (PQ #1745, `sol/dedup-ci-grace`): the load-phase
 bound cites the checkpoint reader's deadline at line 1868 after #1729.
 Grace arithmetic, schemas and pipeline defaults are unchanged.
@@ -4725,8 +4752,12 @@ resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
 
-As of: 2026-09-29 · `claude/1654-row-startup`.
+As of: 2026-09-29 · `claude/tessera-pin-b40c93cb`.
 Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-29, `claude/tessera-pin-b40c93cb`) for **the Tessera
+re-pin to b40c93cb, the routed-loader start-state fix (tessera#729)** (PQ
+#1739); see the stamp at the top of this document.
 
 Re-stamped (2026-09-29, `claude/1654-row-startup`) for **the dispatcher's
 refusal of a streaming campaign without an adoptable source proof** and **the

@@ -412,11 +412,15 @@ TESSERA_DEV_PIN_ENV = "PRISMAQUANT_TESSERA_DEV_PIN"
 #: (tessera#724), under PQ #1719: the routed window intake repacks in place
 #: into the loader's scratch. The packaged v45 contract and the admission
 #: answer are unchanged.
+#: Re-pinned 2026-09-29 to b40c93cb73, Tessera master's merge of #730
+#: (tessera#729), under PQ #1739: the routed MoE loader keeps the tensor-
+#: parallel row-cut start state in the permuted column order. The packaged
+#: v45 contract and the admission answer are unchanged.
 #: The literal below
 #: is ``pprint.pformat(contract_answer(c), width=79, sort_dicts=False)`` on
 #: the v45 contract, and its diff against the v44 literal is exactly the two
 #: fused routed rows' ``lane.requires``.
-TESSERA_DEV_PIN_COMMIT = "83460680ed84e33c82eb62b31345381cc151aa58"
+TESSERA_DEV_PIN_COMMIT = "b40c93cb73745097e57a1ba4cf5b9eee166c759a"
 
 #: sha256 of ``tessera/serving/runtime_contract.json`` at that commit -- the
 #: bytes a human read when the answer below was accepted.  Recorded, and
