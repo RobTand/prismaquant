@@ -787,12 +787,16 @@ def _select_mtp(args, *, serving_target=None, profile=None) -> tuple[dict, dict]
     selection reads only its own payload and sub-budget, never the body.
     ``--mtp-fixed-formats`` pins named groups to one rung each, intersected
     with the same attested menu (``select_mtp_rungs(fixed_formats=)``).
+    ``--mtp-formats`` declares the layer's menu (PQ #1692): the attested rungs
+    are intersected with it, and a declaration that leaves a unit or a group
+    without a rung exits 2 rather than falling back to the attested menu.
     """
-    from .glm_mtp_selection import load_mtp_cost, select_mtp_rungs
+    from .glm_mtp_selection import MtpMenuRefused, load_mtp_cost, select_mtp_rungs
 
     if args.mtp_byte_budget is None or not args.mtp_serve_constants:
         raise SystemExit("[alloc] --mtp-joint-cost requires --mtp-byte-budget "
                          "and --mtp-serve-constants")
+    declared = getattr(args, "mtp_formats", None)
     try:
         payload = load_mtp_cost(args.mtp_joint_cost)
         constants = json.loads(Path(args.mtp_serve_constants).read_text())
@@ -803,7 +807,14 @@ def _select_mtp(args, *, serving_target=None, profile=None) -> tuple[dict, dict]
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
                                   constants=constants, acceptance_points=points,
                                   eligible=_mtp_rung_attestation(serving_target, profile),
-                                  fixed_formats=fixed)
+                                  fixed_formats=fixed,
+                                  formats=(None if declared is None
+                                           else declared.split(",")))
+    except MtpMenuRefused as exc:
+        import sys
+
+        print(f"[alloc] ERROR: MTP menu (--mtp-formats): {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(2) from exc
     except ValueError as exc:
         raise SystemExit(f"[alloc] ERROR: MTP selection: {exc}") from exc
     return payload, record
@@ -2089,6 +2100,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     help="Optional JSON file mapping MTP group names to one format "
                          "each; the selector keeps only that rung for the group, "
                          "intersected with the attested menu.")
+    ap.add_argument("--mtp-formats", default=None,
+                    help="Optional comma-separated MTP menu (PQ #1692), the MTP "
+                         "twin of --formats: the selector offers only these "
+                         "formats (BF16 passthrough included only when named), "
+                         "intersected with the attested menu. The record names "
+                         "the declaration and every rung it removed; a unit or "
+                         "group left without a rung exits 2. Unset: unchanged.")
     ap.add_argument("--mtp-acceptance-points", default=None,
                     help="Optional JSON list of served acceptance points "
                          "({measured_acceptance, rung_name|bits}) for the MTP "
