@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1692, `claude/mtp-formats`): **the GLM MTP layer
+takes a declared menu, `--mtp-formats`, the MTP twin of `--formats`.**
+- **Before:** the selector's menu was the runtime's attestation alone (`allocator._mtp_rung_attestation`). A release that declares one family could not say so for layer 45.
+- **Measured case (PB `c92e2e3a`):** GLM-5.3 v2 is all Tessera-8, but the open menu picked `TESSERA_BF16_K1_R1024` for the routed experts.
+- **Now:** `glm_mtp_selection.select_mtp_rungs(formats=)` intersects every unit's attested rungs with the declaration before any `--mtp-fixed-formats` pin. BF16 passthrough is included, so it stays on the menu only when named.
+- **Record:** `mtp_formats`, `menu_restricted_rungs` (rung: units removed) and `mtp_formats_unoffered`. The groups remain selections, never `fixed`.
+- **Refusals:** an empty or unknown name, or a declaration that leaves a unit or a group without a complete rung, raises `MtpMenuRefused`. The allocator exits 2, and never falls back to the attested menu.
+- **Unset:** the menu and the record are unchanged.
+
+No default, stage or ship gate changes. Gate: `tests/test_mtp_formats_menu_1692.py`.
+
 Re-stamped 2026-09-29 (PQ #1609, `sonnet/1609-side-bytes`):
 **the Tessera byte accountant now prices a Linear's container side bytes, not
 only its plane region.** `tessera.layout` sizes the planes; a unit on the wire is
@@ -5151,6 +5162,12 @@ merge. For GLM-5.3, routed E4M3 is attested at R896 and routed BF16 at R1024.
 one probe identity. It carries their rows unchanged, records each part's source,
 and refuses a part that describes another layer, unit set or probe, or that
 prices a rung twice.
+
+`--mtp-formats` (PQ #1692, optional) declares the MTP layer's menu:
+- the attested rungs, BF16 passthrough included, are intersected with the named formats before any `--mtp-fixed-formats` pin;
+- the record names the declaration (`mtp_formats`), each removed rung's unit count (`menu_restricted_rungs`) and any named format offered to no unit (`mtp_formats_unoffered`);
+- a unit or group left without a complete rung exits 2;
+- unset, the menu and the record are unchanged.
 
 Re-stamped (2026-09-25, `claude/stageb-window-readahead-1291`) for **Stage B
 render read-ahead through the IO engine** (PQ #1291, #1294): the retained
