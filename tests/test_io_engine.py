@@ -454,7 +454,9 @@ def test_range_entries_are_read_by_their_reader_and_charged_their_held_bytes():
             assert [item.value for item in delivered] == [bytes([group]) * SIZE]
             assert delivered[0].observed == ({"group": group},)
             stream.release()
-    assert calls == [0, 1, 2, 3]
+    # Readers run on pool threads; callback start order is not delivery order.
+    # The take assertions above verify ordered delivery; each reader runs once.
+    assert sorted(calls) == [0, 1, 2, 3]
     assert stream.counters["entries_read"] == 4
     assert stream.counters["bytes_read"] == 4 * SIZE
     assert stream.counters["read_s"] > 0
