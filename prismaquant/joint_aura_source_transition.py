@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,7 +17,9 @@ import re
 import subprocess
 import weakref
 
-from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_UTF8_STRICT, LengthFramedSourceSha256, bytes_sha256hex, file_sha256hex,
+)
 from .joint_aura_transition_base import _bound, _require
 
 VERSION = "empty_joint_lease_v1"
@@ -136,20 +137,14 @@ _SOURCE_REWRITES = {'aura_cost.py': [('            joint_lease = None\n         
 def source_proof(package_root=None):
     """Reconstruct old bytes; any additional source change fails closed."""
     root = Path(package_root) if package_root is not None else Path(__file__).resolve().parent
-    current, original = hashlib.sha256(), hashlib.sha256()
+    current, original = LengthFramedSourceSha256(), LengthFramedSourceSha256()
     seen = set()
     for path in sorted(root.rglob("*")):
         if not path.is_file() or "__pycache__" in path.relative_to(root).parts or path.suffix in {".pyc", ".pyo"}:
             continue
         name = path.relative_to(root).as_posix()
         payload = path.read_bytes()
-        def update(digest, data):
-            encoded = name.encode()
-            digest.update(len(encoded).to_bytes(4, "big"))
-            digest.update(encoded)
-            digest.update(len(data).to_bytes(8, "big"))
-            digest.update(data)
-        update(current, payload)
+        current.update(name, payload)
         if name == "joint_aura_source_transition.py":
             seen.add(name)
             continue
@@ -157,7 +152,7 @@ def source_proof(package_root=None):
             _require(payload.count(new.encode()) == 1, f"unapproved or missing source hunk in {name}")
             payload = payload.replace(new.encode(), old.encode(), 1)
             seen.add(name)
-        update(original, payload)
+        original.update(name, payload)
     _require(seen == set(_SOURCE_REWRITES) | {"joint_aura_source_transition.py"}, "incomplete source proof")
     _require(original.hexdigest() == _CONTRACT["source_sha256"], "unapproved producer package change")
     return {"producer_source_sha256": current.hexdigest(),

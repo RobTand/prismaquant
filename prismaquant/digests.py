@@ -37,6 +37,11 @@ Byte profiles, all lowercase-hex SHA-256:
   only how the file is read, never the digest. The path may be a ``str`` or a
   ``PathLike``; a missing path or a directory raises what ``open`` raises.
 
+- ``LengthFramedSourceSha256``: incremental records in caller order, each
+  strict UTF-8 name preceded by its four-byte big-endian byte length, then a
+  payload preceded by its eight-byte big-endian byte length. No sorting,
+  reconstruction, separators or final trailer; those stay with the caller.
+
 Pickle profile:
 
 - ``canonical_pickle_bytes``: ``pickle.dumps`` at explicit protocol 4 of a
@@ -296,6 +301,23 @@ FILE_BLOCK_BYTES = 8 << 20
 #: (``autoscale.selected_anchor_resources``, RobTand/prismaquant#1491), so the
 #: two read the same number from here.
 SOURCE_HASH_BLOCK_BYTES = 16 * 1024**2
+
+
+class LengthFramedSourceSha256:
+    """Incremental be32/name/be64/payload source profile; caller owns order."""
+
+    def __init__(self) -> None:
+        self._digest = hashlib.sha256()
+
+    def update(self, name: str, payload: bytes) -> None:
+        encoded = name.encode("utf-8")
+        self._digest.update(len(encoded).to_bytes(4, "big"))
+        self._digest.update(encoded)
+        self._digest.update(len(payload).to_bytes(8, "big"))
+        self._digest.update(payload)
+
+    def hexdigest(self) -> str:
+        return self._digest.hexdigest()
 
 
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
