@@ -51,6 +51,8 @@ from .quality_prefill_knee import (
     KNEE_RULE,
     KneeSelection,
     KneeSelectionError,
+    frontier_endpoints,
+    is_finite_number,
     nondominated,
     read_points,
     select_development_point,
@@ -105,17 +107,13 @@ _fail = Contract(PactSelectionError).fail
 # ------------------------------------------------------------------- inputs
 
 
-def _finite(value: object) -> bool:
-    return type(value) in (int, float) and math.isfinite(value)
-
-
 def _interval(raw: object, where: str) -> tuple[float, float] | None:
     if raw is None:
         return None
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)) or len(raw) != 2:
         _fail(f"{where}.time_interval_ms must be null or a [lo, hi] pair")
     lo, hi = raw
-    if not (_finite(lo) and _finite(hi)) or lo > hi:
+    if not (is_finite_number(lo) and is_finite_number(hi)) or lo > hi:
         _fail(f"{where}.time_interval_ms must be finite with lo <= hi")
     return float(lo), float(hi)
 
@@ -153,10 +151,10 @@ def _clean_points(points: Iterable[Mapping[str, object]]) -> list[dict[str, obje
         if type(nbytes) is not int or nbytes < 1:
             _fail(f"{where}.bytes must be a positive int")
         time_ms = raw.get("time_ms")
-        if not _finite(time_ms) or time_ms <= 0:
+        if not is_finite_number(time_ms) or time_ms <= 0:
             _fail(f"{where}.time_ms must be a positive finite number")
         dloss = raw.get("predicted_dloss")
-        if not _finite(dloss) or dloss < 0:
+        if not is_finite_number(dloss) or dloss < 0:
             _fail(f"{where}.predicted_dloss must be a finite non-negative number")
         cleaned[point_id] = {
             "point_id": point_id,
@@ -266,12 +264,6 @@ def materiality(
 # ---------------------------------------------------------------- one knee
 
 
-def _endpoints(frontier):
-    fastest = min(frontier, key=lambda p: (p.prefill_budget, p.quality_value, p.assignment_id))
-    best = min(frontier, key=lambda p: (p.quality_value, p.prefill_budget, p.assignment_id))
-    return fastest, best
-
-
 def _derive_resolution(
     first: KneeSelection,
     typed_by_id: Mapping[str, object],
@@ -329,7 +321,7 @@ def _derive_knee(
     typed_by_id = {p.point_id: p for p in typed}
     by_id = {p["point_id"]: p for p in points}
     frontier = nondominated(typed)
-    fastest, best = _endpoints(frontier)
+    fastest, best = frontier_endpoints(frontier)
     mat = materiality(
         by_id[fastest.point_id], by_id[best.point_id], allow_unresolved=allow_unresolved
     )

@@ -4,10 +4,11 @@ Runs unchanged on a checkout without the change (no wait_sink attribute: the
 "before" arm) and with it (the "after" arm attaches the real ledger sink).
 Reports wall per take (median of REPEATS) plus a cProfile of the drain.
 """
-import cProfile, hashlib, io, os, pstats, statistics, sys, tempfile, time
+import cProfile, io, os, pstats, statistics, sys, tempfile, time
 sys.path.insert(0, os.getcwd())
 os.environ.pop("PRISMABUILD_RESIDENCY_MAP", None)
 from prismaquant import io_engine
+from prismaquant.digests import bytes_sha256hex
 
 GROUPS, PER, SIZE, REPEATS = 96, 8, 65536, 9
 
@@ -24,7 +25,7 @@ def main():
             open(p, "wb").write(data)
             entries.append(io_engine.ReadEntry(
                 key=f"g{g}e{i}", path=p, size=SIZE, limit=SIZE, held_bytes=SIZE,
-                expected_sha256=hashlib.sha256(data).hexdigest(), decoder=decode, group=g))
+                expected_sha256=bytes_sha256hex(data), decoder=decode, group=g))
     have_sink = hasattr(io_engine.ReadStream, "wait_sink") or "wait_sink" in io_engine.ReadStream.__init__.__code__.co_names or True
     ledger = None
     try:
