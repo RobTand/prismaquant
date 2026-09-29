@@ -86,6 +86,11 @@ def canonical_sha256(value: object) -> str:
 def _reject_duplicate_members(
     pairs: Sequence[tuple[str, Any]],
 ) -> dict[str, Any]:
+    # Deliberate standalone twin of prismaquant.schemas.unique_json_object:
+    # wait_dsv4_aura_campaign loads this file without the package so terminal
+    # receipt publication stays off the GPU runtime dependency set, and
+    # load_completion_receipt reaches _load_json there -- even a lazy package
+    # import would couple it to torch. Same loop, same refusal.
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
