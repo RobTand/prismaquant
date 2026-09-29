@@ -82,6 +82,8 @@ def harness(monkeypatch):
 
     monkeypatch.setattr(staged_lease, "acquire_entry_window", fake_acquire)
     monkeypatch.setattr(time, "sleep", lambda s: None)
+    # The pinned wait, whatever the runner's environment carries.
+    monkeypatch.setenv("PRISMAQUANT_STAGED_RANGE_WAIT_S", "30")
     monkeypatch.setattr(pxc, "_await_entry_landing",
                         lambda *a, **k: True)
     return windows, script
