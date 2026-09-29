@@ -7,7 +7,6 @@ and restores the fallback on exit (PQ #1199).
 """
 from __future__ import annotations
 
-import hashlib
 import importlib
 import inspect
 import json
@@ -17,6 +16,8 @@ import sys
 from pathlib import Path
 import types
 import weakref
+
+from .digests import bytes_sha256hex, file_sha256hex
 
 VERSION = 'glm_kda_causal_exp_v1'
 SCHEMA = 'prismaquant.glm_source_derivative.v1'
@@ -37,14 +38,13 @@ def _require(ok, message):
 
 
 def sha256(path):
-    with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+    return file_sha256hex(path)
 
 
 def bound_json(binding, label):
     _require(isinstance(binding, dict) and set(binding) == {'path', 'sha256'}, label + ' requires path/SHA256')
     raw = Path(binding['path']).read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == binding['sha256'], label + ' bytes changed')
+    _require(bytes_sha256hex(raw) == binding['sha256'], label + ' bytes changed')
     return json.loads(raw)
 
 
@@ -69,11 +69,11 @@ def normalize_source_derivative(value):
 
 
 def corrected_source(raw):
-    _require(hashlib.sha256(raw).hexdigest() == ORIGINAL_MODELING_SHA256, 'original modeling source differs')
+    _require(bytes_sha256hex(raw) == ORIGINAL_MODELING_SHA256, 'original modeling source differs')
     old, new = ORIGINAL_EXPRESSION.encode(), CORRECTED_EXPRESSION.encode()
     _require(raw.count(old) == 1, 'reviewed source expression is not unique')
     result = raw.replace(old, new, 1)
-    _require(hashlib.sha256(result).hexdigest() == CORRECTED_MODELING_SHA256, 'corrected source differs')
+    _require(bytes_sha256hex(result) == CORRECTED_MODELING_SHA256, 'corrected source differs')
     return result
 
 
@@ -129,15 +129,15 @@ def _observe(model, build):
     from transformers.integrations import accelerate
     model_path, hub_path = Path(modeling.__file__), Path(hub_kernels.__file__)
     raw, hub_raw = model_path.read_bytes(), hub_path.read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == CORRECTED_MODELING_SHA256, 'actual modeling source differs')
-    _require(hashlib.sha256(hub_raw).hexdigest() == build['hub_kernels_sha256'], 'actual dispatch source differs')
+    _require(bytes_sha256hex(raw) == CORRECTED_MODELING_SHA256, 'actual modeling source differs')
+    _require(bytes_sha256hex(hub_raw) == build['hub_kernels_sha256'], 'actual dispatch source differs')
     # Authenticate the target module's compiler flags, without inheriting this
     # verifier's future-annotations flag into unrelated Transformers modules.
     compiled = compile(raw, str(model_path), 'exec', dont_inherit=True)
     hub_compiled = compile(hub_raw, str(hub_path), 'exec', dont_inherit=True)
     accelerate_path = Path(accelerate.__file__)
     accelerate_raw = accelerate_path.read_bytes()
-    _require(hashlib.sha256(accelerate_raw).hexdigest() == ORIGINAL_ACCELERATE_INTEGRATION_SHA256,
+    _require(bytes_sha256hex(accelerate_raw) == ORIGINAL_ACCELERATE_INTEGRATION_SHA256,
              'actual accelerate wrapper source differs')
     accelerate_compiled = compile(accelerate_raw, str(accelerate_path), 'exec', dont_inherit=True)
     function = modeling.chunk_kimi_delta_attention
@@ -217,11 +217,11 @@ def original_source(raw):
     from the pinned original anywhere else does not invert to it, so its
     reach cannot be derived and it is refused.
     """
-    _require(hashlib.sha256(raw).hexdigest() == CORRECTED_MODELING_SHA256, 'corrected modeling source differs')
+    _require(bytes_sha256hex(raw) == CORRECTED_MODELING_SHA256, 'corrected modeling source differs')
     old, new = ORIGINAL_EXPRESSION.encode(), CORRECTED_EXPRESSION.encode()
     _require(raw.count(new) == 1, 'reviewed corrected expression is not unique')
     result = raw.replace(new, old, 1)
-    _require(hashlib.sha256(result).hexdigest() == ORIGINAL_MODELING_SHA256,
+    _require(bytes_sha256hex(result) == ORIGINAL_MODELING_SHA256,
              'corrected source changes more than the reviewed expression')
     return result
 
@@ -304,7 +304,7 @@ _REACH = {}
 def _corrected_reach(path):
     """``correction_reach`` of a loaded corrected modeling file, once per content."""
     raw = Path(path).read_bytes()
-    key = (hashlib.sha256(raw).hexdigest(), ORIGINAL_MODELING_SHA256, CORRECTED_MODELING_SHA256)
+    key = (bytes_sha256hex(raw), ORIGINAL_MODELING_SHA256, CORRECTED_MODELING_SHA256)
     if key not in _REACH:
         _REACH[key] = correction_reach(original_source(raw), raw)
     return _REACH[key]
