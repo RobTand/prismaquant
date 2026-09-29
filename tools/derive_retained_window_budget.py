@@ -34,8 +34,9 @@ _LAYER = re.compile(r'^.*\.layers\.(\d+)(?:\.|$)')
 
 
 def _sha256(path):
-    with open(path, 'rb') as handle:
-        return hashlib.file_digest(handle, 'sha256').hexdigest()
+    from prismaquant.digests import file_sha256hex
+
+    return file_sha256hex(path)
 
 
 def _bound(path, digest, label):

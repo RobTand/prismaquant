@@ -58,7 +58,9 @@ PREFETCH = 2
 
 
 def _sha(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
+    from prismaquant.digests import bytes_sha256hex
+
+    return bytes_sha256hex(raw)
 
 
 def _write_new(path: Path, raw: bytes) -> None:
