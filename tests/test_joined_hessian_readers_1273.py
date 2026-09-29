@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pickle
 from pathlib import Path
 import sys
 
@@ -289,6 +290,11 @@ def _surface_joined(tmp_path, *, override=None):
     parts = checkpoint.with_name(checkpoint.name + ".parts")
     payload = pickle.loads(cost_path.read_bytes())
     manifest = json.loads(checkpoint.read_text())
+    # Every pre-existing row carries the panel identity, so the only seals
+    # in play are the panel's and the overlay's.
+    for unit_rows in payload["costs"].values():
+        for row in unit_rows.values():
+            row["hessian_identity"] = dict(panel_row)
     for unit in units:
         manifest["identity"]["units"][unit]["menu"].append(
             PANEL_FMT if unit == "h" else OVERLAY_FMT)
