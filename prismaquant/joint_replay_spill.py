@@ -59,6 +59,7 @@ with no page cache in between, in calls that bound what is in flight.
 """
 from __future__ import annotations
 
+from array import array
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -70,6 +71,7 @@ import threading
 import time
 
 import torch
+import xxhash
 
 from .dev_mode import dev_mode_enabled, seal_check
 from .joint_aura import (
@@ -77,6 +79,7 @@ from .joint_aura import (
     SignedJointProjectionLease,
     select_invocation_gradient,
 )
+from .io_engine import TerminalReadError
 from .joint_replay_regime import OPERATOR_GEMM, PER_INVOCATION, normalize_replay_regime
 from .routed_experts import PackedExpertProjection, ProfileRoutedExpertClassifier
 
@@ -713,10 +716,12 @@ class _InputDigest:
 
 
 class _Entry:
-    __slots__ = ("logical", "nbytes", "layout", "digest")
+    __slots__ = ("logical", "nbytes", "layout", "digest", "checksum")
 
     def __init__(self, logical, nbytes, layout):
         self.logical, self.nbytes, self.layout, self.digest = logical, nbytes, layout, None
+        # Host-file integrity, distinct from the device digest across probes.
+        self.checksum = None
 
 
 class _Window:
@@ -745,6 +750,9 @@ class _Window:
         self.g_logical: dict[str, int] = {}
         self.g_runs: dict[tuple[str, int], list[tuple[int, int, int]]] = {}
         self.g_starts: dict[tuple[str, int], list[int]] = {}
+        # Probe -> packed 64-bit checksums, indexed by firing-order record.
+        # Avoid a Python object/key per gradient in an already large roster.
+        self.g_checksums: dict[int, array] = {}
         # (owner, entry) -> the last plan position that reads it
         self.last_ref: dict[tuple[str, int], int] = {}
         # [(owner, chunk)] in replay order
@@ -941,6 +949,10 @@ class StageBReplaySpill:
             "write_calls": 0, "file_bytes_written": 0, "read_calls": 0,
             "file_bytes_read": 0, "replay_stream": None,
             "replay_reclaims": 0, "replay_reclaimed_bytes": 0,
+            "checksum_algorithm": "xxh3_64",
+            "checksum_write_cpu_s": 0.0, "checksum_read_cpu_s": 0.0,
+            "checksum_bytes_written": 0, "checksum_bytes_verified": 0,
+            "checksums_verified": 0,
         }
         if self.accumulation == OPERATOR_GEMM:
             self.telemetry.update(accumulation=self.accumulation,
@@ -1217,8 +1229,14 @@ class StageBReplaySpill:
         g_layout = _layout(selected, dense=_is_dense(selected))
         g_bytes = selected.numel() * self.element_size
         logical = window.g_logical.get(name, 0)
+        checksums = window.g_checksums.get(self._probe)
+        if checksums is None:
+            checksums = window.g_checksums[self._probe] = (
+                array("Q", [0]) * len(window.records))
         if self._probe == 0:
             window.records.append((name, owner, entry, logical, g_bytes, g_layout))
+            # Publish the slot before _stage can flush to the writer thread.
+            checksums.append(0)
             g_residue = g_layout[2]
         else:
             cursor = window.record_cursor
@@ -1385,10 +1403,24 @@ class StageBReplaySpill:
             key = "x_bytes_written" if kind == "x" else "g_bytes_written"
             self.telemetry[key] += logical - parts[0][3]
         base = self._scratch.allocate(size)
+        checksum_cpu, checksum_bytes = 0.0, 0
         for runs, part, relative in placed:
             logical, nbytes, file_offset = part[3], part[4], base + relative
             if not nbytes:
                 continue  # An empty tensor has no slot and needs no run.
+            # The CUDA copy is complete and this arena remains owned by the
+            # writer until its direct write ends. Hash exactly the operand,
+            # not the slot padding (which the replay never consumes).
+            before = time.thread_time()
+            checksum = xxhash.xxh3_64_intdigest(view[part[5]:part[5] + nbytes])
+            checksum_cpu += time.thread_time() - before
+            checksum_bytes += nbytes
+            window = self._windows[part[0]]
+            kind, stream = part[1]
+            if kind == "x":
+                window.entries[stream][part[2]].checksum = checksum
+            else:
+                window.g_checksums[probe][part[2]] = checksum
             if runs and runs[-1][1] + runs[-1][2] == file_offset:
                 # Abuts the stream's last run in the file: extend it.
                 runs[-1] = (runs[-1][0], runs[-1][1], runs[-1][2] + nbytes)
@@ -1399,6 +1431,8 @@ class StageBReplaySpill:
             self.telemetry["write_calls"] += self._scratch.write(
                 base, slots, call_bytes=WRITE_CALL_BYTES)
         self.telemetry["file_bytes_written"] += size
+        self.telemetry["checksum_write_cpu_s"] += checksum_cpu
+        self.telemetry["checksum_bytes_written"] += checksum_bytes
         self.telemetry["writer_busy_s"] += time.time() - started
 
     def _end_capture(self):
@@ -1579,15 +1613,17 @@ class StageBReplaySpill:
             record = entries[entry]
             if record.nbytes:
                 pieces.append((self._physical(x_runs, x_starts, record.logical,
-                                              record.nbytes), offset, record.nbytes))
+                                              record.nbytes), offset, record.nbytes,
+                               record.checksum, "x", owner, entry))
         for position, offset in gradients:
             name, _, _, logical, nbytes, _ = window.records[position]
             if nbytes:
                 pieces.append((self._physical(window.g_runs[(name, probe)],
                                               window.g_starts[(name, probe)], logical,
-                                              nbytes), offset, nbytes))
+                                              nbytes), offset, nbytes,
+                               window.g_checksums[probe][position], "g", name, position))
         spans = []
-        for file_offset, offset, nbytes in sorted(pieces):
+        for file_offset, offset, nbytes, *_integrity in sorted(pieces):
             if file_offset % block != offset % block:
                 raise RuntimeError("Stage B spill tensor is off its replay residue")
             lead = file_offset % block
@@ -1606,11 +1642,25 @@ class StageBReplaySpill:
                 calls.append((cut, at + (cut - low), size))
         read = self._scratch.read_into
         done = [read(cut, [view[at:at + size]]) for cut, at, size in calls]
+        checksum_cpu = 0.0
+        for file_offset, offset, nbytes, expected, kind, name, position in pieces:
+            before = time.thread_time()
+            observed = xxhash.xxh3_64_intdigest(view[offset:offset + nbytes])
+            checksum_cpu += time.thread_time() - before
+            if observed != expected:
+                raise TerminalReadError(
+                    f"Stage B spill checksum mismatch in window {self._window_of[owner]}, "
+                    f"probe {probe}, bytes [{file_offset}, {file_offset + nbytes}) "
+                    f"({kind} {name}, record {position})")
+        payload_bytes = sum(piece[2] for piece in pieces)
         with self._telemetry_lock:
-            self.telemetry["bytes_read"] += sum(nbytes for _, _, nbytes in pieces)
+            self.telemetry["bytes_read"] += payload_bytes
             self.telemetry["file_bytes_read"] += sum(done)
             self.telemetry["reads"] += len(spans)
             self.telemetry["read_calls"] += len(calls)
+            self.telemetry["checksum_read_cpu_s"] += checksum_cpu
+            self.telemetry["checksum_bytes_verified"] += payload_bytes
+            self.telemetry["checksums_verified"] += len(pieces)
 
     def replay(self, window_index, probe_index, lease):
         """Feed ``lease`` this window's spilled invocations for one probe."""

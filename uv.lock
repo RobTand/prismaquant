@@ -3137,6 +3137,7 @@ dependencies = [
     { name = "torch" },
     { name = "tqdm" },
     { name = "transformers" },
+    { name = "xxhash" },
 ]
 
 [package.optional-dependencies]
@@ -3165,6 +3166,7 @@ requires-dist = [
     { name = "tqdm" },
     { name = "transformers", specifier = ">=5.0" },
     { name = "vllm", marker = "extra == 'serve'", specifier = ">=0.19" },
+    { name = "xxhash", specifier = ">=3.7.0" },
 ]
 provides-extras = ["serve", "test"]
 

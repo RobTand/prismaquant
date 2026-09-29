@@ -516,6 +516,27 @@ them.
 
 ---
 
+## Split-pin legal-domain provenance (#1768; Refs #1549)
+
+`DomainPins` also transcribes the separately reviewed v3 producer commit and
+serving-source digest. These optional fields are omitted when absent, so the
+tracked v2 `FROZEN_PINS` and its six-field serialized report stay unchanged.
+`live_pins()` reads the split constants from their owner when the pinned
+source digest is present; it does not infer them from the serving commit,
+contract bytes or the provisioner's separate installed-package checksum.
+`pin_drift()` compares the ordered union of frozen/live fields and reports an
+absent value as null. A v2/v3 transition in either direction, or a change to
+only one split identity, is drift rather than a silently ignored field or a
+missing-key exception. A future activating review must transcribe both v3
+identities into its frozen state; this change does not fabricate them for v2.
+
+This is the metadata-report slice deferred by #1574. The current v45 contract
+still has 14 cells and none names its serving code; producer requalification,
+`contract_answer`'s code-column review and a separately reviewed v3 pin remain
+required. No cell promotion, new GPU/serving measurement or live pin change is
+claimed by the CPU reader tests. The existing package-source matcher and
+trace-header checks are unchanged.
+
 ## Moving the pin
 
 Verified against `RobTand/tessera` master on 2026-09-29, at its merge of #730:
