@@ -1,5 +1,34 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1007, `sol/pq-pbio-1014-20260929`): PrismaBuild
+#946 is closed, so it is no longer an upstream implementation blocker for
+band-serial consumer declarations. PrismaQuant still stages these handoffs
+through static readsets without declaring their origin batches. Wiring the
+consumer edge through the supported public mixed-read-plan API and verifying
+retirement in the selected runtime remain required; upstream issue closure
+alone does not establish either. No runtime, pin, or produced-output contract
+changes.
+
+Re-stamped 2026-09-29 (PQ #1014, `sol/pq-pbio-1014-20260929`): the
+undeclared-IO umbrella is closed as retired/deferred tracking, not as a claim
+that every tool was migrated. Stage B preparation (#1070), default fleet-data
+test skipping (#1071), and bounded container cache roots (#1072) are shipped.
+T4 qualification (#1068) and catalog/assembly (#1069) were closed as not
+planned; before either tool runs again, declare its inputs to PrismaBuild,
+produce outputs per batch, and update its readers in the same change. The held
+`campaign/glm-routing-replay-20260922` launcher was never ported to main; a
+future port must use the admitted container launcher and bounded local TMPDIR.
+Separate cache charging and crashed-row cleanup remain open under #1091.
+No runtime behavior, IO admission gate, default, or wire contract changes.
+
+Re-stamped 2026-09-29 (PQ #1754, planner slice of #1750): opt-in
+`plan --row-work-profile` packs whole dense anchor groups from explicit,
+census/argv-bound timing predictions. Count-based defaults and routed row
+bytes remain unchanged. Existing memory/fit gates still decide admission;
+PrismaBuild still owns placement and balancing. CPU planner checks do not
+establish speed or output equivalence; #1750's profiled GPU A/B remains open.
+See [the input contract](campaign_row_work_profile.md).
+
 Re-stamped 2026-09-29 (PQ #1608, `sol/issues-pq-ts-2`): the three closed
 source-transition contracts remain separate. Identical helpers stay in
 `joint_aura_transition_base.py`; checkpoint adoption, run-source proof, and
@@ -6102,8 +6131,10 @@ group and then the record group at its origin with the `consumed` lifetime
 acknowledged. The emitter records the batch refs as `origin_batches`, a
 read-back handoff template refuses, and PrismaBuild's retirement tick
 deletes the batches once a declared consumer succeeds or sweeps them once
-the producer attempt is dead. The consumer's `--after` declaration waits on
-PrismaBuild #946. See "Band-serial Stage B quanta (#996)". A changed Stage B
+the producer attempt is dead. The consumer's `--after` declaration is still
+unwired in PrismaQuant. PrismaBuild #946, which added mixed static/produced
+read plans, is closed; selected-runtime support and consumer integration
+remain to be verified. See "Band-serial Stage B quanta (#996)". A changed Stage B
 produced-output contract; no format, pipeline default or ship gate changes.
 Gates: `tests/test_band_serial_handoff_produced.py`,
 `tests/test_band_serial_handoff_spool_real_pb.py`,
@@ -21255,6 +21286,20 @@ so nothing here decides what to skip, and a row may not carry
 `--deadline-seconds`, which stops a run mid-round and would price a different
 anchor set than one run would have.
 
+**Measured-work packing is opt-in** (#1754, a CPU slice of #1750).
+`plan --row-work-profile PATH` requires count width one and a versioned profile
+bound to the exact census bytes and shared campaign argv. It packs whole
+non-routed groups longest-first using explicit startup/per-group predictions,
+a startup-share objective and available GPU slots; infeasible or invalid
+inputs refuse before publication. Routed groups retain their original sorted
+row IDs, selection bytes, action fields and data manifests. Dense rows record
+predicted pricing/share, and the plan records the profile SHA-256 and contents.
+`_row_memory_gb` and `partition_rows_by_fit` still derive and gate every packed
+row; a declined bundle is not resized. This predicts a layout, not speed or
+numerical equivalence. The [profile contract](campaign_row_work_profile.md)
+defines the measurement and production-validation boundary. Defaults, the
+campaign stage graph and ship gates are unchanged.
+
 **Merge coverage is the scope, or exactly what the plan declares** (2026-09-14,
 #621). Every row stamps the whole census scope into `campaign_scope` whether
 or not the plan ran every row, and `merge` requires every anchor group of that
@@ -28834,8 +28879,11 @@ and is swept once that attempt is dead (failed, withdrawn or superseded by a
 retry). Today's consumer stages the handoff through its static derived
 readset and declares no batch, so a succeeded producer's handoff stays until
 the consumer declares it. That declaration is the consumer's
-`pbrun --after PRODUCER:TEMPLATE_ID` edge, which waits on PrismaBuild #946
-(a v2 read plan that places a produced batch at the phase that reads it);
+`pbrun --after PRODUCER:TEMPLATE_ID` edge, which PrismaQuant has not yet wired
+through a mixed v2 read plan that places a produced batch at its read phase.
+PrismaBuild #946 is closed; that removes the upstream implementation blocker,
+not the need to verify the selected runtime and connect the consumer plan.
+After integration,
 the consumer will find each row by path under the producer's handoff prefix
 and check its bytes and sha256 against the batch ref before reading it.
 `tests/test_band_serial_handoff_produced.py` drives both halves on a private
