@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-28 (PQ #738, `claude/738-forward-capture-fanout`): a
+fresh Stage A run's forward boundary capture fans out across PrismaBuild. A
+forward split is one prep row (`--forward-split-prep S:E,...`), one quantum
+per calibration-partition range (`--forward-split-quantum S:E`), and one CPU
+join (`python -m prismaquant.stage_a_forward_split`). Each quantum captures
+its own samples' boundary entries at global coordinates and seals a partial
+tail checkpoint. The join verifies coverage with
+`verify_boundary_partition_coverage`, joins the tail with
+`join_split_checkpoint`, and writes the chain state the single owner writes.
+The chain split then rolls the reverse chain from the tail. A run without the
+flags writes the same bytes. See "Stage A forward split (#738)". No format,
+pipeline default or ship gate changes.
+
 Re-stamped 2026-09-28 (PQ #1141, `sonnet/1141-cotangent-guards`): **a Stage B
 row that loads the whole cotangent plane refuses before the load when the host
 cannot hold it.** Without the cotangent scratch pair the checkpoint load holds
@@ -27756,6 +27769,73 @@ a quantum reads is declared, and every row the builder adds is read. It
 also stages a later round from a joined checkpoint.
 `tests/test_dispatch_stage_a_split.py` seals a round of the fixture run and
 drives the ordering with a fake `pbrun` over the fixture's real receipts.
+
+### Stage A forward split (#738)
+
+The chain split (above) parallelizes the reverse chain of a resumed run. A
+fresh run's forward capture, which walks every layer over every calibration
+partition, ran on one owner. The forward split runs it as PrismaBuild rows
+over disjoint partition ranges (`prismaquant/stage_a_forward_split.py`).
+The layer-major capture carries no state between partitions, so each range
+is independent. PrismaBuild places every row; nothing here picks a machine.
+
+**The prep** (`--forward-split-prep S:E,...`) binds the run's generation
+once, as the owner `forward-prep`, and writes
+`split/forward/prep.json` (`prismaquant.stage_a.forward_split_prep.v1`): the
+bind session, the chain-state fields the join needs, and the ranges. The
+ranges must be whole read windows (`check_ranges`) and must tile `0..N-1`
+exactly (`require_whole_plane`, which calls
+`verify_boundary_partition_coverage`). `even_ranges` plans them with
+`plan_boundary_partition_ranges` over read windows. The prep captures
+nothing, and a second prep refuses.
+
+**A quantum** (`--forward-split-quantum S:E`) refuses a range the prep did
+not launch. It rebinds the prep's generation as its own owner
+(`forward-samples-SSSSSS-EEEEEE`), captures its samples through
+`capture_layer_major_boundaries(batch_offset=S)`, so every entry carries its
+global batch index, computes the tail cotangents of its samples, and seals a
+partial tail checkpoint at `split/boundary-<num_layers>/samples-SSSSSS-EEEEEE`.
+It writes its entry records to `split/forward/samples-SSSSSS-EEEEEE.entries.json`
+instead of a chain state, and marks its owner status `complete`.
+
+**The join** (`python -m prismaquant.stage_a_forward_split --output-root R
+--receipt PATH`, a CPU row, exit 2 on refusal) requires every range's owner
+status to be `complete` under the prep's session, checks each fragment's
+session, coordinates and entry sizes, joins the tail checkpoint with
+`join_split_checkpoint`, and writes the chain state. It runs once. After it,
+`plan_chain_resume` finds the tail as the lowest sealed checkpoint, so the
+chain split's rounds, or a plain resume, roll the reverse chain from
+`num_layers`. The segment above the first stride checkpoint is therefore the
+chain split's first round, not a separate single-owner segment.
+
+A forward split refuses beside a chain resume, a chain seed, a chain split
+or forward recovery. It needs exact boundary storage.
+
+**Manifests and rows.** `tools/build_stagea_split_package.py forward`
+derives the prep's manifest (the source `head`) and each quantum's (the head
+plus every `forward-*` phase) from the fresh run's submitted manifest, and
+writes `forward-package.json`. `tools/dispatch_stage_a_split.py seal-forward`
+seals the round: `forward-prep`, one row per quantum label, and
+`forward-join`. Every row carries the round's `--tag` (default `gb10`) and
+`--priority` (default `-10`); the join demands no GPU. `submit`
+holds the quanta until the prep has ended `executed` with exit 0 and its
+record names the round's ranges, and holds the join until every quantum has
+ended and written its fragment. Each quantum installs every layer, so a round
+of N quanta reads the layer sources N times: duplicated weight reads in
+exchange for N GPUs.
+
+**Tests.** `tests/test_stage_a_forward_split.py` joins the quanta into the
+single owner's chain state, forward entries and tail checkpoint, byte for
+byte, for the dense model, R13's shape (window 4) and a shared-KV model
+(members compared by content, since a pickled pack keys on storage
+addresses). It rolls a joined forward capture through two chain split rounds
+and a resume to the single owner's final bytes, and covers the join's and
+the prep's refusals. `tests/test_dispatch_stage_a_forward_split.py` covers
+the package and the sealed round. `tests/bench_stage_a_forward_split.py`
+(run by name) records wall, compute and exposed wait per row, single owner
+against 2, 4 and 8 quanta; on its CPU fixture the critical path fell from
+11.2 s to 3.7 s at 4 quanta, dominated by entry `fsync`, and every split's
+chain state equals the single owner's.
 
 ### Stage A dispatch requires the paced spool (#1012)
 

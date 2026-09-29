@@ -24,6 +24,16 @@ commits nothing. So this tool orders the rows by what they leave on disk:
   (``split/quanta/<label>.digests.json``, written as the layer rolls) to a
   baseline: the tripwire for a numeric defect, minutes into a round.
 
+**seal-forward** seals a fresh run's forward split
+(``prismaquant.stage_a_forward_split``) the same way, from a forward package
+(``build_stagea_split_package.py forward``): a prep row that mints the run's
+generation, one quantum row per calibration partition range, each capturing
+its partitions' boundaries through every layer and their tail cotangents,
+and one CPU join row that publishes the tail checkpoint and the chain state.
+The quanta wait for the prep's record and its ``executed`` ending; the join
+waits for every quantum. After the join the run is a chain resume at its
+tail checkpoint, and the chain split rounds above roll it from the top.
+
 Every row runs the checkout the round was sealed from: ``plan_chain_resume``
 requires the running implementation to be the one the latest resume record
 stamps, so the prep, the quanta and the joins must be one tree. Only the
@@ -59,6 +69,7 @@ if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
 ROUND_SCHEMA = "prismaquant.stage_a.split_round.v1"
+FORWARD_ROUND_SCHEMA = "prismaquant.stage_a.forward_split_round.v1"
 ROUND_NAME = "round.json"
 PRIORITY = "-10"
 _PRIORITY = re.compile(r"-?\d+")
@@ -115,7 +126,9 @@ def readahead_depth(manifest: dict, lookahead: int) -> dict:
     is read, each install schedules layers ``L-1 .. L-lookahead`` inside the
     walk (``source_read_plan.chain_prefetch_window``, which stops at the
     walk's end); boundary rows and planes are read only inside their own
-    phase. The head's opening window is reported, not declared: it is
+    phase. A forward capture walks up: while ``forward-L`` is read, the
+    layer visitor has scheduled ``L+1 .. L+lookahead``
+    (``StreamedCausalLM.visit_layer_batches``). The head's opening window is reported, not declared: it is
     scheduled while the head is still the accepted phase. Returns the rows
     and ``declared_gib``, the chain rows' reach rounded up to whole GiB
     (PrismaBuild takes an integer).
@@ -131,15 +144,19 @@ def readahead_depth(manifest: dict, lookahead: int) -> dict:
                 end = position
         table[phase["name"]] = {"start": start, "end": position, "source_bytes": source,
                                 "source_end": end}
-    chains = [name for name in table if name.startswith("chain-")]
+    # A chain walks layers down and a forward capture walks them up
+    # (``source_read_plan``); a manifest reads one walk after its head.
+    walks = [name for name in table if name != "head"]
+    kind = walks[0].split("-")[0] if walks else "chain"
+    step = -1 if kind == "chain" else 1
     rows = []
     for name, row in table.items():
         if name == "head":
-            ahead = chains[:lookahead]
+            ahead = walks[:lookahead]
         else:
-            layer = int(name.removeprefix("chain-"))
-            ahead = [f"chain-{layer - k:03d}" for k in range(1, lookahead + 1)
-                     if f"chain-{layer - k:03d}" in table]
+            layer = int(name.removeprefix(f"{kind}-"))
+            ahead = [f"{kind}-{layer + step * k:03d}" for k in range(1, lookahead + 1)
+                     if f"{kind}-{layer + step * k:03d}" in table]
         ahead = [phase for phase in ahead if table[phase]["source_end"] is not None]
         furthest = max((table[phase]["source_end"] for phase in ahead), default=row["end"])
         rows.append({"reading": name, "ahead": ahead,
@@ -159,7 +176,8 @@ def quantum_read_rate(described: dict, *, samples, n_batches, seconds_per_layer)
     a layer's roll time is proportional to the samples it rolls; round 1
     measures it. PrismaBuild prices ``max(measured, declared)``.
     """
-    phases = [phase for phase in described["phases"] if phase["name"].startswith("chain-")]
+    phases = [phase for phase in described["phases"]
+              if phase["name"].startswith(("chain-", "forward-"))]
     steady = max(phases[1:] or phases, key=lambda phase: phase["bytes"])
     share = (int(samples[1]) - int(samples[0])) / int(n_batches)
     seconds = float(seconds_per_layer) * share
@@ -380,6 +398,106 @@ def seal_round(*, round_dir, checkout, split_package, campaign, spec, prefetch_o
     return document
 
 
+def seal_forward_round(*, round_dir, checkout, forward_package, campaign, spec,
+                       prefetch_override, base_template, artifact_budget_bytes,
+                       chain_regime, seconds_per_layer, n_probes, python, tag="gb10",
+                       template_prefix, tier, priority=PRIORITY) -> dict:
+    """Write a forward split's ``round_dir`` (templates and ``round.json``); submit nothing.
+
+    ``seconds_per_layer`` is the single owner's measured forward seconds per
+    layer over every partition; each quantum's read rate scales it by the
+    quantum's share of the partitions. ``chain_regime`` is the run's: the
+    prep seals it into the run identity the chain split rounds resume under.
+    """
+    from prismaquant.joint_adjoint_checkpoints import adjoint_space
+    from prismaquant.stage_a_chain_split import quantum_label
+
+    priority = str(priority)
+    if not _PRIORITY.fullmatch(priority):
+        raise SplitDispatchRefused(f"priority {priority!r} is not an integer")
+    round_dir = Path(round_dir)
+    if (round_dir / ROUND_NAME).exists():
+        raise SplitDispatchRefused(f"{round_dir / ROUND_NAME} exists: a round is sealed once")
+    commit = checkout_commit(checkout)
+    running = implementation_sha256(checkout)
+    package_path = Path(forward_package)
+    package = json.loads(package_path.read_text())
+    plan = json.loads(Path(campaign["plan_path"]).read_text())
+    output_root = Path(plan["output_root"])
+    base = json.loads(Path(base_template).read_text())
+    n_batches, group_size = int(package["n_batches"]), int(package["group_size"])
+    lookahead = int(json.loads(Path(prefetch_override).read_text())
+                    ["source_prefetch"]["prefetch_lookahead"])
+    regime = ["--chain-batch-size", str(chain_regime["chain_batch_size"]),
+              "--chain-probe-fusion", str(chain_regime["chain_probe_fusion"])]
+    common = dict(checkout=checkout, campaign=campaign, spec=spec,
+                  prefetch_override=prefetch_override,
+                  artifact_budget_bytes=artifact_budget_bytes, tag=tag, priority=priority)
+    templates = round_dir / "templates"
+    templates.mkdir(parents=True, exist_ok=True)
+
+    def template(name, samples):
+        window = window_groups(base, tier=tier, n_probes=n_probes,
+                               range_batches=samples[1] - samples[0], group_size=group_size)
+        body = row_template(base, template_id=f"{template_prefix}-{name}", tier=tier,
+                            window=window, artifact_budget_bytes=artifact_budget_bytes)
+        path = templates / f"{name}.json"
+        _write_json(path, body)
+        return path, window
+
+    rates = [quantum_read_rate(described, samples=described["samples"], n_batches=n_batches,
+                               seconds_per_layer=seconds_per_layer)
+             for described in package["quanta"]]
+    ranges = [list(item["samples"]) for item in package["quanta"]]
+    prep_manifest = gzip.decompress(Path(package["prep"]["data_manifest"]["path"]).read_bytes())
+    # The prep captures nothing, but the wrapper binds its produced output
+    # before the core: it is sized as the round's largest quantum.
+    widest = tuple(max(ranges, key=lambda pair: pair[1] - pair[0]))
+    path, window = template("forward-prep", widest)
+    rows = [{**_stage_row(
+        name="forward-prep", kind="forward-prep",
+        manifest=package["prep"]["data_manifest"]["path"], template_path=path,
+        batch_range=widest, reader={
+            "depth": readahead_depth(json.loads(prep_manifest), lookahead),
+            "rate": {**max(rates, key=lambda rate: rate["read_mb_s"]),
+                     "why": "the round's quanta's rate; the prep reads its head only"}},
+        payload_extra=[*regime, "--forward-split-prep",
+                       ",".join(f"{start}:{stop}" for start, stop in ranges)],
+        **common), "window": window}]
+    labels = []
+    for described, rate in zip(package["quanta"], rates):
+        start, stop = described["samples"]
+        label = quantum_label(start, stop, role="forward")
+        labels.append(label)
+        manifest = json.loads(gzip.decompress(
+            Path(described["data_manifest"]["path"]).read_bytes()))
+        path, window = template(label, (start, stop))
+        rows.append({**_stage_row(
+            name=label, kind="forward-quantum", manifest=described["data_manifest"]["path"],
+            template_path=path, batch_range=(start, stop),
+            reader={"depth": readahead_depth(manifest, lookahead), "rate": rate},
+            payload_extra=[*regime, "--forward-split-quantum", f"{start}:{stop}"],
+            **common), "window": window, "label": label, "samples": [start, stop]})
+    receipt = round_dir / "joins" / "forward-join.json"
+    rows.append({**_cpu_row(
+        name="forward-join", kind="forward-join", checkout=checkout, tag=tag,
+        priority=priority, python=python, module_argv=[
+            "-m", "prismaquant.stage_a_forward_split", "--output-root", str(output_root),
+            "--receipt", str(receipt)]), "receipt": str(receipt)})
+    document = {
+        "schema": FORWARD_ROUND_SCHEMA, "checkout": str(checkout), "commit": commit,
+        "implementation_sha256": running, "output_root": str(output_root),
+        "ranges": ranges, "labels": labels, "n_batches": n_batches,
+        "group_size": group_size, "tag": tag, "priority": priority,
+        "round_source_bytes": int(package["round_source_bytes"]),
+        "pins": {"forward_package": _pin(package_path), "spec": _pin(spec),
+                 "prefetch_override": _pin(prefetch_override),
+                 "base_template": _pin(base_template)},
+        "campaign": dict(campaign), "rows": rows}
+    _write_json(round_dir / ROUND_NAME, document)
+    return document
+
+
 #: The band set check: every band shares one run header (``band_set``).
 _BAND_SET = ("import json, sys; "
              "from prismaquant.joint_adjoint_slices import band_set, stage_a_run_header, "
@@ -393,11 +511,12 @@ _BAND_SET = ("import json, sys; "
 def load_round(round_dir) -> dict:
     """The sealed round, every pinned input unchanged."""
     document = json.loads((Path(round_dir) / ROUND_NAME).read_text())
-    if document.get("schema") != ROUND_SCHEMA:
+    if document.get("schema") not in (ROUND_SCHEMA, FORWARD_ROUND_SCHEMA):
         raise SplitDispatchRefused(f"{round_dir} holds no sealed split round")
     pins = document["pins"]
-    for pin in [pins["split_package"], pins["spec"], pins["prefetch_override"],
-                pins["base_template"], *pins["band_references"],
+    for pin in [*(pins[key] for key in ("split_package", "forward_package") if key in pins),
+                pins["spec"], pins["prefetch_override"],
+                pins["base_template"], *pins.get("band_references", ()),
                 *(row[key] for row in document["rows"]
                   for key in ("data_manifest", "template") if key in row)]:
         if _sha(pin["path"]) != pin["sha256"]:
@@ -488,7 +607,38 @@ def require_ready(document, round_dir, row) -> None:
             if other["kind"] == "band":
                 pb_ending(round_dir, other["name"])
         return
+    if kind.startswith("forward-"):
+        return _require_forward_ready(document, round_dir, space, kind)
     raise SplitDispatchRefused(f"unknown row kind {kind}")
+
+
+def _require_forward_ready(document, round_dir, space, kind) -> None:
+    from prismaquant.stage_a_chain_resume import chain_state_path
+    from prismaquant.stage_a_forward_split import (
+        ForwardSplitRefused, forward_root, prep_record_path, read_prep_record)
+
+    if chain_state_path(space).exists():
+        raise SplitDispatchRefused(
+            f"{chain_state_path(space)} exists: the run's forward capture is done")
+    if kind == "forward-prep":
+        if prep_record_path(space).exists():
+            raise SplitDispatchRefused(f"{prep_record_path(space)} exists: prepped once")
+        return
+    pb_ending(round_dir, "forward-prep")
+    try:
+        prep = read_prep_record(space)
+    except ForwardSplitRefused as exc:
+        raise SplitDispatchRefused(str(exc)) from exc
+    if prep["ranges"] != document["ranges"]:
+        raise SplitDispatchRefused("the run's forward prep is not this round's")
+    if kind == "forward-quantum":
+        return
+    if kind != "forward-join":
+        raise SplitDispatchRefused(f"unknown row kind {kind}")
+    for label in document["labels"]:
+        pb_ending(round_dir, label)
+        if not (forward_root(space) / f"{label}.json").is_file():
+            raise SplitDispatchRefused(f"forward quantum {label} left no receipt")
 
 
 def submit(round_dir, names, *, run=subprocess.run) -> list[dict]:
@@ -594,6 +744,21 @@ def main(argv=None) -> int:
     seal.add_argument("--tag", default="gb10")
     seal.add_argument("--priority", default=PRIORITY,
                       help="every row's PrismaBuild priority band (default %(default)s)")
+    forward = sub.add_parser("seal-forward",
+                             help="write a forward split's round directory; submit nothing")
+    for flag in ("--round-dir", "--checkout", "--forward-package", "--campaign-record",
+                 "--spec", "--prefetch-override", "--base-template", "--tier",
+                 "--template-prefix"):
+        forward.add_argument(flag, required=True)
+    forward.add_argument("--artifact-budget-bytes", type=int, required=True)
+    forward.add_argument("--chain-batch-size", type=int, required=True)
+    forward.add_argument("--chain-probe-fusion", choices=("on", "off"), required=True)
+    forward.add_argument("--n-probes", type=int, required=True)
+    forward.add_argument("--seconds-per-layer", type=float, required=True,
+                         help="the single owner's measured forward seconds per layer")
+    forward.add_argument("--python", required=True, help="the join row's interpreter")
+    forward.add_argument("--tag", default="gb10")
+    forward.add_argument("--priority", default=PRIORITY)
     for name in ("plan", "status"):
         sub.add_parser(name).add_argument("--round-dir", required=True)
     go = sub.add_parser("submit")
@@ -618,6 +783,21 @@ def main(argv=None) -> int:
                 seconds_per_layer=args.seconds_per_layer, digest_layer=args.digest_layer,
                 band_request={"path": args.band_request, "sha256": args.band_request_sha256},
                 band_references=[{"path": path} for path in args.band_reference],
+                python=args.python, tag=args.tag, priority=args.priority)
+            print(json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
+                              "rows": [row["name"] for row in document["rows"]]}))
+        elif args.command == "seal-forward":
+            document = seal_forward_round(
+                round_dir=args.round_dir, checkout=Path(args.checkout).resolve(),
+                forward_package=args.forward_package,
+                campaign=json.loads(Path(args.campaign_record).read_text())["campaign"],
+                spec=args.spec, prefetch_override=args.prefetch_override,
+                base_template=args.base_template, tier=args.tier,
+                template_prefix=args.template_prefix,
+                artifact_budget_bytes=args.artifact_budget_bytes,
+                chain_regime={"chain_batch_size": args.chain_batch_size,
+                              "chain_probe_fusion": args.chain_probe_fusion},
+                seconds_per_layer=args.seconds_per_layer, n_probes=args.n_probes,
                 python=args.python, tag=args.tag, priority=args.priority)
             print(json.dumps({"round": str(Path(args.round_dir) / ROUND_NAME),
                               "rows": [row["name"] for row in document["rows"]]}))
