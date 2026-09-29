@@ -923,7 +923,13 @@ def byte_account(
     )
     table = int(payload["alphabet_bytes"])
     descendant = int(payload["descendant_bytes"])
-    header = int(payload["sidecar_header_bytes"])
+    # The sidecar header and the container side bytes (manifest, container
+    # header, fused framing, #1609) are both bytes the unit carries beside its
+    # plane region; the account labels them together.
+    header = (
+        int(payload["sidecar_header_bytes"])
+        + int(payload.get("container_side_bytes", 0))
+    )
     total = int(payload["total_bytes"])
     # The scale plane is the only remaining per-unit charge, and the body is
     # what is left.  Deriving the pair by subtraction rather than by a second
