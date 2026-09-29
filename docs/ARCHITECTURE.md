@@ -1,5 +1,29 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1609, `sonnet/1609-side-bytes`):
+**the Tessera byte accountant now prices a Linear's container side bytes, not
+only its plane region.** `tessera.layout` sizes the planes; a unit on the wire is
+`container(24 B header + canonical manifest + plane region)` inside a `TSRFUSE1`
+blob (10 B header, 14 B + name per member). `tessera_footprint.
+tessera_tensor_payload_breakdown` (schema `prismaquant.tessera_tensor_payload.v2`)
+adds `container_frame_bytes` (both headers and the per-member record),
+`ratio_slack_bytes` (the manifest's ratio fields priced at their widest varint,
+derived from Tessera's own `Writer`, so the price is an upper bound with a few
+bytes of slack), `member_name_bytes` (exact, from the caller's tensor name;
+`footprint.assignment_artifact_bytes` supplies it through the format's
+`unit_name_bytes` hook, one name per expert on a packed stack) and their sum
+`container_side_bytes`. `total_bytes` and `exact_bpw` include it; `payload_bytes`
+stays the plane region. On GLM-5.3 uniform R1024 the allocator sat below the
+export by 28.7 MB over 36,288 routed Linears (748 to 812 B each). Two known
+over-prices remain: the fused header is charged per Linear rather than per blob
+(up to 10 B per extra member), and the manifest's terminal-slot literal and the
+`TSRFUSE1` struct widths are private to Tessera, so the tests measure the writer
+instead of restating them. Every priced byte and rate moves by the same term,
+including `_recipe_identity`, which hashes the breakdown; the byte-accounting
+pins in `tests/test_tessera_footprint.py`, `test_tessera_forest_bytes.py` and
+`test_tessera_legal_domain.py` now subtract `container_side_bytes` from the
+plane-only contract. Gate: `tests/test_tessera_side_bytes.py`.
+
 Re-stamped 2026-09-29 (PQ #1392/#1532, `sonnet/1392-refusals-declared-reads`):
 **the #1374 uncovered-source refusal now guards every GPU entry point that
 builds a source identity, and the source-identity cache flags no longer enter
