@@ -15,7 +15,6 @@ existing activation artifact owner's exact-entry writer/reader pair
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import mmap
 import os
@@ -36,6 +35,7 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256,
     publish_new_bytes,
 )
+from .digests import bytes_sha256hex, indent2_json_file_bytes
 from .io_spans import ReadRateReporter
 
 from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
@@ -420,7 +420,7 @@ def _write_shared_state_payload(checkpoint_dir: Path, name: str, payload: bytes)
     return {
         "name": name,
         "path": str(path),
-        "sha256": hashlib.sha256(payload).hexdigest(),
+        "sha256": bytes_sha256hex(payload),
         "file_bytes": len(payload),
     }
 
@@ -676,7 +676,7 @@ def unpack_shared_states(payload) -> list:
                 f"adjoint checkpoint shared-state pack member {name!r} "
                 "overruns the index")
         member = view[offset:end]
-        if hashlib.sha256(member).hexdigest() != row["sha256"]:
+        if bytes_sha256hex(member) != row["sha256"]:
             raise RuntimeError(
                 f"adjoint checkpoint shared-state pack member changed: {name!r}")
         members.append((name, member))
@@ -889,8 +889,7 @@ def _checkpoint_manifest_envelope_bytes(*, boundary: int, session: dict,
             key=lambda row: row["name"]),
         "cotangent_sha256": "0" * 64,
     }
-    return len((json.dumps(skeleton, sort_keys=True, indent=2, allow_nan=False)
-                + "\n").encode())
+    return len(indent2_json_file_bytes(skeleton))
 
 
 def _checkpoint_schema(*, referenced: bool, packed: bool) -> str:
@@ -1776,7 +1775,7 @@ def _load_checkpoint_shared_states(stored: dict, *, deadline,
         _await_checkpoint_entry(entry, deadline=deadline)
         path = Path(entry["path"])
         payload = _read_shared_state_payload(path, entry)
-        digest = hashlib.sha256(payload).hexdigest()
+        digest = bytes_sha256hex(payload)
         if digest != entry["sha256"] or len(payload) != entry["file_bytes"]:
             raise RuntimeError(
                 f"adjoint checkpoint shared-state entry changed: {entry['name']}")
@@ -1804,7 +1803,7 @@ def read_shared_state_pack(entry: dict, *, deadline) -> list:
     """
     _await_checkpoint_entry(entry, deadline=deadline)
     payload = _read_shared_state_payload(Path(entry["path"]), entry)
-    if (hashlib.sha256(payload).hexdigest() != entry["sha256"]
+    if (bytes_sha256hex(payload) != entry["sha256"]
             or len(payload) != entry["file_bytes"]):
         raise RuntimeError(
             f"adjoint checkpoint shared-state entry changed: {entry['name']}")
@@ -1912,8 +1911,7 @@ def load_adjoint_checkpoint(
 
 def write_adjoint_receipt(space: str | os.PathLike, receipt: dict) -> bool:
     """Seal the receipt atomically, first writer wins (§3.3)."""
-    payload = (json.dumps(
-        receipt, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    payload = indent2_json_file_bytes(receipt)
     created = publish_new_bytes(adjoint_receipt_path(space), payload)
     if not created:
         raise RuntimeError(
@@ -1925,7 +1923,7 @@ def write_adjoint_receipt(space: str | os.PathLike, receipt: dict) -> bool:
 
 def load_adjoint_receipt(path: str | os.PathLike, sha256: str) -> dict:
     raw = Path(path).read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     if digest != str(sha256):
         raise RuntimeError(
             f"adjoint receipt digest mismatch at {path}: expected {sha256}, "
