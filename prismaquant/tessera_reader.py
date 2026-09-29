@@ -8,7 +8,6 @@ receipt. No serving runtime is imported and no module is monkeypatched.
 from __future__ import annotations
 
 import ast
-import hashlib
 import importlib
 import importlib.abc
 import importlib.machinery
@@ -18,20 +17,22 @@ import re
 import sys
 from types import SimpleNamespace
 
+from .digests import LegacyNulSourceSha256, bytes_sha256hex
+
 SOURCE_SUFFIXES = {'.py', '.cu', '.cuh', '.cpp', '.h'}
 
 
 def _source_tree(root):
     """The owner's encoder_source_sha256 framing, read without importing it."""
-    digest = hashlib.sha256()
+    digest = LegacyNulSourceSha256()
     files = {}
     for path in sorted(p for p in root.rglob('*') if p.suffix in SOURCE_SUFFIXES):
         if path.is_symlink() or not path.is_file():
             raise ValueError('reader source must be regular files in its declared package')
         raw = path.read_bytes()
         relative = path.relative_to(root).as_posix()
-        digest.update(relative.encode() + b'\0'); digest.update(raw); digest.update(b'\0')
-        files[str(path.resolve())] = hashlib.sha256(raw).hexdigest()
+        digest.update(relative, raw)
+        files[str(path.resolve())] = bytes_sha256hex(raw)
     if not files or not (root / '__init__.py').is_file():
         raise ValueError('reader source must name a complete package directory')
     return digest.hexdigest(), files
@@ -46,7 +47,7 @@ class _ReaderSourceLoader(importlib.machinery.SourceFileLoader):
         # Always read the bound source, including after another interpreter
         # wrote bytecode. Every imported file must still match the package seal.
         raw = Path(self.path).read_bytes()
-        if hashlib.sha256(raw).hexdigest() != self.expected:
+        if bytes_sha256hex(raw) != self.expected:
             raise ImportError('reader source changed after its package checksum')
         tree = ast.parse(raw, filename=self.path)
         for node in ast.walk(tree):
