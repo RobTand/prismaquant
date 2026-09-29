@@ -473,3 +473,19 @@ def test_the_receipt_converter_is_a_named_stub(tmp_path):
                      "--receipts", str(tmp_path / "r.json")]) == 2
     with pytest.raises(srp.ShapeRuntimeError, match="tessera#688"):
         srp.consume_shape_time_panel([], table_id="x")
+
+
+def test_the_kernel_lane_histogram_counts_units_per_priced_lane(glm_eligibility, formats):
+    table = _glm_table(glm_eligibility)
+    members, shapes, structure = _glm_units()
+    candidates, option_members = _candidates(members)
+    pricing = srp.build_shape_runtime_resources(
+        table, candidates, option_members=option_members, member_shapes=shapes,
+        member_structure=structure, regime_m=2048, published_formats=formats)
+    routed = {unit: FMTS["T8"] for unit in members if unit.endswith("experts")}
+    histogram = pricing.kernel_lane_histogram(routed)
+    lane = pricing.prefill[("L10.experts", FMTS["T8"])].kernel_lane
+    assert histogram == {f"{lane.symbol}/{lane.decoder}": len(routed)}
+    assert sum(histogram.values()) == len(routed)
+    with pytest.raises(srp.ShapeRuntimeError, match="no prefill time"):
+        pricing.kernel_lane_histogram({"L10.experts": "not-a-format"})

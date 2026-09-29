@@ -231,6 +231,14 @@ from the allocator. After the swap the card and exported-r2 differ only by the
 Tessera side bytes #1609 names (28,802,632 B). Gate:
 `tests/test_mtp_card_rebase_1610.py`.
 
+Re-stamped 2026-09-28 (PQ #1585, `sonnet/1585-pact-materiality`): a PACT hull
+carries a `prismaquant.pact_selection.v1` record (§4.5, "PACT selection
+record"): a materiality test derived from the table's bootstrap intervals,
+three picks (high accuracy, balanced, high prefill) and a roster, stamped into
+the layer config and the shipcard `build` block, which `shipcard.verify`
+checks against the recipe. The high-prefill rule is a proposal that awaits the
+owner. No default, stage, format or lane changes.
+
 Re-stamped 2026-09-28 (PQ #1584, `claude/pact-1584-hull`): the allocator
 gains a research-only PACT mode, reached only through
 `prismaquant.prefill_frontier` (`--pact-shape-table`, `--pact-regime`,
@@ -19268,7 +19276,61 @@ Limits:
 - `--pact-time-ceiling-ms` is a report bound. It flags vertices above the
   ceiling and does not generate the constrained set's own boundary vertex.
 - `select_development_point`'s top-two min_separation test sees hull
-  vertices, not every point of the exact frontier (PQ #1585).
+  vertices, not every point of the exact frontier. The selection record
+  states this as `frontier_scope: lower_convex_hull_vertices`; a caller that
+  passes the exact frontier states its own scope (PQ #1585).
+- The record rides the hull path only. The sweep path of
+  `prefill_frontier replay` keeps its legacy stamp.
+- The record's `high_prefill` rule is a proposal that awaits the owner's
+  decision (see "PACT selection record").
+
+**PACT selection record (2026-09-28, PQ #1585).**
+`prismaquant/pact_selection.py` turns one frontier per regime M into three
+named picks and a `prismaquant.pact_selection.v1` record. No threshold in it
+is chosen: two decisions that would need one derive from the table's own
+bootstrap intervals.
+
+- **Materiality.** The time axis is flat when the fastest endpoint's upper
+  bootstrap bound (`operator_sum_ms_bootstrap`, key `p97.5`) reaches the best
+  endpoint's lower bound (`p2.5`). A flat axis has no knee, and every pick is
+  the accuracy endpoint. Verdicts: `flat`, `material`, `unresolved` (an
+  endpoint has no interval), `single_point` and `no_feasible_point`. Production
+  refuses `unresolved`. Only interval-less scratch CSVs pass
+  `allow_unresolved=True`. `predicted_dloss` has no interval today, so the
+  record states `quality_axis.interval: null`.
+- **Derived `min_separation`.** `select_development_point` refuses when its top
+  two candidates are closer than `min_separation` in normalised perpendicular
+  units (fastest to (0, 1), best to (1, 0)). A candidate whose time moves by
+  `h` ms moves `h / (span · √2)` along the unit perpendicular, so the
+  resolution is the sum of the top two candidates' interval half widths in
+  those units. Pass 1 ranks with 0. Pass 2 applies the derived value.
+- **Three picks.** High accuracy is argmin `predicted_dloss` within the byte
+  budget. Balanced is `select_development_point`. High prefill is the rule id
+  `chord_perpendicular_recursed_v1`: the same chord rule on the non-dominated
+  points no slower than the balanced pick. It needs three points and
+  otherwise records `status: refused` with a reason. **The high-prefill rule
+  is the owner's decision**; the alternative is a served-KL ceiling
+  (`speed_quality_frontier.select_by_quality_ceiling`). The rule id is inside
+  `identity_sha256`, so a change of rule is visible.
+- **Record.** Rule id, normalisation, roster (picks, neighbours and endpoint
+  controls), regime M, table identity, materiality verdict, kernel-lane
+  histogram of each pick (`ShapePricing.kernel_lane_histogram`) and
+  `identity_sha256`. The hull document embeds it, so the replay stamp's
+  `frontier_sha256` binds it. The replay writes it to
+  `__prismaquant__.pact_selection`, and
+  `layer_config.prefill_frontier_replay_claim` stamps it into the shipcard
+  `build` block. It refuses a record that differs from the recipe's, or that
+  disagrees with the replay on its regime, table or pick. `shipcard.verify`
+  re-runs the claim on the card, so a forged record is refused.
+- **Fixtures.** The scratch frontiers carry no interval columns. On the
+  pre-#685 frontier (`tests/fixtures/pact_frontier_pre685_m2048.csv`) the
+  balanced rule reproduces point 96 (high accuracy 0, high prefill 130). On
+  the after-#640 frontier the balanced pick is point 98 (high prefill 125).
+  Both report `unresolved`, since the scratch tables have no bootstrap.
+
+CPU gates: `tests/test_pact_selection.py`,
+`tests/test_pact_allocator_replay.py` and
+`tests/test_shape_runtime_prices.py`.
 
 On GLM-5.3's 132 units × 3 rungs at M=2048, the hull has 139 vertices, found
 with 277 probes in 0.13 s.
