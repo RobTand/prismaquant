@@ -1094,7 +1094,7 @@ def _validate_probe_binding_receipt(
             where="PrismaSnap legacy probe binding.normalized_probe_sha256",
         )
         != bytes_sha256hex(normalized_bytes)
-            or normalized_bytes != expected_bytes
+        or normalized_bytes != expected_bytes
         or receipt.get("source_root") != str(source.root)
         or receipt.get("source_local_content_sha256") != identity.get("content_sha256")
         or receipt.get("source_portable_content_sha256")

@@ -2,7 +2,8 @@
 
 Routing: _rehash_drifted + _verify_overlay_payload must call
 file_digest_sha256hex (_check_capture's roster is a keep: one terminating
-newline per qname matches no owner); create_extension (driven with stubbed pair/header checks) must call
+newline per qname matches no owner); create_extension (driven with stubbed
+pair/header checks) must call
 indent2_json_file_bytes + bytes_sha256hex. All _same comparisons stay with
 identical refusal type/text. Values: byte-identical to the verbatim old
 spellings.
