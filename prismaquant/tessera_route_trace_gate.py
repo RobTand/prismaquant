@@ -1177,15 +1177,15 @@ def compare_artifact_route_traces(
             + "; a claimed phase with no observation is not a pass")
     verdict["served_union"] = dict(sorted(union.items()))
     unserved = sorted(set(priced_modules) - set(union))
-    for module in _sample(unserved):
+    shown, rest = _sample(unserved)
+    for module in shown:
         label = (f"{module} (priced as {checkpoint_of[module]})"
                  if module in checkpoint_of else module)
-        if module in priced_modules:
-            problems.append(
-                f"{label}: priced {priced_modules[module]}, served by no phase "
-                f"({', '.join(map(repr, served_by_phase))} claimed)")
-        else:  # the sample's own overflow marker
-            problems.append(label)
+        problems.append(
+            f"{label}: priced {priced_modules[module]}, served by no phase "
+            f"({', '.join(map(repr, served_by_phase))} claimed)")
+    if rest is not None:
+        problems.append(rest)
     verdict["not_served_in_every_phase"] = {
         module: sorted(n for n, modules in served_by_phase.items() if module not in modules)
         for module in sorted(union)
@@ -1198,12 +1198,15 @@ def compare_artifact_route_traces(
     verdict["granularity"] = EXACT_GRANULARITY
     verdict["exact_module_qualified"] = True
     late = verdict["not_served_in_every_phase"]
+    late_shown, late_rest = _sample(list(late), limit=4)
+    if late_rest is not None:
+        late_shown.append(late_rest)
     return _finish(AGREE, (
         f"exact per-module: {len(priced_modules)} priced module(s), every one "
         f"served on its priced contract in each phase that dispatches it, across "
         f"{len(served_by_phase)} phase(s) ({', '.join(map(repr, served_by_phase))})"
         + (f"; {len(late)} module(s) not dispatched in every phase: "
-           + ", ".join(_sample(list(late), limit=4)) if late else "")))
+           + ", ".join(late_shown) if late else "")))
 
 
 def load_trace_contract() -> tuple[dict[str, dict[str, "str | None"]], dict[str, dict[str, Any]]]:
