@@ -8644,7 +8644,12 @@ def _write_shipcard(
     # allocation writes serving_lane_provenance into its recipe (#1387); a
     # recipe from before that fix carries none, so the histogram is then
     # derived from the assignment being exported, under the recipe's target
-    # profile, by the same summariser the allocator uses.
+    # profile, by the same summariser the allocator uses. A recipe that names
+    # no target profile gets no derivation: under profile None every unit
+    # would read ``no_declared_lane``, a card that looks measured and is not,
+    # so the card carries no histogram and no marker. The same holds for an
+    # assignment with scoped (Tessera) units, whose routes need a serving
+    # context the assignment does not carry (recompute_serving_lane_provenance).
     recipe_meta: dict = {}
     if layer_config_path:
         from .layer_config import read_layer_config_metadata
@@ -8652,10 +8657,10 @@ def _write_shipcard(
         recipe_meta = read_layer_config_metadata(layer_config_path) or {}
     provenance = recipe_meta.get("serving_lane_provenance")
     if not isinstance(provenance, dict) and config_assignment:
-        from .allocator_candidates import selection_serving_lane_provenance
+        from .allocator_candidates import recompute_serving_lane_provenance
 
-        provenance = selection_serving_lane_provenance(
-            config_assignment, None, recipe_meta.get("target_profile"))
+        provenance = recompute_serving_lane_provenance(
+            config_assignment, recipe_meta.get("target_profile"))
     route_histogram = _shipcard.route_histogram_claim(provenance)
     if route_histogram is not None:
         build["route_histogram"] = route_histogram

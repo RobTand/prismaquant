@@ -102,11 +102,19 @@ def _destination_metadata_for_assignment(
         # assignment and the recipe's target profile (#1387), so a new pick
         # recomputes it instead of inheriting the old one. Lane-declared
         # claims (wire, scale, scope) cannot be recomputed here and still refuse.
-        from .allocator_candidates import selection_serving_lane_provenance
+        from .allocator_candidates import recompute_serving_lane_provenance
 
         metadata = dict(metadata)
-        metadata["serving_lane_provenance"] = selection_serving_lane_provenance(
-            dict(assignment), None, metadata.get("target_profile"))
+        recomputed = recompute_serving_lane_provenance(
+            dict(assignment), metadata.get("target_profile"))
+        if recomputed is not None:
+            metadata["serving_lane_provenance"] = recomputed
+        else:
+            # No declared profile, or units whose route needs a serving
+            # context this assignment does not carry: a derivation would be a
+            # different claim than the allocator made. The old claim describes
+            # another assignment, so drop it and stamp nothing.
+            metadata.pop("serving_lane_provenance", None)
         return metadata
     if changed:
         raise ValueError(

@@ -34,6 +34,7 @@ from .allocator_solver import (
     _shape_from_stats,
     predicted_dloss,
 )
+from .digests import DIRECT_UTF8_STRICT
 from .footprint import (
     format_tensor_payload_breakdown,
     plain_source_dtype_tensor_payload_breakdown,
@@ -2666,8 +2667,9 @@ def selection_serving_lane_provenance(
             row["route"] = None
             include_by_unit = True
         row["units"] += 1
-        # ``as_dict`` builds a fixed key order, so its repr is a stable grouping key.
-        route_key = repr(route)
+        # The digests owner's canonical JSON (sorted keys, strict) keys the
+        # group, so the key does not depend on ``as_dict``'s insertion order.
+        route_key = DIRECT_UTF8_STRICT.text(route)
         entry = route_hist.setdefault(fmt, {}).setdefault(
             route_key, {"route": route, "units": 0, "structures": Counter()})
         entry["units"] += 1
@@ -2712,10 +2714,48 @@ def selection_serving_lane_provenance(
         by_format[fmt]["routes"] = [
             {"route": e["route"], "units": e["units"],
              "structures": dict(sorted(e["structures"].items()))}
-            for _key, e in sorted(entries.items())
+            for _key, e in sorted(entries.items(), key=lambda kv: kv[0])
         ]
     if include_by_unit:
         report["by_unit"] = by_unit
+    return report
+
+
+def recompute_serving_lane_provenance(
+    assignment: dict[str, str],
+    target_profile: str | None,
+) -> dict | None:
+    """Re-derive the provenance from a bare assignment, or None when it cannot.
+
+    The exporter and the frontier selector hold an assignment and a recipe,
+    not the allocator's candidates or its per-unit serving contexts. Two things
+    the allocator read from those are therefore unrecoverable here:
+
+    * a scoped (Tessera) unit's route depends on its serving context, which is
+      not in the assignment, so resolving it without one prices a different
+      route than the allocator did. Such an assignment returns None: stamping
+      the wrong histogram is worse than stamping none.
+    * ``activation_pricing_branches`` comes from the chosen ``Candidate``; here
+      every unit reads ``unrecorded``. The card copies only
+      ``route_status_counts`` and ``activation_contracts``, which are equal to
+      the allocator's on every assignment this function accepts.
+
+    A recipe with no ``target_profile`` also returns None: the histogram under
+    "research" is a route the recipe never named.
+    """
+    if not isinstance(target_profile, str) or not target_profile or not assignment:
+        return None
+    from .tessera_menu import TESSERA_LANE_ID
+
+    report = selection_serving_lane_provenance(
+        dict(assignment), None, target_profile)
+    if "by_unit" in report:
+        return None
+    for row in report["by_format"].values():
+        for entry in row.get("routes", ()):
+            route = entry.get("route") or {}
+            if route.get("lane_id") == TESSERA_LANE_ID:
+                return None
     return report
 
 
