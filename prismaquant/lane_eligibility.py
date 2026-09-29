@@ -1695,9 +1695,12 @@ def cell_rung_launches(cell: Any, rate_q256: int | None, lanes: Sequence[LaneCla
     refuses, with the same reason.  Contract v42 is the first to name a lane
     launch beside a lane-free one in one cell: the four window routed cells
     carry the fused routed pair beside the compact adapter, whose dispatch
-    keeps the compact pair for every stack the fused lane refuses (the
-    mixed-rate q256=896 rung).  Refusing those cells whole shrank routed E4M3
-    admission to q256 1024 (PQ #1274).
+    keeps the compact pair for every stack the fused lane refuses (through
+    v44, the mixed-rate q256=896 rung).  Refusing those cells whole shrank
+    routed E4M3 admission to q256 1024 (PQ #1274).  Since v45 the fused lane
+    reads every rung those cells list; the compact-only case on the pinned
+    table is a routed plan outside ``column_rates_routed_moe``, which no
+    listed rung makes.
 
     The rule is not here. Tessera publishes the predicate
     (``native_extensions[].lane.requires``) and owns the decision

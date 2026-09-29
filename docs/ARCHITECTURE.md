@@ -1,5 +1,86 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-29 (PQ #1702, `claude/tessera-pin-v45`): the exact
+Tessera pin is `a21d74d89bd4eca0493a2f913c71b28b03a39d8b`, Tessera master's merge of #701 (contract v45,
+tessera#694). It crosses the 15 master merges since `a5f3b232` (#656, #699,
+#700, #705, #707, #709, #711, #713, #715 to #718, #720, #722 and #723), all
+at contract v44. The packaged contract is v45 (`0869f326…`). The pin stays
+schema v2 (no v45 cell stamps serving code), and the pin JSON's extension
+rows are unchanged.
+
+- **What v45 moves.** The two fused routed lanes
+  (`tessera_routed_fused_e4m3`, `tessera_routed_fused_value`) read
+  `column_rates` [1..8] instead of [4], and their routed-expert launch
+  reaches `column_rates_routed_moe` [1..6], the field PQ #1618 taught the
+  reader. No cell id, rung, serve flag or activation contract moves. The
+  regenerated dev-pin answer literal differs from v44 in exactly those two
+  lanes' `requires`.
+- **What changes hands.** Every rung the four window routed cells list
+  (E4M3 q256 832 to 1088, BF16 1024) plans rates 3 to 5, inside both sets,
+  so every rung makes the fused launch beside the compact one. A mixed-rate
+  routed E4M3 stack recorded the compact pair alone through v44; it now
+  records both pairs in `resolve_unit_route`, in the Tessera export scope
+  gate and in PACT's shape table, where a fused R896 row and a lent R896
+  pool now admit. A lent pool prices R896 at R1024's samples, although
+  Tessera measures R896 at 1.65x to 1.80x of R1024's fused time on its PACT
+  bench. A compact-lane row still admits at those rungs. A shape table
+  measured before v45 therefore keeps pricing them on the compact adapter
+  until it carries fused rows, although the serve runs that adapter only
+  when the fused library is absent or `TESSERA_ROUTED_FUSED=0`. Tessera's
+  measurement (tessera#701; TP1, GLM-5.3-Flash layer 3) has the fused lane
+  2.0x to 3.9x faster than the compact adapter at R832, R960 and R1088.
+- **Resident bytes.** These are tessera#701's arithmetic, not a
+  measurement. At TP2 the fused lane holds 112,224 B per expert per rank:
+  32,320,512 B per MoE layer, 1,357,461,504 B over GLM-5.3-Flash's 42 body
+  MoE layers, and 1,389,782,016 B with the MTP layer. A mixed-rate stack
+  gains all of it against a v44 serve; an R1024 stack gains 4,008,960 B per
+  layer per rank (the run pairs and block descriptors).
+  `TESSERA_ROUTED_FUSED=0` serves the compact adapter alone. The lane builds
+  these tensors at load and writes none of them to the checkpoint. The
+  serving manifest's `resident_bytes_resident_mode` differs on a re-export
+  for another reason: the `a5f3b232` exporter charges a routed stack its
+  decoded tile (about twice the compact lane, tessera#624), and since #720
+  the exporter prices the lane's own tensors. Nothing under `prismaquant/`
+  or `tools/` reads that field, and in Tessera's `src/` only the exporter
+  writes it.
+- **Re-export.** Not needed. The unit blobs do not move across the
+  crossing: #723 publishes the fused frame size and the terminal slot id
+  (tessera#719) as constants with the values the writer already used, and
+  #709 and #711 fold identical-bytes spellings. v45 changes which launch
+  reads a routed stack at load. A served artifact's route and memory
+  evidence is therefore re-taken on a v45 serve, and that serve is also the
+  check that an `a5f3b232` export loads there.
+- **Legal inventory.** Tessera #709 folds the Hessian capture digest's
+  header into `hessian_capture.v1_seal_header`, which moves `export.py`
+  inside `ActivationSource` only (`427a8f97…` -> `2127e82b…`).
+  `_window_bits_for`, `wire_recipe`, the WINDOW constants and `grammar.py`
+  (`9ae1f824…`) are byte-identical, so the new `reader-pin-a21d74d8`
+  byte-state joins the equivalent states and no rate count moves.
+- **Tests.** `tests/test_tessera_lane_routed_rates.py` reads the pinned v45
+  core instead of a stand-in, and holds a v44-shaped table to its v44
+  answer. `test_tessera_lane_requires.py`, `test_tessera_pin_v38_scope.py`
+  and `test_shape_runtime_prices.py` expect both launches at every routed
+  E4M3 rung, the fused R896 row and the lent R896 pool, and refuse R896
+  under a v44-shaped lane.
+- **Evidence.** The serving-identity snapshot
+  (`tests/fixtures/tessera_serving_identity_v2_snapshot.json`, PB action
+  `7b90d69a1381`) differs in 34 paths: the pin's commit and digest, the four
+  `requires` leaves of the answer's two fused lanes, and 28 unit-route
+  `executes` paths. Those are the seven mixed-rate rungs (q256 832 to 960
+  and 1088) on both routed E4M3 cells, 14 units, whose decode and batch
+  regimes now record the fused pair beside the compact one. No route
+  status, qualification, cell id or refusal moves. The Tessera `layer.json`
+  pin (`tests/test_allocator_output_pin_1304.py`, PB actions `9639ecdfd1b1`
+  before and `0a3befd7dd5f` after) moves only in `tessera_dev_pin`:
+  `contract_version` (44 to 45) and `reviewed_contract_sha256` (`47b01355`
+  to `0869f326`). The allocation, the applicability file and the Pareto
+  outputs are byte-identical.
+- **Interpreters.** `/home/rob/venvs/pq-pb059953bc-tessera-a21d74d8` on
+  every box, plus a `-tf516` sibling on each Spark. Each is a copy of the
+  `a5f3b232` interpreter with only Tessera reinstalled, built by a
+  host-pinned PB action: dl380g10 `177cb8e57a27`, sparky `53dff8124e53` and
+  sparklina `8323b283eb2d`.
+
 Re-stamped 2026-09-29 (PQ #1692, `claude/mtp-formats`): **the GLM MTP layer
 takes a declared menu, `--mtp-formats`, the MTP twin of `--formats`.**
 - **Before:** the selector's menu was the runtime's attestation alone (`allocator._mtp_rung_attestation`). A release that declares one family could not say so for layer 45.
@@ -4562,6 +4643,13 @@ re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
 resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
+
+As of: 2026-09-29 · `claude/tessera-pin-v45`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-09-29, `claude/tessera-pin-v45`) for **the Tessera v45 pin
+and the fused routed lane at every mixed-rate rung** (PQ #1702); see the
+stamp at the top of this document.
 
 As of: 2026-09-29 · `sonnet/1392-refusals-declared-reads`.
 Stamps follow, newest first, each recording its own branch and date.
@@ -22482,19 +22570,22 @@ alone:
    bytes) and omitted when the cell states none — and Tessera's
    `decide_lane_requirements` decides the field only for `routed_moe`: absent
    structure is refused by name, dense ignores it, and a routed unit outside the
-   set is refused with the compact adapter named as the route it keeps. The
-   installed pin (contract v44 and earlier) publishes no such field, so nothing
-   changes hands until the pin moves; a v45 table is read, not refused as an
-   unknown requirement (`tests/test_tessera_lane_routed_rates.py`).
-   Consequence on the pinned table today: nothing changes hands — the only
-   cells that launch through the window-GEMV lane are the two streamed dense
-   E4M3 cells at rung 1024, whose plan (`rates (4,)`, 14-bit window, WINDOW /
-   CHANNEL, arity 1, no decoration) the lane reads; every E4M3 resident,
-   BF16 and E2M1 cell launches through torch or the NVFP4 lane. The gate has
-   teeth for the row the contract already routes: the lane's `routes` names
-   `TESSERA_BF16`, and BF16's one attested rung (1792 → column rate 7) is
-   outside `column_rates [1,2,4]`, so a BF16 cell that ever claimed the
-   window-GEMV launch would be refused here by name rather than exported to a
+   set is refused with the compact adapter named as the route it keeps.
+   Since the v45 pin (PQ #1702) both fused routed lanes publish the field:
+   `column_rates` [1..8] with `column_rates_routed_moe` [1..6]. A v44-shaped
+   table, whose fused lanes read [4] and publish no such field, still reads
+   and decides as v44 did (`tests/test_tessera_lane_routed_rates.py`).
+   Consequence on the pinned table (v45): the lane-bearing launches are the
+   fused routed pair in the four window routed cells
+   (`tessera_{e4m3,bf16}_k1_routed_moe_sm121_{decode,batch}_resident`). Every
+   rung they list (E4M3 q256 832 to 1088, BF16 1024) plans rates 3 to 5,
+   inside both sets, so every rung makes the fused launch beside the compact
+   one. No pinned cell launches through the window-GEMV lane: the dense
+   window cells launch the in-plugin `tessera::fused_window_dense` and
+   `tessera::window_gemm_dense`, and the E2M1 cells launch
+   `tessera.kernel_a4`. The window-GEMV gate still has teeth: a cell that
+   claimed that lane at a plan outside `column_rates [1,2,4]` (the dense E2M1
+   q896 rung plans rate 7) is refused here by name rather than exported to a
    kernel that cannot read it (`tests/test_tessera_lane_requires.py`).
    **A lane launch is made only at a rung its lane admits** (contract v42, PQ
    #1274). Tessera derives a cell's `executes` as the union, over the rungs it

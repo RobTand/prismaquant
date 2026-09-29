@@ -11,9 +11,14 @@ design ``PACT-APPLICATION-DESIGN-2026-09-28`` §1). It exists beside
 and carries no weight identity, because kernel time is a function of the
 served shape and of the kernel lane that dispatches it, not of the bytes
 inside the operator (Rob, 2026-09-28). The rate stays in the key because the
-rate can decide the lane: after Tessera #685 a routed E4M3 stack at R1024
-takes the fused lane (17.5 ms at M=2048) and the same stack at R896 takes the
-compact adapter (109 ms).
+rate moves the time on one lane and can decide the lane. Under contracts v42
+to v44 (Tessera #685) a routed E4M3 stack at R1024 took the fused lane
+(17.5 ms at M=2048, TP2 rank-local, the after-#640 bench) and the same stack
+at R896 took the compact adapter (109 ms). Since v45 (tessera#694) R896 takes
+the fused lane too, at 1.65x to 1.80x of R1024's fused time on Tessera's
+PACT bench (TP1, GLM-5.3-Flash layer 3, tessera#701), and a routed plan
+outside the lane's ``column_rates_routed_moe`` still takes the compact
+adapter.
 
 What one row says, and what the table never says
 ------------------------------------------------
@@ -38,8 +43,9 @@ residency, image, execution mode)`` must cover the rate and name the row's
 launch in ``executes``, and the published predicate of the lane that serves
 that launch must admit the rate (``lane_eligibility.cell_lane_admits``, the
 one decision path, asked about that one launch). So a row timed on
-``native_routed_fused_window`` at R1024 admits, and one at R896 is refused
-because the fused lane's ``requires`` does not read that wire.
+``native_routed_fused_window`` at R1024 admits. One at R896 admits since
+contract v45 and was refused before it, because the v44 lane's ``requires``
+did not read that wire.
 
 Unit time
 ---------

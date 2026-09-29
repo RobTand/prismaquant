@@ -89,6 +89,14 @@ change, and only the payload accounting inside them: in ``layer.json``
 the ``achieved_bits`` column of the single row (4.0625 to 4.1492919921875).
 The assignment (3 layers, all TESSERA_E2M1_K2_R896), every predicted_dloss
 column, the applicability file and the knees are byte-identical.
+
+Re-taken 2026-09-29 for PQ #1702's v45 pin (Tessera a21d74d89b). PB receipts
+9639ecdfd1b1 (before: origin/main fcf9bafb6a under the a5f3b232 interpreter)
+and 0a3befd7dd5f (after: the a21d74d8 interpreter) capture the normalised
+outputs. Exactly two fields change, both inside
+``__prismaquant__.tessera_dev_pin``: ``contract_version`` (44 to 45) and
+``reviewed_contract_sha256`` (47b01355 to 0869f326). The allocation, the
+applicability file and the Pareto outputs are byte-identical.
 """
 from __future__ import annotations
 
@@ -133,7 +141,7 @@ TESSERA_DIGESTS = {
         "fe348e3503bc245e296cb22f9aeb3750ab96ed5f615eb5b690f46baccb52b7b1"
     ),
     "layer.json": (
-        "5b2a12166cba8927750dab5ecbfa27b53cb0db3915c588a6c4516e931dc24657"
+        "d576cf5ac75fc8489f300df6c09c7a8cbb444e4bfa04478e39182bb6937bffb9"
     ),
     "pareto.csv": (
         "e172f4262b5a094db870ed0a904d516d0b030926ee89431fe8472e8a5465583d"
