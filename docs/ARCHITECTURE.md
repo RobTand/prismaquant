@@ -21,6 +21,14 @@ future port must use the admitted container launcher and bounded local TMPDIR.
 Separate cache charging and crashed-row cleanup remain open under #1091.
 No runtime behavior, IO admission gate, default, or wire contract changes.
 
+Re-stamped 2026-09-29 (PQ #1754, planner slice of #1750): opt-in
+`plan --row-work-profile` packs whole dense anchor groups from explicit,
+census/argv-bound timing predictions. Count-based defaults and routed row
+bytes remain unchanged. Existing memory/fit gates still decide admission;
+PrismaBuild still owns placement and balancing. CPU planner checks do not
+establish speed or output equivalence; #1750's profiled GPU A/B remains open.
+See [the input contract](campaign_row_work_profile.md).
+
 Re-stamped 2026-09-29 (PQ #1608, `sol/issues-pq-ts-2`): the three closed
 source-transition contracts remain separate. Identical helpers stay in
 `joint_aura_transition_base.py`; checkpoint adoption, run-source proof, and
@@ -21277,6 +21285,20 @@ the resume -- a finished row is a CAS hit and a running row is re-attached --
 so nothing here decides what to skip, and a row may not carry
 `--deadline-seconds`, which stops a run mid-round and would price a different
 anchor set than one run would have.
+
+**Measured-work packing is opt-in** (#1754, a CPU slice of #1750).
+`plan --row-work-profile PATH` requires count width one and a versioned profile
+bound to the exact census bytes and shared campaign argv. It packs whole
+non-routed groups longest-first using explicit startup/per-group predictions,
+a startup-share objective and available GPU slots; infeasible or invalid
+inputs refuse before publication. Routed groups retain their original sorted
+row IDs, selection bytes, action fields and data manifests. Dense rows record
+predicted pricing/share, and the plan records the profile SHA-256 and contents.
+`_row_memory_gb` and `partition_rows_by_fit` still derive and gate every packed
+row; a declined bundle is not resized. This predicts a layout, not speed or
+numerical equivalence. The [profile contract](campaign_row_work_profile.md)
+defines the measurement and production-validation boundary. Defaults, the
+campaign stage graph and ship gates are unchanged.
 
 **Merge coverage is the scope, or exactly what the plan declares** (2026-09-14,
 #621). Every row stamps the whole census scope into `campaign_scope` whether
