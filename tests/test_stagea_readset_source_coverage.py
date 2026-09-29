@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.own_process
+
 from prismaquant.joint_layer_quanta import (
     SOURCE_COMPLETION_SCHEMA,
     build_adjoint_manifest,
@@ -231,7 +233,12 @@ def test_prismabuild_accepts_the_completed_manifest(campaign):
         sys.path.insert(0, str(PUBLISHED_PB_SRC))
     import prismabuild.core as core
     if not Path(core.__file__).resolve().is_relative_to(PUBLISHED_PB_SRC.resolve()):
-        pytest.skip("a different prismabuild is already imported")
+        # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
+        # site-packages prismabuild turn the test green without running it.
+        pytest.fail(
+            "a different prismabuild is already imported -- it shadows the "
+            "published generation under test; the interpreter carries a stale "
+            "prismabuild (PQ #1109)")
     import prismabuild.storage_tiers as tiers
     manifest = _build(campaign, _spans(campaign))
     core.validate_data_manifest(manifest)

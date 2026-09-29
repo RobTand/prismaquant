@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.own_process
+
 FLEET_ROOT = Path("/mnt/shared/prismabuild-fleet")
 
 
@@ -46,7 +48,12 @@ def _pb():
     import prismabuild.storage_tiers as tiers
     for module in (core, tiers):
         if not Path(module.__file__).resolve().is_relative_to(src.resolve()):
-            pytest.skip("a different prismabuild is already imported")
+            # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
+            # site-packages prismabuild turn the test green without running it.
+            pytest.fail(
+                "a different prismabuild is already imported -- it shadows the "
+                "published generation under test; the interpreter carries a stale "
+                "prismabuild (PQ #1109)")
     return core, tiers
 
 

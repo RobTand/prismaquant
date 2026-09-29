@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.own_process
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
@@ -75,7 +77,12 @@ def _published_pool():
     import prismabuild.pool as pool
     if not Path(pool.__file__).resolve().is_relative_to(
             (PUBLISHED_ROOT / "src").resolve()):
-        pytest.skip(f"a different prismabuild is already imported: {pool.__file__}")
+        # A failure, not a skip (PQ #1008, #1109): a skip here let a stale
+        # site-packages prismabuild turn the test green without running it.
+        pytest.fail(
+            f"a different prismabuild is already imported: {pool.__file__} -- it shadows the "
+            "published generation under test; the interpreter carries a stale "
+            "prismabuild (PQ #1109)")
     return pool
 
 
