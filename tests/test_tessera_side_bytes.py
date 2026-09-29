@@ -18,11 +18,17 @@ import pytest
 from prismaquant.tessera_footprint import tessera_tensor_payload_breakdown
 from prismaquant.tessera_formats import get_tessera_family, tessera_wire_recipe
 
+# Preserve CI's per-test deadline in PB too; these are CPU wire-contract tests.
+pytestmark = pytest.mark.timeout(300)
+
 # (family, rung, shape).  Covers the CHANNEL plane on the window body and the
 # LUT16 plane on both bodies, the three shapes of manifest the writer emits.
+# R1023 needs 256 columns for its exact mixed {3, 4} rate schedule, not a
+# production-sized row batch.  Eight rows retain independent channel scales;
+# the other cases retain large geometry and both LUT16 manifest forms (#1746).
 CASES = [
     ("TESSERA_E4M3_K1", 1024, (256, 256)),
-    ("TESSERA_E4M3_K1", 1023, (256, 512)),
+    ("TESSERA_E4M3_K1", 1023, (8, 256)),
     ("TESSERA_E2M1_K1", 768, (256, 256)),
     ("TESSERA_E2M1_K2", 896, (256, 256)),
 ]
@@ -42,10 +48,32 @@ def _encode(family, rung, shape):
     wire = tessera_wire_recipe(spec, rung)
     generator = torch.Generator().manual_seed(1609)
     weight = torch.randn(shape, generator=generator, dtype=torch.float32)
-    exported, _unit, _forests = encode_linear_planes(
+    exported, unit, _forests = encode_linear_planes(
         weight, grid=spec.payload_grid(), q256=rung,
         name=spec.format_name(rung, recipe=wire), verify=False,
     )
+    if family == "TESSERA_E4M3_K1" and rung == 1023:
+        from tessera.container import parse
+        from tessera.manifest import BodyKind, ScalePlaneKind
+        from tessera.planes import PlaneKind
+
+        parsed = parse(exported.blob)
+        manifest = parsed.manifest
+        assert manifest.body is BodyKind.WINDOW
+        assert manifest.scale_plane.kind is ScalePlaneKind.CHANNEL
+        assert (manifest.geometry.rows, manifest.geometry.columns) == shape
+        assert manifest.rates == unit.rates
+        assert set(manifest.rates) == {3, 4}
+        assert sum(manifest.rates) * 256 == rung * shape[1]
+        assert manifest.window_bits > max(manifest.rates)
+        assert unit.window_codes.numel() == 2 ** manifest.window_bits
+        assert unit.scale_rows.numel() == shape[0]
+        planes = {plane.kind: plane for plane in manifest.planes}
+        assert planes[PlaneKind.DIAG_SV].counts[-1] == shape[0]
+        assert planes[PlaneKind.ALPHABET].counts[-1] == unit.window_codes.numel()
+        assert planes[PlaneKind.BODY].counts[-1] > 0
+        assert parsed.side_bytes > 24
+        assert len(parsed.plane_region) == exported.exact_bytes
     return spec, exported
 
 
