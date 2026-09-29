@@ -288,6 +288,16 @@ def _surface_joined(tmp_path, *, override=None):
     manifest["identity_sha256"] = seal(manifest["identity"])
     checkpoint.write_text(json.dumps(manifest))
     seal_value = manifest["identity_sha256"]
+    # Every journal envelope binds the manifest seal: re-stamp the units
+    # this function does not otherwise touch.
+    for item in manifest["units"]:
+        qname = item["qname"]
+        if qname in units:
+            continue
+        envelope = pickle.loads(unit_path(parts, qname).read_bytes())
+        write_unit(parts, stage="Tessera campaign", qname=qname,
+                   identity_sha256=seal_value,
+                   state=pickle.loads(envelope["payload"]))
     for unit, ident in (("h", panel_row), ("p1", overlay_row)):
         real_fmt = PANEL_FMT if unit == "h" else OVERLAY_FMT
         base_row = dict(payload["costs"][unit]["F_R1"])
