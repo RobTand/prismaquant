@@ -4456,7 +4456,8 @@ def _require_campaign_population(model, profile, layer_stride: int) -> ExpertPop
 def _project_expert_population(population: ExpertPopulation, *, weights, menus,
                                model_path, cache_dir: Path, measured=None,
                                projection=None, resource_check=None,
-                               release_source_pages=False, source_authentication=None) -> tuple[dict, dict]:
+                               release_source_pages=False, source_authentication=None,
+                               check_units=True) -> tuple[dict, dict]:
     """Ask the producer to project every in-scope stack; bind it; check the bytes.
 
     Each request covers the whole campaign (the producer hashes the checkpoint
@@ -4473,6 +4474,12 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
     once per row and every shard carries the identical block.  ``measured``
     narrows only what is byte-checked and priced here; the carried block always
     covers every declared stack, because that is what the allocation rebinds.
+
+    ``check_units=False`` returns the same records without reading a source
+    byte, for a caller that runs ``_check_projected_unit`` on every one of
+    them before the unit is encoded: the stream head, on its reader threads
+    (PQ #1654). The records are the ones the serial check returns when it
+    passes, and a failed check refuses the row in either place.
     """
     from .tessera_expert_projection import (
         ExpertProjectionError, bind_expert_projection, carried_projection,
@@ -4508,6 +4515,8 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
             raise RuntimeError(
                 "the census's producer expert projection does not bind to this "
                 f"run's declared population: {exc} (PrismaQuant #183).") from exc
+        if not check_units:
+            return carried, _measured_projected_units(bound, measured)
         return carried, _checked_projected_units(
             bound, weights=weights, model_path=model_path,
             source=carried["producer"]["source"],
@@ -4588,11 +4597,77 @@ def _project_expert_population(population: ExpertPopulation, *, weights, menus,
     carried = carried_projection(answer, bound, request=stack_plan_request(stacks),
                                  tool=str(tool))
     carried["plan_attempts"] = attempts
+    if not check_units:
+        return carried, _measured_projected_units(bound, measured)
     return carried, _checked_projected_units(
         bound, weights=weights, model_path=model_path,
         source=answer["source"], measured=measured,
         resource_check=resource_check, release_source_pages=release_source_pages,
         **({'source_authentication': source_authentication} if source_authentication is not None else {}))
+
+
+def _measured_projected_units(bound, measured=None) -> dict[str, dict]:
+    """The bound unit records this run prices, in the order the check reads them.
+
+    One definition of *which* units the byte check covers, for both places it
+    runs: the serial pass (``_checked_projected_units``) and the stream head's
+    reader threads (``RowStream(check_unit=...)``, PQ #1654).
+    """
+    return {name: unit for _stack, units in sorted(bound.items())
+            for name, unit in sorted(units.items())
+            if measured is None or name in measured}
+
+
+#: What a refused projection byte check says, for one unit or for many.
+PROJECTED_BYTES_REFUSAL = (
+    "Tessera campaign's live expert view disagrees byte-for-byte with the "
+    "producer's source tensor for {units}; the exporter would encode bytes this "
+    "table did not price. Refusing (PrismaQuant #183).")
+
+
+def _check_projected_unit(name, unit, *, live, model_path, source,
+                          release_source_pages=False, source_authentication=None):
+    """Read one unit's source tensor and compare it byte-for-byte with ``live``.
+
+    Returns ``None`` when the two are equal, else the mismatch description the
+    refusal names. The bytes read are the shard the producer hashed, through
+    the owner the snapshot read it with. With ``release_source_pages`` the
+    unit's own consumed span is advised as soon as it compares equal. Nothing
+    here reserves memory: the serial caller reserves around it, and the stream
+    head reserves the reader's working set before it submits the read.
+    """
+    import torch
+
+    from .tessera_expert_projection import ExpertProjectionError, source_unit_weight
+
+    try:
+        if release_source_pages:
+            # The declared shard, stat and advice alike, as the layer gather
+            # does (layer_streaming ``source_stats``): under a residency map
+            # the read goes through the same staged opener, the declared file
+            # supplies the header and any span no staged range covers, and
+            # advising a payload span the stage served drops nothing (PQ #1529).
+            path = Path(model_path)/source['tensors'][unit['source_tensor']]
+            source_stat = (path.stat() if source_authentication is None
+                           else source_authentication.file_stat(path))
+        weight = source_unit_weight(model_path, source, unit,
+            **({'source_authentication': source_authentication} if source_authentication is not None else {}))
+    except ExpertProjectionError as exc:
+        raise RuntimeError(
+            f"Tessera campaign cannot read the producer's source tensor for "
+            f"{name}: {exc} (PrismaQuant #183).") from exc
+    live = live.detach().cpu()
+    if live.dtype != weight.dtype or not torch.equal(live, weight):
+        return (f"{name} (live {tuple(live.shape)} {live.dtype} vs source "
+                f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
+    del weight, live
+    if release_source_pages:
+        from .layer_streaming import _advise_consumed_safetensors_pages
+        _advise_consumed_safetensors_pages(
+            str(path) if source_authentication is None
+            else source_authentication.descriptor_path(path),
+            [unit['source_tensor']], source_stat)
+    return None
 
 
 def _checked_projected_units(bound, *, weights, model_path, source,
@@ -4605,64 +4680,28 @@ def _checked_projected_units(bound, *, weights, model_path, source,
     cannot encode bytes this table did not price (PrismaQuant #183).  Only the
     ``measured`` units are read: a shard cannot check a tensor it never loaded,
     and claiming it had would be the assertion the check exists to replace.
+
+    This is the serial pass the load-all head and the census run. The stream
+    head runs the same per-unit check on its reader threads instead
+    (``_check_projected_unit``, PQ #1654).
     """
-    import torch
-
-    from .tessera_expert_projection import ExpertProjectionError, source_unit_weight
-
     projected: dict[str, dict] = {}
     mismatched: list[str] = []
-    consumed, source_stats = {}, {}
-    for _stack, units in sorted(bound.items()):
-        for name, unit in sorted(units.items()):
-            if measured is not None and name not in measured:
-                continue
-            if resource_check is not None:
-                resource_check(f'before_source_projection_check:{name}')
-            try:
-                if release_source_pages:
-                    # The declared shard, stat and advice alike, as the layer
-                    # gather does (layer_streaming ``source_stats``): under a
-                    # residency map the read goes through the same staged
-                    # opener, the declared file supplies the header and any
-                    # span no staged range covers, and advising a payload
-                    # span the stage served drops nothing (PQ #1529).
-                    path = Path(model_path)/source['tensors'][unit['source_tensor']]
-                    source_stats.setdefault(str(path), path.stat() if source_authentication is None
-                                            else source_authentication.file_stat(path))
-                weight = source_unit_weight(model_path, source, unit,
-                    **({'source_authentication': source_authentication} if source_authentication is not None else {}))
-            except ExpertProjectionError as exc:
-                raise RuntimeError(
-                    f"Tessera campaign cannot read the producer's source tensor for "
-                    f"{name}: {exc} (PrismaQuant #183).") from exc
-            live = weights[name].detach().cpu()
-            if live.dtype != weight.dtype or not torch.equal(live, weight):
-                mismatched.append(
-                    f"{name} (live {tuple(live.shape)} {live.dtype} vs source "
-                    f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
-                if resource_check is not None:
-                    del weight, live
-                    resource_check(f'after_source_projection_check:{name}')
-                continue
+    for name, unit in _measured_projected_units(bound, measured).items():
+        if resource_check is not None:
+            resource_check(f'before_source_projection_check:{name}')
+        mismatch = _check_projected_unit(
+            name, unit, live=weights[name], model_path=model_path, source=source,
+            release_source_pages=release_source_pages,
+            source_authentication=source_authentication)
+        if mismatch is None:
             projected[name] = unit
-            if release_source_pages:
-                consumed.setdefault(str(path), []).append(unit['source_tensor'])
-            if resource_check is not None or release_source_pages:
-                del weight, live
-            if resource_check is not None:
-                resource_check(f'after_source_projection_check:{name}')
+        else:
+            mismatched.append(mismatch)
+        if resource_check is not None:
+            resource_check(f'after_source_projection_check:{name}')
     if mismatched:
-        raise RuntimeError(
-            "Tessera campaign's live expert view disagrees byte-for-byte with the "
-            "producer's source tensor for " + ", ".join(mismatched)
-            + "; the exporter would encode bytes this table did not price. "
-            "Refusing (PrismaQuant #183).")
-    if release_source_pages:
-        from .layer_streaming import _advise_consumed_safetensors_pages
-        for path, keys in consumed.items():
-            _advise_consumed_safetensors_pages(path if source_authentication is None
-                else source_authentication.descriptor_path(path), keys, source_stats[path])
+        raise RuntimeError(PROJECTED_BYTES_REFUSAL.format(units=", ".join(mismatched)))
     return projected
 
 
@@ -6139,9 +6178,15 @@ def _main(argv, *, source_scope) -> int:
             projection=(None if census is None else census.get("expert_projection")),
             **(dict(resource_check=None if selected_guard is None else selected_guard.check,
                     release_source_pages=True, source_authentication=source_authentication)
-               if selected_source else {}))
+               if selected_source else {}),
+            # The stream head byte-checks each unit on its reader threads,
+            # before the unit's entry reaches the encoder, instead of in one
+            # serial pass over every unit before the first encode (PQ #1654).
+            check_units=not streaming_head)
         print(f"[campaign] producer projected {len(expert_projection['stacks'])} stacks; "
-              f"{len(projected_units)} expert units priced here", flush=True)
+              f"{len(projected_units)} expert units priced here"
+              + ("; their source bytes are checked on the row stream's readers"
+                 if streaming_head and projected_units else ""), flush=True)
     # A projected unit is a routed stack member whatever the run declares:
     # Tessera's export intake reads a projection as ``routed_moe`` and expects
     # the routed served wire in its receipt (tessera#662), so pricing one on
@@ -6154,9 +6199,19 @@ def _main(argv, *, source_scope) -> int:
         encode_structure = {**(encode_structure or {}),
                             **{name: "routed_moe" for name in projected_units}}
 
-    if source_authentication is not None:
-        selected_source_preparation['source_authentication'] = source_authentication.receipt()
-        source_authentication.close()
+    def close_source_authentication():
+        """Record the source owner's receipt, then release its descriptors.
+
+        The stream head's readers still read projected source tensors through
+        this owner, so it closes after ``RowStream.finish`` (PQ #1654); every
+        other head closes it here, once the projection check is done.
+        """
+        if source_authentication is not None:
+            selected_source_preparation['source_authentication'] = source_authentication.receipt()
+            source_authentication.close()
+
+    if not streaming_head:
+        close_source_authentication()
 
     if census_only:
         payload = calibration_census(
@@ -6259,6 +6314,25 @@ def _main(argv, *, source_scope) -> int:
         if selected_guard is not None:
             selected_guard.check('before_row_stream_identity_window',
                                  reserve_bytes=window_metadata_bytes)
+
+        def check_projected_source(name, weight):
+            """The projection byte check for one unit, on a reader thread (PQ #1654).
+
+            The same read and comparison ``_checked_projected_units`` makes, for
+            the same unit set; it runs before the unit's entry is read, so no
+            unit reaches the encoder unchecked, and a mismatch refuses the row.
+            """
+            unit = projected_units.get(name)
+            if unit is None:
+                return False
+            mismatch = _check_projected_unit(
+                name, unit, live=weight, model_path=args.model,
+                source=expert_projection['producer']['source'], release_source_pages=True,
+                source_authentication=source_authentication)
+            if mismatch is not None:
+                raise RuntimeError(PROJECTED_BYTES_REFUSAL.format(units=mismatch))
+            return True
+
         row_stream = RowStream(
             capture_path=args.calibration_cache, expected_sha256=args.calibration_cache_sha256,
             expected_identity=capture_identity, census=census, names=targets,
@@ -6268,6 +6342,7 @@ def _main(argv, *, source_scope) -> int:
                 source=source if want_h else None, menu=menus[name],
                 projected_unit=projected_units.get(name), static_scales=static_scales,
                 metadata_bound=window_bounds[name]),
+            check_unit=check_projected_source if projected_units else None,
             threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
             memo_capacity=selected_resources['encoder_memo_capacity'],
             resource_check=None if selected_guard is None else selected_guard.check,
@@ -6614,7 +6689,9 @@ def _main(argv, *, source_scope) -> int:
     def finalize_row_stream():
         """Write the stream head's six identity-bound outputs' inputs, in order.
 
-        Every entry the loop never admitted is read and receipted first, and
+        Every entry the loop never admitted is read, byte-checked against its
+        projected source tensor, and receipted first; the source owner's
+        receipt is then taken and its descriptors closed; and
         every observed count and maximum is checked against the census, so a
         corrupt or changed entry refuses before any of the writes exists. Then
         the capture load execution record, the journal manifest, and the
@@ -6625,6 +6702,9 @@ def _main(argv, *, source_scope) -> int:
         nonlocal hessian_capture_path, input_scales_path, capture_sha256
         started = _time.monotonic()
         row_stream.finish()
+        # Every projected unit's source bytes have now been checked on a
+        # reader, so the owner's receipt covers the reads the serial check made.
+        close_source_authentication()
         census_token_counts(census, row_stream.observed_counts())
         census_max_abs(census, row_stream.observed_max_abs())
         receipts = row_stream.unit_identities()
@@ -6668,6 +6748,8 @@ def _main(argv, *, source_scope) -> int:
               f"(first batch ready {record['first_batch_ready_seconds']} s, "
               f"reads {record['read_seconds']} s, waited {record['wait_seconds']} s, "
               f"{record['hash_only_entries']} receipt-only, {record['rereads']} re-read, "
+              f"{record['projection_checked_reads']} source-checked in "
+              f"{record['projection_check_seconds']} s, "
               f"peak {record['peak_resident_units']} units; finalize "
               f"{record['finalize_seconds']} s)", flush=True)
 
