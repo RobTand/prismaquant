@@ -1910,35 +1910,29 @@ def _source_identity_cache_binding(path, model, calibration_cache=None):
     instead of hashing every shard it reads under its GPU reservation
     (PQ #1497). A proof the row cannot adopt makes the row fall back to that
     hash, so this refuses, at plan time, every proof adoption would refuse:
-    ``validate_cached_streamed_model_identity`` requires complete coverage of
-    the checkpoint index, its tensor-to-shard map, the live config and every
-    shard's stat fingerprint, and each shard's SHA must be the one the bound
-    capture's source roster declares (PQ #1654). The row re-checks all of it
-    against the objects it holds when it adopts.
+    it runs adoption's own check (``streamed_identity_proof_digests``: the
+    proof's seal, the complete checkpoint index and shard coverage, every
+    shard's SHA against the bound capture's roster, and the stat predicate
+    against the live file), PQ #1654. The row re-runs it against the objects
+    it holds when it adopts.
     """
     if not path:
         return None
-    from prismaquant.cost_streaming import validate_cached_streamed_model_identity
-    from prismaquant.tessera_calibration_cache import require_capture_contract, sha256
+    from prismaquant.tessera_calibration_cache import (require_capture_contract,
+                                                       streamed_identity_proof_digests)
     path = Path(path).resolve()
-    identity = validate_cached_streamed_model_identity(
-        str(model), path, require_complete_checkpoint=True)
-    if calibration_cache is not None:
-        roster = require_capture_contract(
-            calibration_cache["path"],
-            expected_sha256=calibration_cache["sha256"])["identity"]["source_files"]
-        declared = {name: digest for name, digest in roster.items()
-                    if name.endswith(".safetensors")}
-        proved = {Path(str(row["path"])).name: row.get("sha256")
-                  for row in identity["shards"]}
-        differing = sorted(name for name in set(declared) | set(proved)
-                           if declared.get(name) != proved.get(name))
-        if differing:
-            raise RuntimeError(
-                f"{path} does not prove the capture's source: {len(differing)} "
-                f"shard(s) differ from its roster, e.g. {differing[:4]}; a row "
-                "would refuse it and hash every shard it reads")
-    return dict(path=str(path), sha256=sha256(path))
+    root = Path(os.path.abspath(model))
+    roster = (None if calibration_cache is None else require_capture_contract(
+        calibration_cache["path"],
+        expected_sha256=calibration_cache["sha256"])["identity"]["source_files"])
+    try:
+        _digests, proof_sha256 = streamed_identity_proof_digests(
+            root, path, roster, live_stat=lambda name: os.stat(root / name))
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError(
+            f"{path} is not a source proof a row can adopt ({exc}); a row "
+            "would refuse it and hash every shard it reads (PQ #1654)") from exc
+    return dict(path=str(path), sha256=proof_sha256)
 
 
 def _row_is_selected_source(inner_argv: list) -> bool:
