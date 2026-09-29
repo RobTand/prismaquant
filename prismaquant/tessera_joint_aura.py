@@ -2411,6 +2411,24 @@ IDENTITY_QUANTUM_REFUSAL = (
     "plan's source_digest_cache (PQ #1374)")
 
 
+def source_identity_proof_kwargs(model, digest_binding=None, *, digest_cache_path=None):
+    """The identity-proof arguments every GPU pass gives its identity build.
+
+    ``build_streamed_model_identity`` seeds shards its identity cache misses
+    from the bound digest proof and, with ``refuse_uncovered`` set, raises
+    before hashing a byte when a shard is still uncovered (PQ #1374). Stage
+    A, Stage B and the sample-parallel worker source cache all pass this one
+    result, so no GPU row carries its own copy of the refusal (PQ #1392).
+    ``digest_binding`` is the plan's ``{path, sha256}`` (digest-checked here);
+    a caller that already holds the verified proof as a file passes
+    ``digest_cache_path`` instead.
+    """
+    if digest_binding is not None:
+        digest_cache_path = _bound(digest_binding, "source digest cache")
+    return {"digest_cache_path": digest_cache_path,
+            "refuse_uncovered": IDENTITY_QUANTUM_REFUSAL.format(model=model)}
+
+
 def build_source_digest_cache(model, out):
     """The CPU-only identity quantum: hash every source shard into ``out``.
 
@@ -2893,9 +2911,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         result["source_prefetch"] = source_prefetch
         source = build_streamed_model_identity(
             runner, config["model"], identity_cache_path=identity_cache_path,
-            digest_cache_path=(None if config.get("source_digest_cache") is None
-                               else _bound(config["source_digest_cache"], "source digest cache")),
-            refuse_uncovered=IDENTITY_QUANTUM_REFUSAL.format(model=config["model"]))
+            **source_identity_proof_kwargs(
+                config["model"], config.get("source_digest_cache")))
         if source_authentication is not None:
             _adopt_built_source_identity(source_authentication, identity_cache_path)
         source_execution = source_execution_identity(runner.model)
