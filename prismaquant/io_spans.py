@@ -851,38 +851,28 @@ class ExposedWaitLedger:
                     "takes": [dict(r) for r in self._takes]}
 
 
-def otsu_idle_threshold(samples) -> dict:
-    """The watts that best split a power trace into an idle and a busy band.
+def idle_baseline(power_times, power_samples, baseline_end_unix) -> dict | None:
+    """The GPU's observed idle power range, from the row's own pre-work samples.
 
-    Otsu's split: the threshold that maximises the between-class variance of
-    the row's own samples, placed midway between the two neighbouring sample
-    values. It is derived from the trace, not chosen. A trace with fewer than
-    two samples or a single value has no two bands and returns ``None``.
+    Every sample taken before ``baseline_end_unix`` (the instant the row first
+    touches CUDA) was taken while the row's startup ran CPU-only, so the GPU
+    was idle. ``idle_ceiling_w`` is the highest of them: the observed idle
+    range, with no free constant. No stamp or no sample before it is no
+    baseline, and returns ``None``.
     """
-    values = sorted(float(v) for v in samples)
-    n = len(values)
-    if n < 2 or values[0] == values[-1]:
-        return {"threshold_w": None, "low_mean_w": None, "high_mean_w": None,
-                "separation": None, "samples": n}
-    total = math.fsum(values)
-    best = None
-    running = 0.0
-    for i in range(1, n):
-        running += values[i - 1]
-        if values[i - 1] == values[i]:
-            continue  # only cut between distinct values
-        w0, w1 = i / n, (n - i) / n
-        m0, m1 = running / i, (total - running) / (n - i)
-        between = w0 * w1 * (m0 - m1) ** 2
-        if best is None or between > best[0]:
-            best = (between, i, m0, m1)
-    _between, cut, low, high = best
-    mean = total / n
-    variance = math.fsum((v - mean) ** 2 for v in values) / n
-    return {"threshold_w": (values[cut - 1] + values[cut]) / 2.0,
-            "low_mean_w": low, "high_mean_w": high,
-            "separation": (best[0] / variance) if variance > 0 else None,
-            "samples": n}
+    if baseline_end_unix is None:
+        return None
+    end = float(baseline_end_unix)
+    pairs = [(float(t), float(w)) for t, w in zip(power_times, power_samples)
+             if float(t) < end]
+    if not pairs:
+        return None
+    watts = [w for _t, w in pairs]
+    return {"n": len(pairs), "min_w": min(watts), "max_w": max(watts),
+            "mean_w": math.fsum(watts) / len(watts),
+            "start_unix": pairs[0][0], "end_unix": pairs[-1][0],
+            "span_s": pairs[-1][0] - pairs[0][0],
+            "window_end_unix": end, "idle_ceiling_w": max(watts)}
 
 
 def derive_wait_bound(*, wait_s: float, nbytes: float, work_before_s: float | None,
@@ -942,12 +932,12 @@ def _power_cells(times, samples, interval_s: float) -> list[tuple[float, float, 
     return cells
 
 
-def _band_split(segments, cells, ends, threshold_w) -> tuple[float, float, float]:
+def _band_split(segments, cells, ends, idle_ceiling_w) -> tuple[float, float, float]:
     import bisect
     idle = busy = unsampled = 0.0
     for start, end in segments:
         covered = 0.0
-        if threshold_w is not None:
+        if idle_ceiling_w is not None:
             for k in range(bisect.bisect_right(ends, start), len(cells)):
                 lo, hi, watts = cells[k]
                 if lo >= end:
@@ -956,7 +946,7 @@ def _band_split(segments, cells, ends, threshold_w) -> tuple[float, float, float
                 if overlap <= 0:
                     continue
                 covered += overlap
-                if watts < threshold_w:
+                if watts <= idle_ceiling_w:
                     idle += overlap
                 else:
                     busy += overlap
@@ -966,17 +956,20 @@ def _band_split(segments, cells, ends, threshold_w) -> tuple[float, float, float
 
 def exposed_wait_report(intervals, takes, *, power_times, power_samples,
                         interval_s: float, phase_windows, envelope_w: float,
-                        idle_threshold_w: float | None = None) -> dict:
+                        baseline_end_unix: float | None = None) -> dict:
     """The row's ``exposed_wait`` block: wait per phase, split by GPU power band.
 
     ``intervals`` are the blocked intervals (``kind``, ``start_unix``,
     ``end_unix``). Overlapping intervals of different kinds are counted once
     (their union is ``wait_s``) and the double coverage is reported as
     ``overlap_s``. Each interval is clipped into the phase windows and laid
-    against the power cells: time in a cell below the idle threshold is
-    ``idle_band_s``, at or above it ``busy_band_s``, and time no sample covers
-    is ``unsampled_s`` -- never guessed. Resolution is the sampler interval.
-    The idle threshold is the trace's own Otsu split unless one is given.
+    against the power cells: time in a cell at or below the idle ceiling is
+    ``idle_band_s``, above it ``busy_band_s``, and time no sample covers is
+    ``unsampled_s`` -- never guessed. Resolution is the sampler interval.
+    The idle ceiling is measured, not chosen: the highest power sample taken
+    before ``baseline_end_unix`` (see :func:`idle_baseline`). A wait second is
+    idle when its cell is at or below it. With no baseline there is no band
+    split and all wait time is ``unsampled_s``.
     ``takes`` carry the rates behind :func:`derive_wait_bound`; the first take
     of a stream is its first fill and is exempt.
     """
@@ -984,14 +977,9 @@ def exposed_wait_report(intervals, takes, *, power_times, power_samples,
     watts = [float(w) for w in power_samples]
     count = min(len(times), len(watts))
     times, watts = times[:count], watts[:count]
-    split = otsu_idle_threshold(watts)
-    if idle_threshold_w is not None:
-        threshold, source = float(idle_threshold_w), "override"
-    elif split["threshold_w"] is not None:
-        threshold, source = split["threshold_w"], "otsu"
-    else:
-        threshold, source = None, "unavailable"
-    cells = _power_cells(times, watts, interval_s) if threshold is not None else []
+    baseline = idle_baseline(times, watts, baseline_end_unix)
+    ceiling = baseline["idle_ceiling_w"] if baseline else None
+    cells = _power_cells(times, watts, interval_s) if ceiling is not None else []
     ends = [cell[1] for cell in cells]
 
     by_kind_spans: dict[str, list[tuple[float, float]]] = {}
@@ -1013,7 +1001,7 @@ def exposed_wait_report(intervals, takes, *, power_times, power_samples,
         union = _merge_intervals(
             [span for spans in by_kind_spans.values() for span in _clip(spans, lo, hi)])
         wait_s = math.fsum(e - s for s, e in union)
-        idle, busy, unsampled = _band_split(union, cells, ends, threshold)
+        idle, busy, unsampled = _band_split(union, cells, ends, ceiling)
         return {"wait_s": wait_s, "idle_band_s": idle, "busy_band_s": busy,
                 "unsampled_s": unsampled, "overlap_s": max(0.0, kind_sum - wait_s),
                 "by_kind": kinds}
@@ -1060,10 +1048,8 @@ def exposed_wait_report(intervals, takes, *, power_times, power_samples,
     return {
         "schema": EXPOSED_WAIT_SCHEMA,
         "gpu_power_envelope_w": float(envelope_w),
-        "idle_threshold_w": threshold,
-        "idle_threshold_source": source,
-        "idle_band_mean_w": split["low_mean_w"],
-        "busy_band_mean_w": split["high_mean_w"],
+        "idle_ceiling_w": ceiling,
+        "baseline": baseline,
         "sample_interval_s": float(interval_s),
         "power_samples": count,
         "phases": phases,
@@ -1077,7 +1063,7 @@ def exposed_wait_report(intervals, takes, *, power_times, power_samples,
 
 __all__ = [
     "EXPOSED_WAIT_SCHEMA", "ExposedWaitLedger", "derive_wait_bound",
-    "exposed_wait_report", "otsu_idle_threshold",
+    "exposed_wait_report", "idle_baseline",
     "GB10_POWER_ENVELOPE_W", "GpuPowerSampler", "GpuPowerSpanSource",
     "IO_SPAN_MARKER", "IO_SPAN_SCHEMA", "IoSpan", "IoSpanLog",
     "MemAvailableFloor", "PROC_IO_FIELDS", "PeriodicSampler",

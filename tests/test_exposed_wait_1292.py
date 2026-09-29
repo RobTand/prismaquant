@@ -19,26 +19,6 @@ ENVELOPE = 140.0
 
 
 # --------------------------------------------------------------------------
-# The idle threshold is derived from the row's own samples
-# --------------------------------------------------------------------------
-
-
-def test_otsu_threshold_splits_a_two_band_trace():
-    samples = [12.0, 13.0, 12.5, 11.5] * 5 + [95.0, 100.0, 105.0, 98.0] * 5
-    split = io_spans.otsu_idle_threshold(samples)
-    assert split["threshold_w"] is not None
-    assert 13.0 < split["threshold_w"] < 95.0
-    assert split["low_mean_w"] == pytest.approx(12.25)
-    assert split["high_mean_w"] == pytest.approx(99.5)
-
-
-def test_otsu_threshold_is_none_when_the_trace_has_one_band():
-    assert io_spans.otsu_idle_threshold([50.0] * 30)["threshold_w"] is None
-    assert io_spans.otsu_idle_threshold([])["threshold_w"] is None
-    assert io_spans.otsu_idle_threshold([40.0])["threshold_w"] is None
-
-
-# --------------------------------------------------------------------------
 # The ledger
 # --------------------------------------------------------------------------
 
@@ -114,11 +94,12 @@ def _trace(start, idle_until, end, *, idle_w=12.0, busy_w=100.0):
     return times, [idle_w if t < idle_until else busy_w for t in times]
 
 
-def _report(intervals, takes=(), *, times, samples, phases, threshold=None):
+def _report(intervals, takes=(), *, times, samples, phases, baseline_end=None):
+    """``baseline_end``: the instant the row first touched the GPU."""
     return io_spans.exposed_wait_report(
         intervals, list(takes), power_times=times, power_samples=samples,
         interval_s=1.0, phase_windows=phases, envelope_w=ENVELOPE,
-        idle_threshold_w=threshold)
+        baseline_end_unix=baseline_end)
 
 
 def test_wait_is_split_by_power_band_per_phase():
@@ -127,11 +108,12 @@ def test_wait_is_split_by_power_band_per_phase():
         {"kind": "window-wait", "start_unix": 102.0, "end_unix": 106.0},
         {"kind": "window-wait", "start_unix": 112.0, "end_unix": 115.0},
     ]
-    report = _report(intervals, times=times, samples=samples,
+    report = _report(intervals, times=times, samples=samples, baseline_end=105.0,
                      phases=[{"name": "p0", "start_unix": 100.0, "end_unix": 120.0}])
     assert report["schema"] == "prismaquant.exposed_wait.v1"
     assert report["gpu_power_envelope_w"] == ENVELOPE
-    assert report["idle_threshold_source"] == "otsu"
+    assert report["idle_ceiling_w"] == 12.0
+    assert report["baseline"]["n"] == 5
     assert report["sample_interval_s"] == 1.0
     phase = report["phases"]["p0"]
     assert phase["wait_s"] == pytest.approx(7.0)
@@ -146,7 +128,7 @@ def test_wait_is_split_by_power_band_per_phase():
 def test_wait_outside_the_sampled_span_is_unsampled_not_guessed():
     times, samples = _trace(100, 110, 120)
     intervals = [{"kind": "window-wait", "start_unix": 118.0, "end_unix": 125.0}]
-    report = _report(intervals, times=times, samples=samples,
+    report = _report(intervals, times=times, samples=samples, baseline_end=105.0,
                      phases=[{"name": "p0", "start_unix": 100.0, "end_unix": 130.0}])
     phase = report["phases"]["p0"]
     assert phase["wait_s"] == pytest.approx(7.0)
@@ -159,8 +141,8 @@ def test_no_power_samples_reports_wait_unclassified():
     intervals = [{"kind": "checkpoint-load", "start_unix": 1.0, "end_unix": 4.0}]
     report = _report(intervals, times=[], samples=[],
                      phases=[{"name": "p0", "start_unix": 0.0, "end_unix": 10.0}])
-    assert report["idle_threshold_source"] == "unavailable"
-    assert report["idle_threshold_w"] is None
+    assert report["idle_ceiling_w"] is None
+    assert report["baseline"] is None
     assert report["phases"]["p0"]["wait_s"] == pytest.approx(3.0)
     assert report["phases"]["p0"]["idle_band_s"] == 0.0
     assert report["phases"]["p0"]["unsampled_s"] == pytest.approx(3.0)
@@ -172,7 +154,7 @@ def test_overlapping_kinds_are_counted_once_and_the_overlap_reported():
         {"kind": "own-source", "start_unix": 102.0, "end_unix": 108.0},
         {"kind": "window-load", "start_unix": 104.0, "end_unix": 110.0},
     ]
-    report = _report(intervals, times=times, samples=samples,
+    report = _report(intervals, times=times, samples=samples, baseline_end=105.0,
                      phases=[{"name": "p0", "start_unix": 100.0, "end_unix": 130.0}])
     phase = report["phases"]["p0"]
     assert phase["wait_s"] == pytest.approx(8.0)  # union 102..110
@@ -184,7 +166,7 @@ def test_overlapping_kinds_are_counted_once_and_the_overlap_reported():
 def test_wait_spanning_a_phase_boundary_is_clipped_into_each_phase():
     times, samples = _trace(100, 130, 140)
     intervals = [{"kind": "window-wait", "start_unix": 108.0, "end_unix": 114.0}]
-    report = _report(intervals, times=times, samples=samples, phases=[
+    report = _report(intervals, times=times, samples=samples, baseline_end=105.0, phases=[
         {"name": "a", "start_unix": 100.0, "end_unix": 110.0},
         {"name": "b", "start_unix": 110.0, "end_unix": 140.0}])
     assert report["phases"]["a"]["wait_s"] == pytest.approx(2.0)
@@ -223,7 +205,7 @@ def test_bound_block_exempts_the_first_fill_and_sums_the_rest():
          "wait_s": 1.0, "bytes": 1000, "work_before_s": 2.0,
          "load_bytes_per_s": None, "first_fill": False},
     ]
-    report = _report(intervals, takes, times=times, samples=samples,
+    report = _report(intervals, takes, times=times, samples=samples, baseline_end=105.0,
                      phases=[{"name": "p0", "start_unix": 100.0, "end_unix": 140.0}])
     bound = report["bound"]
     assert bound["takes"] == 4
@@ -346,6 +328,7 @@ def test_counters_carry_the_exposed_wait_block_per_phase(tmp_path):
     times = [now - 20 + t for t in range(0, 40)]
     samples = [12.0 if t < now - 5 else 100.0 for t in times]
     counters = _counters(tmp_path, _FakeSampler(times, samples))
+    counters.gpu_work_started_unix = now - 15.0  # 12 W samples before this
     counters.open()
     counters.enter_phase()
     counters.exposed_wait.add("window-wait", now - 12.0, now - 10.0)
@@ -358,6 +341,8 @@ def test_counters_carry_the_exposed_wait_block_per_phase(tmp_path):
     assert "layer-001-chunk-000" in wait["phases"]
     assert wait["total"]["wait_s"] == pytest.approx(2.0)
     assert wait["total"]["idle_band_s"] == pytest.approx(2.0, abs=1.01)
+    assert wait["idle_ceiling_w"] == 12.0
+    assert wait["baseline"]["n"] == 5
     assert wait["bound"]["takes"] == 1
     text = json.dumps(block)
     assert "gpu_utilization" not in text and "utilization_percent" not in text
@@ -402,3 +387,117 @@ def test_spill_wait_lands_in_its_counter_and_the_sink():
     spill.wait_sink = None
     spill._note_wait("spill-hook", started)  # no sink: the counter still counts
     assert len(seen) == 2
+
+
+# --------------------------------------------------------------------------
+# The idle ceiling is measured before the first CUDA call, never derived
+# from the trace being classified
+# --------------------------------------------------------------------------
+
+_P0 = [{"name": "p0", "start_unix": 100.0, "end_unix": 200.0}]
+
+
+def test_a_unimodal_busy_trace_reports_no_idle_seconds():
+    # 70-90 W the whole row: the GPU was never idle. A cut through the
+    # middle of a single band must not relabel half the busy seconds idle.
+    times = [float(t) for t in range(100, 160)]
+    samples = [70.0 + 20.0 * ((t * 7) % 10) / 9.0 for t in range(100, 160)]
+    # the row's pre-work window really was idle at 5 W
+    times = [float(t) for t in range(90, 100)] + times
+    samples = [5.0] * 10 + samples
+    intervals = [{"kind": "window-wait", "start_unix": 110.0, "end_unix": 150.0}]
+    report = _report(intervals, times=times, samples=samples,
+                     phases=_P0, baseline_end=100.0)
+    assert report["idle_ceiling_w"] == 5.0
+    assert report["total"]["wait_s"] == pytest.approx(40.0)
+    assert report["total"]["idle_band_s"] == 0.0
+    assert report["total"]["busy_band_s"] == pytest.approx(40.0)
+
+
+def test_the_ceiling_is_the_baseline_max_even_when_the_baseline_ran_warm():
+    # Even when the baseline itself reads 70-90 W (another tenant, a warm
+    # device), the ceiling is what was observed: samples above it are busy.
+    times = [float(t) for t in range(100, 160)]
+    samples = [70.0 + (t % 5) * 5.0 for t in range(100, 160)]  # 70..90
+    intervals = [{"kind": "window-wait", "start_unix": 120.0, "end_unix": 150.0}]
+    report = _report(intervals, times=times, samples=samples,
+                     phases=_P0, baseline_end=110.0)
+    assert report["idle_ceiling_w"] == 90.0
+    # nothing exceeds the ceiling, so every second is at or below it
+    assert report["total"]["busy_band_s"] == 0.0
+    assert report["total"]["idle_band_s"] == pytest.approx(30.0)
+
+
+def test_idle_seconds_at_the_baseline_level_are_reported():
+    times, samples = _trace(100, 130, 160, idle_w=12.0, busy_w=95.0)
+    intervals = [
+        {"kind": "window-load", "start_unix": 110.0, "end_unix": 118.0},  # idle
+        {"kind": "window-load", "start_unix": 140.0, "end_unix": 145.0},  # busy
+    ]
+    report = _report(intervals, times=times, samples=samples,
+                     phases=_P0, baseline_end=105.0)
+    assert report["total"]["wait_s"] == pytest.approx(13.0)
+    assert report["total"]["idle_band_s"] == pytest.approx(8.0)
+    assert report["total"]["busy_band_s"] == pytest.approx(5.0)
+
+
+def test_idle_ceiling_is_the_max_of_a_noisy_baseline():
+    times = [float(t) for t in range(100, 130)]
+    samples = [11.0, 12.5, 13.0, 11.5, 12.0] * 2 + [60.0] * 20
+    intervals = [{"kind": "window-load", "start_unix": 100.0, "end_unix": 130.0}]
+    report = _report(intervals, times=times, samples=samples,
+                     phases=_P0, baseline_end=110.0)
+    assert report["idle_ceiling_w"] == 13.0
+    assert report["total"]["idle_band_s"] == pytest.approx(10.0)
+    assert report["total"]["busy_band_s"] == pytest.approx(20.0)
+
+
+def test_the_receipt_records_the_baseline():
+    times, samples = _trace(100, 130, 160, idle_w=12.0, busy_w=95.0)
+    samples[0], samples[1] = 10.0, 14.0
+    report = _report([], times=times, samples=samples,
+                     phases=_P0, baseline_end=104.0)
+    base = report["baseline"]
+    assert base["n"] == 4
+    assert base["min_w"] == 10.0 and base["max_w"] == 14.0
+    assert base["mean_w"] == pytest.approx((10.0 + 14.0 + 12.0 + 12.0) / 4)
+    assert base["start_unix"] == 100.0 and base["end_unix"] == 103.0
+    assert base["span_s"] == pytest.approx(3.0)
+    assert base["window_end_unix"] == 104.0
+    assert report["idle_ceiling_w"] == 14.0
+
+
+def test_no_baseline_puts_the_wait_in_unsampled_never_guessed():
+    times, samples = _trace(100, 130, 160)
+    intervals = [{"kind": "window-load", "start_unix": 110.0, "end_unix": 120.0}]
+    # no stamp at all
+    stamped_none = _report(intervals, times=times, samples=samples,
+                           phases=_P0, baseline_end=None)
+    # a stamp with no sample before it
+    stamped_early = _report(intervals, times=times, samples=samples,
+                            phases=_P0, baseline_end=100.0)
+    for report in (stamped_none, stamped_early):
+        assert report["idle_ceiling_w"] is None
+        assert report["baseline"] is None
+        total = report["total"]
+        assert total["wait_s"] == pytest.approx(10.0)
+        assert total["idle_band_s"] == 0.0 and total["busy_band_s"] == 0.0
+        assert total["unsampled_s"] == pytest.approx(10.0)
+
+
+def test_a_unimodal_busy_trace_without_a_baseline_is_unsampled_not_split():
+    # The coordinator's case: 70-90 W the whole row and nothing to say what
+    # idle looks like on this device. A data-driven cut through the middle of
+    # the band would relabel about half of these busy seconds idle; with no
+    # measured ceiling the wait is unsampled and nothing is guessed.
+    times = [float(t) for t in range(100, 160)]
+    samples = [70.0 + 20.0 * ((t * 7) % 10) / 9.0 for t in range(100, 160)]
+    intervals = [{"kind": "window-wait", "start_unix": 110.0, "end_unix": 150.0}]
+    for stamp in (None, 100.0):
+        report = _report(intervals, times=times, samples=samples,
+                         phases=_P0, baseline_end=stamp)
+        total = report["total"]
+        assert report["idle_ceiling_w"] is None
+        assert total["idle_band_s"] == 0.0
+        assert total["busy_band_s"] == 0.0
+        assert total["unsampled_s"] == pytest.approx(40.0)

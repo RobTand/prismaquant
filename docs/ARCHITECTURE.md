@@ -43,7 +43,8 @@ format or lane changes.
 
 Re-stamped 2026-09-28 (PQ #1292, `sonnet/1292-exposed-wait`): every Stage B
 row's `counters.json` gains `exposed_wait`, the consumer's time blocked on a
-load, split by GPU power band and judged against a bound derived from the
+load, split by GPU power band (idle means at or below the ceiling the row measured
+before its first CUDA call) and judged against a bound derived from the
 row's own measured rates. It is telemetry only: no pipeline default, stage,
 format, lane or ship gate changes. See "Exposed wait" under the Stage B span
 contract. Stage A rows carry a block that says `instrumented: false`.
@@ -2712,10 +2713,19 @@ said nothing about its own reads between the head and the records.
   then `idle_band_s`, `busy_band_s` and `unsampled_s` against the
   `gpu-power` sampler's cells, so the resolution is the sampler interval.
   Waits outside every phase window are in `total.outside_phases_s`.
-  - **The idle band is derived, not chosen.** `idle_threshold_w` is the
-    Otsu two-class split of the row's own power samples. A trace with no two
-    classes gives `idle_threshold_source: "unavailable"`, and the wait is
-    reported as `unsampled_s`, never guessed.
+  - **The idle ceiling is measured, not chosen.** The row samples GPU power
+    over its own pre-work window: the samples taken before
+    `gpu_work_started_unix`, which the row stamps just before the first
+    CUDA-touching call (`prewarm_projection_backend`). Its startup is
+    GPU-idle, so those samples are the device's observed idle range.
+    `idle_ceiling_w` is their maximum, with no free constant, and the receipt
+    records the `baseline` (`n`, `min_w`, `max_w`, `mean_w`, `start_unix`,
+    `end_unix`, `span_s`). A wait second is idle when its power cell is at or
+    below the ceiling, busy above it. With no baseline sample the band split
+    is `None` and the wait is `unsampled_s`, never guessed. A trace is never
+    cut by its own shape, so a row that is busy throughout reports no idle
+    seconds. The ceiling is only as clean as the pre-CUDA window: another
+    process on the GPU during startup would raise it.
   - **The bound.** For a steady-state take of `bytes` with `work_before_s`
     of compute since the previous take, consume rate is `bytes /
     work_before_s` and load rate is the stream's measured

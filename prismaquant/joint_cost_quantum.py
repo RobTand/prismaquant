@@ -579,6 +579,9 @@ class QuantumCounters:
         # window-load takes and the spill waits land here through ``sink``;
         # span-derived kinds are read from ``self.io`` at the finish.
         self.exposed_wait = ExposedWaitLedger()
+        # The instant the row first touches CUDA. Power samples before it are
+        # the measured idle baseline; ``None`` means no baseline (PQ #1292).
+        self.gpu_work_started_unix: float | None = None
         self.phases = [{"name": str(chunk["name"]),
                         "start_bytes": int(chunk["start_bytes"]),
                         "end_bytes": int(chunk["end_bytes"]),
@@ -627,7 +630,8 @@ class QuantumCounters:
             power_times=list(self.sampler.times),
             power_samples=list(self.sampler.samples),
             interval_s=float(getattr(self.sampler, "interval_s", 1.0)),
-            phase_windows=windows, envelope_w=140.0)
+            phase_windows=windows, envelope_w=140.0,
+            baseline_end_unix=self.gpu_work_started_unix)
 
     def kda_capture_kernel_record(self) -> dict | None:
         block = self.kda_capture_kernel
@@ -3691,6 +3695,9 @@ def run_layer_quantum(
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()
+        # Everything above ran CPU-only, so the power samples before this
+        # instant are the GPU's own idle range (PQ #1292 baseline).
+        gpu_work_started = time.time()
         projection_backend = prewarm_projection_backend(
             execution.get("projection_backend"), device="cuda")
         result["projection_backend"] = projection_backend.identity
@@ -3852,6 +3859,7 @@ def run_layer_quantum(
             frontier=ChunkFrontier(chunks=record["chunks"],
                                    windows=resolved_windows),
             io_spans=io_spans, sampler=power, started=started)
+        counters.gpu_work_started_unix = gpu_work_started
         # Head-phase currency continues from the head-committed base (§6.2
         # step 5): the same cumulative units the single run reports.
         progress = QuantumProgress(frontier=counters._frontier,
