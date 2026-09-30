@@ -61,6 +61,7 @@ from collections.abc import Callable, Mapping, Sequence
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
 from .digests import bytes_sha256hex, newline_utf8_sha256
+from .qnames import LAYER_QNAME as _QNAME_LAYER
 from .source_read_plan import uncovered_spans
 
 
@@ -130,7 +131,6 @@ DEFAULT_STRIDE = 8
 DEFAULT_RAM_WINDOW_GIB = 160
 DEFAULT_MAX_RESIDENT_CONSUMERS = 2
 
-_QNAME_LAYER = re.compile(r"^.*\.layers\.(\d+)(?:\.|$)")
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -205,7 +205,7 @@ def roster_digest(qnames: Sequence[str]) -> str:
 def qname_layer(qname: object) -> int | None:
     """The layer a roster qname names, or None (§3.1's layer grammar).
 
-    The single spelling of the grammar, shared with the joiner (#787 D5):
+    The shared qnames grammar, also used by the COST read-schedule binder:
     a roster qname embeds its layer as ``…layers.N…``, which is how a gap
     names its quantum's units and how the producer partitions the roster
     per layer.

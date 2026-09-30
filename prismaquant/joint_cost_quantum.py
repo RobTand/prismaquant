@@ -543,13 +543,14 @@ class QuantumCounters:
 
     def __init__(self, *, quantum_id, identity_sha256, chunks, frontier: ChunkFrontier,
                  io_spans: IoSpanLog | None = None, sampler=None,
-                 started: float | None = None):
+                 started: float | None = None, pilot_binding: Mapping | None = None):
         from .residency_map import residency_report
 
         self._report = residency_report
         self._frontier = frontier
         self.quantum_id = str(quantum_id)
         self.identity_sha256 = str(identity_sha256)
+        self.pilot_binding = None if pilot_binding is None else dict(pilot_binding)
         # A caller that started the power sampler and the span log before
         # the head (``run_layer_quantum``) passes both, with the time it
         # started them, so wall time and joules cover the same interval.
@@ -772,6 +773,13 @@ class QuantumCounters:
             # Every closed span, in close order (prismaquant.io_spans).
             "io_spans": list(self.io.records),
         }
+        if self.pilot_binding is not None:
+            power = gpu.get("gpu_power_w_p50")
+            counters["pilot"] = {
+                "binding": self.pilot_binding,
+                "action_key": os.environ.get("PRISMABUILD_ACTION_KEY"),
+                "gpu_envelope_fraction": None if power is None else power / 140.0,
+            }
         if self._kernel_error:
             counters["kernel_profiler_error"] = self._kernel_error
         if "sampler_error" in gpu:
@@ -3889,12 +3897,19 @@ def run_layer_quantum(
             except ValueError as exc:
                 raise QuantumIdentityRefused(str(exc)) from exc
         result["resolved_windows"] = len(resolved_windows)
+        from .joint_dispatch_pilot import pilot_binding
+
         counters = QuantumCounters(
             quantum_id=record["quantum_id"], identity_sha256=record["identity_sha256"],
             chunks=record["chunks"],
             frontier=ChunkFrontier(chunks=record["chunks"],
                                    windows=resolved_windows),
-            io_spans=io_spans, sampler=power, started=started)
+            io_spans=io_spans, sampler=power, started=started,
+            pilot_binding=pilot_binding(
+                record, implementation_sha256=implementation,
+                execution_plan_sha256=plan_sha256, replay_regime=replay_regime,
+                cotangent_source="chain" if adjoint_handoff is None else "handoff",
+                emits_handoff=emit_handoff))
         counters.gpu_work_started_unix = gpu_work_started
         # Head-phase currency continues from the head-committed base (§6.2
         # step 5): the same cumulative units the single run reports.
