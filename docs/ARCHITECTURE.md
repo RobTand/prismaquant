@@ -1,5 +1,22 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1794, Refs #1087, `sol/pq-stageb-4`):
+The explicitly selected research constructor policy
+`StageBReplaySpill(scatter_reads=True)` coalesces physically adjacent slot
+reads even when their destination slots are permuted. It uses the existing
+scratch vectored reads and shared IO engine, bounds bytes and iovecs per call,
+and keeps per-operand integrity verification before delivery. Gaps are never
+read through; overlapping file/destination envelopes or invalid grids refuse.
+Absent/false preserves the previous contiguous-destination policy. This CPU
+prerequisite is not wired into the production pipeline or promoted as its
+default. Tensor layouts, record/replay order, arithmetic, checksums, cache,
+export/serving bytes, pin and stage graph are unchanged. The scratch capacity
+includes leading-residue/trailing-grid slot padding that the arena writer
+actually writes; it is not a payload-only reservation. CPU span/operand tests
+do not establish #1087's representative proxy digest, performance, residency,
+peak-memory or reader-wait acceptance. GPU before/after profiles and both-Spark
+Netdata remain HELD pending explicit coordinator approval.
+
 Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
 `plan_reduced_schedule_repair` replays explicit research input history under a
 fixed declared experiment and round cap. Prior receipt continuity, monotonic
