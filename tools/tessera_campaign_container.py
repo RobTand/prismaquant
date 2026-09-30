@@ -12,6 +12,7 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 
 from tools.container_runtime_identity import (
@@ -578,9 +579,54 @@ LOCAL_SCRATCH_PAIRS_ENV = "PRISMABUILD_LOCAL_SCRATCH_PAIRS"
 #: is forwarded and priced by the same call (``local_scratch_environment``).
 #: The produced spool is not listed: PrismaBuild charges its window through
 #: ``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW`` and refuses its pair in the list.
+CONTAINER_CACHE_SCRATCH_ENV = (
+    "PRISMAQUANT_CONTAINER_CACHE_ROOT", "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES")
+
+
+def _refuse_scratch_symlinks(value: str) -> None:
+    """Inspect existing ancestors without creating or resolving scratch."""
+    path = Path(value)
+    for ancestor in (*reversed(path.parents), path):
+        try:
+            info = ancestor.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise RuntimeError(f"cannot inspect scratch path {ancestor}") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise RuntimeError(f"scratch path contains a symlink: {ancestor}")
+        if not stat.S_ISDIR(info.st_mode):
+            raise RuntimeError(f"scratch path is not a directory: {ancestor}")
+
+
+def container_cache_scratch_environment(spec: dict, environ) -> dict:
+    """Validate an explicitly priced compilation-cache root, not its lifetime."""
+    names = CONTAINER_CACHE_SCRATCH_ENV
+    if not any(name in environ or name in spec.get("env", {}) for name in names):
+        return {}
+    maximum = environ.get(names[1])
+    if (not isinstance(maximum, str) or re.fullmatch(r"[0-9]+", maximum) is None
+            or int(maximum) <= 0):
+        raise RuntimeError("container cache needs a sealed positive byte ceiling")
+    root = _canonical_absolute(environ.get(names[0]))
+    if root is not None:
+        cache = PurePosixPath(root)
+        for other_names, _ in LOCAL_SCRATCH_KINDS:
+            other = environ.get(other_names[0])
+            if other_names == names or _canonical_absolute(other) is None:
+                continue
+            path = PurePosixPath(other)
+            if cache == path or cache in path.parents or path in cache.parents:
+                raise RuntimeError("container cache root must be disjoint from other scratch")
+    declared = _bounded_local_environment(spec, environ, names, "container cache")
+    _refuse_scratch_symlinks(declared[names[0]])
+    return declared
+
+
 LOCAL_SCRATCH_KINDS = (
     (COTANGENT_SCRATCH_ENV, cotangent_scratch_environment),
     (STAGE_B_SPILL_ENV, stage_b_spill_environment),
+    (CONTAINER_CACHE_SCRATCH_ENV, container_cache_scratch_environment),
 )
 
 
@@ -618,6 +664,13 @@ def local_scratch_environment(spec: dict, environ) -> dict:
     return forwarded
 
 
+def _forwarded_local_scratch_environment(spec: dict, environ) -> dict:
+    """Forward every registered pair, never the outer admission control."""
+    forwarded = local_scratch_environment(spec, environ)
+    forwarded.pop(LOCAL_SCRATCH_PAIRS_ENV, None)
+    return forwarded
+
+
 #: The container's write caches and PrismaQuant's temp parent, each with the
 #: subdirectory it gets under a declared scratch root (PQ #1072, #1014 item f).
 #: Left unset, each one lands in the container's writable overlay, which is
@@ -652,11 +705,10 @@ def container_cache_environment(spec: dict, scratch: dict) -> "tuple[dict, list[
     """Default cache roots under the declared scratch, and the overlay pins.
 
     ``scratch`` is the forwarded bounded-local environment
-    (:func:`local_scratch_environment` or the per-kind calls). When it
-    declares a root, each variable in :data:`CONTAINER_CACHE_ENV` that the
-    spec leaves unset gets ``<root>/container-cache/<subdir>``. The root is
-    the first declared kind in :data:`LOCAL_SCRATCH_KINDS` order: the
-    cotangent scratch, then the Stage B spill. It sits on a writable
+    (:func:`local_scratch_environment` or the per-kind calls). For legacy
+    declarations without a separate compilation-cache pair, each variable
+    left unset gets ``<root>/container-cache/<subdir>``. That root is the
+    first declared legacy kind: cotangent scratch, then Stage B spill. It sits on a writable
     identity bind, which the kind's own check has already required.
 
     A variable the spec sets keeps its value, so the default never overrides
@@ -666,15 +718,47 @@ def container_cache_environment(spec: dict, scratch: dict) -> "tuple[dict, list[
     preamble; the joint dispatcher's spec check refuses them unless the spec
     names an ``overlay_cache_reason`` (PQ #1129).
 
-    The caches' bytes are not charged separately. They fall inside the scratch
-    root's disk, and only that pair's ceiling is charged to PrismaBuild
-    (PB #911).
+    An explicit compilation-cache pair instead selects its own charged root.
+    Four cache variables must stay there; TMPDIR must explicitly name another
+    charged workspace. This declaration reserves bytes, not a filesystem quota
+    or durable cleanup. Without it, the legacy defaults below are unchanged.
     """
 
     declared = spec.get("env", {}) if isinstance(spec, dict) else {}
     pinned = [name for name, _ in CONTAINER_CACHE_ENV
               if isinstance(declared.get(name), str)
               and not _on_writable_mount(spec, declared[name])]
+    cache_root = scratch.get(CONTAINER_CACHE_SCRATCH_ENV[0])
+    if cache_root:
+        cache = PurePosixPath(cache_root)
+        defaults = {}
+        for name, subdir in CONTAINER_CACHE_ENV:
+            if name == "PRISMAQUANT_TMPDIR":
+                value = _canonical_absolute(declared.get(name))
+                if value is None:
+                    raise RuntimeError("TMPDIR needs an explicit separate charged workspace")
+                workspaces = [PurePosixPath(scratch[names[0]])
+                              for names, _ in LOCAL_SCRATCH_KINDS
+                              if names != CONTAINER_CACHE_SCRATCH_ENV
+                              and scratch.get(names[0])]
+                path = PurePosixPath(value)
+                if (not _on_writable_mount(spec, value)
+                        or path == cache or cache in path.parents
+                        or not any(path == root or root in path.parents
+                                   for root in workspaces)):
+                    raise RuntimeError("TMPDIR needs an explicit separate charged workspace")
+            else:
+                value = _canonical_absolute(declared.get(name, str(cache / subdir)))
+                if value is None:
+                    raise RuntimeError(f"{name} must stay within the charged cache root")
+                path = PurePosixPath(value)
+                if (not _on_writable_mount(spec, value)
+                        or not (path == cache or cache in path.parents)):
+                    raise RuntimeError(f"{name} must stay within the charged cache root")
+                if name not in declared:
+                    defaults[name] = value
+            _refuse_scratch_symlinks(value)
+        return defaults, []
     root = next((scratch[names[0]] for names, _ in LOCAL_SCRATCH_KINDS
                  if scratch.get(names[0])), None)
     if root is None:
@@ -1013,8 +1097,8 @@ def docker_command(spec: dict, command: list[str], *, cwd: str,
     # row-env check that already keeps it: a legacy row sealed with
     # ``MIMALLOC_PURGE_DELAY=10`` reached the container with ``0``.
     bounded_defaults = BOUNDED_CAPTURE_ENV if bounded else {}
-    scratch = {**cotangent_scratch_environment(spec, environ if environ is not None else {}),
-               **stage_b_spill_environment(spec, environ if environ is not None else {})}
+    scratch = _forwarded_local_scratch_environment(
+        spec, environ if environ is not None else {})
     # The caches' defaults come first, so any value in the spec overrides
     # them (PQ #1072).
     cache_defaults, _pinned = container_cache_environment(spec, scratch)
@@ -1129,8 +1213,7 @@ def main(argv=None) -> int:
                       "gpu_attached": with_gpu, "gpu_decision": gpu_reason,
                       "checkout_commit": commit,
                       "overlay_pinned_caches": container_cache_environment(
-                          spec, {**cotangent_scratch_environment(spec, os.environ),
-                                 **stage_b_spill_environment(spec, os.environ)})[1],
+                          spec, _forwarded_local_scratch_environment(spec, os.environ))[1],
                       **imports}), flush=True)
     docker = docker_command(spec, command, cwd=str(Path.cwd()),
                             uid=os.getuid(), gid=os.getgid(), image_id=image_id,
