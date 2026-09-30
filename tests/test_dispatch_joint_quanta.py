@@ -181,7 +181,11 @@ def _stamp_receipt(records_dir, receipt_path):
 
 
 def _argv(records_dir, output_root, receipt=None, extra=()):
-    argv = ["--records", str(records_dir), "--output-root", str(output_root)]
+    # These fixtures exercise unrelated dispatcher contracts without a GPU
+    # measurement. Pilot admission itself uses the production defaults in
+    # test_joint_dispatch_pilot.py; never invent a passing pilot here.
+    argv = ["--records", str(records_dir), "--output-root", str(output_root),
+            "--force-unverified-pilot"]
     if receipt is not None:
         argv += ["--adjoint-receipt", str(receipt)]
     return argv + list(extra)
