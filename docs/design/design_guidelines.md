@@ -131,7 +131,8 @@ For a new numerical method, record:
 - vLLM smoke command and log path;
 - downstream serving-suite commands and log paths, including PPL/mean NLL,
   log-likelihood task checks, and ToolEvalBench for materialized artifacts;
-- observed GPU utilization and whether NVMe/CPU was idle during the hot path.
+- GPU power and work per joule, with aligned system CPU and IO telemetry for
+  the hot path.
 
 The default comparison is method A versus method A plus the new lever, with
 all dependent sweeps re-run for both arms. Do not compare a well-tuned baseline

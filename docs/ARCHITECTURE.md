@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1837): `glm5_next` declares the three attention
+fused groups its construction runtime loads (image `487ecf187`,
+`load_weights` stacked params): `in_proj_qkvbfg_a`, `fused_qkv_a_proj` and
+`indexer.wk_weights_proj`. The attention pins are unchanged, so no allocation,
+export, serving gate, runtime pin or default changes; the groups bind only a
+scope that unpins attention for pricing. See the plugin-architecture note on
+`glm5_next` fused groups.
+
 Re-stamped 2026-09-30 (PQ #1828, Refs #870): the opt-in
 `ProducedRenderPublication` binding reuses the existing boundary publication
 lifecycle and public PB owner/attempt checks. Its declared `renders` payload
@@ -11,6 +19,29 @@ named digest profile, without a second ledger or publication implementation.
 keeps the PWC writer, produced reader bindings, mover round trip and integrated
 retirement as separate work. No production wiring, serialized bytes, numerical
 method, serving gate, runtime pin or default changes; #870 remains open.
+
+Re-stamped 2026-09-30 (PQ #1833, Refs #1802/#1366): the incoming checkpoint
+metadata comparison is classified as a same-record structural check in the
+no-new-run-seal lint. It still refuses foreign cotangent identities in both
+dev and certified modes; exact payload verification is independent. No run
+seal is introduced, weakened or bypassed. Reader-deadline source references
+are refreshed after #1802; load-phase grace arithmetic, runtime behavior,
+production defaults and all serving/export gates are unchanged.
+
+Re-stamped 2026-09-30 (Refs PQ #1295, `sol/issues-pq-7`): bounded non-stream
+PWC file loads (`prefetch` and lazy `get`) request the existing IO engine's
+sealed buffer and reuse the stream's private-mmap decoder. The engine hashes
+and seals the read once, closes its descriptor after decode, and leaves the
+tensor's private mapping alive. Existing digest, tier, file-signature, archive
+and mutation fences remain. Unbounded legacy reads retain their prior policy.
+This is not a new cache, loader pool, numerical method or format/serving byte
+change. Other non-stream callers remain #1295 work. The
+[bounded-PWC CPU profile](results/2026-09-30_pwc_sealed_cpu.md) records matched
+fixtures, before/after cProfile and process-memory samples, and aligned Netdata
+on both Sparks and the test worker. The old fixture did not reproduce retained
+anonymous memory after drop; sparse telemetry and different workers preclude
+an isolated throughput claim. CPU fixtures alone do not establish production
+residency or GPU/NFS performance.
 
 Re-stamped 2026-09-30 (Refs PQ #1247, `sol/issues-pq-5`):
 `_prepare_file_read_bound` checks each distinct render path once per call, in
@@ -1917,9 +1948,10 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   identity read at a window's first probe and at its close
   (`resident_render_identity`, PQ #1348) compares the tensor's version
   counter with the one recorded at load, so a `torch` write in place fails
-  the window before it commits. The PWC's other loads (`prefetch`,
-  a lazy `get`) and `tools/qualify_t4_overlay.py` keep the bytes path; they
-  are PQ #1295 consolidation items.
+  the window before it commits. Bounded non-stream PWC loads (`prefetch`,
+  a lazy `get`) now request this same sealed-buffer decoder. The direct
+  `tools/qualify_t4_overlay.py` caller still keeps the bytes path and remains
+  a PQ #1295 consolidation item.
 - **Release, not take.** A taken window's renders stay charged to the
   stream's budget until the consumer releases them (`ReadStream.release`,
   `:825`): on unified memory a stream that counted them free at the take
@@ -3189,8 +3221,8 @@ It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
 row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
-(`prismaquant/joint_adjoint_checkpoints.py:1868`,
-`prismaquant/joint_quantum_handoff.py:1032`), so the phase waits at most W in
+(`prismaquant/joint_adjoint_checkpoints.py:1986`,
+`prismaquant/joint_quantum_handoff.py:1033`), so the phase waits at most W in
 total outside a PrismaBuild landing record. Since PQ #1143 a spill
 consumer's `handoff-load` holds only the owner states and the shared-pass
 entries; each probe's plane is read in its `spill-pP` phase, whose waits
@@ -26084,14 +26116,18 @@ The two 2026-08-26 additions are **enablement scaffolds, not export-ready lanes*
 a vLLM class importable from the pinned serving stacks, so both return `vllm_architecture_class
 → None`. `qwen4_exp` still declares `fused_groups` read from HF modelling code (`in_proj_qkvz`,
 `in_proj_ba`, the shared-expert `gate_up_proj`), the hy_v3 precedent. `glm5_next` declares
-**none**, and has nothing it may honestly declare: its KDA attention exposes separate q/k/v
-Linears live, and the only fusion evidence is the checkpoint's own
-`quantization_config.modules_to_not_convert` naming `self_attn.qkv_proj` /
-`self_attn.fused_qkvbfg_a_proj`, names that appear in no index key — a lead about someone's
-serving tree, not a contract (principle 14). The gap is harmless only because every fusable
-attention projection is pinned, so no fused group can be split across formats; that pairing is
-ratcheted in `tests/test_model_profile_conformance.py`
-(`UNATTESTED_FUSED_SOURCE_XFAIL`), which goes red if either half changes.
+five groups in its structure spec, each read off a runtime's own `load_weights`: the dense and
+shared-expert `gate_up_proj` pairs (PR #53906 source, 2026-08-27), and since 2026-09-30
+(PQ #1837) the three attention modules of the construction image `487ecf187`
+(`vllm/models/glm5next/nvidia/model.py:752-768`): `self_attn.in_proj_qkvbfg_a` <-
+q/k/v/b/f_a/g_a, `self_attn.fused_qkv_a_proj` <- q_a/kv_a_proj_with_mqa and
+`self_attn.indexer.wk_weights_proj` <- wk/weights_proj. The KDA group names both the checkpoint
+spelling `self_attn.f_a_proj` and the live `self_attn.forget_gate.f_a_proj`, because
+`fused_group_for` matches suffixes. The attention pins do not move: that image builds every
+attention module with `quant_config=None`, so the declarations change no allocation today. They
+keep a pricing scope that unpins attention (`--allow-pinned`) from splitting one vLLM module
+across formats. `tests/test_glm5_next_attention_fused_groups.py` holds the groups, both
+spellings, and the rule that a group is pinned whole or not at all.
 `qwen4_exp` declares no `default_serving_profile` and
 no `supported_lanes` **on purpose** — each is a statement about what a serving runtime does, and
 principle 14 refuses an unattested one; they are owed once a class exists to attest them, and

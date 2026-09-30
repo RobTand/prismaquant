@@ -86,6 +86,19 @@
     {
       "target": "mlp.shared_experts.gate_up_proj",
       "members": ["mlp.shared_experts.gate_proj", "mlp.shared_experts.up_proj"]
+    },
+    {
+      "target": "self_attn.in_proj_qkvbfg_a",
+      "members": ["self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj", "self_attn.b_proj",
+                  "self_attn.f_a_proj", "self_attn.forget_gate.f_a_proj", "self_attn.g_a_proj"]
+    },
+    {
+      "target": "self_attn.fused_qkv_a_proj",
+      "members": ["self_attn.q_a_proj", "self_attn.kv_a_proj_with_mqa"]
+    },
+    {
+      "target": "self_attn.indexer.wk_weights_proj",
+      "members": ["self_attn.indexer.wk", "self_attn.indexer.weights_proj"]
     }
   ],
   "concat_merges": [
@@ -242,7 +255,7 @@
       }
     },
     "open_todos": {
-      "fused_groups": "MLP gate/up fusion ATTESTED 2026-08-27 by direct read of the pinned runtime source (vllm-glm5next:pr53906-933876c, models/glm5next/nvidia/model.py:116 Glm5NextMLP.gate_up_proj = MergedColumnParallelLinear; the same class serves dense-layer MLPs and mlp.shared_experts). Both quantizable gate/up families are declared above so union-find promotes them to one format - a split assignment cannot load. KDA q/k/v fusion remains undeclared: the checkpoint's modules_to_not_convert hints (self_attn.qkv_proj 34x, fused_qkvbfg_a_proj 34x) match no index key, and every KDA projection is BF16-source pinned, so promotion over such a group is trivially satisfied.",
+      "fused_groups": "MLP gate/up fusion ATTESTED 2026-08-27 by direct read of the pinned runtime source (vllm-glm5next:pr53906-933876c, models/glm5next/nvidia/model.py:116 Glm5NextMLP.gate_up_proj = MergedColumnParallelLinear; the same class serves dense-layer MLPs and mlp.shared_experts). Both quantizable gate/up families are declared above so union-find promotes them to one format - a split assignment cannot load. Attention fusion ATTESTED 2026-09-30 (PQ #1837) by direct read of the construction runtime source, image prismaquant/glm53-mia-sm121:487ecf187 (id 75ea13eda532), vllm/models/glm5next/nvidia/model.py sha256 de3ed7f413157596, load_weights stacked_params_mapping :752-768: in_proj_qkvbfg_a <- q_proj,k_proj,v_proj,b_proj,f_a_proj,g_a_proj (kda.py:204 _Glm5NextMergedColumnParallelLinear); fused_qkv_a_proj <- q_a_proj,kv_a_proj_with_mqa (attention.py:457 DeepSeekV2FusedQkvAProjLinear); wk_weights_proj <- indexer wk,weights_proj (attention.py:259 MergedColumnParallelLinear); mtp.py:305-308 repeats the MLA and indexer pairs for layer 45. The same image's Tessera construction block lists all three modules under never_offered (quant_config=None), so the pins stay and these declarations change no allocation today; they exist so a pricing scope that unpins attention (--allow-pinned) cannot split one vLLM module across formats. The KDA group lists both the checkpoint spelling self_attn.f_a_proj and the live spelling self_attn.forget_gate.f_a_proj, because fused_group_for matches name suffixes.",
       "mtp": "Layer 45 is the single num_nextn_predict_layers block. transformers 5.16 refuses it outright (modeling_glm5_next.py:1359 _keys_to_ignore_on_load_unexpected = [r'layers\\.45\\.', r'layers\\.\\d+\\.shared_head\\.']). It is body-indexed, not 'mtp.'-prefixed, so the mtp.* sidecar machinery does not apply - hy_v3 precedent: ship it VERBATIM via passthrough_prefixes with has_mtp() False."
     }
   }

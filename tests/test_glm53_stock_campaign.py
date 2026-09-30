@@ -430,13 +430,14 @@ def test_glm5_next_mlp_gate_up_fused_groups():
         == p.fused_sibling_group("model.layers.7.mlp.shared_experts.up_proj")
         == "model.layers.7.mlp.shared_experts.gate_up_proj"
     )
-    # down_proj is standalone; packed experts are already one unit; KDA and
-    # lm_head are pinned - none may pick up a group.
+    # down_proj is standalone; packed experts are already one unit; lm_head is
+    # pinned; the KDA f_b_proj is its own runtime module (f_a_proj is not: it
+    # loads into in_proj_qkvbfg_a, PQ #1837) - none may pick up a group.
     for standalone in (
         "model.layers.0.mlp.down_proj",
         "model.layers.7.mlp.shared_experts.down_proj",
         "model.layers.7.mlp.experts.gate_up_proj",
-        "model.layers.44.self_attn.f_a_proj",
+        "model.layers.44.self_attn.f_b_proj",
         "lm_head",
     ):
         assert p.fused_sibling_group(standalone) is None, standalone
