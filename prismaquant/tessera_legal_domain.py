@@ -958,11 +958,14 @@ class ByteAccount:
 
 def byte_account(
     family: "str | TesseraFamily", rate_q256: int, shape: Sequence[int],
+    *, structure: "str | None" = None,
 ) -> ByteAccount:
     """Exact serialized bytes for one candidate at one shape, by component.
 
     Delegates to ``tessera_footprint.tessera_tensor_payload_breakdown`` and
-    re-labels its planes; it computes no size of its own.  A second accountant
+    re-labels its planes; it computes no size of its own. ``structure`` selects
+    the existing served recipe; ``None`` preserves research accounting.
+    A second accountant
     is the defect PrismaQuant #126 was, so this one only reads.
     """
     from .tessera_footprint import tessera_tensor_payload_breakdown
@@ -971,6 +974,7 @@ def byte_account(
     rows, columns = int(shape[0]), int(shape[1])
     payload = tessera_tensor_payload_breakdown(
         (rows, columns), family=spec.name, body_rate_q256=int(rate_q256),
+        structure=structure,
     )
     table = int(payload["alphabet_bytes"])
     descendant = int(payload["descendant_bytes"])

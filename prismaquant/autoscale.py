@@ -773,7 +773,8 @@ def selected_anchor_resources(model_path, *, unit_shapes, counts, max_act_rows,
         # never holds the selected population: its phases replace
         # capture_prefetch, resident_anchors and export_inputs for a row that
         # runs it, and are kept apart from ``phases`` so ``memory_bytes`` still
-        # admits the load-all head a resume or an ineligible argv falls back to.
+        # admits an explicit or otherwise required load-all head. A checkpoint
+        # alone no longer requires that head (PQ #1613).
         widest_prefix = max(4*min(counts[name], max_act_rows)*shape[1]
                             for name, shape in unit_shapes.items())
         stream_phases = dict(

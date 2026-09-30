@@ -83,14 +83,27 @@ def test_menu_expansion_forwards_explicit_scope(monkeypatch):
         calls.append(serving_context)
         return admission
 
+    geometry_structures = []
+    wire_calls = []
+
+    def tp_legal(*args, structure=None, **kwargs):
+        geometry_structures.append(structure)
+        return True, ""
+
+    def served_recipe(spec, rate, *, structure):
+        wire_calls.append((spec, rate, structure))
+        return None
+
     monkeypatch.setattr(menu, "route_admission", admit)
-    monkeypatch.setattr(menu, "tessera_tp_legal", lambda *args, **kwargs: (True, ""))
-    monkeypatch.setattr(menu, "tessera_wire_recipe", lambda *args: None)
+    monkeypatch.setattr(menu, "tessera_tp_legal", tp_legal)
+    monkeypatch.setattr(menu, "tessera_served_wire_recipe", served_recipe)
     monkeypatch.setattr(tessera_footprint, "tessera_exact_bits_for_shape",
                         lambda *args, **kwargs: Fraction(128))
     rows = menu.expand_tessera_menu((4, 4), families=(family,), serving_context=context)
     assert len(rows) == 1 and rows[0].admission is admission
     assert calls == [context]
+    assert geometry_structures == [context.structure]
+    assert wire_calls == [(family, 1024, context.structure)]
 
 
 def test_resolved_lane_identity_and_serialization_retain_scope(monkeypatch):

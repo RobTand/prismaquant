@@ -3287,6 +3287,82 @@ def check_source_coverage(coverage_rows: list[dict], *, coverage=None) -> None:
             "readsets from the loader's source plan")
 
 
+def _pilot_code_sha256() -> str:
+    # Same package closure the producer already seals; no second hash recipe.
+    from prismaquant.production_weight_cache import _production_cache_source_sha256
+
+    return _production_cache_source_sha256()
+
+
+def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
+    """Stamp every row before the first submission; a refusal publishes none."""
+    from prismaquant.digests import bytes_sha256hex, is_sha256hex
+    from prismaquant.joint_dispatch_pilot import (
+        PILOT_SCHEMA, PilotRefused, pilot_binding, validate_pilot)
+    from prismaquant.joint_replay_regime import replay_regime_from_environment
+
+    quanta = [row for row in rows if row["kind"] == "quantum"]
+    if args.force_unverified_pilot or len(quanta) <= 1:
+        for row in quanta:
+            row["pilot_admission"] = {
+                "schema": PILOT_SCHEMA,
+                "mode": "override" if args.force_unverified_pilot else "pilot",
+                "fanout": len(quanta),
+            }
+        return
+    if not args.pilot_counters:
+        raise DispatchRefused(
+            f"pilot required before fanout of {len(quanta)} quanta: run one "
+            "--quantum, then supply --pilot-counters PATH SHA256 for each "
+            "code/replay-regime/row-shape; --force-unverified-pilot is an "
+            "explicit, recorded override")
+    documents = []
+    for path, digest in args.pilot_counters:
+        try:
+            raw = Path(path).read_bytes()
+            if not is_sha256hex(digest) or bytes_sha256hex(raw) != digest:
+                raise ValueError("counter document SHA-256 does not match")
+            document = json.loads(raw)
+            if not isinstance(document, dict):
+                raise ValueError("counters are not a JSON object")
+        except (OSError, ValueError) as exc:
+            raise DispatchRefused(f"pilot counters {path}: {exc}") from exc
+        documents.append((document, {"path": str(path), "sha256": digest}))
+    implementation = _pilot_code_sha256()
+    by_id = {record["quantum_id"]: record for _, record in records}
+    origins = {}
+    for row in quanta:
+        argv = row["argv"]
+        spec = json.loads(argv[argv.index("--spec") + 1])
+        expected = pilot_binding(
+            by_id[row["quantum_id"]], implementation_sha256=implementation,
+            execution_plan_sha256=argv[argv.index("--plan-sha256") + 1],
+            replay_regime=replay_regime_from_environment(spec.get("env") or {}),
+            cotangent_source=row["cotangent_source"]["mode"],
+            emits_handoff=row["handoff_template"] is not None)
+        matching = [(c, ref) for c, ref in documents
+                    if isinstance(c.get("pilot"), dict)
+                    and c["pilot"].get("binding") == expected]
+        if len(matching) != 1:
+            raise DispatchRefused(
+                f"pilot for {row['quantum_id']}: expected exactly one matching "
+                "code/plan/replay-regime/row-shape receipt, "
+                f"found {len(matching)}")
+        counters, reference = matching[0]
+        try:
+            admission = validate_pilot(counters, expected)
+        except PilotRefused as exc:
+            raise DispatchRefused(f"{row['quantum_id']}: {exc}") from exc
+        key = admission["action_key"]
+        if key not in origins:
+            origins[key] = gateway.is_terminal_executed(key)
+        if not origins[key]:
+            raise DispatchRefused(f"pilot for {row['quantum_id']}: PB origin {key} "
+                                  "is not successfully terminal")
+        row["pilot_admission"] = {**admission, "document": reference,
+                                  "fanout": len(quanta)}
+
+
 def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
          _coverage=None) -> int:
     parser = argparse.ArgumentParser(
@@ -3378,6 +3454,14 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                              "one (repeatable). A compute term outside every "
                              "ceiling's scope takes the blanket "
                              f"{HEAD_PROGRESS_GRACE_S} s")
+    parser.add_argument("--pilot-counters", action="append", nargs=2, default=[],
+                        metavar=("PATH", "SHA256"),
+                        help="producer counters certifying this code, replay "
+                             "regime and row shape (repeatable); mandatory "
+                             "before publishing more than one quantum")
+    parser.add_argument("--force-unverified-pilot", action="store_true",
+                        help="explicitly bypass pilot admission; stamp the "
+                             "override in dry-run output and dispatch state")
     parser.add_argument("--state", default=None)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -3592,6 +3676,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                              "progress_grace": progress_grace_of(argv),
                              "argv": argv})
         check_source_coverage(coverage_rows, coverage=_coverage)
+        _admit_dispatch_pilots(args, rows, records, gateway)
     except DispatchRefused as exc:
         print(f"dispatch_joint_quanta: refused: {exc}", file=sys.stderr)
         return EXIT_PRECONDITION_REFUSED
@@ -3618,7 +3703,8 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                         "band_serial_readset": row[
                                             "band_serial_readset"],
                                         "link": row["link"],
-                                        "progress_grace": row["progress_grace"]}
+                                        "progress_grace": row["progress_grace"],
+                                        "pilot_admission": row["pilot_admission"]}
                                        if row["kind"] == "quantum" else {}),
                                     **({"slice_sha256": publishable[row["quantum_id"]],
                                         **{key: by_id[row["quantum_id"]]["adjoint"][key]
@@ -3661,6 +3747,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                "handoff_template": row["handoff_template"],
                                "link": row["link"],
                                "progress_grace": row["progress_grace"],
+                               "pilot_admission": row["pilot_admission"],
                                "execution_plan": execution_stamp,
                                "action_key": answer["action_key"]})
             print(json.dumps({"published": row.get("quantum_id", "stage-a"),
