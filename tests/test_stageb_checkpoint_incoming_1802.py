@@ -96,28 +96,61 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
             "spill_root": spill_fixture._spill_root(tmp_path, needs_direct_io=False),
             "ceiling": 64 << 20}
     snapshots = []
+    planes = []
+    active = {}
     held = checkpoints.PlaneHostStaging.held
+    incoming = checkpoints.PlaneHostStaging.incoming
+    store = checkpoints.PlaneHostStaging.store
+
+    def tensor_bytes(value):
+        return value.detach().contiguous().view(torch.uint8).numpy().tobytes()
+
+    def plane_bytes(plane):
+        return {key: tensor_bytes(value) for key, value in plane.items()}
+
+    def capture_incoming(self, keys, *, device):
+        keys = list(keys)
+        result = incoming(self, keys, device=device)
+        active[id(self)]["incoming"].append(
+            (tuple(keys), tuple(result.shape), str(result.dtype), tensor_bytes(result)))
+        return result
+
+    def capture_store(self, keys, rows, gradient):
+        keys = list(keys)
+        store(self, keys, rows, gradient)
+        active[id(self)]["stored"].update(
+            {key: tensor_bytes(self.plane[key]) for key in keys})
 
     @contextmanager
     def capture_final(self):
-        with held(self):
-            yield
-            snapshots.append({key: value.contiguous().view(torch.uint8).numpy().tobytes()
-                              for key, value in self.plane.items()})
+        record = {"incoming": [], "stored": {}}
+        active[id(self)] = record
+        try:
+            with held(self):
+                yield
+                snapshots.append(record)
+                # Inspect this fixture-owned dict only after the quantum has
+                # finished every probe, never while future slots are unread.
+                planes.append(self.plane)
+        finally:
+            del active[id(self)]
 
     monkeypatch.setattr(checkpoints.PlaneHostStaging, "held", capture_final)
+    monkeypatch.setattr(checkpoints.PlaneHostStaging, "incoming", capture_incoming)
+    monkeypatch.setattr(checkpoints.PlaneHostStaging, "store", capture_store)
     spill_fixture._clear_output(campaign, layer)
     baseline, state = spill_fixture._quantum(campaign, monkeypatch, layer=layer, **launch_kwargs)
     assert not hasattr(state, "error"), repr(getattr(state, "error", None))
     baseline_evidence = spill_fixture._evidence(campaign, layer, baseline)
-    baseline_plane = snapshots[-1]
+    baseline_plane = plane_bytes(planes[-1])
     snapshots.clear()
     # Durable prices skip measurement, not the final backward/roll passes.
     baseline_resume, state = spill_fixture._quantum(
         campaign, monkeypatch, layer=layer, resume=True, **launch_kwargs)
     assert not hasattr(state, "error"), repr(getattr(state, "error", None))
     assert spill_fixture._evidence(campaign, layer, baseline_resume) == baseline_evidence
-    assert snapshots
+    assert snapshots and all(row["incoming"] and row["stored"] for row in snapshots)
+    assert plane_bytes(planes[-1]) == baseline_plane
     baseline_resume_planes = list(snapshots)
     snapshots.clear()
     spill_fixture._clear_output(campaign, layer)
@@ -125,7 +158,7 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
     candidate, state = spill_fixture._quantum(campaign, monkeypatch, layer=layer, **launch_kwargs)
     assert not hasattr(state, "error"), repr(getattr(state, "error", None))
     assert spill_fixture._evidence(campaign, layer, candidate) == baseline_evidence
-    assert snapshots[-1] == baseline_plane
+    assert plane_bytes(planes[-1]) == baseline_plane
     if layer == 1:
         assert state.counters_block["handoff_incoming"]["source"] == "checkpoint_research"
     # Fully durable resume preserves the default final passes and operand bytes.
@@ -135,6 +168,7 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
     assert not hasattr(state, "error"), repr(getattr(state, "error", None))
     assert spill_fixture._evidence(campaign, layer, resumed) == baseline_evidence
     assert snapshots == baseline_resume_planes
+    assert plane_bytes(planes[-1]) == baseline_plane
     if layer == 1:
         assert state.counters_block["handoff_incoming"]["source"] == "checkpoint_research"
     spill_fixture._clear_output(campaign, layer)
@@ -172,7 +206,7 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
     assert not hasattr(state, "error"), repr(getattr(state, "error", None))
     assert partial is not None
     assert restored[0] and len(restored[0]) < len(partial["costs"])
-    assert snapshots[-1] == baseline_plane
+    assert plane_bytes(planes[-1]) == baseline_plane
     assert spill_fixture._evidence(campaign, layer, partial) == baseline_evidence
     spill_fixture._clear_output(campaign, layer)
 
