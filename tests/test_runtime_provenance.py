@@ -324,7 +324,15 @@ def native_intake(relation_fixture, joined):
 
 def test_native_rows_reuse_original_same_run_numerical_and_resource_gates(native_intake):
     _, table, relation = native_intake
+    original = json.dumps(relation['record'], sort_keys=True)
     admit_native_rows(table, relation)
+    framing = relation['wire_source_framing']
+    assert len(framing) == len(table.rows)
+    assert all(check['status'] == 'legacy_framing'
+               for row in framing for check in row['comparisons'])
+    assert json.dumps(relation['record'], sort_keys=True) == original
+    admit_native_rows(table, relation)
+    assert relation['wire_source_framing'] == framing
 
 
 @pytest.mark.parametrize("mutation", ["foreign_runtime", "foreign_cost", "foreign_source", "foreign_calibration",
