@@ -39,7 +39,7 @@ from .tessera_formats import (
     tessera_serving_route,
     recipe_from_wire_names,
     scale_plane_name,
-    tessera_wire_recipe,
+    tessera_served_wire_recipe,
     validate_body_rate_q256,
 )
 from .digests import DIRECT_ASCII_LAX_DEFAULT_STR
@@ -303,6 +303,7 @@ def tessera_tensor_payload_breakdown(
     span: "int | None" = None,
     scale_plane: "str | None" = None,
     recipe=None,
+    structure: "str | None" = None,
     member_name: "str | None" = None,
 ) -> dict[str, object]:
     """Exact serialized bytes for one 2-D Linear weight at one Tessera rung.
@@ -318,9 +319,11 @@ def tessera_tensor_payload_breakdown(
     False) and the caller adds ``member_name_bytes`` for its own name.
 
     ``recipe`` -- a ``tessera.export.WireRecipe`` -- is the wire being priced,
-    and it defaults to the one the exporter writes for this family at this
-    rung (``tessera_wire_recipe``), so a footprint priced here is the footprint
-    of the bytes ``encode_linear`` writes.  ``span``/``scale_plane`` remain as
+    and an explicit recipe remains authoritative. Otherwise ``structure``
+    selects ``tessera_served_wire_recipe``: a routed stack is priced on its
+    existing served wire, while ``None`` preserves the research recipe.
+    Unattested explicit serving structures are refused by that resolver.
+    ``span``/``scale_plane`` remain as
     the two-scalar spelling for callers that predate the recipe; naming both is
     refused.  The resolved body, span, plane and window width are all recorded
     in the breakdown and re-derived by
@@ -339,7 +342,9 @@ def tessera_tensor_payload_breakdown(
             "name a recipe or the span/scale_plane scalars, not both"
         )
     if recipe is None:
-        wire = tessera_wire_recipe(spec, body_rate_q256)
+        wire = tessera_served_wire_recipe(
+            spec, body_rate_q256, structure=structure,
+        )
         if span is not None or scale_plane is not None:
             wire = recipe_from_wire_names(
                 int(wire.span if span is None else span),
@@ -657,11 +662,13 @@ def tessera_exact_bits_for_shape(
     shape: Sequence[int],
     *,
     recipe=None,
+    structure: "str | None" = None,
 ) -> Fraction:
     """Exact serialized bits for one Tessera tensor, planes included.
 
     The size question asked without the report: same family, same rung, same
-    recipe, same arithmetic as :func:`tessera_tensor_payload_breakdown` --
+    recipe (or declared serving structure), same arithmetic as
+    :func:`tessera_tensor_payload_breakdown` --
     literally the same call -- so a rung cannot be priced one way for a
     ``FormatSpec`` and another way for an allocator candidate.  It is the
     ``layout="tight"``, canonical-schedule figure, which is what a
@@ -705,7 +712,8 @@ def tessera_exact_bits_for_shape(
             f"shape {dims}"
         )
     rows, columns = dims[-2], dims[-1]
-    wire = tessera_wire_recipe(spec, body_rate_q256) if recipe is None else recipe
+    wire = (tessera_served_wire_recipe(spec, body_rate_q256, structure=structure)
+            if recipe is None else recipe)
     return experts * _exact_bits_for_shape(
         spec.name, int(body_rate_q256), rows, columns, wire,
     )

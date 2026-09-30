@@ -35,6 +35,18 @@ stamps. Producer requalification, the answer-column review and a separately
 reviewed activating pin remain prerequisites; CPU tests are not serving
 qualification.
 
+Re-stamped 2026-09-29 (PQ #1753, Refs #1504, `sol/pq-tessera-2`):
+CPU footprint and menu geometry resolve the existing served recipe when a
+serving structure is declared. In particular, E2M1x2 routed sub-cap units
+use the producer's span-2 TCQ recipe, not the research WINDOW recipe.
+`tessera_tensor_payload_breakdown`, `tessera_exact_bits_for_shape`, and
+`byte_account` accept `structure`; a context-scoped menu carries that same
+structure through whole-unit, TP-shard and byte checks. No structure preserves
+research accounting, and an explicit footprint recipe remains authoritative.
+Unattested served wires are refused by the existing resolver. Production
+rendering, producer accounting, encoded bytes, pin and ship gates are unchanged.
+This is CPU recipe/geometry consistency, not GPU or serving qualification.
+
 Re-stamped 2026-09-29 (PQ #1755, Refs #495, `sol/pq-tessera-3`):
 `python -m prismaquant.tessera_reduced_schedule` provides a research-only offline
 next-work transition from explicit stack evidence, current allocator winners,
