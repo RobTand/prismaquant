@@ -6,6 +6,7 @@ from importlib import metadata
 import importlib.util
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -14,8 +15,6 @@ from test_runtime_provenance import relation_fixture, relation_load
 
 V1 = 'prismaquant.source_tree.v1'
 V2 = 'prismaquant.source_tree.v2'
-PIN = 'b40c93cb73745097e57a1ba4cf5b9eee166c759a'
-VENV = Path('/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb')
 CPP = (b'constexpr char embedded[] = R"BIN(before\0after)BIN";\n'
        b'static_assert(sizeof(embedded) == 13);\n'
        b'static_assert(embedded[6] == 0);\n'
@@ -44,6 +43,7 @@ def framed(files):
 def reseal():
     path = Path(__file__).parents[1] / 'tools' / 'reseal_campaign_identity.py'
     spec = importlib.util.spec_from_file_location('reseal_source_profiles_1762', path)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -152,6 +152,30 @@ def test_runtime_relation_v2_mismatch_is_not_a_legacy_pass(relation_fixture):
         relation_load(relation_fixture)
 
 
+@pytest.mark.parametrize('kind', ['malformed_v2', 'unknown_profile', 'incoherent_v1'])
+def test_runtime_relation_refuses_bad_advertised_package_profiles(relation_fixture, kind):
+    from prismaquant.measured_runtime_prices import RuntimePriceError
+    evidence, record, _ = relation_fixture
+    ref = record['runs']['native']['post_package']
+    package = evidence.get(ref)
+    profiles = {V1: package['encoder_source_sha256']}
+    if kind == 'malformed_v2':
+        profiles[V2] = 'not-a-sha'
+    elif kind == 'unknown_profile':
+        profiles['unknown.source.v2'] = '0' * 64
+    else:
+        profiles[V1] = '0' * 64
+    package['source_profiles'] = profiles
+    evidence.replace(ref, package)
+    engine = record['runs']['engine']
+    engine['post_package'] = dict(ref)
+    raw = evidence.get(engine['runtime'])
+    raw['loaded_package'] = package
+    evidence.replace(engine['runtime'], raw)
+    with pytest.raises(RuntimePriceError, match='source.*profile'):
+        relation_load(relation_fixture)
+
+
 def test_runtime_relation_v2_compares_strong_profiles_not_cross_run_v1(relation_fixture):
     evidence, record, _ = relation_fixture
     files = {name: name.encode() for name in
@@ -193,13 +217,22 @@ def test_reseal_hash_output_emits_both_without_rewriting(tmp_path, capsys):
     assert list(root.iterdir()) == [root / '__init__.py']
 
 
-def test_actual_installed_b40_v1_identity_is_unchanged():
-    distribution = metadata.distribution('tessera-quant')
-    url = json.loads(distribution.read_text('direct_url.json'))
-    assert url['vcs_info']['commit_id'] == PIN
+def test_actual_installed_git_v1_identity_is_unchanged():
+    try:
+        distribution = metadata.distribution('tessera-quant')
+    except metadata.PackageNotFoundError:
+        pytest.skip('needs an installed Git-provenanced Tessera distribution')
+    direct_url = distribution.read_text('direct_url.json')
+    if direct_url is None:
+        pytest.skip('needs Tessera Git direct_url.json provenance')
+    url = json.loads(direct_url)
+    if url.get('vcs_info', {}).get('vcs') != 'git':
+        pytest.skip('needs a non-editable Git-provenanced Tessera install')
+    commit = url['vcs_info']['commit_id']
+    assert len(commit) == 40 and all(c in '0123456789abcdef' for c in commit)
     assert not url.get('dir_info', {}).get('editable', False)
     root = Path(distribution.locate_file('tessera')).resolve()
-    assert root.is_relative_to(VENV.resolve())
+    assert root.is_relative_to(Path(sys.prefix).resolve())
     files = {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob('*'))
              if p.is_file() and p.suffix in tessera_reader.SOURCE_SUFFIXES}
     expected = legacy(files)
@@ -210,5 +243,5 @@ def test_actual_installed_b40_v1_identity_is_unchanged():
     assert Path(installed_encoder.__file__).resolve().parent == root
     installed_encoder.encoder_source_sha256.cache_clear()
     assert installed_encoder.encoder_source_sha256() == expected
-    print(json.dumps({'actual_package': str(root), 'commit': PIN,
+    print(json.dumps({'actual_package': str(root), 'commit': commit,
                       'files': len(files), 'legacy_sha256': expected}, sort_keys=True))
