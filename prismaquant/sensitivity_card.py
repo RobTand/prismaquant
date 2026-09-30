@@ -83,12 +83,13 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-import hashlib
 import json
 import math
 from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
+
+from .digests import text_sha256hex
 
 # 1.1 adds the packed-expert A-side vectors (``expert_*``). Additive: a 1.0
 # reader sees array keys it never asks for, and a 1.1 card whose probe predates
@@ -367,7 +368,7 @@ class CardProvenance:
             },
             sort_keys=True,
         )
-        return hashlib.sha256(payload.encode()).hexdigest()
+        return text_sha256hex(payload)
 
 
 class SensitivityCard:
