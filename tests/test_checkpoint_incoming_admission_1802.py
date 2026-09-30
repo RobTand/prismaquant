@@ -92,6 +92,40 @@ def test_validated_snapshot_cannot_be_redirected_after_construction(tmp_path, ex
         owner.__exit__(None, None, None)
 
 
+@pytest.mark.parametrize("dimension", ["float", "bool"])
+@pytest.mark.parametrize("consumer", ["adapter", "loader"])
+def test_metadata_dimensions_require_exact_positive_ints(tmp_path, dimension, consumer):
+    space, owner, _refs, original = _referenced(tmp_path)
+    # A valid control must construct first: a generic serializer failure must
+    # not accidentally qualify the rejection cases below.
+    cp.CheckpointIncoming(original, n_probes=2, n_batches=1)
+    record = copy.deepcopy(original)
+    if dimension == "float":
+        row = record["activation_entries"][0]
+        row["metadata"]["shape"] = [float(n) for n in row["shape"]]
+    else:
+        row = record["activation_entries"][1]
+        assert row["tensor_bytes"] == 16
+        row["shape"] = [1, 4]
+        row["metadata"]["shape"] = [True, 4]
+    calls = []
+    def factory(rows):
+        calls.append(list(rows))
+        return {}
+    try:
+        with pytest.raises((ValueError, RuntimeError)):
+            if consumer == "adapter":
+                cp.CheckpointIncoming(record, n_probes=2, n_batches=1)
+            else:
+                manifest = cp.checkpoint_manifest_entry(record)
+                Path(manifest["path"]).write_bytes(cp.checkpoint_manifest_bytes(record))
+                cp.load_adjoint_checkpoint(space, record, stream_incoming=True,
+                                           cotangent_factory=factory)
+        assert calls == [], "non-integer metadata dimensions reached reservation"
+    finally:
+        owner.__exit__(None, None, None)
+
+
 @pytest.mark.parametrize("field", ["tensor_bytes", "metadata_shape"])
 def test_standalone_stream_loader_refuses_before_factory_with_matching_manifest(tmp_path, field):
     space, owner, _refs, original = _referenced(tmp_path)

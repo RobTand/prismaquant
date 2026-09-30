@@ -1861,7 +1861,7 @@ def _checkpoint_workspace_rows(stored, plane):
 def _checkpoint_metadata_snapshot(record):
     """Own the JSON checkpoint metadata, without borrowing caller dictionaries."""
     try:
-        return json.loads(canonical_json_bytes(record))
+        return json.loads(canonical_json_bytes(record, where="checkpoint incoming metadata"))
     except (TypeError, ValueError) as exc:
         raise ValueError("checkpoint incoming metadata must be finite JSON") from exc
 
@@ -1889,7 +1889,9 @@ def _validated_checkpoint_stream_plane(record):
         metadata = row.get("metadata")
         if (not isinstance(metadata, dict)
                 or metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
-                or metadata.get("shape") != list(shape)
+                or not isinstance(metadata.get("shape"), list)
+                or any(type(n) is not int or n <= 0 for n in metadata["shape"])
+                or metadata["shape"] != list(shape)
                 or metadata.get("dtype") != row["dtype"]
                 or type(metadata.get("tensor_bytes")) is not int
                 or metadata["tensor_bytes"] != row["tensor_bytes"]):
