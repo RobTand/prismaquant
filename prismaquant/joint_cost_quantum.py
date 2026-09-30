@@ -85,6 +85,10 @@ from .joint_layer_quanta import (
     quantum_source_layer_order,
 )
 from .source_read_plan import chain_prefetch_window
+from .joint_checkpoint_publication import (
+    CheckpointPublicationLedger, SETTING as CHECKPOINT_PUBLICATION_SETTING,
+    publication_budget, publication_geometry, check_construction,
+)
 from .joint_quantum_handoff import (
     HANDOFF_LOAD_PHASE,
     HANDOFF_TEE_GROUPS,
@@ -601,6 +605,7 @@ class QuantumCounters:
         # names none, else the kernel admitted for kernel mode, whose layer
         # pass counts are read at finish.
         self.kda_capture_kernel = None
+        self.checkpoint_publication: dict | None = None
         self._phase_cursor = None
         self._window_cursor = None
 
@@ -767,6 +772,8 @@ class QuantumCounters:
             **({} if self.handoff_incoming is None
                else {"handoff_incoming": self.handoff_incoming}),
             **({} if self.io_engine is None else {"io_engine": self.io_engine}),
+            **({} if self.checkpoint_publication is None
+               else {"checkpoint_publication": self.checkpoint_publication}),
             "exposed_wait": self.exposed_wait_block(finished_unix),
             "phases": self.phases,
             "windows": self.windows,
@@ -1022,6 +1029,7 @@ def quantum_runtime_execution(config, *, replay_regime, kda_capture_kernel=None)
     settings ``run_layer_quantum`` resolved; an unset kernel adds no key.
     """
     execution = dict(config["execution"])
+    publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
     execution.setdefault("device_envelope_bytes", config.get("max_gpu_bytes"))
     if "min_free_gib" in config:
         execution.setdefault("min_free_gib", config["min_free_gib"])
@@ -1645,6 +1653,9 @@ def run_layer_quantum_core(
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
+    checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
+    if checkpoint_budget:
+        publication_geometry(checkpoint_budget, resolved_windows)
     layer = int(record["layer"])
     quantum_id = str(record["quantum_id"])
     # The quantum reads its stage-A slice and nothing else (PQ #993): a whole
@@ -2550,6 +2561,69 @@ def run_layer_quantum_core(
                         weight = linears[name].weight.data
                         _record_joint_operator(name, fmt, weight, weight)
 
+        def acknowledge_units():
+            progress.priced(len(completed_units))
+            progress.commit()
+            counters.mark_phase_units(len(completed_units))
+
+        def durable_window(window_index):
+            progress.window_done(resolved_windows[window_index])
+            counters.enter_phase()
+            counters.mark_phase_units(len(completed_units))
+            progress.commit()
+
+        publication = None
+        if checkpoint_budget:
+            if guard is not None:
+                check_operator_allocation(
+                    guard, "before_stage_b_checkpoint_staging",
+                    reserve_bytes=checkpoint_budget)
+            publication = CheckpointPublicationLedger(
+                checkpoint_root=checkpoint_root,
+                identity_sha256=checkpoint_identity_sha256,
+                windows=resolved_windows, completed=completed_units,
+                acknowledge=acknowledge_units, window_done=durable_window,
+                budget_bytes=checkpoint_budget)
+
+        def checkpoint_state(name, max_staging_bytes=None):
+            if max_staging_bytes is not None:
+                # Inspect resident inputs before allocating rows, copied probe
+                # vectors or their serialization. The list holds only refs.
+                references = [joint_probe, joint_probe_identity, g_trace[name]]
+                for fmt in unit_formats[name]:
+                    references.extend((fmt, joint_operators[(name, fmt)]))
+                    if fmt not in _ZERO_COST_FORMATS:
+                        references.append(joint_components[(name, fmt)])
+                for fmt in render_formats[name]:
+                    key = (name, fmt)
+                    if key in s2:
+                        references.extend((x2_probe[key], dw_src[key]))
+                check_construction(
+                    references=references, rows=len(unit_formats[name]),
+                    probes=n_probes, seed_base=seed_base, limit=max_staging_bytes)
+            rows = {}
+            for fmt in unit_formats[name]:
+                if fmt in _ZERO_COST_FORMATS:
+                    components = [{"weight": 0.0, "activation": 0.0,
+                                   "mixed": 0.0, "total": 0.0}
+                                  for _ in range(n_probes)]
+                else:
+                    components = joint_components[(name, fmt)]
+                row = make_joint_aura_entry(
+                    operator_identity=joint_operators[(name, fmt)],
+                    probe_identity=joint_probe,
+                    signed_components=components,
+                )
+                row["probe_identity"] = joint_probe_identity
+                rows[fmt] = row
+            joint_rows[name] = rows
+            return {**_aura_unit_state(
+                name, render_formats[name], s2=s2, s4=s4,
+                x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
+                col_energy={}, weight_mse_diagnostic={},
+                source_weight_identity={}, observation_counts=None),
+                "joint_aura_rows": joint_rows[name]}
+
         def commit_streamed_units(targets):
             targets = [name for name in targets if name not in completed_units]
             if not targets:
@@ -2558,37 +2632,23 @@ def run_layer_quantum_core(
                     "source_execution"]:
                 raise RuntimeError(
                     "joint AURA source execution backend changed during measurement")
+            submitted = 0
             for name in targets:
-                rows = {}
-                for fmt in unit_formats[name]:
-                    if fmt in _ZERO_COST_FORMATS:
-                        components = [{"weight": 0.0, "activation": 0.0,
-                                       "mixed": 0.0, "total": 0.0}
-                                      for _ in range(n_probes)]
-                    else:
-                        components = joint_components[(name, fmt)]
-                    row = make_joint_aura_entry(
-                        operator_identity=joint_operators[(name, fmt)],
-                        probe_identity=joint_probe,
-                        signed_components=components,
-                    )
-                    row["probe_identity"] = joint_probe_identity
-                    rows[fmt] = row
-                joint_rows[name] = rows
-                _write_aura_unit_checkpoint(
-                    checkpoint_root, qname=name,
-                    identity_sha256=checkpoint_identity_sha256,
-                    state={**_aura_unit_state(
-                        name, render_formats[name], s2=s2, s4=s4,
-                        x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
-                        col_energy={}, weight_mse_diagnostic={},
-                        source_weight_identity={}, observation_counts=None),
-                        "joint_aura_rows": joint_rows[name]})
-                completed_units.add(name)
-            progress.priced(len(completed_units))
-            progress.commit()
-            counters.mark_phase_units(len(completed_units))
-            return len(targets)
+                if publication is not None:
+                    submitted += int(publication.submit(
+                        name, partial(checkpoint_state, name)))
+                else:
+                    _write_aura_unit_checkpoint(
+                        checkpoint_root, qname=name,
+                        identity_sha256=checkpoint_identity_sha256,
+                        state=checkpoint_state(name))
+                    completed_units.add(name)
+                    submitted += 1
+            if publication is not None:
+                publication.poll()
+            else:
+                acknowledge_units()
+            return submitted
 
         noncontiguous_seeds: set[tuple[int, int]] = set()
         capture_group_cache: dict = {}
@@ -2936,8 +2996,10 @@ def run_layer_quantum_core(
         def before_window(window_index, window_names):
             nonlocal window_kernel, window_started, replay_window, window_span
             nonlocal window_reads_at_open
-            del window_names
             close_skipped_window()
+            if publication is not None:
+                # Includes resumed windows with no after_window callback.
+                publication.start_window(int(window_index), window_names)
             window_span = counters.io.open("window", window=int(window_index))
             # The wait has its own child span, as the commit does, so a slow
             # window names which of the two it spent (PQ #1207). Without an
@@ -3035,12 +3097,12 @@ def run_layer_quantum_core(
                                       if render_stream is not None
                                       and render_stream.counters["groups_taken"] else None),
                                   reads=reads)
-            with counters.io.span("commit", window=int(window_index)) as commit_span:
+            with counters.io.span(
+                    "commit" if publication is None else "checkpoint-submit",
+                    window=int(window_index)) as commit_span:
                 commit_span.attrs["units"] = commit_streamed_units(window_names)
-            progress.window_done(resolved_windows[window_index])
-            counters.enter_phase()
-            counters.mark_phase_units(len(completed_units))
-            progress.commit()
+            if publication is None:
+                durable_window(window_index)
             if window_span is not None:
                 counters.io.close(window_span)
 
@@ -3270,11 +3332,25 @@ def run_layer_quantum_core(
                 render_stream=render_stream,
                 render_cache=render_cache,
             )
+            if publication is not None:
+                # Explicit success barrier before unload/handoff/payload.
+                with counters.io.span("checkpoint-flush"):
+                    publication.flush()
             close_skipped_window()
         except BaseException as exc:
+            if publication is not None:
+                try:
+                    publication.cancel()
+                except BaseException as cleanup:
+                    counters.checkpoint_publication = {
+                        "cleanup_error": f"{type(cleanup).__name__}: {cleanup}"}
             close_render_session(exc)
             raise
         finally:
+            if publication is not None:
+                publication.close()
+                counters.checkpoint_publication = {
+                    **(counters.checkpoint_publication or {}), **publication.stats()}
             if render_stream is not None:
                 render_stream.close()
                 counters.io_engine = dict(render_stream.counters)
@@ -3582,6 +3658,7 @@ def run_layer_quantum(
     from .autoscale import require_bounded_capture_environment
 
     execution = config["execution"]
+    publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
     # The replay regime is a launch setting sealed in the campaign container
     # spec, never a plan field: the plan is bound to the prepared inputs.
     from .joint_replay_regime import (
