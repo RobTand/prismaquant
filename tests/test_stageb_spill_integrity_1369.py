@@ -109,22 +109,30 @@ def test_disk_bit_flip_is_rejected_and_restored_chunk_is_bitwise(
         assert torch.equal(restored[:used], original[:used])
 
 
-def test_same_length_wrong_offset_is_rejected(tmp_path, monkeypatch):
-    with _captured(tmp_path, monkeypatch, probes=1) as session:
+@pytest.mark.parametrize("scatter_reads", [False, True])
+def test_same_length_wrong_offset_is_rejected(tmp_path, monkeypatch, scatter_reads):
+    with _captured(tmp_path, monkeypatch, probes=1, scatter_reads=scatter_reads) as session:
         window = session._windows[0]
         low, _ = _payload_range(session, "x", 0)
         other = window.entries["a"][1]
         wrong = session._physical(window.x_runs["a"], window.x_starts["a"],
                                   other.logical, other.nbytes)
         real_read = session._scratch.read_into
+        block = session._block
+        sector = spill._aligned_buffer(block, block, False)
+        wrong_view = memoryview(sector.numpy())
+        real_read(wrong - wrong % block, [wrong_view])
+        wrong_payload = wrong_view[wrong % block:wrong % block + other.nbytes].tobytes()
+        import xxhash
+        assert xxhash.xxh3_64_intdigest(wrong_payload) != window.entries["a"][0].checksum
 
         def misdirected(offset, views):
-            # Copy a different in-bounds slot into the expected destination.
-            # The spill's length, alignment and layout gates cannot detect it.
+            # Inject the different slot's operand at the expected residue.
+            # Whole-slot replacement is allocator-dependent: when residues
+            # differ it may copy stale padding that equals the expected X.
             got = real_read(offset, views)
-            if offset == low - low % session._block:
-                real_read(wrong - wrong % session._block,
-                          [views[0][:session._block]])
+            if offset == low - low % block:
+                views[0][low % block:low % block + other.nbytes] = wrong_payload
             return got
 
         monkeypatch.setattr(session._scratch, "read_into", misdirected)
