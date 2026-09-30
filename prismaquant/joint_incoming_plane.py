@@ -5,6 +5,7 @@ cache, pool or tensor residency mechanism.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 import time
 
@@ -73,7 +74,7 @@ class IncomingPlaneStream:
 
 @contextmanager
 def open_incoming_stream(probe, entries, *, session, max_resident_bytes,
-                         residency_check, stream_factory):
+                         residency_check, stream_factory) -> Iterator[IncomingPlaneStream]:
     """Join/release exact reads on every exit; require clean-pass exhaustion."""
     from .joint_adjoint_checkpoints import stream_exact_entry_tensors
 

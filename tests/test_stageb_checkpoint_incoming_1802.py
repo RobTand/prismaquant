@@ -23,9 +23,11 @@ def campaign(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def _clear_journal(campaign):
-    spill_fixture._clear_output(campaign, 0)
+    for layer in (0, 1):
+        spill_fixture._clear_output(campaign, layer)
     yield
-    spill_fixture._clear_output(campaign, 0)
+    for layer in (0, 1):
+        spill_fixture._clear_output(campaign, layer)
 
 
 def _enable(monkeypatch, mode=MODE):
@@ -120,7 +122,8 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
         assert state.counters_block["handoff_incoming"]["source"] == "checkpoint_research"
     # A fully validated journal avoids all incoming passes; default and research agree.
     snapshots.clear()
-    resumed, state = spill_fixture._quantum(campaign, monkeypatch, layer=layer, **launch_kwargs)
+    resumed, state = spill_fixture._quantum(
+        campaign, monkeypatch, layer=layer, resume=True, **launch_kwargs)
     assert not hasattr(state, "error"), repr(getattr(state, "error", None))
     assert spill_fixture._evidence(campaign, layer, resumed) == baseline_evidence
     assert snapshots == []
@@ -154,7 +157,8 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
         return observe(*args, **kwargs)
 
     monkeypatch.setattr(replay, "observe_and_project_retained_windows", resume)
-    partial, state = spill_fixture._quantum(campaign, monkeypatch, layer=layer, **launch_kwargs)
+    partial, state = spill_fixture._quantum(
+        campaign, monkeypatch, layer=layer, resume=True, **launch_kwargs)
     assert not hasattr(state, "error"), repr(getattr(state, "error", None))
     assert partial is not None
     assert restored[0] and len(restored[0]) < len(partial["costs"])
@@ -173,7 +177,7 @@ def test_unsupported_selection_refuses_before_context_install(campaign, monkeypa
 
     def launch(*args, **kwargs):
         kwargs["execution"] = {**kwargs["execution"], "checkpoint_incoming_mode": MODE}
-        runner = kwargs["runner"]
+        runner = args[0] if args else kwargs["runner"]
         saved_device = runner.device
         try:
             if case == "gpu":

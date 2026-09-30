@@ -23,7 +23,7 @@ import re
 import struct
 import time
 from concurrent.futures import ThreadPoolExecutor, wait as wait_futures
-from contextlib import closing, contextmanager, nullcontext
+from contextlib import AbstractContextManager, closing, contextmanager, nullcontext
 from pathlib import Path
 
 import torch
@@ -1905,7 +1905,7 @@ def _validated_checkpoint_stream_plane(record):
             "coordinates": coordinates,
         }
         identity = metadata.get("identity")
-        if (identity != expected_identity
+        if (not isinstance(identity, dict) or identity != expected_identity
                 or any(type(n) is not int for n in identity["coordinates"].values())):
             raise ValueError("checkpoint incoming metadata has a foreign cotangent identity")
     return plane
@@ -1947,7 +1947,7 @@ class CheckpointIncoming:
         return {probe: [reference_from_record(row) for row in rows]
                 for probe, rows in self._entries.items()}
 
-    def open(self, probe: int, *, max_resident_bytes: int, residency_check):
+    def open(self, probe: int, *, max_resident_bytes: int, residency_check) -> AbstractContextManager:
         from functools import partial
         from .joint_incoming_plane import IncomingPlaneStream, open_incoming_stream
 
