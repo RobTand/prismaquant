@@ -19,7 +19,10 @@ from .measured_runtime_prices import (
     _sha, _string, identity_sha256, RankResources, RuntimeRankResources,
 )
 from .schemas import strict_json_loads
-from .digests import DIRECT_ASCII_LAX, LegacyNulSourceSha256, bytes_sha256hex
+from .digests import (
+    DIRECT_ASCII_LAX, SOURCE_TREE_V1, LegacyNulSourceSha256, bytes_sha256hex,
+    compare_source_profiles, source_tree_profiles,
+)
 
 SCHEMA = "prismaquant.runtime_provenance_relation.v1"
 
@@ -95,6 +98,13 @@ def _source_digest(files):
     return digest.hexdigest()
 
 
+def _source_profiles(files):
+    """Add v2 without broadening or reordering the inherited v1 domain."""
+    return source_tree_profiles(
+        (name, files[name]) for name in sorted(files, key=Path)
+        if Path(name).suffix in {".py", ".cu", ".cuh", ".cpp", ".h"})
+
+
 def _source_tree_identity(tree):
     """The source-tree installer's own identity, recomputed from the bytes.
 
@@ -138,10 +148,13 @@ def _package_source(declaration, reader):
         raise RuntimePriceError("package source needs an exact archive and explicit excluded file roster")
     installed = {name: raw for name, raw in files.items() if name not in excluded}
     source_identity_sha256, source_identity_members = _source_tree_identity(tree)
+    full_profiles, installed_profiles = _source_profiles(files), _source_profiles(installed)
     return {"archive_sha256": declaration["archive"]["sha256"],
             "source_identity_sha256": source_identity_sha256,
             "source_identity_members": source_identity_members,
-            "source_tree_sha256": _source_digest(files), "installed_source_sha256": _source_digest(installed),
+            "source_tree_sha256": full_profiles[SOURCE_TREE_V1],
+            "installed_source_sha256": installed_profiles[SOURCE_TREE_V1],
+            "source_tree_profiles": full_profiles, "installed_source_profiles": installed_profiles,
             "installed_files": {name: {"sha256": bytes_sha256hex(raw), "bytes": len(raw)}
                                 for name, raw in installed.items()}}
 

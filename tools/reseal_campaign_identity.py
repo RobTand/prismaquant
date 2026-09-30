@@ -76,6 +76,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -195,17 +196,37 @@ def prismaquant_tree_sha256(package_dir):
     return digest.hexdigest(), len(paths)
 
 
-def encoder_tree_sha256(src_tessera_dir):
-    """== tessera.cached_unit.encoder_source_sha256() over src/tessera."""
+def _source_digest_owner():
+    """Load the repository's stdlib owner, not an installed PQ/torch package."""
+    name = '_pq_reseal_digest_owner'
+    if name not in sys.modules:
+        path = Path(__file__).resolve().parents[1] / 'prismaquant' / 'digests.py'
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise Refused(f'cannot load required source digest owner: {path}')
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except BaseException:
+            del sys.modules[name]
+            raise
+    return sys.modules[name]
+
+
+def encoder_tree_profiles(src_tessera_dir):
+    """Label both profiles; preserve the original encoder suffixes and order."""
     root = Path(src_tessera_dir)
-    digest = hashlib.sha256()
-    count = 0
-    for path in sorted(p for p in root.rglob('*') if p.suffix in {'.py', '.cu', '.cuh', '.cpp', '.h'}):
-        digest.update(path.relative_to(root).as_posix().encode('utf-8') + b'\0')
-        digest.update(path.read_bytes())
-        digest.update(b'\0')
-        count += 1
-    return digest.hexdigest(), count
+    paths = sorted(p for p in root.rglob('*') if p.suffix in {'.py', '.cu', '.cuh', '.cpp', '.h'})
+    profiles = _source_digest_owner().source_tree_profiles(
+        (path.relative_to(root).as_posix(), path.read_bytes()) for path in paths)
+    return profiles, len(paths)
+
+
+def encoder_tree_sha256(src_tessera_dir):
+    """The unchanged Tessera legacy scalar and count over src/tessera."""
+    profiles, count = encoder_tree_profiles(src_tessera_dir)
+    return profiles[_source_digest_owner().SOURCE_TREE_V1], count
 
 
 def canonical_bytes(value):
@@ -984,7 +1005,10 @@ def cmd_hash_tree(args):
     if args.prismaquant:
         out['prismaquant_source_sha256'], out['prismaquant_files'] = prismaquant_tree_sha256(Path(args.prismaquant)/'prismaquant')
     if args.producer:
-        out['encoder_source_sha256'], out['encoder_files'] = encoder_tree_sha256(Path(args.producer)/'src'/'tessera')
+        profiles, count = encoder_tree_profiles(Path(args.producer)/'src'/'tessera')
+        out['encoder_source_sha256'] = profiles[_source_digest_owner().SOURCE_TREE_V1]
+        out['encoder_files'] = count
+        out['encoder_source_profiles'] = profiles
     print(json.dumps(out, indent=1))
     return 0
 

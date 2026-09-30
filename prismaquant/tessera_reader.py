@@ -17,25 +17,33 @@ import re
 import sys
 from types import SimpleNamespace
 
-from .digests import LegacyNulSourceSha256, bytes_sha256hex
+from .digests import (
+    SOURCE_TREE_V1, SOURCE_TREE_V2, bytes_sha256hex,
+    compare_source_profiles, source_tree_profiles,
+)
 
 SOURCE_SUFFIXES = {'.py', '.cu', '.cuh', '.cpp', '.h'}
 
 
 def _source_tree(root):
-    """The owner's encoder_source_sha256 framing, read without importing it."""
-    digest = LegacyNulSourceSha256()
-    files = {}
+    """The unchanged scalar legacy recipe, read without importing Tessera."""
+    profiles, files = _source_tree_profiles(root)
+    return profiles[SOURCE_TREE_V1], files
+
+
+def _source_tree_profiles(root):
+    """Both labelled profiles of exactly the existing source-file domain."""
+    records, files = [], {}
     for path in sorted(p for p in root.rglob('*') if p.suffix in SOURCE_SUFFIXES):
         if path.is_symlink() or not path.is_file():
             raise ValueError('reader source must be regular files in its declared package')
         raw = path.read_bytes()
         relative = path.relative_to(root).as_posix()
-        digest.update(relative, raw)
+        records.append((relative, raw))
         files[str(path.resolve())] = bytes_sha256hex(raw)
     if not files or not (root / '__init__.py').is_file():
         raise ValueError('reader source must name a complete package directory')
-    return digest.hexdigest(), files
+    return source_tree_profiles(records), files
 
 
 class _ReaderSourceLoader(importlib.machinery.SourceFileLoader):
@@ -90,15 +98,24 @@ def load_declared_reader(record):
     """Import a hash-bound consumer without replacing any producer module."""
     if record is None:
         return None
-    if not isinstance(record, dict) or set(record) != {'path', 'source_sha256'}:
+    if (not isinstance(record, dict) or not {'path', 'source_sha256'} <= set(record)
+            or not set(record) <= {'path', 'source_sha256', 'source_profiles'}):
         raise ValueError('reader requires an explicit package path and source_sha256')
     if not re.fullmatch(r'[0-9a-f]{64}', str(record['source_sha256'])):
         raise ValueError('reader requires an exact source SHA256')
     root = Path(record['path']).resolve()
-    digest, files = _source_tree(root)
-    if digest != record['source_sha256']:
-        raise ValueError('reader package checksum changed')
-    namespace = 'tessera_reader_' + digest
+    profiles, files = _source_tree_profiles(root)
+    declared = record.get('source_profiles', {SOURCE_TREE_V1: record['source_sha256']})
+    if not isinstance(declared, dict) or declared.get(SOURCE_TREE_V1) != record['source_sha256']:
+        raise ValueError('reader legacy scalar disagrees with its labelled profile')
+    try:
+        framing = compare_source_profiles(profiles, declared)
+    except ValueError as exc:
+        raise ValueError(f'reader package checksum changed: {exc}') from exc
+    digest = profiles[SOURCE_TREE_V1]
+    # Even a legacy-only declaration must not alias two actual file maps in
+    # the private import memo. This is not stronger admission of its evidence.
+    namespace = 'tessera_reader_' + profiles[SOURCE_TREE_V2]
     if namespace not in sys.modules:
         finder = _ReaderFinder(namespace, root, files)
         spec = importlib.util.spec_from_file_location(namespace, root / '__init__.py',
@@ -124,5 +141,6 @@ def load_declared_reader(record):
     cached = importlib.import_module(namespace + '.cached_unit')
     artifact = importlib.import_module(namespace + '.unit_artifact')
     return SimpleNamespace(identity={'schema': 'prismaquant.tessera_reader.v1',
-        'path': str(root), 'source_sha256': digest, 'namespace': namespace},
+        'path': str(root), 'source_sha256': digest, 'namespace': namespace,
+        'source_profiles': profiles, 'source_framing': framing},
         verify_cached_unit=cached.verify_cached_unit, read_unit_artifact=artifact.read_unit_artifact)
