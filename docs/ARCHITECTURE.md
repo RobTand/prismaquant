@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1849): `tessera_footprint.
+tessera_tensor_payload_breakdown` prices a unit whose columns are not whole
+256-column superblocks instead of refusing it. The pinned Tessera writes a
+trailing partial superblock, and `tessera_shape_legal` already admitted such
+shapes, so the menu offered rungs the accountant then refused; the GLM-5.3
+attention census raised on the KDA gate up-projections `f_b_proj` and
+`g_b_proj` (`[8192, 128]`, 68 units). A rung whose Bresenham quota does not
+close over the columns is still refused, now as a `TesseraFormatError` (via
+`tessera_formats._schedule_rates`) rather than a raw `GrammarError`. Shapes
+priced before are byte-identical. No default, stage, export or serving gate
+changes; whether a runtime routes a 128-column unit natively stays the
+route-status gate's question. Gate: `tests/test_tessera_partial_superblock.py`.
+
 Re-stamped 2026-09-30 (PQ #1843, step 1 of #1842): the Tessera campaign
 takes `--allow-pinned` (the allocator's grammar) and `--pinned-roster-only`,
 so a census can name a scoped roster of profile-pinned Linears (GLM-5.3

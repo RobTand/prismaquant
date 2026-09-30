@@ -34,6 +34,7 @@ from .tessera_formats import (
     SUPERBLOCK_WEIGHTS,
     TesseraFamily,
     TesseraFormatError,
+    _schedule_rates,
     family_rate_cap,
     get_tessera_family,
     tessera_serving_route,
@@ -377,16 +378,25 @@ def tessera_tensor_payload_breakdown(
             f"Tessera tensor shape must be two positive integers, got {dims}"
         )
     rows, columns = dims
-    if columns % SUPERBLOCK_WEIGHTS:
-        raise TesseraFormatError(
-            f"columns must be a multiple of the {SUPERBLOCK_WEIGHTS}-column "
-            f"superblock; a short trailing block has no quota to keep, got {columns}"
-        )
+    # A column count that is not a whole number of superblocks is priced, not
+    # refused (#1849).  The wire holds a trailing partial superblock:
+    # ``tessera.grammar.superblock_count`` ceilings the partition,
+    # ``superblock_quota_ok`` constrains only complete superblocks, and
+    # ``layout.build_planes`` (called below through ``Geometry``) gives the
+    # partial block its granule.  Whether a rung *exists* over these columns is
+    # the schedule's question, asked just below by ``column_schedule`` and the
+    # quota check -- the same two legs ``tessera_menu.tessera_shape_legal``
+    # asks, so the menu and this accountant agree about which rungs exist.
     if type(sidecar_header_bytes) is not int or sidecar_header_bytes < 0:
         raise TesseraFormatError("sidecar_header_bytes must be nonnegative")
 
+    # ``_schedule_rates`` is ``column_schedule`` with Tessera's refusal of a
+    # rung whose quota does not close over these columns re-raised as a
+    # ``TesseraFormatError`` -- the one refusal type every caller guards with.
+    # The superblock refusal above used to fire first on every column count
+    # where a rung can fail to close, so the raw ``GrammarError`` never leaked.
     rates = (
-        spec.column_schedule(rung, columns, recipe=wire)
+        _schedule_rates(spec, rung, columns, wire)
         if schedule is None
         else tuple(int(r) for r in schedule)
     )

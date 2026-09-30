@@ -124,9 +124,10 @@ def test_the_accountant_prices_what_the_exporter_writes(family, grid, rung, shap
     ``tessera_tensor_payload_breakdown`` is checked on the same line, because
     it is the *other* PrismaQuant accountant -- the one the allocator's byte
     path reads -- and it was handing ``build_planes`` an empty descendant blob,
-    so it charged zero descendant bytes on every rung.  It refuses a column
-    count that is not a whole number of 256-column superblocks, which two of
-    the issue's shapes are not, so it is asserted where it is defined.
+    so it charged zero descendant bytes on every rung.  It is asserted at every
+    shape, including the two whose columns are not whole 256-column
+    superblocks: it used to refuse those, and the wire holds a trailing
+    partial superblock (#1849).
     """
     rows, columns = shape
     priced = _priced_bytes(family, rung, shape)
@@ -135,15 +136,14 @@ def test_the_accountant_prices_what_the_exporter_writes(family, grid, rung, shap
         torch.randn(rows, columns), grid=grid_for_name(grid), q256=rung
     ).exact_bytes
     assert priced == exported, (family, rung, shape)
-    if columns % 256 == 0:
-        breakdown = tessera_tensor_payload_breakdown(
-            shape, family=family, body_rate_q256=rung
-        )
-        # The accountant also prices the container/fused frame (#1609), which
-        # ``exact_bytes`` (the plane region) excludes by definition.
-        assert breakdown["payload_bytes"] == exported, (family, rung, shape)
-        assert (breakdown["total_bytes"] - int(breakdown["container_side_bytes"])
-                == exported), (family, rung, shape)
+    breakdown = tessera_tensor_payload_breakdown(
+        shape, family=family, body_rate_q256=rung
+    )
+    # The accountant also prices the container/fused frame (#1609), which
+    # ``exact_bytes`` (the plane region) excludes by definition.
+    assert breakdown["payload_bytes"] == exported, (family, rung, shape)
+    assert (breakdown["total_bytes"] - int(breakdown["container_side_bytes"])
+            == exported), (family, rung, shape)
 
 
 @pytest.mark.slow
