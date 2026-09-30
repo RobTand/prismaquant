@@ -143,6 +143,11 @@ def test_runtime_relation_v2_mismatch_is_not_a_legacy_pass(relation_fixture):
     package = evidence.get(run['post_package'])
     package['source_profiles'] = {V1: package['encoder_source_sha256'], V2: '0' * 64}
     evidence.replace(run['post_package'], package)
+    engine = record['runs']['engine']
+    engine['post_package'] = dict(run['post_package'])
+    engine_raw = evidence.get(engine['runtime'])
+    engine_raw['loaded_package'] = package
+    evidence.replace(engine['runtime'], engine_raw)
     with pytest.raises(RuntimePriceError, match='v2.*mismatch'):
         relation_load(relation_fixture)
 
