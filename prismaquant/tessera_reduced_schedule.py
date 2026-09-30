@@ -31,7 +31,7 @@ class _PlannerInputs(TypedDict):
     budget_sensitivity: Sequence[float]
 
 
-def _positive_int(value: object, where: str) -> int:
+def _require_positive_builtin_int(value: object, where: str) -> int:
     if type(value) is not int or value <= 0:
         raise TesseraFormatError(f"{where}: expected a positive integer")
     return value
@@ -56,8 +56,8 @@ def _validate_records(records):
         if (len(set(sample.sampled_experts)) != len(sample.sampled_experts)
                 or any(type(e) is not int or e not in frame for e in sample.sampled_experts)):
             raise TesseraFormatError(f"{name}: sampled experts must be unique frame members")
-        reference = _positive_int(sample.reference_q256, f"{name} reference rung")
-        targets = tuple(sorted(_positive_int(q, f"{name} target rung")
+        reference = _require_positive_builtin_int(sample.reference_q256, f"{name} reference rung")
+        targets = tuple(sorted(_require_positive_builtin_int(q, f"{name} target rung")
                                for q in sample.sampled_mse))
         references.add(reference)
         bands.add(targets)
@@ -103,7 +103,7 @@ def plan_reduced_schedule(
     if (not isinstance(winners, Mapping) or set(winners) != set(records)
             or not isinstance(unit_bytes, Mapping) or set(unit_bytes) != set(records)):
         raise TesseraFormatError("winners and byte costs must exactly match the stack roster")
-    _positive_int(byte_budget, "byte_budget")
+    _require_positive_builtin_int(byte_budget, "byte_budget")
     if type(seed) is not int:
         raise TesseraFormatError("seed must be an integer")
     frames = {n: tuple(sorted(s.experts)) for n, s in sorted(records.items())}
@@ -113,8 +113,8 @@ def plan_reduced_schedule(
         if not isinstance(costs, Mapping) or set(costs) != menus[name]:
             raise TesseraFormatError(f"{name}: byte costs must exactly cover the declared band")
         for rate, cost in costs.items():
-            _positive_int(rate, f"{name} byte-cost rung")
-            _positive_int(cost, f"{name} byte cost")
+            _require_positive_builtin_int(rate, f"{name} byte-cost rung")
+            _require_positive_builtin_int(cost, f"{name} byte cost")
         if type(winners[name]) is not int or winners[name] not in menus[name]:
             raise TesseraFormatError(f"{name}: winner is not a declared rung")
     if sum(unit_bytes[n][winners[n]] for n in records) > byte_budget:
