@@ -2158,6 +2158,11 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     for name in ("out", "cache_dir", "checkpoint", "deadline_seconds",
                  "units", "calibration_census", "census_out",
                  "capture_calibration_out", "calibration_cache", "calibration_cache_sha256",
+                 # The optional intake is bound by its calibration receipt, not
+                 # path spelling or duplicated settings. Absent intake keeps
+                 # the historical settings identity unchanged.
+                 "calibration_input", "calibration_input_sha256", "calibration_corpus",
+                 "calibration_input_receipt",
                  "seed_checkpoint", "seed_wire_dir", "anchor_batch_size",
                  "publication_overlap_bytes", "campaign_identity_bytes",
                  "campaign_identity_threads", "source_snapshot_policy",
@@ -3594,6 +3599,19 @@ def _calibration_tokens(model_path: str, n: int, seqlen: int, seed: int):
     return out, text
 
 
+def _campaign_calibration_parameters(args) -> dict[str, object]:
+    """Draw metadata, separate from the CLI seed when a saved draw is supplied."""
+    parameters: dict[str, object] = {"source": "wikitext-2-raw-v1/train", "split_role": "calibration",
+                  "model": str(args.model), "seed": int(args.seed),
+                  "nsamples": int(args.nsamples), "seqlen": int(args.seqlen)}
+    receipt = getattr(args, "calibration_input_receipt", None)
+    if receipt is not None:
+        provenance = receipt["provenance"]
+        parameters.update(source=provenance["source"], seed=provenance["seed"],
+                          calibration_input=receipt)
+    return parameters
+
+
 #: The exit status a run uses when the resolved menu admits nothing.  It is
 #: not 1: a menu that admits nothing is a configuration answer, not a crash,
 #: and a caller that fans out over hundreds of rows needs to tell the two
@@ -4213,7 +4231,9 @@ def calibration_census(counts: Mapping[str, int], max_abs: Mapping[str, float], 
         "model": str(args.model),
         "nsamples": int(args.nsamples),
         "seqlen": int(args.seqlen),
-        "seed": int(args.seed),
+        "seed": int(identity.get("seed", args.seed)),
+        **({"calibration_input": identity["calibration_input"]}
+           if "calibration_input" in identity else {}),
         "layer_stride": int(args.layer_stride),
         # The draw itself, in Tessera's own vocabulary: a census taken on a
         # different corpus or tokenizer is refused before any GPU is spent.
@@ -4240,7 +4260,7 @@ def load_calibration_census(path, *, args) -> dict:
     for field, value in (("model", str(args.model)),
                          ("nsamples", int(args.nsamples)),
                          ("seqlen", int(args.seqlen)),
-                         ("seed", int(args.seed)),
+                         ("seed", _campaign_calibration_parameters(args)["seed"]),
                          ("layer_stride", int(args.layer_stride))):
         if census.get(field) != value:
             raise RuntimeError(
@@ -4268,6 +4288,8 @@ def require_census_draw(census: Mapping, identity: Mapping, *, where: str) -> No
     two are different checks: the same ``--seed 0 --nsamples 32`` over a
     different corpus revision is a different calibration with identical flags.
     """
+    if census.get("calibration_input") != identity.get("calibration_input"):
+        raise RuntimeError(f"{where}: the census's calibration input receipt differs")
     for field in ("text_sha256", "fit_ids_sha256"):
         if str(census.get(field)) != str(identity[field]):
             raise RuntimeError(
@@ -5278,8 +5300,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             raise RuntimeError('streamed capture requires a census from the qualified streaming source route')
         hi, lo = census_token_counts(census, {})
         calibration = th.calibration_identity(corpus_text, tokens, fit_tokens=hi,
-            source="wikitext-2-raw-v1/train", split_role="calibration", model=str(args.model),
-            seed=args.seed, nsamples=args.nsamples, seqlen=args.seqlen, fit_tokens_min=lo)
+            **_campaign_calibration_parameters(args), fit_tokens_min=lo)
         require_census_draw(census, calibration, where="streamed calibration capture")
         # The recorded witness describes the census. The new traversal's own
         # witness is compared at completion; no from-config model is stamped
@@ -5409,8 +5430,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         raise RuntimeError('streamed calibration did not observe every in-scope unit')
     hi, lo = census_token_counts(census, counts)
     calibration = th.calibration_identity(corpus_text, tokens, fit_tokens=hi,
-        source="wikitext-2-raw-v1/train", split_role="calibration", model=str(args.model),
-        seed=args.seed, nsamples=args.nsamples, seqlen=args.seqlen, fit_tokens_min=lo)
+        **_campaign_calibration_parameters(args), fit_tokens_min=lo)
     if writer is not None:
         census_max_abs(census, maxima)
         receipt = writer.finish(model_load_contract=contract)
@@ -5515,6 +5535,12 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--nsamples", type=int, default=8)
     ap.add_argument("--seqlen", type=int, default=512)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--calibration-input", default=None,
+                    help="Optional immutable calibration_ids safetensors draw; requires its SHA256 and real corpus.")
+    ap.add_argument("--calibration-input-sha256", default=None,
+                    help="Independent SHA256 of --calibration-input, binding its draw provenance.")
+    ap.add_argument("--calibration-corpus", default=None,
+                    help="Actual UTF-8 corpus file matching the pinned draw's provenance.text_sha256.")
     ap.add_argument("--max-act-rows", type=int, default=512)
     ap.add_argument("--layer-stride", type=int, default=1,
                     help="price every Nth decoder layer (1 = every Linear)")
@@ -5670,6 +5696,28 @@ def _main(argv, *, source_scope) -> int:
     ap.add_argument("--source-identity-cache-sha256", default=None,
                     help="Expected SHA256 of the --source-identity-cache file, bound by the planner.")
     args = ap.parse_args(argv)
+    calibration_options = (args.calibration_input, args.calibration_input_sha256,
+                           args.calibration_corpus)
+    if any(value is not None for value in calibration_options) and not all(calibration_options):
+        ap.error("--calibration-input, --calibration-input-sha256 and --calibration-corpus go together")
+    args.calibration_input_receipt = None
+    saved_calibration = None
+    if args.calibration_input is not None:
+        from .calibration_data import load_calibration_corpus, load_calibration_input
+        ids, receipt = load_calibration_input(args.calibration_input,
+            expected_sha256=args.calibration_input_sha256,
+            n_samples=args.nsamples, seqlen=args.seqlen)
+        provenance = receipt["provenance"]
+        if type(provenance.get("seed")) is not int:
+            raise ValueError("exact calibration provenance requires an integer seed")
+        if not isinstance(provenance.get("source"), str) or not provenance["source"].strip():
+            raise ValueError("exact calibration provenance requires a nonempty source")
+        if provenance.get("model") != str(args.model):
+            raise ValueError("exact calibration provenance model differs from this campaign")
+        corpus_text = load_calibration_corpus(args.calibration_corpus,
+            expected_sha256=provenance.get("text_sha256"))
+        saved_calibration = (list(ids.split(1, dim=0)), corpus_text)
+        args.calibration_input_receipt = receipt
     if args.exhaustive_rate_grid and parse_rate_band(args.rate_band) is None:
         ap.error("--exhaustive-rate-grid requires --rate-band")
     from .perturbed_x_cache import normalize_verified_activation_load
@@ -5801,7 +5849,8 @@ def _main(argv, *, source_scope) -> int:
                 args.calibration_census, args.calibration_cache,
                 expected_sha256=args.calibration_cache_sha256, model=args.model,
                 max_act_rows=args.max_act_rows, attention_implementation=args.attention_implementation,
-                calibration_parameters=dict(nsamples=args.nsamples, seqlen=args.seqlen, seed=args.seed),
+                calibration_parameters={key: _campaign_calibration_parameters(args)[key]
+                                        for key in ('nsamples', 'seqlen', 'seed')},
                 resource_check=None if selected_guard is None else selected_guard.check,
                 release_read_pages=True))
         if args.source_identity_cache:
@@ -5840,6 +5889,12 @@ def _main(argv, *, source_scope) -> int:
                if args.attention_implementation is not None else {}),
         )
     model.eval()
+    if saved_calibration is not None:
+        vocab_size = model.config.vocab_size
+        if type(vocab_size) is not int or vocab_size < 1:
+            raise ValueError("exact calibration input requires a positive model vocab_size")
+        if any(bool((batch >= vocab_size).any()) for batch in saved_calibration[0]):
+            raise ValueError("exact calibration token IDs exceed the model vocabulary")
     model_load_contract = None
     attention_implementation = None
     capture_runtime = None
@@ -6008,8 +6063,11 @@ def _main(argv, *, source_scope) -> int:
                         else None if context_by_unit is None
                         else {name: context.structure for name, context in context_by_unit.items()})
 
-    tokens, corpus_text = _calibration_tokens(
-        args.model, args.nsamples, args.seqlen, args.seed)
+    if saved_calibration is None:
+        tokens, corpus_text = _calibration_tokens(
+            args.model, args.nsamples, args.seqlen, args.seed)
+    else:
+        tokens, corpus_text = saved_calibration
     want_h = args.hessian == "require" and not census_only
     calibration_cache = None
     capture_identity = None
@@ -6102,9 +6160,7 @@ def _main(argv, *, source_scope) -> int:
         hi, lo = census_token_counts(census, {})
         bound_calibration = th.calibration_identity(
             corpus_text, tokens, fit_tokens=hi,
-            source="wikitext-2-raw-v1/train", split_role="calibration",
-            model=str(args.model), seed=int(args.seed), nsamples=int(args.nsamples),
-            seqlen=int(args.seqlen), fit_tokens_min=lo)
+            **_campaign_calibration_parameters(args), fit_tokens_min=lo)
         require_census_draw(census, bound_calibration, where="calibration capture")
         capture_identity = calibration_store.capture_identity(
             args.calibration_census, calibration=bound_calibration,
@@ -6192,9 +6248,7 @@ def _main(argv, *, source_scope) -> int:
     hessian_token_count, hessian_token_min = census_token_counts(census, hessian_rows)
     hessian_identity = th.calibration_identity(
         corpus_text, tokens, fit_tokens=int(hessian_token_count),
-        source="wikitext-2-raw-v1/train", split_role="calibration",
-        model=str(args.model), seed=int(args.seed), nsamples=int(args.nsamples),
-        seqlen=int(args.seqlen), fit_tokens_min=int(hessian_token_min))
+        **_campaign_calibration_parameters(args), fit_tokens_min=int(hessian_token_min))
     if census is not None:
         require_census_draw(census, hessian_identity,
                             where=f"--calibration-census {args.calibration_census}")
