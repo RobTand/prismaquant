@@ -40,8 +40,8 @@ import re
 import struct
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
-#: A safetensors header is a u64 length and that many bytes of JSON. The
-#: bound is ``layer_streaming``'s own, so every reader refuses the same files.
+#: A safetensors header is a u64 length and that many bytes of JSON. This
+#: bound mirrors ``layer_streaming``; each reader keeps its own refusal policy.
 SAFETENSORS_HEADER_MAX_BYTES = 100_000_000
 
 #: A span is ``(shard path, start, end)`` in absolute file offsets.
@@ -173,15 +173,27 @@ def check_sealed_selection(selection: Mapping[str, Sequence[tuple[str, str]]],
             "refusing before the first read (PQ #1095)")
 
 
+def safetensors_prefix_length(raw: bytes, size: int, *, max_bytes: int,
+                              short_error: str, range_error: str) -> int:
+    """Decode a bounded u64 prefix; acquisition and refusal text stay local.
+
+    Callers supply exactly the eight prefix bytes, not the header body. The
+    explicit bound and messages preserve each reader's existing contract.
+    """
+    if len(raw) != 8:
+        raise ValueError(short_error)
+    (length,) = struct.unpack("<Q", raw)
+    if not 0 < length <= min(max_bytes, size - 8):
+        raise ValueError(range_error)
+    return length
+
+
 def safetensors_header_length(handle, path: str, size: int) -> int:
     """Read a safetensors file's 8-byte length prefix and check it."""
-    raw = handle.read(8)
-    if len(raw) != 8:
-        raise ValueError(f"{path} is too short to be a safetensors file")
-    (length,) = struct.unpack("<Q", raw)
-    if not 0 < length <= min(SAFETENSORS_HEADER_MAX_BYTES, size - 8):
-        raise ValueError(f"{path} has an invalid safetensors header length")
-    return length
+    return safetensors_prefix_length(
+        handle.read(8), size, max_bytes=SAFETENSORS_HEADER_MAX_BYTES,
+        short_error=f"{path} is too short to be a safetensors file",
+        range_error=f"{path} has an invalid safetensors header length")
 
 
 def read_safetensors_header(path: str, *, source_reads=None) -> tuple[dict, int, int]:
