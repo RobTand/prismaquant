@@ -59,6 +59,7 @@ import gzip
 import json
 import os
 import shutil
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -69,7 +70,7 @@ from .digests import bytes_sha256hex
 RETIREMENT_SCHEMA = "prismaquant.stage_a.retirement.v1"
 RETIREMENT_NAME = "stage-a-retired.json"
 #: The largest binding document the scan reads. PrismaBuild's own data
-#: manifest bound; a larger JSON file is no binding this campaign writes.
+#: manifest bound. A larger or unreadable document refuses the negative proof.
 BINDING_MAX_BYTES = 64 * 1024 * 1024
 _SHA256_LEN = 64
 
@@ -217,36 +218,57 @@ def _strings(node, pointer=""):
 
 
 def _binding_documents(roots: Iterable, *, skip: Path):
+    def unreadable(error: OSError):
+        raise RetirementRefused(
+            f"the binding scan cannot read {error.filename}: {error}") from error
+
     for root in roots:
         root = Path(root)
+        if root.is_symlink():
+            raise RetirementRefused(f"the binding root {root} is a symlink")
+        root = root.resolve()
         if root.is_file():
             candidates = [root]
         elif root.is_dir():
             candidates = []
-            for directory, subdirs, files in os.walk(root):
+            for directory, subdirs, files in os.walk(root, onerror=unreadable):
                 here = Path(directory)
                 if here == skip or here.is_relative_to(skip):
                     subdirs[:] = []
                     continue
-                subdirs[:] = [name for name in subdirs
-                              if not (here / name).is_relative_to(skip)]
+                kept = []
+                for name in subdirs:
+                    child = here / name
+                    if child.is_relative_to(skip):
+                        continue
+                    if child.is_symlink():
+                        raise RetirementRefused(
+                            f"the binding directory {child} is a symlink")
+                    kept.append(name)
+                subdirs[:] = kept
                 candidates += [here / name for name in files
                                if name.endswith((".json", ".json.gz"))]
         else:
             raise RetirementRefused(f"the binding root {root} does not exist")
         for path in sorted(candidates):
-            if path.is_symlink() or path.stat().st_size > BINDING_MAX_BYTES:
-                continue
-            raw = path.read_bytes()
-            if path.name.endswith(".gz"):
-                try:
-                    raw = gzip.decompress(raw)
-                except OSError:
-                    continue
+            if path.is_symlink():
+                raise RetirementRefused(f"the binding document {path} is a symlink")
             try:
-                yield path, json.loads(raw)
-            except ValueError:
-                continue
+                if path.stat().st_size > BINDING_MAX_BYTES:
+                    raise RetirementRefused(
+                        f"the binding document {path} exceeds {BINDING_MAX_BYTES} bytes")
+                opener = gzip.open if path.name.endswith(".gz") else open
+                with opener(path, "rb") as source:
+                    raw = source.read(BINDING_MAX_BYTES + 1)
+                if len(raw) > BINDING_MAX_BYTES:
+                    raise RetirementRefused(
+                        f"the binding document {path} exceeds {BINDING_MAX_BYTES} "
+                        "decoded bytes")
+                document = json.loads(raw)
+            except (OSError, EOFError, ValueError, zlib.error) as error:
+                raise RetirementRefused(
+                    f"the binding document {path} cannot be read: {error}") from error
+            yield path, document
 
 
 def check_bindings(roots, *, space: Path, digests: Mapping[str, str]) -> int:

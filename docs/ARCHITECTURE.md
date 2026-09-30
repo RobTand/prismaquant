@@ -143,6 +143,12 @@ qualification and default promotion remain under #1367. GPU profiling is HELD; n
 claim follows from the CPU ordering tests. No export bytes, pin, format menu,
 ship gate or stage graph changes.
 
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): Stage A retirement's
+negative binding proof refuses unreadable, symlinked, malformed or oversized
+binding documents and directory-scan errors. Gzip decoding is bounded by the
+same 64 MiB document limit. This CPU proof slice adds no deletion target or
+forward/dead-owner reclaim; it changes no numerical, wire or serving gate.
+
 Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
 legal-domain pin provenance now transcribes v3's independently reviewed
 producer commit and serving-source digest. `DomainPins` omits absent split
@@ -3956,7 +3962,11 @@ PrismaBuild action, checks everything before it removes anything:
   `require_producer_contained`;
 - no JSON document under the declared `--binding-root`s names a path in the
   run's adjoint space, or the digest of its chain state, receipt or any
-  checkpoint. At least one root is required.
+  checkpoint. At least one root is required. The negative proof refuses an
+  unreadable directory, symlinked binding, malformed JSON/gzip document, or
+  document above the 64 MiB limit (including decoded gzip bytes). It never
+  skips such a document as evidence that no consumer exists. The retiring
+  run's own subtree remains excluded from the consumer scan (PQ #1088).
 
 It then sorts every unreclaimed batch in PrismaBuild's records for those
 owners. A batch wholly inside the checkpoints' files and referenced entries
@@ -3973,6 +3983,8 @@ PQ #1571). That reader reads every batch, reclaimed ones included, and
 refuses a record it cannot read, so a rerun refuses when a reclaimed batch's
 record is gone. Gates:
 - `tests/test_stage_a_retirement_1073.py`;
+- `tests/test_stage_a_retirement_binding_scan_1088.py`: an incomplete binding
+  scan refuses before the retirement record or any unlink;
 - `tests/test_stage_a_retirement_pb_1073.py`: on a real owner, the durable
   charge drops by exactly the pinned batch's bytes.
 
