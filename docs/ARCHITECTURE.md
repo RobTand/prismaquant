@@ -12,6 +12,14 @@ keeps the PWC writer, produced reader bindings, mover round trip and integrated
 retirement as separate work. No production wiring, serialized bytes, numerical
 method, serving gate, runtime pin or default changes; #870 remains open.
 
+Re-stamped 2026-09-30 (PQ #1833, Refs #1802/#1366): the incoming checkpoint
+metadata comparison is classified as a same-record structural check in the
+no-new-run-seal lint. It still refuses foreign cotangent identities in both
+dev and certified modes; exact payload verification is independent. No run
+seal is introduced, weakened or bypassed. Reader-deadline source references
+are refreshed after #1802; load-phase grace arithmetic, runtime behavior,
+production defaults and all serving/export gates are unchanged.
+
 Re-stamped 2026-09-30 (Refs PQ #1247, `sol/issues-pq-5`):
 `_prepare_file_read_bound` checks each distinct render path once per call, in
 first-seen order, instead of once per cell sharing that path. It still reads
@@ -3189,8 +3197,8 @@ It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
 row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
-(`prismaquant/joint_adjoint_checkpoints.py:1868`,
-`prismaquant/joint_quantum_handoff.py:1032`), so the phase waits at most W in
+(`prismaquant/joint_adjoint_checkpoints.py:1986`,
+`prismaquant/joint_quantum_handoff.py:1033`), so the phase waits at most W in
 total outside a PrismaBuild landing record. Since PQ #1143 a spill
 consumer's `handoff-load` holds only the owner states and the shared-pass
 entries; each probe's plane is read in its `spill-pP` phase, whose waits
