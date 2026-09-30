@@ -171,6 +171,10 @@ def test_runtime_relation_v2_compares_strong_profiles_not_cross_run_v1(relation_
         if name == 'engine':
             raw['loaded_package'] = package
         evidence.replace(run['runtime'], raw)
+    # JSON canonicalization sorts run IDs. Observe the differing native v1
+    # before the full-engine metadata, so the pre-fix RED names that gate.
+    record['runs']['zengine'] = record['runs'].pop('engine')
+    record['full_engine_run_id'] = 'zengine'
     result = relation_load(relation_fixture)
     assert result['source_framing']['status'] == 'framed_v2'
     assert all(run['source_framing']['status'] == 'framed_v2' for run in result['runs'].values())
