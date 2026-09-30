@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import json
 import pickle
 import copy
@@ -52,7 +51,7 @@ from prismaquant.joint_layer_quanta import (
     quantum_id,
     roster_digest,
 )
-from .digests import file_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
@@ -155,7 +154,7 @@ def _read_checked(path: Path, expected: str | None, *,
         data = path.read_bytes()
     except OSError as exc:
         raise JoinRefused(f"{where}: unreadable file at {path}: {exc}") from exc
-    actual = hashlib.sha256(data).hexdigest()
+    actual = bytes_sha256hex(data)
     if expected is not None and actual != expected:
         raise JoinRefused(
             f"{where}: digest mismatch at {path}: expected {expected}, got {actual}")

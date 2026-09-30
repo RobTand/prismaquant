@@ -12,12 +12,11 @@ tests and receipts match on them.
 from __future__ import annotations
 
 from collections.abc import Mapping
-import hashlib
 import math
 from pathlib import Path
 from typing import Any
 
-from .digests import file_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex
 from .file_identity import file_stat_signature
 from .schemas import Contract
 
@@ -79,7 +78,7 @@ def read_bound(record, label):
             return hit[1]
     raw = (path.read_bytes() if BOUND_READER is None
            else BOUND_READER(path, record['sha256'], label))
-    same(hashlib.sha256(raw).hexdigest(), record['sha256'], f'{label}: owned bytes')
+    same(bytes_sha256hex(raw), record['sha256'], f'{label}: owned bytes')
     if fence is not None and len(raw) == fence[3]:
         _BOUND_BYTES[key] = (fence, raw)
     return raw
