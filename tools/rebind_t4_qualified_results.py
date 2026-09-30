@@ -21,11 +21,17 @@ prepared files are read at their bound digests and compared, and the
 document records the change as ``old_prepared_rebound``. Any other change
 refuses. Every header field the catalog takes from the prepared is still
 compared as it is.
+
+Result filenames are selected by ``--qualified-key auto|pair|qname``. Auto
+accepts one existing pair-keyed or legacy qname-keyed input, but refuses when
+both exist; the explicit layouts never fall back. No input file is changed.
 """
 import argparse
 import hashlib
 import json
 from pathlib import Path
+
+from prismaquant.digests import DIRECT_ASCII_LAX
 
 SCHEMA = 'prismaquant.t4_qualified_rebinding.v1'
 
@@ -38,8 +44,30 @@ def cell_sha256(cell):
     return sha(json.dumps(cell, sort_keys=True, separators=(',', ':')).encode())
 
 
-def result_path(qualified_dir, qname):
-    return Path(qualified_dir) / (sha(qname.encode()) + '.json')
+def cell_task_id(cell):
+    """Qualification task/output identity: compact ASCII JSON of the exact pair."""
+    return DIRECT_ASCII_LAX.sha256([cell['qname'], cell['format']])
+
+
+def result_path(qualified_dir, qname, fmt=None, *, key='auto'):
+    """Select pair or legacy qname input names, refusing ambiguous auto intake.
+
+    Omitting ``fmt`` preserves the original qname-only helper API. No file is
+    renamed or rewritten; the caller still verifies the selected result.
+    """
+    if key not in ('auto', 'pair', 'qname'):
+        raise ValueError(f'unknown qualification key {key!r}')
+    legacy = Path(qualified_dir) / (sha(qname.encode()) + '.json')
+    if fmt is None or key == 'qname':
+        return legacy
+    pair = Path(qualified_dir) / (cell_task_id({'qname': qname, 'format': fmt}) + '.json')
+    if key == 'pair':
+        return pair
+    pair_exists, legacy_exists = pair.exists(), legacy.exists()
+    if pair_exists and legacy_exists:
+        raise ValueError(f'ambiguous qualification inputs for {(qname, fmt)}: {pair}, {legacy}; '
+                         'select --qualified-key pair or qname explicitly')
+    return legacy if legacy_exists else pair
 
 
 def bound_json(path, expected):
@@ -95,6 +123,8 @@ def main():
     parser.add_argument('--previous-catalog', required=True)
     parser.add_argument('--previous-catalog-sha256', required=True)
     parser.add_argument('--qualified-dir', required=True)
+    parser.add_argument('--qualified-key', choices=('auto', 'pair', 'qname'), default='auto',
+                        help='input filenames: unique pair/qname match, or an explicit layout')
     parser.add_argument('--out', required=True)
     args = parser.parse_args()
     out = Path(args.out)
@@ -113,7 +143,7 @@ def main():
         assert catalog.get(key) == previous.get(key), ('catalog field changed', key)
     rows = []
     for cell in catalog['cells']:
-        raw = result_path(args.qualified_dir, cell['qname']).read_bytes()
+        raw = result_path(args.qualified_dir, cell['qname'], cell['format'], key=args.qualified_key).read_bytes()
         rows.append(rebind_cell(cell, previous_cells[cell['qname'], cell['format']], raw))
     document = {'schema': SCHEMA,
                 'catalog': {'path': args.catalog, 'sha256': args.catalog_sha256},

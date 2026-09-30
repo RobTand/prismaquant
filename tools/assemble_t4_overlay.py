@@ -10,9 +10,11 @@ catalog's cell is admitted for the new cell when the two differ only in
 
 A catalog may add several formats (PQ #1432). Each unit's added formats go,
 sorted, before its terminal BF16 (``joint_catalog_extension.extended_roster``),
-the order the loader and the pair check use. Results for one format live in
-one directory keyed by qname: ``--qualified-dir`` is the default and
-``--format-qualified-dir FORMAT=DIR`` names another directory for one format.
+the order the loader and the pair check use. ``--qualified-dir`` is the default
+result directory and ``--format-qualified-dir FORMAT=DIR`` overrides it for one
+format. Intake accepts pair-keyed names or legacy qname-keyed names when just
+one exists; both present is ambiguous and refuses unless ``--qualified-key``
+explicitly selects ``pair`` or ``qname``. No result is renamed or rewritten.
 A rebinding may bind this catalog, or a catalog this one declares in
 ``carried_from``; its rows admit the cells they name, and every other cell
 needs a result that binds it directly. The published PWC holds the original
@@ -36,10 +38,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from prismaquant.digests import bytes_sha256hex
 from prismaquant.joint_catalog_extension import _artifact_fence, extended_roster
 from prismaquant.tessera_joint_aura import render_origin_census
-from rebind_t4_qualified_results import SCHEMA as REBINDING_SCHEMA, cell_sha256, require_rebound
-from prismaquant.digests import bytes_sha256hex
+from rebind_t4_qualified_results import SCHEMA as REBINDING_SCHEMA
+from rebind_t4_qualified_results import cell_sha256, require_rebound, result_path
 
 PANEL = Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/allocation/joint-panel')
 OLDPLAN = PANEL / 'complete-512-seed237.executed-group.r607.a2v4.encoder-reuse-02.plan.json'
@@ -180,7 +183,9 @@ def main():
     parser.add_argument('--catalog', required=True)
     parser.add_argument('--catalog-sha256', required=True)
     parser.add_argument('--qualified-dir', required=True,
-                        help='result directory, keyed by qname, for every format without its own')
+                        help='result directory for every format without its own')
+    parser.add_argument('--qualified-key', choices=('auto', 'pair', 'qname'), default='auto',
+                        help='input filenames: unique pair/qname match, or an explicit layout')
     parser.add_argument('--format-qualified-dir', action='append', metavar='FORMAT=DIR',
                         help='result directory for one added format (repeatable)')
     parser.add_argument('--rebinding')
@@ -234,8 +239,8 @@ def main():
         q, fmt = cell['qname'], cell['format']
         pair = (q, fmt)
         assert pair not in cache.weights
-        value = qualified_result(cell, (qualified_dir(fmt) / (sha(q.encode()) + '.json')).read_bytes(),
-                                 rebinding_rows)
+        value = qualified_result(cell, result_path(qualified_dir(fmt), q, fmt,
+                                                   key=args.qualified_key).read_bytes(), rebinding_rows)
         receipt = value['verified_cell']
         if 'verified_cell_sha256' in value:
             assert value['verified_cell_sha256'] == cell_sha256(receipt)
