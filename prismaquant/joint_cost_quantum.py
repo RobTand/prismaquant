@@ -1653,6 +1653,24 @@ def run_layer_quantum_core(
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
+    incoming_mode = execution.get("checkpoint_incoming_mode")
+    checkpoint_streaming = incoming_mode is not None
+    if checkpoint_streaming:
+        from .residency_map import ENV_VAR as residency_map_env
+        from .staged_tier_policy import active_policy
+        if type(incoming_mode) is not str or incoming_mode != "stream_once_research":
+            raise QuantumIdentityRefused("checkpoint incoming research selection is invalid")
+        if torch.device(runner.device).type != "cpu":
+            raise QuantumIdentityRefused("checkpoint incoming research is CPU-only")
+        if (record.get("executable_readset") is not None
+                or os.environ.get(residency_map_env) or active_policy() is not None
+                or any(execution.get(key) is not None for key in (
+                    "staged_manifest", "staged_manifest_sha256", "data_manifest_sha256"))):
+            raise QuantumIdentityRefused(
+                "checkpoint incoming research refuses executable/staged read bindings")
+        if adjoint_handoff is not None or handoff_emitter is not None:
+            raise QuantumIdentityRefused("checkpoint incoming research refuses band-serial handoff")
+
     checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
     if checkpoint_budget:
         publication_geometry(checkpoint_budget, resolved_windows)
@@ -1739,6 +1757,21 @@ def run_layer_quantum_core(
     # a bounded shadow of the windowed replay's pass. Off unless requested.
     from .stage_b_pass_profile import RENDER_OWNS_KERNEL_PROFILER, pass_profile_request
     pass_profile = pass_profile_request()
+    if checkpoint_streaming:
+        from .joint_adjoint_slices import checkpoint_is_referenced
+        if (chain_regime["batch_size"] != 1 or chain_regime["probe_fusion"]
+                or replay_regime != DEFAULT_REPLAY_REGIME):
+            raise QuantumIdentityRefused(
+                "checkpoint incoming research refuses nondefault batching/fusion")
+        if workspace_profile is not None or pass_profile is not None:
+            raise QuantumIdentityRefused("checkpoint incoming research refuses capture/shadow profiles")
+        if record["adjoint"]["chain_layers"]:
+            if not checkpoint_is_referenced(adjoint_slice["checkpoint"]):
+                raise QuantumIdentityRefused(
+                    "checkpoint incoming research first chain requires referenced owner entries")
+        elif stage_b_spill_config() is None:
+            raise QuantumIdentityRefused(
+                "checkpoint incoming research chain-empty consumer requires one-pass spill")
     # PQ #1011: an executable read plan is sealed for one replay mode, and a
     # launch in the other mode would stage reads this quantum never makes.
     sealed_spill = False
@@ -2184,6 +2217,20 @@ def run_layer_quantum_core(
                                         n_batches=len(row_offsets))
                         if adjoint_handoff is not None and spill_config is not None
                         else None)
+    checkpoint_incoming = None
+    checkpoint_chain_entries = None
+    if checkpoint_streaming:
+        from .joint_adjoint_checkpoints import CheckpointIncoming
+        checkpoint_incoming = CheckpointIncoming(
+            checkpoint_record, n_probes=n_probes, n_batches=len(row_offsets))
+        if chain_layers:
+            if checkpoint_incoming.session != storage.session:
+                raise QuantumIdentityRefused(
+                    "checkpoint incoming research first chain has a foreign owner session")
+            checkpoint_chain_entries = checkpoint_incoming.references()
+        else:
+            # Reuse the final-pass incoming seam, including all-complete resume.
+            handoff_incoming = checkpoint_incoming
     incoming_budget = None
     if resource_policy is not None and (adjoint_handoff is None
                                         or handoff_incoming is None):
@@ -2206,7 +2253,8 @@ def run_layer_quantum_core(
                     cotangent_factory=storage.checkpoint_cotangent_sink,
                     shared_state_max_bytes=storage.config["max_auxiliary_bytes"],
                     max_resident_bytes=storage.config["max_resident_bytes"],
-                    residency_check=storage.reserve_resident)
+                    residency_check=storage.reserve_resident,
+                    stream_incoming=checkpoint_streaming)
             else:
                 grad_plane, shared_adjoint, shared_pass = load_handoff_inputs(
                     adjoint_handoff, checkpoint_record, n_probes=n_probes,
@@ -2257,6 +2305,8 @@ def run_layer_quantum_core(
                 "boundary_window_bytes": boundary_window_bytes,
                 "max_resident_bytes": int(storage.config["max_resident_bytes"]),
                 "probes": []}
+            if checkpoint_streaming:
+                counters.handoff_incoming["source"] = "checkpoint_research"
         if spill is not None and capture_batch > 1:
             # Before the chain: a batched capture merges samples, so every
             # sample's pass state must be empty (no profile shared state, no
@@ -2339,8 +2389,9 @@ def run_layer_quantum_core(
                             return render_free_layer_roll(
                                 runner, storage=storage, batches=batches, layer=chain_layer,
                                 cotangents=cotangent_owners, n_probes=n_probes,
-                                incoming_entries=None,
-                                incoming_tensor=lambda probe, batch: grad_plane[(probe, batch)],
+                                incoming_entries=checkpoint_chain_entries,
+                                incoming_tensor=(None if checkpoint_chain_entries is not None else
+                                                 lambda probe, batch: grad_plane[(probe, batch)]),
                                 roll=lambda tensor, batch, probe: grad_plane.__setitem__(
                                     (probe, batch), tensor),
                                 min_free_gib=min_free_gib,
@@ -2357,6 +2408,9 @@ def run_layer_quantum_core(
                                 reserve_device_bytes=chain_workspace_bytes.get(
                                     int(chain_layer)))
                         chain_backwards += backwards
+                        # Only the first successful roll consumes original checkpoint rows.
+                        # Later chain/capture inputs are the newly produced destination plane.
+                        checkpoint_chain_entries = None
                     finally:
                         runner.context.unload(chain_layer)
         finally:
