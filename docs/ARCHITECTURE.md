@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (Refs PQ #1295): the retained-render qualifier requests
+the existing sealed `io_engine.read_file` buffer and reuses the PWC private-mmap
+decoder. It closes the descriptor after decoding, including decoder failure;
+the returned tensor owns its mapping. Digest-less first-qualification staging,
+copy-time digest and stat fences remain unchanged, as do wire verification,
+GPU finishing, tensor equality and qualification identity. CPU regressions and
+allocation profiles are not a wire, model or GPU qualification. No new reader,
+cache, pool, format, numerical method, runtime pin or serving gate. The
+[controlled CPU before/after record](results/2026-09-30_qualifier_sealed_cpu.md)
+measures the live storage class and names residual anonymous allocations; it
+makes no isolated speedup, model, NFS, cgroup or GPU qualification claim.
+
 Re-stamped 2026-09-30 (PQ #1849): `tessera_footprint.
 tessera_tensor_payload_breakdown` prices a unit whose columns are not whole
 256-column superblocks instead of refusing it. The pinned Tessera writes a
@@ -2023,8 +2035,14 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   counter with the one recorded at load, so a `torch` write in place fails
   the window before it commits. Bounded non-stream PWC loads (`prefetch`,
   a lazy `get`) now request this same sealed-buffer decoder. The direct
-  `tools/qualify_t4_overlay.py` caller still keeps the bytes path and remains
-  a PQ #1295 consolidation item.
+  `tools/qualify_t4_overlay.py` caller requests it too, through the existing
+  bounded reader so digest-less first qualification preserves its staging and
+  copy-time digest fences. It closes the descriptor on successful decoding and
+  on decoder failure; the returned private mapping owns the verified pages.
+  Wire verification and GPU finishing remain independent qualification gates.
+  [The controlled CPU profile](results/2026-09-30_qualifier_sealed_cpu.md)
+  records live shmem returning to zero on drop and anonymous temporary growth
+  that remains; it does not attribute all retained memory to the decoder.
 - **Release, not take.** A taken window's renders stay charged to the
   stream's budget until the consumer releases them (`ReadStream.release`,
   `:825`): on unified memory a stream that counted them free at the take
