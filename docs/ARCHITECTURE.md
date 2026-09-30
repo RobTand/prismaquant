@@ -17,6 +17,16 @@ export, serving gate, runtime pin or default changes; the groups bind only a
 scope that unpins attention for pricing. See the plugin-architecture note on
 `glm5_next` fused groups.
 
+Re-stamped 2026-09-30 (PQ #1835, Refs #870): the opt-in
+[render prewrite planner](design/produced_render_plan_1835.md) derives physical
+destinations from the sealed origin root and full owner/template/attempt/render
+coordinate, keeping the legacy archive leaf. Planning creates no payloads or
+directories. Revalidated plans delegate explicit payload AND temporary ceilings
+to the existing PB prewrite/abort accounting; duplicate grants are not write or
+adoption permission. This is no tensor-size proof, writer, reader, mover, spool
+or runtime integration. No serialized bytes, numerical method, serving gate,
+runtime pin, default or performance claim changes; #870 remains open.
+
 Re-stamped 2026-09-30 (PQ #1828, Refs #870): the opt-in
 `ProducedRenderPublication` binding reuses the existing boundary publication
 lifecycle and public PB owner/attempt checks. Its declared `renders` payload

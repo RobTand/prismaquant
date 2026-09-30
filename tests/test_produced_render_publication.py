@@ -40,6 +40,7 @@ def render_owner(tmp_path, request):
     options = getattr(request, "param", {})
     template["slots"] = {options.get("slot", "renders"): {
         "class": options.get("artifact_class", "payload")}}
+    template["durable_maxima"].update(options.get("durable_maxima", {}))
     if options.get("write_only"):
         template["write_only"] = True
         template["working_demands"][TIER] = {"minimum_gib": 0, "window_gib": 0}
