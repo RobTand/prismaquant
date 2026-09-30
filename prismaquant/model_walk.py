@@ -127,8 +127,9 @@ accident:
   verdict as ``byte_accounting.convention``); per-device accounting arrives
   with TP as an additive ``shard_policy`` annotation, never as node identity.
 
-This module imports only torch and the standard library, so it can wrap any
-torch model; the prismaquant-specific claim policy lives on the model profile.
+The walker requires only torch and the standard library, including the local
+stdlib-only digest owner for metadata, so it can wrap any torch model; the
+prismaquant-specific claim policy lives on the model profile.
 """
 from __future__ import annotations
 
