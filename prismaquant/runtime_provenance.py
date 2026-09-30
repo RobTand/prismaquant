@@ -1502,10 +1502,16 @@ def admit_native_rows(table, relation):
             raise RuntimePriceError("unsupported native producer panel")
         cited_paths = {rank: path for rank, path, _receipt, _trace, _sha in roster}
         cited_paths_sha256 = {rank: sha for rank, _path, _receipt, _trace, sha in roster}
+        # Legacy callers retain only the original common scalar. Companion
+        # maps are optional, but a supplied map must still bind that scalar.
+        producer_claim = {"source_sha256": run["common"]["producer_source_tree_sha256"]}
+        if "producer_source_profiles" in run:
+            producer_claim["source_profiles"] = run["producer_source_profiles"]
+        producer_profiles = _source_claim(producer_claim, "source_sha256", "source_profiles", "native producer")
         wire_framing = []
         for record in wire_records:
             profiles = _source_claim(record["identity"], "encoder_source_sha256", "source_profiles", "wire producer")
-            wire_framing.append(_compare_sources(run["producer_source_profiles"], profiles,
+            wire_framing.append(_compare_sources(producer_profiles, profiles,
                                                 "original wire producer source-tree seal"))
         # This derived status is separate from the retained wire/panel/runtime
         # identities; old wire records remain explicitly legacy-framed.

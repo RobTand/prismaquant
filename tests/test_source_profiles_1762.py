@@ -117,16 +117,32 @@ def test_gate_refuses_malformed_or_unrecognized_profiles(bad):
 def test_reader_reports_legacy_framing_and_dual_profiles(tmp_path):
     from test_tessera_reader_namespace import package
     declared = package(tmp_path)
-    reader = tessera_reader.load_declared_reader(declared)
-    assert reader is not None
-    assert reader.identity['source_framing']['status'] == 'legacy_framing'
-    both = reader.identity['source_profiles']
-    assert both[V1] == declared['source_sha256']
-    dual = tessera_reader.load_declared_reader({**declared, 'source_profiles': both})
-    assert dual is not None
-    assert dual.identity['source_framing']['status'] == 'framed_v2'
-    with pytest.raises(ValueError, match='v2.*mismatch'):
-        tessera_reader.load_declared_reader({**declared, 'source_profiles': {**both, V2: '0' * 64}})
+    root = Path(declared['path'])
+    # Do not share a process-global reader memo with the original namespace
+    # regression's byte-identical package at a different temporary path.
+    with (root / '__init__.py').open('a') as handle:
+        handle.write('# source-profile metadata regression\n')
+    both = tessera_reader._source_tree_profiles(root)[0]
+    declared['source_sha256'] = both[V1]
+    namespace = 'tessera_reader_' + both[V2]
+    assert namespace not in sys.modules
+    try:
+        reader = tessera_reader.load_declared_reader(declared)
+        assert reader is not None
+        assert reader.identity['source_framing']['status'] == 'legacy_framing'
+        assert reader.identity['source_profiles'] == both
+        dual = tessera_reader.load_declared_reader({**declared, 'source_profiles': both})
+        assert dual is not None
+        assert dual.identity['source_framing']['status'] == 'framed_v2'
+        with pytest.raises(ValueError, match='v2.*mismatch'):
+            tessera_reader.load_declared_reader({**declared, 'source_profiles': {**both, V2: '0' * 64}})
+    finally:
+        for name in tuple(sys.modules):
+            if name == namespace or name.startswith(namespace + '.'):
+                del sys.modules[name]
+        for finder in tuple(sys.meta_path):
+            if isinstance(finder, tessera_reader._ReaderFinder) and finder.namespace == namespace:
+                sys.meta_path.remove(finder)
 
 
 def test_runtime_relation_preserves_record_and_reports_legacy(relation_fixture):
