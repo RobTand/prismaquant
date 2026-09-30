@@ -87,7 +87,12 @@ import torch.nn as nn
 from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
-from prismaquant.digests import LengthFramedSourceSha256, canonical_json
+from prismaquant.digests import (
+    LengthFramedSourceSha256,
+    bytes_sha256hex,
+    canonical_json,
+    text_sha256hex,
+)
 from prismaquant.schemas import refuse_retired_codebook_format
 from prismaquant.render_score import (
     gate_render_candidate,
@@ -2935,7 +2940,7 @@ def _canonical_json_sha256(value: object, *, where: str) -> str:
         ensure_ascii=False,
         allow_nan=False,
     ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return bytes_sha256hex(encoded)
 
 
 def _production_cache_git_commit() -> str:
@@ -3983,7 +3988,7 @@ def _qname_set_sha256(qnames: Iterable[str]) -> str:
     ``calib_hash``) is what makes their rendered rows equal.
     """
     payload = "\n".join(sorted(str(q) for q in qnames))
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return text_sha256hex(payload)
 
 
 def validate_activation_hook_scope(
