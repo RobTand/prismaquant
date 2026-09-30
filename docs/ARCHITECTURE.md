@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1837): `glm5_next` declares the three attention
+fused groups its construction runtime loads (image `487ecf187`,
+`load_weights` stacked params): `in_proj_qkvbfg_a`, `fused_qkv_a_proj` and
+`indexer.wk_weights_proj`. The attention pins are unchanged, so no allocation,
+export, serving gate, runtime pin or default changes; the groups bind only a
+scope that unpins attention for pricing. See the plugin-architecture note on
+`glm5_next` fused groups.
+
 Re-stamped 2026-09-30 (PQ #1828, Refs #870): the opt-in
 `ProducedRenderPublication` binding reuses the existing boundary publication
 lifecycle and public PB owner/attempt checks. Its declared `renders` payload
@@ -26084,14 +26092,18 @@ The two 2026-08-26 additions are **enablement scaffolds, not export-ready lanes*
 a vLLM class importable from the pinned serving stacks, so both return `vllm_architecture_class
 → None`. `qwen4_exp` still declares `fused_groups` read from HF modelling code (`in_proj_qkvz`,
 `in_proj_ba`, the shared-expert `gate_up_proj`), the hy_v3 precedent. `glm5_next` declares
-**none**, and has nothing it may honestly declare: its KDA attention exposes separate q/k/v
-Linears live, and the only fusion evidence is the checkpoint's own
-`quantization_config.modules_to_not_convert` naming `self_attn.qkv_proj` /
-`self_attn.fused_qkvbfg_a_proj`, names that appear in no index key — a lead about someone's
-serving tree, not a contract (principle 14). The gap is harmless only because every fusable
-attention projection is pinned, so no fused group can be split across formats; that pairing is
-ratcheted in `tests/test_model_profile_conformance.py`
-(`UNATTESTED_FUSED_SOURCE_XFAIL`), which goes red if either half changes.
+five groups in its structure spec, each read off a runtime's own `load_weights`: the dense and
+shared-expert `gate_up_proj` pairs (PR #53906 source, 2026-08-27), and since 2026-09-30
+(PQ #1837) the three attention modules of the construction image `487ecf187`
+(`vllm/models/glm5next/nvidia/model.py:752-768`): `self_attn.in_proj_qkvbfg_a` <-
+q/k/v/b/f_a/g_a, `self_attn.fused_qkv_a_proj` <- q_a/kv_a_proj_with_mqa and
+`self_attn.indexer.wk_weights_proj` <- wk/weights_proj. The KDA group names both the checkpoint
+spelling `self_attn.f_a_proj` and the live `self_attn.forget_gate.f_a_proj`, because
+`fused_group_for` matches suffixes. The attention pins do not move: that image builds every
+attention module with `quant_config=None`, so the declarations change no allocation today. They
+keep a pricing scope that unpins attention (`--allow-pinned`) from splitting one vLLM module
+across formats. `tests/test_glm5_next_attention_fused_groups.py` holds the groups, both
+spellings, and the rule that a group is pinned whole or not at all.
 `qwen4_exp` declares no `default_serving_profile` and
 no `supported_lanes` **on purpose** — each is a statement about what a serving runtime does, and
 principle 14 refuses an unattested one; they are owed once a class exists to attest them, and
