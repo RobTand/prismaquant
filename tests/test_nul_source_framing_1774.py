@@ -85,6 +85,32 @@ def _profile_spy(monkeypatch, module):
     return batches
 
 
+def _profiles_spy(monkeypatch, module):
+    batches = []
+    owner = digests.source_tree_profiles
+
+    def observed(records):
+        entries = list(records)
+        batches.append(entries)
+        return owner(entries)
+
+    monkeypatch.setattr(module, "source_tree_profiles", observed)
+    return batches
+
+
+def _labelled_profiles(entries):
+    """Independent framing oracle; the literal legacy golden table stays fixed."""
+    framed = hashlib.sha256(b"prismaquant.source_tree.v2\0")
+    encoded = [(name.encode("utf-8"), raw) for name, raw in entries]
+    for name, raw in sorted(encoded, key=lambda entry: entry[0]):
+        framed.update(len(name).to_bytes(8, "big"))
+        framed.update(name)
+        framed.update(len(raw).to_bytes(8, "big"))
+        framed.update(raw)
+    return {"prismaquant.source_tree.v1": _legacy(entries),
+            "prismaquant.source_tree.v2": framed.hexdigest()}
+
+
 def _bytes_spy(monkeypatch, module):
     calls = []
     owner = digests.bytes_sha256hex
@@ -124,7 +150,7 @@ def test_source_tree_routes(payload, tmp_path, monkeypatch):
     (root / "ignored.json").write_bytes(b"excluded")
     paths = sorted(p for p in root.rglob("*") if p.suffix in reader.SOURCE_SUFFIXES)
     entries = [(p.relative_to(root).as_posix(), p.read_bytes()) for p in paths]
-    batches = _profile_spy(monkeypatch, reader)
+    batches = _profiles_spy(monkeypatch, reader)
     byte_calls = _bytes_spy(monkeypatch, reader)
     sha, files = reader._source_tree(root)
     assert sha == _legacy(entries)
@@ -208,6 +234,8 @@ def test_package_installed_members_routes(payload, tmp_path, monkeypatch):
                       "source_identity_sha256": tree_identity, "source_identity_members": len(tree),
                       "source_tree_sha256": _legacy([("__init__.py", b""), ("a.py", payload)]),
                       "installed_source_sha256": _legacy([("a.py", payload)]),
+                      "source_tree_profiles": _labelled_profiles([("__init__.py", b""), ("a.py", payload)]),
+                      "installed_source_profiles": _labelled_profiles([("a.py", payload)]),
                       "installed_files": {"a.py": {"sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}}}
     assert calls == [*tree.values(), payload]
 
@@ -254,7 +282,7 @@ def test_legacy_ambiguity_is_preserved_not_silently_migrated(tmp_path):
     right = {"__init__.py": b"", "a.py": b"first", "b.py": b"second"}
     expected = "c0d3b3d116abc2201d9f3b9574a45e795eb7219ed24f9a90b01bf61c3550396a"
     assert provenance._source_digest(left) == provenance._source_digest(right) == expected
-    counts = []
+    counts, companions = [], []
     for label, entries in [("left", left), ("right", right)]:
         root = tmp_path / label
         root.mkdir()
@@ -262,5 +290,11 @@ def test_legacy_ambiguity_is_preserved_not_silently_migrated(tmp_path):
             (root / name).write_bytes(raw)
         sha, files = reader._source_tree(root)
         assert sha == expected
+        profiles, profiled_files = reader._source_tree_profiles(root)
+        assert profiles == _labelled_profiles(list(entries.items()))
+        assert profiles["prismaquant.source_tree.v1"] == expected
+        assert profiled_files == files
+        companions.append(profiles["prismaquant.source_tree.v2"])
         counts.append(len(files))
     assert counts == [2, 3]
+    assert len(set(companions)) == 2
