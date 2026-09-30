@@ -105,6 +105,25 @@ def _source_profiles(files):
         if Path(name).suffix in {".py", ".cu", ".cuh", ".cpp", ".h"})
 
 
+def _source_claim(record, legacy_field, profile_field, where):
+    """Validate an optional companion map, never relabel its legacy scalar."""
+    legacy = _sha(record[legacy_field], where + " legacy source profile")
+    profiles = record.get(profile_field, {SOURCE_TREE_V1: legacy})
+    try:
+        compare_source_profiles(profiles, profiles)
+    except (ValueError, TypeError) as exc:
+        raise RuntimePriceError(f"{where} source profiles: {exc}") from exc
+    _equal(profiles[SOURCE_TREE_V1], legacy, where + " legacy source profile binding")
+    return dict(profiles)
+
+
+def _compare_sources(left, right, where):
+    try:
+        return compare_source_profiles(left, right)
+    except (ValueError, TypeError) as exc:
+        raise RuntimePriceError(f"{where} source profiles: {exc}") from exc
+
+
 def _source_tree_identity(tree):
     """The source-tree installer's own identity, recomputed from the bytes.
 
@@ -239,7 +258,8 @@ def _instrumentation(run, raw, base, libraries, reader):
     _equal(roles, set(observed), "instrumentation role coverage")
     source = base["source"]
     expected_sources = {key: value for key, value in source.items()
-                        if key not in ("tessera_package_sha256", "runtime_contract_sha256")}
+                        if key not in ("tessera_package_sha256", "tessera_package_source_profiles",
+                                       "runtime_contract_sha256")}
     if run["scope"] == "native_operator":
         expected_sources["resource_analysis_source_sha256"] = raw["resource_collector"]["analysis_source_sha256"]
     else:
@@ -417,8 +437,17 @@ def _observe_run(run, *, reader, configuration, configuration_sha256, image_mani
     _equal(package["package_files"], installation["plugin_files"], "complete installed package file roster")
     _installed_from_declared_source(installation, package_source)
     _equal(package["package_files"], package_source["installed_files"], "installed package bytes from source archive")
-    _equal(package["encoder_source_sha256"], package_source["installed_source_sha256"], "recomputed installed source seal")
-    _equal(package["encoder_source_sha256"], base["source"]["tessera_package_sha256"], "installed package source digest")
+    package_profiles = _source_claim(package, "encoder_source_sha256", "source_profiles", "loaded package")
+    runtime_profiles = _source_claim(base["source"], "tessera_package_sha256",
+                                     "tessera_package_source_profiles", "runtime package")
+    source_checks = (
+        _compare_sources(package_source["installed_source_profiles"], package_profiles, "recomputed installed seal"),
+        _compare_sources(package_source["installed_source_profiles"], runtime_profiles, "recomputed runtime seal"),
+        _compare_sources(package_profiles, runtime_profiles, "installed package/runtime seal"),
+    )
+    # A strong pair cannot upgrade a different comparison that fell back to v1.
+    source_framing = next((check for check in source_checks if check["status"] == "legacy_framing"),
+                          source_checks[0])
     _equal(package["package_files"]["serving/runtime_contract.json"]["sha256"],
            base["source"]["runtime_contract_sha256"], "installed runtime contract")
     _equal(package["installer_evidence_sha256"], run["installation"]["sha256"], "loaded package installer evidence")
@@ -456,6 +485,8 @@ def _observe_run(run, *, reader, configuration, configuration_sha256, image_mani
         "producer_source_tree_sha256": package_source["source_tree_sha256"],
         "plugin_files": installation["plugin_files"], "plugin_entrypoints": installation["plugin_entrypoints"]}
     return {"raw": raw, "base": base, "sha256": identity_sha256(raw), "common": common,
+            "source_profiles": runtime_profiles, "source_framing": source_framing,
+            "producer_source_profiles": package_source["source_tree_profiles"],
             "libraries": libraries, "instrumentation": excluded,
             "production": {path: sha for path, sha in libraries.items() if path not in excluded}}
 
@@ -525,7 +556,13 @@ def _load_runtime_relation(reference, *, context, root):
     _equal({name for name, run in runs.items() if run["scope"] == "full_engine"}, {full_id}, "full-engine observation coverage")
     full = observed[full_id]
     for name, run in observed.items():
-        _equal(run["common"], full["common"], "common image/core/plugin/config/device coordinates")
+        common, full_common = dict(run["common"]), dict(full["common"])
+        if run["source_framing"]["status"] == full["source_framing"]["status"] == "framed_v2":
+            # Both actual-source comparisons already verified v2. Retain each
+            # original v1 in the result, but do not require cross-run v1 equality.
+            common.pop("package_sha256")
+            full_common.pop("package_sha256")
+        _equal(common, full_common, "common image/core/plugin/config/device coordinates")
         for path in set(run["libraries"]) & set(full["libraries"]):
             _equal(run["libraries"][path], full["libraries"][path], "same-path library bytes")
             _equal(path in run["instrumentation"], path in full["instrumentation"], "production/instrumentation role")
@@ -550,7 +587,10 @@ def _load_runtime_relation(reference, *, context, root):
         _object(item, ("sha256", "scope"), "extra production library")
         _equal(_sha(item["sha256"], "extra production library"), full["production"][path], "extra production bytes")
         _equal(item["scope"], "full_engine", "extra exercised production scope")
+    source_framing = next((run["source_framing"] for run in observed.values()
+                           if run["source_framing"]["status"] == "legacy_framing"), full["source_framing"])
     return {"record": relation, "reference": reference, "reader": reader, "runs": observed,
+            "source_framing": source_framing,
             "full_engine_run_id": full_id, "configuration_sha256": configuration_sha256}
 
 
@@ -1404,7 +1444,7 @@ def admit_native_rows(table, relation):
             raise RuntimePriceError("duplicate native row receipt binding")
         by_key[key] = item
     _equal(set(by_key), {row.key for row in table.rows}, "native row receipt coverage")
-    cohort_panels = []
+    cohort_panels, source_framing = [], []
     for row in table.rows:
         binding = by_key[row.key]
         run_id = binding["run_id"]
@@ -1462,9 +1502,14 @@ def admit_native_rows(table, relation):
             raise RuntimePriceError("unsupported native producer panel")
         cited_paths = {rank: path for rank, path, _receipt, _trace, _sha in roster}
         cited_paths_sha256 = {rank: sha for rank, _path, _receipt, _trace, sha in roster}
+        wire_framing = []
         for record in wire_records:
-            _equal(record["identity"]["encoder_source_sha256"],
-                   run["common"]["producer_source_tree_sha256"], "original wire producer source-tree seal")
+            profiles = _source_claim(record["identity"], "encoder_source_sha256", "source_profiles", "wire producer")
+            wire_framing.append(_compare_sources(run["producer_source_profiles"], profiles,
+                                                "original wire producer source-tree seal"))
+        # This derived status is separate from the retained wire/panel/runtime
+        # identities; old wire records remain explicitly legacy-framed.
+        source_framing.append({"unit": row.unit, "format": row.fmt, "comparisons": wire_framing})
         observations = {}
         for rank, rank_path, _rank_receipt, rank_trace, rank_sha256 in roster:
             try:
@@ -1529,6 +1574,7 @@ def admit_native_rows(table, relation):
     served = _served_artifact_families(relation)
     for row in table.rows:
         _require_served_route_family(row, served)
+    relation["wire_source_framing"] = source_framing
 
 
 def admit_runtime_provenance(table):

@@ -118,10 +118,12 @@ def test_reader_reports_legacy_framing_and_dual_profiles(tmp_path):
     from test_tessera_reader_namespace import package
     declared = package(tmp_path)
     reader = tessera_reader.load_declared_reader(declared)
+    assert reader is not None
     assert reader.identity['source_framing']['status'] == 'legacy_framing'
     both = reader.identity['source_profiles']
     assert both[V1] == declared['source_sha256']
     dual = tessera_reader.load_declared_reader({**declared, 'source_profiles': both})
+    assert dual is not None
     assert dual.identity['source_framing']['status'] == 'framed_v2'
     with pytest.raises(ValueError, match='v2.*mismatch'):
         tessera_reader.load_declared_reader({**declared, 'source_profiles': {**both, V2: '0' * 64}})
@@ -231,7 +233,7 @@ def test_actual_installed_git_v1_identity_is_unchanged():
     commit = url['vcs_info']['commit_id']
     assert len(commit) == 40 and all(c in '0123456789abcdef' for c in commit)
     assert not url.get('dir_info', {}).get('editable', False)
-    root = Path(distribution.locate_file('tessera')).resolve()
+    root = Path(str(distribution.locate_file('tessera'))).resolve()
     assert root.is_relative_to(Path(sys.prefix).resolve())
     files = {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob('*'))
              if p.is_file() and p.suffix in tessera_reader.SOURCE_SUFFIXES}
@@ -240,6 +242,7 @@ def test_actual_installed_git_v1_identity_is_unchanged():
     assert tessera_reader._source_tree(root)[0] == expected
     assert reseal().encoder_tree_sha256(root) == (expected, len(files))
     import tessera.cached_unit as installed_encoder
+    assert installed_encoder.__file__ is not None
     assert Path(installed_encoder.__file__).resolve().parent == root
     installed_encoder.encoder_source_sha256.cache_clear()
     assert installed_encoder.encoder_source_sha256() == expected
