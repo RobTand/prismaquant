@@ -310,47 +310,74 @@ def test_native_cuda_only_batch_trace_has_actual_events(tmp_path, monkeypatch):
     assert 0 < result['anchors'][0]['trace']['bytes'] <= 4*1024**2
 
 
-def test_timed_cuda_window_stops_collection_while_original_call_continues(
-        tmp_path, controlled, monkeypatch):
-    stopped = threading.Event()
-    toggles = []
-    def toggle(self, enabled, activities):
-        toggles.append((enabled, activities))
-        stopped.set()
-    monkeypatch.setattr(FakeProfiler, 'toggle_collection_dynamic', toggle, raising=False)
+@pytest.mark.parametrize('finish_early', [False, True])
+def test_timed_profiler_lifetime_has_one_owner_and_preserves_call_thread(
+        tmp_path, controlled, monkeypatch, finish_early):
+    caller = threading.get_ident()
+    lifetime = []
+    ended = threading.Event()
+    def enter(self):
+        lifetime.append(('start', threading.get_ident()))
+        return self
+    def exit(self, *_):
+        lifetime.append(('stop', threading.get_ident()))
+        ended.set()
+    monkeypatch.setattr(FakeProfiler, '__enter__', enter)
+    monkeypatch.setattr(FakeProfiler, '__exit__', exit)
     obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
-        command=selected(), cuda_only=True, window_seconds=.01)
+        command=selected(), cuda_only=True, window_seconds=.02 if not finish_early else 60)
     token, calls = object(), []
     def original(**kwargs):
-        calls.append(kwargs)
-        assert stopped.wait(10), 'CUDA collection was not stopped during the call'
+        calls.append((threading.get_ident(), kwargs))
+        assert lifetime and lifetime[0][0] == 'start'
+        if not finish_early:
+            assert ended.wait(10), 'collector must finish before the original returns'
         return token
-    assert obs.wrap_anchor(original)(qname='dense', format_name='BF16') is token
-    assert len(calls) == 1
-    assert toggles == [(False, [torch.profiler.ProfilerActivity.CUDA])]
-    record, = obs.result['anchors']
+    assert obs.wrap_anchor(original)(qname='u', format_name='f') is token
+    assert len(calls) == 1 and calls[0][0] == caller
+    assert [phase for phase, _ in lifetime] == ['start', 'stop']
+    assert lifetime[0][1] == lifetime[1][1] != caller
+    assert ended.is_set(), 'profiler owner must join before trace export'
+    record, = json.loads((obs.out/'progress.json').read_text())['anchors']
     assert record['status'] == 'complete'
-    assert record['collection_window']['stopped_by'] == 'deadline'
-    assert record['collection_window']['elapsed_seconds'] >= .01
+    assert record['collection_window']['stopped_by'] == (
+        'anchor_return' if finish_early else 'deadline')
+    if not finish_early:
+        assert record['collection_window']['elapsed_seconds'] >= .02
 
 
-def test_timed_collection_failure_preserves_original_success(tmp_path, controlled, monkeypatch):
+@pytest.mark.parametrize('phase', ['start', 'stop'])
+@pytest.mark.parametrize('original_fails', [False, True])
+def test_timed_collection_failure_preserves_original_outcome(
+        tmp_path, controlled, monkeypatch, phase, original_fails):
     attempted = threading.Event()
-    def toggle(self, *_):
+    def fail(self, *_):
         attempted.set()
-        raise RuntimeError('controlled CUDA toggle failure')
-    monkeypatch.setattr(FakeProfiler, 'toggle_collection_dynamic', toggle, raising=False)
+        raise RuntimeError('controlled CUDA lifetime failure')
+    monkeypatch.setattr(FakeProfiler, '__enter__' if phase == 'start' else '__exit__', fail)
     obs = observe.AnchorObserver(tmp_path, profile_calls=(0,), trace_max_bytes=4096,
         command=selected(), cuda_only=True, window_seconds=.01)
     token, calls = object(), []
+    original_error = ValueError('original anchor failure')
     def original(**kwargs):
         calls.append(kwargs)
         assert attempted.wait(10)
+        if original_fails:
+            raise original_error
         return token
-    assert obs.wrap_anchor(original)(qname='u', format_name='f') is token
+    if original_fails:
+        with pytest.raises(ValueError) as caught:
+            obs.wrap_anchor(original)(qname='u', format_name='f')
+        assert caught.value is original_error
+    else:
+        assert obs.wrap_anchor(original)(qname='u', format_name='f') is token
+    result = json.loads((obs.out/'progress.json').read_text())
+    assert result['anchors'][0]['status'] == (
+        'anchor_failed' if original_fails else 'observation_failed')
     assert len(calls) == 1
-    assert obs.result['anchors'][0]['status'] == 'observation_failed'
-    assert 'controlled CUDA toggle failure' in obs.result['errors'][0]['error']
+    assert result['anchors'][0]['collection_window']['stopped_by'] == phase+'_failed'
+    if not original_fails or phase == 'start':
+        assert 'controlled CUDA lifetime failure' in result['errors'][0]['error']
 
 
 @pytest.mark.parametrize('seconds', [0, -1, float('nan'), float('inf'), True])
@@ -370,12 +397,12 @@ def test_native_timed_cuda_window_excludes_later_work(tmp_path, monkeypatch):
     if not torch.cuda.is_available():
         pytest.skip('native timed CUDA observer qualification')
     stopped = threading.Event()
-    toggle = torch.profiler.profile.toggle_collection_dynamic
-    def observed_toggle(self, *args, **kwargs):
-        result = toggle(self, *args, **kwargs)
-        stopped.set()
+    exit_profile = torch.profiler.profile.__exit__
+    def observed_exit(self, *args, **kwargs):
+        result = exit_profile(self, *args, **kwargs)
+        stopped.set()  # Only after native profiler teardown has drained the trace.
         return result
-    monkeypatch.setattr(torch.profiler.profile, 'toggle_collection_dynamic', observed_toggle)
+    monkeypatch.setattr(torch.profiler.profile, '__exit__', observed_exit)
     weights = torch.ones((8, 64, 64), device='cuda', dtype=torch.bfloat16)
     torch.bmm(weights, weights)  # Resolve the library before testing the timed window.
     torch.cuda.synchronize()
@@ -398,7 +425,7 @@ def test_native_timed_cuda_window_excludes_later_work(tmp_path, monkeypatch):
         result = obs.wrap_anchor(original)(qnames=['a', 'b'], format_name='window-test')
     assert len(calls) == 1 and result is calls[0]
     assert all(torch.equal(value, torch.full_like(value, 64)) for value in result)
-    record, = obs.result['anchors']
+    record, = json.loads((obs.out/'result.json').read_text())['anchors']
     assert record['status'] == 'complete'
     assert record['collection_window']['stopped_by'] == 'deadline'
     trace = json.loads((obs.out/record['trace']['path']).read_text())

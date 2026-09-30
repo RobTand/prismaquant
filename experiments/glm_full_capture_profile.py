@@ -224,7 +224,7 @@ class AnchorObserver(CaptureObserver):
             call_index_scope='Shared scalar and compatible-batch invocation sequence.',
             trace_cap_scope='Exported bytes per window; not a live profiler-memory bound.',
             requested_window_seconds=window_seconds,
-            window_scope='Initial CUDA collection interval; observed duration records scheduler/toggle delay.')
+            window_scope='Initial CUDA collection interval; observed duration records scheduler/teardown delay.')
         self.result.pop('forward_windows_zero_based')
         self.result.pop('profile_layers')
 
@@ -234,39 +234,48 @@ class AnchorObserver(CaptureObserver):
     @contextmanager
     def collection_window(self, profiler, record):
         if self.window_seconds is None:
-            yield
+            with profiler:
+                yield
             return
         cancel = threading.Event()
+        ready = threading.Event()
         failures = []
-        started = time.monotonic()
-        window = dict(requested_seconds=self.window_seconds, stopped_by=None)
+        window: dict[str, float | str | None] = dict(
+            requested_seconds=self.window_seconds, stopped_by=None)
         record['collection_window'] = window
 
-        def stop_collection():
-            if cancel.wait(self.window_seconds):
-                return
+        def collect():
+            started = None
             try:
-                # CUDA collection is Kineto-wide. CPU collection uses thread-
-                # local state, hence the explicit CUDA-only contract above.
-                profiler.toggle_collection_dynamic(False, self.activities)
-                window['stopped_by'] = 'deadline'
+                # Kineto CUDA collection is process-wide, but profiler lifetime
+                # is thread-local. One owner starts AND drains/stops the CUDA-only
+                # profiler. Stop drains pending CUDA activity instead of toggling
+                # it off before finalization. The anchor stays on its calling thread.
+                with profiler:
+                    started = time.monotonic()
+                    ready.set()
+                    returned = cancel.wait(self.window_seconds)
+                window['stopped_by'] = 'anchor_return' if returned else 'deadline'
             except BaseException as error:
                 failures.append(error)
-                window['stopped_by'] = 'toggle_failed'
+                window['stopped_by'] = 'start_failed' if started is None else 'stop_failed'
             finally:
-                window['elapsed_seconds'] = time.monotonic() - started
+                if started is not None:
+                    window['elapsed_seconds'] = time.monotonic() - started
+                ready.set()
 
-        thread = threading.Thread(target=stop_collection, name='anchor-cuda-window', daemon=True)
+        thread = threading.Thread(target=collect, name='anchor-cuda-window', daemon=True)
         thread.start()
         try:
+            ready.wait()
+            if failures:
+                raise RuntimeError(f'CUDA collection window failed: {failures[0]!r}') from failures[0]
             yield
         finally:
             cancel.set()
-            # Join before profiler teardown; the stopper must never access an
-            # ended profiler or toggle a subsequent anchor's collection.
+            # Join before export or the next anchor, including early returns and
+            # failures. No thread may retain a live profiler across call windows.
             thread.join()
-            if window['stopped_by'] is None:
-                window.update(stopped_by='anchor_return', elapsed_seconds=time.monotonic()-started)
             if failures:
                 raise RuntimeError(f'CUDA collection window failed: {failures[0]!r}') from failures[0]
 
@@ -289,15 +298,15 @@ class AnchorObserver(CaptureObserver):
             value = None
             try:
                 try:
-                    with torch.profiler.profile(activities=self.activities, record_shapes=False,
-                            profile_memory=False, with_stack=False) as profiler:
-                        with self.collection_window(profiler, record):
-                            called = True
-                            try:
-                                value = original(*args, **kwargs)
-                            except BaseException as error:
-                                original_error = error
-                                raise
+                    profiler = torch.profiler.profile(activities=self.activities, record_shapes=False,
+                        profile_memory=False, with_stack=False)
+                    with self.collection_window(profiler, record):
+                        called = True
+                        try:
+                            value = original(*args, **kwargs)
+                        except BaseException as error:
+                            original_error = error
+                            raise
                     path = self.out/f'anchor-{index:06d}.trace.json'
                     profiler.export_chrome_trace(str(path))
                     size = path.stat().st_size
