@@ -79,7 +79,8 @@ def geometry(monkeypatch):
             "--export-hessian-reference-policy", json.dumps(REFERENCE_POLICY)]
     spec = dict(model="/synthetic", campaign_argv=argv, cpus=6, headroom_gb=24,
                 process_baseline_bytes=BASELINE_BYTES)
-    census = dict(unit_shapes=shapes, counts=counts)
+    census = dict(unit_shapes=shapes, counts=counts,
+                  anchor_groups={"s:stack": sorted(shapes)})
     return spec, census
 
 
@@ -130,7 +131,8 @@ def test_genuine_load_all_dependencies_are_refused_before_submission(
         argv.extend(extra)
     assert words in dispatch._row_head_dependency(argv)
     selection = tmp_path / "units.json"
-    selection.write_text(json.dumps({"groups": [{"key": "s:stack", "members": sorted(census["counts"])}]}))
+    selection.write_text(json.dumps({"schema": "prismaquant.tessera_campaign_units.v1",
+                                    "groups": [{"key": "s:stack", "members": sorted(census["counts"])}]}))
     row = dict(argv=["python", "-m", "prismaquant.tessera_campaign", *argv,
                      "--units", str(selection)], demand=dict(mem_gb=69))
     with pytest.raises(dispatch.DemandRefused, match="above.*GPU box declares"):

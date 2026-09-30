@@ -40,6 +40,15 @@ unchanged. This CPU integration remains research opt-in: #1367's authorized
 before/after in-process profiles and both-Spark Netdata are HELD, with no speed,
 residency, peak-memory or unchanged-wait claim from CPU barrier tests.
 
+Re-stamped 2026-09-30 (PQ #1789, Refs #1314): campaign `check` and
+`submit` reuse the runtime selection schema and whole-group membership checks
+against the bound census before deriving row demand. Explicit v2 samples
+retain the full group identity and their own priced-member demand. Undeclared
+partial groups are refused for pinned and adaptive bands alike. This is a CPU
+admission prerequisite, not an expert-partition planner or a partial-stack
+merge. No runtime phase plan, cache/prefetch, pin, format, wire or ship gate
+changes; no GPU or output-equivalence claim.
+
 Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
 `BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
 `submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
@@ -21507,8 +21516,13 @@ whose directory yields no readable file is refused for the same reason: zero
 seed bytes against a named directory is a broken read set, not an empty one.
 The manifest's `produced_by` holds no clock, host or git commit, so a plan run
 under pbrun or in a container publishes the bytes a host-side `submit`
-re-derives. `check` re-derives the demand from a manifest row's own argv and
-refuses an under-declared or over-capacity row, then refuses a row that names
+re-derives. Before demand arithmetic, `check` and `submit` validate the
+selection schema and whole-group membership against the bound census through
+the campaign's existing owners. An explicit v2 sample still names the full
+group while charging only its priced members; an undeclared partial group is
+refused even at a pinned rate. `check` then re-derives the demand from a
+manifest row's own argv and refuses an under-declared or over-capacity row,
+then refuses a row that names
 no data manifest, one PrismaBuild would refuse, or another row's; it is the
 preflight for a subset released with `pbcampaign.py` directly. `submit` runs
 the demand check on the planned rows, then re-derives each row's data manifest
