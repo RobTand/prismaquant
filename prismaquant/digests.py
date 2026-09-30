@@ -64,7 +64,7 @@ so a light tool can import it without pulling in torch.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 import hashlib
 import json
@@ -339,6 +339,57 @@ class LegacyNulSourceSha256:
 
     def hexdigest(self) -> str:
         return self._digest.hexdigest()
+
+
+SOURCE_TREE_V1 = "prismaquant.source_tree.v1"
+SOURCE_TREE_V2 = "prismaquant.source_tree.v2"
+
+
+def source_tree_profiles(records: Iterable[tuple[str, bytes]]) -> dict[str, str]:
+    """Preserve caller-ordered NUL v1; add tagged u64/u64 byte-sorted v2.
+
+    The caller still owns its suffix roster and relative-name root. NUL is
+    legitimate content: only v1 treats it as a separator. v2 starts with its
+    ASCII profile name and NUL, then unsigned eight-byte big-endian lengths
+    for both the UTF-8 name and the raw content, with no trailing separator.
+    """
+    entries = list(records)
+    if len({name for name, _ in entries}) != len(entries):
+        raise ValueError("source profiles require unique file names")
+    legacy = LegacyNulSourceSha256()
+    encoded = []
+    for name, raw in entries:
+        if not isinstance(name, str) or not isinstance(raw, bytes):
+            raise TypeError("source profiles require UTF-8 names and byte contents")
+        legacy.update(name, raw)
+        encoded.append((name.encode("utf-8"), raw))
+    framed = hashlib.sha256(SOURCE_TREE_V2.encode("ascii") + b"\0")
+    for name, raw in sorted(encoded, key=lambda entry: entry[0]):
+        framed.update(len(name).to_bytes(8, "big"))
+        framed.update(name)
+        framed.update(len(raw).to_bytes(8, "big"))
+        framed.update(raw)
+    return {SOURCE_TREE_V1: legacy.hexdigest(), SOURCE_TREE_V2: framed.hexdigest()}
+
+
+def compare_source_profiles(left: Mapping[str, str], right: Mapping[str, str]) -> dict[str, str]:
+    """Compare v2 when both declare it, otherwise explicitly report v1.
+
+    An advertised malformed/unknown profile is never downgraded to legacy.
+    Matching v1 cannot mask a mismatch in v2; matching v2 need not compare
+    the caller-ordered legacy transcript across the two sides.
+    """
+    allowed = {SOURCE_TREE_V1, SOURCE_TREE_V2}
+    for profiles in (left, right):
+        if (not isinstance(profiles, Mapping) or SOURCE_TREE_V1 not in profiles
+                or not set(profiles) <= allowed
+                or any(not is_sha256hex(value) for value in profiles.values())):
+            raise ValueError("source profiles require labelled, exact known SHA256 values")
+    profile = SOURCE_TREE_V2 if SOURCE_TREE_V2 in left and SOURCE_TREE_V2 in right else SOURCE_TREE_V1
+    if left[profile] != right[profile]:
+        raise ValueError(f"{profile}: source profile mismatch")
+    return {"status": "framed_v2" if profile == SOURCE_TREE_V2 else "legacy_framing",
+            "profile": profile, "sha256": left[profile]}
 
 
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:

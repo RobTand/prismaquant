@@ -579,6 +579,16 @@ def test_the_intake_gate_re_derives_a_routed_rows_rank_vector(joined, tmp_path, 
     assert row.resources.wire_bytes == WHOLE_SERIALIZED, "one canonical container, charged once"
     assert [entry["rank"] for entry in row.resources.as_dict()["ranks"]] == list(range(world_size))
     assert row.resources.prefill_ms == item["row"]["resources"]["prefill_ms"]
+    assert all(comparison["status"] == "legacy_framing"
+               for entry in relation["wire_source_framing"] for comparison in entry["comparisons"])
+
+
+@pytest.mark.parametrize("profiles", [None, {"prismaquant.source_tree.v1": "0" * 64}])
+def test_native_source_companion_is_optional_but_not_unchecked(joined, tmp_path, profiles):
+    item, context, relation, _panel, _receipts = _routed_gate(joined, tmp_path)
+    relation["runs"]["native"]["producer_source_profiles"] = profiles
+    with pytest.raises(RuntimePriceError, match="source profile"):
+        admit_native_rows(_gate_table(item, context, tmp_path), relation)
 
 
 def test_the_intake_gate_refuses_a_rank_vector_the_receipts_do_not_support(joined, tmp_path):

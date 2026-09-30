@@ -17,6 +17,32 @@ do not establish #1087's representative proxy digest, performance, residency,
 peak-memory or reader-wait acceptance. GPU before/after profiles and both-Spark
 Netdata remain HELD pending explicit coordinator approval.
 
+Re-stamped 2026-09-30 (PQ #1762, `sol/source-domain-1762`): source-file
+provenance adds `prismaquant.source_tree.v2` beside the unchanged labelled
+`prismaquant.source_tree.v1` NUL transcript. v2 hashes its ASCII profile name
+plus NUL, then records in UTF-8 name-byte order with unsigned u64be name
+length, name bytes, unsigned u64be content length and raw content. Embedded
+NUL, including native raw-string source, is valid. Existing suffix rosters,
+relative-name roots and caller ordering for v1 remain unchanged. This is
+separate from the archive/compact-JSON file-map identity and from the older
+be32-name/be64-content PrismaQuant source profile.
+
+`runtime_provenance` emits both source profiles; `tessera_reader` verifies an
+optional labelled map and reports the selected framing without importing the
+Tessera serving runtime. Its private import memo uses the computed v2 digest
+so distinct actual file maps cannot alias through a legacy transcript.
+`tools/reseal_campaign_identity.py hash-tree` emits both encoder profiles;
+no migration command or qualified record is rewritten. Comparison selects v2
+when both sides advertise it, refuses malformed/unknown profiles or a v2
+mismatch even if v1 matches, and otherwise explicitly reports
+`legacy_framing`. Matching v2 does not require cross-side v1 equality.
+Framing status is derived result metadata, not a new runtime/context digest.
+The current Tessera pin, qualified cells, wire identities, format menu,
+numerical behavior and independent export/serving gates remain unchanged.
+Tessera's own package-profile API is additive upstream; adopting it in
+PrismaQuant requires a later separately reviewed pin. CPU framing evidence
+is not GPU or serving qualification.
+
 Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
 `plan_reduced_schedule_repair` replays explicit research input history under a
 fixed declared experiment and round cap. Prior receipt continuity, monotonic
