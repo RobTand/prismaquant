@@ -115,6 +115,8 @@ READ_BUFFER_COUNT = 2
 #: rates. See docs/ARCHITECTURE.md.
 WRITE_CALL_BYTES = 1 << 20
 READ_CALL_BYTES = 1 << 20
+#: Research scatter reads also respect the platform's vectored-I/O ceiling.
+READ_IOV_MAX = int(os.sysconf("SC_IOV_MAX"))
 #: A writer thread by default; tests run the same writes inline.
 DEFAULT_THREADS = True
 #: The sealed spill bound's schema (``executable_readset.spill_bound``).
@@ -622,6 +624,59 @@ def _slot(cursor, residue, nbytes, block):
     return start, offset, _ceil(offset + nbytes, block)
 
 
+def _scatter_read_calls(envelopes, *, block, call_bytes, max_iov):
+    """Plan bounded readv calls for physically adjacent, disjoint slot envelopes.
+
+    Destinations may be permuted. Return physical span count and calls of
+    ``(file_offset, [(buffer_offset, length), ...])``; never fill a file gap.
+    This is an explicit research policy, not the default replay layout.
+    """
+    if (type(block) is not int or block <= 0 or block & (block - 1)
+            or type(call_bytes) is not int or call_bytes < block
+            or call_bytes % block or type(max_iov) is not int or max_iov <= 0):
+        raise ValueError("Stage B scatter read requires grid-aligned byte and iovec bounds")
+    ordered = sorted(envelopes)
+    for low, high, at in ordered:
+        if (low < 0 or high <= low or at < 0
+                or low % block or high % block or at % block):
+            raise RuntimeError("Stage B spill read envelope is off its direct-I/O grid")
+    destinations = sorted((at, at + high - low) for low, high, at in ordered)
+    if any(left[1] > right[0] for left, right in zip(destinations, destinations[1:])):
+        raise RuntimeError("Stage B spill read destinations overlap")
+    calls, vectors = [], []
+    spans, previous_end, call_at, used = 0, None, 0, 0
+    for low, high, at in ordered:
+        if previous_end is not None and low < previous_end:
+            raise RuntimeError("Stage B spill read envelopes overlap")
+        if low != previous_end:
+            spans += 1
+            if vectors:
+                calls.append((call_at, vectors))
+                vectors, used = [], 0
+        cursor = low
+        while cursor < high:
+            destination = at + cursor - low
+            abuts = bool(vectors and vectors[-1][0] + vectors[-1][1] == destination)
+            if used == call_bytes or (len(vectors) == max_iov and not abuts):
+                calls.append((call_at, vectors))
+                vectors, used = [], 0
+                abuts = False
+            if not vectors:
+                call_at = cursor
+            size = min(high - cursor, call_bytes - used)
+            if abuts:
+                start, length = vectors[-1]
+                vectors[-1] = (start, length + size)
+            else:
+                vectors.append((destination, size))
+            used += size
+            cursor += size
+        previous_end = high
+    if vectors:
+        calls.append((call_at, vectors))
+    return spans, calls
+
+
 def _empty_host_cache():
     """Hand the caching host allocator's idle pinned blocks back; the bytes freed."""
     stats = torch.cuda.memory.host_memory_stats
@@ -869,8 +924,12 @@ class StageBReplaySpill:
 
     def __init__(self, *, root, max_bytes, geometry, window_names, n_probes,
                  dtype, device, threads=None, accumulation=PER_INVOCATION,
-                 chunk_rows=None, max_block=None):
+                 chunk_rows=None, max_block=None, scatter_reads=False):
         from .perturbed_x_cache import StageBSpillScratch
+
+        if type(scatter_reads) is not bool:
+            raise ValueError("Stage B scatter_reads must be a boolean")
+        self._scatter_reads = scatter_reads
 
         regime = normalize_replay_regime({"accumulation": accumulation,
                                           "chunk_rows": chunk_rows})
@@ -945,6 +1004,7 @@ class StageBReplaySpill:
             "read_buffers": READ_BUFFER_COUNT,
             "threads": self._threads,
             "direct_io_block": block, "reserved_bytes": self._scratch.capacity,
+            "scatter_reads": self._scatter_reads,
             "write_call_bytes": WRITE_CALL_BYTES, "read_call_bytes": READ_CALL_BYTES,
             "write_calls": 0, "file_bytes_written": 0, "read_calls": 0,
             "file_bytes_read": 0, "replay_stream": None,
@@ -1602,7 +1662,8 @@ class StageBReplaySpill:
         line up); envelopes that abut in both the file and the buffer are one
         read, cut at ``READ_CALL_BYTES``. The calls run in order on the IO
         engine's thread that reads this chunk; the engine reads chunks in
-        parallel.
+        parallel. Explicit research ``scatter_reads`` additionally joins
+        physical adjacency with permuted destinations using bounded readv.
         """
         owner, (_records, new, gradients, _used) = item
         block = self._block
@@ -1622,26 +1683,36 @@ class StageBReplaySpill:
                                               window.g_starts[(name, probe)], logical,
                                               nbytes), offset, nbytes,
                                window.g_checksums[probe][position], "g", name, position))
-        spans = []
+        spans, envelopes = [], []
         for file_offset, offset, nbytes, *_integrity in sorted(pieces):
             if file_offset % block != offset % block:
                 raise RuntimeError("Stage B spill tensor is off its replay residue")
             lead = file_offset % block
             low, high = file_offset - lead, _ceil(file_offset + nbytes, block)
             at = offset - lead
+            if self._scatter_reads:
+                envelopes.append((low, high, at))
+                continue
             if spans and spans[-1][1] == low and spans[-1][2] + spans[-1][1] - spans[-1][0] == at:
                 spans[-1][1] = max(spans[-1][1], high)
             elif spans and low < spans[-1][1]:
                 raise RuntimeError("Stage B spill read envelopes overlap")
             else:
                 spans.append([low, high, at])
-        calls = []
-        for low, high, at in spans:
-            for cut in range(low, high, READ_CALL_BYTES):
-                size = min(READ_CALL_BYTES, high - cut)
-                calls.append((cut, at + (cut - low), size))
         read = self._scratch.read_into
-        done = [read(cut, [view[at:at + size]]) for cut, at, size in calls]
+        if self._scatter_reads:
+            read_spans, calls = _scatter_read_calls(
+                envelopes, block=block, call_bytes=READ_CALL_BYTES, max_iov=READ_IOV_MAX)
+            done = [read(cut, [view[at:at + size] for at, size in vectors])
+                    for cut, vectors in calls]
+        else:
+            calls = []
+            for low, high, at in spans:
+                for cut in range(low, high, READ_CALL_BYTES):
+                    size = min(READ_CALL_BYTES, high - cut)
+                    calls.append((cut, at + (cut - low), size))
+            read_spans = len(spans)
+            done = [read(cut, [view[at:at + size]]) for cut, at, size in calls]
         checksum_cpu = 0.0
         for file_offset, offset, nbytes, expected, kind, name, position in pieces:
             before = time.thread_time()
@@ -1656,7 +1727,7 @@ class StageBReplaySpill:
         with self._telemetry_lock:
             self.telemetry["bytes_read"] += payload_bytes
             self.telemetry["file_bytes_read"] += sum(done)
-            self.telemetry["reads"] += len(spans)
+            self.telemetry["reads"] += read_spans
             self.telemetry["read_calls"] += len(calls)
             self.telemetry["checksum_read_cpu_s"] += checksum_cpu
             self.telemetry["checksum_bytes_verified"] += payload_bytes
