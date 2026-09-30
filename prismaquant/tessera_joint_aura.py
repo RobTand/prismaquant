@@ -1608,7 +1608,10 @@ def _live_targets(runner, names):
 
 def _prepare_file_read_bound(data, *, max_render_bytes):
     """Refuse an oversized later donor before any layer allocates read buffers."""
-    maximum = max(Path(cell["render"]).stat().st_size for cell in data.cells.values())
+    # Render shards are shared by many cells. Keep first-seen path order, but
+    # re-read each distinct size on every call rather than caching file state.
+    render_paths = dict.fromkeys(cell["render"] for cell in data.cells.values())
+    maximum = max(Path(render).stat().st_size for render in render_paths)
     _require(0 < maximum <= max_render_bytes,
              "original render shard exceeds the declared PWC read buffer budget")
     return maximum

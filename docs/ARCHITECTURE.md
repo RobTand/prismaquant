@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (Refs PQ #1247, `sol/issues-pq-5`):
+`_prepare_file_read_bound` checks each distinct render path once per call, in
+first-seen order, instead of once per cell sharing that path. It still reads
+current file sizes on every call and refuses a missing render or a maximum
+outside the declared PWC read-buffer budget. This is local metadata deduplication,
+not a new weight cache, preloader or persisted file-size cache. Preparation
+concurrency, body reads, format/serving bytes, gates, pin and stage graph are
+unchanged. CPU regression and controlled-profile evidence do not establish
+#1247's representative NFS preparation/runtime acceptance. The controlled CPU
+regression, before/after profiles and both-Spark telemetry are recorded in
+[the dated evidence](results/2026-09-30_render_read_bound_cpu.md).
+
 Re-stamped 2026-09-30 (PQ #1794, Refs #1087, `sol/pq-stageb-4`):
 The explicitly selected research constructor policy
 `StageBReplaySpill(scatter_reads=True)` coalesces physically adjacent slot
@@ -56,6 +68,16 @@ existing whole-group table/journal. Default, adaptive and sampled paths keep
 whole groups. This opt-in CPU delivery does not establish GPU numerical
 identity, residency, speed or production promotion. See
 [the partition contract](campaign_expert_partitions.md).
+
+Re-stamped 2026-09-30 (Refs PQ #1492, `sol/issues-pq-4`): the selected-cache
+CLI can explicitly forward `--head-progress-phase` and
+`--head-progress-allowance-s` to the existing head-walk progress cadence.
+Both inputs are required together; blank phases and non-finite/non-positive
+allowances refuse before loading. The submitting PB action must already declare
+that phase and allowance. Absent options retain the no-phase default; this
+reader does not infer or declare a synthesis phase. Existing head checkpoint,
+current-byte verification, manifest bytes and worker limits remain unchanged.
+This CPU wiring is not NFS-throughput or GPU qualification.
 
 Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
 `plan_reduced_schedule_repair` replays explicit research input history under a
@@ -124,6 +146,16 @@ observed failures in a PB-managed retry. Remaining coverage is #1454; skips
 are not qualifications. No pipeline default,
 format, export bytes, runtime pin, serving gate, or GPU claim changed.
 
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the binding reader also
+selects the shared strict reader's constant-refusal callback. Non-standard
+`NaN`, `Infinity` and `-Infinity` literals cannot certify no live binding.
+This is confined to the retirement proof; numerical quantization is unchanged.
+
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the negative binding
+proof uses the shared strict JSON reader to refuse duplicate members. A later
+member cannot hide an earlier binding, and refusals retain the document path.
+No deletion target, payload bytes or resource-reclamation policy changes.
+
 Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
 `BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
 `submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
@@ -142,6 +174,16 @@ Stage B's default still persists units synchronously; GPU before/after
 qualification and default promotion remain under #1367. GPU profiling is HELD; no speed, peak-memory, serving or production-default
 claim follows from the CPU ordering tests. No export bytes, pin, format menu,
 ship gate or stage graph changes.
+
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the binding proof also
+refuses non-regular documents before opening them, so a named pipe cannot
+block the scan waiting for a writer. Retirement targets are unchanged.
+
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): Stage A retirement's
+negative binding proof refuses unreadable, symlinked, malformed or oversized
+binding documents and directory-scan errors. Gzip decoding is bounded by the
+same 64 MiB document limit. This CPU proof slice adds no deletion target or
+forward/dead-owner reclaim; it changes no numerical, wire or serving gate.
 
 Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
 legal-domain pin provenance now transcribes v3's independently reviewed
@@ -3956,7 +3998,11 @@ PrismaBuild action, checks everything before it removes anything:
   `require_producer_contained`;
 - no JSON document under the declared `--binding-root`s names a path in the
   run's adjoint space, or the digest of its chain state, receipt or any
-  checkpoint. At least one root is required.
+  checkpoint. At least one root is required. The negative proof refuses an
+  unreadable directory, symlinked or non-regular binding, malformed JSON/gzip
+  document, or document above the 64 MiB limit (including decoded gzip bytes). It never
+  skips such a document as evidence that no consumer exists. The retiring
+  run's own subtree remains excluded from the consumer scan (PQ #1088).
 
 It then sorts every unreclaimed batch in PrismaBuild's records for those
 owners. A batch wholly inside the checkpoints' files and referenced entries
@@ -3973,6 +4019,8 @@ PQ #1571). That reader reads every batch, reclaimed ones included, and
 refuses a record it cannot read, so a rerun refuses when a reclaimed batch's
 record is gone. Gates:
 - `tests/test_stage_a_retirement_1073.py`;
+- `tests/test_stage_a_retirement_binding_scan_1088.py`: an incomplete binding
+  scan refuses before the retirement record or any unlink;
 - `tests/test_stage_a_retirement_pb_1073.py`: on a real owner, the durable
   charge drops by exactly the pinned batch's bytes.
 

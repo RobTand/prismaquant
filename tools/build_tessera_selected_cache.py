@@ -8,12 +8,16 @@ The exporter's --cached-units intake remains the current-byte verifier.
 Head journaling is opt-in: --head-checkpoint supplies the existing reader's
 checkpoint path, and --head-resume reuses its identity-bound, reverified
 prefix. Neither option declares a synthesis phase or changes manifest bytes.
+The paired --head-progress-phase / --head-progress-allowance-s options report
+through the reader's existing cadence under a phase and stall allowance that
+the submitting PB action already declared. Without them, no phase is reported.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import pickle
 import sys
@@ -147,6 +151,10 @@ def main(argv=None) -> int:
                         help="opt-in existing head-walk journal; declare this path as writable PB output")
     parser.add_argument("--head-resume", action="store_true",
                         help="resume that journal through the reader's existing identity and drift checks")
+    parser.add_argument("--head-progress-phase", default=None,
+                        help="opt-in head progress under a phase already declared by the submitting PB action")
+    parser.add_argument("--head-progress-allowance-s", type=float, default=None,
+                        help="that phase's declared positive stall allowance; required with --head-progress-phase")
     parser.add_argument("--read-paths-out", help="new JSON file listing all rooted export inputs for PB staging")
     parser.add_argument("--catalog-extension")
     parser.add_argument("--catalog-extension-sha256")
@@ -164,6 +172,14 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.head_resume and not args.head_checkpoint:
         raise ValueError("head resume requires --head-checkpoint")
+    if (args.head_progress_phase is None) != (args.head_progress_allowance_s is None):
+        raise ValueError("head progress phase and allowance must be supplied together")
+    if args.head_progress_phase is not None:
+        if not args.head_progress_phase.strip():
+            raise ValueError("head progress phase must be nonempty")
+        if (not math.isfinite(args.head_progress_allowance_s)
+                or args.head_progress_allowance_s <= 0):
+            raise ValueError("head progress allowance must be finite and positive")
     if bool(args.research_proposal) != bool(args.research_proposal_sha256):
         raise ValueError('research proposal path and SHA-256 must be supplied together')
     extension = None
@@ -212,12 +228,13 @@ def main(argv=None) -> int:
     if not isinstance(inputs, dict):
         raise ValueError("joint handoff has no bound original campaign inputs")
     reuse = _bind_plan_encoder_reuse(args.plan, args.plan_sha256, joint)
-    # A reader, not the synthesis stage: it declares no PrismaBuild phase, so
-    # it reports under none rather than under a name nothing declared (#678).
+    # This reader declares no phase. Report only the caller's explicit phase
+    # and allowance, or none; never invent an undeclared synthesis phase (#678).
     data = load_measured_anchor_input(inputs, verify_payloads=False,
                                       require_existing_renders=True,
                                       historical_encoder_reuse=reuse,
-                                      progress_phase=None,
+                                      progress_phase=args.head_progress_phase,
+                                      progress_allowance_s=args.head_progress_allowance_s,
                                       head_checkpoint=args.head_checkpoint,
                                       head_resume=args.head_resume)
     manifest = selected_cached_units_manifest(
