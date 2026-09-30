@@ -207,7 +207,8 @@ def git_commit(tree: str) -> str:
 #: ``build_manifest`` and the ``Campaign`` expansion it walks.  Relative to the
 #: repository root.
 PRODUCER_SOURCES = ("experiments/glm_data_manifests.py",
-                    "experiments/glm_arc_prewarm.py")
+                    "experiments/glm_arc_prewarm.py",
+                    "prismaquant/tessera_campaign_selection.py")
 
 
 def producer_source_sha256() -> str:

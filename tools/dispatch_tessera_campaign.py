@@ -628,7 +628,7 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
     argv = spec['campaign_argv']
     baseline_bytes, baseline_policy = _process_baseline(spec)
     def argument(name, default, convert=int):
-        return convert(argv[argv.index(name)+1]) if name in argv else default
+        return campaign_argv_argument(argv, name, default, convert)
     shapes = census.get('unit_shapes') or {}
     counts = census.get('counts') or {}
     options = dict(
@@ -668,6 +668,11 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
         capture_policy=argument('--streaming-capture-policy', 'legacy', str))
 
 
+def campaign_argv_argument(argv, name, default=None, convert=str):
+    """Read a row's explicit option, shared by admission and partition gates."""
+    return convert(argv[argv.index(name) + 1]) if name in argv else default
+
+
 def _row_head_dependency(argv):
     """What makes a selected row's argv run the load-all head, or ``None``.
 
@@ -679,7 +684,7 @@ def _row_head_dependency(argv):
     from prismaquant.tessera_row_stream import stream_head_dependency
 
     def value(name, default=None):
-        return argv[argv.index(name) + 1] if name in argv else default
+        return campaign_argv_argument(argv, name, default)
     return stream_head_dependency(
         row_head=value('--row-head', 'stream'), selected_source=True,
         capture_load_policy='--capture-load-policy' in argv,
@@ -718,14 +723,21 @@ def _row_label(inner_argv: list, index: int) -> str:
 
 
 def _units_members(inner_argv: list, *, census: dict, where: str) -> list:
-    from prismaquant.tessera_campaign import load_unit_selection, select_anchor_groups
+    from prismaquant.tessera_campaign import (
+        UNITS_SCHEMA_V3, expert_partition_members, load_unit_selection,
+        select_anchor_groups, selection_priced_units)
 
     selection = load_unit_selection(inner_argv[inner_argv.index("--units") + 1])
-    # Sampling prices fewer members of a validated whole group. It is not an
-    # implicit expert-partition contract: preserve the runtime's scope check.
     select_anchor_groups(selection, census["anchor_groups"], where=where)
-    return [name for entry in selection["groups"]
-            for name in (entry.get("sampled") or entry["members"])]
+    if selection["schema"] == UNITS_SCHEMA_V3:
+        from prismaquant.tessera_expert_projection import carried_units
+        _source, records, stacks = carried_units(census["expert_projection"])
+        expert_partition_members(selection, unit_records=records, stack_of=stacks,
+            rate_band=campaign_argv_argument(inner_argv, "--rate-band"),
+            max_rounds=campaign_argv_argument(inner_argv, "--max-rounds", 0, int),
+            seeded=any(flag in inner_argv for flag in (
+                "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member")))
+    return sorted(selection_priced_units(selection)[0])
 
 
 def verify_row_demand(spec: dict, census: dict, row: dict, *,
@@ -2150,6 +2162,23 @@ def cmd_plan(args) -> int:
     if not groups:
         raise RuntimeError("census reports no anchor group to price")
 
+    experts_per_row = getattr(args, "experts_per_row", 0)
+    partition_records, partition_stacks = {}, {}
+    if experts_per_row:
+        from prismaquant.tessera_campaign import parse_rate_band
+        band = parse_rate_band(campaign_argv_argument(spec["campaign_argv"], "--rate-band"))
+        if (type(experts_per_row) is not int or experts_per_row <= 0
+                or args.groups_per_row != 1 or getattr(args, "row_work_profile", None)
+                or args.stack_sample is not None or getattr(args, "seed_workspace", None)
+                or args.seed_checkpoint or args.seed_wire_dir
+                or any(flag in spec["campaign_argv"] for flag in (
+                    "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member"))
+                or band is None or band[0] != band[1]
+                or campaign_argv_argument(spec["campaign_argv"], "--max-rounds", 0, int) != 1):
+            raise RuntimeError("expert partition requires positive size, groups-per-row=1, pinned band, max-rounds=1, no sampling/seeds/work-profile")
+        from prismaquant.tessera_expert_projection import carried_units
+        _source, partition_records, partition_stacks = carried_units(census["expert_projection"])
+
     stack_sample: dict[str, dict] = {}
     if args.stack_sample is not None:
         size_source = getattr(args, "stack_sample_sizes", "probe") or "probe"
@@ -2180,21 +2209,44 @@ def cmd_plan(args) -> int:
             groups=groups, campaign_argv=spec['campaign_argv'],
             groups_per_row=args.groups_per_row)
 
+    expanded_bundles = []
+    for index, bundle in bundles:
+        if experts_per_row and bundle[0].startswith("s:"):
+            from prismaquant.tessera_campaign import EXPERT_PARTITION_SCHEMA
+            by_expert = {}
+            for name in groups[bundle[0]]:
+                if name not in partition_records:
+                    raise RuntimeError(f"expert partition has no producer record for {name}")
+                by_expert.setdefault(partition_records[name]["expert"], []).append(name)
+            expert_ids = sorted(by_expert)
+            count = (len(expert_ids) + experts_per_row - 1) // experts_per_row
+            for part_index in range(count):
+                selected_experts = expert_ids[part_index * experts_per_row:(part_index + 1) * experts_per_row]
+                part = {"schema": EXPERT_PARTITION_SCHEMA, "experts_per_row": experts_per_row,
+                        "index": part_index, "count": count, "rate_q256": band[0],
+                        "members": sorted(name for expert in selected_experts for name in by_expert[expert])}
+                expanded_bundles.append((index, bundle, part))
+        else:
+            expanded_bundles.append((index, bundle, None))
+
     rows: list[dict] = []
     planned: list[dict] = []
     selection_writes: list[tuple[Path, str]] = []
-    for index, bundle in bundles:
-        row_id = f"row-{index:04d}"
+    for index, bundle, part in expanded_bundles:
+        row_id = f"row-{index:04d}" + (f"-p{part['index']:04d}" if part is not None else "")
         entries = []
         for key in bundle:
             entry = {"key": key, "members": sorted(groups[key])}
             if key in stack_sample:
                 entry.update(stack_sample[key])
+            if part is not None:
+                entry["partition"] = part
             entries.append(entry)
         selection = {
             # A file that samples says so in its schema; one that does not
             # stays byte-identical to what every row before 2026-09-06 read.
-            "schema": (UNITS_SCHEMA_V2 if stack_sample else UNITS_SCHEMA),
+            "schema": ("prismaquant.tessera_campaign_units.v3" if part is not None
+                       else UNITS_SCHEMA_V2 if stack_sample else UNITS_SCHEMA),
             "model": spec["model"],
             "layer_stride": census["layer_stride"],
             "groups": entries,
@@ -2202,8 +2254,12 @@ def cmd_plan(args) -> int:
         units_path = units_dir / f"{row_id}.json"
         selection_writes.append((units_path, json.dumps(selection, indent=2, sort_keys=True) + "\n"))
         row_dir = workspace / "rows" / row_id
-        members = [name for entry in entries
-                   for name in (entry.get("sampled") or entry["members"])]
+        from prismaquant.tessera_campaign import expert_partition_members, selection_priced_units
+        if part is not None:
+            expert_partition_members(selection, unit_records=partition_records,
+                stack_of=partition_stacks, rate_band=campaign_argv_argument(spec["campaign_argv"], "--rate-band"),
+                max_rounds=campaign_argv_argument(spec["campaign_argv"], "--max-rounds", 0, int))
+        members = sorted(selection_priced_units(selection)[0])
         argv = [
             "--model", spec["model"],
             "--out", str(row_dir / "cost.pkl"),
@@ -2234,10 +2290,17 @@ def cmd_plan(args) -> int:
         # spec's argv alone priced that row at its stream window instead
         # (PQ #1686).
         row_spec = {**spec, "campaign_argv": argv}
-        rows.append(_row(spec, argv,
-                         mem_gb=_row_memory_gb(row_spec, members, census, selected_source=selected_source),
-                         timeout_s=(None if args.timeout_s is None
-                                    else int(args.timeout_s))))
+        row = _row(spec, argv,
+                   mem_gb=_row_memory_gb(row_spec, members, census, selected_source=selected_source),
+                   timeout_s=(None if args.timeout_s is None else int(args.timeout_s)))
+        if part is not None:
+            effective_argv = _inner_campaign_argv(row)
+            expert_partition_members(selection, unit_records=partition_records,
+                stack_of=partition_stacks, rate_band=campaign_argv_argument(effective_argv, "--rate-band"),
+                max_rounds=campaign_argv_argument(effective_argv, "--max-rounds", 0, int),
+                seeded=any(flag in effective_argv for flag in (
+                    "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member")))
+        rows.append(row)
         predicted_work = {}
         if work_profile is not None and not bundle[0].startswith('s:'):
             timing = work_profile['profile']
@@ -2249,6 +2312,7 @@ def cmd_plan(args) -> int:
         planned.append({"row_id": row_id, "groups": bundle, "members": sorted(members),
                         "dir": str(row_dir), "units": str(units_path),
                         **predicted_work,
+                        **({'expert_partition_selection': selection} if part is not None else {}),
                         **({'seed': row_seed} if row_seed is not None else {}),
                         **({'resources': _streamed_resource_plan(row_spec, census, members,
                             selected_source=True)} if selected_source else {})})
@@ -3399,9 +3463,22 @@ def declared_coverage(plan: dict) -> dict | None:
     reason travels with them into the merged table.  A malformed declaration
     refuses rather than reading as either shape.
     """
+    from prismaquant.tessera_campaign import UNITS_SCHEMA_V3, load_unit_selection, validate_unit_selection
+    partitions = {}
+    for entry in plan["rows"]:
+        selection = entry.get("expert_partition_selection")
+        if selection is None and entry.get("units") and Path(entry["units"]).is_file():
+            selection = load_unit_selection(entry["units"])
+        if selection is not None and selection.get("schema") == UNITS_SCHEMA_V3:
+            validate_unit_selection(selection, path=entry["row_id"])
+            partitions[entry["row_id"]] = selection
     declared = plan.get(DENSE_ROWS_EXCLUDED_KEY)
-    if declared is None:
+    if declared is None and not partitions:
         return None
+    if declared is None:
+        expected = sorted({key for entry in plan["rows"] for key in entry["groups"]})
+        return {"expected_groups": expected, "excluded_rows": [],
+                "reason": "fixed-rate expert partitions", "expected_partitions": partitions}
     rows = declared.get("rows") if isinstance(declared, dict) else None
     reason = declared.get("reason") if isinstance(declared, dict) else None
     if (not isinstance(rows, list) or not rows
@@ -3418,7 +3495,49 @@ def declared_coverage(plan: dict) -> dict | None:
     expected = sorted({key for entry in plan["rows"] for key in entry["groups"]})
     if not expected:
         raise MergeRefused("plan.json declares no priced anchor group")
-    return {"expected_groups": expected, "excluded_rows": list(rows), "reason": reason}
+    return {"expected_groups": expected, "excluded_rows": list(rows), "reason": reason,
+            **({"expected_partitions": partitions} if partitions else {})}
+
+
+def expected_expert_partition_coverage(census: dict, plan_coverage, *, rate_band, max_rounds) -> dict:
+    """Derive complete expert coverage from the plan, never surviving outputs."""
+    expected = {} if plan_coverage is None else plan_coverage.get("expected_partitions", {})
+    if not isinstance(expected, dict):
+        raise MergeRefused("expert partition plan is not a row-selection mapping")
+    if not expected:
+        return {}
+    from prismaquant.tessera_campaign import (
+        UNITS_SCHEMA_V3, expert_partition_members, select_anchor_groups, validate_unit_selection,
+    )
+    from prismaquant.tessera_expert_projection import carried_units
+    _source, records, stack_of = carried_units(census["expert_projection"])
+    covered, indices, counts = {}, {}, {}
+    try:
+        for row_id, selection in expected.items():
+            validate_unit_selection(selection, path=row_id)
+            if selection["schema"] != UNITS_SCHEMA_V3:
+                raise RuntimeError("partition plan carries a legacy selection")
+            select_anchor_groups(selection, census["anchor_groups"], where=row_id)
+            subsets = expert_partition_members(selection, unit_records=records,
+                stack_of=stack_of, rate_band=rate_band, max_rounds=max_rounds)
+            entry = selection["groups"][0]
+            key, part = entry["key"], entry["partition"]
+            members = set(subsets[key])
+            if covered.setdefault(key, set()) & members:
+                raise RuntimeError(f"expert partition overlap for {key}")
+            covered[key].update(members)
+            if part["index"] in indices.setdefault(key, set()):
+                raise RuntimeError(f"expert partition repeats an index for {key}")
+            indices[key].add(part["index"])
+            counts.setdefault(key, set()).add(part["count"])
+        for key, members in covered.items():
+            if members != set(census["anchor_groups"][key]) or len(counts[key]) != 1:
+                raise RuntimeError(f"expert partition incomplete roster for {key}")
+            if indices[key] != set(range(next(iter(counts[key])))):
+                raise RuntimeError(f"expert partition incomplete index coverage for {key}")
+    except (RuntimeError, ValueError, KeyError, TypeError) as exc:
+        raise MergeRefused(f"invalid expert partition plan: {exc}") from exc
+    return expected
 
 
 def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
@@ -3438,7 +3557,8 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
     """
     from prismaquant.tessera_campaign import (
         SCHEMA, campaign_population_block, canonical_refusals, selection_stack_samples,
-        parse_family_restriction)
+        parse_family_restriction, select_anchor_groups, selection_priced_units,
+        UNITS_SCHEMA_V3, validate_unit_selection)
     from prismaquant.tessera_campaign import ExpertPopulation
     # The keys a merged payload must land under are the ones the campaign and
     # the allocation share.  Spelling them here as literals is how a merge
@@ -3456,6 +3576,45 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
         if provenance.get("research_exact_member_scope") is not None:
             raise MergeRefused(
                 f"{row_id}: research exact-member scalar cannot be merged as a full group or stack estimate")
+    reference = next(iter(provenances.values()))
+    expected_partitions = expected_expert_partition_coverage(census, plan_coverage,
+        rate_band=reference.get("rate_band"), max_rounds=reference.get("max_rounds", 0))
+    actual_partitions = set()
+    for row_id, prov in provenances.items():
+        units = prov.get("unit_selection")
+        try:
+            validate_unit_selection(units, path=row_id)
+            select_anchor_groups(units, census.get("anchor_groups", reference["campaign_scope"]["anchor_groups"]), where=row_id)
+        except (RuntimeError, ValueError, KeyError, TypeError) as exc:
+            raise MergeRefused(f"{row_id}: invalid bound selection: {exc}") from exc
+        if units["schema"] == UNITS_SCHEMA_V3:
+            declared = expected_partitions.get(row_id)
+            if (declared is None or prov.get("seed_checkpoint") is not None
+                    or units.get("selected", True) is not True
+                    or {key: value for key, value in units.items() if key != "selected"}
+                    != {key: value for key, value in declared.items() if key != "selected"}):
+                raise MergeRefused(f"{row_id}: expert partition differs from its declared plan")
+            if set(row_payloads[row_id]["costs"]) != selection_priced_units(units)[0]:
+                raise MergeRefused(f"{row_id}: expert partition prices differ from its members")
+            from prismaquant.tessera_formats import parse_tessera_format_name
+            rate = units["groups"][0]["partition"]["rate_q256"]
+            priced_formats = set()
+            for name, prices in row_payloads[row_id]["costs"].items():
+                if not isinstance(prices, dict) or not prices:
+                    raise MergeRefused(f"{row_id}: expert partition has no prices for {name}")
+                for fmt in prices:
+                    try:
+                        parsed = parse_tessera_format_name(fmt)
+                    except (RuntimeError, ValueError, KeyError, TypeError) as exc:
+                        raise MergeRefused(f"{row_id}: invalid expert partition format {fmt!r}") from exc
+                    if parsed is None or parsed[1] != rate:
+                        raise MergeRefused(f"{row_id}: expert partition price {fmt!r} is not its pinned rung")
+                    priced_formats.add(fmt)
+            if set(row_payloads[row_id]["formats"]) != priced_formats:
+                raise MergeRefused(f"{row_id}: expert partition format roster differs from its prices")
+            actual_partitions.add(row_id)
+    if actual_partitions != set(expected_partitions):
+        raise MergeRefused("expert partition row coverage incomplete")
     family_policies, restricted_structures = {}, {}
     for row_id, prov in provenances.items():
         restriction = prov.get("family_restriction")
@@ -3469,8 +3628,7 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
         except (ValueError, TypeError) as exc:
             raise MergeRefused(f"{row_id}: invalid family restriction policy: {exc}") from exc
         structures = restriction["structure_by_unit"]
-        members = {name for group in prov["unit_selection"]["groups"]
-                   for name in group.get("sampled", group["members"])}
+        members = selection_priced_units(prov["unit_selection"])[0]
         if (policy is None or not isinstance(structures, dict) or set(structures) != members
                 or any(s not in ("dense", "routed_moe") for s in structures.values())):
             raise MergeRefused(f"{row_id}: family restriction must cover exact selected unit structures")
@@ -3521,7 +3679,7 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
     for row_id, prov in provenances.items():
         for entry in prov["unit_selection"]["groups"]:
             key = entry["key"]
-            if key in selected:
+            if key in selected and not (row_id in expected_partitions and selected[key] in expected_partitions):
                 raise MergeRefused(
                     f"anchor group {key!r} is priced by both {selected[key]} and {row_id}")
             if key not in scope["anchor_groups"] or sorted(entry["members"]) != sorted(scope["anchor_groups"][key]):
@@ -3603,7 +3761,15 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
         loo.update(payload["leave_one_anchor_out"])
         non_interpolable.extend(payload["non_interpolable"])
         surfaces.update(prov["surfaces"])
-        anchor_groups.update(prov["anchor_groups"])
+        if row_id in expected_partitions:
+            expected_groups = {entry["key"]: entry["partition"]["members"]
+                               for entry in expected_partitions[row_id]["groups"]}
+            if prov["anchor_groups"] != expected_groups:
+                raise MergeRefused(f"{row_id}: expert partition anchor groups differ from its declared keys/members")
+            for key, names in prov["anchor_groups"].items():
+                anchor_groups[key] = sorted(set(anchor_groups.get(key, ())) | set(names))
+        else:
+            anchor_groups.update(prov["anchor_groups"])
         anchor_counts.update(payload["anchor_counts"])
         menu_sizes.update(payload["menu_sizes"])
         expert_wires.update(payload.get(EXPERT_WIRES_KEY, {}))
@@ -3733,7 +3899,7 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
 def _merge_export_hessian_references(row_dirs, payloads, *, out_cache, identity,
                                      policy, static_scales, census):
     from prismaquant import tessera_calibration_cache as store
-    from prismaquant.tessera_campaign import write_export_inputs
+    from prismaquant.tessera_campaign import write_export_inputs, selection_priced_units
 
     def accepted_rows():
         for row_id in sorted(row_dirs):
@@ -3755,7 +3921,7 @@ def _merge_export_hessian_references(row_dirs, payloads, *, out_cache, identity,
                 groups = (provenance.get('unit_selection') or {}).get('groups')
                 if not isinstance(groups, list) or not groups:
                     raise MergeRefused(f'{row_id}: reference row has no selected unit roster')
-                expected = {name for group in groups for name in group.get('sampled', group['members'])}
+                expected = selection_priced_units(provenance['unit_selection'])[0]
                 if set(owner) != expected:
                     raise MergeRefused(f'{row_id}: reference H roster differs from the exact selected members')
                 if owner.receipt()['loaded_entries'] != 0:
@@ -4183,6 +4349,8 @@ def main(argv=None) -> int:
                            "checked against the live source and the capture's "
                            "roster before any row is written (PQ #1654)")
     plan.add_argument("--groups-per-row", type=int, default=1)
+    plan.add_argument("--experts-per-row", type=int, default=0,
+                      help="opt-in unsampled routed expert partitions; pinned band/max-rounds=1 only")
     plan.add_argument("--row-work-profile", default=None,
                       help="opt-in census/argv-bound measured-work JSON profile; "
                            "pack whole dense groups to its predicted startup-share "

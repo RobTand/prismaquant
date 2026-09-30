@@ -3692,12 +3692,37 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
     return menus
 
 
+def anchor_group_rate_grids(groups: Mapping, rates_by_unit: Mapping, *,
+                           encode_structure, projected_units) -> tuple[dict, dict]:
+    """The existing full-group legal intersection, shared with partitions."""
+    group_rates, route_refused = {}, {}
+    for key, members in groups.items():
+        per_family = {}
+        families = set.intersection(*[
+            set(rates_by_unit[m].keys()) for m in members]) if members else set()
+        for family in sorted(families):
+            shared = set.intersection(*[rates_by_unit[m][family] for m in members])
+            refused = _served_route_refusals(
+                family, shared, members, encode_structure=encode_structure,
+                projected_units=projected_units)
+            if refused:
+                route_refused.setdefault(key, {})[family] = refused
+                shared = shared - {int(rung) for rung in refused}
+            if shared:
+                per_family[family] = sorted(shared)
+        group_rates[key] = per_family
+    return group_rates, route_refused
+
+
 #: The selection file ``--units`` reads and ``tools/dispatch_tessera_campaign.py``
 #: writes.  A selection names **fused anchor groups**, never bare units: anchor
 #: placement is a group property (one shared rung grid, the group's worst
 #: member drives the split), so a group is the smallest scope whose measured
 #: values do not depend on what else the run priced.
-UNITS_SCHEMA = "prismaquant.tessera_campaign_units.v1"
+from prismaquant.tessera_campaign_selection import (
+    UNITS_SCHEMA, UNITS_SCHEMA_V2, UNITS_SCHEMA_V3, EXPERT_PARTITION_SCHEMA,
+    selection_priced_units, validate_unit_selection,
+)
 
 #: The same selection, plus the planner's expert sample.  A ``v1`` file prices
 #: every member of every group it names; a ``v2`` file may additionally give a
@@ -3707,7 +3732,6 @@ UNITS_SCHEMA = "prismaquant.tessera_campaign_units.v1"
 #: :func:`select_anchor_groups` checks against this run's own grouping: the
 #: sample says which members are priced, never which members exist.  A run
 #: given a v1 file behaves exactly as it did before v2.
-UNITS_SCHEMA_V2 = "prismaquant.tessera_campaign_units.v2"
 
 #: The calibration census ``--calibration-census`` reads and ``--census-out``
 #: writes: the per-unit calibration row counts of the whole priced scope.
@@ -3932,56 +3956,70 @@ def resolve_anchor_groups(targets: Sequence[str], *, profile,
     return groups
 
 
+def expert_partition_members(selection: Mapping, *, unit_records: Mapping,
+                             stack_of: Mapping, rate_band, max_rounds,
+                             seeded: bool = False) -> dict[str, list[str]]:
+    """Validate deterministic, expert-complete chunks against producer records.
+
+    This is not sampling: every projection of each selected expert is priced,
+    and the complete original group remains the identity/menu frame.
+    """
+    entries = selection.get("groups", [])
+    if selection.get("schema") != UNITS_SCHEMA_V3:
+        if any("partition" in entry for entry in entries):
+            raise RuntimeError("expert partition requires the v3 selection schema")
+        return {}
+    validate_unit_selection(selection, path="expert partition")
+    band = parse_rate_band(rate_band) if rate_band else None
+    if band is None or band[0] != band[1] or type(max_rounds) is not int or max_rounds != 1 or seeded:
+        raise RuntimeError("expert partition requires pinned rate-band, max-rounds=1 and no seeds")
+    if len(entries) != 1:
+        raise RuntimeError("expert partition selection must name one routed group")
+    result = {}
+    for entry in entries:
+        key = entry["key"]
+        full = entry["members"]
+        part = entry.get("partition")
+        fields = {"schema", "experts_per_row", "index", "count", "rate_q256", "members"}
+        if (not key.startswith("s:") or len(set(full)) != len(full)
+                or any(field in entry for field in ("sampled", "audit", "inclusion_probability", "stack_samples"))
+                or not isinstance(part, Mapping) or set(part) != fields
+                or part.get("schema") != EXPERT_PARTITION_SCHEMA):
+            raise RuntimeError("expert partition requires an unsampled routed group and a closed descriptor")
+        if (any(type(part[name]) is not int for name in ("experts_per_row", "index", "count", "rate_q256"))
+                or part["experts_per_row"] <= 0 or part["index"] < 0
+                or part["rate_q256"] != band[0]):
+            raise RuntimeError("expert partition has invalid size/index/rate")
+        by_expert = {}
+        for name in full:
+            record = unit_records.get(name)
+            if (not isinstance(record, Mapping) or type(record.get("expert")) is not int
+                    or record["expert"] < 0 or "s:" + str(stack_of.get(name)) != key):
+                raise RuntimeError(f"expert partition {key}: {name} is not a producer-bound expert")
+            by_expert.setdefault(record["expert"], []).append(name)
+        experts = sorted(by_expert)
+        # Each chunk carries every role/shape used by the full group's menu
+        # cache. Heterogeneous expert geometry needs a separately charged
+        # metadata contract rather than enlarging this row's cache silently.
+        signatures = {tuple(sorted((unit_records[name].get("projection"),
+                                    unit_records[name].get("rows"), unit_records[name].get("cols"))
+                                   for name in names)) for names in by_expert.values()}
+        if len(signatures) != 1:
+            raise RuntimeError("expert partition requires uniform per-expert projection geometry")
+        size = part["experts_per_row"]
+        count = (len(experts) + size - 1) // size
+        start = part["index"] * size
+        expected = sorted(name for expert in experts[start:start + size] for name in by_expert[expert])
+        if (part["count"] != count or part["index"] >= count or not expected
+                or part["members"] != expected):
+            raise RuntimeError("expert partition does not match its complete deterministic expert chunk")
+        result[key] = expected
+    return result
+
+
 def load_unit_selection(path) -> dict:
-    """Read a ``--units`` selection file, refusing anything but this schema."""
-    selection = json.loads(Path(path).read_text())
-    schema = None if not isinstance(selection, dict) else selection.get("schema")
-    if schema not in (UNITS_SCHEMA, UNITS_SCHEMA_V2):
-        raise RuntimeError(
-            f"--units {path}: not a {UNITS_SCHEMA} or {UNITS_SCHEMA_V2} "
-            "selection")
-    groups = selection.get("groups")
-    if not isinstance(groups, list) or not groups:
-        raise RuntimeError(f"--units {path}: names no anchor group")
-    for entry in groups:
-        if (not isinstance(entry, dict) or not isinstance(entry.get("key"), str)
-                or not isinstance(entry.get("members"), list)
-                or not entry["members"]
-                or not all(isinstance(m, str) for m in entry["members"])):
-            raise RuntimeError(
-                f"--units {path}: a group entry is not {{key, members[]}}")
-        if schema == UNITS_SCHEMA and any(
-                field in entry for field in ("sampled", "audit",
-                                             "inclusion_probability", "stack_samples")):
-            raise RuntimeError(
-                f"--units {path}: group {entry['key']!r} carries a sample, "
-                f"which is a {UNITS_SCHEMA_V2} field; a file that samples "
-                "must say so in its schema")
-        members = set(entry["members"])
-        sampled = entry.get("sampled")
-        if sampled is not None:
-            if (not isinstance(sampled, list) or not sampled
-                    or not all(isinstance(m, str) for m in sampled)
-                    or not set(sampled) <= members):
-                raise RuntimeError(
-                    f"--units {path}: group {entry['key']!r} samples units "
-                    "that are not its members")
-            audit = entry.get("audit") or []
-            if not isinstance(audit, list) or not set(audit) <= set(sampled):
-                raise RuntimeError(
-                    f"--units {path}: group {entry['key']!r} audits units it "
-                    "did not sample")
-            pi = entry.get("inclusion_probability")
-            if not isinstance(pi, dict) or not set(sampled) <= set(pi):
-                raise RuntimeError(
-                    f"--units {path}: group {entry['key']!r} samples without "
-                    "an inclusion probability for every sampled unit; an "
-                    "unbiased estimate downstream is impossible without it")
-        elif entry.get("audit"):
-            raise RuntimeError(
-                f"--units {path}: group {entry['key']!r} audits without "
-                "sampling")
-    return selection
+    """Read a ``--units`` selection file through the shared metadata owner."""
+    return validate_unit_selection(json.loads(Path(path).read_text()), path=path)
 
 
 #: The size sources a stack draw may be proportional to.  ``probe`` is the
@@ -4101,26 +4139,6 @@ def selection_stack_samples(selection: Mapping, profile) -> dict[str, StackExper
         if frame_pi != entry.get("inclusion_probability"):
             raise StackSampleError(f"{entry['key']}: packed draw disagrees with full-frame probabilities")
     return result
-
-
-def selection_priced_units(selection: Mapping) -> tuple[set, set, dict]:
-    """``(priced, audit, inclusion_probability)`` a selection asks for.
-
-    ``priced`` is the sample where a group has one and the whole group where
-    it does not, so a v1 selection and an unsampled v2 selection are the same
-    run.  Nothing here decides what a group *is*: that check has already been
-    made against this run's own grouping.
-    """
-    priced: set = set()
-    audit: set = set()
-    pi: dict = {}
-    for entry in selection["groups"]:
-        sampled = entry.get("sampled")
-        priced.update(sampled if sampled else entry["members"])
-        audit.update(entry.get("audit") or ())
-        for name, value in (entry.get("inclusion_probability") or {}).items():
-            pi[str(name)] = float(value)
-    return priced, audit, pi
 
 
 def research_exact_member_scope(selection: Mapping, resolved: Mapping[str, list[str]],
@@ -5887,6 +5905,12 @@ def _main(argv, *, source_scope) -> int:
     selection = None
     stack_samples = {}
     exact_member_scope = None
+    partition_members = {}
+    partition_menu_targets = None
+    partition_unit_records = {}
+    full_expert_members = expert_members
+    census = (None if not args.calibration_census
+              else load_calibration_census(args.calibration_census, args=args))
     selected_groups: list[str] = sorted(scope_groups)
     audit_units: set = set()
     inclusion_probability: dict = {}
@@ -5895,6 +5919,18 @@ def _main(argv, *, source_scope) -> int:
         if (selection.get("model", args.model) != args.model
                 or selection.get("layer_stride", args.layer_stride) != args.layer_stride):
             raise StackSampleError("--units model/layer_stride disagrees with this campaign")
+        if selection.get("schema") == UNITS_SCHEMA_V3:
+            if census is None or args.research_exact_member is not None:
+                raise RuntimeError("expert partition requires a census and excludes research exact-member")
+            from .tessera_expert_projection import carried_units
+            _source, partition_unit_records, partition_stacks = carried_units(census["expert_projection"])
+            partition_members = expert_partition_members(
+                selection, unit_records=partition_unit_records, stack_of=partition_stacks,
+                rate_band=args.rate_band, max_rounds=args.max_rounds,
+                seeded=bool(args.seed_checkpoint or args.seed_wire_dir))
+            partition_menu_targets = sorted(name for entry in selection["groups"] for name in entry["members"])
+            # Existing unit receipts bind the local subset; the scope-wide
+            # producer projection binds the full group geometry/source frame.
         stack_samples = selection_stack_samples(selection, profile)
         selected_groups = select_anchor_groups(
             selection, scope_groups, where=f"--units {args.units}")
@@ -5946,7 +5982,12 @@ def _main(argv, *, source_scope) -> int:
             name: dict(zip(("router_path", "expert_id"), routed.get(name, (None, None))))
             for name in dense_targets
         }
-        for name, member in expert_members.items():
+        topology_experts = ({name: full_expert_members[name] for name in partition_menu_targets}
+                            if partition_menu_targets is not None else expert_members)
+        topology_targets = partition_menu_targets or targets
+        for name, member in topology_experts.items():
+            if name not in topology_targets:
+                continue
             # The packed facts the probe would record for this unit: its
             # packed module and expert count, never a shape guess.
             topology[name] = {
@@ -5955,10 +5996,10 @@ def _main(argv, *, source_scope) -> int:
             }
         context_by_unit = context_by_unit_from_stats(serving_target, topology, profile)
         if args.family_restriction is not None:
-            if len(set(targets)) != len(targets) or set(topology) != set(targets):
+            if len(set(topology_targets)) != len(topology_targets) or set(topology) != set(topology_targets):
                 raise ValueError("family restriction requires unambiguous topology for every target")
             structure_by_unit = {name: unit_structure_from_stats(name, topology[name], profile)
-                                 for name in targets}
+                                 for name in topology_targets}
     # The serving structure each unit's wire is resolved on (#1502): the
     # restriction's authoritative map when there is one, else the serving
     # context's. A run that declares neither prices the research recipe it
@@ -5969,8 +6010,6 @@ def _main(argv, *, source_scope) -> int:
 
     tokens, corpus_text = _calibration_tokens(
         args.model, args.nsamples, args.seqlen, args.seed)
-    census = (None if not args.calibration_census
-              else load_calibration_census(args.calibration_census, args=args))
     want_h = args.hessian == "require" and not census_only
     calibration_cache = None
     capture_identity = None
@@ -6245,13 +6284,30 @@ def _main(argv, *, source_scope) -> int:
         metadata={"schema": SCHEMA, "menu_mode": mode,
                   **({'release_completed_anchor_file_pages': True} if selected_source else {})},
     )
-    menus = expand_menus_for_targets(
-        weights, targets, mode=mode, tp_degree=args.tp_degree,
-        parallel_kind=PARALLEL_NONE,
-        context_by_unit=context_by_unit,
-        family_restriction=args.family_restriction,
-        structure_by_unit=structure_by_unit,
-    )
+    if partition_menu_targets is not None:
+        # Geometry-only menu inputs: no unpriced W/X/H is loaded or cached.
+        menu_weights = {name: torch.empty(census["unit_shapes"][name], device="meta")
+                        for name in partition_menu_targets}
+        full_partition_menus = expand_menus_for_targets(
+            menu_weights, partition_menu_targets, mode=mode, tp_degree=args.tp_degree,
+            parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
+            family_restriction=args.family_restriction, structure_by_unit=structure_by_unit)
+        menus = {name: full_partition_menus[name] for name in targets}
+        partition_encode_structure = {name: "routed_moe" for name in partition_menu_targets}
+        # Consumers and identity receipts describe only this row's priced units.
+        context_by_unit = (None if context_by_unit is None else
+                           {name: context_by_unit[name] for name in targets})
+        structure_by_unit = (None if structure_by_unit is None else
+                             {name: structure_by_unit[name] for name in targets})
+        encode_structure = {name: "routed_moe" for name in targets}
+    else:
+        menus = expand_menus_for_targets(
+            weights, targets, mode=mode, tp_degree=args.tp_degree,
+            parallel_kind=PARALLEL_NONE,
+            context_by_unit=context_by_unit,
+            family_restriction=args.family_restriction,
+            structure_by_unit=structure_by_unit,
+        )
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
     # ``attested`` without a dev pin, ``readable`` against a contract that
     # publishes no reader for these shapes -- used to resolve to nothing and
@@ -7036,9 +7092,11 @@ def _main(argv, *, source_scope) -> int:
     # left unpriced rather than extrapolated into.
     cap = float(args.max_artifact_bpp)
     rates_by_unit: dict[str, dict[str, set[int]]] = {}
-    for name in targets:
+    rate_menu_targets = partition_menu_targets or targets
+    rate_menus = full_partition_menus if partition_menu_targets is not None else menus
+    for name in rate_menu_targets:
         per_family: dict[str, set[int]] = {}
-        for rung in menus[name]:
+        for rung in rate_menus[name]:
             if cap > 0 and rung.bpp > cap:
                 continue
             per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
@@ -7071,22 +7129,17 @@ def _main(argv, *, source_scope) -> int:
     # read off the pinned contract: kept in the menu, not measured, and
     # recorded here with the contract's reason rather than hidden.
     route_refused: dict[str, dict[str, dict[str, dict]]] = {}
-    for key, members in anchor_groups.items():
-        per_family: dict[str, list[int]] = {}
-        families = set.intersection(*[
-            set(rates_by_unit[m].keys()) for m in members]) if members else set()
-        for family in sorted(families):
-            shared = set.intersection(*[
-                rates_by_unit[m][family] for m in members])
-            refused = _served_route_refusals(
-                family, shared, members, encode_structure=encode_structure,
-                projected_units=projected_units)
-            if refused:
-                route_refused.setdefault(key, {})[family] = refused
-                shared = shared - {int(rung) for rung in refused}
-            if shared:
-                per_family[family] = sorted(shared)
-        group_rates[key] = per_family
+    rate_groups = ({entry["key"]: entry["members"] for entry in selection["groups"]}
+                   if partition_menu_targets is not None else anchor_groups)
+    group_rates, route_refused = anchor_group_rate_grids(
+        rate_groups, rates_by_unit,
+        encode_structure=(partition_encode_structure if partition_menu_targets is not None else encode_structure),
+        projected_units=(partition_unit_records if partition_menu_targets is not None else projected_units))
+    if partition_menu_targets is not None:
+        fixed_rate = parse_rate_band(args.rate_band)[0]
+        if any(not any(fixed_rate in rates for rates in families.values())
+               for families in group_rates.values()):
+            raise RuntimeError("expert partition pinned rate has no legal full-group family/grid")
     if route_refused:
         print("[campaign] route-refused rungs (kept in the menu, not measured): "
               + ", ".join(f"{key}:{family}@{sorted(int(r) for r in rungs)}"
