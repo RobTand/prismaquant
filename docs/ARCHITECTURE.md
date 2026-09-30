@@ -12,6 +12,18 @@ unchanged. CPU regression and controlled-profile evidence do not establish
 regression, before/after profiles and both-Spark telemetry are recorded in
 [the dated evidence](results/2026-09-30_render_read_bound_cpu.md).
 
+Re-stamped 2026-09-30 (PQ #1820, Refs #1091): a newly sealed container spec
+can explicitly declare a separate compilation-cache ROOT/MAX pair through the
+existing local-scratch registry. PB charges that ceiling independently; command
+forwarding and the preamble share the registry path. HF, Triton, Inductor and
+XDG stay within the charged cache root, while TMPDIR must explicitly name a
+different charged workspace. Overlaps, ambiguous mounts, symlink ancestors and
+escaped pins refuse; an overlay reason cannot waive this opt-in accounting.
+Legacy rows remain unchanged. [The cache declaration contract](design/container_cache_charge_1091.md)
+distinguishes reservation from quota and durable lifetime. No crash cleanup,
+measured cache peak, GPU/performance, runtime pin or production default is
+claimed; #1091 and PB #1360 remain the independent lifetime/measurement gates.
+
 Re-stamped 2026-09-30 (PQ #1794, Refs #1087, `sol/pq-stageb-4`):
 The explicitly selected research constructor policy
 `StageBReplaySpill(scatter_reads=True)` coalesces physically adjacent slot
@@ -26,8 +38,9 @@ export/serving bytes, pin and stage graph are unchanged. The scratch capacity
 includes leading-residue/trailing-grid slot padding that the arena writer
 actually writes; it is not a payload-only reservation. CPU span/operand tests
 do not establish #1087's representative proxy digest, performance, residency,
-peak-memory or reader-wait acceptance. GPU before/after profiles and both-Spark
-Netdata remain HELD pending explicit coordinator approval.
+peak-memory or reader-wait acceptance. The coordinator's 2026-09-30 14:15Z
+GO conditionally approved the held GPU ask once its own prerequisites hold;
+before/after profiles and both-Spark Netdata still require completed evidence.
 
 Re-stamped 2026-09-30 (PQ #1762, `sol/source-domain-1762`): source-file
 provenance adds `prismaquant.source_tree.v2` beside the unchanged labelled
@@ -3948,8 +3961,16 @@ container writes its HF, Triton and inductor caches, `XDG_CACHE_HOME` and
 `PRISMAQUANT_TMPDIR` somewhere. Left to the container's writable overlay,
 those writes are unbounded and invisible to PrismaBuild.
 
-When a row declares bounded local scratch (PB #911), the launcher binds each
-of these that the spec leaves unset under `<root>/container-cache/<name>`
+An explicit `PRISMAQUANT_CONTAINER_CACHE_ROOT` and
+`PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES` pair instead reserves a separate
+compilation-cache root (PQ #1820, Refs #1091). The four compilation caches stay
+under that root; TMPDIR must explicitly stay in another charged workspace.
+Checks do not create/delete directories or certify crash cleanup. See the
+[separate-cache contract](design/container_cache_charge_1091.md).
+
+Without that opt-in pair, a row declaring bounded local scratch (PB #911)
+keeps its legacy defaults: the launcher binds each variable left unset under
+`<root>/container-cache/<name>`
 (`tessera_campaign_container.container_cache_environment`). The root is the
 first declared kind in `LOCAL_SCRATCH_KINDS` order: the cotangent scratch,
 then the Stage B spill. Its writable identity bind is already required. A
@@ -3971,9 +3992,11 @@ refuses. The launcher's preamble lists the same variables as
 `overlay_pinned_caches`.
 
 Limits:
-- The caches are charged to PrismaBuild through nothing but the scratch
-  pair's own ceiling. The spill preallocates up to that ceiling, so cache
-  bytes can run past what PrismaBuild charged. Their size is unmeasured.
+- Without the explicit separate pair, caches are charged through nothing
+  but the legacy scratch pair's ceiling. The spill can preallocate that ceiling,
+  so additional cache bytes are not separately declared. Their size is
+  unmeasured. The opt-in pair adds an independent reservation, not a measured
+  peak or filesystem quota; durable crash cleanup is still #1091/PB #1360.
 - The caches persist on the box's disk across rows.
 - The campaign's default spec (`spec-hostcap32-ram-dev-spool.json`) pins all
   five to `/tmp` and declares no scratch, so since PQ #1129 every row it wraps
@@ -6480,8 +6503,9 @@ or ship gate changes.
 Re-stamped (2026-09-23, `ws-tq/1072-container-cache-roots`) for **container
 caches under the declared local scratch** (PQ #1072): the launcher binds HF,
 Triton, inductor, XDG and `PRISMAQUANT_TMPDIR` under the first declared scratch
-root when the spec leaves them unset, and the dispatcher warns on a spec that
-pins them to the overlay. See the entry at the top. No format, pipeline
+root when the spec leaves them unset. Since PQ #1129 the dispatcher refuses
+an overlay pin unless the spec declares an `overlay_cache_reason`; the earlier
+warning is no longer the gate. See the entry at the top. No format, pipeline
 default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-tq/1073-retire-superseded-pins`) for **retiring
