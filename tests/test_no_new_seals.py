@@ -136,6 +136,9 @@ ALLOWLIST = {
         1, INTEGRITY, "a shared-state entry against its recorded digest and size"),
     ("prismaquant/joint_adjoint_checkpoints.py", "load_adjoint_receipt"): (
         1, INTEGRITY, "receipt bytes against the pinned digest"),
+    ("prismaquant/joint_adjoint_checkpoints.py", "_validated_checkpoint_stream_plane"): (
+        1, STRUCTURE, "stored cotangent metadata reproduces its enclosing checkpoint's "
+        "session, slot, kind and coordinates; not a comparison with the running campaign"),
     ("prismaquant/joint_cost_quantum.py", "verify_quantum_identity"): (
         4, AMBIGUOUS, "record bytes, the record's own seal and each input file against its "
         "digest (integrity); the Stage A slice binding (ambiguous, #1147 report)"),
