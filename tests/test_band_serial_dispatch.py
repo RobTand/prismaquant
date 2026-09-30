@@ -463,7 +463,11 @@ def _dispatch_layout(tmp_path, monkeypatch, *, run_identity_extra=None):
 def _main(dispatch, gateway, records, receipt_path, out, *extra):
     return dispatch.main(
         ["--records", str(records), "--output-root", str(out),
-         "--adjoint-receipt", str(receipt_path), *extra], _gateway=gateway,
+         "--adjoint-receipt", str(receipt_path),
+         # Fake-gateway fixtures never run a producer to measure a pilot.
+         # Use the existing recorded override, not invented pilot counters.
+         # Producer-bound admission has its own test_joint_dispatch_pilot tests.
+         "--force-unverified-pilot", *extra], _gateway=gateway,
         # The fixture model has no checkpoint; the source-read coverage gate
         # has its own tests (test_readset_coverage_1095).
         _coverage=lambda rows: [])
@@ -481,6 +485,22 @@ def _phases(argv):
 
 def _by_id(gateway):
     return {row["quantum_id"]: row for row in gateway.submitted}
+
+
+def test_control_plane_fixture_records_explicit_pilot_override(
+        tmp_path, monkeypatch):
+    dispatch, _, records, receipt_path, out = _dispatch_layout(
+        tmp_path, monkeypatch)
+    gateway = dispatch.FakeGateway()
+    assert _main(dispatch, gateway, records, receipt_path, out,
+                 "--band-serial", "--handoff-tier", TIER) == 0
+    state = out / "layer-quanta" / dispatch.STATE_FILENAME
+    submissions = [json.loads(line) for line in state.read_text().splitlines()]
+    quanta = [event for event in submissions
+              if event["event"] == "quantum-submitted"]
+    assert len(quanta) == 2
+    assert all(event["pilot_admission"]["mode"] == "override"
+               and event["pilot_admission"]["fanout"] == 2 for event in quanta)
 
 
 def test_band_serial_publishes_producers_then_their_consumers(

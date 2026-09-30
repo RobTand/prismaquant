@@ -92,6 +92,24 @@ admission prerequisite, not an expert-partition planner or a partial-stack
 merge. No runtime phase plan, cache/prefetch, pin, format, wire or ship gate
 changes; no GPU or output-equivalence claim.
 
+Re-stamped 2026-09-30 (PQ #1458, Refs #1454, `sol/pq-pbio-1458-20260930`):
+the original b40c93cb PB test interpreters and their `-tf516` siblings on
+x86 and both Sparks now carry the project runtime/test direct dependency
+versions from green CI run `36287954876`, except the deliberately preserved
+Torch/CUDA and PrismaBuild/Tessera identities. This includes Transformers
+5.16.1, pytest-timeout 2.4.0, datasets 5.0.1, compressed-tensors 0.19.0,
+pytest-cov 7.1.0, and xxhash 4.0.1. Python/Torch stacks are not identical to
+CI. The missing x86 sibling uses the existing copy-and-repoint provisioning
+recipe. Repairs refused active qualified interpreters and preserved Torch/CUDA,
+Tessera, and PrismaBuild identities. The GLM source hash, not just its version,
+was checked. [The environment record](measurements/pb-cpu-environment-restoration-2026-09-30.md)
+contains exact versions, commands, before/after inventory evidence, and CAS
+receipts. This is environment restoration, not a full-suite pass: one shard
+reconciled GREEN; the incomplete bucket subsequently reconciled RED with 21
+observed failures in a PB-managed retry. Remaining coverage is #1454; skips
+are not qualifications. No pipeline default,
+format, export bytes, runtime pin, serving gate, or GPU claim changed.
+
 Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
 `BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
 `submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
