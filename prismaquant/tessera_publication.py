@@ -98,6 +98,21 @@ class PublicationJob:
             raise TypeError("a publication job needs a callable to publish with")
 
 
+def _clear_failure_tracebacks(error: BaseException) -> None:
+    """Keep failure types/messages without retaining staged bytes in frames."""
+    pending, seen = [error], set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        current.__traceback__ = None
+        pending.extend(link for link in (current.__cause__, current.__context__)
+                       if link is not None)
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+
+
 class BoundedPublisher:
     """One writer thread, a byte budget, and order-preserving completions."""
 
@@ -271,6 +286,8 @@ class BoundedPublisher:
             try:
                 job.publish()
             except BaseException as exc:  # noqa: BLE001 - recorded and re-raised
+                _clear_failure_tracebacks(exc)
+                del job
                 with self._cond:
                     if self._failure is None:
                         self._failure = exc
@@ -285,14 +302,13 @@ class BoundedPublisher:
                     self._cond.notify_all()
                 return
             elapsed = time.monotonic() - started
+            key, charge = job.key, int(job.charged_bytes)
+            # Drop staged ownership BEFORE the producer can reuse its credit.
+            del job
             with self._cond:
-                self._done.append(job.key)
-                self._charged -= int(job.charged_bytes)
+                self._done.append(key)
+                self._charged -= charge
                 self._outstanding -= 1
                 self._published += 1
                 self._publish_seconds += elapsed
                 self._cond.notify_all()
-            # Release the staged tensor and blob now rather than at the next
-            # iteration's pop: the budget says how much may be resident, and a
-            # job held one loop longer than its charge is a job outside it.
-            del job
