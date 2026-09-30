@@ -717,8 +717,13 @@ def _row_label(inner_argv: list, index: int) -> str:
     return f"row-{index:04d}"
 
 
-def _units_members(inner_argv: list) -> list:
-    selection = json.loads(Path(inner_argv[inner_argv.index("--units") + 1]).read_text())
+def _units_members(inner_argv: list, *, census: dict, where: str) -> list:
+    from prismaquant.tessera_campaign import load_unit_selection, select_anchor_groups
+
+    selection = load_unit_selection(inner_argv[inner_argv.index("--units") + 1])
+    # Sampling prices fewer members of a validated whole group. It is not an
+    # implicit expert-partition contract: preserve the runtime's scope check.
+    select_anchor_groups(selection, census["anchor_groups"], where=where)
     return [name for entry in selection["groups"]
             for name in (entry.get("sampled") or entry["members"])]
 
@@ -744,8 +749,11 @@ def verify_row_demand(spec: dict, census: dict, row: dict, *,
     model = (inner[inner.index("--model") + 1] if "--model" in inner
              else spec["model"])
     row_spec = {**spec, "model": model, "campaign_argv": inner}
-    members = (_units_members(inner) if "--units" in inner
-               else sorted(census.get("counts") or {}))
+    try:
+        members = (_units_members(inner, census=census, where=label)
+                   if "--units" in inner else sorted(census.get("counts") or {}))
+    except (RuntimeError, ValueError, KeyError, TypeError) as exc:
+        raise DemandRefused(f"{label}: invalid unit selection: {exc}") from exc
     demand = _row_memory_demand(row_spec, members, census,
                                 selected_source="--streaming" in inner)
     gib = 1024 ** 3
