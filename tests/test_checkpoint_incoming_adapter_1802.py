@@ -45,7 +45,8 @@ def test_stream_head_has_no_activation_reads_or_sink_writes(tmp_path, monkeypatc
     plane, shared, passes = checkpoints.load_adjoint_checkpoint(
         space, record, cotangent_factory=factory, stream_incoming=True)
     assert reads == writes == [] and dict(plane) == {}
-    assert [row["name"] for row in slots] == [
+    assert [row["name"] for row in slots] == ["cotangent-0-0", "cotangent-1-0"]
+    assert [row["name"] for probe in range(2) for row in incoming.entries(probe)] == [
         checkpoints.checkpoint_cotangent_plane(record)[key]["name"]
         for key in [(0, 0), (1, 0)]]
     assert set(shared) == {(0, 0), (1, 0)} and passes[0] == {"tag": "a"}

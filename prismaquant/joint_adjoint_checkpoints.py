@@ -1858,46 +1858,90 @@ def _checkpoint_workspace_rows(stored, plane):
     return stored["activation_entries"]
 
 
-class CheckpointIncoming:
-    """Metadata-only validated checkpoint plane over the shared exact reader.
+def _checkpoint_metadata_snapshot(record):
+    """Own the JSON checkpoint metadata, without borrowing caller dictionaries."""
+    try:
+        return json.loads(canonical_json_bytes(record))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("checkpoint incoming metadata must be finite JSON") from exc
 
-    Manifest verification remains the loader's responsibility. This adapter
-    validates the complete grid/layout and preserves the source rows/session;
-    opening or querying layouts never reads payloads or deletes source entries.
+
+def _validated_checkpoint_stream_plane(record):
+    """Validate each streamed row before any layout reservation or payload read."""
+    import math
+    from .perturbed_x_cache import EXACT_ACTIVATION_SCHEMA
+
+    # Validate the checkpoint session for copied rows as well as owner rows.
+    checkpoint_owner_session(record)
+    plane = checkpoint_cotangent_plane(record)
+    session = checkpoint_entry_session(record)
+    referenced = checkpoint_is_referenced(record)
+    for (probe, batch), row in plane.items():
+        shape = row.get("shape")
+        dtype = getattr(torch, str(row.get("dtype")).removeprefix("torch."), None)
+        if (not isinstance(shape, (list, tuple)) or not shape
+                or any(type(n) is not int or n <= 0 for n in shape)
+                or not isinstance(dtype, torch.dtype)
+                or type(row.get("tensor_bytes")) is not int):
+            raise ValueError("checkpoint incoming has an invalid tensor layout")
+        if row["tensor_bytes"] != math.prod(shape) * torch.empty((), dtype=dtype).element_size():
+            raise ValueError("checkpoint incoming tensor bytes disagree with shape/dtype")
+        metadata = row.get("metadata")
+        if (not isinstance(metadata, dict)
+                or metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
+                or metadata.get("shape") != list(shape)
+                or metadata.get("dtype") != row["dtype"]
+                or type(metadata.get("tensor_bytes")) is not int
+                or metadata["tensor_bytes"] != row["tensor_bytes"]):
+            raise ValueError("checkpoint incoming metadata disagrees with tensor layout/schema")
+        coordinates = {"probe": probe, "batch": batch}
+        if referenced:
+            coordinates["boundary"] = record["boundary"]
+        expected_identity = {
+            "session": session, "slot": f"cotangent-{probe}-{batch}",
+            "kind": "cotangent" if referenced else "adjoint_checkpoint_cotangent",
+            "coordinates": coordinates,
+        }
+        identity = metadata.get("identity")
+        if (identity != expected_identity
+                or any(type(n) is not int for n in identity["coordinates"].values())):
+            raise ValueError("checkpoint incoming metadata has a foreign cotangent identity")
+    return plane
+
+
+class CheckpointIncoming:
+    """Owned metadata-only checkpoint plane over the shared exact reader.
+
+    Manifest verification remains the loader's responsibility. Construction
+    validates the complete grid, layout and owner/copied identities. Public
+    metadata queries return defensive copies; payload digests stay independently
+    verified by the exact reader. No source entry is changed or deleted.
     """
 
     def __init__(self, record, *, n_probes: int, n_batches: int):
-        import math
-        import torch
-
         if any(type(n) is not int or n <= 0 for n in (n_probes, n_batches)):
             raise ValueError("checkpoint incoming requires positive probe/batch counts")
-        plane = checkpoint_cotangent_plane(record)
+        record = _checkpoint_metadata_snapshot(record)
+        plane = _validated_checkpoint_stream_plane(record)
         expected = {(p, b) for p in range(n_probes) for b in range(n_batches)}
         if set(plane) != expected:
             raise ValueError("checkpoint incoming has an incomplete or foreign probe/batch grid")
-        for row in plane.values():
-            shape = row.get("shape")
-            dtype = getattr(torch, str(row.get("dtype")).removeprefix("torch."), None)
-            if (not isinstance(shape, (list, tuple)) or not shape
-                    or any(type(n) is not int or n <= 0 for n in shape)
-                    or not isinstance(dtype, torch.dtype)
-                    or type(row.get("tensor_bytes")) is not int):
-                raise ValueError("checkpoint incoming has an invalid tensor layout")
-            if row["tensor_bytes"] != math.prod(shape) * torch.empty((), dtype=dtype).element_size():
-                raise ValueError("checkpoint incoming tensor bytes disagree with shape/dtype")
-        self.session = checkpoint_entry_session(record)
+        self._session = checkpoint_entry_session(record)
         self._coordinates = {id(row): key for key, row in plane.items()}
         self._entries = {p: [plane[p, b] for b in range(n_batches)] for p in range(n_probes)}
         self.max_entry_bytes = max(row["tensor_bytes"] for row in plane.values())
 
+    @property
+    def session(self):
+        return _checkpoint_metadata_snapshot(self._session)
+
     def entries(self, probe: int) -> list[dict]:
         if type(probe) is not int or probe not in self._entries:
             raise ValueError("checkpoint incoming probe is outside its grid")
-        return list(self._entries[probe])
+        return _checkpoint_metadata_snapshot(self._entries[probe])
 
     def references(self) -> dict:
-        """Probe-major per-batch references for the existing chain roll."""
+        """Probe-major immutable source references for the existing chain roll."""
         return {probe: [reference_from_record(row) for row in rows]
                 for probe, rows in self._entries.items()}
 
@@ -1905,8 +1949,10 @@ class CheckpointIncoming:
         from functools import partial
         from .joint_incoming_plane import IncomingPlaneStream, open_incoming_stream
 
+        if type(probe) is not int or probe not in self._entries:
+            raise ValueError("checkpoint incoming probe is outside its grid")
         return open_incoming_stream(
-            probe, self.entries(probe), session=self.session,
+            probe, self._entries[probe], session=self.session,
             max_resident_bytes=max_resident_bytes, residency_check=residency_check,
             stream_factory=partial(IncomingPlaneStream,
                                    coordinate_of=lambda row: self._coordinates[id(row)]))
@@ -1929,17 +1975,20 @@ def load_adjoint_checkpoint(
     whose bytes moved is a new identity, never a silent partial read.
 
     Explicit ``stream_incoming=True`` verifies the manifest and shared states
-    and creates the same empty destination, but leaves activation reads to a
-    validated incoming adapter. The default read/write order is unchanged.
+    validates each row before creating the same empty destination, but leaves
+    activation reads to an incoming adapter. The default order is unchanged.
     """
     if type(stream_incoming) is not bool:
         raise ValueError("checkpoint stream_incoming must be a bool")
     from .residency_shard_reader import staged_range_wait_s
     deadline = time.monotonic() + staged_range_wait_s()
+    if stream_incoming:
+        record = _checkpoint_metadata_snapshot(record)
     stored = _verified_checkpoint_manifest(
         space, record, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
     try:
-        plane = checkpoint_cotangent_plane(stored)
+        plane = (_validated_checkpoint_stream_plane(stored) if stream_incoming
+                 else checkpoint_cotangent_plane(stored))
     except ValueError as exc:
         raise RuntimeError(f"adjoint checkpoint plane refused: {exc}") from exc
     session = checkpoint_entry_session(stored)

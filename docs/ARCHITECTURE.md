@@ -41,8 +41,12 @@ resumed; a fully complete journal opens no incoming pass. Shared owner/pass
 states keep their verified small-file load, while destination reservation remains
 in the existing plane/cache machinery. Checkpoint and band-serial incoming paths
 share the finite probe-major stream, order checks, residency release and primary
-error cleanup; neither acquires another cache or IO pool. Bad exact-entry bytes
-refuse before delivery, without repair or fallback. Arithmetic, formats,
+error cleanup; neither acquires another cache or IO pool. Streaming metadata
+validates copied/owner identities and schema/layout consistency before any
+destination factory call. The adapter owns isolated rows/session and returns
+defensive metadata copies; caller mutations cannot redirect validated operands.
+Canonical destination names remain distinct from original owner references.
+Bad exact-entry bytes refuse before delivery, without repair or fallback. Arithmetic, formats,
 checkpoint/serving/export bytes, pin, defaults and stage graph are unchanged.
 This CPU-only contract is not #1366's profile acceptance: representative GPU
 before/after in-process profiles and both-Spark Netdata remain HELD. No speed,
