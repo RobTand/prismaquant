@@ -113,11 +113,16 @@ def test_dense_readable_candidates_remain_available(qname, fmt):
 
 def test_family_allowance_does_not_bypass_shape_refusal():
     from prismaquant.tessera_formats import TesseraFormatError
-    specs = [fr.get_format(E4M3[-1]), fr.get_format('BF16')]
+    # R1281 does not close its quota over 4095 columns (1281 * 4095 / 256 is
+    # not a whole number of bits), so no such unit exists.  This used to lean
+    # on the footprint's whole-superblock refusal, which #1849 removed: the
+    # wire holds a trailing partial superblock, so R2048 over 4095 columns is
+    # a real, priced unit and no longer a shape refusal.
+    specs = [fr.get_format(E4M3[1]), fr.get_format('BF16')]
     stats, costs = candidate_table([ROUTED], specs, shape=(2048, 4095))
-    # At TP=1 an unsliced window reaches the footprint's superblock check.
+    # At TP=1 an unsliced window reaches the footprint's schedule check.
     # Preserve that existing hard refusal, rather than assuming a TP mask.
-    with pytest.raises(TesseraFormatError, match='multiple of the 256-column'):
+    with pytest.raises(TesseraFormatError, match='not realisable over 4095 columns'):
         ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
             source_manifest={ROUTED: 'bf16'})
 

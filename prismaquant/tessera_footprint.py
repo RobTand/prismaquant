@@ -34,6 +34,7 @@ from .tessera_formats import (
     SUPERBLOCK_WEIGHTS,
     TesseraFamily,
     TesseraFormatError,
+    _schedule_rates,
     family_rate_cap,
     get_tessera_family,
     tessera_serving_route,
@@ -389,8 +390,13 @@ def tessera_tensor_payload_breakdown(
     if type(sidecar_header_bytes) is not int or sidecar_header_bytes < 0:
         raise TesseraFormatError("sidecar_header_bytes must be nonnegative")
 
+    # ``_schedule_rates`` is ``column_schedule`` with Tessera's refusal of a
+    # rung whose quota does not close over these columns re-raised as a
+    # ``TesseraFormatError`` -- the one refusal type every caller guards with.
+    # The superblock refusal above used to fire first on every column count
+    # where a rung can fail to close, so the raw ``GrammarError`` never leaked.
     rates = (
-        spec.column_schedule(rung, columns, recipe=wire)
+        _schedule_rates(spec, rung, columns, wire)
         if schedule is None
         else tuple(int(r) for r in schedule)
     )
