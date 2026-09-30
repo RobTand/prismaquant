@@ -1,5 +1,29 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (Refs PQ #1247, `sol/issues-pq-5`):
+`_prepare_file_read_bound` checks each distinct render path once per call, in
+first-seen order, instead of once per cell sharing that path. It still reads
+current file sizes on every call and refuses a missing render or a maximum
+outside the declared PWC read-buffer budget. This is local metadata deduplication,
+not a new weight cache, preloader or persisted file-size cache. Preparation
+concurrency, body reads, format/serving bytes, gates, pin and stage graph are
+unchanged. CPU regression and controlled-profile evidence do not establish
+#1247's representative NFS preparation/runtime acceptance. The controlled CPU
+regression, before/after profiles and both-Spark telemetry are recorded in
+[the dated evidence](results/2026-09-30_render_read_bound_cpu.md).
+
+Re-stamped 2026-09-30 (PQ #1820, Refs #1091): a newly sealed container spec
+can explicitly declare a separate compilation-cache ROOT/MAX pair through the
+existing local-scratch registry. PB charges that ceiling independently; command
+forwarding and the preamble share the registry path. HF, Triton, Inductor and
+XDG stay within the charged cache root, while TMPDIR must explicitly name a
+different charged workspace. Overlaps, ambiguous mounts, symlink ancestors and
+escaped pins refuse; an overlay reason cannot waive this opt-in accounting.
+Legacy rows remain unchanged. [The cache declaration contract](design/container_cache_charge_1091.md)
+distinguishes reservation from quota and durable lifetime. No crash cleanup,
+measured cache peak, GPU/performance, runtime pin or production default is
+claimed; #1091 and PB #1360 remain the independent lifetime/measurement gates.
+
 Re-stamped 2026-09-30 (PQ #1794, Refs #1087, `sol/pq-stageb-4`):
 The explicitly selected research constructor policy
 `StageBReplaySpill(scatter_reads=True)` coalesces physically adjacent slot
@@ -14,8 +38,9 @@ export/serving bytes, pin and stage graph are unchanged. The scratch capacity
 includes leading-residue/trailing-grid slot padding that the arena writer
 actually writes; it is not a payload-only reservation. CPU span/operand tests
 do not establish #1087's representative proxy digest, performance, residency,
-peak-memory or reader-wait acceptance. GPU before/after profiles and both-Spark
-Netdata remain HELD pending explicit coordinator approval.
+peak-memory or reader-wait acceptance. The coordinator's 2026-09-30 14:15Z
+GO conditionally approved the held GPU ask once its own prerequisites hold;
+before/after profiles and both-Spark Netdata still require completed evidence.
 
 Re-stamped 2026-09-30 (PQ #1762, `sol/source-domain-1762`): source-file
 provenance adds `prismaquant.source_tree.v2` beside the unchanged labelled
@@ -42,6 +67,30 @@ numerical behavior and independent export/serving gates remain unchanged.
 Tessera's own package-profile API is additive upstream; adopting it in
 PrismaQuant requires a later separately reviewed pin. CPU framing evidence
 is not GPU or serving qualification.
+
+Re-stamped 2026-09-30 (PQ #1796, Refs #1314): opt-in
+`plan --experts-per-row N` emits independently retryable unsampled routed
+expert chunks under a v3 selection with the complete original group roster.
+It requires a pinned rate band and one round; sampling, seeds, research exact
+members and work-based packing are refused. The runtime derives each chunk
+from producer expert records and keeps the full group's legal menu grid while
+pricing only its complete expert subset. Existing demand and PB readset
+owners consume that subset; PB still owns placement. Merge requires the plan's
+complete, disjoint partition roster and exact row prices before producing the
+existing whole-group table/journal. Default, adaptive and sampled paths keep
+whole groups. This opt-in CPU delivery does not establish GPU numerical
+identity, residency, speed or production promotion. See
+[the partition contract](campaign_expert_partitions.md).
+
+Re-stamped 2026-09-30 (Refs PQ #1492, `sol/issues-pq-4`): the selected-cache
+CLI can explicitly forward `--head-progress-phase` and
+`--head-progress-allowance-s` to the existing head-walk progress cadence.
+Both inputs are required together; blank phases and non-finite/non-positive
+allowances refuse before loading. The submitting PB action must already declare
+that phase and allowance. Absent options retain the no-phase default; this
+reader does not infer or declare a synthesis phase. Existing head checkpoint,
+current-byte verification, manifest bytes and worker limits remain unchanged.
+This CPU wiring is not NFS-throughput or GPU qualification.
 
 Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
 `plan_reduced_schedule_repair` replays explicit research input history under a
@@ -110,6 +159,16 @@ observed failures in a PB-managed retry. Remaining coverage is #1454; skips
 are not qualifications. No pipeline default,
 format, export bytes, runtime pin, serving gate, or GPU claim changed.
 
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the binding reader also
+selects the shared strict reader's constant-refusal callback. Non-standard
+`NaN`, `Infinity` and `-Infinity` literals cannot certify no live binding.
+This is confined to the retirement proof; numerical quantization is unchanged.
+
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the negative binding
+proof uses the shared strict JSON reader to refuse duplicate members. A later
+member cannot hide an earlier binding, and refusals retain the document path.
+No deletion target, payload bytes or resource-reclamation policy changes.
+
 Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
 `BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
 `submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
@@ -128,6 +187,16 @@ Stage B's default still persists units synchronously; GPU before/after
 qualification and default promotion remain under #1367. GPU profiling is HELD; no speed, peak-memory, serving or production-default
 claim follows from the CPU ordering tests. No export bytes, pin, format menu,
 ship gate or stage graph changes.
+
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the binding proof also
+refuses non-regular documents before opening them, so a named pipe cannot
+block the scan waiting for a writer. Retirement targets are unchanged.
+
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): Stage A retirement's
+negative binding proof refuses unreadable, symlinked, malformed or oversized
+binding documents and directory-scan errors. Gzip decoding is bounded by the
+same 64 MiB document limit. This CPU proof slice adds no deletion target or
+forward/dead-owner reclaim; it changes no numerical, wire or serving gate.
 
 Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
 legal-domain pin provenance now transcribes v3's independently reviewed
@@ -3892,8 +3961,16 @@ container writes its HF, Triton and inductor caches, `XDG_CACHE_HOME` and
 `PRISMAQUANT_TMPDIR` somewhere. Left to the container's writable overlay,
 those writes are unbounded and invisible to PrismaBuild.
 
-When a row declares bounded local scratch (PB #911), the launcher binds each
-of these that the spec leaves unset under `<root>/container-cache/<name>`
+An explicit `PRISMAQUANT_CONTAINER_CACHE_ROOT` and
+`PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES` pair instead reserves a separate
+compilation-cache root (PQ #1820, Refs #1091). The four compilation caches stay
+under that root; TMPDIR must explicitly stay in another charged workspace.
+Checks do not create/delete directories or certify crash cleanup. See the
+[separate-cache contract](design/container_cache_charge_1091.md).
+
+Without that opt-in pair, a row declaring bounded local scratch (PB #911)
+keeps its legacy defaults: the launcher binds each variable left unset under
+`<root>/container-cache/<name>`
 (`tessera_campaign_container.container_cache_environment`). The root is the
 first declared kind in `LOCAL_SCRATCH_KINDS` order: the cotangent scratch,
 then the Stage B spill. Its writable identity bind is already required. A
@@ -3915,9 +3992,11 @@ refuses. The launcher's preamble lists the same variables as
 `overlay_pinned_caches`.
 
 Limits:
-- The caches are charged to PrismaBuild through nothing but the scratch
-  pair's own ceiling. The spill preallocates up to that ceiling, so cache
-  bytes can run past what PrismaBuild charged. Their size is unmeasured.
+- Without the explicit separate pair, caches are charged through nothing
+  but the legacy scratch pair's ceiling. The spill can preallocate that ceiling,
+  so additional cache bytes are not separately declared. Their size is
+  unmeasured. The opt-in pair adds an independent reservation, not a measured
+  peak or filesystem quota; durable crash cleanup is still #1091/PB #1360.
 - The caches persist on the box's disk across rows.
 - The campaign's default spec (`spec-hostcap32-ram-dev-spool.json`) pins all
   five to `/tmp` and declares no scratch, so since PQ #1129 every row it wraps
@@ -3942,7 +4021,11 @@ PrismaBuild action, checks everything before it removes anything:
   `require_producer_contained`;
 - no JSON document under the declared `--binding-root`s names a path in the
   run's adjoint space, or the digest of its chain state, receipt or any
-  checkpoint. At least one root is required.
+  checkpoint. At least one root is required. The negative proof refuses an
+  unreadable directory, symlinked or non-regular binding, malformed JSON/gzip
+  document, or document above the 64 MiB limit (including decoded gzip bytes). It never
+  skips such a document as evidence that no consumer exists. The retiring
+  run's own subtree remains excluded from the consumer scan (PQ #1088).
 
 It then sorts every unreclaimed batch in PrismaBuild's records for those
 owners. A batch wholly inside the checkpoints' files and referenced entries
@@ -3959,6 +4042,8 @@ PQ #1571). That reader reads every batch, reclaimed ones included, and
 refuses a record it cannot read, so a rerun refuses when a reclaimed batch's
 record is gone. Gates:
 - `tests/test_stage_a_retirement_1073.py`;
+- `tests/test_stage_a_retirement_binding_scan_1088.py`: an incomplete binding
+  scan refuses before the retirement record or any unlink;
 - `tests/test_stage_a_retirement_pb_1073.py`: on a real owner, the durable
   charge drops by exactly the pinned batch's bytes.
 
@@ -6418,8 +6503,9 @@ or ship gate changes.
 Re-stamped (2026-09-23, `ws-tq/1072-container-cache-roots`) for **container
 caches under the declared local scratch** (PQ #1072): the launcher binds HF,
 Triton, inductor, XDG and `PRISMAQUANT_TMPDIR` under the first declared scratch
-root when the spec leaves them unset, and the dispatcher warns on a spec that
-pins them to the overlay. See the entry at the top. No format, pipeline
+root when the spec leaves them unset. Since PQ #1129 the dispatcher refuses
+an overlay pin unless the spec declares an `overlay_cache_reason`; the earlier
+warning is no longer the gate. See the entry at the top. No format, pipeline
 default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-tq/1073-retire-superseded-pins`) for **retiring
@@ -21842,7 +21928,17 @@ layers, canonical capture and encoder bounds; their anchor preparation reuses
 the completed capture without a source forward. Both branches retain their
 derived demand when the dispatcher partitions the rows.
 
-**Why the quantum is the fused anchor group.** The adaptive loop's round is per
+**Opt-in fixed-rate expert partitions (#1796, Refs #1314).**
+`--experts-per-row` subdivides an unsampled routed group only at a pinned
+`--rate-band r,r --max-rounds 1`. The v3 selection retains the complete group
+roster plus an explicit deterministic expert chunk. Runtime, own-row demand and
+plan-derived merge coverage share that contract; the full group's menu grid
+remains authoritative. Unsupported combinations fail before publication.
+The default and every adaptive/sampled group remain indivisible. CPU checks do
+not qualify GPU output identity or resident peak memory; the parent acceptance
+remains open. See [the partition contract](campaign_expert_partitions.md).
+
+**Why the default quantum is the fused anchor group.** The adaptive loop's round is per
 `(group, family)`: a round adds one anchor to each surface still failing its
 gate, and the decision reads all of that family's anchors at once. Splitting
 the quantum by rung would put that decision outside the process that owns the

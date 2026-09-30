@@ -46,8 +46,9 @@ class SchemaValidationError(ValueError):
 
 
 #: Shape of a retired codebook rung name (the Gridbook lane, archived
-#: 2026-09-25, #1304). A shape test only, kept here so the torch-free readers
-#: (this module, ``layer_config``) can spot one; the authority is
+#: 2026-09-02; remnant cleanup 2026-09-25, #1304). A shape test only,
+#: kept here so the torch-free readers (this module, ``layer_config``)
+#: can spot one; the authority is
 #: ``format_registry.RETIRED_CODEBOOK_FORMAT_RE``, reached through
 #: ``get_format`` by :func:`refuse_retired_codebook_format`.
 RETIRED_CODEBOOK_NAME_RE = re.compile(r"^(?:NVFP4_CB_K|FP8_CB_K)\d+$")
