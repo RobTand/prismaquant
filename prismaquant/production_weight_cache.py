@@ -1347,9 +1347,11 @@ class ProductionWeightCache:
         A bounded PWC read arrives as an ``io_engine.SealedBuffer`` (PQ #1291):
         the archive is parsed through the memfd and the tensor is loaded with
         ``mmap=True`` from it, so the tensor maps the verified pages instead of
-        copying them into a ``torch`` allocation, which on this platform would
-        not return its pages to the cgroup when freed. The mapping is
-        private: nothing written to the tensor reaches the sealed bytes.
+        copying them into a ``torch`` allocation. This changes the live
+        allocation class; allocator retention after eviction depends on the
+        workload and is not established by the controlled CPU fixture. The
+        mapping is private: nothing written to the tensor reaches the sealed
+        bytes.
         """
         from .io_engine import SealedBuffer
         from .residency_map import StagedReadRefused
