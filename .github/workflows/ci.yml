@@ -122,6 +122,9 @@ jobs:
       # keeps the skip set identical between here and a developer's box.
       - name: Run tests
         env:
+          # Charged-root fixtures intentionally refuse container overlay /tmp.
+          # Use this job's owned runner workspace without relaxing that guard.
+          TMPDIR: ${{ runner.temp }}
           PYTHONPATH: .
           CUDA_VISIBLE_DEVICES: ""
           OMP_NUM_THREADS: "1"
@@ -160,7 +163,7 @@ jobs:
         run: |
           sudo -n systemd-run --scope --quiet -- \
             setpriv --reuid="$(id -u)" --regid="$(id -g)" --init-groups \
-            env HOME="$HOME" PATH="$PATH" PYTHONPATH=. CUDA_VISIBLE_DEVICES= \
+            env HOME="$HOME" PATH="$PATH" TMPDIR="$RUNNER_TEMP" PYTHONPATH=. CUDA_VISIBLE_DEVICES= \
               OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
               NUMEXPR_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=1 MAX_JOBS=1 \
             "$(command -v python)" -m pytest -c pytest.ini tests/ -m own_cgroup \
