@@ -13,7 +13,8 @@ from test_stageb_one_pass_spill import _spill_root
 
 
 @contextmanager
-def _captured(tmp_path, monkeypatch, *, threads=False, probes=2, arena_blocks=None):
+def _captured(tmp_path, monkeypatch, *, threads=False, probes=2, arena_blocks=None,
+              scatter_reads=False):
     # The x86 PB worker's older kernel does not report STATX_DIOALIGN.
     # Model a 4 KiB reported grid; keep the real local file and O_DIRECT
     # syscalls. Grid discovery/refusal is covered by the scratch tests.
@@ -27,7 +28,7 @@ def _captured(tmp_path, monkeypatch, *, threads=False, probes=2, arena_blocks=No
             root=_spill_root(tmp_path, needs_direct_io=False),
             max_bytes=1 << 20, geometry=geometry,
             window_names=[("a",)], n_probes=probes, dtype=torch.bfloat16,
-            device="cpu", threads=threads) as session:
+            device="cpu", threads=threads, scatter_reads=scatter_reads) as session:
         if arena_blocks is not None:
             session.arena_bytes = arena_blocks * session._block
         for probe in range(probes):

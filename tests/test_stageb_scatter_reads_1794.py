@@ -137,6 +137,60 @@ def test_scatter_gap_and_abutting_destinations():
             1, [(0, [(0, 8192)]), (8192, [(8192, 4096)])])
 
 
+def test_iovec_only_flush_has_byte_room():
+    spans, calls = spill._scatter_read_calls(
+        [(i * 4096, (i + 1) * 4096, (3 - i) * 4096) for i in range(4)],
+        block=4096, call_bytes=16384, max_iov=1)
+    assert spans == 1
+    assert calls == [(i * 4096, [((3 - i) * 4096, 4096)]) for i in range(4)]
+
+
+def test_partial_read_crosses_permuted_vectors(tmp_path, monkeypatch):
+    import prismaquant.perturbed_x_cache as cache
+
+    with _captured(tmp_path, monkeypatch, probes=1, scatter_reads=True) as session:
+        window, item, original, source, remapped = _permuted(session)
+        real_preadv = cache.os.preadv
+        calls = []
+
+        def partial(fd, views, offset):
+            calls.append((offset, len(views)))
+            # A short, aligned read spanning two permuted destinations; the
+            # existing scratch must resume into the remaining vectors.
+            return real_preadv(fd, views[:2], offset)
+
+        monkeypatch.setattr(cache.os, "preadv", partial)
+        restored, _ = session._read_chunk(window, 0, item)
+        assert calls == [(0, 4), (2 * session._block, 2)]
+        for (_, old), (_, new) in zip(source, remapped):
+            assert torch.equal(original[old:old + 64], restored[new:new + 64])
+
+
+def test_selected_constructor_capture_replays_through_engine(tmp_path, monkeypatch):
+    from torch import nn
+
+    class Lease:
+        modules = {"a": nn.Linear(8, 8, bias=False)}
+
+        def __init__(self):
+            self.observed = []
+
+        def _observe_invocation(self, name, weight, x, gradient):
+            assert name == "a" and weight is self.modules[name].weight
+            self.observed.append((x.clone(), gradient.clone()))
+
+    with _captured(tmp_path, monkeypatch, probes=1, scatter_reads=True) as session:
+        lease = Lease()
+        session.replay(0, 0, lease)
+        assert len(lease.observed) == 2
+        for invocation, (x, gradient) in enumerate(lease.observed):
+            expected = (torch.arange(32).reshape(4, 8) + invocation * 64).to(torch.bfloat16)
+            assert torch.equal(x, expected)
+            assert torch.equal(gradient, torch.full_like(expected, invocation + 1))
+        assert session.telemetry["scatter_reads"] is True
+        assert session.telemetry["checksums_verified"] == 4
+
+
 def test_slot_padding_is_written_not_just_reserved(tmp_path, monkeypatch):
     with _captured(tmp_path, monkeypatch, probes=1) as session:
         payload = session.telemetry["x_bytes_written"] + session.telemetry["g_bytes_written"]
