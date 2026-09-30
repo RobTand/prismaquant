@@ -6480,8 +6480,9 @@ or ship gate changes.
 Re-stamped (2026-09-23, `ws-tq/1072-container-cache-roots`) for **container
 caches under the declared local scratch** (PQ #1072): the launcher binds HF,
 Triton, inductor, XDG and `PRISMAQUANT_TMPDIR` under the first declared scratch
-root when the spec leaves them unset, and the dispatcher warns on a spec that
-pins them to the overlay. See the entry at the top. No format, pipeline
+root when the spec leaves them unset. Since PQ #1129 the dispatcher refuses
+an overlay pin unless the spec declares an `overlay_cache_reason`; the earlier
+warning is no longer the gate. See the entry at the top. No format, pipeline
 default, stage or ship gate changes.
 
 Re-stamped (2026-09-23, `ws-tq/1073-retire-superseded-pins`) for **retiring
