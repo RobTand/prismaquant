@@ -28,7 +28,6 @@
   "hashlib:prismaquant/cost_stage_checkpoint.py::_load_unit",
   "hashlib:prismaquant/cost_stage_checkpoint.py::write_unit",
   "hashlib:prismaquant/cost_streaming.py::StreamedBoundaryArtifacts.write_produced_files",
-  "hashlib:prismaquant/dev_mode.py::_shown",
   "hashlib:prismaquant/dsv4_campaign_completion.py::_manifest_scope",
   "hashlib:prismaquant/dsv4_campaign_completion.py::_sha256_bytes",
   "hashlib:prismaquant/dsv4_campaign_completion.py::canonical_sha256",
