@@ -152,6 +152,30 @@ def test_runtime_relation_v2_mismatch_is_not_a_legacy_pass(relation_fixture):
         relation_load(relation_fixture)
 
 
+def test_runtime_relation_v2_compares_strong_profiles_not_cross_run_v1(relation_fixture):
+    evidence, record, _ = relation_fixture
+    files = {name: name.encode() for name in
+             ('__init__.py', 'cached_unit.py', 'serving/runtime_contract.json')}
+    both = {V1: legacy(files), V2: framed(files)}
+    package_ref = record['runs']['native']['post_package']
+    package = evidence.get(package_ref)
+    package['source_profiles'] = both
+    evidence.replace(package_ref, package)
+    for name, run in record['runs'].items():
+        run['post_package'] = dict(package_ref)
+        raw = evidence.get(run['runtime'])
+        base = raw if name == 'native' else raw['base']
+        base['source']['tessera_package_sha256'] = '9' * 64 if name == 'native' else both[V1]
+        base['source']['tessera_package_source_profiles'] = {
+            V1: base['source']['tessera_package_sha256'], V2: both[V2]}
+        if name == 'engine':
+            raw['loaded_package'] = package
+        evidence.replace(run['runtime'], raw)
+    result = relation_load(relation_fixture)
+    assert result['source_framing']['status'] == 'framed_v2'
+    assert all(run['source_framing']['status'] == 'framed_v2' for run in result['runs'].values())
+
+
 def test_reseal_hash_output_emits_both_without_rewriting(tmp_path, capsys):
     from types import SimpleNamespace
     root = tmp_path / 'src' / 'tessera'
