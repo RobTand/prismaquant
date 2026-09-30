@@ -272,7 +272,9 @@ def _binding_documents(roots: Iterable, *, skip: Path):
                         "decoded bytes")
                 document = strict_json_loads(
                     raw, duplicate=lambda key: ValueError(
-                        f"duplicate JSON member {key!r}"))
+                        f"duplicate JSON member {key!r}"),
+                    constant=lambda name: ValueError(
+                        f"non-standard JSON constant {name!r}"))
             except (OSError, EOFError, ValueError, zlib.error) as error:
                 raise RetirementRefused(
                     f"the binding document {path} cannot be read: {error}") from error

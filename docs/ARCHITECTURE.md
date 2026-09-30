@@ -124,6 +124,11 @@ observed failures in a PB-managed retry. Remaining coverage is #1454; skips
 are not qualifications. No pipeline default,
 format, export bytes, runtime pin, serving gate, or GPU claim changed.
 
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the binding reader also
+selects the shared strict reader's constant-refusal callback. Non-standard
+`NaN`, `Infinity` and `-Infinity` literals cannot certify no live binding.
+This is confined to the retirement proof; numerical quantization is unchanged.
+
 Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the negative binding
 proof uses the shared strict JSON reader to refuse duplicate members. A later
 member cannot hide an earlier binding, and refusals retain the document path.
