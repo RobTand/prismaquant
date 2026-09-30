@@ -550,7 +550,7 @@ def _row_memory_gb(spec: dict, members: list[str], census: dict, *, selected_sou
     demand becomes a cgroup cap of exactly that many GiB
     (``prismabuild/pool.py:2850``) while the row refuses unless its plan fits
     under that cap *less* the floor it measures for itself
-    (``prismaquant/tessera_campaign.py:4515``). Fold the reservation into the
+    (``prismaquant/tessera_campaign.py``). Fold the reservation into the
     plan instead and the predicate compares an inflated delta against an
     inflated cap and nets to zero -- which is exactly why the spec's declared
     headroom, a term inside ``memory_bytes``, could never close this gap.
