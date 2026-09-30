@@ -269,6 +269,15 @@ priced before are byte-identical. No default, stage, export or serving gate
 changes; whether a runtime routes a 128-column unit natively stays the
 route-status gate's question. Gate: `tests/test_tessera_partial_superblock.py`.
 
+Re-stamped 2026-09-30 (PQ #1367, `sol/pq-stageb-7`): the opt-in bounded
+checkpoint publisher now snapshots an owned builtin graph on the consumer and
+runs the existing pickle/hash/envelope encoder and atomic write on the shared
+IO engine. Credits still cover snapshot/encoder ownership, acknowledgements
+remain durable-only, and the default synchronous path and bytes are unchanged.
+CPU tests and before/after profiling are separate acceptance; no measured
+22.6-second reduction or representative GPU overlap is claimed before those
+profiles and both-Spark telemetry exist.
+
 Re-stamped 2026-09-30 (PQ #1843, step 1 of #1842): the Tessera campaign
 takes `--allow-pinned` (the allocator's grammar) and `--pinned-roster-only`,
 so a census can name a scoped roster of profile-pinned Linears (GLM-5.3
@@ -513,9 +522,10 @@ Re-stamped 2026-09-30 (PQ #1786, Refs #1367, `sol/pq-stageb-3`):
 Stage B has an explicitly opt-in host publication path selected by the runtime
 execution setting `checkpoint_publication_budget_bytes`. Absent/zero retains
 the synchronous default; invalid or too-small bounds refuse. It reserves host
-staging before constructing/encoding each tensor-free unit snapshot, uses a
-conservative builtin-graph bound and capped encoder, and sends only immutable
-existing envelope bytes plus a destination to the shared IO engine. The job
+staging before constructing each tensor-free unit snapshot, uses a conservative
+builtin-graph bound and capped encoder, and sends an owned builtin snapshot
+plus a destination to the shared IO engine. Serialization, payload hashing,
+envelope encoding and atomic publication run on that engine, not the consumer. The job
 ceiling is derived from two sealed windows, with at most two pending window
 records; acknowledged metadata is reaped before a full ceiling is reserved.
 The consumer keeps measured, submitted and durably acknowledged units distinct.
@@ -532,7 +542,8 @@ core comparisons are not cross-plan equivalence. Existing plan/record
 bindings are not removed or rewritten. The default writer, internal unit encoding/schema,
 render/capture arithmetic, serving/export bytes, pin and stage graph remain
 unchanged. This CPU integration remains research opt-in: #1367's authorized
-before/after in-process profiles and both-Spark Netdata are HELD, with no speed,
+before/after in-process profiles and both-Spark Netdata were authorized by the
+14:15Z and 20:30Z coordinator rulings but remain unmeasured, with no speed,
 residency, peak-memory or unchanged-wait claim from CPU barrier tests.
 
 Re-stamped 2026-09-30 (PQ #1789, Refs #1314): campaign `check` and

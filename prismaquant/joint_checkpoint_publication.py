@@ -1,13 +1,16 @@
 """Consumer-owned durable frontier over the existing bounded IO publisher.
 
 This optional host path changes scheduling, not unit encoding or measurement
-identity. IO workers receive only a destination and immutable envelope bytes.
+identity. IO workers receive only a destination and an owned builtin snapshot;
+serialization, hashing and atomic publication run on the existing IO engine.
 """
 from __future__ import annotations
 
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from functools import partial
+from copy import deepcopy
+from threading import Lock
 import sys
 
 from . import aura_cost
@@ -92,6 +95,30 @@ def check_construction(*, references: object, rows: int, probes: int,
     snapshot_bound(references, limit=limit - extra)
 
 
+class _EncodedBytes:
+    """Small shared accounting, never a reference to consumer state or progress."""
+
+    def __init__(self):
+        self._lock = Lock()
+        self._value = 0
+
+    def add(self, size: int) -> None:
+        with self._lock:
+            self._value += size
+
+    def value(self) -> int:
+        with self._lock:
+            return self._value
+
+
+def _publish_snapshot(path, *, name, identity_sha256, state, max_bytes, encoded_bytes):
+    encoded = aura_cost._encode_aura_unit_checkpoint(
+        qname=name, identity_sha256=identity_sha256, state=state,
+        max_bytes=max_bytes)
+    encoded_bytes.add(len(encoded))
+    aura_cost.atomic_write_bytes(path, encoded)
+
+
 class CheckpointPublicationLedger:
     """Bounded measured/submitted/durable state; all methods run on consumer."""
 
@@ -112,7 +139,8 @@ class CheckpointPublicationLedger:
         self._windows: deque[tuple[int, tuple[str, ...]]] = deque()
         self._next_window = 0
         self._closed = False
-        self._submitted_count = self._acknowledged_count = self._encoded_bytes = 0
+        self._submitted_count = self._acknowledged_count = 0
+        self._encoded_bytes = _EncodedBytes()
         self._peak_windows = 0
 
     def _accept(self, keys) -> None:
@@ -150,14 +178,17 @@ class CheckpointPublicationLedger:
     def _freeze(self, name: str, state_factory: Callable[[int], Mapping]) -> PublicationJob:
         state = state_factory(self._slot)
         snapshot_bound(state, limit=self._slot)
-        encoded = aura_cost._encode_aura_unit_checkpoint(
-            qname=name, identity_sha256=self._identity, state=state,
-            max_bytes=self._slot // 4)
-        self._encoded_bytes += len(encoded)
+        # Builtin validation above prevents custom reducers. deepcopy preserves
+        # aliases/cycles and therefore the existing pickle byte representation,
+        # without lending mutable rows or identity graphs to an IO worker.
+        # The reservation includes this copy, encoder buffers and memo tables.
+        owned = deepcopy(state)
         return PublicationJob(
             name, self._slot,
-            partial(aura_cost.atomic_write_bytes,
-                    aura_cost._aura_unit_checkpoint_path(self._root, name), encoded))
+            partial(_publish_snapshot,
+                    aura_cost._aura_unit_checkpoint_path(self._root, name),
+                    name=name, identity_sha256=self._identity, state=owned,
+                    max_bytes=self._slot // 4, encoded_bytes=self._encoded_bytes))
 
     def submit(self, name: str, state_factory: Callable[[int], Mapping]) -> bool:
         self.poll()
@@ -206,5 +237,5 @@ class CheckpointPublicationLedger:
                 "windows_pending_peak": self._peak_windows,
                 "submitted_units": self._submitted_count,
                 "acknowledged_units": self._acknowledged_count,
-                "encoded_bytes": self._encoded_bytes,
+                "encoded_bytes": self._encoded_bytes.value(),
                 "pending_units": len(self._submitted), "closed": self._closed}
