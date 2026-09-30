@@ -4411,8 +4411,9 @@ class CampaignRoster:
     """The Linears a campaign prices, the pins it keeps and the pins it lifts.
 
     ``dense`` is the priced non-expert roster before the layer stride;
-    ``pinned`` the Linears the profile keeps out of it; ``lifted`` the
-    profile-pinned Linears ``--allow-pinned`` put back into ``dense``.
+    ``pinned`` the Linears the profile keeps out of it (pins and
+    ``probe_linear_exclude_extra`` matches); ``lifted`` the kept-out Linears
+    ``--allow-pinned`` put back into ``dense``.
     """
 
     dense: tuple
@@ -4426,12 +4427,15 @@ def campaign_roster(linear_names, profile, *, allow_pinned=None,
 
     Without ``allow_pinned`` this is the roster the campaign always built:
     every Linear except the head, the embeddings, the profile's pins and its
-    ``probe_linear_exclude_extra`` matches. ``allow_pinned`` lifts a
-    profile-pinned Linear whose name contains one of its tokens, with the
-    allocator's grammar and ``token in qname`` semantics
+    ``probe_linear_exclude_extra`` matches. ``allow_pinned`` lifts a Linear
+    the profile keeps out by either rule when its name contains one of the
+    tokens, with the allocator's grammar and ``token in qname`` semantics
     (``fixed_head.parse_allow_pinned`` / ``allow_pinned_lifts_name``), so a
-    census and the allocation that consumes it read one spelling. An
-    exclude-extra match stays excluded, as it does in the allocator.
+    census and the allocation that consumes it read one spelling. Both rules
+    must yield to an explicit token: GLM keeps attention out by pin and by
+    exclude-extra alike, because its construction runtime builds attention
+    with ``quant_config=None`` (principle 9). Pricing such a unit reports a
+    serving gap; export still refuses its unbacked route.
     ``pinned_roster_only`` keeps only the lifted Linears: the roster of a
     scoped campaign over units the body campaign does not price (GLM
     attention). A token that lifts nothing refuses, so a misspelled token
@@ -4447,9 +4451,8 @@ def campaign_roster(linear_names, profile, *, allow_pinned=None,
     for name in linear_names:
         if name.endswith("lm_head") or "embed" in name:
             continue
-        excluded = bool(extra) and re.search(extra, name) is not None
-        if profile.is_pinned_name(name) or excluded:
-            hits = [] if excluded else [token for token in tokens if token in name]
+        if profile.is_pinned_name(name) or (extra and re.search(extra, name)):
+            hits = [token for token in tokens if token in name]
             if not hits:
                 pinned.append(name)
                 continue

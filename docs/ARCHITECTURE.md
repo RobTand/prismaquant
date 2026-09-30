@@ -5981,11 +5981,13 @@ scope reads a layer the body does not run; a scoped roster prices Linears the
 body runs but the profile pins (GLM-5.3 attention). `campaign_roster`
 (`tessera_campaign.py`) owns the campaign's non-expert roster. Without flags it
 is the roster the campaign always built. `--allow-pinned TOKENS` lifts a
-profile-pinned Linear whose name contains a token, with the allocator's
-grammar and `token in qname` semantics (`fixed_head.parse_allow_pinned`), so
-the census and the allocation that reads it spell the lift the same way.
-`probe_linear_exclude_extra` matches stay excluded, as in the allocator.
-`--pinned-roster-only` keeps only the lifted Linears; the unpinned body and
+Linear the profile keeps out, by pin or by `probe_linear_exclude_extra`, when
+its name contains a token, with the allocator's grammar and `token in qname`
+semantics (`fixed_head.parse_allow_pinned`), so the census and the allocation
+that reads it spell the lift the same way. GLM keeps attention out both ways,
+because its construction runtime builds attention with `quant_config=None`
+(principle 9); pricing it reports that serving gap, and export still refuses
+the unbacked route. `--pinned-roster-only` keeps only the lifted Linears; the unpinned body and
 the expert population leave the roster. A token that lifts nothing refuses.
 The census records `pinned_roster` (`prismaquant.tessera_campaign.pinned_roster.v1`:
 tokens, mode, lifted names), and `load_calibration_census` refuses a census
