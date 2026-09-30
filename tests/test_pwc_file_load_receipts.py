@@ -6,6 +6,7 @@ import pickle
 import pytest
 import torch
 
+from prismaquant.io_engine import SealedBuffer
 from prismaquant.production_weight_cache import ProductionWeightCache
 
 
@@ -48,6 +49,11 @@ def test_receipt_hashes_exact_single_read_and_tensor(tmp_path, monkeypatch):
             calls.append(('open', None)); return Counted(stream)
         return stream
     monkeypatch.setattr(Path, 'open', counted)
+    original_fill = SealedBuffer.fill
+    def counted_fill(buffer, fd):
+        calls.append(('read', buffer.size))
+        return original_fill(buffer, fd)
+    monkeypatch.setattr(SealedBuffer, 'fill', counted_fill)
     cache.enable_file_load_receipts(max_file_bytes=len(blob))
     assert cache.prefetch([key], max_workers=1) == 1
     tensor = cache.get(*key)
@@ -160,20 +166,13 @@ def test_mutation_during_read_refuses_without_registering_tensor(tmp_path, monke
     cache, paths, _ = make_cache(tmp_path)
     key, path = next(iter(paths.items()))
     cache.enable_file_load_receipts(max_file_bytes=path.stat().st_size + 20)
-    original = Path.open
-    class Mutating:
-        def __init__(self, stream): self.stream = stream
-        def __enter__(self): return self
-        def __exit__(self, *args): return self.stream.__exit__(*args)
-        def read(self, *args):
-            raw = self.stream.read(*args)
-            with original(path, 'ab') as writer: writer.write(b'drift')
-            return raw
-        def __getattr__(self, name): return getattr(self.stream, name)
-    def altered(candidate, *args, **kwargs):
-        stream = original(candidate, *args, **kwargs)
-        return Mutating(stream) if candidate == path else stream
-    monkeypatch.setattr(Path, 'open', altered)
+    original_fill = SealedBuffer.fill
+    def mutate_filled_source(buffer, fd):
+        complete = original_fill(buffer, fd)
+        with path.open('ab') as writer:
+            writer.write(b'drift')
+        return complete
+    monkeypatch.setattr(SealedBuffer, 'fill', mutate_filled_source)
     with pytest.raises(RuntimeError, match='changed'):
         cache.prefetch([key], max_workers=1)
     assert isinstance(cache.weights[key], str)
@@ -192,17 +191,9 @@ def test_small_file_read_request_ignores_large_global_bound(tmp_path, monkeypatc
     key, path = next(iter(paths.items()))
     size = path.stat().st_size
     cache.enable_file_load_receipts(max_file_bytes=size * 1000)
-    original = Path.open
-    class LimitedRead:
-        def __init__(self, stream): self.stream = stream
-        def __enter__(self): return self
-        def __exit__(self, *args): return self.stream.__exit__(*args)
-        def read(self, requested):
-            assert requested == size + 1, 'small file inherited the whole-cache read bound'
-            return self.stream.read(requested)
-        def __getattr__(self, name): return getattr(self.stream, name)
-    def limited(candidate, *args, **kwargs):
-        stream = original(candidate, *args, **kwargs)
-        return LimitedRead(stream) if candidate == path else stream
-    monkeypatch.setattr(Path, 'open', limited)
+    original_fill = SealedBuffer.fill
+    def bounded_fill(buffer, fd):
+        assert buffer.size == size, 'small file inherited the whole-cache read bound'
+        return original_fill(buffer, fd)
+    monkeypatch.setattr(SealedBuffer, 'fill', bounded_fill)
     assert cache.prefetch([key], max_workers=1) == 1
