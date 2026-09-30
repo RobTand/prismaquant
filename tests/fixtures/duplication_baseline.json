@@ -130,7 +130,6 @@
   "hashlib:prismaquant/stage_b_prep_io.py::StagedPreparationReads._read_entry",
   "hashlib:prismaquant/stage_b_prep_io.py::_hash_range",
   "hashlib:prismaquant/stage_b_prep_io.py::build_preparation_template",
-  "hashlib:prismaquant/stage_b_workspace_profile.py::write_profile",
   "hashlib:prismaquant/stage_inputs.py::read_bound",
   "hashlib:prismaquant/staged_lease.py::_load_sealed_payload",
   "hashlib:prismaquant/streaming_model.py::_StreamingInitializationAudit._observe",
