@@ -19,7 +19,7 @@ class PilotRefused(ValueError):
     """The counters cannot certify the proposed row."""
 
 
-def _digest(value, where):
+def _pilot_binding_digest(value, where):
     if not is_sha256hex(value):
         raise PilotRefused(f"pilot {where}: expected a full SHA-256")
     return value
@@ -51,14 +51,14 @@ def pilot_binding(record: Mapping, *, implementation_sha256: str,
     }
     return {
         "schema": PILOT_SCHEMA,
-        "implementation_sha256": _digest(implementation_sha256, "code digest"),
-        "execution_plan_sha256": _digest(execution_plan_sha256, "execution plan digest"),
+        "implementation_sha256": _pilot_binding_digest(implementation_sha256, "code digest"),
+        "execution_plan_sha256": _pilot_binding_digest(execution_plan_sha256, "execution plan digest"),
         "replay_regime": normalize_replay_regime(replay_regime),
         "row_shape_sha256": canonical_json_sha256(shape, where="pilot row shape"),
     }
 
 
-def _number(value, where, *, positive=False):
+def _pilot_measurement_number(value, where, *, positive=False):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise PilotRefused(f"pilot {where}: missing numeric measurement")
     if not math.isfinite(value) or value < 0 or (positive and value == 0):
@@ -67,13 +67,13 @@ def _number(value, where, *, positive=False):
 
 
 def _same_number(actual, expected, where):
-    actual = _number(actual, where)
+    actual = _pilot_measurement_number(actual, where)
     # Floating-point reconciliation, not an allowed wait-budget excess.
     if not math.isclose(actual, expected, rel_tol=1e-9, abs_tol=1e-9):
         raise PilotRefused(f"pilot {where}: recorded {actual:g}, derived {expected:g}")
 
 
-def _phase(counters, start):
+def _pilot_measurement_phase(counters, start):
     phases = [p for p in counters.get("phases", [])
               if isinstance(p, dict) and isinstance(p.get("entered_unix"), (int, float))
               and p["entered_unix"] <= start]
@@ -90,7 +90,7 @@ def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
         pilot = counters["pilot"]
         if pilot.get("binding") != expected:
             raise PilotRefused("pilot code, plan, replay regime or row shape does not match")
-        key = _digest(pilot.get("action_key"), "PB action key")
+        key = _pilot_binding_digest(pilot.get("action_key"), "PB action key")
         units = counters["units"]
         if (not isinstance(units, list) or len(units) != 2
                 or any(type(n) is not int for n in units)
@@ -103,8 +103,8 @@ def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
         # Kernel timing is optional, including when another session owns
         # the profiler. This gate certifies measured power and wait/rates,
         # not kernel-active time; preserve the producer's diagnostic only.
-        power = _number(counters.get("gpu_power_w_p50"), "median GPU power", positive=True)
-        envelope = _number(counters.get("gpu_power_envelope_w"), "GPU envelope", positive=True)
+        power = _pilot_measurement_number(counters.get("gpu_power_w_p50"), "median GPU power", positive=True)
+        envelope = _pilot_measurement_number(counters.get("gpu_power_envelope_w"), "GPU envelope", positive=True)
         _same_number(envelope, GB10_POWER_ENVELOPE_W, "GB10 power envelope")
         fraction = power / envelope
         _same_number(pilot.get("gpu_envelope_fraction"), fraction, "GPU envelope fraction")
@@ -115,25 +115,25 @@ def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
         if not report.get("baseline") or report.get("power_samples", 0) <= 0:
             raise PilotRefused("pilot has no measured idle baseline or wait power samples")
         total, bound = report["total"], report["bound"]
-        _number(report.get("idle_ceiling_w"), "idle ceiling")
+        _pilot_measurement_number(report.get("idle_ceiling_w"), "idle ceiling")
         _same_number(total.get("wait_s"), math.fsum(
-            _number(total.get(name), name)
+            _pilot_measurement_number(total.get(name), name)
             for name in ("idle_band_s", "busy_band_s", "unsampled_s")),
             "power-band wait")
         _same_number(total.get("wait_s"), math.fsum(
-            _number(block.get("wait_s"), f"{kind} wait")
+            _pilot_measurement_number(block.get("wait_s"), f"{kind} wait")
             for kind, block in total["by_kind"].items())
-            - _number(total.get("overlap_s"), "overlapping wait"), "kind wait")
-        if _number(total.get("unsampled_s"), "unsampled wait") > 0:
+            - _pilot_measurement_number(total.get("overlap_s"), "overlapping wait"), "kind wait")
+        if _pilot_measurement_number(total.get("unsampled_s"), "unsampled wait") > 0:
             raise PilotRefused("pilot exposed wait has unsampled seconds")
         takes = bound["per_take"]
         if not isinstance(takes, list) or not takes:
             raise PilotRefused("pilot has no measured load takes")
         waits, steady_wait, first_wait, bound_sum = {}, 0.0, 0.0, 0.0
         for take in takes:
-            start = _number(take.get("start_unix"), "take start")
-            end = _number(take.get("end_unix"), "take end")
-            wait = _number(take.get("wait_s"), "take wait")
+            start = _pilot_measurement_number(take.get("start_unix"), "take start")
+            end = _pilot_measurement_number(take.get("end_unix"), "take end")
+            wait = _pilot_measurement_number(take.get("wait_s"), "take wait")
             _same_number(wait, end - start, "take interval")
             kind = take["kind"]
             waits[kind] = waits.get(kind, 0.0) + wait
@@ -142,13 +142,13 @@ def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
                     raise PilotRefused("pilot first fill carries steady-state work")
                 first_wait += wait
                 continue
-            nbytes = _number(take.get("bytes"), "take bytes", positive=True)
-            work = _number(take.get("work_before_s"), "work before take", positive=True)
-            load = _number(take.get("load_bytes_per_s"), "load_bytes_per_s", positive=True)
+            nbytes = _pilot_measurement_number(take.get("bytes"), "take bytes", positive=True)
+            work = _pilot_measurement_number(take.get("work_before_s"), "work before take", positive=True)
+            load = _pilot_measurement_number(take.get("load_bytes_per_s"), "load_bytes_per_s", positive=True)
             derived = derive_wait_bound(wait_s=wait, nbytes=nbytes,
                                        work_before_s=work, load_bytes_per_s=load)
             if derived["excess_s"] > 0:
-                phase = _phase(counters, start)
+                phase = _pilot_measurement_phase(counters, start)
                 raise PilotRefused(
                     f"pilot phase {phase}: excess {derived['excess_s']:g}s "
                     f"(wait {wait:g}s, bound {derived['bound_s']:g}s, "
@@ -166,7 +166,7 @@ def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
         _same_number(bound.get("unmeasured_takes"), 0.0, "unmeasured takes")
         first_take = min(t["start_unix"] for t in takes)
         for kind, block in total["by_kind"].items():
-            wait = _number(block.get("wait_s"), f"{kind} wait")
+            wait = _pilot_measurement_number(block.get("wait_s"), f"{kind} wait")
             if wait == 0:
                 continue
             # The span wrapper may cover the same render takes. It cannot
