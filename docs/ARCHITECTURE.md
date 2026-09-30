@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
+`plan_reduced_schedule_repair` replays explicit research input history under a
+fixed declared experiment and round cap. Prior receipt continuity, monotonic
+coverage, complete requested scalar rows and immutable observations are required
+before a supplied re-solved assignment can request its next missing cells.
+Fixed fields and prior rows are compared as canonical JSON bytes, so numeric
+retyping cannot bypass their identity. Replays are digest-bound and cap
+exhaustion fails closed. This wraps the existing planner/global greedy
+diagnostic; it does not solve, encode, dispatch, replace live measured rows,
+modify resumes, admit wires or establish convergence/quality.
+The [repair-history contract](design/tessera_reduced_schedule_repair.md) keeps
+actual execution and GPU acceptance separate. Pin, serving and defaults stay
+unchanged.
+
 Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
 `BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
 `submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
