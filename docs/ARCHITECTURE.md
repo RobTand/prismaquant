@@ -38,8 +38,9 @@ export/serving bytes, pin and stage graph are unchanged. The scratch capacity
 includes leading-residue/trailing-grid slot padding that the arena writer
 actually writes; it is not a payload-only reservation. CPU span/operand tests
 do not establish #1087's representative proxy digest, performance, residency,
-peak-memory or reader-wait acceptance. GPU before/after profiles and both-Spark
-Netdata remain HELD pending explicit coordinator approval.
+peak-memory or reader-wait acceptance. The coordinator's 2026-09-30 14:15Z
+GO conditionally approved the held GPU ask once its own prerequisites hold;
+before/after profiles and both-Spark Netdata still require completed evidence.
 
 Re-stamped 2026-09-30 (PQ #1762, `sol/source-domain-1762`): source-file
 provenance adds `prismaquant.source_tree.v2` beside the unchanged labelled
