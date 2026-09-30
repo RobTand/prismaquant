@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1843, step 1 of #1842): the Tessera campaign
+takes `--allow-pinned` (the allocator's grammar) and `--pinned-roster-only`,
+so a census can name a scoped roster of profile-pinned Linears (GLM-5.3
+attention) without unpinning them for every run. The census records the lift
+in an optional `pinned_roster` block, and `load_calibration_census` refuses a
+census taken under another lift. Unset, census bytes and checkpoint
+identities are unchanged; no default, allocation, export or serving gate
+changes. See the source-scope section on scoped rosters.
+
 Re-stamped 2026-09-30 (PQ #1837): `glm5_next` declares the three attention
 fused groups its construction runtime loads (image `487ecf187`,
 `load_weights` stacked params): `in_proj_qkvbfg_a`, `fused_qkv_a_proj` and
@@ -57,6 +66,21 @@ dev and certified modes; exact payload verification is independent. No run
 seal is introduced, weakened or bypassed. Reader-deadline source references
 are refreshed after #1802; load-phase grace arithmetic, runtime behavior,
 production defaults and all serving/export gates are unchanged.
+
+Re-stamped 2026-09-30 (Refs PQ #1295, `sol/issues-pq-7`): bounded non-stream
+PWC file loads (`prefetch` and lazy `get`) request the existing IO engine's
+sealed buffer and reuse the stream's private-mmap decoder. The engine hashes
+and seals the read once, closes its descriptor after decode, and leaves the
+tensor's private mapping alive. Existing digest, tier, file-signature, archive
+and mutation fences remain. Unbounded legacy reads retain their prior policy.
+This is not a new cache, loader pool, numerical method or format/serving byte
+change. Other non-stream callers remain #1295 work. The
+[bounded-PWC CPU profile](results/2026-09-30_pwc_sealed_cpu.md) records matched
+fixtures, before/after cProfile and process-memory samples, and aligned Netdata
+on both Sparks and the test worker. The old fixture did not reproduce retained
+anonymous memory after drop; sparse telemetry and different workers preclude
+an isolated throughput claim. CPU fixtures alone do not establish production
+residency or GPU/NFS performance.
 
 Re-stamped 2026-09-30 (Refs PQ #1247, `sol/issues-pq-5`):
 `_prepare_file_read_bound` checks each distinct render path once per call, in
@@ -1963,9 +1987,10 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   identity read at a window's first probe and at its close
   (`resident_render_identity`, PQ #1348) compares the tensor's version
   counter with the one recorded at load, so a `torch` write in place fails
-  the window before it commits. The PWC's other loads (`prefetch`,
-  a lazy `get`) and `tools/qualify_t4_overlay.py` keep the bytes path; they
-  are PQ #1295 consolidation items.
+  the window before it commits. Bounded non-stream PWC loads (`prefetch`,
+  a lazy `get`) now request this same sealed-buffer decoder. The direct
+  `tools/qualify_t4_overlay.py` caller still keeps the bytes path and remains
+  a PQ #1295 consolidation item.
 - **Release, not take.** A taken window's renders stay charged to the
   stream's budget until the consumer releases them (`ReadStream.release`,
   `:825`): on unified memory a stream that counted them free at the take
@@ -5980,6 +6005,27 @@ snapshot equals the MTP loader's bytes, both runners satisfy the protocol,
 and a real two-phase tiny capture prices the shared expert and the routed
 stack in one row) and `tests/test_tessera_campaign_fanout.py` (the derived
 draw).
+
+**Scoped rosters of pinned Linears (PQ #1843, step 1 of #1842).** A source
+scope reads a layer the body does not run; a scoped roster prices Linears the
+body runs but the profile pins (GLM-5.3 attention). `campaign_roster`
+(`tessera_campaign.py`) owns the campaign's non-expert roster. Without flags it
+is the roster the campaign always built. `--allow-pinned TOKENS` lifts a
+Linear the profile keeps out, by pin or by `probe_linear_exclude_extra`, when
+its name contains a token, with the allocator's grammar and `token in qname`
+semantics (`fixed_head.parse_allow_pinned`), so the census and the allocation
+that reads it spell the lift the same way. GLM keeps attention out both ways,
+because its construction runtime builds attention with `quant_config=None`
+(principle 9); pricing it reports that serving gap, and export still refuses
+the unbacked route. `--pinned-roster-only` keeps only the lifted Linears; the unpinned body and
+the expert population leave the roster. A token that lifts nothing refuses.
+The census records `pinned_roster` (`prismaquant.tessera_campaign.pinned_roster.v1`:
+tokens, mode, lifted names), and `load_calibration_census` refuses a census
+taken under another lift. Unset, both flags leave the identity settings, so
+body identities do not change. The GLM attention roster keeps the DSA indexer
+pinned: `Glm5NextTextIndexer.forward` is `@torch.no_grad` and only selects
+top-k indices, so it has no AURA cotangent. Gate:
+`tests/test_tessera_campaign_pinned_roster.py`.
 
 Re-stamped (2026-09-25, `claude/dedup-gridbook-move-1304`) for **moving the
 live helpers out of the retired codebook lane's modules** (PQ #1304, P2, part
