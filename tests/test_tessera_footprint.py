@@ -215,11 +215,32 @@ def test_rows_must_divide_by_the_arity():
         )
 
 
-def test_columns_must_be_whole_superblocks():
+def test_a_partial_trailing_superblock_is_priced_as_tessera_prices_it():
+    """The wire holds a trailing partial superblock, so the price does (#1849).
+
+    4000 columns are 15 whole superblocks and 160 more.  This test used to
+    require a refusal here, which is how 128-column KDA gate units crashed the
+    attention census; the price is now whatever Tessera's own accountant says.
+    """
+    from tessera.control import unit_wire_bits
+
     spec = get_tessera_family("TESSERA_E2M1_K1")
-    with pytest.raises(TesseraFormatError, match="superblock"):
+    breakdown = tessera_tensor_payload_breakdown(
+        (4096, 4000), family=spec, body_rate_q256=768
+    )
+    assert 8 * breakdown["payload_bytes"] == unit_wire_bits("E2M1", 768, 4096, 4000)
+
+
+def test_a_rung_whose_quota_does_not_close_over_the_columns_is_refused():
+    """What the superblock refusal stood in for: a rung that does not exist.
+
+    R511 does not close its quota over 320 columns, so there is no such unit
+    to price, and the refusal arrives in this module's error type.
+    """
+    spec = get_tessera_family("TESSERA_E2M1_K1")
+    with pytest.raises(TesseraFormatError):
         tessera_tensor_payload_breakdown(
-            (4096, 4000), family=spec, body_rate_q256=768
+            (96, 320), family=spec, body_rate_q256=511
         )
 
 
