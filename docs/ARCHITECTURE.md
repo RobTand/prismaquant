@@ -29,6 +29,36 @@ keeps the PWC writer, produced reader bindings, mover round trip and integrated
 retirement as separate work. No production wiring, serialized bytes, numerical
 method, serving gate, runtime pin or default changes; #870 remains open.
 
+Re-stamped 2026-09-30 (PQ #1827, Refs #275,
+`sol/pq-tessera-calibration-input`): the Tessera campaign optionally accepts
+`--calibration-input PATH --calibration-input-sha256 SHA256
+--calibration-corpus PATH`. All three are required together; missing options
+refuse before model work. The existing `load_calibration_input` reader checks
+the independently pinned safetensors artifact, exact int64 `[nsamples,seqlen]`
+draw, nonnegative int32 identity domain and declared draw provenance. Its
+bound provenance must name this model, an integer draw seed, a nonempty source
+and a lowercase SHA-256 of the actual UTF-8 corpus bytes. The shared corpus
+reader verifies and decodes those same bytes without newline normalization;
+under the active tier policy it uses the existing pinned whole-file staged
+reader, never a pool reread. Empty or invalid UTF-8 text and model-vocabulary
+violations refuse before calibration forwards. No dataset/tokenizer or sampler
+runs for this explicit intake; its ordered `[1,seqlen]` row views are reused.
+
+Tessera's public calibration identity still hashes the actual corpus text and
+the int32 token bytes, independently of the receipt's int64 tensor digest.
+Checkpoint, census and capture/reuse identities carry the input receipt and
+its real source/draw seed, not the CLI seed relabelled as that draw. Census
+and resume comparisons refuse a different receipt/draw. `--seed` remains the
+run's seed option; it neither resamples nor changes supplied artifact tokens.
+The existing checkpoint `settings.seed` still binds that CLI seed, so changing
+it refuses resume even when the supplied draw is unchanged.
+Absent all three inputs, the existing full-corpus WikiText sampler, defaults
+and identities are unchanged. The saved windowed seed-275 research fixture is
+not the historical campaign sampler's draw. This optional CPU intake is not
+a calibrated census, GPU capture, native-cell admission, served-quality or
+performance qualification. It adds no cache, preloader, dispatcher, topology,
+wire, runtime pin, serving profile, production default or ship-gate change.
+
 Re-stamped 2026-09-30 (PQ #1833, Refs #1802/#1366): the incoming checkpoint
 metadata comparison is classified as a same-record structural check in the
 no-new-run-seal lint. It still refuses foreign cotangent identities in both

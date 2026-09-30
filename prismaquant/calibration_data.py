@@ -80,7 +80,9 @@ def _validate_calibration_draw(ids, provenance, *, artifact_sha256, n_samples, s
     if not isinstance(provenance, dict):
         raise ValueError("exact calibration provenance must be an object")
     draw_sha256 = bytes_sha256hex(ids.to(torch.int32).numpy().tobytes())
-    if (provenance.get("fit_ids_sha256") != draw_sha256
+    if (any(type(provenance.get(field)) is not int
+            for field in ("fit_tokens", "nsamples", "seqlen"))
+            or provenance.get("fit_ids_sha256") != draw_sha256
             or provenance.get("fit_tokens") != ids.numel()
             or provenance.get("nsamples") != n_samples
             or provenance.get("seqlen") != seqlen):
@@ -141,6 +143,24 @@ def load_calibration_input(path, *, expected_sha256, n_samples, seqlen):
     if bytes_sha256hex(path.read_bytes()) != artifact_sha256:
         raise ValueError("exact calibration input changed while loading")
     return ids, receipt
+
+
+def load_calibration_corpus(path, *, expected_sha256: str) -> str:
+    """Decode actual UTF-8 corpus bytes bound by the pinned draw's provenance."""
+    from .staged_tier_policy import policy_is_active
+    from .staged_whole_file import read_staged_whole_file
+
+    if not isinstance(expected_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+        raise ValueError("exact calibration corpus requires its provenance SHA256")
+    path = Path(path)
+    raw = (read_staged_whole_file(path, expected_sha256, label="calibration-corpus")
+           if policy_is_active() else path.read_bytes())
+    if bytes_sha256hex(raw) != expected_sha256:
+        raise ValueError("exact calibration corpus SHA256 mismatch")
+    text = raw.decode("utf-8")
+    if not text.strip():
+        raise ValueError("exact calibration corpus must contain real text")
+    return text
 
 
 def _sample_token_windows_from_texts(
