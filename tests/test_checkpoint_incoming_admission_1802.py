@@ -55,8 +55,16 @@ def test_valid_copied_checkpoint_retains_canonical_slots_and_exact_operands(tmp_
         owner.__exit__(None, None, None)
 
 
+@pytest.mark.parametrize("dev_mode", ["0", "1", None])
 @pytest.mark.parametrize("field", ["slot", "kind", "coordinates"])
-def test_copied_metadata_identity_refuses_before_payload(tmp_path, field):
+def test_copied_metadata_identity_refuses_before_payload(tmp_path, monkeypatch, field,
+                                                       dev_mode):
+    # This is same-record data structure, not a recorded-vs-running seal.
+    # Classifying it for the lint must not make it a dev-mode bypass.
+    if dev_mode is None:
+        monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    else:
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_mode)
     _space, owner, record = _copied(tmp_path)
     row = record["activation_entries"][0]
     row["metadata"]["identity"][field] = {
