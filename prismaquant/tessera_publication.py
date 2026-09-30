@@ -49,7 +49,9 @@ Ownership and bounds:
 * One active writer and a FIFO queue, so jobs and completions keep submission
   order. A shared-backend publisher also bounds reserved, queued, running and
   uncollected completion slots. Consumers collect completions before staging
-  another batch; an idle drain returns its worker. Recovery stays deterministic.
+  another batch. Each shared dispatch publishes at most ``max_jobs`` jobs;
+  a completion callback rearms remaining work behind already queued IO.
+  An idle drain returns its worker. Recovery stays deterministic.
 
 Failure is closed.  When a job raises, the writer keeps the exception, discards
 everything queued behind it *without writing any of it*, and every later
@@ -179,6 +181,9 @@ class BoundedPublisher:
         submits those jobs, then releases unused bytes with ``jobs=0``.
         Consume acknowledgements before requesting slots they still hold;
         an uncollected completion deliberately retains its metadata credit.
+        A single consumer uses :meth:`drain` before reserving past a full job
+        ceiling, including running slots: calling ``completed()`` before they
+        finish does not let that consumer collect them while blocked here.
         """
         charge = int(nbytes)
         if charge < 0:
@@ -250,17 +255,8 @@ class BoundedPublisher:
             self._queued.append(job)
             self._outstanding += 1
             if self._submit_task is not None and not self._task_active:
-                self._task_active = True
-                try:
-                    task = self._submit_task(self._run)
-                    if not isinstance(task, Future):
-                        raise TypeError("publisher submit_task must return a Future")
-                    self._tasks.add(task)
-                    task.add_done_callback(self._task_done)
-                    self._raise_failure()
-                except BaseException as exc:
-                    self._fail_locked(exc)
-                    self._raise_failure()
+                self._dispatch_locked()
+                self._raise_failure()
             self._cond.notify_all()
 
     def completed(self) -> list:
@@ -299,21 +295,19 @@ class BoundedPublisher:
         computed.  It reports nothing and raises nothing: use :meth:`drain`
         when the completions matter, and :meth:`close` when what matters is
         that the thread is gone and nothing was abandoned half written.  After
-        a writer failure nothing is queued, so this returns at once.
+        a writer failure the queued tail is cancelled, but close still waits
+        for its owning task to retire.
         """
         with self._cond:
             self._closing = True
             self._cond.notify_all()
-            tasks = tuple(self._tasks)
+            if self._thread is None:
+                # A completion callback may rearm another bounded drain. Wait
+                # for the entire owned chain, not a snapshot of its first task.
+                while self._tasks:
+                    self._cond.wait()
         if self._thread is not None:
             self._thread.join()
-        else:
-            # Join only owned tasks, never shut down the shared executor.
-            for task in tasks:
-                try:
-                    task.result()
-                except BaseException:
-                    pass  # drain/failure is the error authority, not close
 
     def __enter__(self) -> "BoundedPublisher":
         return self
@@ -369,23 +363,45 @@ class BoundedPublisher:
         self._task_active = False
         self._cond.notify_all()
 
+    def _dispatch_locked(self) -> None:
+        """Dispatch one finite drain; the caller holds the condition lock."""
+        assert self._submit_task is not None
+        self._task_active = True
+        try:
+            task = self._submit_task(self._run)
+            if not isinstance(task, Future):
+                raise TypeError("publisher submit_task must return a Future")
+            self._tasks.add(task)
+            task.add_done_callback(self._task_done)
+        except BaseException as exc:
+            self._fail_locked(exc)
+
     def _task_done(self, task: Future) -> None:
-        """Surface dispatch cancellation/unexpected task failure to waiters."""
+        """Retire/rearm behind queued IO and surface dispatch failure."""
         error = (CancelledError("publication task was cancelled")
                  if task.cancelled() else task.exception())
         with self._cond:
             self._tasks.discard(task)
+            self._task_active = False
             if error is not None:
                 self._fail_locked(error)
+            elif self._queued and self._failure is None:
+                self._dispatch_locked()
+            self._cond.notify_all()
 
     def _run(self) -> None:
-        while True:
+        processed = 0
+        limit = self._max_jobs if self._submit_task is not None else None
+        while limit is None or processed < limit:
             with self._cond:
                 while (not self._queued and not self._closing
                        and self._submit_task is None):
                     self._cond.wait()
                 if not self._queued:
-                    self._task_active = False
+                    # Shared ownership retires only in _task_done, which also
+                    # handles a producer enqueueing before Future completion.
+                    if self._submit_task is None:
+                        self._task_active = False
                     self._cond.notify_all()
                     return
                 job = self._queued.popleft()
@@ -409,3 +425,4 @@ class BoundedPublisher:
                 self._published += 1
                 self._publish_seconds += elapsed
                 self._cond.notify_all()
+            processed += 1

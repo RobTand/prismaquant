@@ -3,9 +3,10 @@
 Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
 `BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
 `submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
-finite FIFO drains, returning the shared worker when idle. Job slots include
-uncollected durable acknowledgements; consumers collect them before staging
-another batch. Completion returns staging credit only after the job releases
+finite FIFO drains of at most `max_jobs` publications per dispatch, rearming
+remaining work behind queued engine tasks. Close waits across the whole owned
+drain chain. Job slots include uncollected durable acknowledgements; a single
+consumer drains a full job ceiling before staging another batch. Completion returns staging credit only after the job releases
 its payload, and stored failure chains no longer retain staging tracebacks.
 Dispatch failure/cancellation drops the unwritten tail and preserves completed
 prefix keys; close joins owned tasks without shutting down the shared engine.

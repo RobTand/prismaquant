@@ -224,6 +224,107 @@ def test_encoded_unit_is_immutable_and_matches_existing_writer(tmp_path):
     assert encoded == expected
 
 
+def test_encoded_cpu_tensor_unit_is_a_snapshot(tmp_path):
+    import torch
+
+    state = {"tensor": torch.arange(8, dtype=torch.float32)}
+    qname, identity = "tensor.unit", "b" * 64
+    aura_cost._write_aura_unit_checkpoint(
+        tmp_path, qname=qname, identity_sha256=identity, state=state)
+    expected = aura_cost._aura_unit_checkpoint_path(tmp_path, qname).read_bytes()
+    encoded = aura_cost._encode_aura_unit_checkpoint(
+        qname=qname, identity_sha256=identity, state=state)
+    assert encoded == expected
+    state["tensor"].fill_(999)
+    assert encoded == expected
+
+
+def test_shared_drain_yields_after_its_job_bound(engine):
+    pub = _pool_publisher(engine, budget=8, jobs=2)
+    first, second, third = (threading.Event() for _ in range(3))
+    release_first, release_second = threading.Event(), threading.Event()
+    reader_seen = threading.Event()
+    observations = []
+    reader = None
+
+    def one():
+        first.set()
+        assert release_first.wait(WAIT)
+
+    def two():
+        second.set()
+        assert release_second.wait(WAIT)
+
+    def three():
+        observations.append(reader_seen.is_set())
+        third.set()
+
+    try:
+        _stage(pub, "first", one)
+        assert first.wait(WAIT)
+        _stage(pub, "second", two)
+        reader = engine.submit(reader_seen.set)
+        release_first.set()
+        assert second.wait(WAIT)
+        assert pub.completed() == ["first"]
+        _stage(pub, "third", three)  # refill while the original drain is active
+        release_second.set()
+        assert third.wait(WAIT)
+        assert observations == [True], "shared drain monopolized queued IO work"
+        assert pub.drain() == ["second", "third"]
+    finally:
+        release_first.set()
+        release_second.set()
+        pub.close()
+        if reader is not None:
+            reader.result(timeout=WAIT)
+
+
+def test_close_waits_across_rearmed_owned_drains(engine):
+    pub = _pool_publisher(engine, budget=8, jobs=2)
+    first, second, third = (threading.Event() for _ in range(3))
+    release_first, release_second, release_third = (
+        threading.Event() for _ in range(3))
+    closing, closed = threading.Event(), threading.Event()
+    closer = None
+
+    def held(began, release):
+        began.set()
+        assert release.wait(WAIT)
+
+    def close():
+        closing.set()
+        pub.close()
+        closed.set()
+
+    try:
+        _stage(pub, "first", lambda: held(first, release_first))
+        assert first.wait(WAIT)
+        _stage(pub, "second", lambda: held(second, release_second))
+        release_first.set()
+        assert second.wait(WAIT)
+        assert pub.completed() == ["first"]
+        _stage(pub, "third", lambda: held(third, release_third))
+        closer = threading.Thread(target=close)
+        closer.start()
+        assert closing.wait(WAIT)
+        release_second.set()
+        assert third.wait(WAIT)
+        assert not closed.wait(0.1), "close joined only the first dispatch"
+        release_third.set()
+        assert closed.wait(WAIT)
+        closer.join(WAIT)
+        assert not closer.is_alive()
+        assert pub.drain() == ["second", "third"]
+    finally:
+        release_first.set()
+        release_second.set()
+        release_third.set()
+        pub.close()
+        if closer is not None:
+            closer.join(WAIT)
+
+
 def test_pool_byte_bound_blocks_before_next_staging(engine):
     pub = _pool_publisher(engine, budget=8)
     began, release = threading.Event(), threading.Event()
