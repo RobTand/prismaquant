@@ -4,6 +4,10 @@
 This consumes a completed joint handoff and a final allocation. It does not
 encode, interpolate bytes, change a source cache, or qualify a serving lane.
 The exporter's --cached-units intake remains the current-byte verifier.
+
+Head journaling is opt-in: --head-checkpoint supplies the existing reader's
+checkpoint path, and --head-resume reuses its identity-bound, reverified
+prefix. Neither option declares a synthesis phase or changes manifest bytes.
 """
 from __future__ import annotations
 
@@ -139,6 +143,10 @@ def main(argv=None) -> int:
     parser.add_argument("--assignment-sha256", required=True,
                         help="the assignment's owner digest (its stamped selection_assignment_sha256), not the file bytes")
     parser.add_argument("--out", required=True)
+    parser.add_argument("--head-checkpoint", default=None,
+                        help="opt-in existing head-walk journal; declare this path as writable PB output")
+    parser.add_argument("--head-resume", action="store_true",
+                        help="resume that journal through the reader's existing identity and drift checks")
     parser.add_argument("--read-paths-out", help="new JSON file listing all rooted export inputs for PB staging")
     parser.add_argument("--catalog-extension")
     parser.add_argument("--catalog-extension-sha256")
@@ -154,6 +162,8 @@ def main(argv=None) -> int:
                         help="explicit sampled-pilot research proposal for validation export")
     parser.add_argument("--research-proposal-sha256", default=None)
     args = parser.parse_args(argv)
+    if args.head_resume and not args.head_checkpoint:
+        raise ValueError("head resume requires --head-checkpoint")
     if bool(args.research_proposal) != bool(args.research_proposal_sha256):
         raise ValueError('research proposal path and SHA-256 must be supplied together')
     extension = None
@@ -207,7 +217,9 @@ def main(argv=None) -> int:
     data = load_measured_anchor_input(inputs, verify_payloads=False,
                                       require_existing_renders=True,
                                       historical_encoder_reuse=reuse,
-                                      progress_phase=None)
+                                      progress_phase=None,
+                                      head_checkpoint=args.head_checkpoint,
+                                      head_resume=args.head_resume)
     manifest = selected_cached_units_manifest(
         assignment, metadata, handoff, data,
         schema="tessera.cached_units.v2" if extension else CACHE_SCHEMA,

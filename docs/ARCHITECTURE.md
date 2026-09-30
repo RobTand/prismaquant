@@ -1,5 +1,25 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
+`BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
+`submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
+finite FIFO drains of at most `max_jobs` publications per dispatch, rearming
+remaining work behind queued engine tasks. Close waits across the whole owned
+drain chain. Job slots include uncollected durable acknowledgements; a single
+consumer drains a full job ceiling before staging another batch. Completion returns staging credit only after the job releases
+its payload, and stored failure chains no longer retain staging tracebacks.
+Dispatch failure/cancellation drops the unwritten tail and preserves completed
+prefix keys; close joins owned tasks without shutting down the shared engine.
+The default campaign writer thread is unchanged. AURA unit envelope encoding
+is extracted as `_encode_aura_unit_checkpoint`; for identical state and identity,
+it returns the same immutable bytes the synchronous atomic writer publishes.
+This is a CPU prerequisite, not retained-window integration: Stage B still
+persists its units synchronously. Durable progress/frontier handling, final
+flush, resume integration and GPU before/after qualification remain under
+#1367. GPU profiling is HELD; no speed, peak-memory, serving or production-default
+claim follows from the CPU ordering tests. No export bytes, pin, format menu,
+ship gate or stage graph changes.
+
 Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
 legal-domain pin provenance now transcribes v3's independently reviewed
 producer commit and serving-source digest. `DomainPins` omits absent split
@@ -38,6 +58,21 @@ wire readiness. The gate retains its greedy diagnostic, not production-DP
 regret. [The contract](design/tessera_reduced_schedule.md) describes the boundary:
 no live campaign dispatch, encoding, repair/re-solve loop, exact-wire admission,
 GPU qualification, pin, serving numerics or production default changes.
+
+Re-stamped 2026-09-29 (PQ #1761, routed backfill admission regression):
+checkpoint presence does not require a load-all row head. The failed
+`ff0b43a5` checkout predates #1613's streaming-resume fix and selected the
+load-all phase after stream-sized dispatch admission. The checked phase plan
+is derived from geometry and declared argv, not host free memory; the latter
+belongs to separate prefetch sizing. `tests/test_routed_resume_admission_1761.py`
+checks the actual runtime head-selection call and planner demand on a synthetic
+864-unit stack at a 69 GiB cap, with two host-free values and three checkpoint
+states. Genuine load-all dependencies still fail before submission when their
+derived demand exceeds box capacity. This adds CPU regression coverage and
+corrects stale prose; it changes no runtime formula, pin, input or default.
+Recovery of the old pinned campaign requires an explicit backport and
+coordinator-approved resubmission. CPU coverage is not a GPU residency,
+numerical-equivalence or campaign-completion measurement.
 
 Re-stamped 2026-09-29 (PQ #1739, `claude/tessera-pin-b40c93cb`): the exact
 Tessera pin is `b40c93cb73745097e57a1ba4cf5b9eee166c759a`, Tessera master's
@@ -85,6 +120,16 @@ range. `xxhash` is a declared dependency;
 checksum CPU time and verified-byte counts are telemetry. No device
 arithmetic, spill layout, export format, pipeline default or ship gate
 changes. Representative GPU overhead profiling remains pending approval.
+
+Re-stamped 2026-09-29 (PQ #1293, `sol/issues-pq-1`): joint-quantum
+fanout requires a successful, measured producer pilot for every proposed
+code/plan/replay-regime/row-shape binding. A single quantum can produce the
+pilot; Stage A and an empty dispatch do not require one. The dispatcher
+checks all pilots before submitting any row and records the evidence or
+explicit `--force-unverified-pilot` override in its state and dry-run plan.
+This changes dispatcher admission, not kernels, arithmetic, stored formats,
+sealed campaign inputs, or fleet placement. CPU regression receipts use
+controlled producer measurements; they do not establish GPU performance.
 
 Re-stamped 2026-09-29 (PQ #1007, `sol/pq-pbio-1014-20260929`): PrismaBuild
 #946 is closed, so it is no longer an upstream implementation blocker for
@@ -3151,8 +3196,8 @@ said nothing about its own reads between the head and the records.
     `idle_ceiling_w` is their maximum, with no free constant, and the receipt
     records the `baseline` (`n`, `min_w`, `max_w`, `mean_w`, `start_unix`,
     `end_unix`, `span_s`). A wait second is idle when its power cell is at or
-    below the ceiling, busy above it. With no baseline sample the band split
-    is `None` and the wait is `unsampled_s`, never guessed. A trace is never
+    below the ceiling, busy above it. With no baseline sample, both measured
+    band counts are zero and all wait time is `unsampled_s`, never guessed. A trace is never
     cut by its own shape, so a row that is busy throughout reports no idle
     seconds. The ceiling is only as clean as the pre-CUDA window: another
     process on the GPU during startup would raise it.
@@ -3164,8 +3209,8 @@ said nothing about its own reads between the head and the records.
     work_before_s)` (`load_lt_consume`), and nothing more. The first take of a
     stream is its first fill (`first_fill`) and is exempt. A take with no
     measured load rate is `unmeasured`, with no bound. `bound` in the block
-    records every take's rates, regime, `bound_s` and `excess_s = wait_s −
-    bound_s`, plus the row totals. A nonzero `excess_s` is the finding.
+    records every take's rates, regime, `bound_s` and
+    `excess_s = max(0, wait_s − bound_s)`, plus the row totals. A nonzero `excess_s` is the finding.
   - **Stage A** has no consumer-side blocked-interval timing. Its counters
     carry `exposed_wait: {instrumented: false, reason, ...}` instead of a
     zero that would read as a measurement.
@@ -3173,6 +3218,30 @@ said nothing about its own reads between the head and the records.
   call, and a 96 x 8 file `ReadStream` fixture measured the same take time
   before and after (median 0.239 s vs 0.231 s; `cProfile` `take` 0.348 s vs
   0.350 s).
+- **Pilot admission** (PQ #1293). Before publishing more than one Stage B
+  quantum, `tools/dispatch_joint_quanta.py` requires repeatable
+  `--pilot-counters PATH SHA256` inputs. `QuantumCounters` stamps a `pilot`
+  block: the existing production-package code digest, actual execution-plan
+  digest, normalized replay regime, conservative sealed row-shape digest,
+  PrismaBuild action key and median GPU power divided by the 140 W envelope.
+  A matching shape retains the layer, calibration/prepared/read-roster
+  identities, windows, chunk extents, chain geometry and handoff role; the
+  gate does not extrapolate to another layer or campaign. The dispatcher
+  verifies exact document bytes, complete outcome and unit counts, successful
+  terminal PB origin, power samples and an idle baseline. It re-derives each
+  steady-state wait bound from measured bytes, load rate and preceding work.
+  Positive excess refuses with the phase, excess and both rates; missing or
+  unsampled measurements and underived steady-state spill waits also refuse.
+  First fill and proved initial source/checkpoint/handoff loads are exempt.
+  Aggregate zero excess alone is not admission. Single-quantum pilot runs,
+  Stage A bootstrap and no-op dispatches remain possible. An explicit
+  `--force-unverified-pilot` is recorded as `mode: override`, never verified
+  evidence. Each verified submission stores its document digest, action key,
+  binding, rates-derived totals and GPU envelope fraction under
+  `pilot_admission`; dry-run output carries the same block.
+  Gate: `tests/test_joint_dispatch_pilot.py`, using the counters producer and
+  publisher with controlled CPU inputs. Historical #1291 GPU results are not
+  retroactively stamped or certified by this gate.
 - **What the counters see.** `/proc/self/io` covers the process's thread
   group, including prefetch threads, and no child process. `read_bytes` is
   storage-layer reads, and `rchar` includes page-cache hits. Neither names a

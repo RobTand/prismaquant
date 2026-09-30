@@ -13,13 +13,13 @@ import json
 import os
 from pathlib import Path
 import posixpath
-import re
 import stat
 from typing import Callable, Mapping
 import zlib
 
 from .digests import is_sha256hex
 from .joint_retained_window_plan import RetainedWindowBudget
+from .qnames import LAYER_QNAME as _LAYER
 from .schemas import Contract, strict_json_loads
 
 
@@ -29,7 +29,6 @@ MAX_MANIFEST_BYTES = 64 * 1024 * 1024
 MAX_DECODED_BYTES = 512 * 1024 * 1024
 MAX_ENTRIES = 1_000_000
 MAX_READS = 4_000_000
-_LAYER = re.compile(r"^.*\.layers\.(\d+)(?:\.|$)")
 _ENTRY_KEYS = {"path", "offset", "bytes", "sha256"}
 _ROOT_KEYS = {"schema", "produced_by", "mount_prefix", "entries", "entry_count",
               "total_bytes", "annotations", "read_plan"}
