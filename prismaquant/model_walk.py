@@ -127,13 +127,13 @@ accident:
   verdict as ``byte_accounting.convention``); per-device accounting arrives
   with TP as an additive ``shard_policy`` annotation, never as node identity.
 
-This module imports only torch and the standard library, so it can wrap any
-torch model; the prismaquant-specific claim policy lives on the model profile.
+The walker requires only torch and the standard library, including the local
+stdlib-only digest owner for metadata, so it can wrap any torch model; the
+prismaquant-specific claim policy lives on the model profile.
 """
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 import os
 import re
@@ -145,7 +145,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.overrides import TorchFunctionMode
-from .digests import DIRECT_ASCII_LAX_DEFAULT_STR
+from .digests import DIRECT_ASCII_LAX_DEFAULT_STR, bytes_sha256hex
 
 __all__ = [
     "BYTE_POLICY_REPLICATED",
@@ -757,9 +757,9 @@ _canonical = DIRECT_ASCII_LAX_DEFAULT_STR.text
 
 
 def _claim_rules_digest(rules: Sequence[ClaimRule]) -> str:
-    return hashlib.sha256(
+    return bytes_sha256hex(
         _canonical(list(claim_rules_to_json(rules))).encode("utf-8")
-    ).hexdigest()
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -818,7 +818,7 @@ def _model_identity(model: nn.Module) -> str:
         try:
             blob = _canonical(cfg.to_dict())
             model_type = getattr(cfg, "model_type", "") or ""
-            digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+            digest = bytes_sha256hex(blob.encode("utf-8"))
             return (
                 f"{model_type or type(model).__name__}:sha256:{digest}"
             )
@@ -882,7 +882,7 @@ def _example_inputs_spec(example_inputs, seq_len: int,
         for tensor in _iter_tensors(example_inputs):
             parts.append(f"in:{list(tensor.shape)}@{tensor.dtype}")
     blob = ";".join(parts)
-    digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+    digest = bytes_sha256hex(blob.encode("utf-8"))[:12]
     return f"provided:{digest}:{blob[:160]}"
 
 
