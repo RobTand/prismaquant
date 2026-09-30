@@ -300,13 +300,13 @@ def _load_aura_checkpoint_manifest(
     return expected_digest
 
 
-def _write_aura_unit_checkpoint(
-    checkpoint_dir: Path,
+def _encode_aura_unit_checkpoint(
     *,
     qname: str,
     identity_sha256: str,
     state: Mapping[str, object],
-) -> None:
+) -> bytes:
+    """Freeze the existing unit envelope; callers own staging/admission."""
     state_bytes = pickle.dumps(dict(state), protocol=pickle.HIGHEST_PROTOCOL)
     envelope = {
         "schema": AURA_CHECKPOINT_UNIT_SCHEMA,
@@ -315,11 +315,19 @@ def _write_aura_unit_checkpoint(
         "payload_sha256": bytes_sha256hex(state_bytes),
         "payload": state_bytes,
     }
-    encoded = pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL)
-    atomic_write_bytes(
-        _aura_unit_checkpoint_path(checkpoint_dir, qname),
-        encoded,
-    )
+    return pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def _write_aura_unit_checkpoint(
+    checkpoint_dir: Path,
+    *,
+    qname: str,
+    identity_sha256: str,
+    state: Mapping[str, object],
+) -> None:
+    encoded = _encode_aura_unit_checkpoint(
+        qname=qname, identity_sha256=identity_sha256, state=state)
+    atomic_write_bytes(_aura_unit_checkpoint_path(checkpoint_dir, qname), encoded)
 
 
 def _load_aura_unit_checkpoint(

@@ -7,7 +7,6 @@ reads producer evidence and never imports the Tessera serving runtime.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import io
 import json
 import statistics
@@ -20,7 +19,7 @@ from .measured_runtime_prices import (
     _sha, _string, identity_sha256, RankResources, RuntimeRankResources,
 )
 from .schemas import strict_json_loads
-from .digests import DIRECT_ASCII_LAX
+from .digests import DIRECT_ASCII_LAX, LegacyNulSourceSha256, bytes_sha256hex
 
 SCHEMA = "prismaquant.runtime_provenance_relation.v1"
 
@@ -61,7 +60,7 @@ class ArtifactReader:
             raw = path.read_bytes()
         except OSError as exc:
             raise RuntimePriceError(f"{where}: cannot read artifact {path}: {exc}") from exc
-        _equal(hashlib.sha256(raw).hexdigest(), _sha(reference["sha256"], where),
+        _equal(bytes_sha256hex(raw), _sha(reference["sha256"], where),
                where + " artifact SHA-256")
         return path, raw
 
@@ -87,12 +86,12 @@ def _strict_json(raw, path, where):
 
 
 def _source_digest(files):
-    """Tessera's versioned source-byte seal, without importing its runtime."""
-    digest = hashlib.sha256()
+    """Tessera's legacy source-byte digest, without importing its runtime."""
+    digest = LegacyNulSourceSha256()
     for name in sorted(files, key=Path):
         raw = files[name]
         if Path(name).suffix in {".py", ".cu", ".cuh", ".cpp", ".h"}:
-            digest.update(name.encode() + b"\0" + raw + b"\0")
+            digest.update(name, raw)
     return digest.hexdigest()
 
 
@@ -108,7 +107,7 @@ def _source_tree_identity(tree):
     already recomputes its source-byte seal: the producer's declared identity
     is checked against bytes this side holds, never accepted as stated.
     """
-    members = {name: hashlib.sha256(raw).hexdigest() for name, raw in tree.items()}
+    members = {name: bytes_sha256hex(raw) for name, raw in tree.items()}
     return DIRECT_ASCII_LAX.sha256(members), len(members)
 
 
@@ -143,7 +142,7 @@ def _package_source(declaration, reader):
             "source_identity_sha256": source_identity_sha256,
             "source_identity_members": source_identity_members,
             "source_tree_sha256": _source_digest(files), "installed_source_sha256": _source_digest(installed),
-            "installed_files": {name: {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+            "installed_files": {name: {"sha256": bytes_sha256hex(raw), "bytes": len(raw)}
                                 for name, raw in installed.items()}}
 
 

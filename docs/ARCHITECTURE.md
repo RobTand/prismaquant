@@ -1,5 +1,25 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
+`BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
+`submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
+finite FIFO drains of at most `max_jobs` publications per dispatch, rearming
+remaining work behind queued engine tasks. Close waits across the whole owned
+drain chain. Job slots include uncollected durable acknowledgements; a single
+consumer drains a full job ceiling before staging another batch. Completion returns staging credit only after the job releases
+its payload, and stored failure chains no longer retain staging tracebacks.
+Dispatch failure/cancellation drops the unwritten tail and preserves completed
+prefix keys; close joins owned tasks without shutting down the shared engine.
+The default campaign writer thread is unchanged. AURA unit envelope encoding
+is extracted as `_encode_aura_unit_checkpoint`; for identical state and identity,
+it returns the same immutable bytes the synchronous atomic writer publishes.
+This is a CPU prerequisite, not retained-window integration: Stage B still
+persists its units synchronously. Durable progress/frontier handling, final
+flush, resume integration and GPU before/after qualification remain under
+#1367. GPU profiling is HELD; no speed, peak-memory, serving or production-default
+claim follows from the CPU ordering tests. No export bytes, pin, format menu,
+ship gate or stage graph changes.
+
 Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
 legal-domain pin provenance now transcribes v3's independently reviewed
 producer commit and serving-source digest. `DomainPins` omits absent split

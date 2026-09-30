@@ -320,6 +320,27 @@ class LengthFramedSourceSha256:
         return self._digest.hexdigest()
 
 
+class LegacyNulSourceSha256:
+    """Inherited name/NUL/payload/NUL profile, not an unambiguous file map.
+
+    Caller ordering and validation stay outside the owner. NUL payloads can
+    imitate entry boundaries (#1762); changing that protocol is not dedup.
+    """
+
+    def __init__(self) -> None:
+        self._digest = hashlib.sha256()
+
+    def update(self, name: str, payload: bytes) -> None:
+        encoded = name.encode("utf-8")
+        self._digest.update(encoded)
+        self._digest.update(b"\0")
+        self._digest.update(payload)
+        self._digest.update(b"\0")
+
+    def hexdigest(self) -> str:
+        return self._digest.hexdigest()
+
+
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:
     return hashlib.sha256(data).hexdigest()
 
