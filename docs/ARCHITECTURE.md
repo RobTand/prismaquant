@@ -18281,8 +18281,8 @@ measurement environment — 29 variables then, 31 since the 0.8.11 advance — w
 artifact-derived native-extension requirements, and a dedicated raw-source W8A16 kernel
 family. These harden evidence and admission and back the source W8A16 route for export; they do
 not by themselves promote an unmeasured full artifact. The four behavioural facts a
-returning reader must know are that **`COST_MODE` defaults to `aura`** (§3.3), Gridbook serving
-is native CUDA/CUTLASS-only and fails closed (§9.2), and fused native-NVFP4 remains default-off
+returning reader must know are that **`COST_MODE` defaults to `aura`** (§3.3), the Gridbook serving lane
+is retired and archival only, and fused native-NVFP4 remains default-off
 after its teacher-backed quality gate (§9.2); direct group-32 MXFP8 remains W8A8 while the
 block-128 checkpoint source route is W8A16.
 
