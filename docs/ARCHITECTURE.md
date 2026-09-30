@@ -31,8 +31,10 @@ claims of synchronous durable commits. Success explicitly flushes before source
 unload, outgoing handoff finalization or payload return. Failure cancels queued
 ownership, joins a running write while preserving its charge, and retains only
 a genuinely published prefix; close alone is not success. The setting is not
-added to the unit measurement identity; existing plan/record bindings are not
-removed or rewritten. The default writer, internal unit encoding/schema,
+added directly to the unit measurement identity; the CLI reads it from its
+digest-bound plan, so changing it changes that plan's digest. Same-binding
+core comparisons are not cross-plan equivalence. Existing plan/record
+bindings are not removed or rewritten. The default writer, internal unit encoding/schema,
 render/capture arithmetic, serving/export bytes, pin and stage graph remain
 unchanged. This CPU integration remains research opt-in: #1367's authorized
 before/after in-process profiles and both-Spark Netdata are HELD, with no speed,

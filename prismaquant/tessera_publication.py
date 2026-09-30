@@ -14,8 +14,9 @@ needs the GPU.
 The campaign's default backend hands those writes to one bounded writer
 thread. An explicit ``submit_task=ENGINE.submit`` backend instead runs finite
 FIFO drains on the existing shared IO engine; it creates no additional pool
-or writer thread. Stage B's CPU slice exposes this backend without yet changing
-retained-window execution or production defaults. What this module does **not** do:
+or writer thread. Stage B's research opt-in uses it for retained-window unit
+checkpoints; its synchronous default is unchanged, and GPU qualification is
+separate. What this module does **not** do:
 
 * **It is not a second cache.**  A job calls the same
   ``_store_rendered_weight_entry`` and the same tmp-plus-``os.replace`` wire

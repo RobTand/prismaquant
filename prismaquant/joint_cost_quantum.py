@@ -2589,7 +2589,7 @@ def run_layer_quantum_core(
             if max_staging_bytes is not None:
                 # Inspect resident inputs before allocating rows, copied probe
                 # vectors or their serialization. The list holds only refs.
-                references = [joint_probe, joint_probe_identity, g_trace[name]]
+                references = [joint_probe_identity, g_trace[name]]
                 for fmt in unit_formats[name]:
                     references.extend((fmt, joint_operators[(name, fmt)]))
                     if fmt not in _ZERO_COST_FORMATS:
