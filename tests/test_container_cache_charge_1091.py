@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -35,6 +36,9 @@ def test_cache_pair_is_priced_independently_without_creating_directories(tmp_pat
     pairs = declared[runner.LOCAL_SCRATCH_PAIRS_ENV]
     assert pairs == ",".join(f"{a}:{b}" for a, b in (_COTANGENT, _SPILL, CACHE))
     assert {name: declared[name] for name in CACHE} == {name: env[name] for name in CACHE}
+    if importlib.util.find_spec("prismabuild") is None:
+        pytest.skip("public PB SDK unavailable; pricing requires a qualified PB-worker receipt")
+    # A present but incompatible/broken SDK must fail, not be skipped.
     from prismabuild.local_scratch import scratch_terms
     assert scratch_terms(declared) == {"spool_gb": 4}
     assert list(tmp_path.iterdir()) == []
