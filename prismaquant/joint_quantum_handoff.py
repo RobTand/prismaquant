@@ -91,6 +91,7 @@ import threading
 import time
 
 from .digests import bytes_sha256hex, indent2_json_file_bytes, is_sha256hex
+from .joint_incoming_plane import IncomingPlaneStream, open_incoming_stream
 
 HANDOFF_SCHEMA = "prismaquant.joint_quantum_handoff.v1"
 HANDOFF_OWNER_STATES_SCHEMA = "prismaquant.joint_quantum_handoff.owner_states.v1"
@@ -1096,76 +1097,12 @@ def load_handoff_inputs(handoff: Mapping, checkpoint_record: Mapping, *,
     return plane, shared_adjoint, shared_pass
 
 
-class HandoffIncomingStream:
-    """One probe's incoming rows, read from the handoff in capture order.
-
-    Returned by :meth:`HandoffIncoming.open`. ``take(keys)`` returns the
-    next rows as verified CPU tensors and refuses any key out of the
-    capture's batch order, so each row is the entry of its own
-    coordinates. ``layout(key)`` reads nothing. ``telemetry`` counts the
-    rows taken, their tensor bytes and the seconds the pass waited for
-    them.
-    """
+class HandoffIncomingStream(IncomingPlaneStream):
+    """Compatibility adapter for the handoff's validated row coordinates."""
 
     def __init__(self, probe, entries, stream):
-        import torch
-
-        self.probe = int(probe)
-        self._entries = list(entries)
-        self._stream = stream
-        self._next = 0
-        self._layouts = {}
-        for batch, entry in enumerate(self._entries):
-            dtype = getattr(torch, str(entry["dtype"]).removeprefix("torch."), None)
-            if not isinstance(dtype, torch.dtype):
-                raise QuantumHandoffRefused(
-                    f"handoff entry {entry['name']!r} has no torch dtype")
-            self._layouts[(self.probe, batch)] = (tuple(entry["shape"]), dtype)
-        self.telemetry = {"probe": self.probe, "entries": 0, "tensor_bytes": 0,
-                          "wait_s": 0.0}
-
-    def layout(self, key):
-        """``(shape, dtype)`` of the row at ``key``; reads nothing."""
-        try:
-            return self._layouts[tuple(key)]
-        except KeyError:
-            raise RuntimeError(
-                f"probe {self.probe}'s incoming stream has no row {key!r}") from None
-
-    def take(self, keys):
-        """The rows at ``keys``, which must be the next ones in batch order."""
-        rows = []
-        for key in keys:
-            key = tuple(key)
-            if self._next >= len(self._entries) or key != (self.probe, self._next):
-                raise RuntimeError(
-                    f"probe {self.probe}'s incoming stream is read in capture "
-                    f"order: row {key!r} was asked for, the next is "
-                    f"{(self.probe, self._next)!r}")
-            started = time.monotonic()
-            entry, tensor = next(self._stream)
-            self.telemetry["wait_s"] += time.monotonic() - started
-            if entry is not self._entries[self._next] or \
-                    _plane_coordinates(entry)[:2] != key:
-                raise RuntimeError(
-                    f"probe {self.probe}'s incoming stream yielded "
-                    f"{entry.get('name')!r} for row {key!r}")
-            self._next += 1
-            self.telemetry["entries"] += 1
-            self.telemetry["tensor_bytes"] += int(entry["tensor_bytes"])
-            rows.append(tensor)
-            tensor = None
-        return rows
-
-    def materialize(self, plane):
-        """Write every remaining row into ``plane`` at its own key."""
-        while self._next < len(self._entries):
-            key = (self.probe, self._next)
-            (plane[key],) = self.take([key])
-
-    @property
-    def exhausted(self):
-        return self._next == len(self._entries)
+        super().__init__(probe, entries, stream, coordinate_of=_plane_coordinates,
+                         label="handoff", refused=QuantumHandoffRefused)
 
 
 class HandoffIncoming:
@@ -1204,25 +1141,11 @@ class HandoffIncoming:
         A clean exit refuses when a row was left unread; any exit closes
         the stream, which waits for a read in flight and releases its charge.
         """
-        from .joint_adjoint_checkpoints import stream_exact_entry_tensors
-
-        entries = self.entries(probe)
-        generator = stream_exact_entry_tensors(
-            entries, expected_session=self.session,
-            max_resident_bytes=int(max_resident_bytes),
-            residency_check=residency_check, deadline_per_window=True)
-        stream = HandoffIncomingStream(probe, entries, generator)
-        failed = True
-        try:
+        with open_incoming_stream(
+                probe, self.entries(probe), session=self.session,
+                max_resident_bytes=max_resident_bytes, residency_check=residency_check,
+                stream_factory=HandoffIncomingStream) as stream:
             yield stream
-            failed = False
-        finally:
-            generator.close()
-            if not failed and not stream.exhausted:
-                raise RuntimeError(
-                    f"probe {int(probe)}'s pass left "
-                    f"{len(entries) - stream.telemetry['entries']} incoming "
-                    "rows unread")
 
 
 def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,

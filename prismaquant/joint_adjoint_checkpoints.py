@@ -23,7 +23,7 @@ import re
 import struct
 import time
 from concurrent.futures import ThreadPoolExecutor, wait as wait_futures
-from contextlib import closing, contextmanager, nullcontext
+from contextlib import AbstractContextManager, closing, contextmanager, nullcontext
 from pathlib import Path
 
 import torch
@@ -1849,9 +1849,121 @@ def _entry_bytes(entry) -> int:
     return int(entry.get("file_bytes") or entry.get("tensor_bytes") or 0)
 
 
+def _checkpoint_workspace_rows(stored, plane):
+    """Canonical existing destination slots for copied and referenced entries."""
+    if checkpoint_is_referenced(stored):
+        return [{"name": f"cotangent-{probe}-{batch}", "shape": row["shape"],
+                 "dtype": row["dtype"], "tensor_bytes": row["tensor_bytes"]}
+                for (probe, batch), row in sorted(plane.items())]
+    return stored["activation_entries"]
+
+
+def _checkpoint_metadata_snapshot(record):
+    """Own the JSON checkpoint metadata, without borrowing caller dictionaries."""
+    try:
+        return json.loads(canonical_json_bytes(record, where="checkpoint incoming metadata"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("checkpoint incoming metadata must be finite JSON") from exc
+
+
+def _validated_checkpoint_stream_plane(record):
+    """Validate each streamed row before any layout reservation or payload read."""
+    import math
+    from .perturbed_x_cache import EXACT_ACTIVATION_SCHEMA
+
+    # Validate the checkpoint session for copied rows as well as owner rows.
+    checkpoint_owner_session(record)
+    plane = checkpoint_cotangent_plane(record)
+    session = checkpoint_entry_session(record)
+    referenced = checkpoint_is_referenced(record)
+    for (probe, batch), row in plane.items():
+        shape = row.get("shape")
+        dtype = getattr(torch, str(row.get("dtype")).removeprefix("torch."), None)
+        if (not isinstance(shape, (list, tuple)) or not shape
+                or any(type(n) is not int or n <= 0 for n in shape)
+                or not isinstance(dtype, torch.dtype)
+                or type(row.get("tensor_bytes")) is not int):
+            raise ValueError("checkpoint incoming has an invalid tensor layout")
+        if row["tensor_bytes"] != math.prod(shape) * torch.empty((), dtype=dtype).element_size():
+            raise ValueError("checkpoint incoming tensor bytes disagree with shape/dtype")
+        metadata = row.get("metadata")
+        if (not isinstance(metadata, dict)
+                or metadata.get("schema") != EXACT_ACTIVATION_SCHEMA
+                or not isinstance(metadata.get("shape"), list)
+                or any(type(n) is not int or n <= 0 for n in metadata["shape"])
+                or metadata["shape"] != list(shape)
+                or metadata.get("dtype") != row["dtype"]
+                or type(metadata.get("tensor_bytes")) is not int
+                or metadata["tensor_bytes"] != row["tensor_bytes"]):
+            raise ValueError("checkpoint incoming metadata disagrees with tensor layout/schema")
+        coordinates = {"probe": probe, "batch": batch}
+        if referenced:
+            coordinates["boundary"] = record["boundary"]
+        expected_identity = {
+            "session": session, "slot": f"cotangent-{probe}-{batch}",
+            "kind": "cotangent" if referenced else "adjoint_checkpoint_cotangent",
+            "coordinates": coordinates,
+        }
+        identity = metadata.get("identity")
+        if (not isinstance(identity, dict) or identity != expected_identity
+                or any(type(n) is not int for n in identity["coordinates"].values())):
+            raise ValueError("checkpoint incoming metadata has a foreign cotangent identity")
+    return plane
+
+
+class CheckpointIncoming:
+    """Owned metadata-only checkpoint plane over the shared exact reader.
+
+    Manifest verification remains the loader's responsibility. Construction
+    validates the complete grid, layout and owner/copied identities. Public
+    metadata queries return defensive copies; payload digests stay independently
+    verified by the exact reader. No source entry is changed or deleted.
+    """
+
+    def __init__(self, record, *, n_probes: int, n_batches: int):
+        if any(type(n) is not int or n <= 0 for n in (n_probes, n_batches)):
+            raise ValueError("checkpoint incoming requires positive probe/batch counts")
+        record = _checkpoint_metadata_snapshot(record)
+        plane = _validated_checkpoint_stream_plane(record)
+        expected = {(p, b) for p in range(n_probes) for b in range(n_batches)}
+        if set(plane) != expected:
+            raise ValueError("checkpoint incoming has an incomplete or foreign probe/batch grid")
+        self._session = checkpoint_entry_session(record)
+        self._coordinates = {id(row): key for key, row in plane.items()}
+        self._entries = {p: [plane[p, b] for b in range(n_batches)] for p in range(n_probes)}
+        self.max_entry_bytes = max(row["tensor_bytes"] for row in plane.values())
+
+    @property
+    def session(self):
+        return _checkpoint_metadata_snapshot(self._session)
+
+    def entries(self, probe: int) -> list[dict]:
+        if type(probe) is not int or probe not in self._entries:
+            raise ValueError("checkpoint incoming probe is outside its grid")
+        return _checkpoint_metadata_snapshot(self._entries[probe])
+
+    def references(self) -> dict:
+        """Probe-major immutable source references for the existing chain roll."""
+        return {probe: [reference_from_record(row) for row in rows]
+                for probe, rows in self._entries.items()}
+
+    def open(self, probe: int, *, max_resident_bytes: int, residency_check) -> AbstractContextManager:
+        from functools import partial
+        from .joint_incoming_plane import IncomingPlaneStream, open_incoming_stream
+
+        if type(probe) is not int or probe not in self._entries:
+            raise ValueError("checkpoint incoming probe is outside its grid")
+        return open_incoming_stream(
+            probe, self._entries[probe], session=self.session,
+            max_resident_bytes=max_resident_bytes, residency_check=residency_check,
+            stream_factory=partial(IncomingPlaneStream,
+                                   coordinate_of=lambda row: self._coordinates[id(row)]))
+
+
 def load_adjoint_checkpoint(
     space: str | os.PathLike, record: dict, *, cotangent_factory=None,
     shared_state_max_bytes=None, max_resident_bytes=None, residency_check=None,
+    stream_incoming: bool = False,
 ) -> tuple[dict, dict, dict]:
     """Read one checkpoint back, verifying every digest it claims.
 
@@ -1863,42 +1975,43 @@ def load_adjoint_checkpoint(
     with no budget it is read one entry at a time, as before.
     Refuses on any digest or shape mismatch: a checkpoint
     whose bytes moved is a new identity, never a silent partial read.
+
+    Explicit ``stream_incoming=True`` verifies the manifest and shared states
+    validates each row before creating the same empty destination, but leaves
+    activation reads to an incoming adapter. The default order is unchanged.
     """
+    if type(stream_incoming) is not bool:
+        raise ValueError("checkpoint stream_incoming must be a bool")
     from .residency_shard_reader import staged_range_wait_s
     deadline = time.monotonic() + staged_range_wait_s()
+    if stream_incoming:
+        record = _checkpoint_metadata_snapshot(record)
     stored = _verified_checkpoint_manifest(
         space, record, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
     try:
-        plane = checkpoint_cotangent_plane(stored)
+        plane = (_validated_checkpoint_stream_plane(stored) if stream_incoming
+                 else checkpoint_cotangent_plane(stored))
     except ValueError as exc:
         raise RuntimeError(f"adjoint checkpoint plane refused: {exc}") from exc
     session = checkpoint_entry_session(stored)
     entries = stored["activation_entries"]
-    if checkpoint_is_referenced(stored):
-        # The owner's entry names carry their boundary (PQ #1036); a
-        # workspace keys its slots by probe and batch alone.
-        workspace_rows = [{"name": f"cotangent-{probe}-{batch}",
-                           "shape": row["shape"], "dtype": row["dtype"],
-                           "tensor_bytes": row["tensor_bytes"]}
-                          for (probe, batch), row in sorted(plane.items())]
-    else:
-        workspace_rows = entries
+    workspace_rows = _checkpoint_workspace_rows(stored, plane)
     cotangents = ({} if cotangent_factory is None
                   else cotangent_factory(workspace_rows))
     by_name = {row["name"]: key for key, row in plane.items()}
-    # A rate and ETA line every 64 entries or 30 s; no PrismaBuild units,
-    # because a read into a disposable scratch is not durable work (#480).
-    rate = ReadRateReporter(
-        "checkpoint-load", total_entries=len(entries),
-        total_bytes=sum(_entry_bytes(entry) for entry in entries))
-    with closing(stream_exact_entry_tensors(
-            entries, expected_session=session, max_resident_bytes=max_resident_bytes,
-            residency_check=residency_check, deadline=deadline)) as stream:
-        for entry, tensor in stream:
-            cotangents[by_name[entry["name"]]] = tensor
-            del tensor
-            rate.entry(_entry_bytes(entry))
-    rate.done()
+    if not stream_incoming:
+        # Disposable scratch reads are not durable PB units (#480).
+        rate = ReadRateReporter(
+            "checkpoint-load", total_entries=len(entries),
+            total_bytes=sum(_entry_bytes(entry) for entry in entries))
+        with closing(stream_exact_entry_tensors(
+                entries, expected_session=session, max_resident_bytes=max_resident_bytes,
+                residency_check=residency_check, deadline=deadline)) as stream:
+            for entry, tensor in stream:
+                cotangents[by_name[entry["name"]]] = tensor
+                del tensor
+                rate.entry(_entry_bytes(entry))
+        rate.done()
     shared_adjoint, shared_pass = _load_checkpoint_shared_states(
         stored, deadline=deadline, shared_state_max_bytes=shared_state_max_bytes)
     return cotangents, shared_adjoint, shared_pass

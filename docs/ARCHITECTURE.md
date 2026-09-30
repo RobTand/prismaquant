@@ -24,6 +24,37 @@ distinguishes reservation from quota and durable lifetime. No crash cleanup,
 measured cache peak, GPU/performance, runtime pin or production default is
 claimed; #1091 and PB #1360 remain the independent lifetime/measurement gates.
 
+Re-stamped 2026-09-30 (PQ #1802, Refs #1366, `sol/pq-stageb-5`):
+Stage B has an explicitly selected CPU research checkpoint path,
+`checkpoint_incoming_mode="stream_once_research"`. Omission keeps the existing
+head load. Invalid modes, GPU devices, executable/staged read bindings,
+band-serial handoffs, nondefault batching/fusion and capture/shadow profiles
+refuse before source installation or capture. This is not admission to a
+production or sealed execution plan. Changing a CLI plan's setting changes its
+digest; direct same-binding fixture comparisons are not cross-plan equivalence.
+For a referenced owner checkpoint, the first chain roll uses existing exact-entry
+references and its existing bounded reader instead of populating the destination
+plane at the head. Later rolls and capture consume the newly produced plane.
+A chain-empty consumer requires one-pass spill and reads original checkpoint
+rows once during each probe's final pass, including when journal entries are
+resumed. A fully complete journal skips pricing, not the default final
+backward/roll passes or their incoming operands. Shared owner/pass
+states keep their verified small-file load, while destination reservation remains
+in the existing plane/cache machinery. Checkpoint and band-serial incoming paths
+share the finite probe-major stream, order checks, residency release and primary
+error cleanup; neither acquires another cache or IO pool. Streaming metadata
+validates copied/owner identities and schema/layout consistency before any
+destination factory call. The adapter owns isolated rows/session and returns
+defensive metadata copies; caller mutations cannot redirect validated operands.
+Canonical destination names remain distinct from original owner references.
+Bad exact-entry bytes refuse before delivery, without repair or fallback. Arithmetic, formats,
+checkpoint/serving/export bytes, pin, defaults and stage graph are unchanged.
+This CPU-only contract is not #1366's profile acceptance: representative GPU
+before/after in-process profiles and both-Spark Netdata remain unperformed.
+Coordinator approval to run a measurement does not qualify this CPU contract.
+No speed, residency, peak-memory or unchanged reader-wait claim follows from
+these tests.
+
 Re-stamped 2026-09-30 (PQ #1794, Refs #1087, `sol/pq-stageb-4`):
 The explicitly selected research constructor policy
 `StageBReplaySpill(scatter_reads=True)` coalesces physically adjacent slot
