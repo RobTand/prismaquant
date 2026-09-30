@@ -102,6 +102,7 @@ import threading
 import time
 from typing import Any, Callable, Hashable, Iterable, Protocol
 
+from .digests import bytes_sha256hex
 from .file_identity import file_stat_signature as _stat_signature
 from .residency_map import StagedReadRefused
 
@@ -410,7 +411,7 @@ def read_file(path: Path, limit: int, *, declared_signature=None, staged=None,
         # on the pass that sealed it: the bytes a decoder maps are the bytes
         # this digest names, and nothing can write them after.
         if buffer is None:
-            digest = hashlib.sha256(raw).hexdigest()
+            digest = bytes_sha256hex(raw)
         else:
             digest, raw = buffer.seal(), buffer
         receipt = {"path": str(path), "bytes": len(raw), "sha256": digest}

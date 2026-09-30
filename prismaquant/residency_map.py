@@ -72,13 +72,14 @@ from __future__ import annotations
 
 import bisect
 import errno
-import hashlib
 import json
 import os
 from pathlib import Path
 import stat
 import threading
 import time
+
+from .digests import bytes_sha256hex
 
 SCHEMA = "prismaquant.prismabuild.residency_map.v1"
 FRAGMENT_SCHEMA = "prismaquant.prismabuild.residency_map_fragment.v1"
@@ -468,7 +469,7 @@ class ResidencyResolver:
         generation = checked["generation"]
         self._entries = adopted
         self._real_entries = None
-        self._map_sha256 = hashlib.sha256(raw).hexdigest()
+        self._map_sha256 = bytes_sha256hex(raw)
         self._tier_id = tier_id
         self._stage_root = checked["stage_root"]
         self._leads = tuple(checked["leads"])
