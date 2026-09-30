@@ -89,12 +89,14 @@ from .schemas import strict_json_loads
 __all__ = [
     "CENSUS_SCHEMA",
     "EXIT_EMPTY_MENU",
+    "PINNED_ROSTER_SCHEMA",
     "SCHEMA",
     "UNITS_SCHEMA",
     "UNITS_SCHEMA_V2",
     "STACK_SAMPLE_COUNTS_SUFFIX",
     "STACK_SAMPLE_SIZE_SOURCES",
     "CampaignAnchor",
+    "CampaignRoster",
     "ExpertPopulation",
     "anchor_group_key",
     "anchor_schedule",
@@ -102,6 +104,7 @@ __all__ = [
     "calibration_census",
     "campaign_cost_payload",
     "campaign_population_block",
+    "campaign_roster",
     "census_max_abs",
     "census_token_counts",
     "contract_source_label",
@@ -111,6 +114,7 @@ __all__ = [
     "selection_stack_samples",
     "main",
     "next_anchor_rate",
+    "pinned_roster_block",
     "report_empty_menus",
     "require_census_draw",
     "resolve_anchor_groups",
@@ -2119,6 +2123,11 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     if settings.get("source_scope") is None:
         # Unset, the body's identity is byte-identical to before the flag.
         settings.pop("source_scope", None)
+    # PQ #1843: unset, the body's identity is byte-identical to before the flags.
+    if not settings.get("allow_pinned"):
+        settings.pop("allow_pinned", None)
+    if not settings.get("pinned_roster_only"):
+        settings.pop("pinned_roster_only", None)
     if restriction is None:
         settings.pop("family_restriction", None)
     else:
@@ -4195,7 +4204,8 @@ def calibration_census(counts: Mapping[str, int], max_abs: Mapping[str, float], 
                        args, groups: Mapping, dense_targets: Sequence[str],
                        expert_targets: Sequence[str], shapes: Mapping,
                        identity: Mapping, expert_projection=None, model_load_contract=None,
-                       attention_implementation=None, capture_runtime=None) -> dict:
+                       attention_implementation=None, capture_runtime=None,
+                       pinned_roster=None) -> dict:
     """The whole priced scope, as one run that loaded the model saw it.
 
     Everything here is scope-wide and selection-independent, and it is here
@@ -4203,7 +4213,8 @@ def calibration_census(counts: Mapping[str, int], max_abs: Mapping[str, float], 
     disagree about it: the per-unit calibration row counts and activation
     maxima, the anchor grouping, the unit shapes a planner sizes rows with, the
     draw's own identity, and the producer's expert projection of every declared
-    stack.
+    stack. ``pinned_roster`` (:func:`pinned_roster_block`) records a lifted-pin
+    roster; a census without one carries no such key.
     """
     return {
         "schema": CENSUS_SCHEMA,
@@ -4228,6 +4239,7 @@ def calibration_census(counts: Mapping[str, int], max_abs: Mapping[str, float], 
         "dense_targets": sorted(dense_targets),
         "expert_targets": sorted(expert_targets),
         "expert_projection": expert_projection,
+        **({"pinned_roster": pinned_roster} if pinned_roster is not None else {}),
     }
 
 
@@ -4247,6 +4259,7 @@ def load_calibration_census(path, *, args) -> dict:
                 f"--calibration-census {path}: {field} is {census.get(field)!r} "
                 f"in the census and {value!r} in this run; the census must be "
                 "the same draw over the same scope")
+    _require_census_pinned_roster(census, args, path)
     counts = census.get("counts")
     maxima = census.get("max_abs")
     if not isinstance(counts, dict) or not counts:
@@ -4386,6 +4399,106 @@ def _campaign_layer_scope(names, layer_stride: int) -> list[str]:
         if match is None or int(match.group(1)) % layer_stride == 0:
             selected.append(name)
     return selected
+
+
+#: The census block that records a lifted-pin roster (PQ #1843). Absent from a
+#: census taken without ``--allow-pinned``, so a body census is byte-identical.
+PINNED_ROSTER_SCHEMA = "prismaquant.tessera_campaign.pinned_roster.v1"
+
+
+@dataclass(frozen=True)
+class CampaignRoster:
+    """The Linears a campaign prices, the pins it keeps and the pins it lifts.
+
+    ``dense`` is the priced non-expert roster before the layer stride;
+    ``pinned`` the Linears the profile keeps out of it (pins and
+    ``probe_linear_exclude_extra`` matches); ``lifted`` the kept-out Linears
+    ``--allow-pinned`` put back into ``dense``.
+    """
+
+    dense: tuple
+    pinned: tuple
+    lifted: tuple
+
+
+def campaign_roster(linear_names, profile, *, allow_pinned=None,
+                    pinned_roster_only: bool = False) -> CampaignRoster:
+    """The campaign's non-expert roster from its Linear names (PQ #1843).
+
+    Without ``allow_pinned`` this is the roster the campaign always built:
+    every Linear except the head, the embeddings, the profile's pins and its
+    ``probe_linear_exclude_extra`` matches. ``allow_pinned`` lifts a Linear
+    the profile keeps out by either rule when its name contains one of the
+    tokens, with the allocator's grammar and ``token in qname`` semantics
+    (``fixed_head.parse_allow_pinned`` / ``allow_pinned_lifts_name``), so a
+    census and the allocation that consumes it read one spelling. Both rules
+    must yield to an explicit token: GLM keeps attention out by pin and by
+    exclude-extra alike, because its construction runtime builds attention
+    with ``quant_config=None`` (principle 9). Pricing such a unit reports a
+    serving gap; export still refuses its unbacked route.
+    ``pinned_roster_only`` keeps only the lifted Linears: the roster of a
+    scoped campaign over units the body campaign does not price (GLM
+    attention). A token that lifts nothing refuses, so a misspelled token
+    cannot shrink the roster silently.
+    """
+    from .fixed_head import parse_allow_pinned
+
+    tokens = parse_allow_pinned(allow_pinned)
+    if pinned_roster_only and not tokens:
+        raise ValueError("--pinned-roster-only requires --allow-pinned")
+    extra = profile.probe_linear_exclude_extra()
+    dense, pinned, lifted, used = [], [], [], set()
+    for name in linear_names:
+        if name.endswith("lm_head") or "embed" in name:
+            continue
+        if profile.is_pinned_name(name) or (extra and re.search(extra, name)):
+            hits = [token for token in tokens if token in name]
+            if not hits:
+                pinned.append(name)
+                continue
+            used.update(hits)
+            lifted.append(name)
+            dense.append(name)
+            continue
+        if not pinned_roster_only:
+            dense.append(name)
+    unused = [token for token in tokens if token not in used]
+    if unused:
+        raise ValueError(f"--allow-pinned tokens lift no profile-pinned Linear: {unused}")
+    return CampaignRoster(dense=tuple(dense), pinned=tuple(pinned), lifted=tuple(lifted))
+
+
+def pinned_roster_block(args, roster: CampaignRoster):
+    """The census's record of a lifted-pin roster, or None without a lift."""
+    from .fixed_head import parse_allow_pinned
+
+    tokens = parse_allow_pinned(getattr(args, "allow_pinned", None))
+    if not tokens:
+        return None
+    return {"schema": PINNED_ROSTER_SCHEMA, "allow_pinned": list(tokens),
+            "pinned_roster_only": bool(getattr(args, "pinned_roster_only", False)),
+            "lifted": sorted(roster.lifted)}
+
+
+def _require_census_pinned_roster(census: Mapping, args, path) -> None:
+    """Refuse a census whose lifted-pin roster is not this run's."""
+    from .fixed_head import parse_allow_pinned
+
+    block = census.get("pinned_roster")
+    tokens = list(parse_allow_pinned(getattr(args, "allow_pinned", None)))
+    only = bool(getattr(args, "pinned_roster_only", False))
+    if block is None and not tokens:
+        return
+    if block is not None and block.get("schema") != PINNED_ROSTER_SCHEMA:
+        raise RuntimeError(
+            f"--calibration-census {path}: unknown pinned roster {block.get('schema')!r}")
+    census_tokens = [] if block is None else list(block.get("allow_pinned") or [])
+    census_only = False if block is None else bool(block.get("pinned_roster_only"))
+    if census_tokens != tokens or census_only != only:
+        raise RuntimeError(
+            f"--calibration-census {path}: its roster lifts {census_tokens!r} "
+            f"(pinned roster only: {census_only}) and this run lifts {tokens!r} "
+            f"(pinned roster only: {only}); the census must be the same scope")
 
 
 @dataclass(frozen=True)
@@ -5234,7 +5347,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
                               dense_targets, expert_targets, scope_groups,
                               tokens, corpus_text, census, context_by_unit,
                               attention_implementation, capture_runtime,
-                              structure_by_unit=None):
+                              structure_by_unit=None, pinned_roster=None):
     """Wire canonical collection to the existing resident layer traversal."""
     import torch
     from . import tessera_calibration_cache as store
@@ -5427,7 +5540,8 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         payload = calibration_census(counts, maxima, args=args, groups=scope_groups,
             dense_targets=dense_targets, expert_targets=expert_targets, shapes=shapes,
             identity=calibration, expert_projection=projection, model_load_contract=contract,
-            attention_implementation=attention_implementation, capture_runtime=capture_runtime)
+            attention_implementation=attention_implementation, capture_runtime=capture_runtime,
+            pinned_roster=pinned_roster)
         from .cost_stage_checkpoint import atomic_write_bytes
         atomic_write_bytes(Path(args.census_out),
             indent2_json_file_bytes(payload))
@@ -5647,6 +5761,14 @@ def _main(argv, *, source_scope) -> int:
                     help="A profile-declared source outside the decoder body (ModelProfile.source_scope, "
                          "e.g. GLM's 'mtp'); requires --source-snapshot-policy selected-tensors-v1 and a "
                          "census carrying the scope's load contract (PQ #1316).")
+    ap.add_argument("--allow-pinned", default=None,
+                    help="Comma-separated tokens: a profile-pinned Linear whose name contains one "
+                         "enters the roster (the allocator's --allow-pinned grammar). A token that "
+                         "lifts nothing refuses. The census records the lift (PQ #1843).")
+    ap.add_argument("--pinned-roster-only", action="store_true",
+                    help="Price only the Linears --allow-pinned lifts: the unpinned body and the "
+                         "expert population leave the roster (a scoped campaign, e.g. GLM "
+                         "attention; PQ #1843). Requires --allow-pinned.")
     ap.add_argument("--streaming-prefetch-workers", type=int, default=1)
     ap.add_argument("--streaming-cache-headroom-gb", type=float, default=24)
     ap.add_argument("--streaming-capture-policy", default="legacy",
@@ -5692,6 +5814,8 @@ def _main(argv, *, source_scope) -> int:
         ap.error('--source-snapshot-policy requires selected streaming capture reuse')
     if args.source_scope is not None and args.source_snapshot_policy != 'selected-tensors-v1':
         ap.error('--source-scope requires --source-snapshot-policy selected-tensors-v1')
+    if args.pinned_roster_only and not args.allow_pinned:
+        ap.error('--pinned-roster-only requires --allow-pinned')
     if args.capture_load_policy is not None and not (selected_source or (
             args.streaming and args.capture_calibration_out and
             args.streaming_capture_policy == 'shared-inputs-bounded-v1')):
@@ -5857,21 +5981,23 @@ def _main(argv, *, source_scope) -> int:
     # The packed expert population the producer bridge covers, or a refusal by
     # name before calibration.  Its members are priced as the producer's
     # projected units below (PrismaQuant #183).
-    population = _require_campaign_population(model, profile, args.layer_stride)
-    dense_targets: list[str] = []
-    all_dense: list[str] = []
-    pinned: list[str] = []
-    for name, module in model.named_modules():
-        if not isinstance(module, torch.nn.Linear):
-            continue
-        if name.endswith("lm_head") or "embed" in name:
-            continue
-        if profile.is_pinned_name(name) or (profile.probe_linear_exclude_extra() and
-                re.search(profile.probe_linear_exclude_extra(), name)):
-            pinned.append(name)
-            continue
-        all_dense.append(name)
-    del module  # Do not retain the final non-body module after source teardown.
+    # A pinned-roster-only campaign prices the lifted Linears and no expert
+    # (PQ #1843); its census records that the population was left out.
+    population = (ExpertPopulation(members=(), declared={}, packed_in_scope={},
+                                   omitted_outside_layer_stride={})
+                  if args.pinned_roster_only else
+                  _require_campaign_population(model, profile, args.layer_stride))
+    # Names only: no module is retained after source teardown.
+    roster = campaign_roster(
+        [name for name, module in model.named_modules() if isinstance(module, torch.nn.Linear)],
+        profile, allow_pinned=args.allow_pinned, pinned_roster_only=args.pinned_roster_only)
+    all_dense = list(roster.dense)
+    pinned = list(roster.pinned)
+    pinned_roster = pinned_roster_block(args, roster)
+    if pinned_roster is not None:
+        print(f"[campaign] --allow-pinned {pinned_roster['allow_pinned']} lifts "
+              f"{len(roster.lifted)} profile-pinned Linears"
+              + (" (pinned roster only)" if args.pinned_roster_only else ""), flush=True)
     dense_targets = _campaign_layer_scope(all_dense, args.layer_stride)
     expert_targets = population.qnames
     expert_members = {member.qname: member for member in population.members}
@@ -6032,7 +6158,8 @@ def _main(argv, *, source_scope) -> int:
                 dense_targets=census_dense_targets, expert_targets=census_expert_targets,
                 scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
                 context_by_unit=context_by_unit, attention_implementation=attention_implementation,
-                capture_runtime=capture_runtime, structure_by_unit=structure_by_unit)
+                capture_runtime=capture_runtime, structure_by_unit=structure_by_unit,
+                pinned_roster=pinned_roster)
         finally:
             runner.shutdown()
     if selected_source:
@@ -6390,7 +6517,8 @@ def _main(argv, *, source_scope) -> int:
             shapes={name: tuple(weight.shape) for name, weight in weights.items()},
             identity=hessian_identity, expert_projection=expert_projection,
             model_load_contract=model_load_contract,
-            attention_implementation=attention_implementation,capture_runtime=capture_runtime)
+            attention_implementation=attention_implementation,capture_runtime=capture_runtime,
+            pinned_roster=pinned_roster)
         if set(payload["counts"]) != set(census_targets):
             raise RuntimeError(
                 "the census did not observe every unit in scope: missing "
