@@ -2063,7 +2063,7 @@ def _store_rendered_weight_entry(
         # Per-process staging: a fan-out that re-renders a cell another writer
         # is publishing must not share its inode. The suffix adds exactly one
         # dot so torch's archive name -- and the published bytes -- are the
-        # same as a direct save (``unique_temp_suffix``).
+        # same as the legacy ``<fname>.tmp`` save (``unique_temp_suffix``).
         tmp_path = cache_dir_path / (fname + unique_temp_suffix())
         torch.save(stored, tmp_path)
         if durable:
