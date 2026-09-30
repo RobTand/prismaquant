@@ -20,8 +20,6 @@
   "hashlib:prismaquant/artifact_collection.py::reference_for_record",
   "hashlib:prismaquant/artifact_collection_legacy.py::_load_json_source",
   "hashlib:prismaquant/autoscale.py::streamed_calibration_resources",
-  "hashlib:prismaquant/calibration_data.py::_validate_calibration_draw",
-  "hashlib:prismaquant/calibration_data.py::load_calibration_input",
   "hashlib:prismaquant/cluster_campaign.py::_file_sha256",
   "hashlib:prismaquant/cluster_campaign.py::_owner_token",
   "hashlib:prismaquant/cluster_campaign.py::_probe_stage_receipts",
