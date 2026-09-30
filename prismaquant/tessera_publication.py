@@ -14,8 +14,9 @@ needs the GPU.
 The campaign's default backend hands those writes to one bounded writer
 thread. An explicit ``submit_task=ENGINE.submit`` backend instead runs finite
 FIFO drains on the existing shared IO engine; it creates no additional pool
-or writer thread. Stage B's CPU slice exposes this backend without yet changing
-retained-window execution or production defaults. What this module does **not** do:
+or writer thread. Stage B's research opt-in uses it for retained-window unit
+checkpoints; its synchronous default is unchanged, and GPU qualification is
+separate. What this module does **not** do:
 
 * **It is not a second cache.**  A job calls the same
   ``_store_rendered_weight_entry`` and the same tmp-plus-``os.replace`` wire
@@ -286,6 +287,30 @@ class BoundedPublisher:
             self._done.clear()
             self._cond.notify_all()
             return out
+
+    def cancel_pending(self) -> list:
+        """Stop admission/drop queued tail without releasing a running charge.
+
+        The caller retains its own primary exception. An internal cancellation
+        marker wakes blocked producers without retaining that caller's graph.
+        Close/join before collecting the genuinely published prefix; drain
+        raises rather than representing a cancelled submission as success.
+        """
+        with self._cond:
+            self._closing = True
+            keys = [job.key for job in self._queued]
+            charge = sum(int(job.charged_bytes) for job in self._queued)
+            count = len(self._queued)
+            # Drop ownership before notifying reusable credit. A running job
+            # is outside this deque and retains its charge until retirement.
+            self._queued.clear()
+            self._charged -= charge + self._reserved
+            self._outstanding -= count
+            self._reserved = self._reserved_jobs = 0
+            if self._failure is None:
+                self._failure = CancelledError("publication admission cancelled")
+            self._cond.notify_all()
+            return keys
 
     def close(self) -> None:
         """Publish what is queued, then join owned execution tasks.

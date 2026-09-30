@@ -14,6 +14,32 @@ The [repair-history contract](design/tessera_reduced_schedule_repair.md) keeps
 actual execution and GPU acceptance separate. Pin, serving and defaults stay
 unchanged.
 
+Re-stamped 2026-09-30 (PQ #1786, Refs #1367, `sol/pq-stageb-3`):
+Stage B has an explicitly opt-in host publication path selected by the runtime
+execution setting `checkpoint_publication_budget_bytes`. Absent/zero retains
+the synchronous default; invalid or too-small bounds refuse. It reserves host
+staging before constructing/encoding each tensor-free unit snapshot, uses a
+conservative builtin-graph bound and capped encoder, and sends only immutable
+existing envelope bytes plus a destination to the shared IO engine. The job
+ceiling is derived from two sealed windows, with at most two pending window
+records; acknowledged metadata is reaped before a full ceiling is reserved.
+The consumer keeps measured, submitted and durably acknowledged units distinct.
+Only durable acknowledgements price units or advance the ready window prefix,
+including validated resumed windows. Executable read phases remain monotonic
+while the durable frontier lags. Enqueue spans are `checkpoint-submit`, not
+claims of synchronous durable commits. Success explicitly flushes before source
+unload, outgoing handoff finalization or payload return. Failure cancels queued
+ownership, joins a running write while preserving its charge, and retains only
+a genuinely published prefix; close alone is not success. The setting is not
+added directly to the unit measurement identity; the CLI reads it from its
+digest-bound plan, so changing it changes that plan's digest. Same-binding
+core comparisons are not cross-plan equivalence. Existing plan/record
+bindings are not removed or rewritten. The default writer, internal unit encoding/schema,
+render/capture arithmetic, serving/export bytes, pin and stage graph remain
+unchanged. This CPU integration remains research opt-in: #1367's authorized
+before/after in-process profiles and both-Spark Netdata are HELD, with no speed,
+residency, peak-memory or unchanged-wait claim from CPU barrier tests.
+
 Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
 `BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
 `submit_task=ENGINE.submit` requires positive byte and job ceilings and runs
@@ -27,10 +53,9 @@ prefix keys; close joins owned tasks without shutting down the shared engine.
 The default campaign writer thread is unchanged. AURA unit envelope encoding
 is extracted as `_encode_aura_unit_checkpoint`; for identical state and identity,
 it returns the same immutable bytes the synchronous atomic writer publishes.
-This is a CPU prerequisite, not retained-window integration: Stage B still
-persists its units synchronously. Durable progress/frontier handling, final
-flush, resume integration and GPU before/after qualification remain under
-#1367. GPU profiling is HELD; no speed, peak-memory, serving or production-default
+This was the CPU prerequisite for the opt-in retained-window integration above.
+Stage B's default still persists units synchronously; GPU before/after
+qualification and default promotion remain under #1367. GPU profiling is HELD; no speed, peak-memory, serving or production-default
 claim follows from the CPU ordering tests. No export bytes, pin, format menu,
 ship gate or stage graph changes.
 

@@ -32,6 +32,7 @@ requires); memory-safe (one autograd graph at a time, watchdog-gated).
 from __future__ import annotations
 
 import argparse
+import io
 from collections.abc import Mapping, MutableMapping
 import json
 import math
@@ -300,14 +301,38 @@ def _load_aura_checkpoint_manifest(
     return expected_digest
 
 
+class _BoundedCheckpointBytes(io.BytesIO):
+    """Refuse serialization beyond already-reserved host staging."""
+
+    def __init__(self, limit: int):
+        super().__init__()
+        self._limit = limit
+
+    def write(self, buffer, /) -> int:
+        if self.tell() + len(buffer) > self._limit:
+            raise ValueError("checkpoint encoding exceeds staging bytes limit")
+        return super().write(buffer)
+
+
+def _checkpoint_pickle_bytes(value, *, max_bytes: int | None) -> bytes:
+    if max_bytes is None:
+        return pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ValueError("checkpoint encoding bytes limit must be a positive integer")
+    with _BoundedCheckpointBytes(max_bytes) as sink:
+        pickle.Pickler(sink, protocol=pickle.HIGHEST_PROTOCOL).dump(value)
+        return sink.getvalue()
+
+
 def _encode_aura_unit_checkpoint(
     *,
     qname: str,
     identity_sha256: str,
     state: Mapping[str, object],
+    max_bytes: int | None = None,
 ) -> bytes:
-    """Freeze the existing unit envelope; callers own staging/admission."""
-    state_bytes = pickle.dumps(dict(state), protocol=pickle.HIGHEST_PROTOCOL)
+    """Freeze the existing envelope; caller reserves peak staging first."""
+    state_bytes = _checkpoint_pickle_bytes(dict(state), max_bytes=max_bytes)
     envelope = {
         "schema": AURA_CHECKPOINT_UNIT_SCHEMA,
         "qname": str(qname),
@@ -315,7 +340,7 @@ def _encode_aura_unit_checkpoint(
         "payload_sha256": bytes_sha256hex(state_bytes),
         "payload": state_bytes,
     }
-    return pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL)
+    return _checkpoint_pickle_bytes(envelope, max_bytes=max_bytes)
 
 
 def _write_aura_unit_checkpoint(
