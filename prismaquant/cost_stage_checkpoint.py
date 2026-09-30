@@ -9,7 +9,6 @@ state is an error; it is never silently overwritten or recomputed.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-import hashlib
 import json
 import os
 import pickle
@@ -24,7 +23,7 @@ from .digests import (  # noqa: F401 -- re-exported: one spelling
     canonical_json_sha256,
     canonical_json_sha256_normalized,
 )
-from .digests import text_sha256hex
+from .digests import bytes_sha256hex, text_sha256hex
 
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
@@ -202,7 +201,7 @@ def write_unit(
         "stage": str(stage),
         "qname": str(qname),
         "identity_sha256": str(identity_sha256),
-        "payload_sha256": hashlib.sha256(state_bytes).hexdigest(),
+        "payload_sha256": bytes_sha256hex(state_bytes),
         "payload": state_bytes,
     }
     atomic_write_bytes(
@@ -250,7 +249,7 @@ def _load_unit(
             f"{stage} unit checkpoint {path} has no byte payload for {qname}; "
             "refusing reuse or recompute"
         )
-    digest = hashlib.sha256(payload).hexdigest()
+    digest = bytes_sha256hex(payload)
     if envelope.get("payload_sha256") != digest:
         raise RuntimeError(
             f"{stage} unit checkpoint {path} payload_sha256 differs for "
