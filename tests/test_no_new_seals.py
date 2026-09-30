@@ -123,6 +123,9 @@ ALLOWLIST = {
         2, INTEGRITY, "the identity schema, and content_sha256 against its shard digests"),
     ("prismaquant/cost_streaming.py", "validate_cached_streamed_model_identity"): (
         1, INTEGRITY, "a cached identity whose tensor-to-shard map is not this checkpoint's"),
+    ("prismaquant/joint_adjoint_checkpoints.py", "_validated_checkpoint_stream_plane"): (
+        1, STRUCTURE, "a stored cotangent's metadata agrees with the same checkpoint's "
+        "recorded session, slot, kind and coordinates; not a running-source seal"),
     ("prismaquant/joint_adjoint_checkpoints.py", "unpack_shared_states"): (
         1, INTEGRITY, "a pack member against its recorded digest"),
     ("prismaquant/joint_adjoint_checkpoints.py", "AdjointCheckpointAttempt.reference_activation"): (
