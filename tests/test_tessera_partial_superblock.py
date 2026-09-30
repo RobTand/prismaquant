@@ -131,3 +131,41 @@ def test_every_rung_at_the_kda_gate_shape_is_tesseras_price_or_tesseras_refusal(
             priced += 1
     # Not vacuous: the reproduction needs a priced menu at this shape.
     assert priced > 0, (priced, refused)
+
+
+CUDA = pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="an [8192, 128] window encode is minutes on CPU; the census runs it on CUDA",
+)
+
+
+@CUDA
+@pytest.mark.parametrize("fmt", (
+    "TESSERA_E4M3_K1_R1024",
+    "TESSERA_BF16_K1_R1024",
+    "TESSERA_E2M1_K2_R896",
+))
+def test_a_kda_gate_unit_encodes_decodes_and_prices_on_cuda(fmt):
+    """The census's own device, at the real shape: encode, decode, price.
+
+    The CPU legs above prove the identity at a small 128-column unit; this one
+    runs the unit the census will actually encode, on the device it will
+    encode it on, and checks the decoded artifact comes back at its shape.
+    """
+    from tessera.unit_artifact import read_unit_artifact
+
+    from prismaquant.tessera_formats import parse_tessera_format_name
+    from prismaquant.tessera_render import _grid_for
+
+    family, rung = parse_tessera_format_name(fmt)
+    torch.manual_seed(0)
+    weight = torch.randn(*KDA_GATE, device="cuda", dtype=torch.bfloat16)
+    unit = encode_linear(
+        weight, grid=_grid_for(family), q256=int(rung), name=fmt, verify=True
+    )
+    breakdown = tessera_tensor_payload_breakdown(
+        KDA_GATE, family=family, body_rate_q256=int(rung)
+    )
+    assert unit.exact_bytes == breakdown["payload_bytes"], fmt
+    decoded = read_unit_artifact(unit.blob, device="cuda")
+    assert tuple(decoded.shape) == KDA_GATE, fmt
