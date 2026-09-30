@@ -74,6 +74,7 @@ import time
 import torch
 
 from .file_identity import file_stat_signature
+from .source_read_plan import safetensors_prefix_length
 from .residency_map import RANGE_HIT, RANGE_UNCOVERED, residency_resolver
 from .staged_tier_policy import (
     StagedRangeNotLanded,
@@ -744,12 +745,10 @@ def _cuts(offset: int, count: int, chunk: int) -> list[tuple[int, int]]:
 def _read_shard_header(path: str) -> tuple[dict, int, int]:
     """The shard's header, its payload base, and the declared file's length.
 
-    The 8-byte little-endian length prefix and JSON header ``safetensors``
-    itself reads, under the bounds
-    ``layer_streaming._advise_consumed_safetensors_pages`` applies to the same
-    bytes. The parse is repeated there rather than shared because that function
-    is on the install hot path and this change has to stay expressible as
-    minimal source hunks for the joint run's closed source transition.
+    Prefix decode and bounds use the source-read-plan owner. This reader
+    keeps its descriptor acquisition, regular-file fence, exact body-length
+    and JSON-object checks, refusal messages, and finally-close contract;
+    the best-effort consumed-page advice reader has a different policy.
     """
     handle = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
     try:
@@ -757,11 +756,10 @@ def _read_shard_header(path: str) -> tuple[dict, int, int]:
         if not stat.S_ISREG(info.st_mode):
             raise ValueError("source shard is not a regular file")
         raw = os.pread(handle, 8, 0)
-        if len(raw) != 8:
-            raise ValueError("source shard has no safetensors header length")
-        header_bytes = int.from_bytes(raw, "little")
-        if not 0 < header_bytes <= min(MAX_HEADER_BYTES, info.st_size - 8):
-            raise ValueError("source shard header length is out of range")
+        header_bytes = safetensors_prefix_length(
+            raw, info.st_size, max_bytes=MAX_HEADER_BYTES,
+            short_error="source shard has no safetensors header length",
+            range_error="source shard header length is out of range")
         blob = os.pread(handle, header_bytes, 8)
         if len(blob) != header_bytes:
             raise ValueError("source shard header is shorter than it declares")
