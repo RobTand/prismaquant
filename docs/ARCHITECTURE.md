@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (Refs PQ #1247, `sol/issues-pq-5`):
+`_prepare_file_read_bound` checks each distinct render path once per call, in
+first-seen order, instead of once per cell sharing that path. It still reads
+current file sizes on every call and refuses a missing render or a maximum
+outside the declared PWC read-buffer budget. This is local metadata deduplication,
+not a new weight cache, preloader or persisted file-size cache. Preparation
+concurrency, body reads, format/serving bytes, gates, pin and stage graph are
+unchanged. CPU regression and controlled-profile evidence do not establish
+#1247's representative NFS preparation/runtime acceptance. The controlled CPU
+regression, before/after profiles and both-Spark telemetry are recorded in
+[the dated evidence](results/2026-09-30_render_read_bound_cpu.md).
+
 Re-stamped 2026-09-30 (PQ #1794, Refs #1087, `sol/pq-stageb-4`):
 The explicitly selected research constructor policy
 `StageBReplaySpill(scatter_reads=True)` coalesces physically adjacent slot
