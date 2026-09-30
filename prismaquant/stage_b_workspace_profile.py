@@ -32,7 +32,6 @@ a lower bound.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import statistics
@@ -40,6 +39,7 @@ import threading
 import time
 from pathlib import Path
 
+from .digests import bytes_sha256hex
 from .io_spans import MemAvailableFloor, PeriodicSampler, mem_available_bytes
 
 PROFILE_ENV = "PRISMAQUANT_STAGE_B_WORKSPACE_PROFILE"
@@ -335,7 +335,7 @@ def write_profile(path, profile):
                       default=str) + "\n").encode()
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     atomic_write_bytes(Path(path), raw)
-    return hashlib.sha256(raw).hexdigest()
+    return bytes_sha256hex(raw)
 
 
 def profile_capture_workspace(request, *, storage, batches, layer, run_group, observed,
