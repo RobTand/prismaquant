@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1843, step 1 of #1842): the Tessera campaign
+takes `--allow-pinned` (the allocator's grammar) and `--pinned-roster-only`,
+so a census can name a scoped roster of profile-pinned Linears (GLM-5.3
+attention) without unpinning them for every run. The census records the lift
+in an optional `pinned_roster` block, and `load_calibration_census` refuses a
+census taken under another lift. Unset, census bytes and checkpoint
+identities are unchanged; no default, allocation, export or serving gate
+changes. See the source-scope section on scoped rosters.
+
 Re-stamped 2026-09-30 (PQ #1837): `glm5_next` declares the three attention
 fused groups its construction runtime loads (image `487ecf187`,
 `load_weights` stacked params): `in_proj_qkvbfg_a`, `fused_qkv_a_proj` and
@@ -5966,6 +5975,25 @@ snapshot equals the MTP loader's bytes, both runners satisfy the protocol,
 and a real two-phase tiny capture prices the shared expert and the routed
 stack in one row) and `tests/test_tessera_campaign_fanout.py` (the derived
 draw).
+
+**Scoped rosters of pinned Linears (PQ #1843, step 1 of #1842).** A source
+scope reads a layer the body does not run; a scoped roster prices Linears the
+body runs but the profile pins (GLM-5.3 attention). `campaign_roster`
+(`tessera_campaign.py`) owns the campaign's non-expert roster. Without flags it
+is the roster the campaign always built. `--allow-pinned TOKENS` lifts a
+profile-pinned Linear whose name contains a token, with the allocator's
+grammar and `token in qname` semantics (`fixed_head.parse_allow_pinned`), so
+the census and the allocation that reads it spell the lift the same way.
+`probe_linear_exclude_extra` matches stay excluded, as in the allocator.
+`--pinned-roster-only` keeps only the lifted Linears; the unpinned body and
+the expert population leave the roster. A token that lifts nothing refuses.
+The census records `pinned_roster` (`prismaquant.tessera_campaign.pinned_roster.v1`:
+tokens, mode, lifted names), and `load_calibration_census` refuses a census
+taken under another lift. Unset, both flags leave the identity settings, so
+body identities do not change. The GLM attention roster keeps the DSA indexer
+pinned: `Glm5NextTextIndexer.forward` is `@torch.no_grad` and only selects
+top-k indices, so it has no AURA cotangent. Gate:
+`tests/test_tessera_campaign_pinned_roster.py`.
 
 Re-stamped (2026-09-25, `claude/dedup-gridbook-move-1304`) for **moving the
 live helpers out of the retired codebook lane's modules** (PQ #1304, P2, part
