@@ -59,6 +59,7 @@ import gzip
 import json
 import os
 import shutil
+import stat
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -254,7 +255,11 @@ def _binding_documents(roots: Iterable, *, skip: Path):
             if path.is_symlink():
                 raise RetirementRefused(f"the binding document {path} is a symlink")
             try:
-                if path.stat().st_size > BINDING_MAX_BYTES:
+                metadata = path.stat()
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise RetirementRefused(
+                        f"the binding document {path} is not a regular file")
+                if metadata.st_size > BINDING_MAX_BYTES:
                     raise RetirementRefused(
                         f"the binding document {path} exceeds {BINDING_MAX_BYTES} bytes")
                 opener = gzip.open if path.name.endswith(".gz") else open

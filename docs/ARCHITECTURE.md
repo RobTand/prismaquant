@@ -143,6 +143,10 @@ qualification and default promotion remain under #1367. GPU profiling is HELD; n
 claim follows from the CPU ordering tests. No export bytes, pin, format menu,
 ship gate or stage graph changes.
 
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the binding proof also
+refuses non-regular documents before opening them, so a named pipe cannot
+block the scan waiting for a writer. Retirement targets are unchanged.
+
 Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): Stage A retirement's
 negative binding proof refuses unreadable, symlinked, malformed or oversized
 binding documents and directory-scan errors. Gzip decoding is bounded by the
@@ -3963,8 +3967,8 @@ PrismaBuild action, checks everything before it removes anything:
 - no JSON document under the declared `--binding-root`s names a path in the
   run's adjoint space, or the digest of its chain state, receipt or any
   checkpoint. At least one root is required. The negative proof refuses an
-  unreadable directory, symlinked binding, malformed JSON/gzip document, or
-  document above the 64 MiB limit (including decoded gzip bytes). It never
+  unreadable directory, symlinked or non-regular binding, malformed JSON/gzip
+  document, or document above the 64 MiB limit (including decoded gzip bytes). It never
   skips such a document as evidence that no consumer exists. The retiring
   run's own subtree remains excluded from the consumer scan (PQ #1088).
 
