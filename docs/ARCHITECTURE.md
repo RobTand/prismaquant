@@ -28,6 +28,21 @@ seal is introduced, weakened or bypassed. Reader-deadline source references
 are refreshed after #1802; load-phase grace arithmetic, runtime behavior,
 production defaults and all serving/export gates are unchanged.
 
+Re-stamped 2026-09-30 (Refs PQ #1295, `sol/issues-pq-7`): bounded non-stream
+PWC file loads (`prefetch` and lazy `get`) request the existing IO engine's
+sealed buffer and reuse the stream's private-mmap decoder. The engine hashes
+and seals the read once, closes its descriptor after decode, and leaves the
+tensor's private mapping alive. Existing digest, tier, file-signature, archive
+and mutation fences remain. Unbounded legacy reads retain their prior policy.
+This is not a new cache, loader pool, numerical method or format/serving byte
+change. Other non-stream callers remain #1295 work. The
+[bounded-PWC CPU profile](results/2026-09-30_pwc_sealed_cpu.md) records matched
+fixtures, before/after cProfile and process-memory samples, and aligned Netdata
+on both Sparks and the test worker. The old fixture did not reproduce retained
+anonymous memory after drop; sparse telemetry and different workers preclude
+an isolated throughput claim. CPU fixtures alone do not establish production
+residency or GPU/NFS performance.
+
 Re-stamped 2026-09-30 (Refs PQ #1247, `sol/issues-pq-5`):
 `_prepare_file_read_bound` checks each distinct render path once per call, in
 first-seen order, instead of once per cell sharing that path. It still reads
@@ -1933,9 +1948,10 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   identity read at a window's first probe and at its close
   (`resident_render_identity`, PQ #1348) compares the tensor's version
   counter with the one recorded at load, so a `torch` write in place fails
-  the window before it commits. The PWC's other loads (`prefetch`,
-  a lazy `get`) and `tools/qualify_t4_overlay.py` keep the bytes path; they
-  are PQ #1295 consolidation items.
+  the window before it commits. Bounded non-stream PWC loads (`prefetch`,
+  a lazy `get`) now request this same sealed-buffer decoder. The direct
+  `tools/qualify_t4_overlay.py` caller still keeps the bytes path and remains
+  a PQ #1295 consolidation item.
 - **Release, not take.** A taken window's renders stay charged to the
   stream's budget until the consumer releases them (`ReadStream.release`,
   `:825`): on unified memory a stream that counted them free at the take
