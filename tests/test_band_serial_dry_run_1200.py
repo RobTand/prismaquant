@@ -64,7 +64,11 @@ def _layout(tmp_path, monkeypatch):
 def _run(dispatch, gateway, records, receipt_path, out, *extra, coverage=None):
     return dispatch.main(
         ["--records", str(records), "--output-root", str(out),
-         "--adjoint-receipt", str(receipt_path), *BAND, *extra],
+         "--adjoint-receipt", str(receipt_path),
+         # FakeGateway does not execute a producer or measure pilot counters.
+         # Record the existing override, including for simulated real runs;
+         # production pilot admission is exercised by test_joint_dispatch_pilot.
+         "--force-unverified-pilot", *BAND, *extra],
         _gateway=gateway,
         # The fixture model has no checkpoint to plan sources from; the
         # coverage gate has its own tests (test_readset_coverage_1095).
@@ -118,6 +122,12 @@ def test_a_dry_run_publishes_no_handoff_template(tmp_path, monkeypatch, capsys):
     assert _run(dispatch, gateway, records, receipt_path, out) == 0
     submitted = band._by_id(gateway)
     assert sorted(submitted) == sorted(rows)
+    state = out / "layer-quanta" / dispatch.STATE_FILENAME
+    quanta = [event for line in state.read_text().splitlines()
+              if (event := json.loads(line))["event"] == "quantum-submitted"]
+    assert len(quanta) == 2
+    assert all(event["pilot_admission"]["mode"] == "override"
+               and event["pilot_admission"]["fanout"] == 2 for event in quanta)
     for quantum_id, row in rows.items():
         path = Path(row["handoff_template"])
         assert hashlib.sha256(path.read_bytes()).hexdigest() == \
