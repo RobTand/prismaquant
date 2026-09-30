@@ -151,3 +151,34 @@ verified result metadata and full Netdata series are retained as
 `pwc-sealed-netdata-before.json` and `pwc-sealed-netdata-after.json` under that
 artifact directory. The profile plan records the unchanged fixture and
 acceptance boundary in `pwc-sealed-profile-plan.md`.
+
+## Delivery verification update
+
+The source was rebased onto main
+`20f66d140fef208fc78a32f4dbbcbe54bf12bd91`; core/test head
+`31f2dcf043c24df5aee8a6b32272bbdefec9e5bc` then passed all nine files:
+PB action `ba0bb9567fd0ed4464affaf03b8091e6effc2a1a5f5fa758d899c2f657a706f6`,
+dl380g10, executed/rc0, **124 passed, zero failed/skipped**, 124 collected/ran,
+no reconciliation problems, 120.29 s pytest. CAS v3 receipt
+`7a5ed7487d513d7cdc37eda197f86140eda88c328e9af7ebeb5a5789e496240c`;
+29026-byte result SHA-256
+`856ac9abc0b36f732e142d4305b4ea856373834b7d2a5cef59b6dd945fb84846`.
+
+Three-module compile action
+`62298183dc460556b936849cfff57cb76f69d2dcee120ad36009530a9c488966`
+executed/rc0 on dl380g10; receipt
+`e24ebe86cae3b5bfd0b50078a05c464fb0eb1de459742db4808d50ddb3f5ce2d`;
+27-byte result SHA-256
+`7ed73160ccc8b883f82917d4047587809fee8060fc4460964e50094b70c9bc9b`.
+Public terminals, producer action/worker bindings and actual payload lengths
+and SHA-256 were independently checked. These checks do not verify the full
+worker attestation. The evidence-only appendix is a later documentation commit,
+not a claim that the earlier action included its own future receipt.
+
+Recipe and reconciled/evidence artifacts:
+`pwc-sealed-final-green.sh`, `pwc-sealed-final-green.json`,
+`pwc-sealed-final-compile.log`, `pwc-sealed-final-evidence.json`, under the
+campaign artifact directory above. Both clients independently checked the
+serve-window sentinel and used priority -10, one reserved CPU/native thread,
+the current b40-pinned x86 interpreter, 240 s tests/120 s compile deadlines,
+and 4 GiB tests/2 GiB compile. No GPU or model qualification was performed.
