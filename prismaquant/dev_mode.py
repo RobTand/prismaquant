@@ -43,12 +43,13 @@ modules that own them, and each one hands its comparison to
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from typing import Any
+
+from .digests import bytes_sha256hex
 
 #: The one environment variable. Read at the gates, never cached, so a
 #: subprocess or a container inherits it through the environment alone.
@@ -122,7 +123,7 @@ def _shown(value: Any) -> str:
         encoded = json.dumps(value, sort_keys=True, default=repr).encode()
     except (TypeError, ValueError):
         encoded = text.encode()
-    digest = hashlib.sha256(encoded).hexdigest()[:16]
+    digest = bytes_sha256hex(encoded)[:16]
     return f"{text[:_SHOWN_CHARS]}... ({len(text)} chars, sha256 {digest}...)"
 
 
