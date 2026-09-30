@@ -11,8 +11,11 @@ spends about 1.13 to 1.16 s inside sixteen ``torch.save`` calls and about
 fsync: that is serialisation and copying, not device latency, and none of it
 needs the GPU.
 
-This module hands those two writes to one bounded writer thread so they can run
-while the next batch encodes.  What it deliberately does **not** do:
+The campaign's default backend hands those writes to one bounded writer
+thread. An explicit ``submit_task=ENGINE.submit`` backend instead runs finite
+FIFO drains on the existing shared IO engine; it creates no additional pool
+or writer thread. Stage B's CPU slice exposes this backend without yet changing
+retained-window execution or production defaults. What this module does **not** do:
 
 * **It is not a second cache.**  A job calls the same
   ``_store_rendered_weight_entry`` and the same tmp-plus-``os.replace`` wire
@@ -43,8 +46,10 @@ Ownership and bounds:
   case: admitting it would mean the declared bound is not the bound, and the
   answer to a render that does not fit is a bigger budget, chosen by whoever
   is accounting for the memory.
-* One writer thread and a FIFO queue, so jobs run in submission order and
-  completions are reported in that order.  Recovery stays deterministic.
+* One active writer and a FIFO queue, so jobs and completions keep submission
+  order. A shared-backend publisher also bounds reserved, queued, running and
+  uncollected completion slots. Consumers collect completions before staging
+  another batch; an idle drain returns its worker. Recovery stays deterministic.
 
 Failure is closed.  When a job raises, the writer keeps the exception, discards
 everything queued behind it *without writing any of it*, and every later
@@ -60,6 +65,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
+from concurrent.futures import CancelledError, Future
 from dataclasses import dataclass
 from typing import Callable, Hashable
 
@@ -114,15 +120,35 @@ def _clear_failure_tracebacks(error: BaseException) -> None:
 
 
 class BoundedPublisher:
-    """One writer thread, a byte budget, and order-preserving completions."""
+    """Bounded FIFO publication with consumer-owned durable acknowledgements.
 
-    def __init__(self, *, budget_bytes: int, name: str = "tessera-publication"):
+    By default, retain the campaign's existing writer thread. ``submit_task``
+    selects a shared execution backend (``ENGINE.submit`` for Stage B). It
+    requires ``max_jobs`` and runs finite drains, never idle condition waits
+    on shared workers. The job bound includes uncollected completions, so
+    consumers must collect acknowledgements before requesting more slots.
+    """
+
+    def __init__(self, *, budget_bytes: int, name: str = "tessera-publication",
+                 submit_task: Callable[[Callable[[], None]], Future] | None = None,
+                 max_jobs: int | None = None):
         budget = int(budget_bytes)
         if budget <= 0:
             raise ValueError(
                 "a publisher needs a positive byte budget; the synchronous "
                 "path is no publisher at all, not a publisher of size zero")
+        if submit_task is not None and not callable(submit_task):
+            raise TypeError("publisher submit_task must be callable")
+        if max_jobs is not None and (type(max_jobs) is not int or max_jobs <= 0):
+            raise ValueError("publisher max_jobs must be a positive integer")
+        if submit_task is not None and max_jobs is None:
+            raise ValueError("a shared-backend publisher requires max_jobs")
         self._budget = budget
+        self._submit_task = submit_task
+        self._max_jobs = max_jobs
+        self._reserved_jobs = 0
+        self._task_active = False
+        self._tasks: set[Future] = set()
         self._cond = threading.Condition()
         self._queued: deque[PublicationJob] = deque()
         self._done: deque[Hashable] = deque()
@@ -138,24 +164,33 @@ class BoundedPublisher:
         # Daemon so an unhandled exception on the main thread cannot leave the
         # interpreter waiting on a writer nobody is going to drain.  The
         # ordered shutdown is :meth:`close`, which callers run from a finally.
-        self._thread = threading.Thread(target=self._run, name=name, daemon=True)
-        self._thread.start()
+        self._thread = None
+        if submit_task is None:
+            self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+            self._thread.start()
 
     # -- caller side --------------------------------------------------------
 
-    def reserve(self, nbytes: int) -> None:
+    def reserve(self, nbytes: int, *, jobs: int = 1) -> None:
         """Take room for bytes that do not exist yet, blocking until it fits.
 
-        The caller must follow a successful reserve with exactly one
-        :meth:`submit` of that size, or with :meth:`release`.
+        A single-job reservation is followed by one :meth:`submit` or
+        :meth:`release`. A batch reserves ``jobs`` slots before encoding,
+        submits those jobs, then releases unused bytes with ``jobs=0``.
+        Consume acknowledgements before requesting slots they still hold;
+        an uncollected completion deliberately retains its metadata credit.
         """
         charge = int(nbytes)
         if charge < 0:
             raise ValueError("cannot reserve negative bytes")
+        if type(jobs) is not int or jobs <= 0:
+            raise ValueError("a reservation needs a positive job count")
+        if self._max_jobs is not None and jobs > self._max_jobs:
+            raise PublicationError("one reservation exceeds the publisher job limit")
         if charge > self._budget:
             raise PublicationError(
                 f"one artifact of {charge} bytes does not fit a publication "
-                f"budget of {self._budget}; raise --publication-overlap-bytes "
+                f"budget of {self._budget}; raise the caller's byte ceiling "
                 "or publish synchronously. Admitting it would mean the "
                 "declared bound is not the bound.")
         with self._cond:
@@ -163,21 +198,37 @@ class BoundedPublisher:
             if self._closing:
                 raise PublicationError("publisher is closed; nothing more can be staged")
             waited = time.monotonic()
-            while self._charged + charge > self._budget:
+            while (self._charged + charge > self._budget
+                   or (self._max_jobs is not None
+                       and self._reserved_jobs + self._outstanding
+                       + len(self._done) + jobs > self._max_jobs)):
                 self._cond.wait()
                 self._raise_failure()
+                if self._closing:
+                    raise PublicationError("publisher is closed; nothing more can be staged")
             self._submit_blocked_seconds += time.monotonic() - waited
             self._charged += charge
             self._reserved += charge
+            if self._max_jobs is not None:
+                self._reserved_jobs += jobs
             if self._charged > self._peak_charged_bytes:
                 self._peak_charged_bytes = self._charged
 
-    def release(self, nbytes: int) -> None:
-        """Give back a reservation whose bytes were never staged."""
+    def release(self, nbytes: int, *, jobs: int = 1) -> None:
+        """Return unstaged credit; ``jobs=0`` returns a batch's leftover bytes."""
         charge = int(nbytes)
+        if charge < 0 or type(jobs) is not int or jobs < 0:
+            raise ValueError("cannot release negative bytes or job counts")
         with self._cond:
+            if self._failure is not None:
+                return  # failure already cancelled every reservation
+            if charge > self._reserved or (self._max_jobs is not None
+                                           and jobs > self._reserved_jobs):
+                raise PublicationError("release exceeds the unstaged reservation")
             self._charged -= charge
             self._reserved -= charge
+            if self._max_jobs is not None:
+                self._reserved_jobs -= jobs
             self._cond.notify_all()
 
     def submit(self, job: PublicationJob) -> None:
@@ -191,9 +242,25 @@ class BoundedPublisher:
                 raise PublicationError(
                     f"{charge} bytes were submitted against {self._reserved} "
                     "reserved; every charged job reserves before it stages")
+            if self._max_jobs is not None and self._reserved_jobs < 1:
+                raise PublicationError("every bounded job reserves its slot before staging")
             self._reserved -= charge
+            if self._max_jobs is not None:
+                self._reserved_jobs -= 1
             self._queued.append(job)
             self._outstanding += 1
+            if self._submit_task is not None and not self._task_active:
+                self._task_active = True
+                try:
+                    task = self._submit_task(self._run)
+                    if not isinstance(task, Future):
+                        raise TypeError("publisher submit_task must return a Future")
+                    self._tasks.add(task)
+                    task.add_done_callback(self._task_done)
+                    self._raise_failure()
+                except BaseException as exc:
+                    self._fail_locked(exc)
+                    self._raise_failure()
             self._cond.notify_all()
 
     def completed(self) -> list:
@@ -208,6 +275,7 @@ class BoundedPublisher:
         with self._cond:
             out = list(self._done)
             self._done.clear()
+            self._cond.notify_all()
             return out
 
     def drain(self) -> list:
@@ -220,10 +288,11 @@ class BoundedPublisher:
             self._raise_failure()
             out = list(self._done)
             self._done.clear()
+            self._cond.notify_all()
             return out
 
     def close(self) -> None:
-        """Publish what is queued, then stop the writer.
+        """Publish what is queued, then join owned execution tasks.
 
         The writer keeps taking jobs until the queue is empty, so a close on
         the way out of a failed run still lands the bytes that were already
@@ -235,7 +304,16 @@ class BoundedPublisher:
         with self._cond:
             self._closing = True
             self._cond.notify_all()
-        self._thread.join()
+            tasks = tuple(self._tasks)
+        if self._thread is not None:
+            self._thread.join()
+        else:
+            # Join only owned tasks, never shut down the shared executor.
+            for task in tasks:
+                try:
+                    task.result()
+                except BaseException:
+                    pass  # drain/failure is the error authority, not close
 
     def __enter__(self) -> "BoundedPublisher":
         return self
@@ -256,7 +334,7 @@ class BoundedPublisher:
     def stats(self) -> dict:
         """What the run charged and how long the encode thread waited."""
         with self._cond:
-            return {
+            result = {
                 "schema": SCHEMA,
                 "budget_bytes": int(self._budget),
                 "published": int(self._published),
@@ -265,6 +343,13 @@ class BoundedPublisher:
                 "publish_seconds": float(self._publish_seconds),
                 "failed": self._failure is not None,
             }
+            if self._submit_task is not None:
+                result.update(backend="shared", max_jobs=self._max_jobs,
+                              charged_bytes=self._charged,
+                              reserved_jobs=self._reserved_jobs,
+                              held_jobs=self._reserved_jobs + self._outstanding
+                              + len(self._done))
+            return result
 
     # -- writer side --------------------------------------------------------
 
@@ -274,12 +359,34 @@ class BoundedPublisher:
                 "a staged artifact was not published; nothing queued behind "
                 "the failure was written") from self._failure
 
+    def _fail_locked(self, error: BaseException) -> None:
+        """Cancel queued ownership before returning its staging credit."""
+        if self._failure is None:
+            _clear_failure_tracebacks(error)
+            self._failure = error
+        self._queued.clear()
+        self._charged = self._reserved = self._outstanding = self._reserved_jobs = 0
+        self._task_active = False
+        self._cond.notify_all()
+
+    def _task_done(self, task: Future) -> None:
+        """Surface dispatch cancellation/unexpected task failure to waiters."""
+        error = (CancelledError("publication task was cancelled")
+                 if task.cancelled() else task.exception())
+        with self._cond:
+            self._tasks.discard(task)
+            if error is not None:
+                self._fail_locked(error)
+
     def _run(self) -> None:
         while True:
             with self._cond:
-                while not self._queued and not self._closing:
+                while (not self._queued and not self._closing
+                       and self._submit_task is None):
                     self._cond.wait()
                 if not self._queued:
+                    self._task_active = False
+                    self._cond.notify_all()
                     return
                 job = self._queued.popleft()
             started = time.monotonic()
@@ -289,17 +396,7 @@ class BoundedPublisher:
                 _clear_failure_tracebacks(exc)
                 del job
                 with self._cond:
-                    if self._failure is None:
-                        self._failure = exc
-                    # Fail closed. Whatever was staged behind this job is
-                    # dropped unwritten, and its charge with it, so a caller
-                    # blocked on the budget wakes into the failure instead of
-                    # waiting on a writer that has stopped.
-                    self._queued.clear()
-                    self._charged = 0
-                    self._reserved = 0
-                    self._outstanding = 0
-                    self._cond.notify_all()
+                    self._fail_locked(exc)
                 return
             elapsed = time.monotonic() - started
             key, charge = job.key, int(job.charged_bytes)
