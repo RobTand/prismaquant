@@ -124,6 +124,11 @@ observed failures in a PB-managed retry. Remaining coverage is #1454; skips
 are not qualifications. No pipeline default,
 format, export bytes, runtime pin, serving gate, or GPU claim changed.
 
+Re-stamped 2026-09-30 (`sol/issues-pq-3`, Refs #1088): the negative binding
+proof uses the shared strict JSON reader to refuse duplicate members. A later
+member cannot hide an earlier binding, and refusals retain the document path.
+No deletion target, payload bytes or resource-reclamation policy changes.
+
 Re-stamped 2026-09-30 (PQ #1775, Refs #1367, `sol/pq-stageb-2`):
 `BoundedPublisher` exposes an explicitly selected shared-IO-engine backend.
 `submit_task=ENGINE.submit` requires positive byte and job ceilings and runs

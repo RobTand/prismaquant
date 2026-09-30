@@ -67,6 +67,7 @@ from typing import Iterable, Mapping
 
 from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publish_new_bytes
 from .digests import bytes_sha256hex
+from .schemas import strict_json_loads
 
 RETIREMENT_SCHEMA = "prismaquant.stage_a.retirement.v1"
 RETIREMENT_NAME = "stage-a-retired.json"
@@ -269,7 +270,9 @@ def _binding_documents(roots: Iterable, *, skip: Path):
                     raise RetirementRefused(
                         f"the binding document {path} exceeds {BINDING_MAX_BYTES} "
                         "decoded bytes")
-                document = json.loads(raw)
+                document = strict_json_loads(
+                    raw, duplicate=lambda key: ValueError(
+                        f"duplicate JSON member {key!r}"))
             except (OSError, EOFError, ValueError, zlib.error) as error:
                 raise RetirementRefused(
                     f"the binding document {path} cannot be read: {error}") from error
