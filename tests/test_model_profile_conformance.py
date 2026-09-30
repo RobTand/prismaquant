@@ -143,9 +143,14 @@ ROLE_COMPOSITE_FUSED_SOURCE_EXEMPT = {
 # exposes separate q/k/v Linears live, and the only qkv fusion evidence was
 # the checkpoint's `quantization_config.modules_to_not_convert` naming
 # `self_attn.qkv_proj` / `self_attn.fused_qkvbfg_a_proj`, names that appear in
-# no index key. That lead is still unattested — and still harmless, because
-# every fusable attention projection remains pinned (see `pinned_names`), so
-# no attention group can be split across formats.
+# no index key. Since 2026-09-30 (PQ #1837) the attention groups are attested
+# too, by direct read of the construction runtime's `load_weights`
+# stacked_params_mapping (image 487ecf187, vllm/models/glm5next/nvidia/
+# model.py:752-768): `in_proj_qkvbfg_a` <- q/k/v/b/f_a/g_a,
+# `fused_qkv_a_proj` <- q_a/kv_a_proj_with_mqa, `indexer.wk_weights_proj` <-
+# wk/weights_proj. The attention projections stay pinned (that runtime builds
+# them with quant_config=None); the declarations are what keeps a pricing
+# scope that unpins them from splitting one vLLM module across formats.
 UNATTESTED_FUSED_SOURCE_XFAIL: set[str] = set()
 
 FUSED_PROBE_NAMES = (
