@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
 
 import torch
+
+from .digests import bytes_sha256hex
 
 
 def _read_calibration_payload(path: Path, expected_sha256: str) -> bytes:
@@ -78,7 +79,7 @@ def _validate_calibration_draw(ids, provenance, *, artifact_sha256, n_samples, s
         raise ValueError("exact calibration token IDs exceed the nonnegative int32 identity domain")
     if not isinstance(provenance, dict):
         raise ValueError("exact calibration provenance must be an object")
-    draw_sha256 = hashlib.sha256(ids.to(torch.int32).numpy().tobytes()).hexdigest()
+    draw_sha256 = bytes_sha256hex(ids.to(torch.int32).numpy().tobytes())
     if (provenance.get("fit_ids_sha256") != draw_sha256
             or provenance.get("fit_tokens") != ids.numel()
             or provenance.get("nsamples") != n_samples
@@ -86,7 +87,7 @@ def _validate_calibration_draw(ids, provenance, *, artifact_sha256, n_samples, s
         raise ValueError("exact calibration input differs from declared draw provenance")
     return ids, {
         "schema": "prismaquant.calibration_input.v1", "artifact_sha256": artifact_sha256,
-        "calibration_sha256": hashlib.sha256(ids.contiguous().numpy().tobytes()).hexdigest(),
+        "calibration_sha256": bytes_sha256hex(ids.contiguous().numpy().tobytes()),
         "shape": list(ids.shape), "dtype": str(ids.dtype), "provenance": provenance,
     }
 
@@ -114,7 +115,7 @@ def load_calibration_input(path, *, expected_sha256, n_samples, seqlen):
         from .staged_lease import LeaseRefused
 
         raw = _read_calibration_payload(path, expected_sha256)
-        artifact_sha256 = hashlib.sha256(raw).hexdigest()
+        artifact_sha256 = bytes_sha256hex(raw)
         if artifact_sha256 != expected_sha256:
             raise LeaseRefused("calibration-staged-digest-divergent",
                                kind="integrity")
@@ -122,7 +123,7 @@ def load_calibration_input(path, *, expected_sha256, n_samples, seqlen):
         return _validate_calibration_draw(
             ids, provenance, artifact_sha256=artifact_sha256,
             n_samples=n_samples, seqlen=seqlen)
-    artifact_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    artifact_sha256 = bytes_sha256hex(path.read_bytes())
     if artifact_sha256 != expected_sha256:
         raise ValueError("exact calibration input artifact SHA256 mismatch")
     with safe_open(str(path), framework="pt", device="cpu") as stream:
@@ -137,7 +138,7 @@ def load_calibration_input(path, *, expected_sha256, n_samples, seqlen):
         ids, provenance, artifact_sha256=artifact_sha256,
         n_samples=n_samples, seqlen=seqlen)
     # Refuse a file replacement between its digest check and tensor loading.
-    if hashlib.sha256(path.read_bytes()).hexdigest() != artifact_sha256:
+    if bytes_sha256hex(path.read_bytes()) != artifact_sha256:
         raise ValueError("exact calibration input changed while loading")
     return ids, receipt
 
