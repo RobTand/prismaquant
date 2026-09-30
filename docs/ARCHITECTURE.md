@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-09-30 (PQ #1828, Refs #870): the opt-in
+`ProducedRenderPublication` binding reuses the existing boundary publication
+lifecycle and public PB owner/attempt checks. Its declared `renders` payload
+slot must support producer readback; invalid lane declarations refuse before
+instance admission. Render batch identity preserves the full Linear name and
+uses the weight writer's registry-canonical format spelling and the existing
+named digest profile, without a second ledger or publication implementation.
+[The CPU prerequisite contract](design/produced_render_binding_1828.md)
+keeps the PWC writer, produced reader bindings, mover round trip and integrated
+retirement as separate work. No production wiring, serialized bytes, numerical
+method, serving gate, runtime pin or default changes; #870 remains open.
+
 Re-stamped 2026-09-30 (Refs PQ #1247, `sol/issues-pq-5`):
 `_prepare_file_read_bound` checks each distinct render path once per call, in
 first-seen order, instead of once per cell sharing that path. It still reads

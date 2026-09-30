@@ -682,6 +682,10 @@ class BoundaryProducedPublication:
     #: A template that does not authorize it refuses at the first
     #: descriptor rather than at the mover.
     DEFAULT_SLOT = "boundary_entries"
+    # Optional lane constraints. Boundary publication keeps its existing
+    # read/write and write-only declarations; render publication narrows them.
+    REQUIRED_SLOT_CLASS: str | None = None
+    REQUIRES_READBACK = False
 
     def __init__(self, *, queue, template, instance, tier: str,
                  cas_root: str, slot: str | None = None,
@@ -693,6 +697,7 @@ class BoundaryProducedPublication:
         self.tier = str(tier)
         self.cas_root = str(cas_root)
         self.slot = str(slot or self.DEFAULT_SLOT)
+        self._validate_binding_template(template, self.slot)
         self.env = dict(os.environ) if env is None else dict(env)
         # Dev/fixture-only passthrough for the mover argv (e.g. ``--unpaced``
         # where no ZFS pacer exists); production stays empty.
@@ -712,6 +717,26 @@ class BoundaryProducedPublication:
         self._manifest_digests: dict[str, str] = {}
 
     # -- binding -----------------------------------------------------------
+
+    @classmethod
+    def _validate_binding_template(cls, template: Mapping, slot: str) -> None:
+        """Apply lane constraints before filing or constructing an instance.
+
+        The default boundary policy adds no restriction. A lane may require
+        its own payload slot and readback without copying this lifecycle.
+        """
+        if cls.REQUIRED_SLOT_CLASS is not None:
+            slots = template.get("slots")
+            spec = slots.get(slot) if isinstance(slots, Mapping) else None
+            if (slot != cls.DEFAULT_SLOT or not isinstance(spec, Mapping)
+                    or spec.get("class") != cls.REQUIRED_SLOT_CLASS):
+                raise BoundaryProducedBindingError(
+                    f"{cls.DEFAULT_SLOT} publication requires the declared "
+                    f"{cls.DEFAULT_SLOT!r} {cls.REQUIRED_SLOT_CLASS} slot")
+        if cls.REQUIRES_READBACK and template.get("write_only") is True:
+            raise BoundaryProducedBindingError(
+                f"{cls.DEFAULT_SLOT} publication cannot bind a write-only "
+                "template: the producer reads its published outputs")
 
     @classmethod
     def bind_from_admitted_owner(cls, *, queue_root: str | Path | None = None,
@@ -768,6 +793,7 @@ class BoundaryProducedPublication:
             raise BoundaryProducedBindingError(
                 f"the declared template authorizes no {wanted!r} slot: "
                 "Stage A's boundary entries have nowhere to be filed")
+        cls._validate_binding_template(template, wanted)
         try:
             claim_snapshot = pool_mod.read_claimed_record(queue, owner)
         except Exception as exc:
