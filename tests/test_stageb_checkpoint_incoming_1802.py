@@ -112,6 +112,14 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
     baseline_evidence = spill_fixture._evidence(campaign, layer, baseline)
     baseline_plane = snapshots[-1]
     snapshots.clear()
+    # Durable prices skip measurement, not the final backward/roll passes.
+    baseline_resume, state = spill_fixture._quantum(
+        campaign, monkeypatch, layer=layer, resume=True, **launch_kwargs)
+    assert not hasattr(state, "error"), repr(getattr(state, "error", None))
+    assert spill_fixture._evidence(campaign, layer, baseline_resume) == baseline_evidence
+    assert snapshots
+    baseline_resume_planes = list(snapshots)
+    snapshots.clear()
     spill_fixture._clear_output(campaign, layer)
     _enable(monkeypatch)
     candidate, state = spill_fixture._quantum(campaign, monkeypatch, layer=layer, **launch_kwargs)
@@ -120,13 +128,15 @@ def test_same_binding_cost_journal_and_final_plane_bytes(campaign, monkeypatch, 
     assert snapshots[-1] == baseline_plane
     if layer == 1:
         assert state.counters_block["handoff_incoming"]["source"] == "checkpoint_research"
-    # A fully validated journal avoids all incoming passes; default and research agree.
+    # Fully durable resume preserves the default final passes and operand bytes.
     snapshots.clear()
     resumed, state = spill_fixture._quantum(
         campaign, monkeypatch, layer=layer, resume=True, **launch_kwargs)
     assert not hasattr(state, "error"), repr(getattr(state, "error", None))
     assert spill_fixture._evidence(campaign, layer, resumed) == baseline_evidence
-    assert snapshots == []
+    assert snapshots == baseline_resume_planes
+    if layer == 1:
+        assert state.counters_block["handoff_incoming"]["source"] == "checkpoint_research"
     spill_fixture._clear_output(campaign, layer)
     # A real partial durable journal still consumes the whole original incoming
     # plane on its final pass, rather than treating already-priced units as finality.

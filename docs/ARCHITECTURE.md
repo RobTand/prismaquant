@@ -37,7 +37,8 @@ references and its existing bounded reader instead of populating the destination
 plane at the head. Later rolls and capture consume the newly produced plane.
 A chain-empty consumer requires one-pass spill and reads original checkpoint
 rows once during each probe's final pass, including when journal entries are
-resumed; a fully complete journal opens no incoming pass. Shared owner/pass
+resumed. A fully complete journal skips pricing, not the default final
+backward/roll passes or their incoming operands. Shared owner/pass
 states keep their verified small-file load, while destination reservation remains
 in the existing plane/cache machinery. Checkpoint and band-serial incoming paths
 share the finite probe-major stream, order checks, residency release and primary
@@ -49,8 +50,10 @@ Canonical destination names remain distinct from original owner references.
 Bad exact-entry bytes refuse before delivery, without repair or fallback. Arithmetic, formats,
 checkpoint/serving/export bytes, pin, defaults and stage graph are unchanged.
 This CPU-only contract is not #1366's profile acceptance: representative GPU
-before/after in-process profiles and both-Spark Netdata remain HELD. No speed,
-residency, peak-memory or unchanged reader-wait claim follows from these tests.
+before/after in-process profiles and both-Spark Netdata remain unperformed.
+Coordinator approval to run a measurement does not qualify this CPU contract.
+No speed, residency, peak-memory or unchanged reader-wait claim follows from
+these tests.
 
 Re-stamped 2026-09-30 (PQ #1794, Refs #1087, `sol/pq-stageb-4`):
 The explicitly selected research constructor policy
