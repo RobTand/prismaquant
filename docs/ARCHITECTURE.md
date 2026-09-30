@@ -43,6 +43,20 @@ Tessera's own package-profile API is additive upstream; adopting it in
 PrismaQuant requires a later separately reviewed pin. CPU framing evidence
 is not GPU or serving qualification.
 
+Re-stamped 2026-09-30 (PQ #1796, Refs #1314): opt-in
+`plan --experts-per-row N` emits independently retryable unsampled routed
+expert chunks under a v3 selection with the complete original group roster.
+It requires a pinned rate band and one round; sampling, seeds, research exact
+members and work-based packing are refused. The runtime derives each chunk
+from producer expert records and keeps the full group's legal menu grid while
+pricing only its complete expert subset. Existing demand and PB readset
+owners consume that subset; PB still owns placement. Merge requires the plan's
+complete, disjoint partition roster and exact row prices before producing the
+existing whole-group table/journal. Default, adaptive and sampled paths keep
+whole groups. This opt-in CPU delivery does not establish GPU numerical
+identity, residency, speed or production promotion. See
+[the partition contract](campaign_expert_partitions.md).
+
 Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
 `plan_reduced_schedule_repair` replays explicit research input history under a
 fixed declared experiment and round cap. Prior receipt continuity, monotonic
@@ -21842,7 +21856,17 @@ layers, canonical capture and encoder bounds; their anchor preparation reuses
 the completed capture without a source forward. Both branches retain their
 derived demand when the dispatcher partitions the rows.
 
-**Why the quantum is the fused anchor group.** The adaptive loop's round is per
+**Opt-in fixed-rate expert partitions (#1796, Refs #1314).**
+`--experts-per-row` subdivides an unsampled routed group only at a pinned
+`--rate-band r,r --max-rounds 1`. The v3 selection retains the complete group
+roster plus an explicit deterministic expert chunk. Runtime, own-row demand and
+plan-derived merge coverage share that contract; the full group's menu grid
+remains authoritative. Unsupported combinations fail before publication.
+The default and every adaptive/sampled group remain indivisible. CPU checks do
+not qualify GPU output identity or resident peak memory; the parent acceptance
+remains open. See [the partition contract](campaign_expert_partitions.md).
+
+**Why the default quantum is the fused anchor group.** The adaptive loop's round is per
 `(group, family)`: a round adds one anchor to each surface still failing its
 gate, and the decision reads all of that family's anchors at once. Splitting
 the quantum by rung would put that decision outside the process that owns the

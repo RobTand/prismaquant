@@ -59,6 +59,7 @@ Run it on dl380g10 as rob::
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import queue
@@ -73,7 +74,15 @@ POOL_BASE = "/storage_pool/shared/tessera-measurements/glm-canonical-census-2026
 QUEUE = "/mnt/shared/prismabuild-fleet/pb-queue"
 CAS_REQUESTS = "/mnt/shared/prismabuild-fleet/cas/requests"
 
-UNITS_RE = re.compile(r"units/(row-\d{4})\.json")
+UNITS_RE = re.compile(r"units/(row-\d{4}(?:-p\d{4})?)\.json")
+# This owner is deliberately torch-free: manifest construction runs outside
+# the GPU image and must not import the package's runtime/registry bootstrap.
+_selection_spec = importlib.util.spec_from_file_location(
+    "tessera_campaign_selection_contract",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "prismaquant",
+                 "tessera_campaign_selection.py"))
+_selection_owner = importlib.util.module_from_spec(_selection_spec)
+_selection_spec.loader.exec_module(_selection_owner)
 ARC_PATH = "/proc/spl/kstat/zfs/arcstats"
 RECORD_SIZE = 1 << 20
 
@@ -280,7 +289,12 @@ class Campaign:
                 units = _json(row["units"])
             if units is None:
                 raise SystemExit(f"unreadable units: {row['units']}")
-            names = [m for g in units["groups"] for m in g["members"]]
+            if units.get("schema") == _selection_owner.UNITS_SCHEMA_V3:
+                _selection_owner.validate_unit_selection(units, path=row["units"])
+                names = list(_selection_owner.selection_priced_units(units)[0])
+            else:
+                # Preserve the legacy prewarm policy outside this opt-in lane.
+                names = [m for g in units["groups"] for m in g["members"]]
             # prefetch_capture sorts before it reads; warm in the same order.
             self._units_cache[row_id] = sorted(names)
         return self._units_cache[row_id]
