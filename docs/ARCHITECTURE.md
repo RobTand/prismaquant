@@ -57,6 +57,16 @@ whole groups. This opt-in CPU delivery does not establish GPU numerical
 identity, residency, speed or production promotion. See
 [the partition contract](campaign_expert_partitions.md).
 
+Re-stamped 2026-09-30 (Refs PQ #1492, `sol/issues-pq-4`): the selected-cache
+CLI can explicitly forward `--head-progress-phase` and
+`--head-progress-allowance-s` to the existing head-walk progress cadence.
+Both inputs are required together; blank phases and non-finite/non-positive
+allowances refuse before loading. The submitting PB action must already declare
+that phase and allowance. Absent options retain the no-phase default; this
+reader does not infer or declare a synthesis phase. Existing head checkpoint,
+current-byte verification, manifest bytes and worker limits remain unchanged.
+This CPU wiring is not NFS-throughput or GPU qualification.
+
 Re-stamped 2026-09-30 (PQ #1776, Refs #495, `sol/pq-tessera-5`):
 `plan_reduced_schedule_repair` replays explicit research input history under a
 fixed declared experiment and round cap. Prior receipt continuity, monotonic
