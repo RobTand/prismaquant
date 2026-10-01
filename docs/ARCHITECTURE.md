@@ -11,6 +11,18 @@ CPU fixtures establish contracts only, not GPU occupancy or a speedup;
 real Stage A/profile evidence and the PACT startup leg remain in #1663.
 No numerical, checkpoint-byte, pipeline default, pin, wire or ship-gate change.
 
+Re-stamped 2026-10-01 (PQ #1314): one complete unsampled GLM routed group
+at E4M3_K1/R896 is now qualified against all 36 fixed-rate p8 chunks. Existing
+canonical H/reference and journal owners reconcile identical 864-unit costs,
+identities and non-timing anchors; producer-verified actual wire bytes match
+for all 864 blobs. Missing/duplicate actual chunks and damaged wire controls
+refuse after a completed positive. Action-cgroup peaks and terminal/CAS/log
+records were inspected. This does not claim a full model campaign, another
+rate/family, staged residency, performance, serving promotion or a new default.
+Adaptive and sampled groups remain indivisible. See the
+[bounded qualification record](results/2026-10-01_fixed_rate_expert_partition.md)
+for immutable inputs, commands, receipts and limitations.
+
 Re-stamped 2026-10-01 (PQ #1870, declaration slice of #1100): the streaming
 source plan names whole config/index bootstrap reads separately from shard
 header prefixes. The existing quantum compiler projects these metadata reads
