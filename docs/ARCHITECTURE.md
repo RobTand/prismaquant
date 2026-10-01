@@ -13,6 +13,12 @@ The report context records `claim_scope` and `visual_roots`. Existing trace,
 unclaimed-operand and decided-but-unpriced gates are not weakened. Real traced
 CPU operand fixtures cover all five declared visual families, merger operands,
 explicit/default text controls, visual profile pins and CLI scope/refusal.
+GLM's existing source-format visual probe exclusion still refuses its full-gamut
+pricing/export verdict; the scope flag and trace override cannot waive it.
+The walk verdict's serialized `refused` flag now agrees with its final policy
+decision, including the pre-existing trace-only exception. Refusal kinds and
+override evidence remain recorded; claim/unpriced refusals are never excused.
+This corrects provenance, not gate authority or the allowed exception policy.
 This is discovery, not complete multimodal capture, empirical pricing, encoded
 wire output or native serving qualification. No production pipeline/default,
 format, cost equation, cache/prefetch, pin, wire, kernel or numerical change.

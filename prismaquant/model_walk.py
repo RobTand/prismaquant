@@ -1671,7 +1671,6 @@ def evaluate_walk_gate(
     if trace_status != TRACE_COMPLETE:
         kinds.append(_KIND_TRACE_INCOMPLETE)
 
-    base["refused"] = bool(kinds)
     base["refusal_kinds"] = list(kinds)
 
     if not kinds:
@@ -1693,6 +1692,7 @@ def evaluate_walk_gate(
             refused = True
 
     # Policy decides first; one serialization boundary projects its verdict.
+    base["refused"] = refused
     return WalkGateVerdict(
         provenance=base,
         refused=refused,
