@@ -58,8 +58,8 @@ PREFETCH = 2
 
 
 @pytest.fixture(autouse=True)
-def _offline_tier_policy():
-    """Run outside campaign scope with no staged-tier policy (PQ #845)."""
+def _offline_tier_policy(installed_client_sdk):
+    """Offline gateway fixture; PB calls bind the reviewed installed SDK."""
     from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
     deactivate_staged_tier_policy_for_tests()
     yield

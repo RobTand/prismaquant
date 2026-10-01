@@ -6,12 +6,12 @@ code. New tests only; no production file is edited here.
 - Real PQ producer: ``joint_layer_quanta.layer_quanta`` on a two-layer
   fixture whose manifest entries point at real tmp safetensors/plain
   files with real digests (one manifest end to end, no remap).
-- Real PB parsing: published PB ``core`` manifest validation and
-  ``storage_tiers`` phase ranges from the immutable published generation
-  (see fullstack_pb_generation). Slice phase tables carry chunk phases
+- Real PB parsing: pinned PB ``core`` manifest validation and
+  ``storage_tiers`` phase ranges from the immutable shared source generation
+  (see fullstack_pb_generation). Staged source is not active-fleet evidence. Slice phase tables carry chunk phases
   only (producer #852); the storage legs move the real per-layer slices
   under their own wire digests -- no substitute manifest anywhere.
-- Real movers: published ``stage_move`` (each slice in two entry-aligned
+- Real movers: pinned ``stage_move`` (each slice in two entry-aligned
   legs under distinct keys, including a nonzero source-offset
   ``.pbrange`` range) and ``ram_promote`` with epoch into tmp tiers (the
   wire blob on layer-000, the payload range on layer-001); each slice's
@@ -80,9 +80,15 @@ STAGE_TIER = "prismabuild-stage:dl380g10"
 RAM_TIER = "ram:dl380g10"
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
+def _reader_sdk_bound():
+    with pbgen.reader_sdk_bound():
+        yield
+
+
+@pytest.fixture(scope="module")
 def pb():
-    """PB imports belong to this test, matching conftest's import restoration."""
+    """One pinned SDK3 package for the module's real mover fixtures."""
     require_prismabuild_sdk()
     info = pbgen.require_paths()
     import prismabuild.core as core  # noqa: E402

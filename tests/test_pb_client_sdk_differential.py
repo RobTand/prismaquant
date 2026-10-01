@@ -18,7 +18,10 @@ The OLD path means one of two things:
   production path.
 
 Refusal *reasons* may differ where PB's validator now words the refusal
-(residency maps); the decision and the adopted state may not.
+(residency maps). SDK3 also retains PB #1267's deliberate fail-closed
+exception: a present-but-empty claimed row is refused, while an absent
+claim remains None; pool._read_json alone does not make that distinction.
+The corpus checks that exception explicitly rather than restoring SDK1.
 """
 from __future__ import annotations
 
@@ -142,7 +145,12 @@ def test_claimed_record_reads_like_pool_read_json(client, tmp_path):
         assert queue.item_path(pool.CLAIMED, key) == tmp_path / "queue" / "claimed" / f"{key}.json"
         old = _outcome(lambda: pool._read_json(queue.item_path(pool.CLAIMED, key)))
         new = _outcome(lambda: client.read_claimed_record(queue, key))
-        assert new == old, (label, old, new)
+        if label == "empty":
+            assert old == ("ok", None), old
+            assert new[0] == "PoolContractError", new
+            assert "claimed record is empty (torn write or broken mount?)" in new[1]
+        else:
+            assert new == old, (label, old, new)
 
 
 def _old_sealed_row(queue_root: str, action_key: str):
