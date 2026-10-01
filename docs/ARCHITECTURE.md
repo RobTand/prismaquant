@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1852, Refs #275): local single-file safetensors
+checkpoints derive complete tensor-to-file coverage from the validated file
+header, including auxiliary names absent from the live decoder. An existing
+Hugging Face index remains authoritative. The shared streamed identity builder
+records this map in the existing identity schema, allowing the unchanged
+complete-source adoption gate to authenticate a legitimate single-file source.
+Malformed headers, missing canonical tensors, source mutation and resealed
+coverage omissions still refuse. Header inspection does not materialize
+tensors, synthesize a checkpoint index or introduce a rendered-weight cache.
+Checkpoint payload bytes, defaults, runtime pins, allocation and export/serving
+gates are unchanged. This CPU source-integrity prerequisite is not a model,
+census, capture or native-serving qualification. Gate:
+`tests/test_single_file_streamed_source_proof.py`.
+
 Re-stamped 2026-09-30 (Refs PQ #1295): the retained-render qualifier requests
 the existing sealed `io_engine.read_file` buffer and reuses the PWC private-mmap
 decoder. It closes the descriptor after decoding, including decoder failure;

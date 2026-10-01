@@ -5972,8 +5972,10 @@ def _local_checkpoint_shards(
 
     The streaming model omits auxiliary decoder namespaces it does not execute
     (DSv4's MTP towers are one example), while the exporter copies those
-    tensors byte-verbatim.  The Hugging Face index is therefore the authority
-    for complete source-byte coverage, not only ``context.weight_shard``.
+    tensors byte-verbatim.  The Hugging Face index, when present, is the
+    authority for complete source-byte coverage.  A single-file checkpoint
+    instead uses every tensor name in its validated safetensors header, not
+    only ``context.weight_shard``.  Neither path reads tensor payloads here.
     """
     root = Path(source_model)
     if not root.is_dir():
@@ -6025,7 +6027,22 @@ def _local_checkpoint_shards(
         return dict(sorted(canonical_map.items())), shard_paths
     single = root / "model.safetensors"
     if single.is_file():
-        return None, [single.resolve()]
+        from safetensors import SafetensorError, safe_open
+
+        try:
+            with safe_open(str(single), framework="pt", device="cpu") as handle:
+                tensor_names = list(handle.keys())
+        except (OSError, SafetensorError) as exc:
+            raise RuntimeError(
+                f"streamed model identity cannot read safetensors header {single}"
+            ) from exc
+        if not tensor_names or any(
+            not isinstance(name, str) or not name for name in tensor_names
+        ):
+            raise RuntimeError(
+                f"streamed model identity requires non-empty tensor names in {single}"
+            )
+        return {name: single.name for name in sorted(tensor_names)}, [single.resolve()]
     return None, None
 
 
