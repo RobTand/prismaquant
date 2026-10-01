@@ -89,7 +89,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
-from .digests import text_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, text_sha256hex
 
 # 1.1 adds the packed-expert A-side vectors (``expert_*``). Additive: a 1.0
 # reader sees array keys it never asks for, and a 1.1 card whose probe predates
@@ -358,7 +358,7 @@ class CardProvenance:
     notes: str = ""
 
     def fingerprint(self) -> str:
-        payload = json.dumps(
+        payload = DIRECT_ASCII_SPACED_LAX.text(
             {
                 "model_id": self.model_id,
                 "calib_hash": self.calib_hash,
@@ -366,7 +366,6 @@ class CardProvenance:
                 "seq_len": self.seq_len,
                 "render_basis": self.render_basis.value,
             },
-            sort_keys=True,
         )
         return text_sha256hex(payload)
 
