@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (Refs PQ #1171, forward preparation slice): newly
+built Stage A forward group manifests carry the same complete head/forward
+read set and round metadata. Group execution samples remain in the existing
+package descriptors and action arguments, not the shared manifest identity.
+Head-only preparation and adjoint manifests are unchanged; existing sealed
+packages are not rewritten. Metadata objects remain independently owned.
+This establishes byte/digest equality in CPU fixtures only, not identical
+runtime tier/cuts, deployed shared namespaces, own-consumer interest egress,
+residency savings or GPU qualification. The public-runtime/two-group profile
+acceptance remains in #1171. No new cache/share registry, numerical method,
+format, export wire, runtime pin, pipeline stage or serving gate.
+
 Re-stamped 2026-10-01 (Refs #1921, CPU full-gamut discovery slice):
 `ModelProfile.walk_claim_rules(include_visual=True)` explicitly includes
 vision/merger Linear decisions in the existing discovery rules, without

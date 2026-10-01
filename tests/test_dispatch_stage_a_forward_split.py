@@ -119,7 +119,8 @@ def test_the_prep_stages_the_head_and_each_quantum_the_forward_walk(tmp_path):
         manifest, names = _phases(described["data_manifest"]["path"])
         assert names == ["head", *FORWARD]
         assert manifest["annotations"]["forward_split"] == {
-            "role": "quantum", "samples": samples, "n_batches": N_BATCHES, "group_size": 2}
+            "role": "quantum", "ranges": RANGES, "n_batches": N_BATCHES, "group_size": 2}
+        assert described["samples"] == samples
         assert described["source_bytes"] == sum(1000 * (index + 2)
                                                 for index in range(LAYERS))
     # Every quantum reads every layer's weights: the round reads them once each.

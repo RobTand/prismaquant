@@ -226,6 +226,15 @@ def round_manifests(original, loaded, *, through, ranges):
     return prep, quanta
 
 
+def _forward_group_manifests(original, *, forward, stamp, ordered):
+    """Keep execution partitions outside the complete forward read-set identity."""
+    return {pair: _derive(original, ["head", *forward], {},
+                          {**stamp, "role": "quantum",
+                           "ranges": [list(value) for value in ordered]},
+                          key="forward_split")
+            for pair in ordered}
+
+
 def forward_manifests(original, *, ranges, n_batches, group_size):
     """``(prep manifest, {(start, stop): quantum manifest})`` for a forward split.
 
@@ -250,10 +259,8 @@ def forward_manifests(original, *, ranges, n_batches, group_size):
     prep = _derive(original, ["head"], {},
                    {**stamp, "role": "prep", "ranges": [list(pair) for pair in ordered]},
                    key="forward_split")
-    quanta = {pair: _derive(original, ["head", *forward], {},
-                            {**stamp, "role": "quantum", "samples": list(pair)},
-                            key="forward_split")
-              for pair in ordered}
+    quanta = _forward_group_manifests(original, forward=forward, stamp=stamp,
+                                      ordered=ordered)
     return prep, quanta
 
 
@@ -430,7 +437,7 @@ def main(argv=None) -> int:
     if argv[:1] == ["forward"]:
         return forward_main(argv[1:])
 
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--original-manifest", required=True,
                         help="the source run's submitted Stage A data manifest")
     parser.add_argument("--original-manifest-sha256", required=True)
