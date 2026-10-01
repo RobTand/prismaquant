@@ -605,6 +605,56 @@ def _is_visual_linear(name: str) -> bool:
     return bool(_VISUAL_PREFIX_RE.match(name))
 
 
+def _prepare_visual_allocations(
+    stats: dict,
+    costs: dict,
+    candidates: dict[str, list[Candidate]],
+    *,
+    sensitivity: str,
+    visual_format: str,
+    fixed_format_assignment: dict[str, str],
+    fixed_stats: dict,
+    fixed_chosen_candidates: dict[str, Candidate],
+    build_visual_candidates: Callable[[dict, dict], dict[str, list[Candidate]]],
+) -> tuple[dict, dict, dict[str, list[Candidate]]]:
+    """Own visual fixed/decision partitioning before allocator aggregation."""
+    visual_names = sorted(n for n in stats if _is_visual_linear(n))
+    visual_aux_candidates: dict[str, Candidate] = {}
+    if visual_names:
+        visual_cost_names = [name for name in visual_names if name in costs]
+        if visual_cost_names and sensitivity == "fisher":
+            visual_candidates = build_visual_candidates(
+                {name: stats[name] for name in visual_cost_names},
+                {name: costs[name] for name in visual_cost_names},
+            )
+            visual_aux_candidates = {
+                name: cand for name in visual_cost_names
+                if (
+                    cand := _find_candidate_for_format(
+                        visual_candidates, name, visual_format,
+                    )
+                ) is not None
+            }
+        fixed_format_assignment.update({name: visual_format for name in visual_names})
+        fixed_stats.update({name: stats[name] for name in visual_names})
+        fixed_chosen_candidates.update(visual_aux_candidates)
+        visual_names_set = set(visual_names)
+        stats = {name: value for name, value in stats.items() if name not in visual_names_set}
+        costs = {name: value for name, value in costs.items() if name not in visual_names_set}
+        candidates = {name: value for name, value in candidates.items() if name not in visual_names_set}
+        print(
+            f"[alloc] --visual-format={visual_format}: fixed "
+            f"{len(visual_names)} visual Linears as auxiliary to body "
+            "bpp/Δloss accounting"
+            + (
+                f" ({len(visual_aux_candidates)} measured cost rows tracked)"
+                if visual_aux_candidates else ""
+            ),
+            flush=True,
+        )
+    return stats, costs, candidates
+
+
 def _mark_weight_only_nvfp4_stats(
     stats: Mapping[str, Mapping[str, object]],
     profile,
@@ -3285,62 +3335,28 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             )
 
     visual_names = sorted(n for n in stats if _is_visual_linear(n))
-    visual_aux_candidates: dict[str, Candidate] = {}
-    if visual_names:
-        visual_cost_names = [name for name in visual_names if name in costs]
-        if visual_cost_names and args.visual_sensitivity == "fisher":
-            visual_stats = {name: stats[name] for name in visual_cost_names}
-            visual_costs = {name: costs[name] for name in visual_cost_names}
-            visual_candidates = build_candidates(
-                visual_stats,
-                visual_costs,
-                [fr.get_format(visual_format_canonical)],
-                calibrated_gains,
-                census_loo=census_loo,
-                source_manifest=source_manifest,
-                target_profile=target_profile,
-                mask_records=candidate_mask_records,
-                activation_pricing=activation_pricing,
-                context_by_unit=tessera_context_by_unit,
-            )
-            visual_aux_candidates = {
-                name: cand for name in visual_cost_names
-                if (
-                    cand := _find_candidate_for_format(
-                        visual_candidates,
-                        name,
-                        visual_format_canonical,
-                    )
-                ) is not None
-            }
-        fixed_format_assignment.update({
-            name: visual_format_canonical for name in visual_names
-        })
-        fixed_stats.update({name: stats[name] for name in visual_names})
-        fixed_chosen_candidates.update(visual_aux_candidates)
-        visual_names_set = set(visual_names)
-        stats = {
-            name: value for name, value in stats.items()
-            if name not in visual_names_set
-        }
-        costs = {
-            name: value for name, value in costs.items()
-            if name not in visual_names_set
-        }
-        candidates = {
-            name: value for name, value in candidates.items()
-            if name not in visual_names_set
-        }
-        print(
-            f"[alloc] --visual-format={visual_format_canonical}: fixed "
-            f"{len(visual_names)} visual Linears as auxiliary to body "
-            f"bpp/Δloss accounting"
-            + (
-                f" ({len(visual_aux_candidates)} measured cost rows tracked)"
-                if visual_aux_candidates else ""
-            ),
-            flush=True,
-        )
+    stats, costs, candidates = _prepare_visual_allocations(
+        stats,
+        costs,
+        candidates,
+        sensitivity=args.visual_sensitivity,
+        visual_format=visual_format_canonical,
+        fixed_format_assignment=fixed_format_assignment,
+        fixed_stats=fixed_stats,
+        fixed_chosen_candidates=fixed_chosen_candidates,
+        build_visual_candidates=lambda visual_stats, visual_costs: build_candidates(
+            visual_stats,
+            visual_costs,
+            [fr.get_format(visual_format_canonical)],
+            calibrated_gains,
+            census_loo=census_loo,
+            source_manifest=source_manifest,
+            target_profile=target_profile,
+            mask_records=candidate_mask_records,
+            activation_pricing=activation_pricing,
+            context_by_unit=tessera_context_by_unit,
+        ),
+    )
 
     # Text-only probes can omit the complete visual tower. Discover those
     # source-only Linears *before* Pareto records are built so every candidate
