@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from fleet_sdk import require_prismabuild_sdk
 from prismaquant import staged_lease
 
 COMMIT = "95a59051d48cda82eea7927f31870c6c862d7174"
@@ -17,6 +18,12 @@ def test_reviewed_reader_and_sdk_move_together():
 
 
 def test_real_sdk3_sealed_tree_is_the_production_resolver(monkeypatch):
+    # The sealed tree lives on the fleet's shared mount, so this test is
+    # fleet-only like every other PB SDK test: the hosted runner, which has
+    # no prismabuild distribution and no /mnt/shared, skips it through the
+    # one predicate tests/fleet_sdk.py owns (PQ #886, #1941). On a box with
+    # the SDK installed it runs, and a missing tree fails it loudly.
+    require_prismabuild_sdk()
     root = "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk3-20261001/" + COMMIT
     staged_lease.set_lease_helper_root(root)
     try:
