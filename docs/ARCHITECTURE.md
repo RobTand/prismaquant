@@ -12,6 +12,17 @@ graphs past `max_model_len` 2048 is not eager-equivalent (cause 2), and the
 lane's TP 1 reference script cannot serve the GLM-5.3 artifact. Description
 only: no default, stage, format, gate, runner, pin or printed recipe changes.
 
+Re-stamped 2026-10-01 (PQ #1859, scoped prerequisite for #870): the existing
+production-cache render-identity builder and reader refuse distinct canonical
+`qname|format` coordinates that share one legacy archive destination. The gate
+runs before sidecar/shard resume work; canonical format aliases of the same
+coordinate remain legal. It preserves the identity schema, filenames, Torch
+serialization and the render loop. Directory creation may already have occurred.
+This is not produced-render publication, global concurrent-writer ownership or
+a storage-aware archive bound; direct callers outside this identity gate and
+full writer/reader integration remain in #870. No numerical, format, runtime-pin,
+export or serving-gate change. Gate: `tests/test_render_cache_destination_identity.py`.
+
 Re-stamped 2026-10-01 (PQ #1852, Refs #275): local single-file safetensors
 checkpoints derive complete tensor-to-file coverage from the validated file
 header, including auxiliary names absent from the live decoder. An existing
