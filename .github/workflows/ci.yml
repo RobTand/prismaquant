@@ -104,6 +104,22 @@ jobs:
       - name: Install pinned Tessera
         run: python -m pip install --no-deps .ci/tessera
 
+      # The PrismaBuild SDK the staged-lease tests inject
+      # (staged_lease.inject_installed_sdk_for_tests) must be a non-editable
+      # Git install at PB_READER_LEASE_PIN_COMMIT, the pin pbtest's guard
+      # also reads. RobTand/prismabuild is public and stdlib-only, so
+      # --no-deps installs all of it (#1941).
+      - name: Resolve PrismaBuild development pin
+        id: pb-pin
+        run: |
+          pb_commit="$(python tools/resolve_prismabuild_dev_pin.py)"
+          printf 'commit=%s\n' "$pb_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned PrismaBuild SDK
+        run: >-
+          python -m pip install --no-deps
+          "prismabuild @ git+https://github.com/RobTand/prismabuild.git@${{ steps.pb-pin.outputs.commit }}"
+
       # CPU torch explicitly: the default PyPI wheel drags a full CUDA stack
       # (~2.5 GB of runner disk and minutes of download) that no test here can
       # use. Installed first so the project's own `torch>=2.6` is satisfied and
