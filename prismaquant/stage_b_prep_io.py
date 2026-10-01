@@ -34,12 +34,11 @@ did, so only created files enter this action's batches.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
-from .digests import bytes_sha256hex, text_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, text_sha256hex
 
 #: The template slot every Stage B preparation output is filed under.
 PREPARATION_SLOT = "stage_b_metadata"
@@ -421,7 +420,7 @@ def build_preparation_template(*, metadata_root: str | os.PathLike, tier: str,
                                "temp_max_bytes": payload_max_bytes},
             "working_demands": {str(tier): {"minimum_gib": 0, "window_gib": 0}},
             "permitted_tiers": [str(tier)], "write_only": True}
-    digest = text_sha256hex(json.dumps(body, sort_keys=True))[:16]
+    digest = text_sha256hex(DIRECT_ASCII_SPACED_LAX.text(body))[:16]
     return {**body, "template_id": f"{PREPARATION_TEMPLATE_PREFIX}-{digest}"}
 
 

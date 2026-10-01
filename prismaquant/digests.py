@@ -7,7 +7,12 @@ spelling here, and every site that hashes, stores or compares with that
 recipe uses it. A site whose bytes differ from every profile keeps its own
 code; it is never moved onto a profile whose bytes are "close enough".
 
-JSON profiles, all with sorted keys and compact ``(",", ":")`` separators:
+JSON profiles, all with sorted keys. Separators are compact ``(",", ":")``
+unless the profile states otherwise:
+
+- ``DIRECT_ASCII_SPACED_LAX``: default-spaced ``(", ", ": ")`` separators,
+  ``ensure_ascii=True``, ``allow_nan=True`` and no fallback serializer. This
+  is direct JSON, not a round trip; its inherited spaces are identity bytes.
 
 - Round trip, UTF-8, strict (``canonical_json``, ``canonical_json_bytes``,
   ``canonical_json_sha256``, ``canonical_json_sha256_normalized``). The value
@@ -222,18 +227,22 @@ def canonical_json_sha256_normalized(value: object, *, where: str) -> str:
 
 @dataclass(frozen=True)
 class JsonProfile:
-    """One direct JSON encoding: sorted keys, compact separators, these options."""
+    """One direct JSON encoding: sorted keys and exactly these options.
+
+    Separators default to compact; a spaced profile must name its own pair.
+    """
 
     name: str
     ensure_ascii: bool
     allow_nan: bool
     default: Callable[[object], object] | None = None
+    separators: tuple[str, str] = (",", ":")
 
     def _encoder(self) -> json.JSONEncoder:
         """The stdlib encoder with exactly this profile's options."""
         return json.JSONEncoder(
             sort_keys=True,
-            separators=(",", ":"),
+            separators=self.separators,
             ensure_ascii=self.ensure_ascii,
             allow_nan=self.allow_nan,
             default=self.default,
@@ -263,6 +272,9 @@ DIRECT_ASCII_STRICT = JsonProfile("direct-ascii-strict", ensure_ascii=True, allo
 DIRECT_ASCII_LAX = JsonProfile("direct-ascii-lax", ensure_ascii=True, allow_nan=True)
 DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
     "direct-ascii-lax-default-str", ensure_ascii=True, allow_nan=True, default=str)
+DIRECT_ASCII_SPACED_LAX = JsonProfile(
+    "direct-ascii-spaced-lax", ensure_ascii=True, allow_nan=True,
+    separators=(", ", ": "))
 
 
 def canonical_pickle_bytes(value: object) -> bytes:
