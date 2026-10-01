@@ -143,14 +143,30 @@ def _manifest(root):
     return json.loads((Path(root) / "capture_manifest.json").read_text())
 
 
-@pytest.mark.parametrize("policy,ranges", [
-    ("legacy", "0:1,1:3"),
-    ("legacy", "0:1,1:2,2:3"),
-    ("shared-inputs-bounded-v1", "0:1,1:2,2:3"),
-])
-def test_glm_capture_chain_equals_the_monolith_entry_for_entry(tmp_path, monkeypatch, policy, ranges):
-    """Prep, quanta and join publish the monolith's capture; each quantum hashes only what it reads."""
+def _assert_same_capture(expected_root, actual_root, *, what):
+    """Two published captures are the same manifest and the same bytes, entry for entry."""
+    expected, published = _manifest(expected_root), _manifest(actual_root)
+    assert published == expected, what
+    for name, entry in expected["entries"].items():
+        before = torch.load(Path(expected_root) / entry['path'], weights_only=True)
+        after = torch.load(Path(actual_root) / published['entries'][name]['path'], weights_only=True)
+        assert before.keys() == after.keys(), (what, name)
+        for key, value in before.items():
+            if isinstance(value, torch.Tensor):
+                assert torch.equal(value.view(torch.uint8), after[key].view(torch.uint8)), (what, name, key)
+            else:
+                assert value == after[key], (what, name, key)
+
+
+def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device):
+    """Prep, quanta and join publish the monolith's capture; each quantum hashes only what it reads.
+
+    The campaign places its model on CUDA whenever CUDA is available, so the
+    CPU case hides it and the CUDA case records the device of every boundary
+    tensor a quantum writes and of every one its successor reads.
+    """
     from prismaquant import capture_layer_chain as chain
+    from prismaquant import cost_streaming
     from prismaquant import tessera_calibration_cache as cache
     from prismaquant import tessera_campaign as campaign
     from test_glm5_next_streamed_forward_parity import _build_model
@@ -161,6 +177,8 @@ def test_glm_capture_chain_equals_the_monolith_entry_for_entry(tmp_path, monkeyp
                     f'(unset, and {pinned} is absent)')
     monkeypatch.setenv('TESSERA_REPO', str(producer))
     monkeypatch.setenv("PRISMAQUANT_TMPDIR", str(tmp_path / "staging"))
+    if device == "cpu":
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     torch.manual_seed(1885)
     source = tmp_path / "source"
     shards = _write_sharded_checkpoint(_build_model(_three_layer_config()).to(torch.bfloat16), source)
@@ -181,10 +199,16 @@ def test_glm_capture_chain_equals_the_monolith_entry_for_entry(tmp_path, monkeyp
     monolith = tmp_path / 'monolith'
     assert campaign.main([*capture, '--cache-dir', str(tmp_path / 'monolith-cache'),
                           '--capture-calibration-out', str(monolith)]) == 0
+    if device == "cuda":
+        # A control: a chain can only equal a monolith that equals itself.
+        again = tmp_path / 'monolith-again'
+        assert campaign.main([*capture, '--cache-dir', str(tmp_path / 'monolith-again-cache'),
+                              '--capture-calibration-out', str(again)]) == 0
+        _assert_same_capture(monolith, again,
+                             what="two monolithic CUDA captures differ: the forward is not repeat-exact")
 
     # Every whole-file source hash in the tree: the capture identity's and the
     # descriptor owner's (``sha256``) and the streamed identity's.
-    from prismaquant import cost_streaming
     hashed = []
 
     def spy(original):
@@ -196,6 +220,24 @@ def test_glm_capture_chain_equals_the_monolith_entry_for_entry(tmp_path, monkeyp
         return hash_file
     monkeypatch.setattr(cache, "sha256", spy(cache.sha256))
     monkeypatch.setattr(cost_streaming, "_file_sha256", spy(cost_streaming._file_sha256))
+
+    # Where each boundary tensor lives as a quantum writes it, and as its
+    # successor's frontier hands it to the forward (which moves it to the
+    # runner's device).
+    written, read = [], []
+    write = cost_streaming.StreamedBoundaryArtifacts.write
+
+    def recording_write(self, tensor, **kwargs):
+        written.append(tensor.device.type)
+        return write(self, tensor, **kwargs)
+    monkeypatch.setattr(cost_streaming.StreamedBoundaryArtifacts, "write", recording_write)
+    hidden_batches = chain._BoundaryFrontier.hidden_batches
+
+    def recording_hidden_batches(self):
+        for hidden in hidden_batches(self):
+            read.append(hidden.device.type)
+            yield hidden
+    monkeypatch.setattr(chain._BoundaryFrontier, "hidden_batches", recording_hidden_batches)
 
     root = tmp_path / 'chain'
     storage = {"schema": "prismaquant.aura.boundary_storage.v2", "capture_order": "layer_major",
@@ -229,24 +271,52 @@ def test_glm_capture_chain_equals_the_monolith_entry_for_entry(tmp_path, monkeyp
             before = json.loads(chain.fragment_path(root, *pairs[pairs.index((start, stop)) - 1])
                                 .read_text())["boundary"]
             assert before and all(Path(record["path"]).is_file() for record in before)
+    # Every interior boundary was written from the runner's device and read
+    # back by the next quantum; a silent CPU fallback fails the CUDA case here.
+    passed = (len(pairs) - 1) * len(tokens)
+    assert written == [device] * passed
+    assert len(read) == passed
     hashed.clear()
     assert campaign.main([*chained, '--cache-dir', str(tmp_path / 'join-cache'),
                           '--capture-chain', 'join']) == 0
     assert hashed == []  # the join hashes no source file
     record = json.loads(chain.join_path(root).read_text())
-    assert record["retired_boundary_entries"] == (len(pairs) - 1) * len(tokens)
+    assert record["retired_boundary_entries"] == passed
     entries = list((Path(storage["directory"]) / prep["session"]["generation"] / "entries").iterdir())
     assert entries == []
-
-    expected, published = _manifest(monolith), _manifest(root)
-    assert published == expected
-    for name, entry in expected["entries"].items():
-        before = torch.load(monolith / entry['path'], weights_only=True)
-        after = torch.load(root / published['entries'][name]['path'], weights_only=True)
-        assert before.keys() == after.keys()
-        for key, value in before.items():
-            if isinstance(value, torch.Tensor):
-                assert torch.equal(value.view(torch.uint8), after[key].view(torch.uint8)), (name, key)
-            else:
-                assert value == after[key], (name, key)
+    _assert_same_capture(monolith, root, what="the chain's capture differs from the monolith's")
     cache.require_capture_contract(root / 'capture_manifest.json')
+
+
+@pytest.mark.parametrize("policy,ranges", [
+    ("legacy", "0:1,1:3"),
+    ("legacy", "0:1,1:2,2:3"),
+    ("shared-inputs-bounded-v1", "0:1,1:2,2:3"),
+])
+def test_glm_capture_chain_equals_the_monolith_entry_for_entry(tmp_path, monkeypatch, policy, ranges):
+    """The chain on CPU, including on a box that has CUDA."""
+    _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, device="cpu")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA; certifies nothing when skipped")
+@pytest.mark.parametrize("policy,ranges", [
+    ("legacy", "0:1,1:2,2:3"),
+    ("shared-inputs-bounded-v1", "0:1,1:2,2:3"),
+])
+def test_glm_capture_chain_equals_the_monolith_entry_for_entry_on_cuda(
+        tmp_path, monkeypatch, request, policy, ranges):
+    """The chain with the model on CUDA: boundaries leave and re-enter the device.
+
+    Each quantum writes its boundary from CUDA tensors (``boundary_consumer`` ->
+    ``StreamedBoundaryArtifacts.write``) and the next quantum's frontier moves
+    the stored tensors back with ``.to(device)``. Both cases tile three
+    ranges, so the middle quantum's written boundary is computed from a
+    frontier it moved to the device: a CPU fallback on either side leaves a
+    CPU tensor at that write. A bounded CUDA capture needs its release policy
+    before the process starts, so that case runs in a child pytest (#1096).
+    """
+    from test_glm_campaign_streaming import bounded_capture_child_needed, run_in_bounded_capture_child
+    if bounded_capture_child_needed(policy, cuda=True, environ=os.environ):
+        run_in_bounded_capture_child(request, tmp_path)
+        return
+    _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, device="cuda")
