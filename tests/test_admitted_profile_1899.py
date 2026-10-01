@@ -59,8 +59,9 @@ def test_stale_output_refuses_before_any_process(tmp_path, monkeypatch):
     assert calls==[]
 
 
-def test_row_failure_is_not_replaced_by_observer_success(tmp_path, monkeypatch):
-    observations=tmp_path/'obs';observer=Process(0);row=Process(9)
+@pytest.mark.parametrize('observer_code', [0, 7])
+def test_row_failure_survives_observer_result(tmp_path, monkeypatch, observer_code):
+    observations=tmp_path/'obs';observer=Process(observer_code);row=Process(9)
     def spawn(cmd, **kw):
         if cmd[0]=='observer':
             observations.mkdir();(observations/'ready.json').write_text(json.dumps({'target_out':'out'}))
@@ -68,4 +69,8 @@ def test_row_failure_is_not_replaced_by_observer_success(tmp_path, monkeypatch):
         return row
     monkeypatch.setattr(module.subprocess,'Popen',spawn)
     assert module.run_observed(['row'],['observer'],observations,target_out='out',ready_timeout=1)==9
-    assert observer.finished and row.finished
+    assert observer.finished and row.finished and not row.terminated
+    assert (observations/'workload_done').read_text() == '9'
+    if observer_code:
+        record=json.loads((observations/'observer_result.json').read_text())
+        assert record['returncode'] == observer_code and record['qualified'] is False
