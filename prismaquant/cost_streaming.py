@@ -7112,11 +7112,11 @@ def live_streaming_runner_config(source_model: str | Path) -> dict[str, object]:
     affect the derived config).  Raises on any failure; callers report it
     fail-closed.
     """
-    from transformers import AutoConfig
-
     from prismaquant.model_profiles import detect_profile
     from prismaquant.sensitivity_probe import stage_multimodal, stage_text_only
-    from prismaquant.streaming_model import build_streaming_skeleton
+    from prismaquant.streaming_model import (
+        build_streaming_skeleton, load_streaming_auto_config,
+    )
 
     source = str(source_model)
     profile = detect_profile(source)
@@ -7126,9 +7126,7 @@ def live_streaming_runner_config(source_model: str | Path) -> dict[str, object]:
     else:
         staged = stage_text_only(source)
         multimodal = False
-    config = AutoConfig.from_pretrained(
-        staged, trust_remote_code=True, local_files_only=True
-    )
+    config = load_streaming_auto_config(source, staged, local_files_only=True)
     skeleton = build_streaming_skeleton(config, multimodal=multimodal)
     config_dict = skeleton.config.to_dict()
     if not isinstance(config_dict, dict):

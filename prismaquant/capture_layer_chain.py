@@ -84,16 +84,25 @@ def range_label(start: int, stop: int) -> str:
     return f"capture-{start:03d}-{stop:03d}"
 
 
-def fragment_path(capture_root, start: int, stop: int) -> Path:
+def capture_fragment_path(capture_root, start: int, stop: int) -> Path:
     return chain_root(capture_root) / f"{range_label(start, stop)}.fragment.json"
 
 
-def generation_directory(prep) -> Path:
+fragment_path = capture_fragment_path
+
+
+def capture_generation_directory(prep) -> Path:
     return Path(prep["boundary_storage"]["directory"]) / str(prep["session"]["generation"])
 
 
-def owner_status_path(prep, start: int, stop: int) -> Path:
+generation_directory = capture_generation_directory
+
+
+def capture_owner_status_path(prep, start: int, stop: int) -> Path:
     return generation_directory(prep) / "owners" / f"{range_label(start, stop)}.json"
+
+
+owner_status_path = capture_owner_status_path
 
 
 # -- layer ranges --------------------------------------------------------------
@@ -189,12 +198,15 @@ def bind_identity(identity, ranges, n_batches) -> dict:
             "ranges": [list(pair) for pair in ranges], "n_batches": int(n_batches)}
 
 
-def _seal(body, *, where, field):
+def _seal_capture_document(body, *, where, field):
     body = canonical_json(body, where=where)
     return {**body, field: canonical_json_sha256(body, where=where)}
 
 
-def _read_sealed(path, *, schema, field, what):
+_seal = _seal_capture_document
+
+
+def _read_capture_document(path, *, schema, field, what):
     try:
         document = json.loads(Path(path).read_bytes())
     except (OSError, ValueError) as exc:
@@ -205,6 +217,9 @@ def _read_sealed(path, *, schema, field, what):
     if canonical_json_sha256(body, where=what) != document.get(field):
         raise CaptureChainRefused(f"{path} does not seal its own content")
     return document
+
+
+_read_sealed = _read_capture_document
 
 
 def read_prep(capture_root) -> dict:
@@ -233,7 +248,7 @@ def authenticate_quantum_source(capture_root, *, census_path, model, resource_ch
         release_read_pages=release_read_pages)
 
 
-def prepare(capture_root, *, census_path, ranges, n_batches, boundary_storage, identity):
+def prepare_capture_chain(capture_root, *, census_path, ranges, n_batches, boundary_storage, identity):
     """The prep row: seal the identity, the ranges and the source once.
 
     ``identity`` is called once, between two fingerprint passes over the
@@ -271,6 +286,9 @@ def prepare(capture_root, *, census_path, ranges, n_batches, boundary_storage, i
         if not publish_new_bytes(path, payload):
             raise CaptureChainRefused(f"{path} exists: a capture chain is prepped once")
     return {"path": str(path), "sha256": bytes_sha256hex(payload), "document": document}
+
+
+prepare = prepare_capture_chain
 
 
 # -- fragments and owners ------------------------------------------------------

@@ -53,6 +53,19 @@ This changes repository delivery metadata, not runtime, formats, numerical
 methods, cache/residency, plugin pins or artifact-serving gates. Gate:
 `.github/scripts/linked_issue.test.cjs`.
 
+Re-stamped 2026-10-01 (PQ #1922, Refs #1100): both streaming config loads
+share the stock AutoConfig input boundary. In the no-rewrite active-policy
+branch, verified declared metadata is delivered through the existing
+`io_engine.SealedBuffer`; HF receives that immutable local configuration file
+while retaining its original model-root argument, built-in class selection and
+defaults. The descriptor closes on return or error. Configuration-file
+indirection and dynamic AutoConfig execution are refused rather than selecting
+an undeclared second input. Inactive and rewritten-stage loads are unchanged;
+remote-code/model construction and broader worker header coverage remain
+separate. No router fork, monkeypatch, new cache/stager, format, numerical
+method, runtime pin, export wire, default or serving gate; CPU fixtures do not
+establish model/GPU qualification or a performance claim.
+
 Re-stamped 2026-10-01 (PQ #1918): `tools/dispatch_capture_chain.py seal`
 takes `--priority` (default -10, unchanged), so a capture chain that feeds a
 gate can run in the campaign band, as `dispatch_tessera_campaign --priority`
@@ -88,6 +101,17 @@ and the no-rewrite canonical return path are unchanged. This first input does
 not cover AutoConfig's subsequent reads, remote-code execution or the broader
 worker header audit. No new stager/cache, numerical method, schema, runtime pin,
 export wire, default or serving gate; CPU fixtures are not model/GPU admission.
+
+Re-stamped 2026-10-01 (Refs PQ #1088): superseded-run retirement admits
+forward entries only from the chain producer's sealed boundary records, exact
+owned session/generation and existing adjoint binding-proof namespace. Only
+selected PB-committed paths join the sealed unlink list; uncommitted copies and
+imported/foreign entries remain untouched. Existing successor, containment,
+path/digest binding and committed-file identity fences apply before any unlink.
+Crash retries use only the prior sealed target list and never add new paths.
+The CPU gate is `tests/test_stage_a_retirement_forward_1088.py`; this is not
+live cleanup, physical tier egress, GPU/model or performance qualification.
+PB dead-stage-copy acceptance remains independent; the broad parent stays open.
 
 Re-stamped 2026-10-01 (PQ #1892, Refs #1885): the pure initialization owner
 provides a metadata-only merge of completed selected witnesses. A mandatory,
@@ -4449,12 +4473,16 @@ PrismaBuild action, checks everything before it removes anything:
   run's own subtree remains excluded from the consumer scan (PQ #1088).
 
 It then sorts every unreclaimed batch in PrismaBuild's records for those
-owners. A batch wholly inside the checkpoints' files and referenced entries
-is retired; each of its files must still match the commit's
-`origin_identity`. A batch with none of those files is left alone, and a
-batch with some of them refuses. The tool seals `stage-a-retired.json`
-first, which makes chain resume, seed and band refuse the space. It then
-removes `checkpoints/` and the referenced entries, and calls
+owners. Eligible targets are checkpoint files, referenced cotangent entries
+and the sealed forward records owned by this run's exact storage session,
+generation and adjoint namespace. Imported/foreign entries are excluded;
+malformed or escaping claimed ownership refuses. A batch wholly inside that
+set is retired; each file must still match the commit's `origin_identity`.
+Only the selected PB-committed forward paths join the persisted unlink list;
+uncommitted copies remain untouched. A batch with no eligible path is left
+alone, and a mixed eligible/unrelated batch refuses. The tool seals
+`stage-a-retired.json` first, which makes chain resume, seed and band refuse
+the space. It then removes `checkpoints/` and the persisted entries, and calls
 `reclaim_origin` for each retired batch. A rerun finishes from the sealed
 record. The queue root comes from the producer records, so no
 produced-output binding is needed. The tool reads each batch through
@@ -4466,10 +4494,17 @@ record is gone. Gates:
 - `tests/test_stage_a_retirement_binding_scan_1088.py`: an incomplete binding
   scan refuses before the retirement record or any unlink;
 - `tests/test_stage_a_retirement_pb_1073.py`: on a real owner, the durable
-  charge drops by exactly the pinned batch's bytes.
+  charge drops by exactly the pinned batch's bytes;
+- `tests/test_stage_a_retirement_forward_1088.py`: a private real PB origin
+  batch from actual controlled Stage A boundary records is selected, its
+  durable charge drops exactly, uncommitted copies survive, declared forward
+  path bindings refuse, and interrupted unlink reuses the sealed targets.
+  These CPU fixtures do not qualify seed/capsule execution or physical tier
+  cleanup.
 
-This adds a new operator tool and three refusals. It changes no format,
-pipeline default, stage or ship gate.
+The operator tool introduced in #1073 now extends its target admission without
+changing a format, pipeline default, stage or ship gate. PB's independent
+ended-attempt stage-copy retirement is not certified by an origin quota test.
 
 The Stage B preparation runs as a PrismaBuild action that declares what it
 reads and commits what it writes (2026-09-23, `ws-tq/1070-stage-b-prep-on-pb`,

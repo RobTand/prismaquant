@@ -83,7 +83,7 @@ from .nvfp4_activation_contract import (
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
-from .digests import bytes_sha256hex, indent2_json_file_bytes
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes
 from .schemas import strict_json_loads
 
 __all__ = [
@@ -5422,7 +5422,7 @@ def _write_capture_load_execution(args, writer, *, guard, resources):
         replay=writer.load_execution, seal=writer.seal_load_execution,
         resources=resources, memory_guard=None if guard is None else guard.snapshot())
     atomic_write_bytes(Path(args.cache_dir)/'capture-load-execution.json',
-        (json.dumps(execution_record, indent=2, sort_keys=True)+'\n').encode())
+        (DIRECT_ASCII_INDENT2_LAX.text(execution_record)+'\n').encode())
 
 
 def _run_streamed_calibration(args, runner, profile, *, mode, population,

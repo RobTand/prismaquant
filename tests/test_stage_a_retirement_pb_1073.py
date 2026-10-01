@@ -125,7 +125,7 @@ def _name_producer(space, producer):
         {k: v for k, v in state.items() if k != "chain_state_sha256"})))
 
 
-def test_retirement_reclaims_exactly_the_pinned_batches(tmp_path, monkeypatch, capsys):
+def test_retirement_reclaims_owned_pins_and_committed_forward_batches(tmp_path, monkeypatch, capsys):
     pb_repo = _pb(monkeypatch)
     from prismaquant import stage_a_chain_resume as resume_mod
     from prismaquant import stage_a_retirement as retire
@@ -157,12 +157,13 @@ def test_retirement_reclaims_exactly_the_pinned_batches(tmp_path, monkeypatch, c
     assert retire_main(argv(root, succ, [bindings])) == 0
     report = last_json(capsys)
     assert asked == [producer]
-    assert report["batches"] == {"cotangent-pins": "reclaimed"}
-    assert [row["batch_id"] for row in report["untouched_batches"]] == ["forward-0"]
-    assert report["durable_charge_before"] - report["durable_charge_after"] == pinned_bytes
-    assert publication.durable_charge()["payload"] == forward_bytes
+    assert report["batches"] == {"cotangent-pins": "reclaimed", "forward-0": "reclaimed"}
+    assert report["untouched_batches"] == []
+    assert report["durable_charge_before"] - report["durable_charge_after"] == pinned_bytes + forward_bytes
+    assert publication.durable_charge()["payload"] == 0
     assert not any(os.path.exists(path) for path in pinned)
-    assert os.path.exists(forward[0])
+    assert not os.path.exists(forward[0])
+    assert all(os.path.exists(path) for path in forward[1:])
     assert retire.retirement_record_path(space).is_file()
 
 
@@ -177,7 +178,11 @@ def test_a_batch_mixing_pins_and_live_entries_refuses(tmp_path, monkeypatch, cap
     forward = sorted(str(p) for p in (space / "exact-boundaries").rglob("*.pt")
                      if str(p) not in set(pinned))
     _q, publication = _owner(tmp_path, pb_repo, _template(space / "exact-boundaries"))
-    _commit(publication, "mixed", [pinned[0], forward[0]])
+    # A sealed owned forward path is now eligible. Preserve this test's
+    # mixed/live refusal with a real PB-committed but unreferenced control.
+    unrelated = Path(forward[0]).with_name("unreferenced-control.pt")
+    unrelated.write_bytes(Path(forward[0]).read_bytes())
+    _commit(publication, "mixed", [pinned[0], str(unrelated)])
     _name_producer(space, resume_mod.producer_binding(publication))
     monkeypatch.setattr(resume_mod, "require_producer_contained", lambda producer: None)
     bindings = tmp_path / "bindings"
