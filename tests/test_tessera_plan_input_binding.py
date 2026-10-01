@@ -156,7 +156,8 @@ def delayed_driver_start(monkeypatch):
     ({"changed": True}, 2, "ASSIGNMENT_DIGEST"),
     ({"manifest": "missing"}, 2, "allocation"),
     ({"manifest": "other-stage"}, 2, "allocation"),
-], ids=["old-allocation", "missing", "other-stage"])
+    ({"mode": "compiled"}, 0, "Serve:"),
+], ids=["old-allocation", "missing", "other-stage", "compiled"])
 def test_delayed_start_keeps_real_driver_binding_checks(
         tmp_path, delayed_driver_start, options, expected_code, required_output):
     result = _run(tmp_path, **options)
