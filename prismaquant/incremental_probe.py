@@ -765,6 +765,23 @@ def _build_body_shard_entries(num_layers: int, layers_per_shard: int,
     return entries
 
 
+def _build_visual_shard_entries(
+    profile, cfg: dict, layers_per_shard: int, start_idx: int,
+) -> list[ShardEntry]:
+    """Adapt profile-declared visual regions to production shard entries."""
+    visual_key = profile.visual_config_key()
+    visual_prefix = profile.visual_layer_prefix()
+    if not visual_key or not visual_prefix:
+        return []
+    vis_cfg = cfg.get(visual_key, {})
+    n_vis = int(vis_cfg.get("depth") or vis_cfg.get("num_hidden_layers") or 0)
+    if n_vis <= 0:
+        return []
+    return _build_body_shard_entries(
+        n_vis, max(layers_per_shard, 4), visual_prefix, "visual", start_idx,
+    )
+
+
 def build_shard_schedule(
     *,
     model_path: str,
@@ -783,8 +800,6 @@ def build_shard_schedule(
     profile = _detect_profile_for_shards(model_path)
     body_prefix = profile.body_layer_prefix()
     mtp_prefix = profile.mtp_layer_prefix()
-    visual_key = profile.visual_config_key()
-    visual_prefix = profile.visual_layer_prefix()
     lm_head_name = profile.lm_head_name()
     sidx = 0
 
@@ -850,15 +865,12 @@ def build_shard_schedule(
             extras.extend(mtp_entries)
             sidx += len(mtp_entries)
 
-    if include_visual and visual_key and visual_prefix:
-        vis_cfg = cfg.get(visual_key, {})
-        n_vis = int(vis_cfg.get("depth") or vis_cfg.get("num_hidden_layers") or 0)
-        if n_vis > 0:
-            vis_per_shard = max(body_layers_per_shard, 4)
-            vis_entries = _build_body_shard_entries(
-                n_vis, vis_per_shard, visual_prefix, "visual", sidx)
-            extras.extend(vis_entries)
-            sidx += len(vis_entries)
+    if include_visual:
+        vis_entries = _build_visual_shard_entries(
+            profile, cfg, body_layers_per_shard, sidx,
+        )
+        extras.extend(vis_entries)
+        sidx += len(vis_entries)
 
     if include_lm_head:
         # A tied head (`tie_word_embeddings` declared AND no head tensor
