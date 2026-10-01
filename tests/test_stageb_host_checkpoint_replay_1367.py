@@ -57,3 +57,49 @@ def test_host_replay_refuses_incomplete_census(tmp_path):
         replay(source, tmp_path / "fresh", expected_units=6,
                host_windows=2, budget_bytes=32 << 20, max_jobs=2)
     assert not (tmp_path / "fresh" / "synchronous").exists()
+
+
+def test_source_allowance_precedes_any_decode(monkeypatch, tmp_path):
+    import experiments.stageb_checkpoint_host_replay as host
+
+    source = _source(tmp_path)
+    path = aura_cost._aura_unit_checkpoint_path(source, "unit-0")
+    # The established loader accepts trailing bytes; this remains a valid
+    # envelope, but cannot be constructed inside the requested staging slot.
+    with path.open("ab") as handle:
+        handle.write(b"x" * (128 << 10))
+
+    def unexpected_decode(*args, **kwargs):
+        raise AssertionError("source decoding preceded its construction allowance")
+
+    monkeypatch.setattr(host.pickle, "loads", unexpected_decode)
+    with pytest.raises(ValueError, match="source construction allowance"):
+        replay(source, tmp_path / "fresh", expected_units=5,
+               host_windows=2, budget_bytes=8 << 20, max_jobs=2)
+
+
+@pytest.mark.parametrize("payload", [
+    b"\x80\x04]r\xff\xff\xff\x7f.",  # Sparse memo can allocate enormous tables.
+    b"\x80\x04cbuiltins\nlist\n)R.",  # Constructor execution is not builtin decoding.
+])
+def test_source_refuses_unbounded_pickle_before_state_decode(monkeypatch, tmp_path, payload):
+    import hashlib
+    import pickle
+    import experiments.stageb_checkpoint_host_replay as host
+
+    source = _source(tmp_path)
+    path = aura_cost._aura_unit_checkpoint_path(source, "unit-0")
+    loads = pickle.loads
+    envelope = loads(path.read_bytes())
+    envelope.update(payload=payload, payload_sha256=hashlib.sha256(payload).hexdigest())
+    path.write_bytes(pickle.dumps(envelope, protocol=pickle.HIGHEST_PROTOCOL))
+
+    def refuse_unsafe_decode(data, *args, **kwargs):
+        if data == payload:
+            raise AssertionError("unbounded pickle reached state decoder")
+        return loads(data, *args, **kwargs)
+
+    monkeypatch.setattr(host.pickle, "loads", refuse_unsafe_decode)
+    with pytest.raises(ValueError, match="bounded builtin pickle"):
+        replay(source, tmp_path / "fresh", expected_units=5,
+               host_windows=2, budget_bytes=32 << 20, max_jobs=2)
