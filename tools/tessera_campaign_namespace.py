@@ -36,12 +36,18 @@ def refuse_path_symlinks(value: str, *, directory: bool = True) -> None:
             raise RuntimeError(f"scratch path is not a directory: {ancestor}")
 
 
-def namespace_path(value: object, *, directory: bool = True) -> Path:
+def namespace_absolute_path(value: object) -> Path:
+    """Validate path syntax without opening or authenticating input artifacts."""
     if (not isinstance(value, str) or not value.startswith("/") or "\x00" in value
             or str(PurePosixPath(value)) != value or ".." in PurePosixPath(value).parts):
         raise RuntimeError("namespace paths must be canonical absolute paths")
-    refuse_path_symlinks(value, directory=directory)
     return Path(value)
+
+
+def namespace_path(value: object, *, directory: bool = True) -> Path:
+    path = namespace_absolute_path(value)
+    refuse_path_symlinks(str(path), directory=directory)
+    return path
 
 
 def namespace_request_parts(row: dict) -> tuple[int, dict, int]:
@@ -190,6 +196,13 @@ def prepare_namespace_requests(*, requests: list[dict], selected: list[str],
     return result
 
 
+def namespace_destinations(request: dict, binding: dict) -> list[tuple[Path, bool]]:
+    """The same owned destinations drive path and mount validation."""
+    directory = Path(binding["root"]) / binding["request_key"]
+    return [(directory / filename, flag == "--cache-dir") for flag, filename in OUTPUTS.items()] + [
+        (Path(request["env"][name]), True) for name in WRITABLE_ENV]
+
+
 def validate_namespace_request(row: dict, *, executed_commit: str | None = None) -> dict:
     """Reproduce immutable ownership and request bytes, without admitting inputs."""
     _, spec, _ = namespace_request_parts(row)
@@ -219,10 +232,8 @@ def validate_namespace_request(row: dict, *, executed_commit: str | None = None)
     expected = namespace_retarget(binding["normalized_request"], str(directory))
     if request != expected:
         raise RuntimeError("namespace destinations or request differ from owned row")
-    for flag, filename in OUTPUTS.items():
-        namespace_path(str(directory / filename), directory=flag == "--cache-dir")
-    for name in WRITABLE_ENV:
-        namespace_path(request["env"][name])
+    for path, is_directory in namespace_destinations(request, binding):
+        namespace_path(str(path), directory=is_directory)
     # No input or mount may place read-only evidence inside owned writable space.
     for reference in (binding["readset"], binding["reconciliation"]["evidence"]):
         namespace_reference(reference)

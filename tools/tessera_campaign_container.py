@@ -931,6 +931,11 @@ def _package_root(roots: list) -> "tuple[str, Path] | None":
     return None
 
 
+def guarded_import_root(spec: dict, *, cwd: str):
+    """Replay the launcher's safe-path package search through declared mounts."""
+    return _package_root(import_search_roots(spec, cwd=cwd, safe_path=True))
+
+
 def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str | None, Path, bool]":
     """The PrismaQuant tree this launch is expected to run, and how it was chosen.
 
@@ -1000,7 +1005,7 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
     and the row's stamped digest is what catches that after the fact.
     """
 
-    guarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=True))
+    guarded = guarded_import_root(spec, cwd=cwd)
     unguarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=False))
     shadow_sha = (None if unguarded is None
                   else prismaquant_source_sha256(unguarded[1] / "prismaquant"))
