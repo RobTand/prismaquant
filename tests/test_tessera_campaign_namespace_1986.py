@@ -1,6 +1,9 @@
 """Metadata-only namespace admission; no model, Docker or historical inputs."""
 import copy
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -29,7 +32,11 @@ def request():
 
 
 def arguments(tmp_path) -> dict:
-    rows = [request()]
+    row = request()
+    spec = json.loads(row["argv"][4])
+    spec["container"]["mounts"] = [{"source": str(tmp_path), "target": str(tmp_path), "readonly": False}]
+    row["argv"][4] = json.dumps(spec)
+    rows = [row]
     key = owner.canonical_json_sha256(rows[0], where="fixture request")
     evidence = {"path": "/readonly/reconciliation.json", "sha256": "1" * 64}
     reconciliation = {"schema": "prismaquant.tessera_namespace_reconciliation.v1",
@@ -212,7 +219,8 @@ def test_adapter_positive_and_source_refusal_before_docker(tmp_path, monkeypatch
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: COMMIT)
     monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **k: type("Result", (), {"returncode": 0, "stdout": ""})())
-    monkeypatch.setattr(adapter, "pinned_source_root", lambda spec, cwd: (None, adapter.Path(cwd), True))
+    (tmp_path / "prismaquant").mkdir()
+    (tmp_path / "prismaquant" / "__init__.py").write_text("# synthetic checkout package\n")
     assert adapter.validate_namespace_launch(spec, row["argv"][6:], cwd=str(tmp_path), environ=row["env"]) == COMMIT
     monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: "0" * 40)
     monkeypatch.setattr(adapter, "inspect_or_load", lambda *args: pytest.fail("Docker reached"))
@@ -300,3 +308,186 @@ def test_untracked_executed_source_is_not_the_bound_commit(tmp_path, monkeypatch
         "returncode": 0, "stdout": "?? tools/foreign_module.py\n"})())
     with pytest.raises(RuntimeError, match="namespace full executed source"):
         adapter.validate_namespace_launch(spec, row["argv"][6:], cwd=str(tmp_path), environ=row["env"])
+
+
+def replace_fixture_request(kwargs, row):
+    old = kwargs["selected"][0]
+    key = owner.canonical_json_sha256(row, where="fixture request")
+    kwargs["requests"] = [row]
+    kwargs["selected"] = [key]
+    kwargs["reconciliation"]["status"] = {key: "unfinished"}
+    kwargs["reconciliation"]["requests_sha256"] = owner.canonical_json_sha256([row], where="fixture roster")
+    kwargs["readsets"] = {key: kwargs["readsets"][old]}
+
+
+@pytest.mark.parametrize("pythonpath", [None, "/image-only", "/image-only:/workspace"])
+def test_review_source_requires_known_guarded_checkout(tmp_path, monkeypatch, pythonpath):
+    kwargs = arguments(tmp_path)
+    row = kwargs["requests"][0]
+    spec = json.loads(row["argv"][4])
+    if pythonpath is None:
+        row["env"].pop("PYTHONPATH")
+    else:
+        row["env"]["PYTHONPATH"] = pythonpath
+    spec["env"] = row["env"]
+    row["argv"][4] = json.dumps(spec)
+    replace_fixture_request(kwargs, row)
+    row = dispatch.prepare_namespace_requests(**kwargs)[0]
+    dispatch.publish_namespace_requests([row])
+    spec = json.loads(row["argv"][4])
+    (tmp_path / "prismaquant").mkdir()
+    (tmp_path / "prismaquant" / "__init__.py").write_text("# genuine fixture checkout\n")
+    monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: COMMIT)
+    monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **k: type("Result", (), {"returncode": 0, "stdout": ""})())
+    with pytest.raises(RuntimeError, match="guarded|checkout|import"):
+        adapter.validate_namespace_launch(spec, row["argv"][6:], cwd=str(tmp_path), environ=row["env"])
+    for name, value in row["env"].items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("Docker reached"))
+    with pytest.raises(RuntimeError, match="guarded|checkout|import"):
+        adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
+
+
+@pytest.mark.parametrize("mount_case", ["absent", "readonly", "remapped", "hidden"])
+def test_review_mount_coverage_refusal(tmp_path, mount_case):
+    kwargs = arguments(tmp_path)
+    row = kwargs["requests"][0]
+    spec = json.loads(row["argv"][4])
+    if mount_case == "absent":
+        spec["container"]["mounts"] = []
+    elif mount_case == "readonly":
+        spec["container"]["mounts"][0]["readonly"] = True
+    elif mount_case == "remapped":
+        spec["container"]["mounts"][0]["source"] = "/foreign"
+    else:
+        spec["container"]["mounts"].append({"source": "/foreign", "target": kwargs["root"], "readonly": False})
+    row["argv"][4] = json.dumps(spec)
+    replace_fixture_request(kwargs, row)
+    with pytest.raises(RuntimeError, match="mount|hidden"):
+        dispatch.prepare_namespace_requests(**kwargs)
+    assert not (tmp_path / "new").exists()
+
+
+def test_review_fresh_and_identical_publication_establishes_writable_temps(tmp_path):
+    rows = prepared(tmp_path)
+    assert not (tmp_path / "new").exists()
+    for attempt in range(2):
+        dispatch.publish_namespace_requests(rows)
+        namespace.require_namespace_publication(rows[0])
+        for name in ("TMPDIR", "TMP", "TEMP"):
+            directory = adapter.Path(rows[0]["env"][name])
+            assert directory.is_dir(), name
+            probe = directory / ("owned-probe-" + str(attempt))
+            probe.write_bytes(b"writable")
+            assert probe.read_bytes() == b"writable"
+            probe.unlink()
+        observed = subprocess.run([sys.executable, "-c", "import tempfile; print(tempfile.gettempdir())"],
+                                  env={**os.environ, **rows[0]["env"]}, check=True,
+                                  capture_output=True, text=True, timeout=30)
+        assert observed.stdout.strip() == rows[0]["env"]["TMPDIR"]
+
+
+@pytest.mark.parametrize("value", ["traversal", "relative", "double_slash", "contained"])
+def test_review_path_input_is_canonical_before_overlap(tmp_path, value):
+    kwargs = arguments(tmp_path)
+    row = kwargs["requests"][0]
+    if value == "traversal":
+        path = str(tmp_path / "existing") + "/../new"
+    elif value == "relative":
+        path = "../new"
+    elif value == "double_slash":
+        path = str(tmp_path) + "//outside"
+    else:
+        path = str(tmp_path / "new" / "model")
+    row["argv"][row["argv"].index("--units") + 1] = path
+    replace_fixture_request(kwargs, row)
+    with pytest.raises(RuntimeError, match="canonical|overlap"):
+        dispatch.prepare_namespace_requests(**kwargs)
+    assert not (tmp_path / "new").exists()
+
+
+def test_review_guarded_checkout_positive_and_alternate_root_refusal(tmp_path):
+    checkout = tmp_path / "checkout"
+    alternate = tmp_path / "alternate"
+    for root in (checkout, alternate):
+        (root / "prismaquant").mkdir(parents=True)
+        (root / "prismaquant" / "__init__.py").write_text("# synthetic package\n")
+    spec = {"env": {"PYTHONPATH": "/workspace"}, "container": {"mounts": []}}
+    assert adapter.guarded_import_root(spec, cwd=str(checkout), require_checkout=True) == ("/workspace", checkout)
+    spec["container"]["mounts"] = [{"source": str(alternate), "target": "/alternate", "readonly": True}]
+    spec["env"]["PYTHONPATH"] = "/alternate:/workspace"
+    with pytest.raises(RuntimeError, match="guarded imports"):
+        adapter.guarded_import_root(spec, cwd=str(checkout), require_checkout=True)
+
+
+def test_review_temporary_symlink_race_cannot_escape_or_replace_bindings(tmp_path, monkeypatch):
+    row = prepared(tmp_path)[0]
+    dispatch.publish_namespace_requests([row])
+    binding = namespace.require_namespace_publication(row)
+    row_root = tmp_path / "new" / binding["request_key"]
+    before = {name: (row_root / name).read_bytes() for name in ("binding.json", "request.json")}
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    destination = adapter.Path(row["env"]["TMPDIR"])
+    actual_open = os.open
+
+    def race(name, flags, *args, **kwargs):
+        if name == "TMPDIR":
+            destination.rmdir()
+            destination.symlink_to(foreign, target_is_directory=True)
+        return actual_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(namespace.os, "open", race)
+    with pytest.raises(RuntimeError, match="cannot establish"):
+        namespace.establish_namespace_temporaries(row)
+    assert list(foreign.iterdir()) == []
+    assert {name: (row_root / name).read_bytes() for name in before} == before
+
+
+def test_review_temporary_writability_refuses_without_metadata_overwrite(tmp_path, monkeypatch):
+    row = prepared(tmp_path)[0]
+    dispatch.publish_namespace_requests([row])
+    binding = namespace.require_namespace_publication(row)
+    path = tmp_path / "new" / binding["request_key"] / "binding.json"
+    before = path.read_bytes()
+    monkeypatch.setattr(namespace.os, "access", lambda *a, **k: False)
+    with pytest.raises(RuntimeError, match="not writable"):
+        namespace.establish_namespace_temporaries(row)
+    assert path.read_bytes() == before
+
+
+def test_review_adapter_repairs_missing_owned_temps_before_entry(tmp_path, monkeypatch):
+    row = prepared(tmp_path)[0]
+    dispatch.publish_namespace_requests([row])
+    spec = json.loads(row["argv"][4])
+    directory = adapter.Path(row["env"]["TMPDIR"])
+    directory.rmdir()
+    (tmp_path / "prismaquant").mkdir()
+    (tmp_path / "prismaquant" / "__init__.py").write_text("# fixture actual checkout\n")
+    monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: COMMIT)
+    monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **k: type("Result", (), {"returncode": 0, "stdout": ""})())
+    assert adapter.validate_namespace_launch(spec, row["argv"][6:], cwd=str(tmp_path), environ=row["env"]) == COMMIT
+    assert directory.is_dir()
+
+
+@pytest.mark.parametrize("violation", ["mount", "input"])
+def test_review_adapter_rechecks_self_consistent_old_contract_gaps(tmp_path, violation):
+    row = prepared(tmp_path)[0]
+    binding = json.loads(row["argv"][4])["namespace_binding"]
+    normalized = binding["normalized_request"]
+    if violation == "mount":
+        spec = json.loads(normalized["argv"][4])
+        spec["container"]["mounts"] = []
+        normalized["argv"][4] = owner.canonical_json_bytes(spec, where="fixture spec").decode()
+    else:
+        normalized["argv"][normalized["argv"].index("--units") + 1] = str(tmp_path) + "/existing/../new"
+    base = {key: value for key, value in binding.items() if key not in ("request_key", "request", "request_sha256")}
+    request_key = owner.canonical_json_sha256(base, where="namespace row binding")
+    request = namespace.namespace_retarget(normalized, binding["root"] + "/" + request_key)
+    binding = {**base, "request_key": request_key, "request": copy.deepcopy(request),
+               "request_sha256": owner.canonical_json_sha256(request, where="namespace request")}
+    spec = json.loads(request["argv"][4])
+    spec["namespace_binding"] = binding
+    with pytest.raises(RuntimeError, match="mount|canonical"):
+        namespace.namespace_adapter_request(spec, request["argv"][6:], request["env"])
+    assert not (tmp_path / "new").exists()

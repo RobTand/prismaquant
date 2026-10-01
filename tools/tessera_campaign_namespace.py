@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import stat
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 
 from tools.pq_profile_digest import canonical_json_bytes, canonical_json_sha256
@@ -109,10 +111,7 @@ def namespace_reference(record: object) -> None:
             or re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is None):
         raise RuntimeError("namespace needs an explicit path/SHA256 input reference")
     # Input references are syntax-checked only: no historical artifact reads.
-    value = record["path"]
-    if (not isinstance(value, str) or not value.startswith("/")
-            or str(PurePosixPath(value)) != value or ".." in PurePosixPath(value).parts):
-        raise RuntimeError("namespace input reference path is not canonical")
+    namespace_absolute_path(record["path"])
 
 
 def prepare_namespace_requests(*, requests: list[dict], selected: list[str],
@@ -250,7 +249,8 @@ def validate_namespace_request(row: dict, *, executed_commit: str | None = None)
                 value = argument.split("=", 1)[1]
             else:
                 continue
-            if Path(value).is_relative_to(Path(binding["root"])):
+            input_path = namespace_absolute_path(value)
+            if input_path.is_relative_to(Path(binding["root"])):
                 raise RuntimeError("namespace input overlaps owned outputs")
     for mount in spec["container"].get("mounts", []):
         target = Path(mount["target"])
@@ -258,6 +258,11 @@ def validate_namespace_request(row: dict, *, executed_commit: str | None = None)
             raise RuntimeError("namespace output is hidden by a declared mount")
         if directory.is_relative_to(target) and (mount.get("readonly") or mount["source"] != mount["target"]):
             raise RuntimeError("namespace needs writable identity-mapped output mounts")
+    for destination, _ in namespace_destinations(request, binding):
+        if not any(destination.is_relative_to(Path(mount["target"]))
+                   and mount["source"] == mount["target"] and not mount.get("readonly", False)
+                   for mount in spec["container"].get("mounts", [])):
+            raise RuntimeError("namespace destination lacks a writable identity-mapped mount")
     return binding
 
 
@@ -293,7 +298,7 @@ def namespace_adapter_request(spec: dict, command: list[str], environ) -> dict:
     return row
 
 
-def require_namespace_publication(row: dict) -> None:
+def require_namespace_publication(row: dict) -> dict:
     binding = validate_namespace_request(row)
     root = namespace_path(binding["root"])
     record_path = namespace_path(str(root / "namespace.json"), directory=False)
@@ -313,3 +318,40 @@ def require_namespace_publication(row: dict) -> None:
         raise RuntimeError("namespace owner record is malformed")
     if record["bindings"].get(binding["request_key"]) != binding_sha256:
         raise RuntimeError("namespace published binding digest differs")
+    return binding
+
+
+def establish_namespace_temporaries(row: dict) -> None:
+    """Create writable temps only after ownership; never follow raced symlinks.
+
+    Directory descriptors anchor each mkdir/open to the admitted owner tree.
+    Concurrent same-binding callers may reuse directories, never replace them.
+    """
+    binding = require_namespace_publication(row)
+    root = namespace_absolute_path(binding["root"]) / binding["request_key"]
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open("/", flags)
+
+    def open_directory(name: str, parent_fd: int, *, create: bool = False) -> int:
+        if create:
+            with suppress(FileExistsError):
+                os.mkdir(name, dir_fd=parent_fd)
+        return os.open(name, flags, dir_fd=parent_fd)
+
+    try:
+        steps = [(component, False) for component in root.parts[1:]] + [("environment", True)]
+        for component, create in steps:
+            next_fd = open_directory(component, fd, create=create)
+            os.close(fd)
+            fd = next_fd
+        for name in ("TMPDIR", "TMP", "TEMP"):
+            temporary_fd = open_directory(name, fd, create=True)
+            try:
+                if not os.access(".", os.W_OK, dir_fd=temporary_fd, effective_ids=True):
+                    raise RuntimeError("namespace owned temporary directory is not writable")
+            finally:
+                os.close(temporary_fd)
+    except OSError as exc:
+        raise RuntimeError("namespace cannot establish owned temporary directories") from exc
+    finally:
+        os.close(fd)

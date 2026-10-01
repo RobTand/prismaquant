@@ -17,7 +17,8 @@ import subprocess
 from tools.container_runtime_identity import (
     image_content_sha256, prismaquant_source_sha256)
 from tools.tessera_campaign_namespace import (
-    namespace_adapter_request, refuse_path_symlinks as _refuse_scratch_symlinks,
+    establish_namespace_temporaries, namespace_adapter_request,
+    refuse_path_symlinks as _refuse_scratch_symlinks,
     validate_namespace_request,
 )
 
@@ -931,9 +932,21 @@ def _package_root(roots: list) -> "tuple[str, Path] | None":
     return None
 
 
-def guarded_import_root(spec: dict, *, cwd: str):
-    """Replay the launcher's safe-path package search through declared mounts."""
-    return _package_root(import_search_roots(spec, cwd=cwd, safe_path=True))
+def guarded_import_root(spec: dict, *, cwd: str,
+                        require_checkout: bool = False) -> tuple[str, Path] | None:
+    """Replay safe-path imports; opt-in ownership requires known checkout resolution."""
+    roots = import_search_roots(spec, cwd=cwd, safe_path=True)
+    guarded = _package_root(roots)
+    if require_checkout:
+        if guarded is None or guarded[1].resolve() != Path(cwd).resolve():
+            raise RuntimeError("namespace guarded imports do not resolve to the executed checkout")
+        known_entries = {entry for entry, _ in roots}
+        for entry in spec.get("env", {}).get("PYTHONPATH", "").split(":"):
+            if entry not in known_entries:
+                raise RuntimeError("namespace guarded imports have an unknown earlier root")
+            if entry == guarded[0]:
+                break
+    return guarded
 
 
 def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str | None, Path, bool]":
@@ -1181,9 +1194,8 @@ def validate_namespace_launch(spec: dict, command: list[str], *, cwd: str, envir
         raise RuntimeError("namespace cannot inspect executed source") from exc
     if changed.returncode != 0 or changed.stdout.strip():
         raise RuntimeError("namespace full executed source differs from its commit")
-    _, source, defaulted = pinned_source_root(spec, cwd=cwd)
-    if not defaulted or source != Path(cwd):
-        raise RuntimeError("namespace slice requires imports from the executed checkout")
+    guarded_import_root(spec, cwd=cwd, require_checkout=True)
+    establish_namespace_temporaries(row)
     return commit
 
 

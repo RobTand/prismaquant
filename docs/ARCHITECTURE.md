@@ -9,7 +9,13 @@ Reviewed baseline and executed full commits remain distinct. Owned output and
 cache/temp destinations are deterministic; shared no-clobber publication admits
 only identical ownership/request bytes on resume. The container adapter checks
 publication, command/environment, paths and the committed full executed source
-before Docker inspection. No contract means unchanged legacy behavior. This
+before Docker inspection. Guarded import resolution must reach that actual
+checkout, not a defaulted or image-only root. Every owned output/cache/temp path
+requires a writable identity-mapped persistent mount. Path-valued input references
+must be canonical before overlap checks, without reading their artifacts. After
+ownership publication/admission, descriptor-anchored no-follow directory creation
+establishes writable TMPDIR/TMP/TEMP destinations; preparation remains write-free.
+No contract means unchanged legacy behavior. This
 metadata-only CPU slice does not verify completion evidence or input bytes,
 rederive resource demand, prove legacy/current runtime compatibility, adopt
 seeds, submit rows, or qualify prices/serving/GPU recovery. Existing campaign

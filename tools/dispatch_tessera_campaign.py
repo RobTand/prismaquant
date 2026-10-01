@@ -112,7 +112,8 @@ else:
     )
 
 from tools.tessera_campaign_namespace import (
-    namespace_path, namespace_publication_record, prepare_namespace_requests,
+    establish_namespace_temporaries, namespace_path, namespace_publication_record,
+    prepare_namespace_requests,
     validate_namespace_request,
 )
 
@@ -152,6 +153,8 @@ def publish_namespace_requests(rows: list[dict]) -> None:
     for path, payload in payloads:
         if not publish_new_bytes(path, payload) and path.read_bytes() != payload:
             raise RuntimeError("namespace concurrent publication bytes differ")
+    for row in rows:
+        establish_namespace_temporaries(row)
 
 
 #: What ``plan`` writes beside the manifest, so ``merge`` reads the row layout
