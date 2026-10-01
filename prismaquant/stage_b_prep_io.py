@@ -39,6 +39,8 @@ import os
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from .digests import bytes_sha256hex
+
 #: The template slot every Stage B preparation output is filed under.
 PREPARATION_SLOT = "stage_b_metadata"
 #: The template id prefix; the id's suffix digests the template body, so a
@@ -259,7 +261,7 @@ class StagedPreparationReads:
         except TierPolicyRefused as exc:
             raise PreparationReadRefused(
                 f"{where} at {path} was not served from the stage: {exc}") from exc
-        digest = hashlib.sha256(raw).hexdigest()
+        digest = bytes_sha256hex(raw)
         if digest != staged["sha256"] or (sha256 is not None and digest != sha256):
             raise PreparationReadRefused(
                 f"{where} at {path}: the staged bytes hash to {digest}, not the "
@@ -467,7 +469,7 @@ class PreparationPublication:
         descriptors = [self._po.validate_descriptor({
             "schema": self._po.DESCRIPTOR_SCHEMA_V2, "slot": PREPARATION_SLOT,
             "artifact_class": "payload", "path": path, "bytes": len(payload),
-            "sha256": hashlib.sha256(payload).hexdigest(),
+            "sha256": bytes_sha256hex(payload),
             "producer_generation": self.batch_id(kind),
             "owner_action_key": self.publication.instance["owner_action_key"],
             "owner_attempt": dict(self.publication.instance["owner_attempt"]),

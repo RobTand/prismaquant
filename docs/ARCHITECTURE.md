@@ -1,5 +1,44 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1852, Refs #275): local single-file safetensors
+checkpoints derive complete tensor-to-file coverage from the validated file
+header, including auxiliary names absent from the live decoder. An existing
+Hugging Face index remains authoritative. The shared streamed identity builder
+records this map in the existing identity schema, allowing the unchanged
+complete-source adoption gate to authenticate a legitimate single-file source.
+Malformed headers, missing canonical tensors, source mutation and resealed
+coverage omissions still refuse. Header inspection does not materialize
+tensors, synthesize a checkpoint index or introduce a rendered-weight cache.
+Checkpoint payload bytes, defaults, runtime pins, allocation and export/serving
+gates are unchanged. This CPU source-integrity prerequisite is not a model,
+census, capture or native-serving qualification. Gate:
+`tests/test_single_file_streamed_source_proof.py`.
+
+Re-stamped 2026-09-30 (Refs PQ #1295): the retained-render qualifier requests
+the existing sealed `io_engine.read_file` buffer and reuses the PWC private-mmap
+decoder. It closes the descriptor after decoding, including decoder failure;
+the returned tensor owns its mapping. Digest-less first-qualification staging,
+copy-time digest and stat fences remain unchanged, as do wire verification,
+GPU finishing, tensor equality and qualification identity. CPU regressions and
+allocation profiles are not a wire, model or GPU qualification. No new reader,
+cache, pool, format, numerical method, runtime pin or serving gate. The
+[controlled CPU before/after record](results/2026-09-30_qualifier_sealed_cpu.md)
+measures the live storage class and names residual anonymous allocations; it
+makes no isolated speedup, model, NFS, cgroup or GPU qualification claim.
+
+Re-stamped 2026-09-30 (PQ #1849): `tessera_footprint.
+tessera_tensor_payload_breakdown` prices a unit whose columns are not whole
+256-column superblocks instead of refusing it. The pinned Tessera writes a
+trailing partial superblock, and `tessera_shape_legal` already admitted such
+shapes, so the menu offered rungs the accountant then refused; the GLM-5.3
+attention census raised on the KDA gate up-projections `f_b_proj` and
+`g_b_proj` (`[8192, 128]`, 68 units). A rung whose Bresenham quota does not
+close over the columns is still refused, now as a `TesseraFormatError` (via
+`tessera_formats._schedule_rates`) rather than a raw `GrammarError`. Shapes
+priced before are byte-identical. No default, stage, export or serving gate
+changes; whether a runtime routes a 128-column unit natively stays the
+route-status gate's question. Gate: `tests/test_tessera_partial_superblock.py`.
+
 Re-stamped 2026-09-30 (PQ #1843, step 1 of #1842): the Tessera campaign
 takes `--allow-pinned` (the allocator's grammar) and `--pinned-roster-only`,
 so a census can name a scoped roster of profile-pinned Linears (GLM-5.3
@@ -2010,8 +2049,14 @@ four synchronous 8 MiB `pread` streams at about 0.9 GB/s.
   counter with the one recorded at load, so a `torch` write in place fails
   the window before it commits. Bounded non-stream PWC loads (`prefetch`,
   a lazy `get`) now request this same sealed-buffer decoder. The direct
-  `tools/qualify_t4_overlay.py` caller still keeps the bytes path and remains
-  a PQ #1295 consolidation item.
+  `tools/qualify_t4_overlay.py` caller requests it too, through the existing
+  bounded reader so digest-less first qualification preserves its staging and
+  copy-time digest fences. It closes the descriptor on successful decoding and
+  on decoder failure; the returned private mapping owns the verified pages.
+  Wire verification and GPU finishing remain independent qualification gates.
+  [The controlled CPU profile](results/2026-09-30_qualifier_sealed_cpu.md)
+  records live shmem returning to zero on drop and anonymous temporary growth
+  that remains; it does not attribute all retained memory to the decoder.
 - **Release, not take.** A taken window's renders stay charged to the
   stream's budget until the consumer releases them (`ReadStream.release`,
   `:825`): on unified memory a stream that counted them free at the take

@@ -112,14 +112,30 @@ def test_dense_readable_candidates_remain_available(qname, fmt):
 
 
 def test_family_allowance_does_not_bypass_shape_refusal():
-    from prismaquant.tessera_formats import TesseraFormatError
+    # R1281 does not close its quota over 4095 columns (1281 * 4095 / 256 is
+    # not a whole number of bits), so no such unit exists, and the legality
+    # gate drops it even though the research profile allows the family.  This
+    # test used to lean on the footprint's whole-superblock refusal, which
+    # raised on any 4095-column unit; #1849 removed it, because the wire holds
+    # a trailing partial superblock.
+    specs = [fr.get_format(E4M3[1]), fr.get_format('BF16')]
+    stats, costs = candidate_table([ROUTED], specs, shape=(2048, 4095))
+    masks = []
+    result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
+        source_manifest={ROUTED: 'bf16'}, mask_records=masks)
+    assert {candidate.fmt for candidate in result[ROUTED]} == {'BF16'}
+    assert [(m['format'], m['reason']) for m in masks] == [
+        (E4M3[1], 'tensor_parallel_shard')]
+
+
+def test_a_realisable_rung_on_a_partial_superblock_is_offered():
+    # The other side of #1849: R2048 closes over 4095 columns, so the unit is
+    # real and priced rather than refused.
     specs = [fr.get_format(E4M3[-1]), fr.get_format('BF16')]
     stats, costs = candidate_table([ROUTED], specs, shape=(2048, 4095))
-    # At TP=1 an unsliced window reaches the footprint's superblock check.
-    # Preserve that existing hard refusal, rather than assuming a TP mask.
-    with pytest.raises(TesseraFormatError, match='multiple of the 256-column'):
-        ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
-            source_manifest={ROUTED: 'bf16'})
+    result = ac.build_candidates(stats, costs, specs, target_profile=PROFILE,
+        source_manifest={ROUTED: 'bf16'})
+    assert {candidate.fmt for candidate in result[ROUTED]} == {E4M3[-1], 'BF16'}
 
 
 def test_family_allowance_does_not_bypass_source_ceiling():
