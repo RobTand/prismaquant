@@ -1175,17 +1175,8 @@ class ModelProfile(ABC):
                     )
                     mtp_regexes[0] = rf"(?:{extra}|{mtp_regexes[0]})"
                 regexes.extend(mtp_regexes)
-        visual_key = self.visual_config_key()
-        if include_visual and visual_key:
-            vis_cfg = cfg.get(visual_key, {})
-            n_vis = int(
-                vis_cfg.get("depth") or vis_cfg.get("num_hidden_layers") or 0
-            )
-            if n_vis > 0:
-                regexes.extend(
-                    _build_layer_shard_regexes(n_vis,
-                                               max(layers_per_shard, 4),
-                                               layer_prefix=self.visual_layer_prefix()))
+        if include_visual:
+            regexes.extend(self.visual_shard_regexes(cfg, layers_per_shard))
         if include_lm_head:
             regexes.append(rf"^{re.escape(self.lm_head_name())}$")
         return regexes
@@ -1218,6 +1209,20 @@ class ModelProfile(ABC):
         if spec is not None:
             return tuple(spec.mtp_extra_linear_names)
         return ("mtp.fc",)
+
+    def visual_shard_regexes(self, cfg: dict, layers_per_shard: int) -> list[str]:
+        """Shared visual scheduling for profile and incremental probe shards."""
+        visual_key = self.visual_config_key()
+        if not visual_key:
+            return []
+        vis_cfg = cfg.get(visual_key, {})
+        n_vis = int(vis_cfg.get("depth") or vis_cfg.get("num_hidden_layers") or 0)
+        if n_vis <= 0:
+            return []
+        return _build_layer_shard_regexes(
+            n_vis, max(layers_per_shard, 4),
+            layer_prefix=self.visual_layer_prefix(),
+        )
 
     def visual_layer_prefix(self) -> str | None:
         """Prefix used for visual-encoder block names, or None if this

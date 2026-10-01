@@ -624,12 +624,7 @@ def build_extended_shard_regexes(
             regexes.extend(mtp_regexes)
 
     if include_visual and visual_key and visual_prefix:
-        vis_cfg = cfg.get(visual_key, {})
-        n_vis = int(vis_cfg.get("depth") or vis_cfg.get("num_hidden_layers") or 0)
-        if n_vis > 0:
-            vis_per_shard = max(layers_per_shard, 4)
-            regexes.extend(build_layer_shard_regexes(
-                n_vis, vis_per_shard, layer_prefix=visual_prefix))
+        regexes.extend(profile.visual_shard_regexes(cfg, layers_per_shard))
 
     if include_lm_head:
         regexes.append(rf"^{re.escape(lm_head_name)}$")
