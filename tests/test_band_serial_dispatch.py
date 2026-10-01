@@ -4,10 +4,11 @@ Four bound executable records on a two-band fixture (stride 2, checkpoints
 2 and 4): band 4 holds layers 3 and 2, band 2 holds layers 1 and 0. Layer 3
 hands its cotangent to layer 2, and layer 1 to layer 0.
 
-PrismaBuild has no dependency between actions, so the edge is publication
-order: a producer row declares its handoff as a produced output, and its
-consumer is published only after the producer executed, reported complete
-and published a handoff the consumer binds. The consumer stages a readset
+The current dispatcher uses publication order: a producer row declares its
+handoff as a produced output, and its consumer is published only after the
+producer executed, reported complete and published a handoff the consumer
+binds. Public origin-batch declarations are a separate integration contract;
+this offline fixture does not establish that lifecycle. The consumer stages a readset
 derived from its sealed chain manifest and that handoff, and the quantum
 re-derives the same bytes before it reads.
 """
