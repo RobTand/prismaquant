@@ -47,13 +47,13 @@ def _check_builtin_pickle(data: bytes) -> None:
         if name in _UNBOUNDED_OPCODES:
             raise ValueError(f"source requires bounded builtin pickle: {name}")
         if name in ("PUT", "BINPUT", "LONG_BINPUT"):
-            if argument != memo_count:
+            if type(argument) is not int or argument != memo_count:
                 raise ValueError("source requires bounded builtin pickle: sparse memo")
             memo_count += 1
         elif name == "MEMOIZE":
             memo_count += 1
         elif name in ("GET", "BINGET", "LONG_BINGET"):
-            if not 0 <= argument < memo_count:
+            if type(argument) is not int or not 0 <= argument < memo_count:
                 raise ValueError("source requires bounded builtin pickle: invalid memo")
 
 

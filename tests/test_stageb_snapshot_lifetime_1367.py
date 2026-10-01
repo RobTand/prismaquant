@@ -19,7 +19,7 @@ def test_cyclic_snapshot_retirement_precedes_credit(monkeypatch, tmp_path, outco
     encode = aura._encode_aura_unit_checkpoint
     entered, release = threading.Event(), threading.Event()
     marker = f"snapshot-lifetime-{outcome}"
-    source = {"marker": marker}
+    source: dict[str, object] = {"marker": marker}
     source["self"] = source
 
     def tracked_copy(value):
