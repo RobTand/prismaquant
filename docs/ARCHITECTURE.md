@@ -22,6 +22,18 @@ contract/producer remain unchanged. This CPU metadata prerequisite does not
 activate a capture chain, authenticate source bytes or qualify model/GPU parity;
 no numerical, wire, default, cache, pin or serving/export gate changes.
 
+Re-stamped 2026-10-01 (PQ #1903, Refs #1100): auxiliary source-checkpoint
+identity hashes use the existing lifetime-pinned whole-file metadata reader
+under an active tier policy. The shared verified-byte delivery is separated
+from text decoding and digest selection; digest-cache hits still verify
+config/index and root Python metadata, without a pool fallback. An unbound
+auxiliary file is refused. Without a policy, the existing streaming SHA-256
+block size remains. Raw bytes, content-identity fields, canonical source/shard
+paths and original stat fences are unchanged. This does not close AutoConfig,
+remote-code execution, cold shard hashing or the broader worker header audit.
+No new cache, format, numerical method, export wire, runtime pin, pipeline
+default or serving gate; CPU regressions are not model/GPU qualification.
+
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
 using the existing delivery owner and exposed-wait ledger/report. Ready

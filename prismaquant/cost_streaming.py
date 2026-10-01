@@ -5940,7 +5940,18 @@ def build_streamed_causal_lm(
     return runner
 
 
-_file_sha256 = partial(file_sha256hex, block_size=16 * 1024 * 1024)
+_SOURCE_IDENTITY_BLOCK_BYTES = 16 * 1024 * 1024
+_file_sha256 = partial(file_sha256hex, block_size=_SOURCE_IDENTITY_BLOCK_BYTES)
+
+
+def _source_checkpoint_metadata_sha256(path: Path) -> str:
+    """Hash auxiliary bytes without bypassing an active metadata readset."""
+    from .staged_whole_file import read_source_metadata_sha256
+
+    return read_source_metadata_sha256(
+        path, label="source checkpoint metadata",
+        block_size=_SOURCE_IDENTITY_BLOCK_BYTES,
+    )
 
 
 def stat_fingerprint(path: str | Path, observed: os.stat_result) -> dict[str, object]:
@@ -6476,7 +6487,7 @@ def build_source_checkpoint_identity(
         if not path.is_file():
             continue
         fingerprint = _streamed_identity_stat_fingerprint(path)
-        digest = _file_sha256(path)
+        digest = _source_checkpoint_metadata_sha256(path)
         if _streamed_identity_stat_fingerprint(path) != fingerprint:
             raise RuntimeError(
                 f"source checkpoint metadata changed while hashing: {path}"
