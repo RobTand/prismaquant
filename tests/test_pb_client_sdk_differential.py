@@ -679,11 +679,12 @@ def _runtime_tree(root: Path, *, old_halves: bool, client_tags):
         (root / "tools/fleet").mkdir(parents=True, exist_ok=True)
         (root / "tools/fleet/pbcampaign.py").write_text("def decompose(args):\n    pass\n")
     if client_tags is not None:
+        from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
         package = root / "src/prismabuild"
         package.mkdir(parents=True, exist_ok=True)
         (package / "__init__.py").write_text("")
         (package / "client.py").write_text(textwrap.dedent(f"""\
-            SDK_VERSION = 1
+            SDK_VERSION = {PB_CLIENT_SDK_VERSION}
             CAPABILITIES = frozenset({sorted(client_tags)!r})
         """))
     return root
