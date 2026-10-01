@@ -98,6 +98,42 @@ def resource_fixture(tmp_path, monkeypatch):
     return inputs, plan, extended, policy_binding, policy
 
 
+def test_resource_formats_resolve_once_per_invocation(resource_fixture, monkeypatch):
+    """Repeated unit names reuse descriptors, never a process-global admission."""
+    from collections import Counter
+    from prismaquant import format_registry as fr
+
+    inputs, _original, _extended, _binding, expected = resource_fixture
+    resolve = fr.get_format
+    calls = Counter()
+
+    def counted(name):
+        calls[name] += 1
+        return resolve(name)
+
+    monkeypatch.setattr(fr, "get_format", counted)
+    actual = derive_policy(inputs, **LIMITS)
+    assert actual == expected
+    tessera_calls = {name: count for name, count in calls.items()
+                     if name.startswith("TESSERA_")}
+    assert tessera_calls and all(count == 1 for count in tessera_calls.values())
+
+    calls.clear()
+    assert derive_policy(inputs, **LIMITS) == expected
+    assert {name: count for name, count in calls.items()
+            if name.startswith("TESSERA_")} == tessera_calls
+
+    # A subsequent invocation must see a substituted resolver and its refusal.
+    def refused(name):
+        if name.startswith("TESSERA_"):
+            raise RuntimeError("changed invocation admission")
+        return resolve(name)
+
+    monkeypatch.setattr(fr, "get_format", refused)
+    with pytest.raises(RuntimeError, match="changed invocation admission"):
+        derive_policy(inputs, **LIMITS)
+
+
 def test_resource_derivation_fixes_indivisible_delta_and_preserves_science(resource_fixture):
     inputs, original, extended, binding, policy = resource_fixture
     assert original['execution']['retained_operator_windows']['budget']['candidate_delta_bytes'] == 16
