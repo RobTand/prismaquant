@@ -1,21 +1,21 @@
 {
-  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-client-sdk-20260927/059953bc3793f539600d333cd3311773e592b0e6",
-  "candidate_commit": "059953bc3793f539600d333cd3311773e592b0e6",
-  "candidate_source": "https://github.com/RobTand/prismabuild pull request #1255 head (branch claude/decouple-step2-client-sdk)",
+  "bundle_root": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk3-20261001/95a59051d48cda82eea7927f31870c6c862d7174",
+  "candidate_commit": "95a59051d48cda82eea7927f31870c6c862d7174",
+  "candidate_source": "https://github.com/RobTand/prismabuild pull request #1402 merge (SDK3), coordinator-authorized PQ #1888",
   "equivalent_commits": [],
   "files": {
-    "src/prismabuild/client.py": "8c01ed48491de4ece403e77647c8ced06d1dcce0e4659aad5d4f9bba8ddb96af",
-    "src/prismabuild/core.py": "20980e226e1e91cb4942e3f1e6f6c20160dfc56c79680987b9b1d1dd338a510d",
-    "src/prismabuild/movement_actions.py": "30ef5dfb3014e39ea3c99a47c942e28a188098df9ace2de24579a62c678b94f5",
-    "src/prismabuild/pool.py": "f43ec8b01b7578b6083f4a517d268f7725cad5a86283d2952dd1679b981e1199",
-    "src/prismabuild/produced_output.py": "4ca4ab5107f7d18722b76d961fec7f7ca475e0e5fac9c140393643514117c789",
-    "src/prismabuild/reader_lease.py": "c10be75030f40cab09416695f4442a41b279b066a173faf6b1c19f279d579699",
+    "src/prismabuild/client.py": "3d0315d2e4977baad1552f74c9fafd9079bb3c14bb8c64d141c0d403f97aba38",
+    "src/prismabuild/core.py": "8c293c25f9817e337ba9ebe07ffae14e55b4706934b5e324fea112824abbe77c",
+    "src/prismabuild/movement_actions.py": "1dc8232daba1896d993be4b95f514de6b03dc596bd9acf70a13061dc827bb1bf",
+    "src/prismabuild/pool.py": "9e4e099278fd2ef99bf62f1fde5043c216328768b79aa20f3dc05d58ce323a04",
+    "src/prismabuild/produced_output.py": "8d636899e500ee8ea88dde1b5654a1a938fba619b76fb485ac17903ec0898187",
+    "src/prismabuild/reader_lease.py": "db3faad20cb59f61121922deac98fbab695fb873085ce50f92a256583cdc8196",
     "src/prismabuild/residency_map.py": "10ce7f4f654fab46d45f64ffa5a85768df5dafa12bd8343a61b5abb0363d7b99",
-    "src/prismabuild/resource_scope.py": "49a6f78e0c20cc68f3b6cd002e51b7dbe5943d5d21d4ba1dbca18b5d2563898c",
-    "src/prismabuild/storage_tiers.py": "837303be8cdd793bb49122527c77a896fd793833e82410ab53921ff848ef0ac7",
-    "tools/fleet/prewarm_loop.py": "2c038e546222bbbbfb110249853399dc04cdd0aa5c6e84e6579fe9f45dfa62fc",
+    "src/prismabuild/resource_scope.py": "1dd143bec66f28ffb6cce9c019c37205f6fb765d847598c6176822dd8c19246c",
+    "src/prismabuild/storage_tiers.py": "cf1685e2001318ce02c545327c9eeb904b9471f6103d47e64d04a505ea5106ee",
+    "tools/fleet/prewarm_loop.py": "1d8b5c0c5a3df2ddb2cdd739226f5bfd4f44ada0689fd10732efd534da14cafe",
     "tools/fleet/stage_move.py": "0563ac11c38e43af32b90053c0edb3e1dc51792fb9b9304dbde9a36980e3b312",
-    "tools/fleet/stage_release.py": "bd3f306f289b50ea0ddc05ec17bc7d6aef2c98823753ab45ba8b12366024d78f"
+    "tools/fleet/stage_release.py": "dc0d0ace5717444a979ed74b1784e836b92fef41dd3ab786555861720b3eba5f"
   },
   "fleet_observation_as_of": {
     "observed_utc": "2026-09-21",
@@ -24,17 +24,21 @@
     "why_it_is_dated": "the fleet moves; a test artifact that asserts a live-fleet fact decays the moment it does, and a stale assertion in a fixture is worse than no assertion. Nothing here is scanned or enforced at test time."
   },
   "note": "The PrismaBuild produced-output API this lane's Stage A boundary publication is built against. The SOURCE is root-accepted; global application is a separate, pending step, and this pin does not assert what any particular runtime generation carries -- see fleet_observation_as_of for a dated observation rather than a claim that decays. Provenance is an IMMUTABLE bundle, not a live worktree: the bytes here were cut with `git archive` from the committed tree at the candidate commit and written read-only under the fleet's qualification root, and the digests below are what the tests check. The mutable lane checkouts are deliberately NOT a search path: a committed fixture must not resolve against a tree that exists to move. Both halves of the harness come from ONE bundle -- produced_output.py with the pool.PoolQueue authorization that funds a successor mover over an already committed batch -- because mixing this produced_output with the installed 461728e4 pool would refuse a successor's funding for a reason that is not this lane's. The reader half is separately pinned and deployed: acquire_for's material_namespace/residency_root parameters are already present at PQ's own reviewed reader-lease pin (staged_lease.PB_READER_LEASE_PIN_COMMIT); check the produced-output qualification and selected installed generation separately. These tests skip loudly when nothing resolves against the digests; they never imply support that does not exist.",
-  "qualification": "MERGED: PrismaBuild pull request #1255 head 059953bc, merged into PB main as b50d7f0126a6 (a merge commit; 059953bc is its second parent) and published in runtime generation b50d7f0126a6-1790563481-376b6a2d3928. The bundle and digests stay at the PR head: at b50d7f0126a6, src/prismabuild/pool.py and src/prismabuild/storage_tiers.py differ (PB #1265 landed first) and the other ten pinned files are byte-identical, checked file by file. Evidence for PQ #1541.",
+  "qualification": "SOURCE MERGED: PB #1402 at 95a59051d48cda82eea7927f31870c6c862d7174, SDK3. Exact git-archive bundle; all twelve pinned files also match staged generation 5aca8ee9323c-1790835144-b584825fe9d4. Runtime activation remains a separate pb-sched row-boundary operation; PQ #1888 does not certify activation or performance.",
   "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
   "search_paths": [
     {
       "env": "PRISMAQUANT_STAGEA_PRODUCED_PB_SRC"
     },
     {
-      "glob": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-client-sdk-20260927/*"
+      "path": "/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk3-20261001/95a59051d48cda82eea7927f31870c6c862d7174"
     }
   ],
   "supersedes": [
+    {
+      "candidate_commit": "059953bc3793f539600d333cd3311773e592b0e6",
+      "why": "PQ #1888 adopts coordinator-authorized SDK3 from PB #1402. The old SDK1 bundle and its historical receipts remain untouched; no old result is transferred to the new source. New reader/SDK CPU receipts are required."
+    },
     {
       "candidate_commit": "83e8d502ad9305177ee6e0501ff7c88ee036579d",
       "why": "superseded by the PrismaBuild client SDK candidate (PB #1255, issue #1254): PQ now reaches PB only through src/prismabuild/client.py, which the 83e8d502 bundle does not carry, so no test of this lane can bind it. Of the eleven files pinned there, 11 moved and 0 are byte-identical, checked file by file: moved src/prismabuild/core.py 4f2d0347a9a6... -> 20980e226e1e..., src/prismabuild/movement_actions.py fd3a76883033... -> 30ef5dfb3014..., src/prismabuild/pool.py 176cc02a976e... -> f43ec8b01b75..., src/prismabuild/produced_output.py b3999af60784... -> 4ca4ab5107f7..., src/prismabuild/reader_lease.py 0e1eb63d43ab... -> c10be75030f4..., src/prismabuild/residency_map.py fa77a5fbb2bb... -> 10ce7f4f654f..., src/prismabuild/resource_scope.py f9a85dd27704... -> 49a6f78e0c20..., src/prismabuild/storage_tiers.py a33faa564893... -> 837303be8cdd..., tools/fleet/prewarm_loop.py 638f2aeda817... -> 2c038e546222..., tools/fleet/stage_move.py 3e67cb50c99e... -> 0563ac11c38e..., tools/fleet/stage_release.py 900436256d57... -> bd3f306f289b.... src/prismabuild/client.py is newly pinned. Evidence measured against 83e8d502 is not carried forward; this lane's tests were re-run against the new bundle."

@@ -1359,7 +1359,7 @@ def test_lease_pin_module_reports_approved_commit():
     from prismaquant.staged_lease import (
         PINNED_SDK_COMMIT, PB_READER_LEASE_PIN_COMMIT)
     assert PINNED_SDK_COMMIT == PB_READER_LEASE_PIN_COMMIT
-    assert PINNED_SDK_COMMIT == "059953bc3793f539600d333cd3311773e592b0e6"
+    assert PINNED_SDK_COMMIT == "95a59051d48cda82eea7927f31870c6c862d7174"
 
 
 # -- window enter/exit contract: single-shot, no leaks ------------------------

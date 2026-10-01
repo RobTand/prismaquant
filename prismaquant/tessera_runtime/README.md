@@ -188,10 +188,23 @@ and point `TESSERA_REPO` at its complete checkout; the producer scripts live in
 `experiments/` and are not wheel entry points.
 Provision the pin venv from a git URL so the install records the commit
 (`git+https://github.com/RobTand/tessera.git@<pin>`). The PrismaBuild test
-interpreter for the current pin is
-`/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb`. It carries both pins this
-tree tests against: Tessera `b40c93cb` and PrismaBuild `059953bc`
-(`staged_lease.PB_READER_LEASE_PIN_COMMIT`, PQ #1541). It is a copy of
+interpreter for the current reader/SDK pin on DL380 is
+`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb`. PQ #1888 adopts exact
+PrismaBuild `95a59051d48cda82eea7927f31870c6c862d7174` / SDK3 while retaining
+Tessera `b40c93cb`. Provision it through an admitted PB action by copying
+`pq-pb059953bc-tessera-b40c93cb` to the new path, repointing copied scripts
+and any `.pth` references, then force-reinstalling only PrismaBuild from
+`git+https://github.com/RobTand/prismabuild.git@95a59051d48cda82eea7927f31870c6c862d7174`
+with `--no-deps --no-build-isolation`. Assert both noneditable Git commits,
+the installed client path under the new prefix and `SDK_VERSION == 3` before
+using it. PB commands and receipts are recorded in PR #1900; a path alone
+is not a provision pass. This CPU pin movement does not certify Spark
+interpreters or activate a runtime generation. Do not mutate old live venvs.
+
+The previous SDK1 interpreter
+`/home/rob/venvs/pq-pb059953bc-tessera-b40c93cb` carried Tessera `b40c93cb`
+and PrismaBuild `059953bc` (`staged_lease.PB_READER_LEASE_PIN_COMMIT` at
+PQ #1541/#1740). It was a copy of
 `pq-pb059953bc-tessera-83460680` with only Tessera reinstalled, non-editable,
 provisioned by host-pinned PB build actions on 2026-09-29: dl380g10
 `04db45b6e214`, sparky `6e595022a3d5` and sparklina `18820b4622bf`.

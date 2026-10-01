@@ -1,26 +1,26 @@
 {
   "schema": "prismaquant.stagea_produced_boundaries.pb_candidate_pin.v1",
-  "bundle_root": "/mnt/shared/prismabuild-fleet/runtime-generations/b2d12097cd53-1790564012-4cd6608d3052",
-  "candidate_commit": "b2d12097cd530be0a808a1a1fb91ff53d1436b28",
-  "runtime_generation": "b2d12097cd53-1790564012-4cd6608d3052",
-  "qualification": "PUBLISHED RUNTIME GENERATION b2d12097cd53-1790564012-4cd6608d3052",
+  "bundle_root": "/mnt/shared/prismabuild-fleet/runtime-generations/5aca8ee9323c-1790835144-b584825fe9d4",
+  "candidate_commit": "5aca8ee9323c075139d4205ea51a128ecc7a9510",
+  "runtime_generation": "5aca8ee9323c-1790835144-b584825fe9d4",
+  "qualification": "PUBLISHED, STAGED SDK3 generation; all seventeen pinned files match reviewed PB95a59051d48cda82eea7927f31870c6c862d7174. Activation is independently owned by pb-sched; this fixture never establishes it.",
   "files": {
-    "src/prismabuild/action_edges.py": "ab4ae4347403b609470fe45943dc2730496c11c6fb226d59affb33547a479d50",
-    "src/prismabuild/adaptive_cpu.py": "c756ee54bd103df4d86ddee94c8eb79c3c54a0335d934eef4f24e1b7718a073e",
-    "src/prismabuild/client.py": "8c01ed48491de4ece403e77647c8ced06d1dcce0e4659aad5d4f9bba8ddb96af",
-    "src/prismabuild/core.py": "20980e226e1e91cb4942e3f1e6f6c20160dfc56c79680987b9b1d1dd338a510d",
-    "src/prismabuild/movement_actions.py": "30ef5dfb3014e39ea3c99a47c942e28a188098df9ace2de24579a62c678b94f5",
-    "src/prismabuild/pool.py": "7b8a58f40724a41a7c337aa4f9153e85eb6ecd6a2e5affa090a5dc40ede0ed64",
-    "src/prismabuild/produced_output.py": "4ca4ab5107f7d18722b76d961fec7f7ca475e0e5fac9c140393643514117c789",
-    "src/prismabuild/produced_spool.py": "c10f876f26a66c409d88da3a5dc611a62900582dda2865c5ea6db5175792fbf7",
-    "src/prismabuild/reader_lease.py": "c10be75030f40cab09416695f4442a41b279b066a173faf6b1c19f279d579699",
+    "src/prismabuild/action_edges.py": "969abef4dddbf195da96c1d2c3b5a8775efbe348a44f6f80ffac14e3ae8ea9af",
+    "src/prismabuild/adaptive_cpu.py": "adf61b958c6be0f214b4de5ecbf0b7f88203188d4a34196fccd4da23fa908e27",
+    "src/prismabuild/client.py": "3d0315d2e4977baad1552f74c9fafd9079bb3c14bb8c64d141c0d403f97aba38",
+    "src/prismabuild/core.py": "8c293c25f9817e337ba9ebe07ffae14e55b4706934b5e324fea112824abbe77c",
+    "src/prismabuild/movement_actions.py": "1dc8232daba1896d993be4b95f514de6b03dc596bd9acf70a13061dc827bb1bf",
+    "src/prismabuild/pool.py": "9e4e099278fd2ef99bf62f1fde5043c216328768b79aa20f3dc05d58ce323a04",
+    "src/prismabuild/produced_output.py": "8d636899e500ee8ea88dde1b5654a1a938fba619b76fb485ac17903ec0898187",
+    "src/prismabuild/produced_spool.py": "818891c8d9c13b3e05beefb551b43091ee419b2eb7457cdcf5321b9ea5dd2645",
+    "src/prismabuild/reader_lease.py": "db3faad20cb59f61121922deac98fbab695fb873085ce50f92a256583cdc8196",
     "src/prismabuild/residency_map.py": "10ce7f4f654fab46d45f64ffa5a85768df5dafa12bd8343a61b5abb0363d7b99",
-    "src/prismabuild/resource_scope.py": "49a6f78e0c20cc68f3b6cd002e51b7dbe5943d5d21d4ba1dbca18b5d2563898c",
-    "src/prismabuild/storage_tiers.py": "e37471df5c43be54a98596d59d587a9c7c636d25a98066c864426cf71a4eadd6",
-    "tools/fleet/prewarm_loop.py": "2c038e546222bbbbfb110249853399dc04cdd0aa5c6e84e6579fe9f45dfa62fc",
+    "src/prismabuild/resource_scope.py": "1dd143bec66f28ffb6cce9c019c37205f6fb765d847598c6176822dd8c19246c",
+    "src/prismabuild/storage_tiers.py": "cf1685e2001318ce02c545327c9eeb904b9471f6103d47e64d04a505ea5106ee",
+    "tools/fleet/prewarm_loop.py": "1d8b5c0c5a3df2ddb2cdd739226f5bfd4f44ada0689fd10732efd534da14cafe",
     "tools/fleet/produced_export.py": "0bc4159cf5d4d4955bc83c10d6676df42108a281a4b0b6e9024d5c4c73a30efc",
     "tools/fleet/stage_move.py": "0563ac11c38e43af32b90053c0edb3e1dc51792fb9b9304dbde9a36980e3b312",
-    "tools/fleet/stage_release.py": "bd3f306f289b50ea0ddc05ec17bc7d6aef2c98823753ab45ba8b12366024d78f",
+    "tools/fleet/stage_release.py": "dc0d0ace5717444a979ed74b1784e836b92fef41dd3ab786555861720b3eba5f",
     "tools/prismabuild_worker.py": "9d6851f927ddf09e75d7eb187b49be9dbfba05274536d765077d93e26ec79418"
   },
   "search_paths": [
@@ -28,7 +28,7 @@
       "env": "PRISMAQUANT_PB_GENERATION_SRC"
     },
     {
-      "path": "/mnt/shared/prismabuild-fleet/runtime-generations/b2d12097cd53-1790564012-4cd6608d3052"
+      "path": "/mnt/shared/prismabuild-fleet/runtime-generations/5aca8ee9323c-1790835144-b584825fe9d4"
     }
   ],
   "consumers": [
