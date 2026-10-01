@@ -656,6 +656,42 @@ binding documents and directory-scan errors. Gzip decoding is bounded by the
 same 64 MiB document limit. This CPU proof slice adds no deletion target or
 forward/dead-owner reclaim; it changes no numerical, wire or serving gate.
 
+Re-stamped 2026-09-30 (PQ #1743, `sol/1654-startup-current-pin`): a new,
+non-partitioned stream head starts its exact first anchor batch on the existing
+RowStream readers before run identity and journal preparation. Group/rung/batch
+rules and the row-local refusal memo determine that batch; at most one batch
+is primed, with existing source/capture verification and a pre-read memory
+guard. The actual first encode plan must match before collection, and its
+guard charges primed futures together with the ahead window. No early weight
+installation, receipts, checkpoint writes or second cache. Existing complete,
+partial or even empty journal paths retain the before-read resume gate;
+ambiguous journal access fails closed. Expert partitions also retain their
+existing admit-time reads: their legal rate grid depends on unpriced full-group
+siblings, not a subset-only early plan. Tests: `tests/test_row_startup_prime.py`
+and the existing stream suite. Frozen A/B neutrality is checked; newly rebased
+artifact and profiled delta gates remain independent.
+
+Re-stamped 2026-09-30 (PQ #1742, `sol/1654-startup-current-pin`): pricing rows
+start Tessera's exact `encoder_source_sha256()` on the existing affinity-bound
+I/O executor after source authentication and before model preparation, then
+join before producer binding and run identity. The producer's own one-entry
+cache and all identity fields remain unchanged; this is not a new digest or
+cross-row memo. Every exit drains the future; a seal failure propagates at
+the explicit join. Census/capture-only heads submit no unused seal work.
+Tests: `tests/test_row_startup_encoder_seal.py`; frozen A/B output neutrality
+has been checked. Newly rebased artifact and profiled phase deltas require
+their own gates (no speed claim here).
+
+Re-stamped 2026-09-29 (PQ #1741, `sol/1654-startup-neutral`): served-route
+planning memoizes pinned-contract refusals by `(family, rung, structure)`
+across one row's anchor groups. The unprojected routed-member gate is still
+per member; only its structure-dependent wire comparison is reused. Sorted
+refusal records, admitted rungs, numerical costs, anchors and wire bytes are
+unchanged by this planning change. The memo is not retained across runs.
+Tests: `tests/test_row_startup_routes.py`; frozen A/B output neutrality has
+subsequently been checked. A measured delta and newly rebased artifact
+qualification still require their own gates (no speed claim here).
+
 Re-stamped 2026-09-29 (PQ #1768, `sol/pq-contract-split-1549`, Refs #1549):
 legal-domain pin provenance now transcribes v3's independently reviewed
 producer commit and serving-source digest. `DomainPins` omits absent split
@@ -18245,8 +18281,8 @@ measurement environment — 29 variables then, 31 since the 0.8.11 advance — w
 artifact-derived native-extension requirements, and a dedicated raw-source W8A16 kernel
 family. These harden evidence and admission and back the source W8A16 route for export; they do
 not by themselves promote an unmeasured full artifact. The four behavioural facts a
-returning reader must know are that **`COST_MODE` defaults to `aura`** (§3.3), Gridbook serving
-is native CUDA/CUTLASS-only and fails closed (§9.2), and fused native-NVFP4 remains default-off
+returning reader must know are that **`COST_MODE` defaults to `aura`** (§3.3), the Gridbook serving lane
+is retired and archival only, and fused native-NVFP4 remains default-off
 after its teacher-backed quality gate (§9.2); direct group-32 MXFP8 remains W8A8 while the
 block-128 checkpoint source route is W8A16.
 
@@ -18254,6 +18290,16 @@ block-128 checkpoint source route is W8A16.
 document is wrong — fix it, or record the divergence in §12; never propagate it.
 
 ---
+
+Re-stamped 2026-09-30 (PQ #1741, `sol/1654-startup-current-pin`): the existing
+`anchor_group_rate_grids` helper shares row-local served-route facts across
+its full-group intersections, including expert-partition planning. Main retains
+the complete group's legal grid and pinned-rate refusal; the memo does not
+relax per-member projection gates or persist across invocations. This is a
+startup CPU planning change, not a new cache, numerical method, serving gate,
+pin, menu or stage. The frozen A/B output-neutrality evidence does not qualify
+a newly rebased artifact or a measured startup delta; current-head CPU and
+approved profile gates remain independent.
 
 ## Contents
 

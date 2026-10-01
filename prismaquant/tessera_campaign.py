@@ -883,8 +883,73 @@ def _stale_served_wire(anchor, record, *, structure) -> "str | None":
             f"served on {served} at this rung (#1502); re-priced, not adopted")
 
 
+def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
+                              weights, profile, expert_members, encode_structure,
+                              projected_units, audit_units, route_cache,
+                              partitioned=False):
+    """Overlap a new head's exact first batch; never read ahead of resume gates.
+
+    Use the existing group/anchor/batch mechanisms and row-local refusal memo.
+    Any existing journal, even empty, keeps the before-read identity path. An
+    inaccessible path fails closed instead of being treated as absent.
+    """
+    # A partition's legal grid depends on unpriced full-group siblings. Keep
+    # its existing admit-time reads until this early-batch planner carries that
+    # full-group contract; a subset-derived prime could disagree with admit.
+    if partitioned or args.seed_checkpoint or getattr(args, "finalize_checkpoint", False):
+        return
+    for path in (checkpoint, checkpoint.with_name(checkpoint.name + ".parts"),
+                 checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX)):
+        try:
+            path.stat()
+        except FileNotFoundError:
+            continue
+        else:
+            return
+
+    def snap(rate, allowed):
+        if not allowed:
+            return None
+        return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
+
+    cap = float(args.max_artifact_bpp)
+    rates_by_unit = {}
+    for name in targets:
+        per_family = {}
+        for rung in menus[name]:
+            if cap > 0 and rung.bpp > cap:
+                continue
+            per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
+        rates_by_unit[name] = per_family
+    groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
+    band = parse_rate_band(getattr(args, "rate_band", None))
+    pending = []
+    for _key, members in sorted(groups.items()):
+        families = set.intersection(*[set(rates_by_unit[m]) for m in members]) if members else set()
+        for family in sorted(families):
+            shared = set.intersection(*[rates_by_unit[m][family] for m in members])
+            refused = _served_route_refusals(family, shared, members,
+                encode_structure=encode_structure, projected_units=projected_units,
+                route_cache=route_cache)
+            allowed = sorted(shared - {int(rung) for rung in refused})
+            if not allowed:
+                continue
+            want = round_one_rates(allowed, band=band, anchors=args.anchors,
+                                   snap=snap, exhaustive_band=args.exhaustive_rate_grid)
+            extra = None if not audit_units else audit_extra_rate(allowed, want, snap=snap)
+            for name in members:
+                rates = set(want)
+                if extra is not None and name in audit_units:
+                    rates.add(extra)
+                pending.extend((name, family, rate) for rate in sorted(rates))
+    batches = _anchor_batches(pending, weights=weights, batch_size=args.anchor_batch_size,
+                              structures=encode_structure)
+    if batches:
+        row_stream.prime([item[0] for item in batches[0]])
+
+
 def _served_route_refusals(family, rungs, members, *, encode_structure,
-                           projected_units) -> "dict[str, dict]":
+                           projected_units, route_cache=None) -> "dict[str, dict]":
     """The rungs of ``family`` some member cannot be served on, with why.
 
     ``{str(rung): {"reason": ..., "members": [...]}}`` for every refused rung.
@@ -902,20 +967,31 @@ def _served_route_refusals(family, rungs, members, *, encode_structure,
     from .tessera_formats import (
         tessera_served_route_refusal, tessera_served_wire_recipe, tessera_wire_recipe)
 
+    # The pinned contract answer is shared by every member of a structure.
+    # A caller may share this memo across one row's groups, never across runs.
+    # Projection membership is still checked separately for each member.
+    memo = {} if route_cache is None else route_cache
     refused: dict[str, dict] = {}
     for rung in sorted(int(r) for r in rungs):
         reasons: dict[str, list[str]] = {}
         for member in members:
             structure = (encode_structure or {}).get(member)
-            reason = tessera_served_route_refusal(family, rung, structure=structure)
+            key = (family, rung, structure)
+            if key not in memo:
+                memo[key] = tessera_served_route_refusal(family, rung, structure=structure)
+            reason = memo[key]
             if (reason is None and structure == "routed_moe"
-                    and member not in (projected_units or {})
-                    and tessera_served_wire_recipe(family, rung, structure=structure,
-                                                   refuse_unattested=False)
-                    != tessera_wire_recipe(family, rung)):
-                reason = (f"{family}_R{rung}: a routed unit with no producer projection is "
-                          "adopted by Tessera's export intake on the dense receipt, which "
-                          "cannot stamp the routed served wire")
+                    and member not in (projected_units or {})):
+                unprojected_key = (*key, "unprojected")
+                if unprojected_key not in memo:
+                    differs = (tessera_served_wire_recipe(
+                        family, rung, structure=structure, refuse_unattested=False)
+                        != tessera_wire_recipe(family, rung))
+                    memo[unprojected_key] = (
+                        f"{family}_R{rung}: a routed unit with no producer projection is "
+                        "adopted by Tessera's export intake on the dense receipt, which "
+                        "cannot stamp the routed served wire" if differs else None)
+                reason = memo[unprojected_key]
             if reason is not None:
                 reasons.setdefault(reason, []).append(member)
         if reasons:
@@ -2543,6 +2619,42 @@ def _identity_threads_for_this_process(requested) -> int:
     return max(1, min(requested, admitted))
 
 
+class _EncoderSourceSealAhead:
+    """Overlap the producer's exact cold source seal, using its own cache.
+
+    This is a row-owned future on the existing affinity-bound I/O executor,
+    not another digest or memo. Join before a producer identity can first read
+    the seal; the unchanged identity/bind API then sees the producer's cache.
+    """
+
+    def __init__(self):
+        from .io_engine import ENGINE
+        self._future = ENGINE.submit(self._take)
+
+    @staticmethod
+    def _take():
+        return _checkpoint_identity_api().encoder_source_sha256()
+
+    def wait(self) -> str:
+        return self._future.result()
+
+    def finish(self) -> None:
+        # Drain on every exit, but do not mask a prior preparation failure.
+        # Successful pricing MUST wait explicitly and propagate seal failure.
+        try:
+            self._future.result()
+        except BaseException:
+            pass
+
+
+def _start_encoder_source_seal_ahead(args, source_scope):
+    if args.census_out or args.capture_calibration_out:
+        return None
+    ahead = _EncoderSourceSealAhead()
+    source_scope.callback(ahead.finish)
+    return ahead
+
+
 class _SealAhead:
     """Take the calibration owner's capture seal on a helper thread.
 
@@ -3725,8 +3837,11 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
 
 
 def anchor_group_rate_grids(groups: Mapping, rates_by_unit: Mapping, *,
-                           encode_structure, projected_units) -> tuple[dict, dict]:
+                           encode_structure, projected_units,
+                           route_cache: dict[tuple, str | None] | None = None) -> tuple[dict, dict]:
     """The existing full-group legal intersection, shared with partitions."""
+    if route_cache is None:
+        route_cache = {}
     group_rates, route_refused = {}, {}
     for key, members in groups.items():
         per_family = {}
@@ -3736,7 +3851,7 @@ def anchor_group_rate_grids(groups: Mapping, rates_by_unit: Mapping, *,
             shared = set.intersection(*[rates_by_unit[m][family] for m in members])
             refused = _served_route_refusals(
                 family, shared, members, encode_structure=encode_structure,
-                projected_units=projected_units)
+                projected_units=projected_units, route_cache=route_cache)
             if refused:
                 route_refused.setdefault(key, {})[family] = refused
                 shared = shared - {int(rung) for rung in refused}
@@ -6122,6 +6237,11 @@ def _main(argv, *, source_scope) -> int:
             args.capture_calibration_out, census_path=args.calibration_census, model=args.model,
             release_read_pages=args.streaming_capture_policy == 'shared-inputs-bounded-v1'))
 
+    # The source proof is adopted before this point. The producer's immutable
+    # package seal can run under skeleton/tokenizer/calibration preparation
+    # instead of serially at the head of run_identity (PQ #1742).
+    encoder_seal_ahead = _start_encoder_source_seal_ahead(args, source_scope)
+
     from .model_profiles import detect_profile
     profile = detect_profile(args.model)
     runner = None
@@ -6600,6 +6720,11 @@ def _main(argv, *, source_scope) -> int:
             factor_scratch_bytes=(selected_resources['phases']['resident_anchors']['factorization_scratch_bytes']
                                   if selected_source else 0))
 
+    # Before the first producer binding/metadata plan or run identity. Keep
+    # those APIs and every identity field unchanged; only their cold seal's
+    # scheduling moves. No unused work is submitted for census/capture heads.
+    if encoder_seal_ahead is not None:
+        encoder_seal_ahead.wait()
     _activation_kwargs_for = activation_kwargs_for(calibration_source)
 
     cache = ProductionWeightCache(
@@ -6792,6 +6917,7 @@ def _main(argv, *, source_scope) -> int:
               flush=True)
 
     row_stream = None
+    route_cache: dict[tuple, str | None] = {}
     if streaming_head:
         from .tessera_row_stream import RowStream
         stream_threads = identity_threads
@@ -6847,6 +6973,11 @@ def _main(argv, *, source_scope) -> int:
                                   ['factorization_scratch_bytes']))
         source_scope.callback(row_stream.close)
         calibration_cache = row_stream.capture
+        _prime_first_anchor_batch(row_stream, args=args, checkpoint=checkpoint,
+            targets=targets, menus=menus, weights=weights, profile=profile,
+            expert_members=expert_members, encode_structure=encode_structure,
+            projected_units=projected_units, audit_units=audit_units, route_cache=route_cache,
+            partitioned=partition_menu_targets is not None)
 
     def run_identity(**receipts):
         # The resume identity, run level: everything a price is a function of,
@@ -7459,7 +7590,8 @@ def _main(argv, *, source_scope) -> int:
     group_rates, route_refused = anchor_group_rate_grids(
         rate_groups, rates_by_unit,
         encode_structure=(partition_encode_structure if partition_menu_targets is not None else encode_structure),
-        projected_units=(partition_unit_records if partition_menu_targets is not None else projected_units))
+        projected_units=(partition_unit_records if partition_menu_targets is not None else projected_units),
+        route_cache=route_cache)
     if partition_menu_targets is not None:
         fixed_rate = parse_rate_band(args.rate_band)[0]
         if any(not any(fixed_rate in rates for rates in families.values())
