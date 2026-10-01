@@ -133,6 +133,7 @@ def test_unknown_failure_kind_refuses_fail_closed():
 def test_override_excuses_trace_incompleteness_only():
     aborted = evaluate_walk_gate(None, trace_status="incomplete")
     assert aborted.refused
+    assert aborted.provenance["refused"] is aborted.refused
     assert "incomplete_trace" in aborted.refusal_kinds
 
     excused = evaluate_walk_gate(
@@ -140,6 +141,7 @@ def test_override_excuses_trace_incompleteness_only():
         trace_error_class="DataDependentOutputException",
         override_reason="DSA position scalar aborts the fake trace")
     assert not excused.refused
+    assert excused.provenance["refused"] is excused.refused
     assert excused.provenance["override"] == {
         "env": WALK_GATE_OVERRIDE_ENV,
         "reason": "DSA position scalar aborts the fake trace",
@@ -149,6 +151,7 @@ def test_override_excuses_trace_incompleteness_only():
     unclaimed = _walked(claim_rules=[LINEAR_DECIDE])
     still_refused = evaluate_walk_gate(unclaimed, override_reason="try me")
     assert still_refused.refused
+    assert still_refused.provenance["refused"] is still_refused.refused
     assert "unclaimed_node" in still_refused.refusal_kinds
     assert still_refused.provenance.get("override_excused_trace_only") is None
 
