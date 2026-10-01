@@ -54,7 +54,7 @@ from prismaquant.production_weight_cache import (
     packed_activation_hook_scope_of,
     validate_activation_hook_scope,
 )
-from .digests import file_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, file_sha256hex
 
 
 CAMPAIGN_IDENTITY_SCHEMA = (
@@ -1829,7 +1829,7 @@ def _read_json_object(path: str | Path, *, where: str) -> dict[str, object]:
 
 def _summary(payload: Mapping[str, object]) -> str:
     render = payload.get("campaign_identity", {}).get("render", {})
-    return json.dumps({
+    return DIRECT_ASCII_SPACED_LAX.text({
         "schema": payload.get("schema"),
         "entries": payload.get("entries"),
         "coverage_mode": payload.get("coverage_mode") or render.get(
@@ -1840,7 +1840,7 @@ def _summary(payload: Mapping[str, object]) -> str:
             or render.get("coverage_identity_sha256")
         ),
         "shard_id": payload.get("shard_id"),
-    }, sort_keys=True)
+    })
 
 
 def _add_coverage_arguments(parser: argparse.ArgumentParser) -> None:

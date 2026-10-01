@@ -389,7 +389,6 @@
   "sorted-json:prismaquant/tessera_selected_scales.py::write_selected_scales",
   "sorted-json:prismaquant/tessera_source_digest_adoption.py::adopt_source_digests",
   "sorted-json:prismaquant/tessera_source_digest_adoption.py::main",
-  "sorted-json:prismaquant/union_production_cache.py::_summary",
   "sorted-json:prismaquant/union_production_cache.py::create_shard_manifest",
   "sorted-json:prismaquant/union_production_cache.py::union_shard_manifests",
   "sorted-json:prismaquant/unit_topology_restamp.py::main",
