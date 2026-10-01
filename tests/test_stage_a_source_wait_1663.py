@@ -96,3 +96,45 @@ def test_stage_a_reports_source_component_without_claiming_whole_row_instrumente
     assert source["power_samples"] == 0
     assert counters["exposed_wait"]["instrumented"] is False
     assert "boundary/checkpoint" in counters["exposed_wait"]["reason"]
+
+
+def test_observer_scope_rejects_nested_or_invalid_binding(monkeypatch):
+    context = _make_ctx(monkeypatch, workers=1)
+    ledger = io_spans.ExposedWaitLedger()
+    try:
+        with pytest.raises(TypeError, match="must be callable"):
+            with context.observe_source_waits(None):
+                pass
+        with context.observe_source_waits(ledger.sink):
+            with pytest.raises(RuntimeError, match="already active"):
+                with context.observe_source_waits(ledger.sink):
+                    pass
+            assert context._source_wait_sink == ledger.sink
+        assert context._source_wait_sink is None
+    finally:
+        context.prefetch_pool.shutdown(wait=True)
+
+
+@pytest.mark.parametrize("loader_failed", [False, True])
+def test_observer_failure_never_masks_loader_failure(monkeypatch, loader_failed):
+    context = _make_ctx(monkeypatch, workers=1)
+    failure = RuntimeError("fixture source failed") if loader_failed else None
+    delivery = _Delivery({"weight": object()}, error=failure)
+    clock = iter([20.0, 23.0])
+    monkeypatch.setattr(streaming_model.time, "time", lambda: next(clock))
+
+    def refuse_observation(*args):
+        raise ValueError("fixture telemetry failed")
+
+    try:
+        with pytest.raises(RuntimeError) as caught:
+            with context.observe_source_waits(refuse_observation):
+                context._await_prefetch(4, delivery, retry_availability=False)
+        if loader_failed:
+            assert caught.value is failure
+            assert "fixture telemetry failed" in caught.value.__notes__[0]
+        else:
+            assert str(caught.value) == "source wait observer failed"
+        assert context._source_wait_sink is None
+    finally:
+        context.prefetch_pool.shutdown(wait=True)

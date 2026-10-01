@@ -1299,9 +1299,41 @@ class StreamingContext:
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
 
+    @contextmanager
+    def observe_source_waits(self, sink):
+        """Observe this consumer's pending deliveries, without owning their loads."""
+        if not callable(sink):
+            raise TypeError('source wait observer must be callable')
+        if getattr(self, '_source_wait_sink', None) is not None:
+            raise RuntimeError('source wait observer already active')
+        self._source_wait_sink = sink
+        try:
+            yield
+        finally:
+            self._source_wait_sink = None
+
     def _prefetch_result(self, layer, future):
         """Take one delivery result; retry ownership stays in ``_await_prefetch``."""
-        return future.result()
+        sink = getattr(self, '_source_wait_sink', None)
+        if sink is None or future.done():
+            return future.result()
+        started = time.time()
+        failure = None
+        try:
+            return future.result()
+        except BaseException as error:
+            failure = error
+            raise
+        finally:
+            finished = time.time()
+            try:
+                sink('source-prefetch', started, finished,
+                     {'layer': int(layer), 'wait_s': max(0.0, finished - started)})
+            except BaseException as error:
+                if failure is None:
+                    # An observer's failure is not a loader availability cause.
+                    raise RuntimeError('source wait observer failed') from error
+                failure.add_note(f'source wait observer failed: {type(error).__name__}: {error}')
 
     def _await_prefetch(self, layer, future, *, retry_availability):
         """Await delivery, retaining its owner even when speculation is replaced.

@@ -5434,6 +5434,10 @@ class StreamedCausalLM:
                 'source_tensor_keys': list(self.context._snapshot_source_keys),
                 'nonbody_materialized': False} if snapshot_only else {}))
 
+    def observe_source_waits(self, sink):
+        """Scope source-delivery observation through the existing residency owner."""
+        return self.context.observe_source_waits(sink)
+
     @contextmanager
     def pin_layer(self, layer: int) -> Iterator[None]:
         layer = int(layer)

@@ -41,7 +41,7 @@ import os
 import pickle
 import socket
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import torch
@@ -49,7 +49,9 @@ import torch
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
 from .digests import bytes_sha256hex, indent2_json_file_bytes
-from .io_spans import EXPOSED_WAIT_SCHEMA, GpuPowerSampler
+from .io_spans import (
+    EXPOSED_WAIT_SCHEMA, ExposedWaitLedger, GpuPowerSampler, exposed_wait_report,
+)
 from .joint_adjoint_checkpoints import (
     ADJOINT_CAPTURE_ENTRY_POINT,
     ADJOINT_RECEIPT_SCHEMA,
@@ -2539,6 +2541,9 @@ def run_adjoint_capture(
     sampler = GpuPowerSampler().start()
     kernel = _stage_a_kernel_profiler()
     runner = None
+    source_waits = ExposedWaitLedger()
+    source_observation = ExitStack()
+    gpu_work_started = None
     started, before_io = time.time(), _io_counters()
     try:
         result["device_envelope"] = _stage_a_device_envelope(config)
@@ -2550,6 +2555,7 @@ def run_adjoint_capture(
         reader = load_declared_reader(config.get("reader"))
         reader_identity = None if reader is None else reader.identity
         implementation = _aura_source_sha256()
+        gpu_work_started = time.time()
         projection_backend = prewarm_projection_backend(
             execution.get("projection_backend"), device="cuda")
         result["projection_backend"] = projection_backend.identity
@@ -2610,6 +2616,7 @@ def run_adjoint_capture(
             source_authentication=None,
             source_derivative=execution.get("source_derivative"),
             **prefetch["run_used"])
+        source_observation.enter_context(runner.observe_source_waits(source_waits.sink))
         require_capture_compatibility(config.get("source_capture_compatibility"),
                                       capture=config["canonical_capture"],
                                       model=runner.model)
@@ -2707,6 +2714,7 @@ def run_adjoint_capture(
               f"{error}", flush=True)
         raise
     finally:
+        source_observation.close()
         kernel.__exit__(None, None, None)
         if runner is not None:
             completed, runner = runner, None
@@ -2723,6 +2731,16 @@ def run_adjoint_capture(
         if residency is not None:
             result["residency"] = residency
 
+    source_snapshot = source_waits.snapshot()
+    source_report = exposed_wait_report(
+        source_snapshot['intervals'], source_snapshot['takes'],
+        power_times=getattr(sampler, 'times', ()),
+        power_samples=getattr(sampler, 'samples', ()),
+        interval_s=getattr(sampler, 'interval_s', 1.0),
+        phase_windows=[{'name': 'adjoint-capture', 'start_unix': started,
+                        'end_unix': result['env']['finished_epoch']}],
+        envelope_w=140.0, baseline_end_unix=gpu_work_started)
+    source_report['coverage'] = 'source-prefetch-only'
     counters = {
         "schema": QUANTUM_COUNTERS_SCHEMA.replace(
             "joint_layer_quantum", "joint_adjoint_capture"),
@@ -2738,14 +2756,14 @@ def run_adjoint_capture(
         "kernel_active_ratio": (
             kernel.kernel_active_s / (result["phases"][0]["end_epoch"] - started)
             if not kernel.error else None),
-        # PQ #1292: the capture's source loads are not timed on the consumer
-        # side (the runner reports a stage change, not the interval the layer
-        # loop blocked), so this row records that, never a zero it did not
-        # measure. The gap is the one named by the issue's Stage A follow-up.
+        # PQ #1663: source delivery is one observed component, not proof of
+        # complete row coverage. Construction, boundary/checkpoint and other
+        # consumer waits remain outside this scoped source-prefetch observer.
+        "source_exposed_wait": source_report,
         "exposed_wait": {
             "schema": EXPOSED_WAIT_SCHEMA, "instrumented": False,
-            "reason": ("stage A capture reports source-load stage changes, "
-                       "not the consumer's blocked intervals"),
+            "reason": ("source-prefetch waits recorded separately; "
+                       "boundary/checkpoint blocked intervals not fully instrumented"),
             "gpu_power_envelope_w": 140.0},
         "phases": [{"name": "adjoint-capture",
                     "bytes_from_ram": (residency or {}).get("bytes_from_ram"),
