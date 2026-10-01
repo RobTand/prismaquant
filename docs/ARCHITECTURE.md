@@ -31,6 +31,19 @@ This changes repository delivery metadata, not runtime, formats, numerical
 methods, cache/residency, plugin pins or artifact-serving gates. Gate:
 `.github/scripts/linked_issue.test.cjs`.
 
+Re-stamped 2026-10-01 (PQ #1922, Refs #1100): both streaming config loads
+share the stock AutoConfig input boundary. In the no-rewrite active-policy
+branch, verified declared metadata is delivered through the existing
+`io_engine.SealedBuffer`; HF receives that immutable local configuration file
+while retaining its original model-root argument, built-in class selection and
+defaults. The descriptor closes on return or error. Configuration-file
+indirection and dynamic AutoConfig execution are refused rather than selecting
+an undeclared second input. Inactive and rewritten-stage loads are unchanged;
+remote-code/model construction and broader worker header coverage remain
+separate. No router fork, monkeypatch, new cache/stager, format, numerical
+method, runtime pin, export wire, default or serving gate; CPU fixtures do not
+establish model/GPU qualification or a performance claim.
+
 Re-stamped 2026-10-01 (PQ #1918): `tools/dispatch_capture_chain.py seal`
 takes `--priority` (default -10, unchanged), so a capture chain that feeds a
 gate can run in the campaign band, as `dispatch_tessera_campaign --priority`

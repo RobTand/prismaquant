@@ -38,6 +38,7 @@ import time
 from contextlib import contextmanager
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from typing import Any
+from pathlib import Path
 
 import torch
 from safetensors import safe_open
@@ -1749,6 +1750,43 @@ def _skeleton_config_and_class(config, *, multimodal: bool,
     return _resolve_text_only_skeleton(config, log_prefix=log_prefix)
 
 
+def load_streaming_auto_config(source_model: str, staged_model: str, *,
+                               local_files_only: bool = False):
+    """Keep stock HF config loading behind one streaming input boundary."""
+    from transformers import AutoConfig
+
+    options = {"local_files_only": True} if local_files_only else {}
+    from prismaquant.staged_tier_policy import active_policy
+
+    if active_policy() is None or Path(source_model).resolve() != Path(staged_model).resolve():
+        return AutoConfig.from_pretrained(
+            staged_model, trust_remote_code=True, **options)
+
+    from prismaquant.io_engine import SealedBuffer
+    from prismaquant.staged_whole_file import read_staged_source_metadata_bytes
+
+    raw = read_staged_source_metadata_bytes(
+        Path(source_model) / "config.json", label="streaming AutoConfig input")
+    config_dict = json.loads(raw)
+    if config_dict.get("configuration_files"):
+        raise RuntimeError("undeclared configuration-file indirection is unsupported")
+    auto_map = config_dict.get("auto_map", {})
+    if isinstance(auto_map, dict) and auto_map.get("AutoConfig"):
+        raise RuntimeError("undeclared dynamic AutoConfig execution is unsupported")
+
+    buffer = SealedBuffer(len(raw))
+    try:
+        buffer.fill_bytes(raw)
+        buffer.seal()
+        # Stock HF chooses its class/defaults and retains the original root;
+        # only the local configuration-file input is redirected.
+        return AutoConfig.from_pretrained(
+            staged_model, trust_remote_code=False, local_files_only=True,
+            _configuration_file=buffer.path)
+    finally:
+        buffer.close()
+
+
 def build_streaming_skeleton(config, *, multimodal: bool,
                              log_prefix: str = "[streaming]",
                              attn_implementation: str | None = None):
@@ -1975,7 +2013,7 @@ def _build_streaming_context(model_path: str, *,
                 print(f"{log_prefix} manual meta streaming load avoids HF fp8 "
                       "module rewrite; PrismaQuant will apply weight_scale_inv "
                       "during layer loads", flush=True)
-        config = AutoConfig.from_pretrained(staged, trust_remote_code=True)
+        config = load_streaming_auto_config(model_path, staged)
         skeleton = build_streaming_skeleton(config, multimodal=multimodal,
             log_prefix=log_prefix, attn_implementation=attn_implementation)
     skel_base, skel_layers = _get_layer_list(skeleton)

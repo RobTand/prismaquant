@@ -35,6 +35,12 @@ def _verified_source_metadata_bytes(path: Path, *, label: str) -> tuple[bytes, s
     return raw, expected
 
 
+def read_staged_source_metadata_bytes(path: Path, *, label: str) -> bytes:
+    """Deliver verified declared metadata bytes; never select a pool fallback."""
+    raw, _digest = _verified_source_metadata_bytes(path, label=label)
+    return raw
+
+
 def read_source_metadata_text(path: Path, *, label: str,
                               encoding: str | None = None) -> str:
     """Read metadata at its canonical path through the active read contract.

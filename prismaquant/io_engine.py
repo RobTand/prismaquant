@@ -171,6 +171,16 @@ class SealedBuffer:
             os.close(self._fd)
             raise
 
+    def fill_bytes(self, payload: bytes) -> None:
+        """Fill owned writable pages from an already-delivered exact byte payload."""
+        if not isinstance(payload, bytes) or len(payload) != self.size:
+            raise ValueError("sealed io payload must be bytes of the declared size")
+        target = self._map
+        if self._fd is None or (self.size and target is None):
+            raise RuntimeError("sealed io buffer is not writable")
+        if target is not None:
+            target[:] = payload
+
     def fill(self, fd: int) -> bool:
         """Read ``fd`` from offset 0 into the buffer; whether it held exactly ``size`` bytes."""
         offset = 0
