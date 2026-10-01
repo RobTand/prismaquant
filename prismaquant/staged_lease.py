@@ -71,9 +71,11 @@ from .staged_tier_policy import TierPolicyRefused
 #: 461728e4. PQ #1888 adopts SDK3 from merged PB #1402 at 95a59051.
 #: Deployment qualification is separate; this pin advertises no capability.
 #: No capability assertion rides it. Its stdlib resolver,
-#: tools/resolve_prismabuild_dev_pin.py, had no caller and was retired in
-#: PQ #1302; recover it with
-#: ``git show ffb40f417b2:tools/resolve_prismabuild_dev_pin.py``.
+#: tools/resolve_prismabuild_dev_pin.py, is read by pbtest's pin guard, which
+#: refuses a shard whose interpreter installs another PB commit before pytest
+#: starts. PQ #1302 retired it as callerless; PQ #1929 restored it, sharing
+#: ``resolve_tessera_dev_pin.resolve_literal_pin``, after a stale interpreter
+#: ran the whole suite red instead of being refused.
 PB_READER_LEASE_PIN_COMMIT = "95a59051d48cda82eea7927f31870c6c862d7174"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
