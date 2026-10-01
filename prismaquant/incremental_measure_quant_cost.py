@@ -805,12 +805,11 @@ def _write_empty_cost_shard(
 
 # ---------------------------------------------------------------------------
 # Visual cost shard runner — Phase 2 multimodal support.
-# Loads the multimodal-staged model (vision_config preserved) and runs
-# `measure_batched_gpu` / `measure_unbatched` against cached activations
-# for the visual Linears matched by this shard's regex. The 35B visual
-# tower is ~1 GB BF16; the full 35B model fits in 128 GB. On 122B-scale
-# models the whole-model load OOMs and we gracefully emit an empty shard
-# so the allocator's --visual-format override can take over.
+# Uses the shared multimodal streaming context (vision_config preserved):
+# visual weights are resident and body decoder layers remain on meta.
+# Shared measurement uses cached activations for live Linears matched by
+# the shard selector. Context-build OOM currently writes an empty shard;
+# that legacy uniform fallback is not a complete full-gamut measurement.
 # ---------------------------------------------------------------------------
 def _run_visual_cost_shard(
     *,
