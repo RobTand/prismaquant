@@ -4196,6 +4196,25 @@ def validate_pre_guard_admission(
     }
 
 
+def _check_rendered_cache_destinations(
+    rendered_pairs: Iterable[str], *, where: str
+) -> None:
+    """Refuse distinct coordinates that share one legacy archive leaf."""
+    from prismaquant import format_registry as fr
+
+    owners: dict[str, tuple[str, str]] = {}
+    for pair in rendered_pairs:
+        qname, fmt = pair.rsplit("|", 1)
+        coordinate = (qname, fr.canonical_format_name(fmt.strip().upper()))
+        filename = _cache_weight_filename(*coordinate)
+        previous = owners.setdefault(filename, coordinate)
+        if previous != coordinate:
+            raise ValueError(
+                f"{where}.rendered_pairs aliases rendered cache destination "
+                f"{filename!r}: {previous!r} and {coordinate!r}"
+            )
+
+
 def build_production_cache_render_identity(
     *,
     render_scope: str,
@@ -4255,6 +4274,9 @@ def build_production_cache_render_identity(
         for qname, fmts in render_formats_by_qname.items()
         for fmt in fmts
     })
+    _check_rendered_cache_destinations(
+        rendered_pairs, where="production cache render identity"
+    )
     digest = str(calib_hash or "").strip().lower()
     if re.fullmatch(r"[0-9a-f]{32,64}", digest) is None:
         raise ValueError(
@@ -4375,6 +4397,7 @@ def validate_production_cache_render_identity(
             f"{where}.rendered_pairs must be a sorted nonempty "
             '"qname|FMT" string list'
         )
+    _check_rendered_cache_destinations(pairs, where=where)
     rows = raw.get("max_act_rows")
     if not isinstance(rows, int) or isinstance(rows, bool) or rows < 1:
         raise ValueError(f"{where}.max_act_rows must be a positive int")
