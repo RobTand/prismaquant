@@ -2403,6 +2403,36 @@ def _check_head_source(head_source: Mapping) -> dict:
     return {"layers_prefix": prefix, "tensors": rows, "spans": sorted(spans)}
 
 
+def head_source_from_streaming_plan(source_plan: Mapping) -> dict:
+    """Project the source reader's plan into the existing sealed head contract.
+
+    Tensor selection and whole config/index reads remain the source reader's
+    authority; the quantum compiler owns their executable declaration. Shard
+    header prefixes remain separate from existing tensor tiles. No file opens.
+    """
+    metadata = source_plan.get("metadata_reads")
+    if not isinstance(metadata, (list, tuple)) or not metadata:
+        raise ValueError("streaming head requires bootstrap metadata reads")
+    spans = list(source_plan["head_spans"])
+    for row in metadata:
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            raise ValueError("streaming head has malformed bootstrap metadata")
+        path, offset, nbytes = row
+        if (type(offset) is not int or offset != 0
+                or type(nbytes) is not int or nbytes <= 0):
+            raise ValueError("bootstrap metadata must declare a positive whole-file read")
+        spans.append((path, offset, offset + nbytes))
+    # The shared checker owns path/range validation before normalization and
+    # deduplication; malformed rows cannot bypass it through set/sort errors.
+    head = _check_head_source({
+        "layers_prefix": source_plan["layers_prefix"],
+        "tensors": source_plan["head_tensors"],
+        "spans": spans,
+    })
+    head["spans"] = sorted(set(head["spans"]))
+    return head
+
+
 def build_quantum_executable_manifest(
         record: Mapping, receipt: Mapping, parent_manifest: Mapping, *,
         strided_boundaries: Sequence[int], n_probes: int, calib: Mapping,

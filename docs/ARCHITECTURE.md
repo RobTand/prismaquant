@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1870, declaration slice of #1100): the streaming
+source plan names whole config/index bootstrap reads separately from shard
+header prefixes. The existing quantum compiler projects these metadata reads
+alongside the unchanged resident-head tensor spans, and regeneration uses
+that shared projection. Newly generated executable head manifests and their
+binders therefore include the config/index declaration; an otherwise valid
+rehashed tensor-only head does not bind under the new projection. The head's
+three-field schema is unchanged; previously sealed records and manifests are
+not rewritten. This is declaration coverage, not proof that the worker's
+profile/index/source-identity callers use staged readers. That integration
+and the broader shard-header audit remain #1100. No numerical, format,
+serving, export-wire, runtime-pin or serializer change.
+
 Re-stamped 2026-10-01 (PQ #1869, Refs #1314): the shared rate-band
 owner accepts strict two-integer list/tuple provenance as well as its existing
 CLI string. Partition merge can consume the actual producer's JSON-serialized

@@ -251,10 +251,13 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
 
     Returns ``{"profile", "multimodal", "layers_prefix", "head_prefixes",
     "head_tensors", "head_spans", "layer_spans", "span_tensors",
-    "header_reads"}``. Spans are ``(path, start, end)``; ``span_tensors``
+    "metadata_reads", "header_reads"}``. Spans are ``(path, start, end)``; ``span_tensors``
     names the checkpoint tensor each span holds. ``head_tensors`` is
     ``source_read_plan.selection_checkpoint_names`` of the head selection.
-    ``header_reads`` are the reads this plan itself makes, as
+    ``metadata_reads`` are the whole config/index reads needed for bootstrap,
+    as ``(path, offset, bytes)``. They are separate from shard-header prefixes
+    so the executable head can declare them without altering tensor tiles.
+    ``header_reads`` are all reads this plan itself makes, as
     ``(path, offset, bytes)``: the model config whole when there is one
     (profile detection opens it), the index whole, then each shard's length
     prefix and header.
@@ -337,10 +340,12 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     head_spans = _spans(selections["head"])
     layer_spans = {layer: _spans(selection)
                    for layer, selection in selections.items() if layer != "head"}
-    header_reads = ([(config_path, 0, os.path.getsize(config_path))]
-                    if os.path.isfile(config_path) else [])
-    header_reads.append((index_path, 0, len(index_raw)))
-    header_reads += [(path, 0, base) for path, (_h, base, _s) in sorted(headers.items())]
+    metadata_reads = ([(config_path, 0, os.path.getsize(config_path))]
+                      if os.path.isfile(config_path) else [])
+    metadata_reads.append((index_path, 0, len(index_raw)))
+    header_reads = [*metadata_reads,
+                    *((path, 0, base) for path, (_h, base, _s)
+                      in sorted(headers.items()))]
     return {
         "profile": profile.name,
         "multimodal": multimodal,
@@ -350,6 +355,7 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
         "head_spans": head_spans,
         "layer_spans": layer_spans,
         "span_tensors": span_tensors,
+        "metadata_reads": metadata_reads,
         "header_reads": header_reads,
     }
 
