@@ -13,11 +13,10 @@ their names (and the one call between them) changed.
 """
 from __future__ import annotations
 
-import warnings
-
 import pytest
 import torch
 
+from cuda_sync_sites import sync_sites
 from prismaquant import tessera_campaign as campaign
 from prismaquant.tessera_campaign import (
     PROJECTED_BYTES_REFUSAL, _measured_projected_units, _read_projected_unit)
@@ -197,19 +196,6 @@ def test_the_mismatch_test_bites_when_the_comparison_is_stubbed(tmp_path, device
     assert campaign._checked_projected_units(bound, **kwargs) == _measured_projected_units(bound)
 
 
-def _syncs(fn):
-    torch.cuda.synchronize()
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        torch.cuda.set_sync_debug_mode("warn")
-        try:
-            fn()
-        finally:
-            torch.cuda.set_sync_debug_mode("default")
-    torch.cuda.synchronize()
-    return sum("synchroniz" in str(w.message) for w in caught)
-
-
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="counts CUDA host syncs")
 def test_the_check_syncs_once_per_pass_not_once_per_unit(tmp_path):
     count = 48
@@ -217,5 +203,7 @@ def test_the_check_syncs_once_per_pass_not_once_per_unit(tmp_path):
     weights = {name: t.cuda() for name, t in live.items()}
     kwargs = dict(weights=weights, model_path=root, source=source)
     campaign._checked_projected_units(bound, **kwargs)  # warm the pinned staging cache
-    assert _syncs(lambda: _reference_checked_units(bound, **kwargs)) >= count
-    assert _syncs(lambda: campaign._checked_projected_units(bound, **kwargs)) <= 1
+    old = sync_sites(lambda: _reference_checked_units(bound, **kwargs))
+    assert len(old) >= count, old  # the instrument sees the per-unit loop
+    new = sync_sites(lambda: campaign._checked_projected_units(bound, **kwargs))
+    assert len(new) <= 1, new
