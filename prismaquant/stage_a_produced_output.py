@@ -955,8 +955,8 @@ class BoundaryProducedPublication:
         retirement. Readable-but-lossy ids alias, and two groups sharing an
         id would mean retiring one frees the other's credit.
 
-        Retry-stable by construction: the generation is the owner action
-        key, so a restart inside the same admitted attempt re-derives every
+        Retry-stable by construction: the generation derives from the owner
+        action key, so a restart inside the same admitted attempt re-derives every
         id and asks PrismaBuild what happened to it.
         """
 
