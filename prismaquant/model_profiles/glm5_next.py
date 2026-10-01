@@ -495,6 +495,8 @@ class Glm5NextProfile(ModelProfile):
     def _walk_glm_visual_exclusion_rules(self, *, include_visual: bool = False):
         from prismaquant.model_walk import ClaimRule
 
+        if include_visual:
+            return []
         return [ClaimRule(
             "exclude",
             "vision tower: outside the text graph this artifact serves; "

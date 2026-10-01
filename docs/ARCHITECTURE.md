@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (Refs #1921, CPU full-gamut discovery slice):
+`ModelProfile.walk_claim_rules(include_visual=True)` explicitly includes
+vision/merger Linear decisions in the existing discovery rules, without
+changing default text-artifact/A8S scope. Vision exclusion construction is
+separate from tensor claims; all profile overrides forward the same keyword.
+Profile pins, routers, embeddings, scalar/bias/norm floors and the MTP sidecar
+retain their independent dispositions. `python -m prismaquant.model_walk
+--include-visual` requires profile rules and all existing declared vision roots
+in the loaded module tree; a missing root refuses even with a trace override.
+The report context records `claim_scope` and `visual_roots`. Existing trace,
+unclaimed-operand and decided-but-unpriced gates are not weakened. Real traced
+CPU operand fixtures cover all five declared visual families, merger operands,
+explicit/default text controls, visual profile pins and CLI scope/refusal.
+This is discovery, not complete multimodal capture, empirical pricing, encoded
+wire output or native serving qualification. No production pipeline/default,
+format, cost equation, cache/prefetch, pin, wire, kernel or numerical change.
+#1921 remains open for producer/qualification work; accepted A8S BF16/source
+parity is not blocked. Seven measurement asks remain coordinator-owned.
+
 Re-stamped 2026-10-01 (Refs #1921, CPU shard-coverage slice): visual scope
 policy now has one profile owner, `ModelProfile.visual_shard_regexes`, consumed
 by both legacy regex builders and the actual production `build_shard_schedule`.
@@ -17,8 +36,8 @@ and independent export/serving gates are unchanged. `tests/test_visual_shard_cov
 exercises five profile families across all three builders, exact single unit
 ownership, cost-intake reachability, missing/opt-out/zero-block controls and
 invalid namespace declarations; its dispatch checks are structural CPU guards,
-not GPU execution or plugin qualification. Full-gamut ModelWalk inclusion is a
-separate CPU slice; unsupported non-body low-bit export still refuses. #1921
+not GPU execution or plugin qualification. Full-gamut ModelWalk inclusion is
+explicit opt-in as described above; unsupported non-body low-bit export still refuses. #1921
 remains open for producer/GPU qualification and does not block accepted A8S
 BF16 vision parity. No visual wire, native-cell, performance or serving claim.
 

@@ -40,6 +40,9 @@ def _fixture(tmp_path, case):
         names.append(mtp_name)
     with torch.device('meta'):
         model = OperandTree(names).eval()
+        owner = model.get_submodule(visual[0].rsplit('.', 1)[0])
+        owner.add_module('norm', nn.LayerNorm(4))
+        owner.add_module('embedding', nn.Embedding(4, 4))
     return profile, model, visual, mtp_name
 
 
@@ -57,6 +60,9 @@ def test_full_gamut_walk_claims_each_real_visual_and_merger_operand(tmp_path, ca
     assert result.claims['model.layers.0.mlp.up_proj.weight'].disposition == 'decide'
     if mtp:
         assert result.claims[f'{mtp}.weight'].disposition == 'exclude'
+    prefix = visual[0].rsplit('.', 1)[0]
+    assert result.claims[f'{prefix}.norm.weight'].disposition == 'exclude'
+    assert result.claims[f'{prefix}.embedding.weight'].disposition == 'exclude'
     assert find_decided_but_unpriced(result, model, profile) == ()
 
 
@@ -73,3 +79,74 @@ def test_default_discovery_scope_remains_the_explicit_text_artifact_control(tmp_
     assert result.claims['lm_head.weight'].disposition == 'pin'
     if mtp:
         assert result.claims[f'{mtp}.weight'].disposition == 'exclude'
+
+
+@pytest.mark.parametrize('case', CASES, ids=[case[0] for case in CASES])
+def test_full_gamut_does_not_override_a_profile_pinned_visual_leaf(tmp_path, monkeypatch, case):
+    profile, model, visual, _ = _fixture(tmp_path, case)
+    original = profile.is_pinned_name
+    pinned = f'{visual[0]}.weight'
+    monkeypatch.setattr(profile, 'is_pinned_name',
+                        lambda name: name == pinned or original(name))
+    result = walk_model(model, (torch.zeros(1, 2, 4, device='meta'),),
+                        claim_rules=profile.walk_claim_rules(include_visual=True))
+    assert result.claims[pinned].disposition == 'pin'
+    assert result.claims[f'{visual[1]}.weight'].disposition == 'decide'
+
+
+def _cli_loader(monkeypatch, model):
+    from transformers import AutoConfig, AutoModelForCausalLM
+    from prismaquant import model_walk
+
+    monkeypatch.setattr(AutoConfig, 'from_pretrained', lambda *a, **kw: object())
+    monkeypatch.setattr(AutoModelForCausalLM, 'from_config', lambda *a, **kw: model)
+    original = model_walk.walk_model
+    # Adapt only the synthesized input to this small real operand graph.
+    # The real tracer, claims, priceability check and gate still execute.
+    monkeypatch.setattr(model_walk, 'walk_model',
+                        lambda model, **kw: original(
+                            model, (torch.zeros(1, 2, 4, device='meta'),), **kw))
+    return model_walk
+
+
+@pytest.mark.parametrize('include_visual', [False, True])
+def test_cli_records_scope_and_keeps_the_independent_gate(tmp_path, monkeypatch, include_visual):
+    import json
+
+    _, model, _, _ = _fixture(tmp_path, CASES[0])
+    walker = _cli_loader(monkeypatch, model)
+    out = tmp_path / 'scope.json'
+    args = ['--model', str(tmp_path), '--output', str(out)]
+    if include_visual:
+        args.append('--include-visual')
+    assert walker.main(args) == 0
+    report = json.loads(out.read_text())
+    assert report['context']['claim_scope'] == (
+        'full_gamut' if include_visual else 'text_artifact')
+    assert bool(report['context']['visual_roots']) is include_visual
+    assert report['gate']['refused'] is False
+    assert report['gate']['claims_by_disposition']['decide'] == (
+        4 if include_visual else 1)
+
+
+def test_cli_cannot_excuse_a_missing_declared_visual_root(tmp_path, monkeypatch, capsys):
+    _config(tmp_path, CASES[0][0], CASES[0][1])
+    with torch.device('meta'):
+        model = OperandTree(['model.layers.0.mlp.up_proj', 'lm_head'])
+    walker = _cli_loader(monkeypatch, model)
+    with pytest.raises(SystemExit) as exc:
+        walker.main(['--model', str(tmp_path), '--include-visual',
+                     '--override-reason', 'this cannot excuse missing scope'])
+    assert exc.value.code == 2
+    assert 'missing declared vision roots: model.visual' in capsys.readouterr().err
+
+
+@pytest.mark.parametrize('rules', ['profile', 'none'])
+def test_cli_rejects_full_gamut_without_a_declared_scope(tmp_path, capsys, rules):
+    from prismaquant.model_walk import main
+
+    _config(tmp_path, 'qwen3', 'Qwen3ForCausalLM')
+    with pytest.raises(SystemExit) as exc:
+        main(['--model', str(tmp_path), '--include-visual', '--rules', rules])
+    assert exc.value.code == 2
+    assert 'requires profile rules and declared vision roots' in capsys.readouterr().err

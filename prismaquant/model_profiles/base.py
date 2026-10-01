@@ -1541,7 +1541,7 @@ class ModelProfile(ABC):
         from prismaquant.model_walk import ClaimRule
 
         visual_prefix = self.visual_layer_prefix()
-        if not visual_prefix:
+        if include_visual or not visual_prefix:
             return []
         return [ClaimRule(
             "exclude",
@@ -1576,7 +1576,9 @@ class ModelProfile(ABC):
         3. **exclude** — the MTP sidecar (``mtp_source_prefix()``), read only
            under spec decode; dispositioned by the MTP lane.
         4. **exclude** — the visual/audio tower (``visual_layer_prefix()``),
-           outside the text graph this artifact serves.
+           outside the text graph this artifact serves. Explicit
+           ``include_visual=True`` omits only this scope exclusion; pins,
+           embeddings, biases and the MTP sidecar keep their dispositions.
         5. **exclude** — ``nn.Embedding`` weights: consumed by row gather,
            not by a GEMM; the exporter ships source bytes.
         6. **exclude** — non-persistent buffers (rotary caches, derived
