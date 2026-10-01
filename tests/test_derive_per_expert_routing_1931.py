@@ -10,14 +10,12 @@ its name changed.
 """
 from __future__ import annotations
 
-import traceback
-import warnings
-
 import pytest
 import torch
 import torch.nn.functional as F
 from torch import nn
 
+from cuda_sync_sites import sync_sites
 from prismaquant import measure_quant_cost as mqc
 from prismaquant.measure_quant_cost import _packed_experts_router, _packed_router_topk
 
@@ -325,36 +323,8 @@ def test_routing_syncs_the_host_once_not_once_per_expert():
     for derive, ceiling in ((mqc.derive_per_expert_activations, 1),
                             (_reference_derive, num_experts)):
         derive(experts, X, parent)  # warm up
-        torch.cuda.synchronize()
-        sites = _sync_sites(lambda: derive(experts, X, parent))
+        sites = sync_sites(lambda: derive(experts, X, parent))
         if derive is _reference_derive:
             assert len(sites) >= num_experts, sites  # the instrument sees the old loop
         else:
             assert len(sites) <= ceiling, sites
-
-
-def _sync_sites(fn):
-    """Run ``fn`` with CUDA sync warnings on; return the call site of each sync.
-
-    A failure then names the line that synced, not only how many lines did.
-    """
-    sites = []
-
-    def _record(message, category, filename, lineno, file=None, line=None):
-        if "synchroniz" not in str(message):
-            return
-        frames = [f for f in traceback.extract_stack()[:-1]
-                  if not f.filename.endswith("warnings.py")]
-        sites.append(" <- ".join(
-            f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno} {f.line}"
-            for f in reversed(frames[-3:])))
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("always")
-        warnings.showwarning = _record
-        torch.cuda.set_sync_debug_mode("warn")
-        try:
-            fn()
-        finally:
-            torch.cuda.set_sync_debug_mode("default")
-    return sites
