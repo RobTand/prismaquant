@@ -51,8 +51,8 @@ Required behavior:
   rungs, never from an agent's judgment during execution;
 - make transfers and barriers content-addressed and independently verifiable;
 - make retries idempotent, resumable, and deterministic from committed state;
-- publish resource and GPU-utilization telemetry as part of the campaign
-  receipt; and
+- publish resource and GPU-power telemetry with aligned system CPU and IO
+  series as part of the campaign receipt; and
 - fail closed on missing, conflicting, or ambiguous state instead of asking an
   agent to infer how execution should continue.
 
