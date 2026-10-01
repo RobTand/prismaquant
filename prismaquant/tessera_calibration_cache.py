@@ -10,6 +10,8 @@ import hashlib
 import json
 import math
 import os
+from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 import stat
 import threading
@@ -81,6 +83,37 @@ def sha256(path, *, resource_check=None, release_read_pages=False, file_descript
         return hashlib.file_digest(handle, 'sha256').hexdigest()
 
 
+@contextmanager
+def _engine_source_hashes(paths, *, resource_check=None, release_read_pages=False):
+    """Hash ``paths`` together on the process's IO engine (PQ #1887).
+
+    Each file gets the same guarded :func:`sha256` the serial loop ran: every
+    byte, the identity fence, ``resource_check`` and page release. Only the
+    files overlap. One reader at a time took 71 min over the 599 GB
+    GLM-5.3-Flash source on NFS-RDMA while the row's GPU idled. The pool is
+    ``io_engine.ENGINE`` (#1294 forbids a new one), so at most
+    ``min(ENGINE.width, len(paths))`` hashes are in flight, each holding two
+    ``SOURCE_HASH_BLOCK_BYTES`` blocks; this runs before the model is
+    resident, and ``resource_check`` still refuses on absolute bytes.
+
+    Yields ``digest_of(path)``. Read the paths in the serial loop's order, so
+    the first error raised is the one that loop raised. On exit the hashes
+    not yet started are cancelled and the running ones awaited, so no read
+    is still in flight when the error propagates.
+    """
+    from concurrent.futures import wait
+    from .io_engine import ENGINE
+    futures = {path: ENGINE.submit(partial(sha256, path, resource_check=resource_check,
+                                           release_read_pages=release_read_pages))
+               for path in paths}
+    try:
+        yield lambda path: futures[path].result()
+    finally:
+        for future in futures.values():
+            future.cancel()
+        wait(futures.values())
+
+
 def _json(path, value):
     atomic_write_bytes(Path(path), indent2_json_file_bytes(value))
 
@@ -117,8 +150,7 @@ def capture_identity(census_path, *, calibration, max_act_rows,
                     *root.glob('*.model'), *root.glob('*.txt')})
     if not files or not (root / 'config.json').is_file():
         raise RuntimeError('calibration capture needs a complete local source checkpoint')
-    def source_digest(path):
-        return sha256(path, resource_check=resource_check, release_read_pages=release_read_pages)
+    hashing = dict(resource_check=resource_check, release_read_pages=release_read_pages)
     # The census already seals the producer's complete source/auxiliary
     # roster (including non-JSON tokenizer assets such as chat_template.jinja).
     # Check those bytes too, without inventing another producer identity.
@@ -128,11 +160,15 @@ def capture_identity(census_path, *, calibration, max_act_rows,
     if declared.get('config_sha256'):
         expected['config.json'] = declared['config_sha256']
     if source_authentication is None:
-        source = {p.name:source_digest(p) for p in files if p.is_file()}
-        for name,digest in expected.items():
-            actual = source[name] if name in source else source_digest(root/name)
-            if actual != digest:
-                raise RuntimeError(f'calibration source differs from census producer: {name}')
+        present = [p for p in files if p.is_file()]
+        with _engine_source_hashes(present, **hashing) as digest_of:
+            source = {p.name:digest_of(p) for p in present}
+        with _engine_source_hashes([root/name for name in expected if name not in source],
+                                   **hashing) as digest_of:
+            for name,digest in expected.items():
+                actual = source[name] if name in source else digest_of(root/name)
+                if actual != digest:
+                    raise RuntimeError(f'calibration source differs from census producer: {name}')
     else:
         if not isinstance(source_authentication, CaptureSourceAuthentication):
             raise TypeError('selected source needs the complete-capture descriptor owner')
