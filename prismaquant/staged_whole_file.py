@@ -14,6 +14,43 @@ import os
 from pathlib import Path
 
 
+def read_source_metadata_text(path: Path, *, label: str,
+                              encoding: str | None = None) -> str:
+    """Read metadata at its canonical path through the active read contract.
+
+    With no tier policy, retain the legacy text decoder. Under a policy,
+    the bound whole-file entry supplies the declared digest and the existing
+    lease reader supplies its bytes; metadata never falls back to the pool.
+    This does not authenticate an unbound caller or change source paths.
+    """
+    from .staged_tier_policy import active_policy, refuse_pool_bulk_read
+
+    path = Path(path)
+    if active_policy() is None:
+        return path.read_text(encoding=encoding)
+
+    from .digests import bytes_sha256hex
+    from .residency_map import residency_resolver
+
+    resolver = residency_resolver()
+    if resolver is None:
+        raise refuse_pool_bulk_read(str(path), "metadata-readset-not-staged")
+    staged = resolver.staged_read(path)
+    if staged is None:
+        raise refuse_pool_bulk_read(str(path), "metadata-readset-not-staged")
+    expected = staged.get("sha256")
+    if not isinstance(expected, str) or not expected:
+        raise refuse_pool_bulk_read(str(path), "metadata-digest-not-declared")
+    raw = read_staged_entry(resolver, path, staged, label=label)
+    if bytes_sha256hex(raw) != expected:
+        raise refuse_pool_bulk_read(str(path), "metadata-digest-mismatch")
+    # TextIOWrapper preserves Path.read_text's universal-newline behavior.
+    import io
+
+    with io.TextIOWrapper(io.BytesIO(raw), encoding=encoding) as handle:
+        return handle.read()
+
+
 def read_staged_whole_file(path: Path, expected_sha256: str, *,
                            label: str) -> bytes:
     """One whole declared file, staged-pinned under the active tier policy.

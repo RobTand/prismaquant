@@ -23,6 +23,19 @@ Adaptive and sampled groups remain indivisible. See the
 [bounded qualification record](results/2026-10-01_fixed_rate_expert_partition.md)
 for immutable inputs, commands, receipts and limitations.
 
+Re-stamped 2026-10-01 (PQ #1880, reader slice of #1100): streamed source JSON,
+weight-map profile detection, and checkpoint-index discovery share the
+metadata-text adapter. With an active tier policy it reads the declared
+whole-file binding through the existing resolver and lifetime-pinned reader,
+checks the declared digest, and decodes without reopening the canonical pool
+path. Missing material or a digest mismatch refuses without pool fallback.
+Without a policy, legacy text decoding remains; explicit capture JSON
+authenticators retain their own reads. Source paths and the existing head
+schema stay unchanged. This is not full worker bootstrap closure: AutoConfig
+shadow staging, auxiliary identity hashes, remote-code handling and the
+complete shard-header audit remain #1100. No new cache/executor, serving gate,
+format, numerical method, export wire, serializer or runtime pin.
+
 Re-stamped 2026-10-01 (PQ #1870, declaration slice of #1100): the streaming
 source plan names whole config/index bootstrap reads separately from shard
 header prefixes. The existing quantum compiler projects these metadata reads

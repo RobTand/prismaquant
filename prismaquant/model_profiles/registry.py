@@ -183,8 +183,10 @@ def detect_profile(model_path: str, *, config: dict | None = None) -> ModelProfi
         document = config
     elif cfg_path.exists():
         try:
-            with open(cfg_path) as f:
-                cfg = json.load(f)
+            from ..staged_whole_file import read_source_metadata_text
+
+            cfg = json.loads(read_source_metadata_text(
+                cfg_path, label="model profile config"))
             model_type = cfg.get("model_type") or ""
             archs = list(cfg.get("architectures") or [])
             document = cfg if isinstance(cfg, dict) else None
