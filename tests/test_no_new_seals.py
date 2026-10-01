@@ -123,9 +123,6 @@ ALLOWLIST = {
         2, INTEGRITY, "the identity schema, and content_sha256 against its shard digests"),
     ("prismaquant/cost_streaming.py", "validate_cached_streamed_model_identity"): (
         1, INTEGRITY, "a cached identity whose tensor-to-shard map is not this checkpoint's"),
-    ("prismaquant/joint_adjoint_checkpoints.py", "_validated_checkpoint_stream_plane"): (
-        1, STRUCTURE, "a stored cotangent's metadata agrees with the same checkpoint's "
-        "recorded session, slot, kind and coordinates; not a running-source seal"),
     ("prismaquant/joint_adjoint_checkpoints.py", "unpack_shared_states"): (
         1, INTEGRITY, "a pack member against its recorded digest"),
     ("prismaquant/joint_adjoint_checkpoints.py", "AdjointCheckpointAttempt.reference_activation"): (
@@ -249,11 +246,6 @@ ALLOWLIST = {
         1, INTEGRITY, "a file's bytes against its bound digest"),
     ("tools/dispatch_tessera_campaign.py", "_bound_pickle"): (
         1, INTEGRITY, "a pickle's bytes against its bound digest"),
-    # The same pre-existing #1754 comparison becomes visible when #1769 routes
-    # its opaque inline hashlib expression through the named byte owner.
-    ("tools/dispatch_tessera_campaign.py", "work_profile_bundles"): (
-        1, INTEGRITY, "the explicit timing-profile input binds these exact census "
-        "bytes; reject a profile for another census, not a recorded run identity"),
     ("tools/dispatch_tessera_campaign.py", "verify_joint_campaign_scope"): (
         1, STRUCTURE, "the campaign identity has the expected schema"),
     ("tools/dispatch_tessera_campaign.py", "work_profile_bundles"): (
@@ -469,6 +461,19 @@ def _campaign_sources() -> dict[str, str]:
 
 def test_every_campaign_seal_goes_through_seal_check():
     assert violations(_campaign_sources()) == []
+
+
+def test_allowlist_keys_are_unique():
+    tree = ast.parse(Path(__file__).read_text())
+    assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
+                      and any(isinstance(target, ast.Name) and target.id == "ALLOWLIST"
+                              for target in node.targets))
+    assert isinstance(assignment.value, ast.Dict)
+    keys = []
+    for key in assignment.value.keys:
+        assert key is not None
+        keys.append(ast.literal_eval(key))
+    assert len(keys) == len(set(keys))
 
 
 def test_every_allowlist_entry_gives_its_kind_and_reason():
