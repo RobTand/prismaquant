@@ -52,7 +52,6 @@ D5. The joiner is NOT colocated here. The contract (§4.1/§7) sketched
 from __future__ import annotations
 
 import gzip
-import hashlib
 import json
 import os
 import re
@@ -2899,8 +2898,7 @@ def emit_quantum_boundary_readsets(receipt: Mapping,
                              "refusing")
         seen.add(quantum_id)
         seen.add(manifest_path)
-        manifest_sha256 = hashlib.sha256(
-            seal_manifest_bytes(manifest)).hexdigest()
+        manifest_sha256 = bytes_sha256hex(seal_manifest_bytes(manifest))
         emitted.append({
             "record": bind_quantum_boundary_readset(
                 record, receipt, manifest=manifest,
@@ -3150,8 +3148,7 @@ def emit_quantum_executable_readsets(
                              "refusing")
         seen.add(quantum_id)
         seen.add(manifest_path)
-        manifest_sha256 = hashlib.sha256(
-            seal_manifest_bytes(manifest)).hexdigest()
+        manifest_sha256 = bytes_sha256hex(seal_manifest_bytes(manifest))
         emitted.append({
             "record": bind_quantum_executable(
                 record, receipt, parent_manifest, manifest=manifest,
