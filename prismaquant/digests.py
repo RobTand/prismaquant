@@ -13,6 +13,9 @@ unless the profile states otherwise:
 - ``DIRECT_ASCII_SPACED_LAX``: default-spaced ``(", ", ": ")`` separators,
   ``ensure_ascii=True``, ``allow_nan=True`` and no fallback serializer. This
   is direct JSON, not a round trip; its inherited spaces are identity bytes.
+- ``DIRECT_ASCII_INDENT2_LAX``: two-space indentation, ``(",", ": ")``
+  separators, ASCII escaping, lax nonfinite values and no fallback serializer.
+  File writers retain their own final LF and publication policy.
 
 - Round trip, UTF-8, strict (``canonical_json``, ``canonical_json_bytes``,
   ``canonical_json_sha256``, ``canonical_json_sha256_normalized``). The value
@@ -237,12 +240,14 @@ class JsonProfile:
     allow_nan: bool
     default: Callable[[object], object] | None = None
     separators: tuple[str, str] = (",", ":")
+    indent: int | None = None
 
     def _encoder(self) -> json.JSONEncoder:
         """The stdlib encoder with exactly this profile's options."""
         return json.JSONEncoder(
             sort_keys=True,
             separators=self.separators,
+            indent=self.indent,
             ensure_ascii=self.ensure_ascii,
             allow_nan=self.allow_nan,
             default=self.default,
@@ -275,6 +280,9 @@ DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
 DIRECT_ASCII_SPACED_LAX = JsonProfile(
     "direct-ascii-spaced-lax", ensure_ascii=True, allow_nan=True,
     separators=(", ", ": "))
+DIRECT_ASCII_INDENT2_LAX = JsonProfile(
+    "direct-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
+    separators=(",", ": "), indent=2)
 
 
 def canonical_pickle_bytes(value: object) -> bytes:

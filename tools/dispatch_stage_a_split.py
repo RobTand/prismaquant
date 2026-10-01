@@ -91,8 +91,10 @@ def _pin(path) -> dict:
 
 
 def _write_json(path: Path, value) -> None:
+    from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+    path.write_text(DIRECT_ASCII_INDENT2_LAX.text(value) + "\n")
 
 
 def implementation_sha256(checkout) -> str:
@@ -638,6 +640,24 @@ def _require_forward_ready(document, round_dir, space, kind) -> None:
             raise SplitDispatchRefused(f"forward quantum {label} left no receipt")
 
 
+def submission_result(name, argv, completed) -> dict:
+    """Build the last detach object and unchanged subprocess result fields.
+
+    Callers retain their path lookup, writer, persistence and refusal policy.
+    """
+    detach = None
+    for line in (completed.stdout or "").splitlines():
+        try:
+            value = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(value, dict) and "action_key" in value:
+            detach = value
+    result = {"name": name, "argv": argv, "returncode": completed.returncode,
+              "stdout": completed.stdout, "stderr": completed.stderr, "detach": detach}
+    return result
+
+
 def submit(round_dir, names, *, run=subprocess.run) -> list[dict]:
     """Submit the named rows in order, each once its predecessors finished."""
     round_dir = Path(round_dir)
@@ -656,17 +676,9 @@ def submit(round_dir, names, *, run=subprocess.run) -> list[dict]:
             raise SplitDispatchRefused(f"row {name} was already submitted")
         require_ready(document, round_dir, row)
         completed = run(row["argv"], capture_output=True, text=True)
-        detach = None
-        for line in (completed.stdout or "").splitlines():
-            try:
-                value = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(value, dict) and "action_key" in value:
-                detach = value
-        result = {"name": name, "argv": row["argv"], "returncode": completed.returncode,
-                  "stdout": completed.stdout, "stderr": completed.stderr, "detach": detach}
+        result = submission_result(name, row["argv"], completed)
         _write_json(submission_path(round_dir, name), result)
+        detach = result["detach"]
         results.append(result)
         if completed.returncode != 0 or detach is None:
             raise SplitDispatchRefused(

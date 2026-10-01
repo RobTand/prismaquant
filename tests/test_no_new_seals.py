@@ -318,7 +318,7 @@ ALLOWLIST = {
         "the sealed request's (ambiguous, #1147 report)"),
     ("prismaquant/joint_adjoint_band.py", "band_from_request"): (
         1, INTEGRITY, "the sealed request's bytes against the supplied digest"),
-    ("prismaquant/joint_cost_read_schedule.py", "_read_sealed"): (
+    ("prismaquant/joint_cost_read_schedule.py", "_read_pinned_cost_manifest"): (
         1, INTEGRITY, "manifest bytes against their digest"),
     ("prismaquant/joint_cost_read_schedule.py", "load_joint_cost_read_schedule"): (
         2, AMBIGUOUS, "the read schedule's plan and prepared bindings against the running "
