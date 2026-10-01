@@ -415,6 +415,33 @@ def _files_under(directory: Path) -> set[str]:
             if path.is_file() or path.is_symlink()}
 
 
+def _classify_batches(producers, retired_paths) -> tuple[list, list]:
+    """Classify PB-owned batches against the already-derived retirement set."""
+    retired_set = set(retired_paths)
+    plan_batches, untouched = [], []
+    for producer in producers:
+        for queue, instance, template in producer_instances(producer):
+            for row in _batches(queue, instance, template):
+                inside = [p for p in row["paths"] if p in retired_set]
+                if not inside:
+                    untouched.append({"batch_id": row["batch_id"], "bytes": row["bytes"],
+                                      "owner": instance["owner_action_key"]})
+                    continue
+                if len(inside) != len(row["paths"]):
+                    outside = sorted(set(row["paths"]) - set(inside))
+                    raise RetirementRefused(
+                        f"batch {row['batch_id']} mixes checkpoint entries with "
+                        f"{len(outside)} path(s) no checkpoint names ({outside[0]}): "
+                        "part of it is not this retirement's")
+                changed = [p for p in row["paths"] if not _identity_holds(row["filed"], p)]
+                if changed:
+                    raise RetirementRefused(
+                        f"batch {row['batch_id']}: {changed[0]} is not the file its "
+                        "commit recorded")
+                plan_batches.append((queue, instance, template, row))
+    return plan_batches, untouched
+
+
 def plan_retirement(output_root, *, successor_path, successor_sha256,
                     binding_roots) -> Retirement:
     """Check everything and classify every batch. Writes nothing."""
@@ -468,28 +495,8 @@ def plan_retirement(output_root, *, successor_path, successor_sha256,
 
     read = check_bindings(binding_roots, space=space, digests=digests)
     # The record's list, not the directory: on a rerun the directory is gone.
-    retired_set = set(entry_paths) | set(checkpoint_files)
-    plan_batches, untouched = [], []
-    for producer in producers:
-        for queue, instance, template in producer_instances(producer):
-            for row in _batches(queue, instance, template):
-                inside = [p for p in row["paths"] if p in retired_set]
-                if not inside:
-                    untouched.append({"batch_id": row["batch_id"], "bytes": row["bytes"],
-                                      "owner": instance["owner_action_key"]})
-                    continue
-                if len(inside) != len(row["paths"]):
-                    outside = sorted(set(row["paths"]) - set(inside))
-                    raise RetirementRefused(
-                        f"batch {row['batch_id']} mixes checkpoint entries with "
-                        f"{len(outside)} path(s) no checkpoint names ({outside[0]}): "
-                        "part of it is not this retirement's")
-                changed = [p for p in row["paths"] if not _identity_holds(row["filed"], p)]
-                if changed:
-                    raise RetirementRefused(
-                        f"batch {row['batch_id']}: {changed[0]} is not the file its "
-                        "commit recorded")
-                plan_batches.append((queue, instance, template, row))
+    plan_batches, untouched = _classify_batches(
+        producers, set(entry_paths) | set(checkpoint_files))
 
     if record is None:
         body = canonical_json({
