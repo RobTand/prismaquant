@@ -63,22 +63,55 @@ def test_fleet_data_runs_when_asked_for(tmp_path, extra, environ):
     assert "skipped" not in output
 
 
-def test_the_marked_real_data_tests_carry_the_mark():
-    """The three reads #1014 names are marked, and nothing else in them."""
+#: The decorator this test looks for, spelled as its dotted parts.
+#: ``pbtest`` decides fleet data per file by a textual search for the mark,
+#: so writing the dotted name out here would make it leave this hermetic
+#: file out of every unmarked run (PQ #1954).
+FLEET_DATA_DECORATOR = ["pytest", "mark", "fleet_data"]
+
+#: Each real fleet-data read #1014 names lives in a file of its own, so the
+#: hermetic tests that used to share a file with it run in the merge queue
+#: (PQ #1954).
+MARKED_FILES = {
+    "test_tessera_census_stats_glm53.py": {
+        "test_glm53_probe_expands_onto_the_census_roster"},
+    "test_glm_joint_data_manifest_at_submit_fleet_data.py": {
+        "test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases"},
+    "test_dispatch_shared_tag_placement_fleet_data.py": {
+        "test_dispatcher_tags_are_placeable_on_the_live_gb10_fleet"},
+}
+
+#: The hermetic halves the reads were split out of: they mark nothing.
+SPLIT_FROM = ("test_glm_joint_data_manifest_at_submit.py",
+              "test_dispatch_shared_tag_placement.py")
+
+
+def _marked_tests(name):
     import ast
 
-    marked = set()
-    for name in ("test_tessera_census_stats_glm53.py",
-                 "test_glm_joint_data_manifest_at_submit.py",
-                 "test_dispatch_shared_tag_placement.py"):
-        tree = ast.parse((ROOT / "tests" / name).read_text())
-        for node in tree.body:
+    tree = ast.parse((ROOT / "tests" / name).read_text())
+    return {node.name for node in tree.body
             if isinstance(node, ast.FunctionDef) and any(
-                    ast.unparse(decorator) == "pytest.mark.fleet_data"
-                    for decorator in node.decorator_list):
-                marked.add(node.name)
-    assert marked == {
-        "test_glm53_probe_expands_onto_the_census_roster",
-        "test_the_real_joint_pass_read_set_is_terabytes_in_bounded_phases",
-        "test_dispatcher_tags_are_placeable_on_the_live_gb10_fleet",
-    }
+                ast.unparse(decorator).split(".") == FLEET_DATA_DECORATOR
+                for decorator in node.decorator_list)}
+
+
+def _test_names(name):
+    import ast
+
+    tree = ast.parse((ROOT / "tests" / name).read_text())
+    return {node.name for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")}
+
+
+def test_the_marked_real_data_tests_carry_the_mark():
+    """The three reads #1014 names are marked, each alone in its file."""
+    for name, expected in MARKED_FILES.items():
+        assert _marked_tests(name) == expected, name
+        tree_tests = _test_names(name)
+        assert tree_tests == expected, (
+            f"{name} holds unmarked tests {sorted(tree_tests - expected)}: "
+            "pbtest leaves the whole file out of an unmarked run")
+    for name in SPLIT_FROM:
+        assert _marked_tests(name) == set(), name
+
