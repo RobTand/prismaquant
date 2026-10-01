@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1892, Refs #1885): the pure initialization owner
+provides a metadata-only merge of completed selected witnesses. A mandatory,
+typed expected complete census contract is validated first; contiguous,
+disjoint selections must tile all model layers with identical source/runtime/
+model/dtype/prefix identity and every head record. The merge counts agreed
+heads once, unions body state once, recomputes the existing digest/counts and
+requires exact equality to that census contract. It has no unchecked completion
+mode or production caller. Real tiny CPU audit parity is not source-byte
+authentication, capture publication or model/GPU qualification; #1885 retains
+chain integration and GPU parity. MTP/audit producers, schemas, defaults,
+cache/residency, numerical methods, pins, wire and serving/export gates are
+unchanged. Gate: `tests/test_streaming_initialization_merge.py`.
+
 Re-stamped 2026-10-01 (PQ #1891, Refs #1885): the pure full, prefix and
 selected initialization metadata validators live in `streaming_initialization`;
 `streaming_model` preserves their existing import surfaces, schemas and

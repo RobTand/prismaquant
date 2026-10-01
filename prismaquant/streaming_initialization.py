@@ -3,8 +3,27 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
+from typing import Any, TypedDict
 
 from .digests import DIRECT_ASCII_STRICT
+
+
+class StreamingInitializationContract(TypedDict):
+    """The existing complete census contract, required by the metadata merge."""
+
+    schema: str
+    scope: str
+    status: str
+    transformers_version: str
+    model_class: str
+    dtype: str
+    layers_prefix: str
+    num_layers: int
+    persistent_tensors: int
+    derived_buffers: int
+    state_sha256: str
+    source_map_sha256: str
 
 
 _STREAMING_INITIALIZATION_SCHEMA = "prismaquant.streaming_initialization.v1"
@@ -156,3 +175,62 @@ def validate_streaming_selected_initialization_witness(value):
     return dict(value)
 
 
+def merge_streaming_selected_initialization_witnesses(
+    witnesses: Iterable[dict[str, Any]],
+    *,
+    expected_contract: StreamingInitializationContract,
+) -> StreamingInitializationContract:
+    """Reconstruct metadata only when it equals the complete census contract.
+
+    Each completed selection must be contiguous; disjoint selections must tile
+    every model layer. Head state is counted once, with every record agreeing.
+    This does not authenticate checkpoint bytes or activate a capture chain.
+    """
+    expected = validate_streaming_initialization_contract(expected_contract)
+    try:
+        selections = [validate_streaming_selected_initialization_witness(w) for w in witnesses]
+    except (TypeError, KeyError, AttributeError) as exc:
+        raise ValueError("Malformed streaming selected-layer witness collection") from exc
+    if not selections:
+        raise ValueError("Streaming initialization merge requires completed selections")
+    selections.sort(key=lambda w: w["observed_layers"][0])
+    heads = selections[0]["head_state_names"]
+    state = {name: selections[0]["state"][name] for name in heads}
+    seen = set()
+    for witness in selections:
+        if (witness["total_model_layers"] != expected["num_layers"] or
+                any(witness[key] != expected[key] for key in (
+                    "transformers_version", "model_class", "dtype", "layers_prefix", "source_map_sha256"))):
+            raise ValueError("Streaming initialization merge identity differs from complete census")
+        layers = witness["observed_layers"]
+        if layers != list(range(layers[0], layers[-1] + 1)):
+            raise ValueError("Streaming initialization merge requires contiguous selections")
+        if seen.intersection(layers):
+            raise ValueError("Streaming initialization merge selections overlap")
+        seen.update(layers)
+        if (witness["head_state_names"] != heads or
+                any(witness["state"][name] != state[name] for name in heads)):
+            raise ValueError("Streaming initialization merge head state differs")
+        for name, record in witness["state"].items():
+            if name in heads:
+                continue
+            if name in state:
+                raise ValueError("Streaming initialization merge repeats body state")
+            state[name] = record
+    if seen != set(range(expected["num_layers"])):
+        raise ValueError("Streaming initialization merge omitted model layers")
+    merged: StreamingInitializationContract = {
+        "schema": _STREAMING_INITIALIZATION_SCHEMA,
+        "scope": "streamed_text_source_forward", "status": "completed",
+        "transformers_version": expected["transformers_version"],
+        "model_class": expected["model_class"], "dtype": expected["dtype"],
+        "layers_prefix": expected["layers_prefix"], "num_layers": expected["num_layers"],
+        "persistent_tensors": sum(r["kind"] == "checkpoint" for r in state.values()),
+        "derived_buffers": sum(r["kind"] == "derived_buffer" for r in state.values()),
+        "state_sha256": _initialization_digest(state),
+        "source_map_sha256": expected["source_map_sha256"],
+    }
+    validate_streaming_initialization_contract(merged)
+    if merged != expected:
+        raise ValueError("Merged streaming initialization differs from complete census contract")
+    return merged
