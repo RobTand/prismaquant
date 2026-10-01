@@ -22,6 +22,19 @@ separate CPU slice; unsupported non-body low-bit export still refuses. #1921
 remains open for producer/GPU qualification and does not block accepted A8S
 BF16 vision parity. No visual wire, native-cell, performance or serving claim.
 
+Re-stamped 2026-10-01 (Refs PQ #1007): a band-serial consumer's derived
+bootstrap head declares the canonical handoff JSON record separately from its
+plane and owner-state entries. Record acquisition is separated from consumer
+identity validation and uses the existing verified, lifetime-pinned whole-file
+metadata reader under an active tier policy; missing or damaged material
+refuses without a pool fallback. Inactive bytes and the existing digest, seal,
+canonical-form, producer, successor, source, session and shape checks remain.
+This metadata-only slice does not place origin batches, declare public origin
+consumers, establish retirement/spill lifetime, or prove an executed consumer
+chain. Sealed records, handoff JSON bytes/schema, kernels, numerical behavior,
+export wire, pins, pipeline defaults and serving gates are unchanged. CPU
+fixtures are not GPU/model admission.
+
 Re-stamped 2026-10-01 (PQ #1936, Refs #1921): allocation first separates
 visual policy from orchestration. A complete measured visual Fisher/cost
 population retains its legal visual and merger candidates in the existing
