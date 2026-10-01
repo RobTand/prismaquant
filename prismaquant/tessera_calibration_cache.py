@@ -1010,8 +1010,12 @@ class CaptureWriter:
             self.seal_load_execution = {}
             extra = dict(verified_load_policy=self.load_execution['policy'],
                          load_execution=self.seal_load_execution)
+        # The journal's completed records too: a capture chain's units were
+        # written by earlier processes (PQ #1885). After a whole traversal
+        # this process's records already cover them.
         return publish_capture(self.root, census_path=self.census_path,
-                               identity=self.identity, existing_entries=self.records,
+                               identity=self.identity,
+                               existing_entries={**self.completed, **self.records},
                                release_file_pages=self.release_file_pages,
                                resource_check=self.resource_check, **extra)
 
