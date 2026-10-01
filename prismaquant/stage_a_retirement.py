@@ -1,4 +1,4 @@
-"""Retire a superseded Stage A run's checkpoints and their pinned entries (PQ #1073).
+"""Retire superseded Stage A checkpoint pins and committed forward entries.
 
 Since #1036/#1037 a Stage A checkpoint names the owner's own cotangent entries
 at its boundary instead of copying them, so a checkpoint pins them: roll
@@ -28,18 +28,20 @@ steps, and every check comes before the first unlink:
 
 2. **Plan.** From PrismaBuild's own records (each owner's filed instance, its
    ``commitments.json`` and its batch records), every committed batch that is
-   not reclaimed is classified against what the run's checkpoints hold: the
-   referenced cotangent entries and the files under ``checkpoints/``. A batch
-   entirely inside that set is retired. A batch with no path in it (forward
-   boundary entries, for one) is left alone and reported. A batch that mixes
-   the two refuses, named: part of it is live by this tool's own account. Each
+   not reclaimed is classified against the referenced cotangent entries,
+   files under ``checkpoints/``, and sealed forward records owned by this run
+   inside its generation and binding-proof namespace. A batch entirely inside
+   that set is retired. Only selected PB-committed forward paths become unlink
+   targets; uncommitted copies and imported/foreign forward inputs stay put.
+   A batch with no eligible path is left alone and reported. A batch mixing
+   eligible and unrelated files refuses: part of it is not this retirement's. Each
    file a retired batch names must still be the file its commit recorded
    (the batch's ``origin_identity``); a changed file refuses.
 
 3. **Apply.** The retirement record (``stage-a-retired.json``) is sealed into
    the space first. From then on a chain resume, a seed and the band tool
    refuse the space (:func:`refuse_retired_space`). Then ``checkpoints/`` is
-   removed, the referenced entries are unlinked, and ``reclaim_origin`` is
+   removed, the persisted cotangent/selected forward entries are unlinked, and ``reclaim_origin`` is
    called for each retired batch, so PrismaBuild stops charging it on its own
    evidence that every path is gone. A rerun after a crash reads the sealed
    record and finishes: a path already gone is not a refusal.
@@ -415,6 +417,52 @@ def _files_under(directory: Path) -> set[str]:
             if path.is_file() or path.is_symlink()}
 
 
+def _owned_forward_paths(document: Mapping, *, space: Path, session: Mapping) -> set[str]:
+    """Sealed forward candidates owned by this run, inside its binding proof."""
+    from .joint_adjoint_checkpoints import reference_from_record
+    from .perturbed_x_cache import EXACT_ACTIVATION_SCHEMA
+
+    rows = document.get("boundary_entries", {})
+    if not isinstance(rows, Mapping):
+        raise RetirementRefused("the chain state's boundary entries are not a mapping")
+    owner_session = document["boundary_storage"]["session"]
+    directory = Path(document["boundary_storage"]["directory"]) / session["generation"] / "entries"
+    real_directory, real_space = Path(os.path.realpath(directory)), Path(os.path.realpath(space))
+    paths = set()
+    for entries in rows.values():
+        if not isinstance(entries, list):
+            raise RetirementRefused("the chain state's forward entries are not a list")
+        for entry in entries:
+            try:
+                metadata = entry["metadata"]
+                identity = metadata["identity"]
+                _session_of({"boundary_storage": {"session": identity["session"]}},
+                            "a sealed forward entry")
+                if identity["session"] != owner_session:
+                    continue  # Imported forward inputs are not this producer's files.
+                reference = reference_from_record(entry)
+                if (metadata["schema"] != EXACT_ACTIVATION_SCHEMA
+                        or identity["kind"] != "boundary"
+                        or metadata["shape"] != list(reference.shape)
+                        or metadata["dtype"] != reference.dtype
+                        or metadata["tensor_bytes"] != reference.tensor_bytes
+                        or reference.file_bytes <= 0
+                        or len(reference.sha256) != _SHA256_LEN):
+                    raise RetirementRefused("an owned forward entry has inconsistent exact metadata")
+                path = Path(os.path.normpath(reference.path))
+                real = Path(os.path.realpath(path))
+                if (not path.is_absolute()
+                        or not path.is_relative_to(os.path.normpath(directory))
+                        or not real.is_relative_to(real_directory)
+                        or not real.is_relative_to(real_space)):
+                    raise RetirementRefused(
+                        f"owned forward entry {path} escapes this run's generation or binding proof")
+                paths.add(str(path))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RetirementRefused(f"malformed sealed forward entry: {exc}") from exc
+    return paths
+
+
 def _classify_batches(producers, retired_paths) -> tuple[list, list]:
     """Classify PB-owned batches against the already-derived retirement set."""
     retired_set = set(retired_paths)
@@ -494,11 +542,18 @@ def plan_retirement(output_root, *, successor_path, successor_sha256,
         record = None
 
     read = check_bindings(binding_roots, space=space, digests=digests)
-    # The record's list, not the directory: on a rerun the directory is gone.
+    # On retry, only the sealed list: vanished files must not change targets,
+    # and an old retirement must never acquire new forward entries.
+    forward_paths = _owned_forward_paths(document, space=space, session=session) if record is None else set()
     plan_batches, untouched = _classify_batches(
-        producers, set(entry_paths) | set(checkpoint_files))
+        producers, set(entry_paths) | set(checkpoint_files) | forward_paths)
 
     if record is None:
+        # A sealed forward record is eligibility, not permission to sweep it.
+        # Only the real PB committed batches we selected add deletion targets.
+        committed_forward = {path for *_, row in plan_batches
+                             for path in row["paths"] if path in forward_paths}
+        entry_paths = sorted(set(entry_paths) | committed_forward)
         body = canonical_json({
             "schema": RETIREMENT_SCHEMA,
             "session": session,
