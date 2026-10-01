@@ -166,7 +166,9 @@ def test_extended_shards_use_profile_visual_prefix(tmp_path):
     )
 
     assert regexes == [
-        r"model\.vision_tower\.vision_model\.encoder\.layers\.(?:0|1|2)\."
+        r"model\.vision_tower\.vision_model\.encoder\.layers\.(?:0|1|2)\.",
+        r"^(?!model\.vision_tower\.vision_model\.encoder\.layers\.\d+\.)"
+        r"(?:model\.vision_tower|model\.embed_vision)\.",
     ]
 
 

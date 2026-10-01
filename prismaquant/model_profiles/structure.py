@@ -433,6 +433,7 @@ class ModelStructureSpec:
     mtp_extra_linear_names: tuple[str, ...] = ()
     visual_layer_prefix: str | None = None
     visual_config_key: str | None = None
+    visual_root_prefixes: tuple[str, ...] = ()
     lm_head_name: str | None = None
     embedding_name: str | None = None
 
@@ -448,6 +449,18 @@ class ModelStructureSpec:
         probe = payload.get("probe") or {}
         staging = payload.get("staging") or {}
         shard_regexes = payload.get("shard_regexes") or {}
+        visual_roots = shard_regexes.get("visual_root_prefixes", ())
+        if not isinstance(visual_roots, (list, tuple)) or any(
+            not isinstance(root, str) or re.fullmatch(r"\w+(?:\.\w+)*", root) is None
+            for root in visual_roots
+        ):
+            raise ValueError("visual_root_prefixes must be nonempty dotted namespace strings without trailing dots")
+        visual_layer_prefix = _optional_str(shard_regexes.get("visual_layer_prefix"))
+        if visual_roots and (not visual_layer_prefix or not any(
+            visual_layer_prefix == root or visual_layer_prefix.startswith(root + ".")
+            for root in visual_roots
+        )):
+            raise ValueError("visual_root_prefixes must contain the visual_layer_prefix namespace")
         supported_lanes = tuple(
             canonical_export_lane(v) for v in payload.get("supported_lanes", ())
         )
@@ -522,8 +535,9 @@ class ModelStructureSpec:
             mtp_extra_linear_names=tuple(
                 str(v) for v in shard_regexes.get("mtp_extra_linear_names", ())
             ),
-            visual_layer_prefix=_optional_str(shard_regexes.get("visual_layer_prefix")),
+            visual_layer_prefix=visual_layer_prefix,
             visual_config_key=_optional_str(shard_regexes.get("visual_config_key")),
+            visual_root_prefixes=tuple(visual_roots),
             lm_head_name=_optional_str(shard_regexes.get("lm_head_name")),
             embedding_name=_optional_str(shard_regexes.get("embedding_name")),
         )

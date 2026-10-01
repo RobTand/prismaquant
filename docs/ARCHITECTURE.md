@@ -1,5 +1,27 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (Refs #1921, CPU shard-coverage slice): visual scope
+policy now has one profile owner, `ModelProfile.visual_shard_regexes`, consumed
+by both legacy regex builders and the actual production `build_shard_schedule`.
+Validated optional `ModelStructureSpec.visual_root_prefixes` declares the known
+GLM5Next/Qwen3.5/Qwen4 visual roots and Gemma4 vision/embed-vision roots. Existing
+block shards retain their owners; one disjoint dotted non-block scope includes
+merger/projector Linears without guessing audio/body names. A missing vision
+config or explicit `include_visual=False` does not invent scopes; a configured
+zero-block tower can still own a merger. Probe and cost dispatch use existing
+`ShardEntry.kind`, never a regex-text fallback that routes new visual selectors
+to body. The production cost intake reaches the complete declared probe scope.
+MTP actual-safetensors counting, source-native A8S defaults, per-Linear cost and
+format legality, caches/prefetch, numerical methods, wire/pin/kernel behavior
+and independent export/serving gates are unchanged. `tests/test_visual_shard_coverage.py`
+exercises five profile families across all three builders, exact single unit
+ownership, cost-intake reachability, missing/opt-out/zero-block controls and
+invalid namespace declarations; its dispatch checks are structural CPU guards,
+not GPU execution or plugin qualification. Full-gamut ModelWalk inclusion is a
+separate CPU slice; unsupported non-body low-bit export still refuses. #1921
+remains open for producer/GPU qualification and does not block accepted A8S
+BF16 vision parity. No visual wire, native-cell, performance or serving claim.
+
 Re-stamped 2026-10-01 (PQ #1936, Refs #1921): allocation first separates
 visual policy from orchestration. A complete measured visual Fisher/cost
 population retains its legal visual and merger candidates in the existing

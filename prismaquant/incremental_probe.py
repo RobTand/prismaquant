@@ -226,7 +226,6 @@ from .sensitivity_probe import (
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,
-    _classify_shard,
 )
 
 
@@ -686,7 +685,7 @@ class ShardEntry:
     linear_include: str
     kind: str  # "body", "mtp", "visual", "lm_head"
     layer_indices: frozenset[int]
-    layer_prefix: str | None  # Profile-declared layer prefix; None for lm_head.
+    layer_prefix: str | None  # None for lm_head and non-block visual regions.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -769,17 +768,30 @@ def _build_visual_shard_entries(
     profile, cfg: dict, layers_per_shard: int, start_idx: int,
 ) -> list[ShardEntry]:
     """Adapt profile-declared visual regions to production shard entries."""
+    regexes = profile.visual_shard_regexes(cfg, layers_per_shard)
+    if not regexes:
+        return []
     visual_key = profile.visual_config_key()
     visual_prefix = profile.visual_layer_prefix()
-    if not visual_key or not visual_prefix:
-        return []
     vis_cfg = cfg.get(visual_key, {})
     n_vis = int(vis_cfg.get("depth") or vis_cfg.get("num_hidden_layers") or 0)
-    if n_vis <= 0:
-        return []
-    return _build_body_shard_entries(
+    entries = _build_body_shard_entries(
         n_vis, max(layers_per_shard, 4), visual_prefix, "visual", start_idx,
     )
+    n_block_shards = len(entries)
+    if [entry.linear_include for entry in entries] != regexes[:n_block_shards]:
+        raise ValueError("profile visual scope disagrees with visual block shard layout")
+    entries.extend(
+        ShardEntry(
+            shard_idx=start_idx + n_block_shards + offset,
+            linear_include=regex,
+            kind="visual",
+            layer_indices=frozenset(),
+            layer_prefix=None,
+        )
+        for offset, regex in enumerate(regexes[n_block_shards:])
+    )
+    return entries
 
 
 def build_shard_schedule(
@@ -1576,9 +1588,9 @@ def kv_shared_fisher_block_reason(model_path: str) -> str | None:
     )
 
 
-# Streaming infrastructure — `StreamingContext`, `_build_streaming_context`,
-# and `_classify_shard` live in `streaming_model` so both the probe and
-# the cost measurement share one implementation.
+# Streaming infrastructure — `StreamingContext` and `_build_streaming_context`
+# live in `streaming_model` so probe and cost measurement share one context.
+# Typed ShardEntry metadata owns dispatch; selectors do not reclassify kind.
 
 
 # ---------------------------------------------------------------------------
@@ -5563,8 +5575,9 @@ def main():
             # LPS-invariant reuse: try to synthesize this shard from
             # cached per-Linear stats pooled from other compatible
             # shards. Skip body+lm_head+mtp kinds only — visual/empty
-            # shards don't have per-Linear stats to reuse.
-            kind_for_synth = _classify_shard(linear_include)
+            # shards don't have per-Linear stats to reuse. The schedule
+            # owns kind; regex text is a selector, not routing metadata.
+            kind_for_synth = schedule[shard_idx].kind
             if kind_for_synth in ("body", "mtp", "lm_head") and linear_cache:
                 if synthesize_shard_from_linear_cache(
                     linear_include=linear_include,
@@ -5583,7 +5596,7 @@ def main():
             if shard_path.exists():
                 print(f"[incremental] stale shard {shard_idx}: "
                       f"recomputing {shard_path}", flush=True)
-            kind = _classify_shard(linear_include)
+            kind = schedule[shard_idx].kind
             print(f"[incremental] shard {shard_idx} ({kind}): "
                   f"include={linear_include!r}", flush=True)
             _ensure_ready()

@@ -21,6 +21,7 @@
   "shard_regexes": {
     "visual_config_key": "vision_config",
     "visual_layer_prefix": "model.visual.blocks",
+    "visual_root_prefixes": ["model.visual"],
     "body_layer_prefix": "model.layers",
     "mtp_source_prefix": "mtp.",
     "mtp_layer_prefix": "mtp.layers",

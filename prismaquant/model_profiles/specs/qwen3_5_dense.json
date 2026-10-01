@@ -37,6 +37,7 @@
   "shard_regexes": {
     "visual_config_key": "vision_config",
     "visual_layer_prefix": "model.visual.blocks",
+    "visual_root_prefixes": ["model.visual"],
     "mtp_extra_linear_names": ["mtp.fc"]
   },
   "naming": {

@@ -74,7 +74,6 @@ from .measure_quant_cost import (
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,
-    _classify_shard,
 )
 
 
@@ -1222,7 +1221,9 @@ def main():
                 print(f"[incremental-cost] stale shard {shard_idx}: "
                       f"recomputing {shard_path}", flush=True)
 
-            kind = _classify_shard(linear_include)
+            # Typed schedule metadata owns dispatch. Anchored/non-block
+            # visual selectors must not fall through a regex guess to body.
+            kind = schedule[shard_idx].kind
             print(f"[incremental-cost] shard {shard_idx} ({kind}): "
                   f"include={linear_include!r}", flush=True)
             _ensure_ready()
