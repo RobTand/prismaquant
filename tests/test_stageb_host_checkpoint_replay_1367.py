@@ -53,10 +53,13 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure
     source = _source(tmp_path, cyclic=True)
     gc.collect()
     decoded_ids = set()
+    decode_count = 0
     decode = aura_cost._decode_aura_unit_checkpoint
 
     def observed_decode(*args, **kwargs):
+        nonlocal decode_count
         state = decode(*args, **kwargs)
+        decode_count += 1
         decoded_ids.add(id(state))
         decoded_ids.add(id(state["self"]))
         return state
@@ -72,7 +75,8 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure
         from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
         monkeypatch.setattr(CheckpointPublicationLedger, "_freeze", refuse)
     from experiments.stageb_checkpoint_host_replay import digest
-    source_hashes = {path: digest(path) for path in source.iterdir() if path.is_file()}
+    source_hashes = {path: digest(path) for path in source.rglob("*") if path.is_file()}
+    assert len(source_hashes) == 6  # manifest plus all five nested unit files
     enabled = gc.isenabled()
     gc.disable()
     try:
@@ -88,6 +92,7 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure
             assert result["publication"]["charged_bytes"] == 0
         assert source_hashes == {path: digest(path) for path in source_hashes}
         assert decoded_ids
+        assert decode_count == {None: 10, "synchronous": 1, "snapshot": 6}[failure]
         assert not any(type(item) is dict and id(item) in decoded_ids
                        and "self" in item for item in gc.get_objects()), (
                            "replay retained uncharged decoded source cycles")
