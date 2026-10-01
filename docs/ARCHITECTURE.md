@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1869, Refs #1314): the shared rate-band
+owner accepts strict two-integer list/tuple provenance as well as its existing
+CLI string. Partition merge can consume the actual producer's JSON-serialized
+band without treating it as CLI text. Both representations share the same
+positive, ordered q256 range checks; bool, float, string-valued and malformed
+typed bands refuse. Pinned-rate/one-round/coverage/menu restrictions remain in
+force. No numerical rates, wire, cache, runtime pin, default or promotion gate
+change; CPU regression is not full GPU artifact qualification.
+
 Re-stamped 2026-10-01 (PQ #1864): the Tessera lane's `load_generate.graph`
 gate names GLM-5.3's graph configuration. The T-8 release serve passes
 `--compilation-config '{"mode":"NONE","cudagraph_mode":"FULL_DECODE_ONLY"}'`

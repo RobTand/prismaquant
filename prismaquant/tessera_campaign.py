@@ -202,10 +202,15 @@ def anchor_schedule(lo: int, hi: int, count: int) -> list[int]:
 
 
 def parse_rate_band(text) -> "tuple[int, int] | None":
-    """``"lo,hi"`` in q256 body-rate units, or None when unset."""
+    """CLI ``"lo,hi"`` or a strict integer provenance pair, in q256 units."""
     if text is None or str(text).strip() == "":
         return None
-    parts = str(text).split(",")
+    if isinstance(text, (list, tuple)):
+        if len(text) != 2 or any(type(value) is not int for value in text):
+            raise RuntimeError(f"--rate-band {text!r}: want two integer q256 values")
+        parts = text
+    else:
+        parts = str(text).split(",")
     if len(parts) != 2:
         raise RuntimeError(f"--rate-band {text!r}: want 'lo,hi' in q256 units")
     try:
