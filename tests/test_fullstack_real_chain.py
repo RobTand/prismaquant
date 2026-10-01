@@ -80,9 +80,9 @@ STAGE_TIER = "prismabuild-stage:dl380g10"
 RAM_TIER = "ram:dl380g10"
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def pb():
-    """Published PB stdlib + fleet tools from the immutable generation."""
+    """PB imports belong to this test, matching conftest's import restoration."""
     require_prismabuild_sdk()
     info = pbgen.require_paths()
     import prismabuild.core as core  # noqa: E402

@@ -73,8 +73,9 @@ def _pb():
             "stage_move": stage_move, "ram_promote": ram_promote}
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def pb():
+    """PB imports are test-scoped, as conftest's restoration requires."""
     return _pb()
 
 
