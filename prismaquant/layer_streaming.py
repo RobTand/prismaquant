@@ -113,8 +113,10 @@ def _source_safe_open(path, *, source_authentication=None, **kwargs):
 def _source_json(path, source_authentication=None):
     if source_authentication is not None:
         return source_authentication.read_json(path)
-    with open(path) as handle:
-        return json.load(handle)
+    from .staged_whole_file import read_source_metadata_text
+
+    return json.loads(read_source_metadata_text(
+        Path(path), label="streamed source JSON"))
 
 
 # ---------------------------------------------------------------------------

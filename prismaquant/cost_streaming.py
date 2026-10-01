@@ -5987,7 +5987,10 @@ def _local_checkpoint_shards(
     index_path = root / "model.safetensors.index.json"
     if index_path.is_file():
         try:
-            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            from .staged_whole_file import read_source_metadata_text
+
+            payload = json.loads(read_source_metadata_text(
+                index_path, label="checkpoint index", encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(
                 f"streamed model identity cannot read {index_path}"
