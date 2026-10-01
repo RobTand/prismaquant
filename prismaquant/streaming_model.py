@@ -1184,6 +1184,44 @@ class StreamingContext:
         _unload(self.model, [f"{self.layers_prefix}{L}."])
         return self.layer_cache.trim_for_memory_pressure() if trim_cache else 0
 
+    def source_files_by_layer(self) -> dict[int, frozenset[str]]:
+        """``{layer: source files its read opens}``: its weights' and FP8 scales' shards.
+
+        The loader's selection (``select_source_tensors`` on the layer prefix,
+        plus ``fp8_scale_inv_map``), grouped in one pass over the weight map.
+        """
+        found = getattr(self, "_source_files_by_layer", None)
+        if found is None:
+            grouped: dict[int, set[str]] = {}
+            prefix = self.layers_prefix
+            pairs = [*self.weight_shard.items(),
+                     *((name, shard) for name, (shard, _key) in self.fp8_scale_inv_map.items())]
+            for name, shard in pairs:
+                if name.startswith(prefix):
+                    index = name[len(prefix):].split(".", 1)[0]
+                    if index.isdigit():
+                        grouped.setdefault(int(index), set()).add(shard)
+            found = {layer: frozenset(files) for layer, files in grouped.items()}
+            self._source_files_by_layer = found
+        return found
+
+    def release_source_pages_before(self, next_layer: int, stop: int):
+        """Drop the retained source pages no layer in ``[next_layer, stop)`` reads.
+
+        A streamed capture's recording owner (PQ #1896) keeps each file's pages
+        from its payload hash until its tensors are read, so the source is read
+        once; under the bounded page policy the traversal calls this after each
+        layer so a file's pages go when its last consumer has read them. A no-op
+        for any other owner, and for a traversal without one. Returns the names
+        released.
+        """
+        owner = self.source_authentication
+        if owner is None or not getattr(owner, "is_recording", False):
+            return ()
+        by_layer = self.source_files_by_layer()
+        keep = set().union(*(by_layer.get(layer, ()) for layer in range(next_layer, stop)))
+        return owner.release_retained_pages(keep=keep)
+
     def release_completed_layer(self, L: int):
         """Release an exhausted layer without disturbing its resident successor.
 

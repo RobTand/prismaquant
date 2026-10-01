@@ -5471,6 +5471,16 @@ class StreamedCausalLM:
                 )
             return head
 
+    def _release_source_pages_before(self, next_layer: int, stop: int):
+        """A recording source owner's bounded page policy (PQ #1896); a no-op otherwise.
+
+        Only a streamed capture's runner reads through a recording owner, and
+        only its context drops pages here (``release_source_pages_before``).
+        """
+        owner = getattr(self.context, "source_authentication", None)
+        if getattr(owner, "is_recording", False):
+            self.context.release_source_pages_before(next_layer, stop)
+
     def _prepare(self, input_ids: torch.Tensor):
         if getattr(self.context, 'source_snapshot_only', False):
             raise RuntimeError('snapshot-only source cannot execute a forward')
@@ -5814,6 +5824,10 @@ class StreamedCausalLM:
                 else:
                     for depth in range(start_layer, min(stop, start_layer + self.prefetch_lookahead + 1)):
                         self.context.schedule_prefetch(depth)
+                # A recording source owner (PQ #1896) retains each file's pages
+                # from its hash for the reads that follow: the head's files go
+                # now, each body file after the last layer that reads it.
+                self._release_source_pages_before(start_layer, stop)
                 for layer in range(start_layer, stop):
                     if layer > start_layer:
                         report_source_phase('source_loading', layer)
@@ -5884,6 +5898,7 @@ class StreamedCausalLM:
                                 raise RuntimeError("layer visitor omitted calibration batches")
                     finally:
                         self.context.unload(layer)
+                    self._release_source_pages_before(layer + 1, stop)
                 if exact:
                     for batch, state in zip(batches, states):
                         batch.shared_pass_state = checked(self.profile.capture_forward_pass_state, state[2])

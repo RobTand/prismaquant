@@ -665,7 +665,10 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
                if '--capture-load-policy' in argv else {}))
     return streamed_calibration_resources(spec['model'], **options,
         nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
-        capture_policy=argument('--streaming-capture-policy', 'legacy', str))
+        capture_policy=argument('--streaming-capture-policy', 'legacy', str),
+        # A streamed capture reads its source through a recording owner,
+        # whose retained pages the row holds (PQ #1896).
+        source_recording='--capture-calibration-out' in argv)
 
 
 def campaign_argv_argument(argv, name, default=None, convert=str):

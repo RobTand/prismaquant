@@ -140,7 +140,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    capture_policy='legacy', capture_load_policy=None,
                                    process_baseline_bytes=0, selected_source_units=None,
                                    process_baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION,
-                                   source_scope=None):
+                                   source_scope=None, source_recording=False):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -154,6 +154,17 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     ``source_scope`` prices a profile-declared out-of-body source (PQ #1316)
     the way the loader reads it: the scope's own key mapping, layer prefix and
     layers. A scope has no forward, so it requires ``selected_source_units``.
+
+    ``source_recording`` prices a streamed capture that reads its source
+    through a recording owner (PQ #1896). The owner hashes a whole file at
+    its first payload read and keeps the file's pages for the tensor reads
+    that follow, until the last layer that reads the file is done. Up to
+    ``cache_slots`` consecutive layers can be read at once (the current one
+    and its prefetch lookahead), so ``source_retained_page_bytes`` is the
+    largest on-disk size of the files any ``cache_slots`` consecutive layers
+    read. It is clean page cache, which the guard's committed reading omits;
+    the plan charges it so the cgroup can hold it until it is read, rather
+    than reclaim it and read it again.
     """
     # Ahead of every return in this function, including the legacy one
     # below: a caller that declares a malformed reservation must be
@@ -329,6 +340,14 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # allow a dense FP32 mask and full-hidden-width rotary pairs; original IDs
     # remain in both the original CPU draw and the device-side sample states.
     masks_positions = seqlen*seqlen*4 + seqlen*hidden*4 + nsamples*seqlen*16
+    retained_pages = 0
+    if source_recording:
+        file_bytes = {shard: (Path(model_path)/shard).stat().st_size
+                      for files in body_shards.values() for shard in files}
+        ordered = sorted(body_shards)
+        retained_pages = max((sum(file_bytes[shard] for shard in set().union(
+            *(body_shards[layer] for layer in ordered[first:first+cache_slots])))
+            for first in range(len(ordered))), default=0)
     terms = dict(source_window_bytes=sum(sorted(body.values(), reverse=True)[:cache_slots]),
         nonbody_source_bytes=fixed, loader_transient_bytes=loader_transient,
         current_boundary_bytes=boundary, microbatch_transition_bytes=transition,
@@ -336,7 +355,8 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         layer_hessian_bytes=max(h_by_layer.values(), default=0),
         layer_prefix_bytes=max(x_by_layer.values(), default=0),
         entry_validation_bytes=widest_unit,
-        declared_headroom_bytes=math.ceil(headroom_gb*1024**3))
+        declared_headroom_bytes=math.ceil(headroom_gb*1024**3),
+        **({'source_retained_page_bytes': retained_pages} if source_recording else {}))
     # One new entry may coexist with the old one during atomic replacement;
     # metadata/journals have an explicit per-unit serialization allowance.
     disk = total_h+total_x+widest_unit+len(unit_shapes)*16384
@@ -388,19 +408,22 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         drain[layer] = drain.get(layer, 0)+max(h+device_x, len(members)*(h+output_x))
     common = {key: value for key, value in terms.items() if key not in
               ('source_window_bytes', 'loader_transient_bytes',
-               'layer_hessian_bytes', 'layer_prefix_bytes')}
-    forward = dict(common, source_window_bytes=terms['source_window_bytes'],
+               'layer_hessian_bytes', 'layer_prefix_bytes', 'source_retained_page_bytes')}
+    # The recording owner's retained pages live while layers are read; the
+    # seal reads no source a layer reads (PQ #1896).
+    retained = ({'source_retained_page_bytes': retained_pages} if source_recording else {})
+    forward = dict(common, **retained, source_window_bytes=terms['source_window_bytes'],
         loader_transient_bytes=loader_transient,
         layer_hessian_bytes=max(forward_h.values(), default=0),
         layer_prefix_bytes=max(forward_x.values(), default=0))
-    materialization = dict(common,
+    materialization = dict(common, **retained,
         source_window_bytes=sum(sorted(body.values(), reverse=True)[:cache_slots-1]),
         loader_transient_bytes=0,
         layer_materialization_bytes=max(drain.values(), default=0),
         finite_validation_mask_bytes=max((max(shape[1]**2,
             min(counts[name], max_act_rows)*shape[1])
             for name, shape in unit_shapes.items()), default=0))
-    source_validation = dict(common, source_window_bytes=terms['source_window_bytes'],
+    source_validation = dict(common, **retained, source_window_bytes=terms['source_window_bytes'],
         loader_transient_bytes=loader_transient,
         source_validation_file_bytes=max(raw_body.values(), default=0),
         source_validation_cpu_copy_bytes=max(

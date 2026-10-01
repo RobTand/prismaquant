@@ -523,11 +523,13 @@ def test_bounded_writer_advises_only_verified_durable_entries_and_guards_sealing
         release_file_pages=True, resource_check=lambda label: events.append(('check', label)))
     writer.write(acts=acts, hessians=hessians, counts=census['counts'], maxima=census['max_abs'])
     writer.finish(model_load_contract=identity['model_load_contract'])
+    # The seal holds each replay-verified entry to its fingerprint and reads
+    # nothing, so it has no pages to advise (PQ #1896).
     assert events == [
         ('check', 'before_capture_write:a'), ('advice', 'a.pt'), ('check', 'after_capture_write:a'),
         ('check', 'before_capture_write:b'), ('advice', 'b.pt'), ('check', 'after_capture_write:b'),
-        ('check', 'before_capture_seal:a'), ('advice', 'a.pt'), ('check', 'after_capture_seal:a'),
-        ('check', 'before_capture_seal:b'), ('advice', 'b.pt'), ('check', 'after_capture_seal:b')]
+        ('check', 'before_capture_seal:a'), ('check', 'after_capture_seal:a'),
+        ('check', 'before_capture_seal:b'), ('check', 'after_capture_seal:b')]
     events.clear()
     (root/'inputs/a.pt').write_bytes(b'corrupt')
     writer = cc.CaptureWriter(root, census_path=path, identity=identity, release_file_pages=True)
