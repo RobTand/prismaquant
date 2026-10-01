@@ -14,6 +14,9 @@ from test_dispatch_joint_quanta import _COTANGENT, _SPILL
 
 CACHE = ("PRISMAQUANT_CONTAINER_CACHE_ROOT", "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES")
 COMPILATION = ("HF_HOME", "TRITON_CACHE_DIR", "TORCHINDUCTOR_CACHE_DIR", "XDG_CACHE_HOME")
+# Pure Docker-argv fixtures declare container paths, not pytest's /tmp overlay.
+# Filesystem/symlink refusal tests below deliberately retain their real tmp_path.
+CONTAINER_FIXTURE_ROOT = Path("/pq-fixture-cache-charge-1091")
 
 
 def _runner():
@@ -44,8 +47,8 @@ def test_cache_pair_is_priced_independently_without_creating_directories(tmp_pat
     assert list(tmp_path.iterdir()) == []
 
 
-def test_cache_forwarding_and_defaults_do_not_reuse_spill_or_tmp(tmp_path):
-    spec, env = _layout(tmp_path)
+def test_cache_forwarding_and_defaults_do_not_reuse_spill_or_tmp():
+    spec, env = _layout(CONTAINER_FIXTURE_ROOT)
     inside = _docker_env(spec, env)
     assert {name: inside[name] for name in CACHE} == {name: env[name] for name in CACHE}
     assert {name: inside[name] for name in COMPILATION} == {
@@ -93,24 +96,25 @@ def test_cache_ceiling_uses_the_public_pb_ascii_positive_contract(tmp_path, valu
         _runner().local_scratch_environment(spec, env)
 
 
-@pytest.mark.parametrize("pin", ["/tmp/hf", "/mnt/shared/hf", "/unmounted/hf"])
-def test_an_overlay_waiver_cannot_route_distinct_cache_outside_its_charge(tmp_path, pin):
-    spec, env = _layout(tmp_path, pins={"HF_HOME": pin})
+@pytest.mark.parametrize("pin", ["/tmp/hf", "/var/tmp/hf", "/mnt/shared/hf", "/unmounted/hf"])
+def test_an_overlay_waiver_cannot_route_distinct_cache_outside_its_charge(pin):
+    spec, env = _layout(CONTAINER_FIXTURE_ROOT, pins={"HF_HOME": pin})
     spec["overlay_cache_reason"] = "fixture: must not waive accounting"
     with pytest.raises(RuntimeError, match="HF_HOME.*cache root"):
         _docker_env(spec, env)
 
 
-def test_tmpdir_requires_an_explicit_other_charged_root(tmp_path):
-    spec, env = _layout(tmp_path)
+def test_tmpdir_requires_an_explicit_other_charged_root():
+    spec, env = _layout(CONTAINER_FIXTURE_ROOT)
     del spec["env"]["PRISMAQUANT_TMPDIR"]
     with pytest.raises(RuntimeError, match="TMPDIR.*separate"):
         _docker_env(spec, env)
 
 
 @pytest.mark.parametrize("bad_tmp", ["compile/row-tmp", "outside/row-tmp"])
-def test_tmpdir_cannot_reuse_cache_or_an_uncharged_directory(tmp_path, bad_tmp):
-    spec, env = _layout(tmp_path, pins={"PRISMAQUANT_TMPDIR": str(tmp_path / bad_tmp)})
+def test_tmpdir_cannot_reuse_cache_or_an_uncharged_directory(bad_tmp):
+    spec, env = _layout(CONTAINER_FIXTURE_ROOT,
+                        pins={"PRISMAQUANT_TMPDIR": str(CONTAINER_FIXTURE_ROOT / bad_tmp)})
     with pytest.raises(RuntimeError, match="TMPDIR.*separate"):
         _docker_env(spec, env)
 
@@ -144,9 +148,16 @@ def test_cache_requires_an_unambiguous_writable_identity_bind(tmp_path, mode):
         _runner().local_scratch_environment(spec, env)
 
 
-def test_contained_cache_pins_are_preserved(tmp_path):
-    cache = tmp_path / "compile"
-    spec, env = _layout(tmp_path, pins={"HF_HOME": str(cache / "pinned-hf")})
+@pytest.mark.parametrize("overlay", ["/tmp", "/var/tmp"])
+def test_identity_mount_does_not_waive_overlay_cache_refusal(overlay):
+    spec, env = _layout(Path(overlay) / "pq-cache-fixture")
+    with pytest.raises(RuntimeError, match="HF_HOME.*cache root"):
+        _docker_env(spec, env)
+
+
+def test_contained_cache_pins_are_preserved():
+    cache = CONTAINER_FIXTURE_ROOT / "compile"
+    spec, env = _layout(CONTAINER_FIXTURE_ROOT, pins={"HF_HOME": str(cache / "pinned-hf")})
     inside = _docker_env(spec, env)
     assert inside["HF_HOME"] == str(cache / "pinned-hf")
     assert inside["TRITON_CACHE_DIR"] == str(cache / "triton")
