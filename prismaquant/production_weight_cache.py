@@ -88,6 +88,7 @@ from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
 from prismaquant.digests import (
+    DIRECT_UTF8_STRICT,
     LengthFramedSourceSha256,
     bytes_sha256hex,
     canonical_json,
@@ -2938,13 +2939,7 @@ def identity_value_for_error(value: object) -> str:
 
 def _canonical_json_sha256(value: object, *, where: str) -> str:
     canonical = _canonical_json_value(value, where=where)
-    encoded = json.dumps(
-        canonical,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
+    encoded = DIRECT_UTF8_STRICT.encoded(canonical)
     return bytes_sha256hex(encoded)
 
 
