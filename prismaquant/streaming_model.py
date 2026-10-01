@@ -549,7 +549,7 @@ def _mask_cuda_queries_during_meta_init(log_prefix: str):
         torch.cuda.current_device = old_current_device  # type: ignore[assignment]
 
 
-def _init_rotary_inplace(base_model: nn.Module, device: torch.device,
+def _init_rotary_inplace(base_model: torch.nn.Module, device: torch.device,
                          dtype: torch.dtype) -> None:
     """Populate deterministic rotary buffers on a meta-built skeleton.
 
@@ -1299,6 +1299,42 @@ class StreamingContext:
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
 
+    @contextmanager
+    def observe_source_waits(self, sink):
+        """Observe this consumer's pending deliveries, without owning their loads."""
+        if not callable(sink):
+            raise TypeError('source wait observer must be callable')
+        if getattr(self, '_source_wait_sink', None) is not None:
+            raise RuntimeError('source wait observer already active')
+        self._source_wait_sink = sink
+        try:
+            yield
+        finally:
+            self._source_wait_sink = None
+
+    def _prefetch_result(self, layer, future):
+        """Take one delivery result; retry ownership stays in ``_await_prefetch``."""
+        sink = getattr(self, '_source_wait_sink', None)
+        if sink is None or future.done():
+            return future.result()
+        started = time.time()
+        failure = None
+        try:
+            return future.result()
+        except BaseException as error:
+            failure = error
+            raise
+        finally:
+            finished = time.time()
+            try:
+                sink('source-prefetch', started, finished,
+                     {'layer': int(layer), 'wait_s': max(0.0, finished - started)})
+            except BaseException as error:
+                if failure is None:
+                    # An observer's failure is not a loader availability cause.
+                    raise RuntimeError('source wait observer failed') from error
+                failure.add_note(f'source wait observer failed: {type(error).__name__}: {error}')
+
     def _await_prefetch(self, layer, future, *, retry_availability):
         """Await delivery, retaining its owner even when speculation is replaced.
 
@@ -1309,7 +1345,7 @@ class StreamingContext:
         This reports no progress and grants no new phase/watchdog allowance.
         """
         try:
-            return future.result()
+            return self._prefetch_result(layer, future)
         except Exception as exc:
             if (not retry_availability or not _is_prefetch_availability(exc)
                     or getattr(future, '_pq_availability_retried', False)):
@@ -1338,7 +1374,7 @@ class StreamingContext:
                     self._inflight.setdefault(layer, future)
                 raise
             replacement._pq_availability_retried = True
-            return replacement.result()
+            return self._prefetch_result(layer, replacement)
 
     def settle_prefetched_layers(self, layer_indices, *, retry_availability=False):
         """Await an already scheduled window without claiming its owners.
@@ -1845,7 +1881,7 @@ def _find_visual_module(model) -> tuple[Any | None, str]:
     return None, ""
 
 
-def _module_has_meta_tensors(module: nn.Module) -> bool:
+def _module_has_meta_tensors(module: torch.nn.Module) -> bool:
     return any(
         getattr(t, "is_meta", False)
         for t in (
