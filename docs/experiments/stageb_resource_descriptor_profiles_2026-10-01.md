@@ -55,6 +55,8 @@ These are environmental observations while the measured operation ran on x86, no
 - Before Netdata SHA-256: `a7b3bab2add4d40507e172f25e129e4ddd101fb7883384db5957ffbfbb8c0a93`.
 - After Netdata SHA-256: `2fa3331b8453181c3ef2153873f05d3280f57af2e9fba77d46eb9a4c08b1068d`.
 
+The complete normal metadata producer was also run after the fix, with the same immutable input argv/bands/prepared references. Action `cbc3157214d6fd0202f3a3a68f67329b2ac295917665e5d13c43a5c03a94d0ba` ended in timeout after 904.046 seconds; its terminal record is complete and unambiguous. No new normal-metadata completion is established. This narrower CPU fix removes measured descriptor work but does not resolve the remaining full-head intake cost or authorize original #1367 closure.
+
 The first instrument attempt failed before operation completion because the worker could not resolve SSH aliases as DNS names. The retained failure is action `6accbf902a3ac0713b9c77361b1f59839c9014de2823cec30e948463ff7a0127`, returncode 1. The successful collector used the addresses from `ssh -G` while retaining stable host names in the series. No missing-chart gate was weakened.
 
 ## Correctness gate
