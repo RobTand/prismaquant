@@ -614,6 +614,14 @@ class PeriodicSampler:
     def stopping(self) -> bool:
         return self._stop.is_set()
 
+    @property
+    def native_id(self) -> int | None:
+        """Native sampler identity for preserving admitted CPU affinity."""
+        return self._thread.native_id
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
+
     def start(self) -> "PeriodicSampler":
         self._thread.start()
         return self
