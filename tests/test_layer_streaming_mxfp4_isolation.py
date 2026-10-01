@@ -44,3 +44,8 @@ def test_shared_expert_scope_after_native_dsv4_import(tmp_path):
 def test_undeclared_checkpoint_after_native_dsv4_import(tmp_path):
     _assert_mixed_session_passes(
         tmp_path, "test_undeclared_checkpoint_has_no_mxfp4_names")
+
+
+def test_undeclared_int8_group16_after_native_dsv4_import(tmp_path):
+    _assert_mixed_session_passes(
+        tmp_path, "test_undeclared_int8_group16_is_not_decoded_as_nibbles")
