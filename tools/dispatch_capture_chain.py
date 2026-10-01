@@ -39,7 +39,13 @@ TOOLS = Path(__file__).resolve().parent
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
-from dispatch_stage_a_split import SplitDispatchRefused, pb_ending, submission_path  # noqa: E402
+from dispatch_stage_a_split import (  # noqa: E402
+    SplitDispatchRefused,
+    _write_json,
+    pb_ending,
+    submission_path,
+    submission_result,
+)
 from dispatch_tessera_campaign import PBCAMPAIGN, _row, _row_memory_gb, load_spec  # noqa: E402
 
 ROUND_SCHEMA = "prismaquant.capture_chain_round.v1"
@@ -61,17 +67,13 @@ def round_directory(workspace) -> Path:
     return Path(workspace).resolve() / "capture-chain"
 
 
-def _write_json(path: Path, value) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
-
-
 def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_timeout_s,
          bookend_mem_gb=16, progress_phases=(), priority=PRIORITY) -> dict:
     """Write the chain's rows once; nothing reaches PrismaBuild."""
     from prismaquant.capture_layer_chain import (parse_layer_ranges, range_label,
                                                  require_layer_tiling)
     from prismaquant.cost_streaming import check_boundary_storage
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     from prismaquant.tessera_calibration_cache import sha256
     for value, flag in ((timeout_s, "--timeout-s"), (bookend_timeout_s, "--bookend-timeout-s")):
         if type(value) is not int or value <= 0:
@@ -109,7 +111,7 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
 
     text = ",".join(f"{start}:{stop}" for start, stop in pairs)
     add("prep", "prep", ["--capture-chain-ranges", text, "--capture-chain-boundary-storage",
-                         json.dumps(boundary_storage, sort_keys=True)],
+                         DIRECT_ASCII_SPACED_LAX.text(boundary_storage)],
         mem_gb=bookend_mem_gb, timeout=bookend_timeout_s, phases=(), gpu=False)
     quantum_mem_gb = _row_memory_gb(spec, sorted(census["counts"]), census)
     for start, stop in pairs:
@@ -125,7 +127,7 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
     return document
 
 
-def load_round(round_dir) -> dict:
+def load_capture_round(round_dir) -> dict:
     from prismaquant.tessera_calibration_cache import sha256
     document = json.loads((Path(round_dir) / ROUND_NAME).read_text())
     if document.get("schema") != ROUND_SCHEMA:
@@ -133,6 +135,9 @@ def load_round(round_dir) -> dict:
     if sha256(document["census"]["path"]) != document["census"]["sha256"]:
         raise ChainDispatchRefused("the census changed since the chain was sealed")
     return document
+
+
+load_round = load_capture_round
 
 
 def require_outputs(document, entry) -> None:
@@ -180,7 +185,7 @@ def _pb_ending(round_dir, name) -> dict:
         raise ChainDispatchRefused(str(exc)) from exc
 
 
-def require_ready(round_dir, document, index) -> None:
+def require_capture_ready(round_dir, document, index) -> None:
     """Refuse row ``index`` until the row before it finished and its outputs check."""
     if index == 0:
         return
@@ -189,22 +194,17 @@ def require_ready(round_dir, document, index) -> None:
     require_outputs(document, before)
 
 
+require_ready = require_capture_ready
+
+
 def _submit_row(round_dir, entry, *, run) -> dict:
     manifest = Path(round_dir) / "manifests" / f"{entry['name']}.json"
     _write_json(manifest, [entry["row"]])
     command = [sys.executable, str(PBCAMPAIGN), "--detach", str(manifest)]
     completed = run(command, capture_output=True, text=True)
-    detach = None
-    for line in (completed.stdout or "").splitlines():
-        try:
-            value = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(value, dict) and "action_key" in value:
-            detach = value
-    result = {"name": entry["name"], "argv": command, "returncode": completed.returncode,
-              "stdout": completed.stdout, "stderr": completed.stderr, "detach": detach}
+    result = submission_result(entry["name"], command, completed)
     _write_json(submission_path(round_dir, entry["name"]), result)
+    detach = result["detach"]
     if completed.returncode != 0 or detach is None:
         raise ChainDispatchRefused(
             f"row {entry['name']} was not submitted (exit {completed.returncode}): "
@@ -221,7 +221,7 @@ def _retire_attempt(round_dir, name) -> None:
     path.rename(path.with_name(f"{name}.attempt-{attempt}.json"))
 
 
-def submit(round_dir, *, wait_s=None, retry=None, run=subprocess.run) -> list[dict]:
+def submit_capture_chain(round_dir, *, wait_s=None, retry=None, run=subprocess.run) -> list[dict]:
     """Submit the next row (with ``wait_s``, every remaining row) in chain order."""
     round_dir = Path(round_dir)
     document = load_round(round_dir)
@@ -253,6 +253,9 @@ def submit(round_dir, *, wait_s=None, retry=None, run=subprocess.run) -> list[di
     return results
 
 
+submit = submit_capture_chain
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     sub = ap.add_subparsers(dest="command", required=True)
@@ -279,6 +282,8 @@ def main(argv=None) -> int:
                             help="wait for each row through pbwait and walk the whole chain")
     submitting.add_argument("--retry", default=None, help="re-submit this row after a failure")
     args = ap.parse_args(argv)
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+
     try:
         if args.command == "seal":
             phases = () if args.progress_grace_s is None else (
@@ -293,12 +298,12 @@ def main(argv=None) -> int:
         elif args.command == "plan":
             document = load_round(round_directory(args.workspace))
             for entry in document["rows"]:
-                print(json.dumps({"name": entry["name"], "row": entry["row"]}, sort_keys=True))
+                print(DIRECT_ASCII_SPACED_LAX.text({"name": entry["name"], "row": entry["row"]}))
         else:
             for result in submit(round_directory(args.workspace), wait_s=args.wait_s,
                                  retry=args.retry):
-                print(json.dumps({"name": result["name"], "detach": result["detach"]},
-                                 sort_keys=True))
+                print(DIRECT_ASCII_SPACED_LAX.text(
+                    {"name": result["name"], "detach": result["detach"]}))
     except SplitDispatchRefused as exc:
         print(f"[capture-chain] refused: {exc}", file=sys.stderr)
         return 2

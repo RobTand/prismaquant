@@ -17,7 +17,7 @@ import stat
 from typing import Callable, Mapping
 import zlib
 
-from .digests import is_sha256hex
+from .digests import bytes_sha256hex, is_sha256hex
 from .joint_retained_window_plan import RetainedWindowBudget
 from .qnames import LAYER_QNAME as _LAYER
 from .schemas import Contract, strict_json_loads
@@ -81,7 +81,7 @@ def _decode_unique(raw: bytes) -> dict:
         raise ValueError("joint COST read schedule: invalid UTF-8 JSON") from exc
 
 
-def _read_sealed(path: str | Path, sha256: str, size: int) -> dict:
+def _read_pinned_cost_manifest(path: str | Path, sha256: str, size: int) -> dict:
     _sha(sha256, "manifest_sha256")
     _int(size, "manifest_bytes", positive=True)
     _require(size <= MAX_MANIFEST_BYTES, "manifest exceeds PB's 64 MiB input limit")
@@ -98,7 +98,7 @@ def _read_sealed(path: str | Path, sha256: str, size: int) -> dict:
                  and before.st_ino == after.st_ino and before.st_size == after.st_size
                  and before.st_mtime_ns == after.st_mtime_ns,
                  "manifest bytes changed during read")
-    _require(hashlib.sha256(raw).hexdigest() == sha256, "manifest SHA-256 differs")
+    _require(bytes_sha256hex(raw) == sha256, "manifest SHA-256 differs")
     if raw.startswith(b"\x1f\x8b"):
         try:
             decoder = zlib.decompressobj(wbits=16 + zlib.MAX_WBITS)
@@ -110,6 +110,9 @@ def _read_sealed(path: str | Path, sha256: str, size: int) -> dict:
                  "gzip data manifest needs exactly one bounded complete member")
         raw = decoded
     return _decode_unique(raw)
+
+
+_read_sealed = _read_pinned_cost_manifest
 
 
 def _validate_pb_v2(manifest: object) -> tuple[dict, tuple[str, ...]]:
