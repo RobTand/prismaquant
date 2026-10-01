@@ -12,11 +12,11 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
-import stat
 import subprocess
 
 from tools.container_runtime_identity import (
     image_content_sha256, prismaquant_source_sha256)
+from tools.tessera_campaign_namespace import refuse_path_symlinks as _refuse_scratch_symlinks
 
 
 # These are PrismaBuild's action environment contract, deliberately kept in
@@ -581,22 +581,6 @@ LOCAL_SCRATCH_PAIRS_ENV = "PRISMABUILD_LOCAL_SCRATCH_PAIRS"
 #: ``PRISMABUILD_PRODUCED_SPOOL_HOST_WINDOW`` and refuses its pair in the list.
 CONTAINER_CACHE_SCRATCH_ENV = (
     "PRISMAQUANT_CONTAINER_CACHE_ROOT", "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES")
-
-
-def _refuse_scratch_symlinks(value: str) -> None:
-    """Inspect existing ancestors without creating or resolving scratch."""
-    path = Path(value)
-    for ancestor in (*reversed(path.parents), path):
-        try:
-            info = ancestor.lstat()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            raise RuntimeError(f"cannot inspect scratch path {ancestor}") from exc
-        if stat.S_ISLNK(info.st_mode):
-            raise RuntimeError(f"scratch path contains a symlink: {ancestor}")
-        if not stat.S_ISDIR(info.st_mode):
-            raise RuntimeError(f"scratch path is not a directory: {ancestor}")
 
 
 def container_cache_scratch_environment(spec: dict, environ) -> dict:
