@@ -67,6 +67,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .digests import text_sha256hex
+
 
 class BoundaryProducedBindingError(RuntimeError):
     """The boundary publication could not be bound or used."""
@@ -937,8 +939,8 @@ class BoundaryProducedPublication:
         """
 
         if self._generation is None:
-            self._generation = hashlib.sha256(
-                str(self.instance["owner_action_key"]).encode()).hexdigest()[:16]
+            self._generation = text_sha256hex(
+                str(self.instance["owner_action_key"]))[:16]
         return self._generation
 
     def batch_id_for(self, *, boundary_index: int, group_index: int,
@@ -968,9 +970,9 @@ class BoundaryProducedPublication:
         if not kind or "/" in kind:
             raise ValueError("a boundary group kind is a bare name")
         probe = "-" if probe_index is None else str(probe_index)
-        ident = hashlib.sha256("\x00".join((
+        ident = text_sha256hex("\x00".join((
             str(kind), str(boundary_index), probe, str(group_index),
-            self.generation)).encode()).hexdigest()[:12]
+            self.generation)))[:12]
         readable = (f"b{boundary_index}" if probe_index is None
                     else f"b{boundary_index}p{probe_index}")
         return (f"stagea-{kind}-{readable}-g{group_index}"
