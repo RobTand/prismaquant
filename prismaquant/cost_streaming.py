@@ -29,7 +29,7 @@ from prismaquant.layer_streaming import (
     _compute_position_embeddings,
     _get_final_norm,
 )
-from .digests import DIRECT_ASCII_LAX, file_sha256hex
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, file_sha256hex
 from .joint_stageb_resources import cotangent_scratch
 
 
@@ -1342,7 +1342,7 @@ class StreamedBoundaryArtifacts:
             ProducedFileReference(
                 path=str(self.directory / name), name=name,
                 file_bytes=len(payload),
-                sha256=hashlib.sha256(payload).hexdigest())
+                sha256=bytes_sha256hex(payload))
             for name, payload in files]
         total = sum(ref.file_bytes for ref in references)
         # The files share max_artifact_bytes with the entries, as the
