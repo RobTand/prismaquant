@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1986, Refs #1588). As of: 2026-10-01 ·
+`sol/pq-stageb-9`. The opt-in campaign namespace preparation API extends the
+existing dispatcher, without a new scheduler or CLI: a complete hash-keyed
+reconciliation roster explicitly selects unfinished requests and independently
+supplied evidence/readset/dependency expectations bind each digest-keyed row.
+Reviewed baseline and executed full commits remain distinct. Owned output and
+cache/temp destinations are deterministic; shared no-clobber publication admits
+only identical ownership/request bytes on resume. The container adapter checks
+publication, command/environment, paths and the committed full executed source
+before Docker inspection. No contract means unchanged legacy behavior. This
+metadata-only CPU slice does not verify completion evidence or input bytes,
+rederive resource demand, prove legacy/current runtime compatibility, adopt
+seeds, submit rows, or qualify prices/serving/GPU recovery. Existing campaign
+seed, checkpoint and journal gates, caches, pins, formats and ship gates remain
+unchanged. Gate: `tests/test_tessera_campaign_namespace_1986.py`.
+
 Re-stamped 2026-10-01 (PQ #1936, Refs #1921): allocation first separates
 visual policy from orchestration. A complete measured visual Fisher/cost
 population retains its legal visual and merger candidates in the existing

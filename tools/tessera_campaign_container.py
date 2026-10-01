@@ -16,7 +16,10 @@ import subprocess
 
 from tools.container_runtime_identity import (
     image_content_sha256, prismaquant_source_sha256)
-from tools.tessera_campaign_namespace import refuse_path_symlinks as _refuse_scratch_symlinks
+from tools.tessera_campaign_namespace import (
+    namespace_adapter_request, refuse_path_symlinks as _refuse_scratch_symlinks,
+    validate_namespace_request,
+)
 
 
 # These are PrismaBuild's action environment contract, deliberately kept in
@@ -1154,6 +1157,31 @@ def inspect_or_load(container):
     return rows
 
 
+def validate_namespace_launch(spec: dict, command: list[str], *, cwd: str, environ) -> str | None:
+    """Opt-in ownership refusal before Docker inspection or campaign entry."""
+    if "namespace_binding" not in spec:
+        return None
+    row = namespace_adapter_request(spec, command, environ)
+    commit = checkout_commit(cwd)
+    if commit is None:
+        raise RuntimeError("namespace requires a committed executed checkout")
+    validate_namespace_request(row, executed_commit=commit)
+    # The legacy helper checks package bytes only. Namespace ownership is over
+    # the full source, including this adapter and the preparation contract.
+    try:
+        changed = subprocess.run(["git", "-C", cwd, "status", "--porcelain",
+                                  "--untracked-files=normal"],
+                                 capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("namespace cannot inspect executed source") from exc
+    if changed.returncode != 0 or changed.stdout.strip():
+        raise RuntimeError("namespace full executed source differs from its commit")
+    _, source, defaulted = pinned_source_root(spec, cwd=cwd)
+    if not defaulted or source != Path(cwd):
+        raise RuntimeError("namespace slice requires imports from the executed checkout")
+    return commit
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", required=True)
@@ -1174,6 +1202,7 @@ def main(argv=None) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a container command is required")
+    namespace_commit = validate_namespace_launch(spec, command, cwd=str(Path.cwd()), environ=os.environ)
     requested = spec["container"]["image"]
     inspected = inspect_or_load(spec['container'])
     if not isinstance(inspected, list) or len(inspected) != 1 or not isinstance(inspected[0], dict):
@@ -1188,7 +1217,7 @@ def main(argv=None) -> int:
                            f"expected {declared}, observed {content_digest}")
     with_gpu, gpu_reason = gpu_attachment(spec, cpu_only=args.cpu_only, environ=os.environ)
     imports = verify_pinned_import(spec, cwd=str(Path.cwd()))
-    commit = checkout_commit(str(Path.cwd()))
+    commit = namespace_commit if namespace_commit is not None else checkout_commit(str(Path.cwd()))
     print(json.dumps({"schema": "prismaquant.tessera_campaign_container.v1",
                       "requested_image": requested, "image_id": image_id,
                       "image_content_sha256": content_digest,

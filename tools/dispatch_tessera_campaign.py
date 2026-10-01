@@ -111,7 +111,48 @@ else:
         validate_container,
     )
 
+from tools.tessera_campaign_namespace import (
+    namespace_path, namespace_publication_record, prepare_namespace_requests,
+    validate_namespace_request,
+)
+
 PBCAMPAIGN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbcampaign.py")
+
+
+def publish_namespace_requests(rows: list[dict]) -> None:
+    """No-clobber metadata publication; only identical ownership may resume.
+
+    Preparation is separate from publication. This never submits rows or opens
+    model inputs. A crash before ownership publication leaves ambiguous state
+    that refuses, rather than inventing recovery or adopting unknown files.
+    """
+    from prismaquant.cost_stage_checkpoint import canonical_json_bytes, publish_new_bytes
+
+    record = namespace_publication_record(rows)
+    root = namespace_path(record["root"])
+    files = [(root / "namespace.json", record)]
+    directories = [root]
+    for row in rows:
+        binding = validate_namespace_request(row)
+        directory = root / binding["request_key"]
+        directories.append(directory)
+        files.extend(((directory / "binding.json", binding), (directory / "request.json", row)))
+    payloads = [(path, canonical_json_bytes(value, where="namespace publication")) for path, value in files]
+    # Refuse conflicts BEFORE publishing any part of this request set.
+    for directory in directories:
+        if directory.exists():
+            witness = directory / ("namespace.json" if directory == root else "binding.json")
+            namespace_path(str(witness), directory=False)
+            if not witness.is_file():
+                raise RuntimeError("namespace is occupied without published ownership")
+    for path, payload in payloads:
+        namespace_path(str(path), directory=False)
+        if path.exists() and path.read_bytes() != payload:
+            raise RuntimeError("namespace existing publication bytes differ")
+    for path, payload in payloads:
+        if not publish_new_bytes(path, payload) and path.read_bytes() != payload:
+            raise RuntimeError("namespace concurrent publication bytes differ")
+
 
 #: What ``plan`` writes beside the manifest, so ``merge`` reads the row layout
 #: from the plan rather than from the directory listing it happens to find.

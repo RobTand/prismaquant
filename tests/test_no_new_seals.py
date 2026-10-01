@@ -78,6 +78,8 @@ MODULES = (
     "prismaquant/tessera_joint_aura.py",
     "tools/dispatch_joint_quanta.py",
     "tools/dispatch_tessera_campaign.py",
+    "tools/tessera_campaign_container.py",
+    "tools/tessera_campaign_namespace.py",
     "tools/regenerate_joint_quanta.py",
 )
 
@@ -257,6 +259,21 @@ ALLOWLIST = {
         1, INTEGRITY, "reference commitments bind the priced row they merge"),
     ("tools/dispatch_tessera_campaign.py", "merge_checkpoint"): (
         2, AMBIGUOUS, "rows merged into one checkpoint agree on identity and unit inputs"),
+    # Opt-in #1986 namespace ownership only; no general source/calibration gate.
+    ("tools/tessera_campaign_namespace.py", "prepare_namespace_requests"): (
+        2, INTEGRITY, "the explicit original roster and container-content input bindings "
+        "must reproduce the independently supplied namespace preparation inputs"),
+    ("tools/tessera_campaign_namespace.py", "validate_namespace_request"): (
+        1, INTEGRITY, "the materialized request reproduces its immutable namespace request digest"),
+    ("tools/tessera_campaign_namespace.py", "namespace_publication_record"): (
+        1, STRUCTURE, "the published namespace contains exactly its explicitly selected request roster"),
+    ("tools/tessera_campaign_namespace.py", "require_namespace_publication"): (
+        1, INTEGRITY, "the row binding reproduces the durable namespace ownership digest"),
+    # Pre-existing adapter integrity checks newly covered by this lint.
+    ("tools/tessera_campaign_container.py", "inspect_or_load"): (
+        1, INTEGRITY, "the image archive bytes reproduce the explicitly declared content digest"),
+    ("tools/tessera_campaign_container.py", "main"): (
+        1, INTEGRITY, "the inspected Docker image content reproduces its declared content digest"),
     ("tools/regenerate_joint_quanta.py", "_load_json"): (
         1, INTEGRITY, "bytes against the pinned digest"),
     ("tools/regenerate_joint_quanta.py", "_check_authorized_diff"): (
