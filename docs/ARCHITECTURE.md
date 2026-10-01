@@ -5,9 +5,10 @@ its source once and its own output never. The monolith and every chain
 quantum read the source through a recording `CaptureSourceAuthentication`
 (`record_capture_source`). The first payload read of a file hashes all of it
 through the held descriptor the tensors are then read through and records the
-digest. The hash keeps the file's pages for those reads, so the bytes come off
-storage once, not twice. A census that declares producer digests is compared
-at that first use, and a mismatch refuses before the first tensor. Under the
+digest. The hash keeps the file's pages for those reads, so while the pages
+stay in memory the bytes come off storage once. A census that declares
+producer digests is compared at that first use, and a mismatch refuses before
+the first tensor. Under the
 bounded capture policy the owner drops a file's pages after the last layer that
 reads it (`StreamingContext.release_source_pages_before`). Files the forward
 never reads (MTP or vision shards, tokenizer assets) are hashed once at the seal
@@ -22,9 +23,19 @@ different digests for one file, and hashes only what no quantum read. On the
 output side, `CaptureWriter` and `publish_capture` hash each entry while it is
 written (`SerializedEntryDigest`). The seal holds each entry to the stat
 fingerprint taken then and reads nothing back; the manifest digest is of the
-bytes written. Admission charges the retained pages as
-`source_retained_page_bytes` when `streamed_calibration_resources(...,
-source_recording=True)`. Not changed: the stat fence, `resource_check`, the
+bytes written. The retained pages are clean page cache. With
+`source_recording=True`, `streamed_calibration_resources` reports their peak
+as `source_retained_page_bytes` (`retained_source_page_bytes`) beside the plan.
+It does not add the peak to `memory_bytes`: the guard's committed reading omits
+clean pages, and the kernel reclaims them before it refuses an allocation.
+When the peak exceeds the slack under the cap, the kernel reclaims pages and
+their ranges are read twice. The capture prints both numbers
+(`capture_source_retained_pages`). GLM-5.3-Flash-BF16 has shards that
+interleave layers; one shard is read by layers 4 and 40. For the attention
+capture (cap 111.7 GB, plan 98.4 GB), the bounded peak at two cache slots is
+69.7 GB against 13.3 GB of slack. That capture therefore re-reads the
+interleaved ranges it cannot hold, on top of one hash pass over the 643 GB
+source. Not changed: the stat fence, `resource_check`, the
 manifest schema, formats, defaults, runtime pins and serving gates. A capture
 journalled before this change will not resume, because its journal is keyed on
 the old identity; that refusal is fail-closed. Gates:

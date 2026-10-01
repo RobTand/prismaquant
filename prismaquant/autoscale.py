@@ -134,6 +134,38 @@ def _baseline_fields(process_baseline_bytes,
                 baseline_policy=policy)
 
 
+def retained_source_page_bytes(layer_files, file_bytes, cache_slots, *, released=True):
+    """Peak page cache a streamed capture's recording owner keeps (PQ #1896).
+
+    The owner keeps a file's pages from the read that hashes it. Under the
+    bounded page policy (``released``) the traversal drops them once no layer
+    from the next one on reads the file (``release_source_pages_before``).
+    While layer ``L`` runs, layers up to ``L + cache_slots - 1`` may already
+    be read, so the owner holds every file read so far that a layer at or
+    after ``L`` still reads. When shards interleave layers (GLM-5.3-Flash:
+    one shard is read by layers 4 and 40), that is far more than the files
+    of any ``cache_slots`` consecutive layers. Without the bounded policy
+    nothing is dropped before the owner closes, so it is every file read.
+    ``layer_files`` maps a layer to the files it reads; ``file_bytes`` maps a
+    file to its size.
+    """
+    layers = sorted(layer_files)
+    if not released:
+        return sum(file_bytes[name] for name in set().union(*layer_files.values()))
+    later, needed = {}, set()
+    for layer in reversed(layers):
+        needed = needed | set(layer_files[layer])
+        later[layer] = needed
+    read_by, read = [], set()
+    for layer in layers:
+        read = read | set(layer_files[layer])
+        read_by.append(read)
+    window = max(1, int(cache_slots))
+    return max((sum(file_bytes[name] for name in
+                    read_by[min(index + window - 1, len(layers) - 1)] & later[layer])
+                for index, layer in enumerate(layers)), default=0)
+
+
 def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
                                    prefetch_workers, headroom_gb,
@@ -155,16 +187,15 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     the way the loader reads it: the scope's own key mapping, layer prefix and
     layers. A scope has no forward, so it requires ``selected_source_units``.
 
-    ``source_recording`` prices a streamed capture that reads its source
-    through a recording owner (PQ #1896). The owner hashes a whole file at
-    its first payload read and keeps the file's pages for the tensor reads
-    that follow, until the last layer that reads the file is done. Up to
-    ``cache_slots`` consecutive layers can be read at once (the current one
-    and its prefetch lookahead), so ``source_retained_page_bytes`` is the
-    largest on-disk size of the files any ``cache_slots`` consecutive layers
-    read. It is clean page cache, which the guard's committed reading omits;
-    the plan charges it so the cgroup can hold it until it is read, rather
-    than reclaim it and read it again.
+    ``source_recording`` reports, beside the plan, the page cache a streamed
+    capture's recording owner keeps (PQ #1896):
+    ``source_retained_page_bytes`` from :func:`retained_source_page_bytes`.
+    It is not in ``memory_bytes`` or any phase. It is clean page cache, which
+    the guard's committed reading omits (``committed_cgroup_bytes``) and the
+    kernel reclaims before it refuses an allocation; charging it against the
+    committed cap would refuse a capture that cannot run out of memory on it.
+    What it decides is whether the source is read once: the pages the slack
+    under the cap cannot hold are reclaimed, and their ranges are read again.
     """
     # Ahead of every return in this function, including the legacy one
     # below: a caller that declares a malformed reservation must be
@@ -340,14 +371,6 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     # allow a dense FP32 mask and full-hidden-width rotary pairs; original IDs
     # remain in both the original CPU draw and the device-side sample states.
     masks_positions = seqlen*seqlen*4 + seqlen*hidden*4 + nsamples*seqlen*16
-    retained_pages = 0
-    if source_recording:
-        file_bytes = {shard: (Path(model_path)/shard).stat().st_size
-                      for files in body_shards.values() for shard in files}
-        ordered = sorted(body_shards)
-        retained_pages = max((sum(file_bytes[shard] for shard in set().union(
-            *(body_shards[layer] for layer in ordered[first:first+cache_slots])))
-            for first in range(len(ordered))), default=0)
     terms = dict(source_window_bytes=sum(sorted(body.values(), reverse=True)[:cache_slots]),
         nonbody_source_bytes=fixed, loader_transient_bytes=loader_transient,
         current_boundary_bytes=boundary, microbatch_transition_bytes=transition,
@@ -355,8 +378,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         layer_hessian_bytes=max(h_by_layer.values(), default=0),
         layer_prefix_bytes=max(x_by_layer.values(), default=0),
         entry_validation_bytes=widest_unit,
-        declared_headroom_bytes=math.ceil(headroom_gb*1024**3),
-        **({'source_retained_page_bytes': retained_pages} if source_recording else {}))
+        declared_headroom_bytes=math.ceil(headroom_gb*1024**3))
     # One new entry may coexist with the old one during atomic replacement;
     # metadata/journals have an explicit per-unit serialization allowance.
     disk = total_h+total_x+widest_unit+len(unit_shapes)*16384
@@ -380,6 +402,12 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         # The source files each layer's reads open, selected tensors only
         # when a selection is given, like body_source_file_bytes.
         body_source_shards={str(k): sorted(v) for k, v in sorted(body_shards.items())},
+        # Reported, never summed: see the docstring (PQ #1896).
+        **({'source_retained_page_bytes': retained_source_page_bytes(body_shards,
+            {shard: (Path(model_path)/shard).stat().st_size
+             for files in body_shards.values() for shard in files}, cache_slots,
+            released=capture_policy == 'shared-inputs-bounded-v1')}
+           if source_recording else {}),
         live_layer_prefix=live_prefix,
         transient_status='conservative physical allocator bound for direct final-slab packer')
     if capture_policy != 'shared-inputs-bounded-v1':
@@ -408,22 +436,19 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         drain[layer] = drain.get(layer, 0)+max(h+device_x, len(members)*(h+output_x))
     common = {key: value for key, value in terms.items() if key not in
               ('source_window_bytes', 'loader_transient_bytes',
-               'layer_hessian_bytes', 'layer_prefix_bytes', 'source_retained_page_bytes')}
-    # The recording owner's retained pages live while layers are read; the
-    # seal reads no source a layer reads (PQ #1896).
-    retained = ({'source_retained_page_bytes': retained_pages} if source_recording else {})
-    forward = dict(common, **retained, source_window_bytes=terms['source_window_bytes'],
+               'layer_hessian_bytes', 'layer_prefix_bytes')}
+    forward = dict(common, source_window_bytes=terms['source_window_bytes'],
         loader_transient_bytes=loader_transient,
         layer_hessian_bytes=max(forward_h.values(), default=0),
         layer_prefix_bytes=max(forward_x.values(), default=0))
-    materialization = dict(common, **retained,
+    materialization = dict(common,
         source_window_bytes=sum(sorted(body.values(), reverse=True)[:cache_slots-1]),
         loader_transient_bytes=0,
         layer_materialization_bytes=max(drain.values(), default=0),
         finite_validation_mask_bytes=max((max(shape[1]**2,
             min(counts[name], max_act_rows)*shape[1])
             for name, shape in unit_shapes.items()), default=0))
-    source_validation = dict(common, **retained, source_window_bytes=terms['source_window_bytes'],
+    source_validation = dict(common, source_window_bytes=terms['source_window_bytes'],
         loader_transient_bytes=loader_transient,
         source_validation_file_bytes=max(raw_body.values(), default=0),
         source_validation_cpu_copy_bytes=max(

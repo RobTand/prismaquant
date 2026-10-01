@@ -666,8 +666,9 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
     return streamed_calibration_resources(spec['model'], **options,
         nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
         capture_policy=argument('--streaming-capture-policy', 'legacy', str),
-        # A streamed capture reads its source through a recording owner,
-        # whose retained pages the row holds (PQ #1896).
+        # A streamed capture reads its source through a recording owner; the
+        # plan reports the owner's retained clean pages beside, not in, its
+        # memory demand (PQ #1896).
         source_recording='--capture-calibration-out' in argv)
 
 

@@ -378,28 +378,56 @@ def test_a_traversal_identity_seals_only_with_its_recorded_source(capture, tmp_p
 
 # -- admission ------------------------------------------------------------------
 
-def test_admission_charges_the_retained_source_window(tmp_path):
-    from prismaquant.autoscale import streamed_calibration_resources
+def test_the_retained_window_follows_shards_that_interleave_layers():
+    """A file read by layers 0 and 3 is held from layer 0 until layer 3 is read.
+
+    GLM-5.3-Flash's shards interleave this way (one is read by layers 4 and
+    40), so a window of consecutive layers under-counts what the owner holds.
+    """
+    from prismaquant.autoscale import retained_source_page_bytes
+    layer_files = {0: {'x'}, 1: {'b'}, 2: {'c'}, 3: {'x'}}
+    size = {'x': 1000, 'b': 1, 'c': 10}
+    # One slot: layer 2 runs holding c and x, which layer 3 still reads. The
+    # largest single layer is only x (1000).
+    assert retained_source_page_bytes(layer_files, size, 1) == 1010
+    # Two slots: layer 1 runs with layer 2 read ahead, holding b, c and x. Two
+    # consecutive layers' files are at most x + c (1010).
+    assert retained_source_page_bytes(layer_files, size, 2) == 1011
+    # Without the bounded policy nothing goes before the owner closes.
+    assert retained_source_page_bytes(layer_files, size, 1, released=False) == 1011
+
+
+def test_admission_reports_the_retained_window_outside_the_plan(tmp_path):
+    """Retained pages are clean page cache: reported, never charged (PQ #1896).
+
+    The guard's committed reading omits them and the kernel reclaims them
+    before it refuses an allocation, so they are not in ``memory_bytes`` or
+    any phase; what they decide is whether the source is read once.
+    """
+    from prismaquant.autoscale import (retained_source_page_bytes,
+                                       streamed_calibration_resources)
     from test_capture_layer_chain_glm import _three_layer_config, _write_sharded_checkpoint
     from test_glm5_next_streamed_forward_parity import _build_model
     source = tmp_path / 'source'
     _write_sharded_checkpoint(_build_model(_three_layer_config()).to(torch.bfloat16), source)
-    sizes = [(source / f'model-layer-{layer:03d}.safetensors').stat().st_size for layer in range(3)]
     common = dict(unit_shapes={}, counts={}, nsamples=2, seqlen=257, max_act_rows=7,
                   prefetch_workers=1, headroom_gb=0)
-    plain = streamed_calibration_resources(source, cache_slots=2, **common)
-    assert 'source_retained_page_bytes' not in plain['terms']
-    for slots in (2, 3):
-        plan = streamed_calibration_resources(source, cache_slots=slots, source_recording=True,
-                                              **common)
-        window = max(sum(sizes[first:first + slots]) for first in range(3))
-        assert plan['terms']['source_retained_page_bytes'] == window
-        assert plan['memory_bytes'] == sum(plan['terms'].values())
-    bounded = streamed_calibration_resources(source, cache_slots=2, source_recording=True,
-        capture_policy='shared-inputs-bounded-v1', **common)
-    window = max(sum(sizes[first:first + 2]) for first in range(3))
-    for name in ('source_validation', 'forward', 'materialization'):
-        assert bounded['phases'][name]['source_retained_page_bytes'] == window
+    for policy, released in (('legacy', False), ('shared-inputs-bounded-v1', True)):
+        for slots in (2, 3):
+            plain = streamed_calibration_resources(source, cache_slots=slots,
+                                                   capture_policy=policy, **common)
+            plan = streamed_calibration_resources(source, cache_slots=slots,
+                capture_policy=policy, source_recording=True, **common)
+            assert 'source_retained_page_bytes' not in plain
+            layer_files = {int(k): set(v) for k, v in plan['body_source_shards'].items()}
+            sizes = {name: (source / name).stat().st_size
+                     for files in layer_files.values() for name in files}
+            assert plan['source_retained_page_bytes'] == retained_source_page_bytes(
+                layer_files, sizes, slots, released=released) > 0
+            assert plan['memory_bytes'] == plain['memory_bytes']
+            for phase in (plan.get('phases') or {}).values():
+                assert 'source_retained_page_bytes' not in phase
+            assert 'source_retained_page_bytes' not in (plan.get('terms') or {})
 
 
 # -- the streamed capture, end to end -------------------------------------------

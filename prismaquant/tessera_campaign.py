@@ -5537,6 +5537,13 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
                 + json.dumps(memory_admission_detail(
                     plan_bytes=resources['memory_bytes'],
                     cap_bytes=guard.cap_bytes), sort_keys=True))
+        if 'source_retained_page_bytes' in resources:
+            # Clean page cache, outside the plan (PQ #1896). Past the slack the
+            # kernel reclaims retained pages and their ranges are read again,
+            # so this line says whether the source can be read once.
+            print(json.dumps({'capture_source_retained_pages': {
+                'retained_bytes': resources['source_retained_page_bytes'],
+                'slack_bytes': guard.cap_bytes - resources['memory_bytes']}}), flush=True)
         additional = max(sum(value for key, value in phase.items() if key not in
             ('nonbody_source_bytes', 'declared_headroom_bytes'))
             for phase in resources['phases'].values())
