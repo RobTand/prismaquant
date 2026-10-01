@@ -33,7 +33,22 @@ from prismaquant.layer_streaming import (
     _check_mxfp4_packed_grid,
 )
 
+# Unsupported AutoModel config refusals enumerate Transformers' lazy mapping,
+# importing native DSv4 before these tests detect their synthetic checkpoints.
+# Reuse the suite's existing child-process isolation rather than weaken that
+# correctly fatal vendor-identity guard or rewrite another module's imports.
+pytestmark = pytest.mark.own_process
+
 CPU = torch.device("cpu")
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _registered_dsv4_modeling():
+    """Own the real DSv4 bootstrap separately from checkpoint-byte fixtures."""
+    from prismaquant.vendored import register_deepseek_v4
+
+    # Never replace the profile or swallow its native-identity refusal.
+    register_deepseek_v4()
 
 # FP4 E2M1 element grid, code 0..15 (sign bit = 8).
 _E2M1 = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
