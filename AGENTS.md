@@ -7,11 +7,15 @@ Before implementing new functionality, read this file,
 ## Repository change delivery
 
 Every change to `main` must start with an issue in this repository and arrive
-through a pull request. Never push commits directly to `main`. Put a supported
-closing reference such as `Closes #123` in the pull request description so
-GitHub links the issue through its native closing-issue relationship. A plain
-mention, a pull request number, a nonexistent number, or an issue in another
-repository does not satisfy the required `linked issue` check.
+through a pull request. Never push commits directly to `main`. When the change
+completes an issue, put a supported closing reference such as `Closes #123` in
+the pull request description so GitHub links its native closing relationship.
+For a partial slice, instead add an explicit `Refs #123` or `Part of #123` line
+naming an OPEN parent issue in this repository. The required `linked issue`
+check verifies that parent through GitHub without closing it. Do not create a
+bookkeeping issue just to deliver a slice. Plain mentions, quoted code examples,
+pull request numbers, nonexistent parents, closed non-closing parents and
+references to another repository do not satisfy this check.
 
 ## Core Principles
 
