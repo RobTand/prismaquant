@@ -17,6 +17,7 @@ seal read them a third time. These tests hold the single-pass contract:
 """
 from collections import Counter
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path
@@ -432,7 +433,25 @@ def test_admission_reports_the_retained_window_outside_the_plan(tmp_path):
 
 # -- the streamed capture, end to end -------------------------------------------
 
-def _glm_source(tmp_path, monkeypatch):
+def _glm_conv_kernel_is_cuda_only():
+    """Whether transformers bound GLM's ``causal_conv1d_fn`` to the CUDA-only package.
+
+    ``use_kernel_func_from_hub_with_fallback`` chooses once, when
+    ``modeling_glm5_next`` is imported: the ``causal_conv1d`` package's
+    ``causal_conv1d_fn`` when the package imports and resolves it, otherwise
+    the torch path. The package rejects CPU tensors, whatever
+    ``torch.cuda.is_available`` says later (PQ #1939). This mirrors that
+    choice; a spec lookup would not, because a package whose extension fails
+    to import still has a spec, and transformers falls back to torch for it.
+    """
+    try:
+        getattr(importlib.import_module('causal_conv1d'), 'causal_conv1d_fn')
+    except Exception:
+        return False
+    return True
+
+
+def _glm_source(tmp_path, monkeypatch, *, device):
     from test_capture_layer_chain_glm import _three_layer_config, _write_sharded_checkpoint
     from test_glm5_next_streamed_forward_parity import _build_model
     pinned = '/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97'
@@ -442,7 +461,9 @@ def _glm_source(tmp_path, monkeypatch):
                     f'(unset, and {pinned} is absent)')
     monkeypatch.setenv('TESSERA_REPO', str(producer))
     monkeypatch.setenv('PRISMAQUANT_TMPDIR', str(tmp_path / 'staging'))
-    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    if device == 'cpu':
+        # The campaign places its model on CUDA whenever CUDA is available.
+        monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
     torch.manual_seed(1896)
     source = tmp_path / 'source'
     shards = _write_sharded_checkpoint(_build_model(_three_layer_config()).to(torch.bfloat16), source)
@@ -451,6 +472,34 @@ def _glm_source(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('policy', ['legacy', 'shared-inputs-bounded-v1'])
 def test_a_streamed_capture_reads_each_source_file_once(tmp_path, monkeypatch, policy):
+    """The capture with the model on CPU.
+
+    It runs where GLM's convolution takes CPU tensors: a worker whose
+    transformers bound the torch path. A GB10 worker binds the CUDA-only
+    package, so there this case skips and the CUDA case below runs instead.
+    """
+    if _glm_conv_kernel_is_cuda_only():
+        pytest.skip('transformers bound GLM causal_conv1d_fn to the CUDA-only causal_conv1d '
+                    'package at import; this CPU case runs on CPU-only workers (PQ #1939)')
+    _reads_each_source_file_once(tmp_path, monkeypatch, policy, device='cpu')
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='needs CUDA; certifies nothing when skipped')
+@pytest.mark.parametrize('policy', ['legacy', 'shared-inputs-bounded-v1'])
+def test_a_streamed_capture_reads_each_source_file_once_on_cuda(tmp_path, monkeypatch, request, policy):
+    """The capture with the model on CUDA, the device a GB10 capture uses.
+
+    A bounded CUDA capture needs its release policy before the process starts,
+    so that case runs in a child pytest (#1096); the spies below run in it.
+    """
+    from test_glm_campaign_streaming import bounded_capture_child_needed, run_in_bounded_capture_child
+    if bounded_capture_child_needed(policy, cuda=True, environ=os.environ):
+        run_in_bounded_capture_child(request, tmp_path)
+        return
+    _reads_each_source_file_once(tmp_path, monkeypatch, policy, device='cuda')
+
+
+def _reads_each_source_file_once(tmp_path, monkeypatch, policy, *, device):
     """The monolith hashes every file exactly once, each through the descriptor it reads.
 
     The census pass runs first, unobserved. During the capture every whole-file
@@ -460,7 +509,7 @@ def test_a_streamed_capture_reads_each_source_file_once(tmp_path, monkeypatch, p
     rest (the vision tower, the tokenizer assets) once at the seal.
     """
     from prismaquant import tessera_campaign as campaign
-    source, shards = _glm_source(tmp_path, monkeypatch)
+    source, shards = _glm_source(tmp_path, monkeypatch, device=device)
     tokens = [torch.arange(257).remainder(126).add(2).reshape(1, -1),
               torch.arange(257).flip(0).remainder(126).add(2).reshape(1, -1)]
     monkeypatch.setattr(campaign, '_calibration_tokens', lambda *_: (tokens, 'tiny GLM frozen draw'))
