@@ -39,9 +39,9 @@ def checkpoint(tmp_path):
     return root, config, index, {"entries": entries}
 
 
-def _deny_pool_opens(monkeypatch, root):
-    paths = {str(root / name) for name in
-             ("config.json", "model.safetensors.index.json")}
+def _deny_pool_opens(monkeypatch, root, *, names=(
+        "config.json", "model.safetensors.index.json")):
+    paths = {str(root / name) for name in names}
 
     def guard(original):
         def opened(path, *args, **kwargs):
@@ -57,8 +57,8 @@ def _deny_pool_opens(monkeypatch, root):
     monkeypatch.setattr(os, "open", guard(os.open))
 
 
-def _activate(tmp_path, monkeypatch, manifest, *, skip=()):
-    _stage_manifest(tmp_path, monkeypatch, manifest, skip=skip)
+def _activate(tmp_path, monkeypatch, manifest, *, skip=(), corrupt=()):
+    _stage_manifest(tmp_path, monkeypatch, manifest, skip=skip, corrupt=corrupt)
     bind_residency_manifest(MANIFEST)
     activate_staged_tier_policy("ram,ssd")
 

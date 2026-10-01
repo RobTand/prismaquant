@@ -240,8 +240,14 @@ def test_the_band_serial_readset_swaps_the_chain_for_the_handoff(tmp_path):
     # handoff-load stages exactly what load_handoff_inputs reads, in order.
     assert rows(derived, HANDOFF_LOAD_PHASE) == handoff_read_entries(
         handoff, _slice(consumer)["checkpoint"])
-    # Every kept phase stages the sealed bytes, unchanged.
-    for name in ["head", *sealed_names[4:]]:
+    # Bootstrap keeps the sealed rows, then stages its bound JSON record.
+    record_path = Path(published["path"])
+    assert rows(derived, "head") == [*rows(sealed, "head"), {
+        "path": str(record_path), "offset": 0,
+        "bytes": record_path.stat().st_size, "sha256": published["sha256"],
+    }]
+    # Every remaining kept phase stages the sealed bytes, unchanged.
+    for name in sealed_names[4:]:
         assert rows(derived, name) == rows(sealed, name), name
     # No checkpoint cotangent and no chain boundary is staged any more.
     staged = {entry["path"] for entry in derived["entries"]}

@@ -113,8 +113,15 @@ def test_a_spill_consumer_stages_each_probes_incoming_in_its_spill_phase(tmp_pat
             expected += [boundaries[batch], _plane_row(handoff, probe, batch)]
         assert _rows(derived, _spill_phase(probe)) == expected, probe
 
-    # Every other phase stages the sealed bytes, unchanged.
-    for name in ["head", *sealed_names[4:]]:
+    # Bootstrap also stages the JSON record before consuming its plane.
+    record_path = Path(handoff["owner_states"]["path"]).parent / "handoff.json"
+    raw_record = record_path.read_bytes()
+    assert _rows(derived, "head") == [*_rows(sealed, "head"), {
+        "path": str(record_path), "offset": 0, "bytes": len(raw_record),
+        "sha256": hashlib.sha256(raw_record).hexdigest(),
+    }]
+    # Every other non-spill phase stages the sealed bytes, unchanged.
+    for name in sealed_names[4:]:
         if not name.startswith("spill-p"):
             assert _rows(derived, name) == _rows(sealed, name), name
     # Each plane entry is staged once, in its own probe's spill phase.
