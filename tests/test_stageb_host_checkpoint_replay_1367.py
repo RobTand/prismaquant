@@ -46,7 +46,8 @@ def test_host_replay_checks_bytes_owner_frontier_and_resume(tmp_path):
                host_windows=2, budget_bytes=32 << 20, max_jobs=2)
 
 
-def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path):
+@pytest.mark.parametrize("failure", [None, "synchronous", "snapshot"])
+def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure):
     import gc
 
     source = _source(tmp_path, cyclic=True)
@@ -61,14 +62,32 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path):
         return state
 
     monkeypatch.setattr(aura_cost, "_decode_aura_unit_checkpoint", observed_decode)
+
+    def refuse(*args, **kwargs):
+        raise RuntimeError("injected source lease refusal")
+
+    if failure == "synchronous":
+        monkeypatch.setattr(aura_cost, "_write_aura_unit_checkpoint", refuse)
+    elif failure == "snapshot":
+        from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
+        monkeypatch.setattr(CheckpointPublicationLedger, "_freeze", refuse)
+    from experiments.stageb_checkpoint_host_replay import digest
+    source_hashes = {path: digest(path) for path in source.iterdir() if path.is_file()}
     enabled = gc.isenabled()
     gc.disable()
     try:
-        result = replay(source, tmp_path / "fresh", expected_units=5,
-                        host_windows=2, budget_bytes=32 << 20, max_jobs=2)
-        assert result["baseline_candidate_digests_equal"]
-        assert result["source_unchanged"]
-        assert result["publication"]["charged_bytes"] == 0
+        if failure:
+            with pytest.raises(RuntimeError, match="injected source lease refusal"):
+                replay(source, tmp_path / "fresh", expected_units=5,
+                       host_windows=2, budget_bytes=32 << 20, max_jobs=2)
+        else:
+            result = replay(source, tmp_path / "fresh", expected_units=5,
+                            host_windows=2, budget_bytes=32 << 20, max_jobs=2)
+            assert result["baseline_candidate_digests_equal"]
+            assert result["source_unchanged"]
+            assert result["publication"]["charged_bytes"] == 0
+        assert source_hashes == {path: digest(path) for path in source_hashes}
+        assert decoded_ids
         assert not any(type(item) is dict and id(item) in decoded_ids
                        and "self" in item for item in gc.get_objects()), (
                            "replay retained uncharged decoded source cycles")

@@ -8,6 +8,7 @@ therefore the replay uses explicitly reported balanced host partitions.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
@@ -17,7 +18,7 @@ import threading
 
 from prismaquant import aura_cost
 from prismaquant.joint_checkpoint_publication import (
-    CheckpointPublicationLedger, publication_geometry)
+    CheckpointPublicationLedger, owned_builtin_graph, publication_geometry)
 
 # Builtin opcode/object/memo/UTF-8 expansion plus simultaneous raw, envelope,
 # payload and decoded graph owners. This is an admission allowance, not RSS.
@@ -68,14 +69,17 @@ def _load_source(path: Path, *, name: str, identity: str, allowance: int) -> dic
         raise ValueError("source construction allowance exceeded by a growing file")
     _check_builtin_pickle(raw)
     envelope = pickle.loads(raw)
-    if type(envelope) is not dict or envelope.get("identity_sha256") != identity:
-        raise ValueError("replay lineage differs from the existing manifest")
-    payload = envelope.get("payload")
-    if type(payload) is not bytes:
-        raise ValueError("replay source has no builtin byte payload")
-    _check_builtin_pickle(payload)
-    return aura_cost._decode_aura_unit_checkpoint(
-        envelope, path=path, qname=name, identity_sha256=identity)
+    if type(envelope) is not dict:
+        raise ValueError("replay source has no builtin envelope")
+    with owned_builtin_graph(envelope):
+        if envelope.get("identity_sha256") != identity:
+            raise ValueError("replay lineage differs from the existing manifest")
+        payload = envelope.get("payload")
+        if type(payload) is not bytes:
+            raise ValueError("replay source has no builtin byte payload")
+        _check_builtin_pickle(payload)
+        return aura_cost._decode_aura_unit_checkpoint(
+            envelope, path=path, qname=name, identity_sha256=identity)
 
 
 def replay(source: Path, destination: Path, *, expected_units: int,
@@ -128,8 +132,9 @@ def replay(source: Path, destination: Path, *, expected_units: int,
         for name in names:
             source_digests[name] = digest(paths[name])
             input_bytes += paths[name].stat().st_size
-            aura_cost._write_aura_unit_checkpoint(
-                sync, qname=name, identity_sha256=identity, state=load(name))
+            with owned_builtin_graph(load(name)) as state:
+                aura_cost._write_aura_unit_checkpoint(
+                    sync, qname=name, identity_sha256=identity, state=state)
             target = aura_cost._aura_unit_checkpoint_path(sync, name)
             expected[name] = digest(target)
             historical_matches += expected[name] == source_digests[name]
@@ -151,8 +156,13 @@ def replay(source: Path, destination: Path, *, expected_units: int,
             for index, window in enumerate(windows):
                 ledger.start_window(index, window["names"])
                 for name in window["names"]:
-                    if not ledger.submit(name, lambda limit, name=name: load(name, limit)):
-                        raise AssertionError("fresh replay skipped a unit")
+                    # Construction still occurs inside the ledger reservation;
+                    # retire originals only after its owned snapshot is frozen.
+                    with ExitStack() as source_lease:
+                        if not ledger.submit(name, lambda limit, name=name:
+                                source_lease.enter_context(
+                                    owned_builtin_graph(load(name, limit)))):
+                            raise AssertionError("fresh replay skipped a unit")
             ledger.flush()
             if durable != set(names) or checked != durable or done != list(range(host_windows)):
                 raise AssertionError("replay did not reach its durable frontier")

@@ -287,7 +287,10 @@ synchronous/shared-engine file digests, durable acknowledgements and resume,
 and records encoder thread ownership. Its source factory checks an explicit
 size-derived builtin decode allowance before allocation, refuses reducers and
 sparse memo tables, and shares the existing AURA envelope/integrity decoder
-without loading the envelope twice. Its balanced host partitions are not
+without loading the envelope twice. Decoder-owned envelope and state graphs
+have scoped leases: cycle edges retire after synchronous encoding or after the
+ledger freezes its copy, including failure and refusal exits. Published input
+files and borrowed consumer graphs are never mutated. Its balanced host partitions are not
 claimed to reproduce the GPU row's resolved window membership. Representative
 before/after in-process profiles, next-window GPU lag and both-box Netdata are a
 carried obligation under #1253 on the next real Stage B production run, not a

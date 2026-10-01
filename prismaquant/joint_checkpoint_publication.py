@@ -7,7 +7,8 @@ serialization, hashing and atomic publication run on the existing IO engine.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from functools import partial
 from copy import deepcopy
 from threading import Lock
@@ -135,7 +136,7 @@ def _owned_mutable_containers(root: object) -> list[dict | list]:
         if type(value) is dict:
             containers.append(value)
             pending.extend(value.values())
-        else:
+        elif isinstance(value, (list, tuple)):
             if type(value) is list:
                 containers.append(value)
             pending.extend(value)
@@ -146,6 +147,20 @@ def _dispose_owned_containers(containers: list[dict | list]) -> None:
     """Break owned mutable cycle edges without GC or a cleanup allocation."""
     while containers:
         containers.pop().clear()
+
+
+@contextmanager
+def owned_builtin_graph(root: dict) -> Iterator[dict]:
+    """Lease a decoder-owned builtin graph; retire it on every scoped exit.
+
+    Never pass a borrowed consumer graph. The caller must have bounded and
+    validated construction before entering this ownership-transfer contract.
+    """
+    containers = _owned_mutable_containers(root)
+    try:
+        yield root
+    finally:
+        _dispose_owned_containers(containers)
 
 
 def _publish_snapshot(path, *, name, identity_sha256, state, max_bytes, encoded_bytes):
