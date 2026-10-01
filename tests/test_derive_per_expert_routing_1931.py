@@ -10,6 +10,7 @@ its name changed.
 """
 from __future__ import annotations
 
+import traceback
 import warnings
 
 import pytest
@@ -325,15 +326,35 @@ def test_routing_syncs_the_host_once_not_once_per_expert():
                             (_reference_derive, num_experts)):
         derive(experts, X, parent)  # warm up
         torch.cuda.synchronize()
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            torch.cuda.set_sync_debug_mode("warn")
-            try:
-                derive(experts, X, parent)
-            finally:
-                torch.cuda.set_sync_debug_mode("default")
-        syncs = sum("synchroniz" in str(w.message) for w in caught)
+        sites = _sync_sites(lambda: derive(experts, X, parent))
         if derive is _reference_derive:
-            assert syncs >= num_experts, syncs  # the instrument sees the old loop
+            assert len(sites) >= num_experts, sites  # the instrument sees the old loop
         else:
-            assert syncs <= ceiling, syncs
+            assert len(sites) <= ceiling, sites
+
+
+def _sync_sites(fn):
+    """Run ``fn`` with CUDA sync warnings on; return the call site of each sync.
+
+    A failure then names the line that synced, not only how many lines did.
+    """
+    sites = []
+
+    def _record(message, category, filename, lineno, file=None, line=None):
+        if "synchroniz" not in str(message):
+            return
+        frames = [f for f in traceback.extract_stack()[:-1]
+                  if not f.filename.endswith("warnings.py")]
+        sites.append(" <- ".join(
+            f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno} {f.line}"
+            for f in reversed(frames[-3:])))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.showwarning = _record
+        torch.cuda.set_sync_debug_mode("warn")
+        try:
+            fn()
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
+    return sites
