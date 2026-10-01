@@ -14,21 +14,9 @@ import os
 from pathlib import Path
 
 
-def read_source_metadata_text(path: Path, *, label: str,
-                              encoding: str | None = None) -> str:
-    """Read metadata at its canonical path through the active read contract.
-
-    With no tier policy, retain the legacy text decoder. Under a policy,
-    the bound whole-file entry supplies the declared digest and the existing
-    lease reader supplies its bytes; metadata never falls back to the pool.
-    This does not authenticate an unbound caller or change source paths.
-    """
-    from .staged_tier_policy import active_policy, refuse_pool_bulk_read
-
-    path = Path(path)
-    if active_policy() is None:
-        return path.read_text(encoding=encoding)
-
+def _verified_source_metadata_bytes(path: Path, *, label: str) -> tuple[bytes, str]:
+    """Return staged metadata and its verified declared digest under one lease."""
+    from .staged_tier_policy import refuse_pool_bulk_read
     from .digests import bytes_sha256hex
     from .residency_map import residency_resolver
 
@@ -44,11 +32,48 @@ def read_source_metadata_text(path: Path, *, label: str,
     raw = read_staged_entry(resolver, path, staged, label=label)
     if bytes_sha256hex(raw) != expected:
         raise refuse_pool_bulk_read(str(path), "metadata-digest-mismatch")
+    return raw, expected
+
+
+def read_source_metadata_text(path: Path, *, label: str,
+                              encoding: str | None = None) -> str:
+    """Read metadata at its canonical path through the active read contract.
+
+    With no tier policy, retain the legacy text decoder. Under a policy,
+    the bound whole-file entry supplies the declared digest and the existing
+    lease reader supplies its bytes; metadata never falls back to the pool.
+    This does not authenticate an unbound caller or change source paths.
+    """
+    from .staged_tier_policy import active_policy
+
+    path = Path(path)
+    if active_policy() is None:
+        return path.read_text(encoding=encoding)
+    raw, _ = _verified_source_metadata_bytes(path, label=label)
     # TextIOWrapper preserves Path.read_text's universal-newline behavior.
     import io
 
     with io.TextIOWrapper(io.BytesIO(raw), encoding=encoding) as handle:
         return handle.read()
+
+
+def read_source_metadata_sha256(path: Path, *, label: str,
+                                block_size: int) -> str:
+    """Hash raw metadata bytes through the active source read contract.
+
+    An inactive policy retains the caller's legacy streaming block size.
+    Active reads share the whole-file lease and digest verification with
+    text metadata, but never decode or normalize those bytes.
+    """
+    from .staged_tier_policy import active_policy
+
+    path = Path(path)
+    if active_policy() is None:
+        from .digests import file_sha256hex
+
+        return file_sha256hex(path, block_size=block_size)
+    _, digest = _verified_source_metadata_bytes(path, label=label)
+    return digest
 
 
 def read_staged_whole_file(path: Path, expected_sha256: str, *,

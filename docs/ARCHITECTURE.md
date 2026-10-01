@@ -1,5 +1,39 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1892, Refs #1885): the pure initialization owner
+provides a metadata-only merge of completed selected witnesses. A mandatory,
+typed expected complete census contract is validated first; contiguous,
+disjoint selections must tile all model layers with identical source/runtime/
+model/dtype/prefix identity and every head record. The merge counts agreed
+heads once, unions body state once, recomputes the existing digest/counts and
+requires exact equality to that census contract. It has no unchecked completion
+mode or production caller. Real tiny CPU audit parity is not source-byte
+authentication, capture publication or model/GPU qualification; #1885 retains
+chain integration and GPU parity. MTP/audit producers, schemas, defaults,
+cache/residency, numerical methods, pins, wire and serving/export gates are
+unchanged. Gate: `tests/test_streaming_initialization_merge.py`.
+
+Re-stamped 2026-10-01 (PQ #1891, Refs #1885): the pure full, prefix and
+selected initialization metadata validators live in `streaming_initialization`;
+`streaming_model` preserves their existing import surfaces, schemas and
+DIRECT_ASCII_STRICT digest owner. Selected witness counts now require exact
+integers, refusing boolean and float lookalikes. The runtime audit and MTP
+contract/producer remain unchanged. This CPU metadata prerequisite does not
+activate a capture chain, authenticate source bytes or qualify model/GPU parity;
+no numerical, wire, default, cache, pin or serving/export gate changes.
+
+Re-stamped 2026-10-01 (PQ #1903, Refs #1100): auxiliary source-checkpoint
+identity hashes use the existing lifetime-pinned whole-file metadata reader
+under an active tier policy. The shared verified-byte delivery is separated
+from text decoding and digest selection; digest-cache hits still verify
+config/index and root Python metadata, without a pool fallback. An unbound
+auxiliary file is refused. Without a policy, the existing streaming SHA-256
+block size remains. Raw bytes, content-identity fields, canonical source/shard
+paths and original stat fences are unchanged. This does not close AutoConfig,
+remote-code execution, cold shard hashing or the broader worker header audit.
+No new cache, format, numerical method, export wire, runtime pin, pipeline
+default or serving gate; CPU regressions are not model/GPU qualification.
+
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
 using the existing delivery owner and exposed-wait ledger/report. Ready
