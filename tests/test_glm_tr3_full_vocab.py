@@ -672,8 +672,10 @@ def test_candidate_authentication_matches_real_manifest_bytes(tmp_path):
 
 
 def test_missing_digest_cache_cannot_trigger_implicit_full_rehash(tmp_path, monkeypatch):
+    from safetensors.torch import save_file
     from prismaquant import cost_streaming
-    (tmp_path / "model.safetensors").write_bytes(b"not loaded")
+    # Reach the cache refusal after authenticating a real checkpoint header.
+    save_file({"unit.weight": torch.zeros(1)}, str(tmp_path / "model.safetensors"))
     monkeypatch.setattr(cost_streaming, "build_source_checkpoint_identity",
                         lambda *a, **k: pytest.fail("must not hash missing/stale cache"))
     with pytest.raises(ValueError, match="incomplete/stale"):
