@@ -50,6 +50,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from .digests import text_sha256hex
 from .stage_inputs import require as _require, same as _same
 from .tessera_joint_aura import head_walk_read_set, is_head_walk_read
 
@@ -126,8 +127,8 @@ def stage_a_roster(formats_by_qname, *, capsule, plan_sha256, prepared_sha256,
     whose bytes do not match the capsule's digest, and a campaign under
     another plan, preparation, read manifest, roster or calibration shape.
     """
-    roster = hashlib.sha256("".join(
-        f"{name}\n" for name in sorted(formats_by_qname)).encode()).hexdigest()
+    roster = text_sha256hex("".join(
+        f"{name}\n" for name in sorted(formats_by_qname)))
     if capsule is None:
         return roster, campaign_scope
     from .joint_forward_campaign import resolve_forward_campaign
