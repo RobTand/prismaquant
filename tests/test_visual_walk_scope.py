@@ -63,7 +63,14 @@ def test_full_gamut_walk_claims_each_real_visual_and_merger_operand(tmp_path, ca
     prefix = visual[0].rsplit('.', 1)[0]
     assert result.claims[f'{prefix}.norm.weight'].disposition == 'exclude'
     assert result.claims[f'{prefix}.embedding.weight'].disposition == 'exclude'
-    assert find_decided_but_unpriced(result, model, profile) == ()
+    unpriced = find_decided_but_unpriced(result, model, profile)
+    if case[0] == 'glm5_next':
+        # Discovery does not overrule GLM's BF16/source-format serve contract.
+        assert {item['node'] for item in unpriced} == {
+            f'{name}.weight' for name in visual}
+        assert {item['reason_code'] for item in unpriced} == {'probe_linear_excluded'}
+    else:
+        assert unpriced == ()
 
 
 @pytest.mark.parametrize('case', CASES, ids=[case[0] for case in CASES])
@@ -113,7 +120,7 @@ def _cli_loader(monkeypatch, model):
 def test_cli_records_scope_and_keeps_the_independent_gate(tmp_path, monkeypatch, include_visual):
     import json
 
-    _, model, _, _ = _fixture(tmp_path, CASES[0])
+    _, model, visual, _ = _fixture(tmp_path, CASES[1])
     walker = _cli_loader(monkeypatch, model)
     out = tmp_path / 'scope.json'
     args = ['--model', str(tmp_path), '--output', str(out)]
@@ -126,7 +133,27 @@ def test_cli_records_scope_and_keeps_the_independent_gate(tmp_path, monkeypatch,
     assert bool(report['context']['visual_roots']) is include_visual
     assert report['gate']['refused'] is False
     assert report['gate']['claims_by_disposition']['decide'] == (
-        4 if include_visual else 1)
+        1 + len(visual) if include_visual else 1)
+
+
+@pytest.mark.parametrize('override', [None, 'trace override cannot admit GLM vision'])
+def test_full_gamut_cli_does_not_waive_the_profile_priceability_gate(tmp_path, monkeypatch, override):
+    import json
+
+    _, model, visual, _ = _fixture(tmp_path, CASES[0])
+    walker = _cli_loader(monkeypatch, model)
+    out = tmp_path / 'refused.json'
+    args = ['--model', str(tmp_path), '--output', str(out), '--include-visual']
+    if override:
+        args.extend(['--override-reason', override])
+    assert walker.main(args) == 2
+    report = json.loads(out.read_text())
+    assert report['context']['claim_scope'] == 'full_gamut'
+    assert report['gate']['refused'] is True
+    assert report['gate']['claims_by_disposition']['decide'] == 1 + len(visual)
+    assert report['gate']['refusal_kinds'] == ['decided_but_unpriced_node']
+    assert {item['node'] for item in report['gate']['decided_but_unpriced_nodes']} == {
+        f'{name}.weight' for name in visual}
 
 
 def test_cli_cannot_excuse_a_missing_declared_visual_root(tmp_path, monkeypatch, capsys):
