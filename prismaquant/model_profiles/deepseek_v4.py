@@ -143,8 +143,6 @@ class DeepseekV4Profile(ModelProfile):
              uses `.scale` siblings handled via fp8_scale_pairs)
           - FP8 block-scale `.scale` siblings of `.weight` keys
             (consumed by the FP8 dequant pass)
-          - Compressor + indexer keys (skipped at probe time per the
-            modeling patch in vendored/transformers_deepseek_v4)
           - Standalone `.scale` top-level entries with no paired weight
         """
         if k.endswith(".weight_scale_inv"):
