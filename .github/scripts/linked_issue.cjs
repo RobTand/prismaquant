@@ -8,6 +8,7 @@ const CLOSING_ISSUES_QUERY = `
     repository(owner: $owner, name: $repo) {
       pullRequest(number: $number) {
         number
+        body
         closingIssuesReferences(first: 100) {
           nodes {
             __typename
@@ -19,6 +20,20 @@ const CLOSING_ISSUES_QUERY = `
             }
           }
         }
+      }
+    }
+  }
+`;
+
+const PARENT_ISSUE_QUERY = `
+  query ParentIssue($owner: String!, $repo: String!, $issueNumber: Int!) {
+    repository(owner: $owner, name: $repo) {
+      issue(number: $issueNumber) {
+        __typename
+        number
+        state
+        url
+        repository { nameWithOwner }
       }
     }
   }
@@ -83,6 +98,84 @@ function evaluateClosingIssues(response, expectedRepository, expectedPullNumber)
   };
 }
 
+function parentIssueNumbers(body, expectedRepository, serverUrl) {
+  if (typeof body !== "string") {
+    throw new Error("pull request body is missing or malformed");
+  }
+  const numbers = new Set();
+  let origin;
+  try {
+    origin = new URL(serverUrl).origin;
+  } catch {
+    throw new Error("GitHub server URL is missing or malformed");
+  }
+  let fence;
+  const text = body.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+  for (const line of text.split(/\r?\n/)) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = undefined;
+      continue;
+    }
+    if (fence) continue;
+    const directive = line.match(/^ {0,3}(?:[-*][ \t]+)?(?:Refs|Part[ \t]+of)[ \t]+(.+)$/i);
+    if (!directive) continue;
+    for (const token of directive[1].split(/[ \t,]+/)) {
+      let repository = expectedRepository;
+      let match = token.match(/^#([1-9][0-9]*)[.;:]?$/);
+      if (!match) {
+        const qualified = token.match(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)[.;:]?$/);
+        if (qualified) {
+          repository = qualified[1];
+          match = [qualified[0], qualified[2]];
+        } else if (token.startsWith("https://")) {
+          let url;
+          try {
+            url = new URL(token);
+          } catch {
+            continue;
+          }
+          const path = url.pathname.match(/^\/([^/]+\/[^/]+)\/issues\/([1-9][0-9]*)$/);
+          if (url.origin === origin && !url.search && !url.hash && !url.username && !url.password && path) {
+            repository = path[1];
+            match = [token, path[2]];
+          }
+        }
+      }
+      if (!match || repository.toLowerCase() !== expectedRepository.toLowerCase()) continue;
+      const number = Number(match[1]);
+      if (Number.isSafeInteger(number) && number <= 2147483647) numbers.add(number);
+      if (numbers.size > 100) throw new Error("too many parent issue references");
+    }
+  }
+  return [...numbers];
+}
+
+function evaluateOpenParent(response, identity, expectedNumber) {
+  const repository = requireObject(requireObject(response, "parent GraphQL response").repository, "parent GraphQL repository");
+  if (repository.issue === null) return null;
+  const node = requireObject(repository.issue, "parent issue node");
+  if (node.number !== expectedNumber) {
+    throw new Error(`GraphQL returned parent #${String(node.number)} instead of #${expectedNumber}`);
+  }
+  if (node.__typename !== "Issue") return null;
+  const owner = requireObject(node.repository, "parent issue repository");
+  if (owner.nameWithOwner !== identity.repository || node.state !== "OPEN" || typeof node.url !== "string" || !node.url) return null;
+  return { number: node.number, state: node.state, url: node.url };
+}
+
+async function readOpenParent(github, response, identity, serverUrl) {
+  for (const issueNumber of parentIssueNumbers(response.repository.pullRequest.body, identity.repository, serverUrl)) {
+    const parent = await github.graphql(PARENT_ISSUE_QUERY, {
+      owner: identity.owner, repo: identity.repo, issueNumber,
+    });
+    const issue = evaluateOpenParent(parent, identity, issueNumber);
+    if (issue) return issue;
+  }
+  return null;
+}
+
 function pullRequestIdentity(context) {
   const pullRequest = requireObject(
     context && context.payload && context.payload.pull_request,
@@ -120,6 +213,14 @@ function pullRequestIdentity(context) {
   };
 }
 
+async function readPullRequest(github, identity) {
+  return github.graphql(CLOSING_ISSUES_QUERY, {
+    owner: identity.owner,
+    repo: identity.repo,
+    number: identity.pullNumber,
+  });
+}
+
 async function publishStatus(github, identity, targetUrl, state, description) {
   await github.rest.repos.createCommitStatus({
     owner: identity.owner,
@@ -143,14 +244,10 @@ async function run({ github, context, core }) {
       identity,
       targetUrl,
       "pending",
-      "Resolving GitHub closing-issue references",
+      "Resolving closing issues or an open parent reference",
     );
 
-    const response = await github.graphql(CLOSING_ISSUES_QUERY, {
-      owner: identity.owner,
-      repo: identity.repo,
-      number: identity.pullNumber,
-    });
+    const response = await readPullRequest(github, identity);
     const result = evaluateClosingIssues(
       response,
       identity.repository,
@@ -158,16 +255,14 @@ async function run({ github, context, core }) {
     );
 
     if (!result.ok) {
-      await publishStatus(
-        github,
-        identity,
-        targetUrl,
-        "failure",
-        "No same-repository closing issue is linked",
-      );
-      core.setFailed(
-        `pull request #${identity.pullNumber} has no same-repository closing issue reference`,
-      );
+      const parent = await readOpenParent(github, response, identity, context.serverUrl);
+      if (parent) {
+        await publishStatus(github, identity, targetUrl, "success", `Refs open same-repository parent #${parent.number}`);
+        core.info(`accepted open parent reference: #${parent.number} (${parent.url})`);
+      } else {
+        await publishStatus(github, identity, targetUrl, "failure", "No closing issue or open same-repository parent is linked");
+        core.setFailed(`pull request #${identity.pullNumber} has no same-repository closing issue or open parent reference`);
+      }
       return;
     }
 
@@ -206,7 +301,10 @@ async function run({ github, context, core }) {
 module.exports = {
   CHECK_NAME,
   CLOSING_ISSUES_QUERY,
+  PARENT_ISSUE_QUERY,
   TARGET_BRANCH,
+  parentIssueNumbers,
+  evaluateOpenParent,
   evaluateClosingIssues,
   publishStatus,
   pullRequestIdentity,

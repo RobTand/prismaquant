@@ -96,6 +96,22 @@ def test_the_sealed_rows_run_in_chain_order_at_priority_minus_ten(sealed):
     assert json.loads((round_dir / "round.json").read_text()) == document
 
 
+def test_a_gate_critical_chain_seals_every_row_in_the_band_it_is_given(tmp_path, monkeypatch):
+    """PQ #1918: a chain that feeds a gate is campaign work and runs at 0, not -10."""
+    fixture = _Chain(tmp_path, root=tmp_path / "calibration-cache", prepare=False)
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({"model": str(fixture.source), "campaign_argv": ["--streaming"],
+                                "cwd": str(tmp_path), "python": "python3", "env": {}}))
+    monkeypatch.setattr(dispatch, "_row_memory_gb", lambda spec, members, census: 7)
+    assert dispatch.main(["seal", "--spec", str(spec), "--workspace", str(tmp_path),
+                          "--ranges", "0:1,1:2", "--boundary-storage",
+                          json.dumps(_boundary_policy(fixture.boundaries)),
+                          "--timeout-s", str(TIMEOUT), "--bookend-timeout-s", str(BOOKEND),
+                          "--priority", "0"]) == 0
+    document = dispatch.load_round(dispatch.round_directory(tmp_path))
+    assert [entry["row"]["priority"] for entry in document["rows"]] == [0, 0, 0, 0]
+
+
 def test_a_quantum_declares_its_progress_phase_only_when_asked(tmp_path, monkeypatch):
     fixture = _Chain(tmp_path, root=tmp_path / "calibration-cache", prepare=False)
     spec = tmp_path / "spec.json"
