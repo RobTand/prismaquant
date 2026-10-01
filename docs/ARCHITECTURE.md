@@ -269,11 +269,15 @@ priced before are byte-identical. No default, stage, export or serving gate
 changes; whether a runtime routes a 128-column unit natively stays the
 route-status gate's question. Gate: `tests/test_tessera_partial_superblock.py`.
 
-Re-stamped 2026-09-30 (PQ #1367, `sol/pq-stageb-7`): the opt-in bounded
+Re-stamped 2026-10-01 (PQ #1367, `sol/pq-stageb-7`): the opt-in bounded
 checkpoint publisher now snapshots an owned builtin graph on the consumer and
 runs the existing pickle/hash/envelope encoder and atomic write on the shared
 IO engine. Credits still cover snapshot/encoder ownership, acknowledgements
 remain durable-only, and the default synchronous path and bytes are unchanged.
+The optional positive `checkpoint_publication_max_jobs` caps the existing
+finite window-derived geometry without expanding it, so larger bounded host
+graphs can use fewer staging slots instead of inflating memory reservations.
+It requires a positive publication byte budget; absent retains the prior geometry.
 CPU tests and before/after profiling are separate acceptance; no measured
 22.6-second reduction or representative GPU overlap is claimed before those
 profiles and both-Spark telemetry exist.
@@ -526,8 +530,10 @@ staging before constructing each tensor-free unit snapshot, uses a conservative
 builtin-graph bound and capped encoder, and sends an owned builtin snapshot
 plus a destination to the shared IO engine. Serialization, payload hashing,
 envelope encoding and atomic publication run on that engine, not the consumer. The job
-ceiling is derived from two sealed windows, with at most two pending window
-records; acknowledged metadata is reaped before a full ceiling is reserved.
+ceiling defaults to two sealed windows and can be reduced by the strict positive
+`checkpoint_publication_max_jobs` execution setting, with at most two pending
+window records. Invalid limits, or a limit without a positive byte budget,
+refuse; acknowledged metadata is reaped before a full ceiling is reserved.
 The consumer keeps measured, submitted and durably acknowledged units distinct.
 Only durable acknowledgements price units or advance the ready window prefix,
 including validated resumed windows. Executable read phases remain monotonic

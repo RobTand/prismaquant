@@ -33,12 +33,14 @@ def _envelopes(campaign):
     return {path.name: path.read_bytes() for path in (_journal(campaign) / "units").glob("*.pkl")}
 
 
-def _enable(monkeypatch, budget=BUDGET):
+def _enable(monkeypatch, budget=BUDGET, *, max_jobs=None):
     original = quantum.run_layer_quantum_core
 
     def launch(*args, **kwargs):
         kwargs["execution"] = {
             **kwargs["execution"], "checkpoint_publication_budget_bytes": budget}
+        if max_jobs is not None:
+            kwargs["execution"]["checkpoint_publication_max_jobs"] = max_jobs
         return original(*args, **kwargs)
 
     monkeypatch.setattr(quantum, "run_layer_quantum_core", launch)
@@ -111,14 +113,15 @@ def test_next_real_window_replays_before_held_serialization(campaign, monkeypatc
     assert seen["durable"] == len(payload["costs"])
 
 
-def test_sync_async_envelopes_and_complete_resume_are_exact(campaign, monkeypatch):
+@pytest.mark.parametrize("max_jobs", [None, 1, 4])
+def test_sync_async_envelopes_and_complete_resume_are_exact(campaign, monkeypatch, max_jobs):
     assert campaign.device.type == "cpu"
     _clear(campaign)
     synchronous, state = _quantum(campaign, monkeypatch, layer=1)
     assert synchronous is not None, getattr(state, "error", None)
     expected = _envelopes(campaign)
     _clear(campaign)
-    _enable(monkeypatch)
+    _enable(monkeypatch, max_jobs=max_jobs)
     asynchronous, state = _quantum(campaign, monkeypatch, layer=1)
     assert asynchronous is not None, getattr(state, "error", None)
     assert _envelopes(campaign) == expected

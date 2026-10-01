@@ -18,6 +18,7 @@ from .io_engine import ENGINE
 from .tessera_publication import BoundedPublisher, PublicationError, PublicationJob
 
 SETTING = "checkpoint_publication_budget_bytes"
+JOBS_SETTING = "checkpoint_publication_max_jobs"
 # Two pickle frame buffers, traversal/memo overhead and small encoder objects.
 # Input graph objects are conservatively counted too, even when already resident.
 ENCODER_FIXED_BYTES = 1 << 20
@@ -32,9 +33,21 @@ def publication_budget(value: object) -> int:
     return value
 
 
-def publication_geometry(budget: int, windows: Sequence[Mapping]) -> tuple[int, int]:
+def publication_job_limit(value: object, *, budget: int) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or value <= 0 or budget <= 0:
+        raise ValueError(f"{JOBS_SETTING} requires a positive integer and publication budget")
+    return value
+
+
+def publication_geometry(budget: int, windows: Sequence[Mapping], *,
+                         max_jobs: int | None = None) -> tuple[int, int]:
     jobs = 2 * max((len(window["names"]) for window in windows), default=1)
     jobs = max(2, jobs)
+    limit = publication_job_limit(max_jobs, budget=budget)
+    if limit is not None:
+        jobs = min(jobs, limit)
     slot = budget // jobs
     if budget and slot <= ENCODER_FIXED_BYTES:
         raise ValueError(f"{SETTING} is too small for {jobs} bounded staging slots")
@@ -125,8 +138,9 @@ class CheckpointPublicationLedger:
     def __init__(self, *, checkpoint_root, identity_sha256: str,
                  windows: Sequence[Mapping], completed: set[str],
                  acknowledge: Callable[[], None], window_done: Callable[[int], None],
-                 budget_bytes: int):
-        self._jobs, self._slot = publication_geometry(budget_bytes, windows)
+                 budget_bytes: int, max_jobs: int | None = None):
+        self._jobs, self._slot = publication_geometry(
+            budget_bytes, windows, max_jobs=max_jobs)
         self._publisher = BoundedPublisher(
             budget_bytes=budget_bytes, max_jobs=self._jobs,
             submit_task=ENGINE.submit, name="stage-b-unit-checkpoint")

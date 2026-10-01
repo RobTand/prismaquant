@@ -87,7 +87,8 @@ from .joint_layer_quanta import (
 from .source_read_plan import chain_prefetch_window
 from .joint_checkpoint_publication import (
     CheckpointPublicationLedger, SETTING as CHECKPOINT_PUBLICATION_SETTING,
-    publication_budget, publication_geometry, check_construction,
+    JOBS_SETTING as CHECKPOINT_PUBLICATION_JOBS_SETTING,
+    publication_budget, publication_geometry, publication_job_limit, check_construction,
 )
 from .joint_quantum_handoff import (
     HANDOFF_LOAD_PHASE,
@@ -1029,7 +1030,9 @@ def quantum_runtime_execution(config, *, replay_regime, kda_capture_kernel=None)
     settings ``run_layer_quantum`` resolved; an unset kernel adds no key.
     """
     execution = dict(config["execution"])
-    publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
+    checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
+    publication_job_limit(execution.get(CHECKPOINT_PUBLICATION_JOBS_SETTING),
+                          budget=checkpoint_budget)
     execution.setdefault("device_envelope_bytes", config.get("max_gpu_bytes"))
     if "min_free_gib" in config:
         execution.setdefault("min_free_gib", config["min_free_gib"])
@@ -1672,8 +1675,10 @@ def run_layer_quantum_core(
             raise QuantumIdentityRefused("checkpoint incoming research refuses band-serial handoff")
 
     checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
+    checkpoint_jobs = publication_job_limit(
+        execution.get(CHECKPOINT_PUBLICATION_JOBS_SETTING), budget=checkpoint_budget)
     if checkpoint_budget:
-        publication_geometry(checkpoint_budget, resolved_windows)
+        publication_geometry(checkpoint_budget, resolved_windows, max_jobs=checkpoint_jobs)
     layer = int(record["layer"])
     quantum_id = str(record["quantum_id"])
     # The quantum reads its stage-A slice and nothing else (PQ #993): a whole
@@ -2637,7 +2642,7 @@ def run_layer_quantum_core(
                 identity_sha256=checkpoint_identity_sha256,
                 windows=resolved_windows, completed=completed_units,
                 acknowledge=acknowledge_units, window_done=durable_window,
-                budget_bytes=checkpoint_budget)
+                budget_bytes=checkpoint_budget, max_jobs=checkpoint_jobs)
 
         def checkpoint_state(name, max_staging_bytes=None):
             if max_staging_bytes is not None:
@@ -3712,7 +3717,9 @@ def run_layer_quantum(
     from .autoscale import require_bounded_capture_environment
 
     execution = config["execution"]
-    publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
+    checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
+    publication_job_limit(execution.get(CHECKPOINT_PUBLICATION_JOBS_SETTING),
+                          budget=checkpoint_budget)
     # The replay regime is a launch setting sealed in the campaign container
     # spec, never a plan field: the plan is bound to the prepared inputs.
     from .joint_replay_regime import (
