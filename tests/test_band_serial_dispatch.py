@@ -4,10 +4,11 @@ Four bound executable records on a two-band fixture (stride 2, checkpoints
 2 and 4): band 4 holds layers 3 and 2, band 2 holds layers 1 and 0. Layer 3
 hands its cotangent to layer 2, and layer 1 to layer 0.
 
-PrismaBuild has no dependency between actions, so the edge is publication
-order: a producer row declares its handoff as a produced output, and its
-consumer is published only after the producer executed, reported complete
-and published a handoff the consumer binds. The consumer stages a readset
+The current dispatcher uses publication order: a producer row declares its
+handoff as a produced output, and its consumer is published only after the
+producer executed, reported complete and published a handoff the consumer
+binds. Public origin-batch declarations are a separate integration contract;
+this offline fixture does not establish that lifecycle. The consumer stages a readset
 derived from its sealed chain manifest and that handoff, and the quantum
 re-derives the same bytes before it reads.
 """
@@ -239,8 +240,14 @@ def test_the_band_serial_readset_swaps_the_chain_for_the_handoff(tmp_path):
     # handoff-load stages exactly what load_handoff_inputs reads, in order.
     assert rows(derived, HANDOFF_LOAD_PHASE) == handoff_read_entries(
         handoff, _slice(consumer)["checkpoint"])
-    # Every kept phase stages the sealed bytes, unchanged.
-    for name in ["head", *sealed_names[4:]]:
+    # Bootstrap keeps the sealed rows, then stages its bound JSON record.
+    record_path = Path(published["path"])
+    assert rows(derived, "head") == [*rows(sealed, "head"), {
+        "path": str(record_path), "offset": 0,
+        "bytes": record_path.stat().st_size, "sha256": published["sha256"],
+    }]
+    # Every remaining kept phase stages the sealed bytes, unchanged.
+    for name in sealed_names[4:]:
         assert rows(derived, name) == rows(sealed, name), name
     # No checkpoint cotangent and no chain boundary is staged any more.
     staged = {entry["path"] for entry in derived["entries"]}

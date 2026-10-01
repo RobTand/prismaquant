@@ -780,6 +780,16 @@ def handoff_kernel_refusal(producer: Mapping, kda_capture_kernel) -> str | None:
     return None
 
 
+def _read_handoff_record_bytes(path: Path) -> bytes:
+    """Acquire the record separately from its consumer identity checks."""
+    from .staged_tier_policy import active_policy
+    from .staged_whole_file import read_staged_source_metadata_bytes
+
+    if active_policy() is None:
+        return path.read_bytes()
+    return read_staged_source_metadata_bytes(path, label="quantum handoff record")
+
+
 def load_quantum_handoff(path, sha256: str, *, record: Mapping,
                          adjoint_slice: Mapping, kda_capture_kernel) -> dict:
     """Read and bind the handoff a consumer quantum was given.
@@ -801,7 +811,7 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
         raise QuantumHandoffRefused("the handoff digest is not a sha256")
     path = Path(path)
     try:
-        raw = path.read_bytes()
+        raw = _read_handoff_record_bytes(path)
     except OSError as exc:
         raise QuantumHandoffRefused(f"handoff unreadable at {path}: {exc}") from exc
     if bytes_sha256hex(raw) != sha256:
@@ -910,6 +920,14 @@ def load_quantum_handoff(path, sha256: str, *, record: Mapping,
     if seen != set(expected):
         raise QuantumHandoffRefused("the handoff does not cover the plane")
     return handoff
+
+
+def _handoff_record_read_entry(handoff: Mapping) -> dict:
+    """The canonical metadata record, independent of its plane entries."""
+    raw = handoff_record_bytes(handoff)
+    path = Path(handoff["owner_states"]["path"]).parent / HANDOFF_RECORD_NAME
+    return {"path": str(path), "offset": 0, "bytes": len(raw),
+            "sha256": bytes_sha256hex(raw)}
 
 
 def _read_row(entry: Mapping) -> dict:
@@ -1157,8 +1175,10 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
     bound handoff: the ``checkpoint-load`` phase and every chain phase give
     way to one ``handoff-load`` phase, placed right after ``head``, that
     stages exactly what :func:`load_handoff_inputs` reads, in its order.
-    Every other phase keeps its entries. Entries are rebuilt with the
-    builder's ``(path, offset)`` deduplication, so the phase byte counts and
+    The bootstrap ``head`` keeps its existing entries and also stages the
+    canonical handoff record needed before loading its plane. Every other
+    phase keeps its entries. Entries are rebuilt with the builder's
+    ``(path, offset)`` deduplication, so the phase byte counts and
     the prepared-input window indices follow the new index space.
 
     A spill-sealed readset (``annotations.replay_mode == "spill"``) streams
@@ -1262,7 +1282,8 @@ def band_serial_manifest(sealed_manifest: Mapping, handoff: Mapping,
                     f"{name} does not stage one boundary entry per stored batch")
             incoming[name] = [_read_row(entry)
                               for entry in handoff_incoming_entries(handoff, probe)]
-    seal("head", [kept(index) for index in phases[0]["entry_indices"]])
+    seal("head", [kept(index) for index in phases[0]["entry_indices"]]
+         + [take(_handoff_record_read_entry(handoff))])
     seal(HANDOFF_LOAD_PHASE,
          [take(row) for row in handoff_read_entries(
              handoff, checkpoint_record, streamed_incoming=streamed)])
