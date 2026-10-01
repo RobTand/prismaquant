@@ -1675,29 +1675,32 @@ def evaluate_walk_gate(
     base["refusal_kinds"] = list(kinds)
 
     if not kinds:
-        return WalkGateVerdict(
-            provenance=base, refused=False, refusal_kinds=())
-
-    claim_refusals = [
-        k for k in kinds
-        if k in (_KIND_UNKNOWN_FAILURE, _KIND_UNCLAIMED, _KIND_UNRESOLVED,
-                 _KIND_DECIDED_UNPRICED)
-    ]
-    if claim_refusals:
-        # No override reaches here, ever: claims are pinned/excluded/decided
-        # with reasons in the profile rules, not waived at export time.
-        refused = True
-    elif override_reason:
-        base["override_excused_trace_only"] = True
         refused = False
     else:
-        refused = True
+        claim_refusals = [
+            k for k in kinds
+            if k in (_KIND_UNKNOWN_FAILURE, _KIND_UNCLAIMED, _KIND_UNRESOLVED,
+                     _KIND_DECIDED_UNPRICED)
+        ]
+        if claim_refusals:
+            # No override reaches here, ever: claims are pinned/excluded/decided
+            # with reasons in the profile rules, not waived at export time.
+            refused = True
+        elif override_reason:
+            base["override_excused_trace_only"] = True
+            refused = False
+        else:
+            refused = True
 
+    # Policy decides first; one serialization boundary projects its verdict.
     return WalkGateVerdict(
         provenance=base,
         refused=refused,
         refusal_kinds=tuple(kinds),
-        refusal_reason=_refusal_text(base, kinds, unknown, bool(override_reason)),
+        refusal_reason=(
+            _refusal_text(base, kinds, unknown, bool(override_reason))
+            if kinds else ""
+        ),
     )
 
 
