@@ -182,6 +182,14 @@ def chain_owner_from_receipt(path, *, action_key, layer, layers, basis=None):
                 "admission and at the roll's cgroup peak")}
 
 
+def _resource_specs_for_layer(names, formats):
+    """Resolve metadata descriptors separately from per-unit resource planning."""
+    from . import format_registry as fr
+
+    return {name: {fmt: fr.get_format(fmt) for fmt in formats[name]}
+            for name in names}
+
+
 def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_bytes=72 * GIB, candidate_files=None,
                   capture=None, chain=None, cotangent=None):
     """Use the existing statistics planner and retained-window budget owner.
@@ -196,7 +204,6 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
     plane against the container cap before the render bound is derived.
     """
     import torch
-    from . import format_registry as fr
     from .aura_cost import _ZERO_COST_FORMATS
     from .joint_layer_quanta import qname_layer
     from .joint_retained_window_plan import (DECLARED_BUDGET_FIELDS, MEASURED_BUDGET_FIELDS,
@@ -303,7 +310,7 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
         names.sort()
         modules = {n: torch.nn.Linear(shapes[n][1], shapes[n][0], bias=False, device="meta", dtype=torch.bfloat16)
                    for n in names}
-        specs = {n: {fmt: fr.get_format(fmt) for fmt in formats[n]} for n in names}
+        specs = _resource_specs_for_layer(names, formats)
         statistics = plan_joint_statistics_target_windows(modules, specs,
             max_statistics_bytes=physical_bytes, activation_max_abs=maxima)
         keys = {n: tuple((n, fmt) for fmt in formats[n]) for n in names}
