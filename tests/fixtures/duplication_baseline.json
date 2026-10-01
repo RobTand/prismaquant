@@ -123,8 +123,6 @@
   "hashlib:prismaquant/stage_a_head.py::stage_a_roster",
   "hashlib:prismaquant/stage_a_produced_output.py::BoundaryProducedPublication.batch_id_for",
   "hashlib:prismaquant/stage_a_produced_output.py::BoundaryProducedPublication.generation",
-  "hashlib:prismaquant/stage_b_prep_io.py::PreparationPublication.commit",
-  "hashlib:prismaquant/stage_b_prep_io.py::StagedPreparationReads._read_entry",
   "hashlib:prismaquant/stage_b_prep_io.py::_hash_range",
   "hashlib:prismaquant/stage_b_prep_io.py::build_preparation_template",
   "hashlib:prismaquant/staged_lease.py::_load_sealed_payload",
