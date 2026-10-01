@@ -343,7 +343,6 @@
   "sorted-json:prismaquant/production_weight_cache.py::_merge_packed_pair_map_or_refuse",
   "sorted-json:prismaquant/production_weight_cache.py::_merge_streaming_layer_map_or_refuse",
   "sorted-json:prismaquant/production_weight_cache.py::_write_render_score_sidecar",
-  "sorted-json:prismaquant/quality_prefill_pb_adapter.py::document_bytes",
   "sorted-json:prismaquant/release_receipts.py::main",
   "sorted-json:prismaquant/sample_parallel_probe.py::main",
   "sorted-json:prismaquant/sample_parallel_probe.py::merge_importance_stats",

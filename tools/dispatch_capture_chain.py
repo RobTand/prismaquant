@@ -10,7 +10,8 @@ on disk, as ``dispatch_stage_a_split`` does for the Stage A split:
 * **seal** writes ``<workspace>/capture-chain/round.json`` from the campaign
   spec: every row's PrismaBuild row (built by
   ``dispatch_tessera_campaign._row``, so the class, container, environment
-  and demand are the capture row's), at priority -10 with an explicit
+  and demand are the capture row's), at priority -10 (``--priority``: a chain
+  that feeds a gate is campaign work and runs at 0) with an explicit
   ``timeout_s``. The prep and the join run no forward and claim no GPU.
   A quantum's progress phase (``capture``, reporting each layer whose units
   are journalled) is declared only when asked for (``--progress-grace-s``),
@@ -43,6 +44,9 @@ from dispatch_tessera_campaign import PBCAMPAIGN, _row, _row_memory_gb, load_spe
 
 ROUND_SCHEMA = "prismaquant.capture_chain_round.v1"
 ROUND_NAME = "round.json"
+#: The agent band, as ``dispatch_tessera_campaign --priority``: agent and
+#: post-campaign work never displaces campaign rows. A gate-critical chain
+#: passes ``--priority 0`` (PQ #1918).
 PRIORITY = -10
 PBWAIT = PBCAMPAIGN.parent / "pbwait.py"
 #: The phase a capture chain quantum reports its journalled layers in.
@@ -63,7 +67,7 @@ def _write_json(path: Path, value) -> None:
 
 
 def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_timeout_s,
-         bookend_mem_gb=16, progress_phases=()) -> dict:
+         bookend_mem_gb=16, progress_phases=(), priority=PRIORITY) -> dict:
     """Write the chain's rows once; nothing reaches PrismaBuild."""
     from prismaquant.capture_layer_chain import (parse_layer_ranges, range_label,
                                                  require_layer_tiling)
@@ -72,6 +76,8 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
     for value, flag in ((timeout_s, "--timeout-s"), (bookend_timeout_s, "--bookend-timeout-s")):
         if type(value) is not int or value <= 0:
             raise ChainDispatchRefused(f"every chain row needs an explicit positive {flag}")
+    if type(priority) is not int:
+        raise ChainDispatchRefused("a chain's priority is an integer queue band")
     spec = load_spec(Path(spec_path))
     if "--streaming" not in spec["campaign_argv"]:
         raise ChainDispatchRefused("a capture chain is a streamed capture: the spec's "
@@ -96,7 +102,7 @@ def seal(spec_path, workspace, *, ranges, boundary_storage, timeout_s, bookend_t
                 "--cache-dir", str(round_dir / "cache" / name), *common,
                 "--capture-chain", kind, *extra]
         row = _row(spec, argv, mem_gb=mem_gb, timeout_s=timeout, progress_phases=phases)
-        row["priority"] = PRIORITY
+        row["priority"] = priority
         if not gpu:
             row["demand"] = {**row["demand"], "gpu": 0}
         rows.append({"name": name, "kind": kind, "layers": layers, "row": row})
@@ -262,6 +268,9 @@ def main(argv=None) -> int:
     sealing.add_argument("--bookend-mem-gb", type=int, default=16)
     sealing.add_argument("--progress-grace-s", type=int, default=None,
                          help="opt-in: declare each quantum's progress phase capture=SECONDS")
+    sealing.add_argument("--priority", type=int, default=PRIORITY,
+                         help="every row's queue band; -10 is the agent band, and a chain "
+                              "that feeds a gate is campaign work and runs at 0")
     planning = sub.add_parser("plan", help="print the sealed rows")
     planning.add_argument("--workspace", required=True)
     submitting = sub.add_parser("submit", help="submit the next row once its predecessor finished")
@@ -277,7 +286,8 @@ def main(argv=None) -> int:
             document = seal(args.spec, args.workspace, ranges=args.ranges,
                             boundary_storage=args.boundary_storage, timeout_s=args.timeout_s,
                             bookend_timeout_s=args.bookend_timeout_s,
-                            bookend_mem_gb=args.bookend_mem_gb, progress_phases=phases)
+                            bookend_mem_gb=args.bookend_mem_gb, progress_phases=phases,
+                            priority=args.priority)
             print(f"[capture-chain] sealed {len(document['rows'])} rows in "
                   f"{round_directory(args.workspace) / ROUND_NAME}")
         elif args.command == "plan":

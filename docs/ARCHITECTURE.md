@@ -42,6 +42,12 @@ the old identity; that refusal is fail-closed. Gates:
 `tests/test_capture_single_pass_source_1896.py` plus the chain, calibration
 cache and verified-load suites.
 
+Re-stamped 2026-10-01 (PQ #1918): `tools/dispatch_capture_chain.py seal`
+takes `--priority` (default -10, unchanged), so a capture chain that feeds a
+gate can run in the campaign band, as `dispatch_tessera_campaign --priority`
+already allows. Rows sealed without it are byte-identical. Gate:
+`tests/test_dispatch_capture_chain.py`.
+
 Re-stamped 2026-10-01 (PQ #1885): the streamed calibration capture can run
 as a chain of retryable layer-range rows instead of one forward
 ("Layer-chain calibration capture (#1885)" below). A prep row hashes the
@@ -5560,6 +5566,12 @@ Stamps follow, newest first, each recording its own branch and date.
 Re-stamped (2026-10-01, `claude/pq-1896-single-pass-source`) for **the
 single-pass streamed capture source and output** (PQ #1896, #1887); see the
 stamp at the top of this document.
+
+As of: 2026-10-01 · `claude/pq-1918-chain-priority`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-10-01, `claude/pq-1918-chain-priority`) for **the capture
+chain's priority band** (PQ #1918); see the stamp at the top of this document.
 
 As of: 2026-10-01 · `claude/capture-layer-chain`.
 Stamps follow, newest first, each recording its own branch and date.
@@ -29883,7 +29895,8 @@ orders the rows by what they leave on disk, as `dispatch_stage_a_split` does:
 
 - `seal` writes `<workspace>/capture-chain/round.json` from the campaign
   spec. Each row comes from `dispatch_tessera_campaign._row`, at priority -10
-  with an explicit `timeout_s`. A quantum's memory demand is the monolithic
+  (the agent band) unless `--priority` names another (#1918: a chain that
+  feeds a gate is campaign work and runs at 0), with an explicit `timeout_s`. A quantum's memory demand is the monolithic
   capture row's (`_row_memory_gb` over every census unit), an overestimate
   for one range. The prep and the join claim no GPU. A quantum's `capture`
   progress phase is declared only with `--progress-grace-s`, and `pbrun`
