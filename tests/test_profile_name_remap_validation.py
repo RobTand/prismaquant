@@ -42,3 +42,18 @@ def test_incorrect_rewrite_still_fails(monkeypatch):
     result = check(monkeypatch, {"model.": "body."}, lambda name: name)
     assert not result.ok
     assert "expected prefix 'body.'" in result.detail
+
+
+@pytest.mark.parametrize('source,expected', [
+    ('embed.weight', 'model.embed_tokens.weight'),
+    ('head.weight', 'lm_head.weight'),
+    ('layers.1.ffn.experts.0.w1.weight',
+     'model.layers.1.mlp.experts.0.gate_proj.weight'),
+    ('layers.1.attn.wkv.scale', None),
+])
+def test_dsv4_checkpoint_remap_accepts_the_shared_profile_keyword(source, expected):
+    from prismaquant.model_profiles.deepseek_v4 import DeepseekV4Profile
+
+    profile = DeepseekV4Profile()
+    assert profile.checkpoint_to_live_name(ckpt_key=source) == expected
+    assert profile.checkpoint_to_live_name(source) == expected

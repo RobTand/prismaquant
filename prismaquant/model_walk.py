@@ -1671,33 +1671,36 @@ def evaluate_walk_gate(
     if trace_status != TRACE_COMPLETE:
         kinds.append(_KIND_TRACE_INCOMPLETE)
 
-    base["refused"] = bool(kinds)
     base["refusal_kinds"] = list(kinds)
 
     if not kinds:
-        return WalkGateVerdict(
-            provenance=base, refused=False, refusal_kinds=())
-
-    claim_refusals = [
-        k for k in kinds
-        if k in (_KIND_UNKNOWN_FAILURE, _KIND_UNCLAIMED, _KIND_UNRESOLVED,
-                 _KIND_DECIDED_UNPRICED)
-    ]
-    if claim_refusals:
-        # No override reaches here, ever: claims are pinned/excluded/decided
-        # with reasons in the profile rules, not waived at export time.
-        refused = True
-    elif override_reason:
-        base["override_excused_trace_only"] = True
         refused = False
     else:
-        refused = True
+        claim_refusals = [
+            k for k in kinds
+            if k in (_KIND_UNKNOWN_FAILURE, _KIND_UNCLAIMED, _KIND_UNRESOLVED,
+                     _KIND_DECIDED_UNPRICED)
+        ]
+        if claim_refusals:
+            # No override reaches here, ever: claims are pinned/excluded/decided
+            # with reasons in the profile rules, not waived at export time.
+            refused = True
+        elif override_reason:
+            base["override_excused_trace_only"] = True
+            refused = False
+        else:
+            refused = True
 
+    # Policy decides first; one serialization boundary projects its verdict.
+    base["refused"] = refused
     return WalkGateVerdict(
         provenance=base,
         refused=refused,
         refusal_kinds=tuple(kinds),
-        refusal_reason=_refusal_text(base, kinds, unknown, bool(override_reason)),
+        refusal_reason=(
+            _refusal_text(base, kinds, unknown, bool(override_reason))
+            if kinds else ""
+        ),
     )
 
 
@@ -1886,6 +1889,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="'profile' applies detect_profile().walk_claim_rules(); "
                          "'none' applies no rules (every matmul-fed node "
                          "refuses — useful as a self-test of the gate).")
+    ap.add_argument("--include-visual", action="store_true",
+                    help="Full-gamut discovery using the profile's declared "
+                         "vision roots; includes vision/merger Linear claims, "
+                         "not a pricing or serving qualification. Default "
+                         "remains the text-artifact scope.")
     ap.add_argument("--trust-remote-code", action="store_true")
     ap.add_argument("--override-reason", default=None,
                     help="Explicit reason excusing TRACE INCOMPLETENESS only "
@@ -1898,6 +1906,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     profile = detect_profile_with_warning(args.model, entrypoint="model_walk")
+    visual_roots = profile.visual_root_prefixes() if args.include_visual else ()
+    if args.include_visual and (args.rules != "profile" or not visual_roots):
+        ap.error("--include-visual requires profile rules and declared vision roots")
 
     import torch
     from transformers import AutoConfig, AutoModel
@@ -1942,7 +1953,21 @@ def main(argv: list[str] | None = None) -> int:
             model_class_used = model_class_used or "base"
     model.eval()
 
-    rules = profile.walk_claim_rules() if args.rules == "profile" else ()
+    if args.include_visual:
+        missing_roots = []
+        for root in visual_roots:
+            try:
+                model.get_submodule(root)
+            except AttributeError:
+                missing_roots.append(root)
+        if missing_roots:
+            ap.error("--include-visual model is missing declared vision roots: "
+                     + ", ".join(missing_roots))
+    rules = (
+        profile.walk_claim_rules(include_visual=True)
+        if args.include_visual else
+        profile.walk_claim_rules() if args.rules == "profile" else ()
+    )
     print(f"[model-walk] profile={getattr(profile, 'name', type(profile).__name__)}"
           f" model_class={model_class_used} rules={len(rules)}"
           f" execution={args.execution}")
@@ -2020,6 +2045,8 @@ def main(argv: list[str] | None = None) -> int:
             "execution": args.execution,
             "materialized": bool(args.materialize),
             "rules_source": args.rules,
+            "claim_scope": "full_gamut" if args.include_visual else "text_artifact",
+            "visual_roots": list(visual_roots),
         },
         "gate": verdict.provenance,
         "provenance": (

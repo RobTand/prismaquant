@@ -492,7 +492,19 @@ class Glm5NextProfile(ModelProfile):
     # ------------------------------------------------------------
     # Discovery walk
     # ------------------------------------------------------------
-    def walk_claim_rules(self):
+    def _walk_glm_visual_exclusion_rules(self, *, include_visual: bool = False):
+        from prismaquant.model_walk import ClaimRule
+
+        if include_visual:
+            return []
+        return [ClaimRule(
+            "exclude",
+            "vision tower: outside the text graph this artifact serves; "
+            "shipped verbatim via passthrough_prefixes",
+            name_regex=r"^model\.visual\.",
+        )]
+
+    def walk_claim_rules(self, *, include_visual: bool = False):
         from prismaquant.model_walk import ClaimRule
 
         rules = [
@@ -516,13 +528,8 @@ class Glm5NextProfile(ModelProfile):
                 "exporter ships its source bytes",
                 name_regex=r"self_attn\.conv1d\.weight$",
             ),
-            ClaimRule(
-                "exclude",
-                "vision tower: outside the text graph this artifact "
-                "serves; shipped verbatim via passthrough_prefixes",
-                name_regex=r"^model\.visual\.",
-            ),
         ]
+        rules.extend(self._walk_glm_visual_exclusion_rules(include_visual=include_visual))
         # Base rules then pin the three probe-skipped module classes
         # declared in specs/glm5_next.json (Glm5NextTextTopkRouter's bare
         # `weight` :151, Glm5NextTextHyperConnection's `fn` :259, and the
@@ -530,7 +537,7 @@ class Glm5NextProfile(ModelProfile):
         # nn.Parameter fed to F.linear (:160, :278, :800) that neither the
         # `max_ndim=1` exclude nor the `module_class="Linear"` decide rule
         # would otherwise claim.
-        rules.extend(super().walk_claim_rules())
+        rules.extend(super().walk_claim_rules(include_visual=include_visual))
         return rules
 
     # ------------------------------------------------------------

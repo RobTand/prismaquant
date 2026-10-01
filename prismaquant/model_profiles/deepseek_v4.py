@@ -128,7 +128,7 @@ class DeepseekV4Profile(ModelProfile):
         # selectable-Linear inventory the byte accounting assumes.
         return r"self_attn\.(?:compressor|indexer)\."
 
-    def checkpoint_to_live_name(self, k: str, *,
+    def checkpoint_to_live_name(self, ckpt_key: str, *,
                                 multimodal: bool = False) -> str | None:
         """DSv4-Flash checkpoint → transformers live qname.
 
@@ -143,10 +143,9 @@ class DeepseekV4Profile(ModelProfile):
              uses `.scale` siblings handled via fp8_scale_pairs)
           - FP8 block-scale `.scale` siblings of `.weight` keys
             (consumed by the FP8 dequant pass)
-          - Compressor + indexer keys (skipped at probe time per the
-            modeling patch in vendored/transformers_deepseek_v4)
           - Standalone `.scale` top-level entries with no paired weight
         """
+        k = ckpt_key
         if k.endswith(".weight_scale_inv"):
             return None
         # DSv4 stores FP8 block-scale siblings as `.scale` (paired with
@@ -441,7 +440,7 @@ class DeepseekV4Profile(ModelProfile):
         from ..vendored import register_deepseek_v4
         register_deepseek_v4()
 
-    def walk_claim_rules(self):
+    def walk_claim_rules(self, *, include_visual: bool = False):
         """DSv4 has four matmul-fed families the base rules cannot claim —
         every one a bare Parameter on a module class the probe's dense
         enumeration cannot hook, each pinned with the reason it ships at
@@ -485,10 +484,10 @@ class DeepseekV4Profile(ModelProfile):
             ),
             ClaimRule(
                 "pin",
-                "compressor/indexer Linear: the gridbook D0.1 serve "
+                "compressor/indexer Linear: the profile's serving "
                 "contract keeps these leaves source-format; charged to the "
                 "immutable floor (see probe_linear_exclude_extra)",
                 name_regex=self.probe_linear_exclude_extra(),
             ),
         ]
-        return rules + super().walk_claim_rules()
+        return rules + super().walk_claim_rules(include_visual=include_visual)

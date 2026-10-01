@@ -1536,7 +1536,20 @@ class ModelProfile(ABC):
             return ()
         return tuple(spec.probe_grouped_module_class_names)
 
-    def walk_claim_rules(self):
+    def _walk_visual_exclusion_rules(self, *, include_visual: bool = False):
+        """Keep artifact-scope vision exclusions separate from tensor claims."""
+        from prismaquant.model_walk import ClaimRule
+
+        visual_prefix = self.visual_layer_prefix()
+        if include_visual or not visual_prefix:
+            return []
+        return [ClaimRule(
+            "exclude",
+            "visual tower: outside the text graph this artifact serves",
+            name_regex=rf"^{re.escape(visual_prefix)}",
+        )]
+
+    def walk_claim_rules(self, *, include_visual: bool = False):
         """Claim rules for the discovery walker (`prismaquant.model_walk`).
 
         The walker discovers every named tensor and every matmul-fed
@@ -1563,7 +1576,9 @@ class ModelProfile(ABC):
         3. **exclude** — the MTP sidecar (``mtp_source_prefix()``), read only
            under spec decode; dispositioned by the MTP lane.
         4. **exclude** — the visual/audio tower (``visual_layer_prefix()``),
-           outside the text graph this artifact serves.
+           outside the text graph this artifact serves. Explicit
+           ``include_visual=True`` omits only this scope exclusion; pins,
+           embeddings, biases and the MTP sidecar keep their dispositions.
         5. **exclude** — ``nn.Embedding`` weights: consumed by row gather,
            not by a GEMM; the exporter ships source bytes.
         6. **exclude** — non-persistent buffers (rotary caches, derived
@@ -1588,7 +1603,7 @@ class ModelProfile(ABC):
         Override to extend, not to weaken: profiles append architecture
         rules (or prepend more specific ones) and return the base list for
         everything the architecture does not special-case. A profile that
-        removes rule 8 turns every Linear into a walk failure, which is loud
+        removes rule 11 turns every Linear into a walk failure, which is loud
         by design.
         """
         from prismaquant.model_walk import ClaimRule
@@ -1620,13 +1635,7 @@ class ModelProfile(ABC):
                 "the MTP lane, outside this artifact's quantizable body",
                 name_regex=rf"^{re.escape(mtp_prefix)}",
             ))
-        visual_prefix = self.visual_layer_prefix()
-        if visual_prefix:
-            rules.append(ClaimRule(
-                "exclude",
-                "visual tower: outside the text graph this artifact serves",
-                name_regex=rf"^{re.escape(visual_prefix)}",
-            ))
+        rules.extend(self._walk_visual_exclusion_rules(include_visual=include_visual))
         rules.append(ClaimRule(
             "exclude",
             "input embedding: consumed by per-token row gather "
