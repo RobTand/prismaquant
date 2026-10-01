@@ -441,7 +441,7 @@ class DeepseekV4Profile(ModelProfile):
         from ..vendored import register_deepseek_v4
         register_deepseek_v4()
 
-    def walk_claim_rules(self):
+    def walk_claim_rules(self, *, include_visual: bool = False):
         """DSv4 has four matmul-fed families the base rules cannot claim —
         every one a bare Parameter on a module class the probe's dense
         enumeration cannot hook, each pinned with the reason it ships at
@@ -491,4 +491,4 @@ class DeepseekV4Profile(ModelProfile):
                 name_regex=self.probe_linear_exclude_extra(),
             ),
         ]
-        return rules + super().walk_claim_rules()
+        return rules + super().walk_claim_rules(include_visual=include_visual)

@@ -1536,7 +1536,20 @@ class ModelProfile(ABC):
             return ()
         return tuple(spec.probe_grouped_module_class_names)
 
-    def walk_claim_rules(self):
+    def _walk_visual_exclusion_rules(self, *, include_visual: bool = False):
+        """Keep artifact-scope vision exclusions separate from tensor claims."""
+        from prismaquant.model_walk import ClaimRule
+
+        visual_prefix = self.visual_layer_prefix()
+        if not visual_prefix:
+            return []
+        return [ClaimRule(
+            "exclude",
+            "visual tower: outside the text graph this artifact serves",
+            name_regex=rf"^{re.escape(visual_prefix)}",
+        )]
+
+    def walk_claim_rules(self, *, include_visual: bool = False):
         """Claim rules for the discovery walker (`prismaquant.model_walk`).
 
         The walker discovers every named tensor and every matmul-fed
@@ -1620,13 +1633,7 @@ class ModelProfile(ABC):
                 "the MTP lane, outside this artifact's quantizable body",
                 name_regex=rf"^{re.escape(mtp_prefix)}",
             ))
-        visual_prefix = self.visual_layer_prefix()
-        if visual_prefix:
-            rules.append(ClaimRule(
-                "exclude",
-                "visual tower: outside the text graph this artifact serves",
-                name_regex=rf"^{re.escape(visual_prefix)}",
-            ))
+        rules.extend(self._walk_visual_exclusion_rules(include_visual=include_visual))
         rules.append(ClaimRule(
             "exclude",
             "input embedding: consumed by per-token row gather "

@@ -150,7 +150,7 @@ class Qwen4ExpProfile(ModelProfile):
     # ------------------------------------------------------------
     # Discovery-walk claims
     # ------------------------------------------------------------
-    def walk_claim_rules(self):
+    def walk_claim_rules(self, *, include_visual: bool = False):
         """Two matmul-fed / non-GEMM families the base rules cannot claim.
 
         `base.walk_claim_rules()` rule 9 only decides ``nn.Linear`` weights;
@@ -205,4 +205,4 @@ class Qwen4ExpProfile(ModelProfile):
                 name_regex=r"(?:^|\.)conv1d\.weight$",
             ),
         ]
-        return rules + super().walk_claim_rules()
+        return rules + super().walk_claim_rules(include_visual=include_visual)
