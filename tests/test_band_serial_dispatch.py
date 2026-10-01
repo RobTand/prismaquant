@@ -58,9 +58,10 @@ PREFETCH = 2
 
 
 @pytest.fixture(autouse=True)
-def _offline_tier_policy(installed_client_sdk):
-    """Offline gateway fixture; PB calls bind the reviewed installed SDK."""
+def _offline_tier_policy(monkeypatch):
+    """Offline gateway fixture; planner and reader use one reviewed source root."""
     from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
+    _pin_published_helper_root(monkeypatch)
     deactivate_staged_tier_policy_for_tests()
     yield
     deactivate_staged_tier_policy_for_tests()
@@ -410,29 +411,17 @@ def test_a_handoff_reads_the_checkpoint_plane_by_its_coordinates(tmp_path):
 # -- the dispatch edge --------------------------------------------------------
 
 def _pin_published_helper_root(monkeypatch):
-    """The published PrismaBuild generation, named, never taken from the env.
+    """Bind the shared reviewed source pin, not a live-generation selector.
 
-    A producer row's handoff template is validated by PrismaBuild's own
-    ``produced_output``, which the dispatcher loads through the lease
-    helper root. Inside a PrismaBuild action that root is injected, so
-    these tests passed there and failed in CI, where nothing injects it
-    (8 failures on main 4b310ce59f6). The root is now the published
-    generation itself, with the injected variable removed, and a box with
-    no published runtime skips.
+    The planner and produced-output reader must import from the same tree.
+    Its staged status establishes source coverage, never fleet activation.
     """
     import prismaquant.staged_lease as staged_lease
+    from fullstack_pb_generation import require_paths
 
-    fleet = Path("/mnt/shared/prismabuild-fleet")
-    try:
-        receipt = json.loads((fleet / "repo" / "RUNTIME_VERSION.json").read_text())
-        root = fleet / "runtime-generations" / str(receipt["generation"])
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        pytest.skip(f"no published PrismaBuild runtime to validate a handoff "
-                    f"template against: {exc}")
-    if not (root / "src" / "prismabuild" / "produced_output.py").is_file():
-        pytest.skip(f"the published PrismaBuild generation is unreadable: {root}")
+    root = require_paths()["root"]
     monkeypatch.delenv(staged_lease.HELPER_ROOT_ENV_VAR, raising=False)
-    monkeypatch.setattr(staged_lease, "_HELPER_ROOT", str(root))
+    monkeypatch.setattr(staged_lease, "_HELPER_ROOT", root)
 
 
 def _dispatch_layout(tmp_path, monkeypatch, *, run_identity_extra=None):
