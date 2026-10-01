@@ -57,6 +57,7 @@ def test_the_shared_pin_names_the_published_generation():
 
 #: Each suite on the shared generation, and the name its pin path has there.
 CONSUMER_PIN_NAMES = {
+    "fullstack_pb_generation": "PIN_PATH",
     "test_band_serial_handoff_produced": "ORIGIN_PIN",
     "test_band_serial_handoff_spool_real_pb": "ORIGIN_PIN",
     "test_produced_output_spool_real_pb": "PIN_PATH",

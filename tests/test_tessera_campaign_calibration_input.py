@@ -171,6 +171,48 @@ def test_model_vocabulary_refuses_before_capture(monkeypatch, tmp_path):
         tool.main([*argv, *options])
 
 
+class _WrapperConfig:
+    """A multimodal wrapper config shaped like GLM-5.3's Glm5NextConfig (#1913): no top-level
+    vocab_size; the decoder's vocabulary lives on its text sub-config."""
+
+    _attn_implementation = "eager"
+
+    def __init__(self, vocab_size):
+        self.text_config = SimpleNamespace(vocab_size=vocab_size)
+
+    def __getattr__(self, name):
+        raise AttributeError(f"'_WrapperConfig' object has no attribute {name!r}")
+
+    def get_text_config(self, decoder=None, encoder=None):
+        return self.text_config
+
+
+def test_wrapper_config_vocabulary_comes_from_its_text_config(monkeypatch, tmp_path):
+    tool, _, argv, model, inputs = _main_fixture(monkeypatch, tmp_path, priced=True)
+    model.config = _WrapperConfig(32)
+    ids, *_, options = _saved_draw(tmp_path)
+    _forbid_sampler(monkeypatch)
+    seen = []
+    def collect(_model, _targets, tokens, *_args, **kwargs):
+        seen.extend(tokens)
+        return ({UNIT: inputs["rows"]}, {}, {UNIT: 8}, {UNIT: inputs["max_abs"]})
+    monkeypatch.setattr(tool, "_collect_activations", collect)
+    assert tool.main([*argv, *options]) == 0
+    assert torch.equal(torch.cat(seen), ids)
+
+
+def test_wrapper_config_text_vocabulary_still_refuses_out_of_range_ids(monkeypatch, tmp_path):
+    tool, _, argv, model, _ = _main_fixture(monkeypatch, tmp_path)
+    model.config = _WrapperConfig(8)
+    *_, options = _saved_draw(tmp_path)
+    _forbid_sampler(monkeypatch)
+    def no_capture(*args, **kwargs):
+        pytest.fail("out-of-vocabulary draw reached capture")
+    monkeypatch.setattr(tool, "_collect_activations", no_capture)
+    with pytest.raises(ValueError, match="vocab"):
+        tool.main([*argv, *options])
+
+
 def test_default_sampler_arguments_unchanged(monkeypatch, tmp_path):
     tool, _, argv, _, inputs = _main_fixture(monkeypatch, tmp_path)
     calls = []

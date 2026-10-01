@@ -5370,6 +5370,61 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
     return hessian_capture_path, input_scales_path, capture_sha256
 
 
+def _streamed_capture_identity(args, census, tokens, corpus_text, *, attention_implementation,
+                               guard=None, release_read_pages=None, source_authentication=None):
+    """The canonical capture identity of this draw over the census's source."""
+    from . import tessera_calibration_cache as store
+    if (census.get('model_load_contract') or {}).get('schema') != 'prismaquant.streaming_initialization.v1':
+        raise RuntimeError('streamed capture requires a census from the qualified streaming source route')
+    hi, lo = census_token_counts(census, {})
+    calibration = th.calibration_identity(corpus_text, tokens, fit_tokens=hi,
+        **_campaign_calibration_parameters(args), fit_tokens_min=lo)
+    require_census_draw(census, calibration, where="streamed calibration capture")
+    # The recorded witness describes the census. The new traversal's own
+    # witness is compared at completion; no from-config model is stamped
+    # as an already completed checkpoint load before it runs.
+    return store.capture_identity(args.calibration_census, calibration=calibration,
+        max_act_rows=args.max_act_rows, model_load_contract=census['model_load_contract'],
+        attention_implementation=attention_implementation,
+        resource_check=None if guard is None else guard.check,
+        release_read_pages=guard is not None if release_read_pages is None else release_read_pages,
+        source_authentication=source_authentication)
+
+
+def _run_capture_chain_bookends(args, saved_calibration):
+    """A capture chain's prep or join row (PQ #1885): no model, no forward."""
+    from . import capture_layer_chain as chain
+    if args.capture_chain == "join":
+        record = chain.join(args.capture_calibration_out, census_path=args.calibration_census)
+        print(f"[campaign] joined streamed calibration capture: {record['manifest']}", flush=True)
+        return 0
+    census = load_calibration_census(args.calibration_census, args=args)
+    tokens, corpus_text = (saved_calibration if saved_calibration is not None else
+                           _calibration_tokens(args.model, args.nsamples, args.seqlen, args.seed))
+    # The prep hashes the whole source once; a bounded capture's prep drops
+    # those pages as it reads, as the monolith's guarded identity does.
+    bounded = args.streaming_capture_policy == 'shared-inputs-bounded-v1'
+    record = chain.prepare(args.capture_calibration_out, census_path=args.calibration_census,
+        ranges=args.capture_chain_ranges, n_batches=len(tokens),
+        boundary_storage=args.capture_chain_boundary_storage,
+        identity=lambda: _streamed_capture_identity(args, census, tokens, corpus_text,
+            attention_implementation=args.attention_implementation, release_read_pages=bounded))
+    print(f"[campaign] prepped streamed calibration capture chain: {record['path']}", flush=True)
+    return 0
+
+
+def _write_capture_load_execution(args, writer, *, guard, resources):
+    """A verified-load capture row's replay and seal receipts, beside its cache."""
+    if writer is None or writer.load_execution is None:
+        return
+    from .cost_stage_checkpoint import atomic_write_bytes
+    execution_record = dict(schema='prismaquant.capture_load_run.v1',
+        replay=writer.load_execution, seal=writer.seal_load_execution,
+        resources=resources, memory_guard=None if guard is None else guard.snapshot())
+    atomic_write_bytes(Path(args.cache_dir)/'capture-load-execution.json',
+        (json.dumps(execution_record, indent=2, sort_keys=True)+'\n').encode())
+
+
 def _run_streamed_calibration(args, runner, profile, *, mode, population,
                               dense_targets, expert_targets, scope_groups,
                               tokens, corpus_text, census, context_by_unit,
@@ -5412,22 +5467,28 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         from .memory_management import CaptureMemoryGuard
         guard = CaptureMemoryGuard(runner.device)
         guard.check('before_capture_identity')
+    # A capture chain quantum (PQ #1885) runs layers [start, stop) of this
+    # same traversal; everything else about the capture is unchanged.
+    quantum = None
+    if getattr(args, 'capture_chain', None) == 'quantum':
+        from .capture_layer_chain import ChainQuantum
+        quantum = ChainQuantum(args.capture_calibration_out, args.capture_layer_range,
+                               num_layers=runner.num_layers,
+                               source_authentication=runner.context.source_authentication)
+    layer_stop = runner.num_layers if quantum is None else quantum.stop
+    if quantum is not None:
+        targets = [name for name in targets
+                   if quantum.start <= runner.layer_index_for_qname(name) < quantum.stop]
     writer = None
     if census is not None:
-        if (census.get('model_load_contract') or {}).get('schema') != 'prismaquant.streaming_initialization.v1':
-            raise RuntimeError('streamed capture requires a census from the qualified streaming source route')
-        hi, lo = census_token_counts(census, {})
-        calibration = th.calibration_identity(corpus_text, tokens, fit_tokens=hi,
-            **_campaign_calibration_parameters(args), fit_tokens_min=lo)
-        require_census_draw(census, calibration, where="streamed calibration capture")
-        # The recorded witness describes the census. The new traversal's own
-        # witness is compared at completion; no from-config model is stamped
-        # as an already completed checkpoint load before it runs.
-        identity = store.capture_identity(args.calibration_census, calibration=calibration,
-            max_act_rows=args.max_act_rows, model_load_contract=census['model_load_contract'],
-            attention_implementation=attention_implementation,
-            resource_check=None if guard is None else guard.check,
-            release_read_pages=guard is not None)
+        # The prep hashed the whole source once. A quantum's identity comes
+        # from the prep's hash-bound roster through the descriptor owner its
+        # runner reads with, which hashes each file the quantum consumes.
+        identity = _streamed_capture_identity(args, census, tokens, corpus_text,
+            attention_implementation=attention_implementation, guard=guard,
+            source_authentication=None if quantum is None else quantum.source_authentication)
+        if quantum is not None:
+            quantum.require_identity(identity, n_batches=len(tokens))
         writer = store.CaptureWriter(args.capture_calibration_out,
             census_path=args.calibration_census, identity=identity,
             release_file_pages=bounded_capture,
@@ -5467,7 +5528,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         if bounded_capture:
             # No loader allocation can race with growing capture tensors.
             runner.context.settle_prefetched_layers(range(
-                layer+1, min(runner.num_layers, layer+1+runner.prefetch_lookahead)))
+                layer+1, min(layer_stop, layer+1+runner.prefetch_lookahead)))
         members = [m for m in population.members if m.qname in names]
         live = refresh_packed_expert_projections(members, profile)
         if live:
@@ -5475,7 +5536,10 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
                 weights={m.qname: m.weight for m in live}, model_path=args.model,
                 source=projection['producer']['source'], measured={m.qname for m in live},
                 resource_check=None if guard is None else guard.check,
-                release_source_pages=guard is not None)
+                release_source_pages=guard is not None,
+                # A quantum's every source read goes through the prep roster's owner.
+                **({} if quantum is None else
+                   {'source_authentication': quantum.source_authentication}))
         # The source identity check is complete. The collector creates its own
         # live views; this caller must not pin old packed storage through return.
         del live
@@ -5485,7 +5549,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             nonlocal completed_source_released, settled_prefetch
             if bounded_capture:
                 settled_prefetch = runner.context.settle_prefetched_layers(range(
-                    layer+1, min(runner.num_layers, layer+1+runner.prefetch_lookahead)))
+                    layer+1, min(layer_stop, layer+1+runner.prefetch_lookahead)))
             runner.context.release_completed_layer(layer)
             completed_source_released = True
 
@@ -5517,6 +5581,11 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         maxima.update(amax)
         if writer is not None:
             writer.write(acts=acts, hessians=hessians, counts=rows, maxima=amax)
+        if quantum is not None:
+            # A no-op unless the row declared the progress contract; the
+            # layer's units are journalled, so it is durable work.
+            from .prismabuild_progress import report
+            report("capture", layer - quantum.start + 1, unit="layers")
         flushed = time.perf_counter()
         record = dict(layer=layer, units=len(names), capture_policy=capture_policy,
             completed_source_released=completed_source_released, collect_seconds=collected-before,
@@ -5535,7 +5604,21 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         print(json.dumps({'streamed_calibration_layer': record}), flush=True)
 
     try:
-        runner.visit_layer_batches(tokens, visit)
+        if quantum is None:
+            runner.visit_layer_batches(tokens, visit)
+        else:
+            with quantum.owner():
+                runner.visit_layer_batches(tokens, visit, start=quantum.frontier(),
+                    stop_layer=quantum.stop, boundary_consumer=quantum.boundary_consumer())
+                if set(counts) != set(targets) or any(value <= 0 for value in counts.values()):
+                    raise RuntimeError('capture chain quantum did not observe every unit of its layers')
+                # The census checks hold per unit, so the quanta's union is the monolith's.
+                census_token_counts(census, counts)
+                census_max_abs(census, maxima)
+                fragment = quantum.complete(
+                    witness=runner.context.source_selected_initialization_witness(
+                        range(quantum.start, quantum.stop)),
+                    verified=writer.verify_entries(targets))
     except BaseException:
         if guard is not None:
             from .cost_stage_checkpoint import atomic_write_bytes
@@ -5543,6 +5626,14 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             atomic_write_bytes(Path(args.cache_dir)/'capture-memory-refusal.json',
                 (json.dumps(failure, indent=2, sort_keys=True)+'\n').encode())
         raise
+    if quantum is not None:
+        _write_capture_load_execution(args, writer, guard=guard,
+                                      resources=resources if guard is not None else None)
+        Path(args.cache_dir, 'streamed-calibration-telemetry.json').write_text(
+            json.dumps(telemetry, indent=2, sort_keys=True)+'\n')
+        print(f"[campaign] capture chain layers {quantum.start}:{quantum.stop} complete: "
+              f"{fragment}", flush=True)
+        return 0
     contract = runner.context.source_initialization_contract()
     if set(counts) != set(targets) or any(value <= 0 for value in counts.values()):
         raise RuntimeError('streamed calibration did not observe every in-scope unit')
@@ -5552,14 +5643,8 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     if writer is not None:
         census_max_abs(census, maxima)
         receipt = writer.finish(model_load_contract=contract)
-        if writer.load_execution is not None:
-            from .cost_stage_checkpoint import atomic_write_bytes
-            execution_record = dict(schema='prismaquant.capture_load_run.v1',
-                replay=writer.load_execution, seal=writer.seal_load_execution,
-                resources=resources if guard is not None else None,
-                memory_guard=None if guard is None else guard.snapshot())
-            atomic_write_bytes(Path(args.cache_dir)/'capture-load-execution.json',
-                (json.dumps(execution_record, indent=2, sort_keys=True)+'\n').encode())
+        _write_capture_load_execution(args, writer, guard=guard,
+                                      resources=resources if guard is not None else None)
         print(f"[campaign] complete streamed calibration capture: {receipt}", flush=True)
     else:
         payload = calibration_census(counts, maxima, args=args, groups=scope_groups,
@@ -5811,6 +5896,17 @@ def _main(argv, *, source_scope) -> int:
                     help='Opt-in canonical H reference load-policy JSON; requires selected reuse of a complete capture.')
     ap.add_argument("--capture-calibration-out", default=None,
                     help="Capture full-census float32 prefix X and uncapped H once, then exit.")
+    ap.add_argument("--capture-chain", default=None, choices=("prep", "quantum", "join"),
+                    help="Run the streamed capture as layer-chain quanta (PQ #1885): prep seals "
+                         "the identity and ranges once, each quantum captures one layer range "
+                         "from its predecessor's boundary, and join publishes the manifest.")
+    ap.add_argument("--capture-layer-range", default=None,
+                    help="A capture chain quantum's source layers A:B.")
+    ap.add_argument("--capture-chain-ranges", default=None,
+                    help="A capture chain prep's layer ranges A:B,B:C,... tiling every source layer.")
+    ap.add_argument("--capture-chain-boundary-storage", type=json.loads, default=None,
+                    help="A capture chain prep's boundary storage policy JSON: where the quanta "
+                         "pass hidden states along, and its byte ceilings.")
     ap.add_argument("--calibration-cache", default=None,
                     help="Verified capture manifest; prefetch selected X/H before encoding.")
     ap.add_argument("--calibration-cache-sha256", default=None,
@@ -5897,6 +5993,31 @@ def _main(argv, *, source_scope) -> int:
             ap.error("--capture-calibration-out requires the full scope and cannot also reuse")
         if args.max_act_rows < 1:
             ap.error("capture/reuse requires positive --max-act-rows")
+    if args.capture_chain is not None:
+        if not (args.streaming and args.capture_calibration_out):
+            ap.error("--capture-chain requires --streaming and --capture-calibration-out")
+        if bool(args.capture_layer_range) != (args.capture_chain == "quantum"):
+            ap.error("--capture-layer-range is a capture chain quantum's, and every quantum names one")
+        if (args.capture_chain_ranges is None or args.capture_chain_boundary_storage is None) != (
+                args.capture_chain != "prep"):
+            ap.error("--capture-chain-ranges and --capture-chain-boundary-storage are the "
+                     "capture chain prep's, and the prep names both")
+        from .capture_layer_chain import (CaptureChainRefused, parse_layer_range,
+                                          parse_layer_ranges, require_layer_tiling)
+        from .cost_streaming import check_boundary_storage
+        try:
+            if args.capture_layer_range is not None:
+                args.capture_layer_range = parse_layer_range(args.capture_layer_range)
+            if args.capture_chain_ranges is not None:
+                args.capture_chain_ranges = require_layer_tiling(
+                    parse_layer_ranges(args.capture_chain_ranges))
+                check_boundary_storage(args.capture_chain_boundary_storage)
+        except (CaptureChainRefused, ValueError) as exc:
+            ap.error(str(exc))
+    elif (args.capture_layer_range or args.capture_chain_ranges
+          or args.capture_chain_boundary_storage is not None):
+        ap.error("--capture-layer-range, --capture-chain-ranges and "
+                 "--capture-chain-boundary-storage require --capture-chain")
     if args.anchor_batch_size < 1:
         ap.error("--anchor-batch-size must be positive")
     if args.publication_overlap_bytes < 0:
@@ -5905,6 +6026,9 @@ def _main(argv, *, source_scope) -> int:
         ap.error("--campaign-identity-bytes cannot be negative")
     if args.campaign_identity_threads is not None and args.campaign_identity_threads < 1:
         ap.error("--campaign-identity-threads must be positive")
+    if args.capture_chain in ("prep", "join"):
+        # Neither runs a forward, so neither loads the model.
+        return _run_capture_chain_bookends(args, saved_calibration)
     if args.anchor_batch_size > 1:
         from .tessera_render import require_tessera_batch_encoder
         require_tessera_batch_encoder()
@@ -5989,6 +6113,15 @@ def _main(argv, *, source_scope) -> int:
             source_authentication.adopt_identity_proof_or_hash(
                 args.source_identity_cache, args.source_identity_cache_sha256)
 
+    if args.capture_chain == "quantum":
+        # A capture chain quantum reads its source through the prep's
+        # hash-bound roster: each file it consumes is hashed once through a
+        # held descriptor, and nothing it does not read is hashed (PQ #1885).
+        from .capture_layer_chain import authenticate_quantum_source
+        source_authentication = source_scope.enter_context(authenticate_quantum_source(
+            args.capture_calibration_out, census_path=args.calibration_census, model=args.model,
+            release_read_pages=args.streaming_capture_policy == 'shared-inputs-bounded-v1'))
+
     from .model_profiles import detect_profile
     profile = detect_profile(args.model)
     runner = None
@@ -6019,7 +6152,12 @@ def _main(argv, *, source_scope) -> int:
         )
     model.eval()
     if saved_calibration is not None:
-        vocab_size = model.config.vocab_size
+        # The decoder's vocabulary: a multimodal wrapper config (GLM-5.3's Glm5NextConfig) keeps
+        # vocab_size on its text sub-config, and get_text_config() returns a text-only config
+        # itself (#1913).
+        config = model.config
+        text_config = config.get_text_config() if hasattr(config, "get_text_config") else config
+        vocab_size = getattr(text_config, "vocab_size", None)
         if type(vocab_size) is not int or vocab_size < 1:
             raise ValueError("exact calibration input requires a positive model vocab_size")
         if any(bool((batch >= vocab_size).any()) for batch in saved_calibration[0]):

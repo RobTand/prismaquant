@@ -2,8 +2,8 @@
 
 Two halves, explicitly distinguished:
 
-- Published-PB + PQ-main legs run GREEN here: real PQ writers, real
-  published validation/stage/promotion/map flows, real PoolQueue
+- Pinned-PB + PQ legs exercise contracts here: real PQ writers, real
+  validation/stage/promotion/map flows from one reviewed source, real PoolQueue
   lifecycle, real protocol-client refusals, real PQ reads and join
   gates over the harness's own fixture.
 - Candidate-gated scenarios (broker Authority, SDK acquire/open/release,
@@ -13,8 +13,9 @@ Two halves, explicitly distinguished:
   conformance row. ``failed`` fails loudly. Only ``qualified`` asserts
   evidence.
 
-No production file is edited or imported beyond the two real trees
-(published fleet mount; verified candidate extraction).
+The connected fixture's source pin may name a staged generation; these
+CPU contracts do not certify activation or the live fleet. Candidate
+scenarios retain their own qualification/refusal results.
 """
 from __future__ import annotations
 
@@ -73,8 +74,15 @@ def _pb():
             "stage_move": stage_move, "ram_promote": ram_promote}
 
 
+@pytest.fixture(autouse=True)
+def _reader_sdk_bound():
+    with published.reader_sdk_bound():
+        yield
+
+
 @pytest.fixture(scope="module")
 def pb():
+    """The module's movers use one reviewed SDK3 source tree."""
     return _pb()
 
 

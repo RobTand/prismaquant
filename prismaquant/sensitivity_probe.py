@@ -132,6 +132,13 @@ atexit.register(_cleanup_stage_dirs)
 # the same hardcoded fallback strip-key list (7 keys, textually identical
 # in both files). Keep both public names and their exact signatures and
 # behavior so no caller moves.
+def _read_text_stage_config(path: Path) -> dict:
+    """Read the input config separately from text-only transformation rules."""
+    from .staged_whole_file import read_source_metadata_text
+
+    return json.loads(read_source_metadata_text(path, label="text-only bootstrap config"))
+
+
 def _stage_text_only_impl(
     model_path: str,
     *,
@@ -141,8 +148,7 @@ def _stage_text_only_impl(
     cfg_path = src / "config.json"
     if not cfg_path.exists():
         return str(src)
-    with open(cfg_path) as f:
-        cfg = json.load(f)
+    cfg = _read_text_stage_config(cfg_path)
 
     # Profile-driven: ask the registered ModelProfile which config keys
     # to strip and whether to promote `text_config.model_type`.
