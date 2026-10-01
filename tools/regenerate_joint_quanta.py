@@ -1214,10 +1214,10 @@ def main(argv=None) -> int:
                         layers=range(len(layers)),
                         source_reads=staged_reads())
                     source_spans = source_plan["layer_spans"]
-                    head_source = {
-                        "layers_prefix": source_plan["layers_prefix"],
-                        "tensors": source_plan["head_tensors"],
-                        "spans": source_plan["head_spans"]}
+                    from prismaquant.joint_layer_quanta import (
+                        head_source_from_streaming_plan,
+                    )
+                    head_source = head_source_from_streaming_plan(source_plan)
                     print(f"source plan: profile {source_plan['profile']} "
                           f"(multimodal={source_plan['multimodal']}), "
                           f"{len(source_plan['head_tensors'])} resident head "

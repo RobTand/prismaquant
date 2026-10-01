@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1870, declaration slice of #1100): the streaming
+source plan names whole config/index bootstrap reads separately from shard
+header prefixes. The existing quantum compiler projects these metadata reads
+alongside the unchanged resident-head tensor spans, and regeneration uses
+that shared projection. Newly generated executable head manifests and their
+binders therefore include the config/index declaration; an otherwise valid
+rehashed tensor-only head does not bind under the new projection. The head's
+three-field schema is unchanged; previously sealed records and manifests are
+not rewritten. This is declaration coverage, not proof that the worker's
+profile/index/source-identity callers use staged readers. That integration
+and the broader shard-header audit remain #1100. No numerical, format,
+serving, export-wire, runtime-pin or serializer change.
+
 Re-stamped 2026-10-01 (PQ #1869, Refs #1314): the shared rate-band
 owner accepts strict two-integer list/tuple provenance as well as its existing
 CLI string. Partition merge can consume the actual producer's JSON-serialized
@@ -8,6 +21,15 @@ positive, ordered q256 range checks; bool, float, string-valued and malformed
 typed bands refuse. Pinned-rate/one-round/coverage/menu restrictions remain in
 force. No numerical rates, wire, cache, runtime pin, default or promotion gate
 change; CPU regression is not full GPU artifact qualification.
+
+Re-stamped 2026-10-01 (Refs PQ #1088): the Stage A negative binding proof
+matches both literal namespace paths and canonical absolute aliases, including
+parent-directory components and symlinks. Existing literal-path refusals remain
+conservative when an alias points outside the namespace; unrelated sibling
+paths and nonpath strings remain legal. Document traversal, digest checks,
+retirement records, deletion targets and public PB reclaim behavior are
+unchanged. CPU regression gate: `tests/test_stage_a_retirement_path_aliases.py`.
+No live retirement, GPU, model, serving or export qualification is implied.
 
 Re-stamped 2026-10-01 (PQ #1864): the Tessera lane's `load_generate.graph`
 gate names GLM-5.3's graph configuration. The T-8 release serve passes
@@ -4233,7 +4255,11 @@ PrismaBuild action, checks everything before it removes anything:
   `require_producer_contained`;
 - no JSON document under the declared `--binding-root`s names a path in the
   run's adjoint space, or the digest of its chain state, receipt or any
-  checkpoint. At least one root is required. The negative proof refuses an
+  checkpoint. Absolute binding values are checked both literally and through
+  `os.path.realpath`, so parent-directory components and symlink aliases cannot
+  hide a binding. Literal namespace matches still refuse when their canonical
+  target is outside; unrelated sibling paths and nonpath strings remain legal.
+  At least one root is required. The negative proof refuses an
   unreadable directory, symlinked or non-regular binding, malformed JSON/gzip
   document, or document above the 64 MiB limit (including decoded gzip bytes). It never
   skips such a document as evidence that no consumer exists. The retiring
