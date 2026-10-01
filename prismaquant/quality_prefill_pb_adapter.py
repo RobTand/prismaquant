@@ -79,7 +79,7 @@ from pathlib import Path
 import re
 
 from prismaquant.cost_stage_checkpoint import canonical_json
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import DIRECT_UTF8_STRICT, bytes_sha256hex
 from prismaquant.schemas import Contract, SchemaValidationError, strict_json_loads
 
 
@@ -284,12 +284,8 @@ def document_bytes(value: object) -> bytes:
     """
 
     try:
-        encoded = json.dumps(
+        encoded = DIRECT_UTF8_STRICT.text(
             canonical_json(value, where="quality-prefill document"),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
         )
     except (TypeError, ValueError) as exc:
         _fail(f"document is not canonical JSON data: {exc}")

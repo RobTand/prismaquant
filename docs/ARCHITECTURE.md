@@ -1,5 +1,25 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1885): the streamed calibration capture can run
+as a chain of retryable layer-range rows instead of one forward
+("Layer-chain calibration capture (#1885)" below). A prep row hashes the
+source once and seals the capture identity, the layer ranges, the batch
+count, the boundary storage policy and the source files' stat fingerprints.
+Each quantum row reads its source through `CaptureSourceAuthentication`
+bound to the prep's roster, so it hashes only the shards it reads. It
+starts from its predecessor's boundary, runs its layers through the
+unchanged capture visitor and writes the next boundary. A join row
+publishes the same `prismaquant.tessera_calibration_cache.v2` manifest a
+monolithic capture writes, without reading an entry, and retires the
+interior boundaries. `StreamedCausalLM.visit_layer_batches` gains a layer
+frontier on its non-exact path only. `CaptureWriter.finish` now publishes the
+journal's completed records, not only its own process's (a bug fix; a later
+process used to refuse the census as uncovered). The monolithic capture, the
+manifest schema, formats, defaults, runtime pins and serving gates are
+unchanged. CPU gates: `tests/test_capture_layer_chain.py`,
+`tests/test_capture_layer_chain_glm.py`, `tests/test_dispatch_capture_chain.py`.
+No GPU parity row against a monolithic capture has run yet.
+
 Re-stamped 2026-10-01 (PQ #1909, Refs #1100): text-only staging separates
 its initial config input from profile-driven transformation, and obtains that
 input through the existing lifetime-pinned metadata-text reader. An active
@@ -43,6 +63,21 @@ paths and original stat fences are unchanged. This does not close AutoConfig,
 remote-code execution, cold shard hashing or the broader worker header audit.
 No new cache, format, numerical method, export wire, runtime pin, pipeline
 default or serving gate; CPU regressions are not model/GPU qualification.
+
+Re-stamped 2026-10-01 (PQ #1888): the reviewed PrismaBuild reader and
+client SDK pin is `95a59051d48cda82eea7927f31870c6c862d7174` (PB #1402),
+with exact SDK version 3. The existing sealed-root resolver, test-only
+Git/RECORD-qualified installed injection, and same-package import checks
+remain authoritative; SDK1/2 and unknown versions refuse, with no shim.
+Produced-output fixtures use SDK3 source bundles through their existing
+pin schemas. Their pinned files match the staged
+`5aca8ee9323c-1790835144-b584825fe9d4` generation; staging/source equivalence
+is not runtime activation. Activation belongs to pb-sched at a row boundary
+after this PQ pin merges, independently of CPU reader/SDK receipts.
+No Tessera pin, numerical kernel, export wire, pipeline default or measured
+speed result changes. The paired DL380 CPU interpreter is
+`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python`; old interpreters
+remain untouched. Commands and verification are in PR #1900.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
@@ -5476,6 +5511,12 @@ re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
 resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
+
+As of: 2026-10-01 · `claude/capture-layer-chain`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-10-01, `claude/capture-layer-chain`) for **the layer-chain
+calibration capture** (PQ #1885); see the stamp at the top of this document.
 
 As of: 2026-09-29 · `claude/tessera-pin-b40c93cb`.
 Stamps follow, newest first, each recording its own branch and date.
@@ -21945,6 +21986,11 @@ manifest; selected-wire materialization derives reuse from that provenance.
 Legacy unqualified capture manifests refuse. Without a cache, each row still
 performs its own selected-unit calibration over the exact draw.
 
+The same capture can also run as a layer chain: a prep row, one row per
+layer range, and a join row, each retryable alone (PQ #1885; see
+"Layer-chain calibration capture (#1885)"). The join publishes the same
+manifest, so `plan --calibration-cache` cannot tell the two apart.
+
 * **`fit_tokens` is a maximum over the scope**, and Tessera seals it into every
   H-aware wire receipt (`cached_unit.encoding_input_identity`), so a shard
   stamping its own selection's maximum would write receipts the exporter
@@ -29693,3 +29739,110 @@ refused. An explicit `template_id` still overrides the derived id; the live
 pair uses the derived one (`tests/test_band_serial_handoff_produced.py`).
 The derived manifest is also checked against PrismaBuild's
 phase planner (`tests/test_band_serial_dispatch.py`).
+
+### Layer-chain calibration capture (#1885)
+
+A streamed calibration capture (`--capture-calibration-out`) used to be one
+forward over every layer. On GLM-5.3 that is one long row that cannot be
+retried in parts. `prismaquant/capture_layer_chain.py` cuts it into rows
+that each run a contiguous layer range `[a, b)` and pass the hidden states
+on through the boundary storage. `tessera_campaign --capture-chain` runs
+each row; all three kinds require `--streaming` and
+`--capture-calibration-out`.
+
+**Prep** (`--capture-chain prep --capture-chain-ranges 0:a,a:b,...
+--capture-chain-boundary-storage JSON`). Loads no model. It refuses ranges
+that overlap or leave a gap, and refuses if a prep record already exists. It
+computes the capture identity once (`capture_identity`, which hashes every
+source file), with the source files' stat fingerprints taken before and after
+the hash and required to be equal. It binds a published generation of the v2
+`layer_major` boundary storage and seals `chain/prep.json`: the identity, the
+ranges, the batch count, the storage policy, the generation's session and the
+fingerprints.
+
+**Quantum** (`--capture-chain quantum --capture-layer-range a:b`). The row
+builds its streamed model with a `CaptureSourceAuthentication` owner bound to
+the prep's identity and the prep record's digest (`authenticate_quantum_source`).
+Each shard the quantum reads is hashed once, through the held descriptor,
+against the prep's roster digest; shards it only inspects are not hashed, and
+the small metadata files are. A quantum therefore hashes the head shards, its
+own layers' shards and the metadata files, never the whole source.
+`ChainQuantum` refuses to run if:
+
+- the prep's ranges do not tile the loaded source's layers;
+- `a:b` is not one of them;
+- its owner status is already `complete` (a quantum runs once);
+- its predecessor's owner is not complete or has no sealed fragment;
+- a source file's stat fingerprint changed since the prep.
+
+It rebinds the generation as its own owner and removes only its own stale
+output boundary from an earlier attempt. It borrows the predecessor's
+boundary through `authorize_forward_inputs`, so it never deletes its input.
+`visit_layer_batches(start=, stop_layer=, boundary_consumer=)` then runs
+layers `[a, b)`:
+
+- `start` supplies each batch's hidden state in its stored dtype, and a dtype
+  other than the runner's refuses.
+- Prefetch and install are bounded to the range.
+- The exact (per-batch) boundary storage path refuses a frontier.
+
+The unchanged capture visitor journals the range's units through
+`CaptureWriter`. `CaptureWriter.verify_entries` re-reads each entry once
+(sha256 and tensor validation) and records its stat fingerprint. The quantum
+then writes boundary `b` (none for the last range) and a sealed fragment:
+the boundary records, the verified unit records, the range's selected
+initialization witness and the source authentication receipt. Last, it marks
+its owner `complete`.
+
+**Join** (`--capture-chain join`). Loads no model. It checks, in order:
+
+1. The census is the prep's.
+2. The ranges tile.
+3. Every owner is complete and every fragment is sealed and bound to the
+   prep.
+4. All quanta saw one layer count.
+5. The source fingerprints are unchanged.
+6. The merged witnesses (`merge_selected_initialization_witnesses`, the union
+   contract; quanta that disagree about a head record refuse) equal the
+   census's model load contract.
+7. The verified units cover the identity's units exactly once.
+
+`CaptureWriter.finish(verified=)` then publishes the manifest. Each entry is
+held to the fingerprint its quantum recorded instead of being read again;
+the `mount` rule of `stat_fingerprint_reuse` admits a different NFS client
+device. A changed entry refuses. After the manifest is published, the join
+unlinks the interior boundaries' entry files by exact path inside the
+generation, and writes `chain/join.json`. The generation directory and its
+owner records are left in place. The join writes no capture-load execution
+record, because it loads nothing.
+
+**Dispatch** (`tools/dispatch_capture_chain.py`). A quantum commits no
+produced output a consumer could wait on through `pbrun --after`, so the tool
+orders the rows by what they leave on disk, as `dispatch_stage_a_split` does:
+
+- `seal` writes `<workspace>/capture-chain/round.json` from the campaign
+  spec. Each row comes from `dispatch_tessera_campaign._row`, at priority -10
+  with an explicit `timeout_s`. A quantum's memory demand is the monolithic
+  capture row's (`_row_memory_gb` over every census unit), an overestimate
+  for one range. The prep and the join claim no GPU. A quantum's `capture`
+  progress phase is declared only with `--progress-grace-s`, and `pbrun`
+  refuses it unless the fleet announces the progress contract.
+- `submit` sends the next row only after the row before it ended `executed`
+  with exit 0 and its outputs check: the prep record and its complete owner,
+  each quantum's complete owner and fragment, and the join's receipt and
+  manifest. `--wait-s` walks the chain through `pbwait`, and `--retry NAME`
+  re-submits a failed row and keeps its earlier submission record.
+
+**Sizing.** The boundary policy's `max_resident_bytes` must hold
+`prefetch_batches` boundary entries, and `max_artifact_bytes` both a
+quantum's input and output boundaries (two per batch). A GLM-5.3 boundary
+entry is about 16 MiB per batch. This sizing is not derived by any tool yet.
+
+Gates: `tests/test_capture_layer_chain.py` (boundary round trip; chained
+visits equal to the monolith; refusals; witness merge; join without reading
+an entry; source hashing through the prep roster; the `finish` regression),
+`tests/test_capture_layer_chain_glm.py` (tiny GLM-5.3 checkpoints: 2- and
+3-quantum chains equal to the monolith entry for entry, including the
+manifest, and each quantum hashes exactly its consumed shards),
+`tests/test_dispatch_capture_chain.py`. These are CPU tests. The GB10 parity
+row against a monolithic GLM-5.3 capture has not run.

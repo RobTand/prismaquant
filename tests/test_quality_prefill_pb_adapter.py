@@ -344,9 +344,10 @@ def _runtime_tree(root: Path, *, tags: tuple[str, ...] | None) -> Path:
     package = root / "src" / "prismabuild"
     package.mkdir(parents=True)
     if tags is not None:
+        from prismaquant.staged_lease import PB_CLIENT_SDK_VERSION
         (package / "__init__.py").write_text("")
         (package / "client.py").write_text(
-            f"SDK_VERSION = 1\nCAPABILITIES = frozenset({sorted(tags)!r})\n")
+            f"SDK_VERSION = {PB_CLIENT_SDK_VERSION}\nCAPABILITIES = frozenset({sorted(tags)!r})\n")
     return root
 
 
