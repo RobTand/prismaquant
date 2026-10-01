@@ -128,7 +128,7 @@ class DeepseekV4Profile(ModelProfile):
         # selectable-Linear inventory the byte accounting assumes.
         return r"self_attn\.(?:compressor|indexer)\."
 
-    def checkpoint_to_live_name(self, k: str, *,
+    def checkpoint_to_live_name(self, ckpt_key: str, *,
                                 multimodal: bool = False) -> str | None:
         """DSv4-Flash checkpoint → transformers live qname.
 
@@ -145,6 +145,7 @@ class DeepseekV4Profile(ModelProfile):
             (consumed by the FP8 dequant pass)
           - Standalone `.scale` top-level entries with no paired weight
         """
+        k = ckpt_key
         if k.endswith(".weight_scale_inv"):
             return None
         # DSv4 stores FP8 block-scale siblings as `.scale` (paired with
