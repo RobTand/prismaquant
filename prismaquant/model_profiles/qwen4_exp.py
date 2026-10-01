@@ -153,7 +153,7 @@ class Qwen4ExpProfile(ModelProfile):
     def walk_claim_rules(self, *, include_visual: bool = False):
         """Two matmul-fed / non-GEMM families the base rules cannot claim.
 
-        `base.walk_claim_rules()` rule 9 only decides ``nn.Linear`` weights;
+        `base.walk_claim_rules()` rule 11 decides ``nn.Linear`` weights;
         an unclaimed *matmul-fed* node fails the walk by design
         (`model_walk.py:894-912` — the ``wo_a`` failure class). qwen4_exp has
         one such node and one adjacent case:
