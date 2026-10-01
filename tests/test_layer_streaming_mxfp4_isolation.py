@@ -39,3 +39,8 @@ def test_full_mxfp4_file_after_native_dsv4_import(tmp_path):
 def test_shared_expert_scope_after_native_dsv4_import(tmp_path):
     _assert_mixed_session_passes(
         tmp_path, "test_shared_expert_is_not_covered_by_the_declaration")
+
+
+def test_undeclared_checkpoint_after_native_dsv4_import(tmp_path):
+    _assert_mixed_session_passes(
+        tmp_path, "test_undeclared_checkpoint_has_no_mxfp4_names")
