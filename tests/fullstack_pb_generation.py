@@ -1,23 +1,23 @@
-"""Resolve published PB stdlib modules from one immutable generation.
+"""Resolve PB stdlib and fleet tools from the existing shared source pin.
 
-The fleet publishes exactly one runtime generation behind
-``/mnt/shared/prismabuild-fleet/repo``. This helper resolves that link
-ONCE per admitted action to a full immutable root, derives the generation
-identity from that same root's own name, inserts its ``src`` and
-``tools/fleet`` ahead of ``sys.path``, and verifies every published module
-actually imported comes from under that same root. A module loaded from
-anywhere else fails loudly: an unresolvable or drifting PB is a failed
-qualification, never a silent substitution.
+Connected CPU fixtures exercise the same reviewed SDK source as their PQ
+reader, not whichever older generation currently serves the fleet. The
+shared ``pb_runtime_generation_pin.json`` owns the root and file digests.
+Resolve it once per admitted action, then verify every imported module is
+under that one root. The root may be staged: a passing source-bound fixture
+never establishes live deployment, activation or fleet qualification.
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
+import json
 from pathlib import Path
 
 from fleet_sdk import require_prismabuild_sdk
 
-REPO_LINK = Path("/mnt/shared/prismabuild-fleet/repo")
+PIN_PATH = Path(__file__).with_name("pb_runtime_generation_pin.json")
 
 #: Resolved once per process (one admitted action); never re-resolved.
 _ROOT: Path | None = None
@@ -28,10 +28,13 @@ def _resolve_once() -> Path:
     require_prismabuild_sdk()
     global _ROOT
     if _ROOT is None:
-        root = REPO_LINK.resolve()
-        assert root.is_dir(), f"published PB root missing under {REPO_LINK}"
-        assert root.name != REPO_LINK.name, (
-            f"PB repo link {REPO_LINK} does not name a generation")
+        pin = json.loads(PIN_PATH.read_text())
+        root = Path(pin["bundle_root"]).resolve()
+        assert root.is_dir(), f"pinned PB root missing: {root}"
+        assert root.name == pin["runtime_generation"], (
+            f"PB root {root} differs from its declared generation")
+        for name, digest in pin["files"].items():
+            assert hashlib.sha256((root / name).read_bytes()).hexdigest() == digest, name
         assert (root / "src" / "prismabuild" / "core.py").is_file(), (
             f"published PB stdlib missing under {root / 'src'}")
         assert (root / "tools" / "fleet" / "stage_move.py").is_file(), (
@@ -40,13 +43,24 @@ def _resolve_once() -> Path:
     return _ROOT
 
 
+@contextmanager
+def reader_sdk_bound():
+    """Bind PQ's existing explicit SDK owner to this fixture's one source root."""
+    from prismaquant.staged_lease import set_lease_helper_root
+    set_lease_helper_root(_resolve_once())
+    try:
+        yield
+    finally:
+        set_lease_helper_root(None)
+
+
 def generation() -> str:
     """The immutable generation id, derived from the resolved root's name."""
     return _resolve_once().name
 
 
 def require_paths() -> dict[str, str]:
-    """Insert the resolved root's src/fleet tools; verify imports land there."""
+    """Insert the pinned root's src/fleet tools; verify imports land there."""
     require_prismabuild_sdk()
     root = _resolve_once()
     src = root / "src"

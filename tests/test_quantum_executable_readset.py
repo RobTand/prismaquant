@@ -303,24 +303,10 @@ def test_seal_deterministic_and_pb_validated(tmp_path):
 
 
 def _pb():
-    fleet = Path("/mnt/shared/prismabuild-fleet")
-    try:
-        receipt = json.loads(
-            (fleet / "repo" / "RUNTIME_VERSION.json").read_text())
-        generation = str(receipt["generation"])
-        pinned = dict(receipt["files"])
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        pytest.skip(f"no PB runtime receipt: {exc}")
-    src = fleet / "runtime-generations" / generation / "src"
-    try:
-        actual = hashlib.sha256(
-            (src / "prismabuild" / "core.py").read_bytes()).hexdigest()
-    except OSError as exc:
-        pytest.skip(f"unreadable PB generation: {exc}")
-    if actual != pinned.get("src/prismabuild/core.py"):
-        pytest.skip("PB generation is not the published bytes")
-    if str(src) not in sys.path:
-        sys.path.insert(0, str(src))
+    """Resolve the same reviewed source pin the reader/SDK fixtures use."""
+    from fullstack_pb_generation import require_paths
+
+    src = Path(require_paths()["src"])
     import prismabuild.core as core
     import prismabuild.storage_tiers as tiers
     import prismabuild.residency_plan as plans
@@ -330,7 +316,7 @@ def _pb():
             # site-packages prismabuild turn the test green without running it.
             pytest.fail(
                 "a different prismabuild is already imported -- it shadows the "
-                "published generation under test; the interpreter carries a stale "
+                "reviewed generation under test; the interpreter carries a stale "
                 "prismabuild (PQ #1109)")
     return core, tiers, plans
 

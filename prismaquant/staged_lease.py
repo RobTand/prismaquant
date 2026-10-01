@@ -67,21 +67,21 @@ from pathlib import Path
 from .staged_tier_policy import TierPolicyRefused
 
 #: Reviewed PB source pin for the reader lease and the client SDK
-#: (``prismabuild.client``, PB #1254); it moved from 461728e4 when the SDK
-#: landed, because no earlier commit carries the SDK.
+#: (``prismabuild.client``, PB #1254); the initial SDK pin replaced
+#: 461728e4. PQ #1888 adopts SDK3 from merged PB #1402 at 95a59051.
 #: Deployment qualification is separate; this pin advertises no capability.
 #: No capability assertion rides it. Its stdlib resolver,
 #: tools/resolve_prismabuild_dev_pin.py, had no caller and was retired in
 #: PQ #1302; recover it with
 #: ``git show ffb40f417b2:tools/resolve_prismabuild_dev_pin.py``.
-PB_READER_LEASE_PIN_COMMIT = "059953bc3793f539600d333cd3311773e592b0e6"
+PB_READER_LEASE_PIN_COMMIT = "95a59051d48cda82eea7927f31870c6c862d7174"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
 #: The PrismaBuild client SDK version this package is written against
-#: (``prismabuild.client.SDK_VERSION``, PB #1254). A tree that serves another
+#: (``prismabuild.client.SDK_VERSION``, PB #1402 / PQ #1888). A tree that serves another
 #: version refuses as unsupported: the SDK's contract is pinned by version, so
 #: a mismatch is a different contract, never a subset to probe.
-PB_CLIENT_SDK_VERSION = 1
+PB_CLIENT_SDK_VERSION = 3
 
 #: The one PrismaBuild module PrismaQuant imports.
 _CLIENT_MODULE = "prismabuild.client"
