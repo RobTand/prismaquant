@@ -22,7 +22,8 @@
   },
   "shard_regexes": {
     "visual_config_key": "vision_config",
-    "visual_layer_prefix": "model.vision_tower.vision_model.encoder.layers"
+    "visual_layer_prefix": "model.vision_tower.vision_model.encoder.layers",
+    "visual_root_prefixes": ["model.vision_tower", "model.embed_vision"]
   },
   "naming": {
     "live_to_recipe": [

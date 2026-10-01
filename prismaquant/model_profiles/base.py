@@ -1175,17 +1175,8 @@ class ModelProfile(ABC):
                     )
                     mtp_regexes[0] = rf"(?:{extra}|{mtp_regexes[0]})"
                 regexes.extend(mtp_regexes)
-        visual_key = self.visual_config_key()
-        if include_visual and visual_key:
-            vis_cfg = cfg.get(visual_key, {})
-            n_vis = int(
-                vis_cfg.get("depth") or vis_cfg.get("num_hidden_layers") or 0
-            )
-            if n_vis > 0:
-                regexes.extend(
-                    _build_layer_shard_regexes(n_vis,
-                                               max(layers_per_shard, 4),
-                                               layer_prefix=self.visual_layer_prefix()))
+        if include_visual:
+            regexes.extend(self.visual_shard_regexes(cfg, layers_per_shard))
         if include_lm_head:
             regexes.append(rf"^{re.escape(self.lm_head_name())}$")
         return regexes
@@ -1218,6 +1209,40 @@ class ModelProfile(ABC):
         if spec is not None:
             return tuple(spec.mtp_extra_linear_names)
         return ("mtp.fc",)
+
+    def visual_shard_regexes(self, cfg: dict, layers_per_shard: int) -> list[str]:
+        """Shard declared visual blocks plus one disjoint non-block region.
+
+        The latter includes merger/projector Linears, not audio or guessed
+        namespaces. Normal probe hook filtering still decides which modules
+        are quantizable; this schedule neither prices nor admits a format.
+        """
+        visual_key = self.visual_config_key()
+        block_prefix = self.visual_layer_prefix()
+        if not visual_key or not block_prefix or visual_key not in cfg:
+            return []
+        vis_cfg = cfg[visual_key]
+        n_vis = int(vis_cfg.get("depth") or vis_cfg.get("num_hidden_layers") or 0)
+        regexes = (
+            _build_layer_shard_regexes(
+                n_vis, max(layers_per_shard, 4), layer_prefix=block_prefix,
+            ) if n_vis > 0 else []
+        )
+        roots = self.visual_root_prefixes()
+        if roots:
+            # Block regions keep their existing owners. A merger/side
+            # projection under a declared root gets exactly one extra owner.
+            exclude_blocks = (
+                rf"(?!{re.escape(block_prefix)}\.\d+\.)" if regexes else ""
+            )
+            root_pattern = "|".join(re.escape(root) for root in roots)
+            regexes.append(rf"^{exclude_blocks}(?:{root_pattern})\.")
+        return regexes
+
+    def visual_root_prefixes(self) -> tuple[str, ...]:
+        """Full visual namespaces declared by the model structure contract."""
+        spec = self.structure_spec()
+        return spec.visual_root_prefixes if spec is not None else ()
 
     def visual_layer_prefix(self) -> str | None:
         """Prefix used for visual-encoder block names, or None if this

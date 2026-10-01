@@ -15,6 +15,7 @@
   "shard_regexes": {
     "visual_config_key": "vision_config",
     "visual_layer_prefix": "model.visual.blocks",
+    "visual_root_prefixes": ["model.visual"],
     "body_layer_prefix": "model.language_model.layers",
     "lm_head_name": "lm_head",
     "embedding_name": "model.language_model.embed_tokens"

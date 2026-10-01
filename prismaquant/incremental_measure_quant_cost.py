@@ -74,7 +74,6 @@ from .measure_quant_cost import (
 from .streaming_model import (
     StreamingContext,
     _build_streaming_context,
-    _classify_shard,
 )
 
 
@@ -806,12 +805,11 @@ def _write_empty_cost_shard(
 
 # ---------------------------------------------------------------------------
 # Visual cost shard runner — Phase 2 multimodal support.
-# Loads the multimodal-staged model (vision_config preserved) and runs
-# `measure_batched_gpu` / `measure_unbatched` against cached activations
-# for the visual Linears matched by this shard's regex. The 35B visual
-# tower is ~1 GB BF16; the full 35B model fits in 128 GB. On 122B-scale
-# models the whole-model load OOMs and we gracefully emit an empty shard
-# so the allocator's --visual-format override can take over.
+# Uses the shared multimodal streaming context (vision_config preserved):
+# visual weights are resident and body decoder layers remain on meta.
+# Shared measurement uses cached activations for live Linears matched by
+# the shard selector. Context-build OOM currently writes an empty shard;
+# that legacy uniform fallback is not a complete full-gamut measurement.
 # ---------------------------------------------------------------------------
 def _run_visual_cost_shard(
     *,
@@ -1222,7 +1220,9 @@ def main():
                 print(f"[incremental-cost] stale shard {shard_idx}: "
                       f"recomputing {shard_path}", flush=True)
 
-            kind = _classify_shard(linear_include)
+            # Typed schedule metadata owns dispatch. Anchored/non-block
+            # visual selectors must not fall through a regex guess to body.
+            kind = schedule[shard_idx].kind
             print(f"[incremental-cost] shard {shard_idx} ({kind}): "
                   f"include={linear_include!r}", flush=True)
             _ensure_ready()
