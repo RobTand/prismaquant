@@ -9,16 +9,19 @@ from experiments.stageb_checkpoint_host_replay import replay
 from prismaquant import aura_cost
 
 
-def _source(tmp_path):
+def _source(tmp_path, *, cyclic=False):
     root = tmp_path / "published"
     root.mkdir()
     units = []
     for index in range(5):
         name = f"unit-{index}"
+        state: dict[str, object] = {
+            "row": {"s2": float(index), "probe": [1.0, 2.0]},
+            "identity": {"calibration": "unchanged"}}
+        if cyclic:
+            state["self"] = state
         aura_cost._write_aura_unit_checkpoint(
-            root, qname=name, identity_sha256="a" * 64,
-            state={"row": {"s2": float(index), "probe": [1.0, 2.0]},
-                   "identity": {"calibration": "unchanged"}})
+            root, qname=name, identity_sha256="a" * 64, state=state)
         units.append({"qname": name,
                       "file": str(aura_cost._aura_unit_checkpoint_path(root, name).relative_to(root))})
     (root / "manifest.json").write_text(json.dumps({"units": units, "identity_sha256": "a" * 64}))
@@ -41,6 +44,38 @@ def test_host_replay_checks_bytes_owner_frontier_and_resume(tmp_path):
     with pytest.raises(FileExistsError):
         replay(source, tmp_path / "fresh", expected_units=5,
                host_windows=2, budget_bytes=32 << 20, max_jobs=2)
+
+
+def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path):
+    import gc
+
+    source = _source(tmp_path, cyclic=True)
+    gc.collect()
+    decoded_ids = set()
+    decode = aura_cost._decode_aura_unit_checkpoint
+
+    def observed_decode(*args, **kwargs):
+        state = decode(*args, **kwargs)
+        decoded_ids.add(id(state))
+        decoded_ids.add(id(state["self"]))
+        return state
+
+    monkeypatch.setattr(aura_cost, "_decode_aura_unit_checkpoint", observed_decode)
+    enabled = gc.isenabled()
+    gc.disable()
+    try:
+        result = replay(source, tmp_path / "fresh", expected_units=5,
+                        host_windows=2, budget_bytes=32 << 20, max_jobs=2)
+        assert result["baseline_candidate_digests_equal"]
+        assert result["source_unchanged"]
+        assert result["publication"]["charged_bytes"] == 0
+        assert not any(type(item) is dict and id(item) in decoded_ids
+                       and "self" in item for item in gc.get_objects()), (
+                           "replay retained uncharged decoded source cycles")
+    finally:
+        if enabled:
+            gc.enable()
+        gc.collect()
 
 
 def test_host_replay_cannot_extend_published_namespace(tmp_path):
