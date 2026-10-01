@@ -290,7 +290,6 @@
   "sorted-json:prismaquant/export_native_compressed.py::_export_resume_fingerprint",
   "sorted-json:prismaquant/export_native_compressed.py::_write_shipcard._hash",
   "sorted-json:prismaquant/export_structure.py::main",
-  "sorted-json:prismaquant/footprint.py::assignment_serialization_sha256",
   "sorted-json:prismaquant/glm53_stock_harvest.py::run_harvest",
   "sorted-json:prismaquant/glm53_stock_reprice.py::main",
   "sorted-json:prismaquant/glm_capture_compatibility.py::main",

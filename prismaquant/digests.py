@@ -24,6 +24,9 @@ unless the profile states otherwise:
   JSON data")``.
 - ``DIRECT_UTF8_STRICT``: one ``json.dumps`` with ``ensure_ascii=False`` and
   ``allow_nan=False``.
+- ``DIRECT_UTF8_LAX``: one direct encoding with ``ensure_ascii=False`` and
+  ``allow_nan=True``, compact separators and no fallback serializer. Nonfinite
+  values remain JSON tokens; encoding to bytes uses strict UTF-8.
 - ``DIRECT_ASCII_STRICT``: one ``json.dumps`` with ``ensure_ascii=True`` and
   ``allow_nan=False``.
 - ``DIRECT_ASCII_LAX``: one ``json.dumps`` with ``ensure_ascii=True`` and
@@ -273,6 +276,7 @@ class JsonProfile:
 
 
 DIRECT_UTF8_STRICT = JsonProfile("direct-utf8-strict", ensure_ascii=False, allow_nan=False)
+DIRECT_UTF8_LAX = JsonProfile("direct-utf8-lax", ensure_ascii=False, allow_nan=True)
 DIRECT_ASCII_STRICT = JsonProfile("direct-ascii-strict", ensure_ascii=True, allow_nan=False)
 DIRECT_ASCII_LAX = JsonProfile("direct-ascii-lax", ensure_ascii=True, allow_nan=True)
 DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
