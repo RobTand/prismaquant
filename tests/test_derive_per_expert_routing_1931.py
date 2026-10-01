@@ -319,7 +319,8 @@ def test_routing_syncs_the_host_once_not_once_per_expert():
     weights = torch.rand(tokens, top_k, device="cuda")
     X = torch.randn(tokens, HIDDEN, device="cuda", dtype=torch.bfloat16)
     experts = _GateExperts(num_experts).cuda().to(torch.bfloat16)
-    parent = _FixedRoute(index, weights).cuda()
+    # The router runs in the input's dtype, as the census's bf16 layers do.
+    parent = _FixedRoute(index, weights).cuda().to(torch.bfloat16)
     for derive, ceiling in ((mqc.derive_per_expert_activations, 1),
                             (_reference_derive, num_experts)):
         derive(experts, X, parent)  # warm up
