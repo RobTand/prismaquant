@@ -549,7 +549,7 @@ def _mask_cuda_queries_during_meta_init(log_prefix: str):
         torch.cuda.current_device = old_current_device  # type: ignore[assignment]
 
 
-def _init_rotary_inplace(base_model: nn.Module, device: torch.device,
+def _init_rotary_inplace(base_model: torch.nn.Module, device: torch.device,
                          dtype: torch.dtype) -> None:
     """Populate deterministic rotary buffers on a meta-built skeleton.
 
@@ -1881,7 +1881,7 @@ def _find_visual_module(model) -> tuple[Any | None, str]:
     return None, ""
 
 
-def _module_has_meta_tensors(module: nn.Module) -> bool:
+def _module_has_meta_tensors(module: torch.nn.Module) -> bool:
     return any(
         getattr(t, "is_meta", False)
         for t in (
