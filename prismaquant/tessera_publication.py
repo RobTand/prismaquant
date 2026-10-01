@@ -93,18 +93,24 @@ class PublicationJob:
     ``key`` names the job to the caller; the campaign uses
     ``(qname, format_name)``.  ``charged_bytes`` is what the staged bytes cost
     while they wait.  ``publish`` performs the writes and must be safe to run
-    on a thread other than the one that built it.
+    on a thread other than the one that built it. Optional ``dispose`` retires
+    owned resources before reusable credit, including an unpublished queued
+    tail. It must be synchronous, nonblocking, nonthrowing and perform no IO
+    or publisher calls. It must tolerate repeated disposal after refusal.
     """
 
     key: Hashable
     charged_bytes: int
     publish: Callable[[], None]
+    dispose: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         if int(self.charged_bytes) < 0:
             raise ValueError("a publication job cannot be charged negative bytes")
         if not callable(self.publish):
             raise TypeError("a publication job needs a callable to publish with")
+        if self.dispose is not None and not callable(self.dispose):
+            raise TypeError("a publication job disposer must be callable")
 
 
 def _clear_failure_tracebacks(error: BaseException) -> None:
@@ -303,7 +309,7 @@ class BoundedPublisher:
             count = len(self._queued)
             # Drop ownership before notifying reusable credit. A running job
             # is outside this deque and retains its charge until retirement.
-            self._queued.clear()
+            self._dispose_queued_locked()
             self._charged -= charge + self._reserved
             self._outstanding -= count
             self._reserved = self._reserved_jobs = 0
@@ -378,12 +384,19 @@ class BoundedPublisher:
                 "a staged artifact was not published; nothing queued behind "
                 "the failure was written") from self._failure
 
+    def _dispose_queued_locked(self) -> None:
+        """Retire each queued resource before dropping its owning job."""
+        while self._queued:
+            job = self._queued.popleft()
+            if job.dispose is not None:
+                job.dispose()
+
     def _fail_locked(self, error: BaseException) -> None:
         """Cancel queued ownership before returning its staging credit."""
         if self._failure is None:
             _clear_failure_tracebacks(error)
             self._failure = error
-        self._queued.clear()
+        self._dispose_queued_locked()
         self._charged = self._reserved = self._outstanding = self._reserved_jobs = 0
         self._task_active = False
         self._cond.notify_all()
@@ -432,7 +445,11 @@ class BoundedPublisher:
                 job = self._queued.popleft()
             started = time.monotonic()
             try:
-                job.publish()
+                try:
+                    job.publish()
+                finally:
+                    if job.dispose is not None:
+                        job.dispose()
             except BaseException as exc:  # noqa: BLE001 - recorded and re-raised
                 _clear_failure_tracebacks(exc)
                 del job

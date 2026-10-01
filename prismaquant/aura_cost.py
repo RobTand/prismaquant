@@ -369,6 +369,18 @@ def _load_aura_unit_checkpoint(
             f"AURA unit checkpoint {path} is corrupt for {qname}; refusing "
             "reuse or recompute"
         ) from exc
+    return _decode_aura_unit_checkpoint(
+        envelope, path=path, qname=qname, identity_sha256=identity_sha256)
+
+
+def _decode_aura_unit_checkpoint(
+    envelope: object,
+    *,
+    path: Path,
+    qname: str,
+    identity_sha256: str,
+) -> dict[str, object]:
+    """Validate and decode one envelope using the existing checkpoint contract."""
     if not isinstance(envelope, Mapping):
         raise RuntimeError(
             f"AURA unit checkpoint {path} is not an envelope for {qname}; "
