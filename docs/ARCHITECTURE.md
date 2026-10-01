@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1909, Refs #1100): text-only staging separates
+its initial config input from profile-driven transformation, and obtains that
+input through the existing lifetime-pinned metadata-text reader. An active
+policy refuses missing or damaged material rather than opening the source pool.
+Inactive decoding, transform keys, config output, staging roots, public wrappers
+and the no-rewrite canonical return path are unchanged. This first input does
+not cover AutoConfig's subsequent reads, remote-code execution or the broader
+worker header audit. No new stager/cache, numerical method, schema, runtime pin,
+export wire, default or serving gate; CPU fixtures are not model/GPU admission.
+
 Re-stamped 2026-10-01 (PQ #1892, Refs #1885): the pure initialization owner
 provides a metadata-only merge of completed selected witnesses. A mandatory,
 typed expected complete census contract is validated first; contiguous,
