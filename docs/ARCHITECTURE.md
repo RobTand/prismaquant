@@ -1,5 +1,28 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1864): the Tessera lane's `load_generate.graph`
+gate names GLM-5.3's graph configuration. The T-8 release serve passes
+`--compilation-config '{"mode":"NONE","cudagraph_mode":"FULL_DECODE_ONLY"}'`
+with `VLLM_USE_BREAKABLE_CUDAGRAPH=0` (tessera#774): vLLM's default
+`VLLM_COMPILE` on GLM5-next resolves its custom ops and norms to their eager
+fallbacks (tessera#702 cause 1). Measured at TP 2 on image `5be13705`: L8192
+c1 prefill +6.4%, with the eager TR3 panel bit-identical (0.027885896312391557,
+25 windows). The gate description also records the limits: decode under FULL
+graphs past `max_model_len` 2048 is not eager-equivalent (cause 2), and the
+lane's TP 1 reference script cannot serve the GLM-5.3 artifact. Description
+only: no default, stage, format, gate, runner, pin or printed recipe changes.
+
+Re-stamped 2026-10-01 (PQ #1859, scoped prerequisite for #870): the existing
+production-cache render-identity builder and reader refuse distinct canonical
+`qname|format` coordinates that share one legacy archive destination. The gate
+runs before sidecar/shard resume work; canonical format aliases of the same
+coordinate remain legal. It preserves the identity schema, filenames, Torch
+serialization and the render loop. Directory creation may already have occurred.
+This is not produced-render publication, global concurrent-writer ownership or
+a storage-aware archive bound; direct callers outside this identity gate and
+full writer/reader integration remain in #870. No numerical, format, runtime-pin,
+export or serving-gate change. Gate: `tests/test_render_cache_destination_identity.py`.
+
 Re-stamped 2026-10-01 (PQ #1852, Refs #275): local single-file safetensors
 checkpoints derive complete tensor-to-file coverage from the validated file
 header, including auxiliary names absent from the live decoder. An existing
@@ -27047,6 +27070,10 @@ forked runtime. The reference serve script
 (`/home/rob/tessera/experiments/tessera_plugin_served.sh`) and the route census
 (`/home/rob/tessera/tools/tessera_route_census.py`) live in that repository and
 are NAMED by the lane spec, never vendored.
+The graph leg's configuration is vLLM's default compiled forward, except on
+GLM-5.3: its release serve runs compilation mode NONE with FULL_DECODE_ONLY
+graphs, because the default mode resolves that never-compiled model's custom
+ops to their eager fallbacks (the `load_generate.graph` description, PQ #1864).
 
 **The boundary is two objects, both machine-readable.** The pin,
 `prismaquant/tessera_runtime/tessera_serving_runtime_pin.json`
