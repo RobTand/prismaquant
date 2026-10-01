@@ -19,6 +19,26 @@ field follows the existing default-serializer field; its default remains
 use keep their encodings. The new configuration/name is additive. It does not
 redefine compact profiles or merge normalized strict JSON with direct lax JSON.
 
+## Current direct-profile inventory (PQ #1988, Refs #1301)
+
+The shared owner now declares seven direct JSON profiles: `DIRECT_UTF8_STRICT`,
+`DIRECT_UTF8_LAX`, `DIRECT_ASCII_STRICT`, `DIRECT_ASCII_LAX`,
+`DIRECT_ASCII_LAX_DEFAULT_STR`, `DIRECT_ASCII_SPACED_LAX` and
+`DIRECT_ASCII_INDENT2_LAX`. `DIRECT_UTF8_LAX` adds compact sorted Unicode JSON,
+permissive nonfinite tokens, no fallback serializer and strict UTF-8 encoding.
+It is direct encoding, not canonical JSON round-trip normalization.
+
+`footprint.assignment_serialization_sha256` delegates only its final encoding
+to this profile; registry aliases, caller-order coercion/key collisions and
+native refusals stay with the caller, and `bytes_sha256hex` still owns the full
+64-hex digest. The strict UTF-8 profile is not interchangeable: the inherited
+recipe permits nonfinite values, including values returned by registry seams.
+The independent literals and refusal/routing fixtures are in
+`tests/test_assignment_json_profile_1988.py`; existing #1816 cases are unchanged.
+The primitive ratchet removes only this caller's sorted-JSON entry (509 to 508,
+sorted 257 to 256, raw 252 unchanged). No numerical, format, wire, pin, default,
+serving, GPU or performance claim is made.
+
 ## Per-site inventory
 
 ### `CardProvenance.fingerprint`

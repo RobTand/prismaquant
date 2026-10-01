@@ -67,7 +67,6 @@ so an over-budget artifact "fits"). Both are caught in
 from __future__ import annotations
 
 import glob
-import json
 import math
 import os
 import re
@@ -76,7 +75,7 @@ from typing import Iterable, Mapping
 
 from . import format_registry as fr
 from .allocator_solver import _shape_from_stats
-from .digests import bytes_sha256hex
+from .digests import DIRECT_UTF8_LAX, bytes_sha256hex
 from .name_projection import (
     MAPPED,
     NameProjection,
@@ -1207,12 +1206,7 @@ def assignment_serialization_sha256(
         str(name): fr.canonical_format_name(str(fmt).strip().upper())
         for name, fmt in assignment.items()
     }
-    encoded = json.dumps(
-        normalized,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
+    encoded = DIRECT_UTF8_LAX.encoded(normalized)
     return bytes_sha256hex(encoded)
 
 
