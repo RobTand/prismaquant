@@ -183,7 +183,11 @@ def collect_netdata():
 
 def finish_netdata():
     nd.stop(90)
-    if not nd.is_alive():
+    if nd.is_alive():
+        error = 'required Netdata sampler join timed out; final window incomplete'
+        telemetry_errors.append(error)
+        event('netdata_error', error=error)
+    else:
         # Only after the periodic tick joins, retain its last partial interval.
         collect_netdata()
 
