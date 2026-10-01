@@ -132,8 +132,10 @@ def test_cli_records_scope_and_keeps_the_independent_gate(tmp_path, monkeypatch,
         'full_gamut' if include_visual else 'text_artifact')
     assert bool(report['context']['visual_roots']) is include_visual
     assert report['gate']['refused'] is False
-    assert report['gate']['claims_by_disposition']['decide'] == (
-        1 + len(visual) if include_visual else 1)
+    # Legacy Qwen scope excludes the block tower, not its non-block mergers.
+    # The opt-in must not quietly change that existing default control.
+    expected_visual = visual if include_visual else visual[1:]
+    assert report['gate']['claims_by_disposition']['decide'] == 1 + len(expected_visual)
 
 
 @pytest.mark.parametrize('override', [None, 'trace override cannot admit GLM vision'])
