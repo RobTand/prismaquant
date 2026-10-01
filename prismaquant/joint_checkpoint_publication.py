@@ -163,7 +163,7 @@ def owned_builtin_graph(root: dict) -> Iterator[dict]:
         _dispose_owned_containers(containers)
 
 
-def _publish_snapshot(path, *, name, identity_sha256, state, max_bytes, encoded_bytes):
+def _publish_aura_unit_snapshot(path, *, name, identity_sha256, state, max_bytes, encoded_bytes):
     encoded = aura_cost._encode_aura_unit_checkpoint(
         qname=name, identity_sha256=identity_sha256, state=state,
         max_bytes=max_bytes)
@@ -239,7 +239,7 @@ class CheckpointPublicationLedger:
         containers = _owned_mutable_containers(owned)
         return PublicationJob(
             name, self._slot,
-            partial(_publish_snapshot,
+            partial(_publish_aura_unit_snapshot,
                     aura_cost._aura_unit_checkpoint_path(self._root, name),
                     name=name, identity_sha256=self._identity, state=owned,
                     max_bytes=self._slot // 4, encoded_bytes=self._encoded_bytes),
