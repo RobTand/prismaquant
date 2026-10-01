@@ -17,7 +17,6 @@
  "primitive_digest_sites": [
   "hashlib:prismaquant/activation_fair_pricing.py::_rows_digest",
   "hashlib:prismaquant/allocator.py::main",
-  "hashlib:prismaquant/artifact_collection.py::reference_for_record",
   "hashlib:prismaquant/artifact_collection_legacy.py::_load_json_source",
   "hashlib:prismaquant/autoscale.py::streamed_calibration_resources",
   "hashlib:prismaquant/cluster_campaign.py::_file_sha256",
@@ -25,7 +24,6 @@
   "hashlib:prismaquant/cluster_campaign.py::_probe_stage_receipts",
   "hashlib:prismaquant/cluster_campaign.py::canonical_sha256",
   "hashlib:prismaquant/cluster_campaign.py::sealed_stage_receipt_sha256",
-  "hashlib:prismaquant/cost_streaming.py::StreamedBoundaryArtifacts.write_produced_files",
   "hashlib:prismaquant/dsv4_campaign_completion.py::_manifest_scope",
   "hashlib:prismaquant/dsv4_campaign_completion.py::_sha256_bytes",
   "hashlib:prismaquant/dsv4_campaign_completion.py::canonical_sha256",
