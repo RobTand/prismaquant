@@ -118,6 +118,14 @@ def _json(path, value):
     atomic_write_bytes(Path(path), indent2_json_file_bytes(value))
 
 
+def capture_source_files(root):
+    """The source files a capture identity seals: every weight and auxiliary file."""
+    root = Path(root)
+    return sorted(path for path in {*root.glob('*.safetensors'), *root.glob('*.json'),
+                                    *root.glob('*.model'), *root.glob('*.txt')}
+                  if path.is_file())
+
+
 def capture_identity(census_path, *, calibration, max_act_rows,
                      model_load_contract, attention_implementation,
                      resource_check=None, release_read_pages=False,
@@ -146,8 +154,7 @@ def capture_identity(census_path, *, calibration, max_act_rows,
             census.get('attention_implementation') != attention_implementation):
         raise RuntimeError('canonical model initialization, runtime or attention differs from census')
     root = Path(census['model'])
-    files = sorted({*root.glob('*.safetensors'), *root.glob('*.json'),
-                    *root.glob('*.model'), *root.glob('*.txt')})
+    files = capture_source_files(root)
     if not files or not (root / 'config.json').is_file():
         raise RuntimeError('calibration capture needs a complete local source checkpoint')
     hashing = dict(resource_check=resource_check, release_read_pages=release_read_pages)
@@ -817,14 +824,56 @@ def fold_load_receipt(execution, receipt):
         execution['ordered_load_identities_sha256'], receipt['identity_sha256'])
 
 
+def capture_entry_fingerprint(path):
+    """The stat fingerprint of one regular, nonsymlink capture entry file."""
+    from .cost_streaming import stat_fingerprint
+    observed = Path(path).lstat()
+    if not stat.S_ISREG(observed.st_mode):
+        raise RuntimeError(f'{path}: capture entry must be a regular nonsymlink file')
+    return stat_fingerprint(str(path), observed)
+
+
+def _reverify_capture_entry(path, name, record, *, census, max_rows, execution,
+                            resource_check=None, release_file_pages=False, file_stat=None):
+    """Hash and validate one written entry; True when the read released its pages."""
+    import torch
+    if execution is None:
+        if sha256(path) != record['sha256']:
+            raise RuntimeError(f'{name}: capture artifact checksum mismatch')
+        _validate_tensors(name, torch.load(path, map_location='cpu', weights_only=True),
+                          census, max_rows)
+        return False
+    payload, _receipt = _verified_capture_entry(path, name, expected_sha256=record['sha256'],
+        census=census, max_rows=max_rows, policy=execution['policy'],
+        execution=execution, resource_check=resource_check,
+        release_file_pages=release_file_pages, expected_stat=file_stat)
+    del payload, _receipt
+    return True
+
+
+def _require_verified_entry(path, name, record, verified):
+    """An entry a chain quantum re-verified, still the object it verified."""
+    from .cost_streaming import stat_fingerprint_reusable
+    if (not isinstance(verified, dict) or verified.get('sha256') != record['sha256']
+            or verified.get('path') != record['path']):
+        raise RuntimeError(f'{name}: verified capture record differs from the journal')
+    if not stat_fingerprint_reusable(capture_entry_fingerprint(path), verified.get('fingerprint')):
+        raise RuntimeError(f'{name}: capture entry changed since its quantum verified it')
+
+
 def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
                     counts=None, maxima=None, existing_entries=None,
                     release_file_pages=False, resource_check=None,
-                    verified_load_policy=None, load_execution=None):
+                    verified_load_policy=None, load_execution=None, verified=None):
     """Seal a complete capture, journalling per-unit file receipts atomically.
 
     ``existing_entries`` seals a previously measured raw capture without another
     model forward. Its bytes receive exactly the ordinary writer's validation.
+
+    ``verified`` maps a unit to the record a capture chain quantum re-verified
+    (sha256 and tensor validation) and the stat fingerprint it took then
+    (PQ #1885). Such an entry is held to that fingerprint instead of being
+    read again.
     """
     import torch
     from .perturbed_x_cache import activation_cache_filename, write_activation_cache_entry
@@ -866,19 +915,16 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
             if record.get('path') != str(expected_path):
                 raise RuntimeError(f'{name}: capture file is outside its canonical location')
             path = root/expected_path
-            file_stat = path.stat() if release_file_pages else None
-            if execution is None:
-                if sha256(path) != record['sha256']:
-                    raise RuntimeError(f'{name}: capture artifact checksum mismatch')
-                _validate_tensors(name,torch.load(path,map_location='cpu',weights_only=True),
-                                  census,identity['max_act_rows'])
-            else:
-                payload, _receipt = _verified_capture_entry(path, name, expected_sha256=record['sha256'],
-                    census=census, max_rows=identity['max_act_rows'], policy=execution['policy'],
-                    execution=execution, resource_check=resource_check,
-                    release_file_pages=release_file_pages, expected_stat=file_stat)
-                del payload, _receipt
+            if verified is not None and name in verified:
+                # Nothing is read, so there are no pages to release.
+                _require_verified_entry(path, name, record, verified[name])
                 loaded_verified = True
+            else:
+                file_stat = path.stat() if release_file_pages else None
+                loaded_verified = _reverify_capture_entry(path, name, record, census=census,
+                    max_rows=identity['max_act_rows'], execution=execution,
+                    resource_check=resource_check, release_file_pages=release_file_pages,
+                    file_stat=file_stat)
         if release_file_pages and not loaded_verified:
             from .perturbed_x_cache import release_activation_cache_file_pages
             release_activation_cache_file_pages(path, expected_stat=file_stat)
@@ -1000,7 +1046,31 @@ class CaptureWriter:
             if self.resource_check is not None:
                 self.resource_check(f'after_capture_write:{name}')
 
-    def finish(self, *, model_load_contract):
+    def verify_entries(self, names):
+        """Re-read this process's entries once, as the seal would, and fingerprint them.
+
+        A capture chain quantum (PQ #1885) runs the seal's sha256 and tensor
+        validation over its own units, so the join publishes without reading
+        1.68 TB again: it holds each entry to the fingerprint returned here.
+        """
+        verified = {}
+        for name in sorted(names):
+            record = self.records.get(name)
+            if record is None:
+                raise RuntimeError(f'{name}: this capture process wrote no entry to verify')
+            path = self.root/record['path']
+            file_stat = path.stat() if self.release_file_pages else None
+            loaded = _reverify_capture_entry(path, name, record, census=self.census,
+                max_rows=self.identity['max_act_rows'], execution=self.load_execution,
+                resource_check=self.resource_check, release_file_pages=self.release_file_pages,
+                file_stat=file_stat)
+            if self.release_file_pages and not loaded:
+                from .perturbed_x_cache import release_activation_cache_file_pages
+                release_activation_cache_file_pages(path, expected_stat=file_stat)
+            verified[name] = dict(record, fingerprint=capture_entry_fingerprint(path))
+        return verified
+
+    def finish(self, *, model_load_contract, verified=None):
         from prismaquant import validate_source_initialization_contract
         actual = validate_source_initialization_contract(model_load_contract)
         if actual != self.identity['model_load_contract']:
@@ -1010,10 +1080,14 @@ class CaptureWriter:
             self.seal_load_execution = {}
             extra = dict(verified_load_policy=self.load_execution['policy'],
                          load_execution=self.seal_load_execution)
+        # The journal's completed records too: a capture chain's units were
+        # written by earlier processes (PQ #1885). After a whole traversal
+        # this process's records already cover them.
         return publish_capture(self.root, census_path=self.census_path,
-                               identity=self.identity, existing_entries=self.records,
+                               identity=self.identity,
+                               existing_entries={**self.completed, **self.records},
                                release_file_pages=self.release_file_pages,
-                               resource_check=self.resource_check, **extra)
+                               resource_check=self.resource_check, verified=verified, **extra)
 
 
 def require_capture_contract(path, expected_sha256=None):

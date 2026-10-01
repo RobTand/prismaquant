@@ -97,6 +97,50 @@ from .streaming_initialization import (
 )
 
 
+def merge_selected_initialization_witnesses(witnesses):
+    """The full source-forward contract of disjoint selected witnesses (PQ #1885).
+
+    A capture chain runs each layer range in its own process, and each
+    process attests the head and the layers it installed. Together they
+    attest what one complete traversal does: every witness must name one
+    loader, model and source map, carry byte-identical head records, and the
+    observed layers must tile every source layer exactly once. The result is
+    what :meth:`_StreamingInitializationAudit.complete` returns for the union
+    of their records.
+    """
+    witnesses = [validate_streaming_selected_initialization_witness(value)
+                 for value in witnesses]
+    if not witnesses:
+        raise ValueError("a merged initialization contract needs at least one witness")
+    shared = ("transformers_version", "model_class", "dtype", "layers_prefix",
+              "total_model_layers", "head_state_names", "source_map_sha256")
+    first = witnesses[0]
+    heads = first["head_state_names"]
+    state, seen = {}, []
+    for witness in witnesses:
+        differs = [key for key in shared if witness[key] != first[key]]
+        if differs:
+            raise ValueError(f"selected witnesses disagree about {differs}")
+        if any(witness["state"][name] != first["state"][name] for name in heads):
+            raise ValueError("selected witnesses disagree about a head record")
+        seen.extend(witness["observed_layers"])
+        state.update(witness["state"])
+    if sorted(seen) != list(range(first["total_model_layers"])):
+        raise ValueError("selected witnesses do not observe every source layer exactly once")
+    return validate_streaming_initialization_contract({
+        "schema": _STREAMING_INITIALIZATION_SCHEMA,
+        "scope": "streamed_text_source_forward", "status": "completed",
+        "transformers_version": first["transformers_version"],
+        "model_class": first["model_class"], "dtype": first["dtype"],
+        "layers_prefix": first["layers_prefix"],
+        "num_layers": first["total_model_layers"],
+        "persistent_tensors": sum(r["kind"] == "checkpoint" for r in state.values()),
+        "derived_buffers": sum(r["kind"] == "derived_buffer" for r in state.values()),
+        "state_sha256": _initialization_digest(state),
+        "source_map_sha256": first["source_map_sha256"],
+    })
+
+
 _MTP_LAYER_INITIALIZATION_SCHEMA = "prismaquant.mtp_layer_initialization.v1"
 
 
