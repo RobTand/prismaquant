@@ -6019,7 +6019,12 @@ def _main(argv, *, source_scope) -> int:
         )
     model.eval()
     if saved_calibration is not None:
-        vocab_size = model.config.vocab_size
+        # The decoder's vocabulary: a multimodal wrapper config (GLM-5.3's Glm5NextConfig) keeps
+        # vocab_size on its text sub-config, and get_text_config() returns a text-only config
+        # itself (#1913).
+        config = model.config
+        text_config = config.get_text_config() if hasattr(config, "get_text_config") else config
+        vocab_size = getattr(text_config, "vocab_size", None)
         if type(vocab_size) is not int or vocab_size < 1:
             raise ValueError("exact calibration input requires a positive model vocab_size")
         if any(bool((batch >= vocab_size).any()) for batch in saved_calibration[0]):
