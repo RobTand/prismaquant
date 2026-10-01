@@ -142,7 +142,9 @@ def _sync_count(fn):
         finally:
             torch.cuda.set_sync_debug_mode("default")
     torch.cuda.synchronize()
-    return sum("synchroniz" in str(w.message) for w in caught)
+    # The exact sync warning: the once-per-process prototype notice also says
+    # "synchronizing" and is not a sync.
+    return sum("called a synchronizing CUDA operation" in str(w.message) for w in caught)
 
 
 def _profile(fn):
