@@ -104,3 +104,38 @@ def test_terminal_readiness_refusal_never_opens_payload(cell, monkeypatch):
     monkeypatch.setattr(m, '_read_verified_wire_blob', lambda c: pytest.fail('foreign bytes reached payload read'))
     with pytest.raises(TierPolicyRefused):
         m.read_cell(cell)
+
+
+@pytest.mark.parametrize('decoder_fails', [False, True])
+def test_render_decode_uses_closed_sealed_buffer(cell, monkeypatch, decoder_fails):
+    from prismaquant.io_engine import SealedBuffer
+
+    captured = []
+    original_decode = m.ProductionWeightCache._decode_file_tensor
+
+    class DecodeStopped(Exception):
+        pass
+
+    def observe_qualifier_decode(self, entry, raw, receipt, staged):
+        captured.append(raw)
+        if decoder_fails:
+            raise DecodeStopped()
+        return original_decode(self, entry, raw, receipt, staged)
+
+    monkeypatch.setattr(m.ProductionWeightCache, '_decode_file_tensor',
+                        observe_qualifier_decode)
+    if decoder_fails:
+        with pytest.raises(DecodeStopped):
+            m.read_cell(cell)
+    else:
+        loaded = m.read_cell(cell)
+        tensor = loaded[3]
+        assert isinstance(tensor, torch.Tensor)
+        assert torch.equal(tensor, torch.arange(8, dtype=torch.bfloat16).reshape(2, 4))
+        original_bytes = Path(cell['render']).read_bytes()
+        tensor[0, 0] += 1
+        assert Path(cell['render']).read_bytes() == original_bytes
+    assert len(captured) == 1
+    assert isinstance(captured[0], SealedBuffer), 'qualification render copied verified bytes'
+    with pytest.raises(RuntimeError, match='sealed io buffer is closed'):
+        _ = captured[0].path
