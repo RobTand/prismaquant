@@ -437,7 +437,7 @@ def main(argv=None) -> int:
     if argv[:1] == ["forward"]:
         return forward_main(argv[1:])
 
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--original-manifest", required=True,
                         help="the source run's submitted Stage A data manifest")
     parser.add_argument("--original-manifest-sha256", required=True)
