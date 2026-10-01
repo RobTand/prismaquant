@@ -196,12 +196,17 @@ class SourceEvents:
         import safetensors
         from prismaquant import tessera_calibration_cache as cc, layer_streaming as ls, streaming_model as sm
         original = cc.sha256
+        # One cProfile can be enabled per process at a time (sys.monitoring),
+        # and capture identity hashes files together on the IO engine since
+        # PQ #1887; profile whichever hash holds the slot, time all of them.
+        profiler_slot = threading.Lock()
         def hashed(path, **kwargs):
             name = self.name(path)
             if name is None:
                 return original(path, **kwargs)
             started, before = time.monotonic(), proc_io()
-            profile = cProfile.Profile() if threading.current_thread() is not threading.main_thread() else None
+            profile = (cProfile.Profile() if threading.current_thread() is not threading.main_thread()
+                       and profiler_slot.acquire(blocking=False) else None)
             if profile is not None:
                 profile.enable()
             try:
@@ -215,6 +220,7 @@ class SourceEvents:
             finally:
                 if profile is not None:
                     profile.disable()
+                    profiler_slot.release()
                     profile.dump_stats(str(self.output/f'{self.arm}-{threading.get_ident()}-{name}.cprofile'))
         def factory(original_open):
             def opened(path, *args, **kwargs):

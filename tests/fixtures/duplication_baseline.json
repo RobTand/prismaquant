@@ -338,7 +338,6 @@
   "sorted-json:prismaquant/prismasnap_checkpoint.py::_atomic_json",
   "sorted-json:prismaquant/prismasnap_validation.py::attest_fold_fidelity",
   "sorted-json:prismaquant/production_cache_stripes.py::write_plan",
-  "sorted-json:prismaquant/production_weight_cache.py::_canonical_json_sha256",
   "sorted-json:prismaquant/production_weight_cache.py::_check_and_record_append_identity",
   "sorted-json:prismaquant/production_weight_cache.py::_check_production_cache_render_identity",
   "sorted-json:prismaquant/production_weight_cache.py::_merge_packed_pair_map_or_refuse",

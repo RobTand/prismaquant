@@ -4,6 +4,7 @@ from __future__ import annotations
 import gc
 import os
 import sys
+import threading
 import weakref
 from pathlib import Path
 from typing import Iterable
@@ -400,6 +401,11 @@ class CaptureMemoryGuard:
         # Per reclaimer name, cumulative: how often a check asked it or
         # skipped it, and what the readings did around each ask (PQ #1383).
         self.reclaim_counters = {}
+        # One check at a time: ``_check`` reads, reclaims and then writes
+        # ``last``, ``baseline``, the peaks and ``failure``. The capture
+        # identity hashes call it from the IO engine's threads (PQ #1887).
+        # Reentrant, in case a reclaimer checks again.
+        self._check_lock = threading.RLock()
         # ``check`` is an INSTANCE ATTRIBUTE holding a closure, not the method:
         # the callers hand ``guard.check`` to a reader as a ``resource_check``
         # callable, and a capability has to travel with THAT object. A bound
@@ -407,8 +413,9 @@ class CaptureMemoryGuard:
         # is invisible to ``getattr(guard.check, ...)`` and every split caller
         # would silently fall back to the conservative sum.
         def check(label, *, reserve_bytes=0, reserve_device_bytes=0):
-            return self._check(label, reserve_bytes=reserve_bytes,
-                               reserve_device_bytes=reserve_device_bytes)
+            with self._check_lock:
+                return self._check(label, reserve_bytes=reserve_bytes,
+                                   reserve_device_bytes=reserve_device_bytes)
         check.separates_cpu_and_device_reservations = self.separate_reservations
         check.__name__ = "check"
         check.__qualname__ = f"{type(self).__name__}.check"
