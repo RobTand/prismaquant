@@ -1588,7 +1588,7 @@ class ModelProfile(ABC):
         Override to extend, not to weaken: profiles append architecture
         rules (or prepend more specific ones) and return the base list for
         everything the architecture does not special-case. A profile that
-        removes rule 8 turns every Linear into a walk failure, which is loud
+        removes rule 11 turns every Linear into a walk failure, which is loud
         by design.
         """
         from prismaquant.model_walk import ClaimRule

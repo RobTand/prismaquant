@@ -485,7 +485,7 @@ class DeepseekV4Profile(ModelProfile):
             ),
             ClaimRule(
                 "pin",
-                "compressor/indexer Linear: the gridbook D0.1 serve "
+                "compressor/indexer Linear: the profile's serving "
                 "contract keeps these leaves source-format; charged to the "
                 "immutable floor (see probe_linear_exclude_extra)",
                 name_regex=self.probe_linear_exclude_extra(),
