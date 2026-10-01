@@ -33,18 +33,20 @@ def _envelopes(campaign):
     return {path.name: path.read_bytes() for path in (_journal(campaign) / "units").glob("*.pkl")}
 
 
-def _enable(monkeypatch, budget=BUDGET):
+def _enable(monkeypatch, budget=BUDGET, *, max_jobs=None):
     original = quantum.run_layer_quantum_core
 
     def launch(*args, **kwargs):
         kwargs["execution"] = {
             **kwargs["execution"], "checkpoint_publication_budget_bytes": budget}
+        if max_jobs is not None:
+            kwargs["execution"]["checkpoint_publication_max_jobs"] = max_jobs
         return original(*args, **kwargs)
 
     monkeypatch.setattr(quantum, "run_layer_quantum_core", launch)
 
 
-def test_next_real_window_replays_before_held_publication(campaign, monkeypatch):
+def test_next_real_window_replays_before_held_serialization(campaign, monkeypatch):
     assert campaign.device.type == "cpu", "submit this CPU fixture on x86"
     assert len(campaign.preflight[1]) > 1
     _clear(campaign)
@@ -54,16 +56,16 @@ def test_next_real_window_replays_before_held_publication(campaign, monkeypatch)
     second_replay = threading.Event()
     seen = {"window": None, "durable": 0, "advanced": False, "worker": None}
     consumer = threading.get_ident()
-    atomic = aura.atomic_write_bytes
+    encode = aura._encode_aura_unit_checkpoint
     observe = replay_module.observe_and_project_retained_windows
     commit = quantum.QuantumProgress.commit
 
-    def held_write(path, body):
-        if Path(path).suffix == ".pkl" and not writer_started.is_set():
+    def held_encode(**kwargs):
+        if not writer_started.is_set():
             seen["worker"] = threading.get_ident()
             writer_started.set()
-            assert release_writer.wait(30), "test writer was not released"
-        atomic(path, body)
+            assert release_writer.wait(30), "test encoder was not released"
+        return encode(**kwargs)
 
     def progress_commit(self):
         seen["durable"] = self.units()
@@ -93,7 +95,7 @@ def test_next_real_window_replays_before_held_publication(campaign, monkeypatch)
         finally:
             release_writer.set()
 
-    monkeypatch.setattr(aura, "atomic_write_bytes", held_write)
+    monkeypatch.setattr(aura, "_encode_aura_unit_checkpoint", held_encode)
     monkeypatch.setattr(quantum.QuantumProgress, "commit", progress_commit)
     monkeypatch.setattr(replay_module, "observe_and_project_retained_windows", instrument)
     controller = threading.Thread(target=control, name="checkpoint-test-control")
@@ -105,20 +107,21 @@ def test_next_real_window_replays_before_held_publication(campaign, monkeypatch)
         controller.join(30)
     assert not controller.is_alive()
     assert payload is not None, getattr(state, "error", None)
-    assert seen["advanced"], "next retained replay waited for the held unit write"
+    assert seen["advanced"], "next retained replay waited for held unit serialization"
     assert seen["before_ack"] == 0, "unacknowledged units became durable progress"
     assert seen["worker"] != consumer, "durable publication ran on the consumer"
     assert seen["durable"] == len(payload["costs"])
 
 
-def test_sync_async_envelopes_and_complete_resume_are_exact(campaign, monkeypatch):
+@pytest.mark.parametrize("max_jobs", [None, 1, 4])
+def test_sync_async_envelopes_and_complete_resume_are_exact(campaign, monkeypatch, max_jobs):
     assert campaign.device.type == "cpu"
     _clear(campaign)
     synchronous, state = _quantum(campaign, monkeypatch, layer=1)
     assert synchronous is not None, getattr(state, "error", None)
     expected = _envelopes(campaign)
     _clear(campaign)
-    _enable(monkeypatch)
+    _enable(monkeypatch, max_jobs=max_jobs)
     asynchronous, state = _quantum(campaign, monkeypatch, layer=1)
     assert asynchronous is not None, getattr(state, "error", None)
     assert _envelopes(campaign) == expected

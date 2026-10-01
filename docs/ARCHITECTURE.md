@@ -269,6 +269,35 @@ priced before are byte-identical. No default, stage, export or serving gate
 changes; whether a runtime routes a 128-column unit natively stays the
 route-status gate's question. Gate: `tests/test_tessera_partial_superblock.py`.
 
+Re-stamped 2026-10-01 (PQ #1367, `sol/pq-stageb-7`): the opt-in bounded
+checkpoint publisher now snapshots an owned builtin graph on the consumer and
+runs the existing pickle/hash/envelope encoder and atomic write on the shared
+IO engine. Owned mutable cycle edges are disposed deterministically before
+success, failure, queued cancellation or refused-submission credit returns;
+this does not depend on cyclic GC or mutate the consumer's input. Credits still
+cover snapshot/encoder ownership, acknowledgements remain durable-only, and
+the default synchronous path and bytes are unchanged.
+The optional positive `checkpoint_publication_max_jobs` caps the existing
+finite window-derived geometry without expanding it, so larger bounded host
+graphs can use fewer staging slots instead of inflating memory reservations.
+It requires a positive publication byte budget; absent retains the prior geometry.
+Host-checkpoint replay is the authorized CPU/equivalence acceptance: it uses
+fresh output namespaces and the existing measured states, checks exact
+synchronous/shared-engine file digests, durable acknowledgements and resume,
+and records encoder thread ownership. Its source factory checks an explicit
+size-derived builtin decode allowance before allocation, refuses reducers and
+sparse memo tables, and shares the existing AURA envelope/integrity decoder
+without loading the envelope twice. Decoder-owned envelope and state graphs
+have scoped leases: cycle edges retire after synchronous encoding or after the
+ledger freezes its copy, including failure and refusal exits. Published input
+files and borrowed consumer graphs are never mutated. Its balanced host partitions are not
+claimed to reproduce the GPU row's resolved window membership. Representative
+before/after in-process profiles, next-window GPU lag and both-box Netdata are a
+carried obligation under #1253 on the next real Stage B production run, not a
+dedicated bulk rerun. No measured 22.6-second reduction, GPU overlap or default
+promotion is claimed from host replay. The replay entry point is
+`experiments/stageb_checkpoint_host_replay.py`.
+
 Re-stamped 2026-09-30 (PQ #1843, step 1 of #1842): the Tessera campaign
 takes `--allow-pinned` (the allocator's grammar) and `--pinned-roster-only`,
 so a census can name a scoped roster of profile-pinned Linears (GLM-5.3
@@ -513,11 +542,14 @@ Re-stamped 2026-09-30 (PQ #1786, Refs #1367, `sol/pq-stageb-3`):
 Stage B has an explicitly opt-in host publication path selected by the runtime
 execution setting `checkpoint_publication_budget_bytes`. Absent/zero retains
 the synchronous default; invalid or too-small bounds refuse. It reserves host
-staging before constructing/encoding each tensor-free unit snapshot, uses a
-conservative builtin-graph bound and capped encoder, and sends only immutable
-existing envelope bytes plus a destination to the shared IO engine. The job
-ceiling is derived from two sealed windows, with at most two pending window
-records; acknowledged metadata is reaped before a full ceiling is reserved.
+staging before constructing each tensor-free unit snapshot, uses a conservative
+builtin-graph bound and capped encoder, and sends an owned builtin snapshot
+plus a destination to the shared IO engine. Serialization, payload hashing,
+envelope encoding and atomic publication run on that engine, not the consumer. The job
+ceiling defaults to two sealed windows and can be reduced by the strict positive
+`checkpoint_publication_max_jobs` execution setting, with at most two pending
+window records. Invalid limits, or a limit without a positive byte budget,
+refuse; acknowledged metadata is reaped before a full ceiling is reserved.
 The consumer keeps measured, submitted and durably acknowledged units distinct.
 Only durable acknowledgements price units or advance the ready window prefix,
 including validated resumed windows. Executable read phases remain monotonic
@@ -532,7 +564,8 @@ core comparisons are not cross-plan equivalence. Existing plan/record
 bindings are not removed or rewritten. The default writer, internal unit encoding/schema,
 render/capture arithmetic, serving/export bytes, pin and stage graph remain
 unchanged. This CPU integration remains research opt-in: #1367's authorized
-before/after in-process profiles and both-Spark Netdata are HELD, with no speed,
+before/after in-process profiles and both-Spark Netdata were authorized by the
+14:15Z and 20:30Z coordinator rulings but remain unmeasured, with no speed,
 residency, peak-memory or unchanged-wait claim from CPU barrier tests.
 
 Re-stamped 2026-09-30 (PQ #1789, Refs #1314): campaign `check` and

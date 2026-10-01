@@ -1,13 +1,17 @@
 """Consumer-owned durable frontier over the existing bounded IO publisher.
 
 This optional host path changes scheduling, not unit encoding or measurement
-identity. IO workers receive only a destination and immutable envelope bytes.
+identity. IO workers receive only a destination and an owned builtin snapshot;
+serialization, hashing and atomic publication run on the existing IO engine.
 """
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from functools import partial
+from copy import deepcopy
+from threading import Lock
 import sys
 
 from . import aura_cost
@@ -15,6 +19,7 @@ from .io_engine import ENGINE
 from .tessera_publication import BoundedPublisher, PublicationError, PublicationJob
 
 SETTING = "checkpoint_publication_budget_bytes"
+JOBS_SETTING = "checkpoint_publication_max_jobs"
 # Two pickle frame buffers, traversal/memo overhead and small encoder objects.
 # Input graph objects are conservatively counted too, even when already resident.
 ENCODER_FIXED_BYTES = 1 << 20
@@ -29,9 +34,21 @@ def publication_budget(value: object) -> int:
     return value
 
 
-def publication_geometry(budget: int, windows: Sequence[Mapping]) -> tuple[int, int]:
+def publication_job_limit(value: object, *, budget: int) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or value <= 0 or budget <= 0:
+        raise ValueError(f"{JOBS_SETTING} requires a positive integer and publication budget")
+    return value
+
+
+def publication_geometry(budget: int, windows: Sequence[Mapping], *,
+                         max_jobs: int | None = None) -> tuple[int, int]:
     jobs = 2 * max((len(window["names"]) for window in windows), default=1)
     jobs = max(2, jobs)
+    limit = publication_job_limit(max_jobs, budget=budget)
+    if limit is not None:
+        jobs = min(jobs, limit)
     slot = budget // jobs
     if budget and slot <= ENCODER_FIXED_BYTES:
         raise ValueError(f"{SETTING} is too small for {jobs} bounded staging slots")
@@ -92,14 +109,77 @@ def check_construction(*, references: object, rows: int, probes: int,
     snapshot_bound(references, limit=limit - extra)
 
 
+class _EncodedBytes:
+    """Small shared accounting, never a reference to consumer state or progress."""
+
+    def __init__(self):
+        self._lock = Lock()
+        self._value = 0
+
+    def add(self, size: int) -> None:
+        with self._lock:
+            self._value += size
+
+    def value(self) -> int:
+        with self._lock:
+            return self._value
+
+
+def _owned_mutable_containers(root: object) -> list[dict | list]:
+    """Prepare retirement while reserved, over an already validated graph."""
+    pending, seen, containers = [root], set(), []
+    while pending:
+        value = pending.pop()
+        if type(value) not in (dict, list, tuple) or id(value) in seen:
+            continue
+        seen.add(id(value))
+        if type(value) is dict:
+            containers.append(value)
+            pending.extend(value.values())
+        elif isinstance(value, (list, tuple)):
+            if type(value) is list:
+                containers.append(value)
+            pending.extend(value)
+    return containers
+
+
+def _dispose_owned_containers(containers: list[dict | list]) -> None:
+    """Break owned mutable cycle edges without GC or a cleanup allocation."""
+    while containers:
+        containers.pop().clear()
+
+
+@contextmanager
+def owned_builtin_graph(root: dict) -> Iterator[dict]:
+    """Lease a decoder-owned builtin graph; retire it on every scoped exit.
+
+    Never pass a borrowed consumer graph. The caller must have bounded and
+    validated construction before entering this ownership-transfer contract.
+    """
+    containers = _owned_mutable_containers(root)
+    try:
+        yield root
+    finally:
+        _dispose_owned_containers(containers)
+
+
+def _publish_aura_unit_snapshot(path, *, name, identity_sha256, state, max_bytes, encoded_bytes):
+    encoded = aura_cost._encode_aura_unit_checkpoint(
+        qname=name, identity_sha256=identity_sha256, state=state,
+        max_bytes=max_bytes)
+    encoded_bytes.add(len(encoded))
+    aura_cost.atomic_write_bytes(path, encoded)
+
+
 class CheckpointPublicationLedger:
     """Bounded measured/submitted/durable state; all methods run on consumer."""
 
     def __init__(self, *, checkpoint_root, identity_sha256: str,
                  windows: Sequence[Mapping], completed: set[str],
                  acknowledge: Callable[[], None], window_done: Callable[[int], None],
-                 budget_bytes: int):
-        self._jobs, self._slot = publication_geometry(budget_bytes, windows)
+                 budget_bytes: int, max_jobs: int | None = None):
+        self._jobs, self._slot = publication_geometry(
+            budget_bytes, windows, max_jobs=max_jobs)
         self._publisher = BoundedPublisher(
             budget_bytes=budget_bytes, max_jobs=self._jobs,
             submit_task=ENGINE.submit, name="stage-b-unit-checkpoint")
@@ -112,7 +192,8 @@ class CheckpointPublicationLedger:
         self._windows: deque[tuple[int, tuple[str, ...]]] = deque()
         self._next_window = 0
         self._closed = False
-        self._submitted_count = self._acknowledged_count = self._encoded_bytes = 0
+        self._submitted_count = self._acknowledged_count = 0
+        self._encoded_bytes = _EncodedBytes()
         self._peak_windows = 0
 
     def _accept(self, keys) -> None:
@@ -150,14 +231,19 @@ class CheckpointPublicationLedger:
     def _freeze(self, name: str, state_factory: Callable[[int], Mapping]) -> PublicationJob:
         state = state_factory(self._slot)
         snapshot_bound(state, limit=self._slot)
-        encoded = aura_cost._encode_aura_unit_checkpoint(
-            qname=name, identity_sha256=self._identity, state=state,
-            max_bytes=self._slot // 4)
-        self._encoded_bytes += len(encoded)
+        # Builtin validation above prevents custom reducers. deepcopy preserves
+        # aliases/cycles and therefore the existing pickle byte representation,
+        # without lending mutable rows or identity graphs to an IO worker.
+        # The reservation includes this copy, encoder buffers and memo tables.
+        owned = deepcopy(state)
+        containers = _owned_mutable_containers(owned)
         return PublicationJob(
             name, self._slot,
-            partial(aura_cost.atomic_write_bytes,
-                    aura_cost._aura_unit_checkpoint_path(self._root, name), encoded))
+            partial(_publish_aura_unit_snapshot,
+                    aura_cost._aura_unit_checkpoint_path(self._root, name),
+                    name=name, identity_sha256=self._identity, state=owned,
+                    max_bytes=self._slot // 4, encoded_bytes=self._encoded_bytes),
+            dispose=partial(_dispose_owned_containers, containers))
 
     def submit(self, name: str, state_factory: Callable[[int], Mapping]) -> bool:
         self.poll()
@@ -168,9 +254,13 @@ class CheckpointPublicationLedger:
         if len(self._submitted) == self._jobs:
             self.flush()
         self._publisher.reserve(self._slot)
+        job = None
         try:
-            self._publisher.submit(self._freeze(name, state_factory))
+            job = self._freeze(name, state_factory)
+            self._publisher.submit(job)
         except BaseException:
+            if job is not None and job.dispose is not None:
+                job.dispose()
             self._publisher.release(self._slot)
             raise
         self._submitted.add(name)
@@ -206,5 +296,5 @@ class CheckpointPublicationLedger:
                 "windows_pending_peak": self._peak_windows,
                 "submitted_units": self._submitted_count,
                 "acknowledged_units": self._acknowledged_count,
-                "encoded_bytes": self._encoded_bytes,
+                "encoded_bytes": self._encoded_bytes.value(),
                 "pending_units": len(self._submitted), "closed": self._closed}
