@@ -584,13 +584,10 @@ def _format_cli_choices() -> tuple[str, ...]:
 # passthrough behavior; quantized formats shrink the tower to quantized
 # storage using the same math the body gets.
 #
-# Phase 2 (tracked separately) will replace this override with a real
-# multimodal Fisher: load images + text, run full forward through the
-# visual encoder → projector → body LM, capture per-Linear empirical Fisher
-# gradients, and feed those into the allocator's closed-form Δloss. That
-# requires a multimodal dataset loader, multimodal tokenizer wiring, and a
-# probe path that doesn't strip the visual tower — none of which ship in
-# Phase 1.
+# The existing multimodal probe/cost paths can instead supply measured visual
+# Fisher inputs. Complete measured populations remain per-Linear DP units;
+# this uniform override is only the explicit/text-only control. Neither path
+# relaxes a container's independent export or serving qualification gates.
 _VISUAL_PREFIX_RE = re.compile(r"^(?:model\.)?visual\.")
 
 
@@ -603,6 +600,55 @@ def _is_visual_linear(name: str) -> bool:
     allocator's stats dictionary landed on.
     """
     return bool(_VISUAL_PREFIX_RE.match(name))
+
+
+def _prepare_visual_allocations(
+    stats: dict,
+    costs: dict,
+    candidates: dict[str, list[Candidate]],
+    *,
+    sensitivity: str,
+    visual_format: str,
+    fixed_format_assignment: dict[str, str],
+    fixed_stats: dict,
+) -> tuple[dict, dict, dict[str, list[Candidate]]]:
+    """Keep complete measured visual units in DP; own uniform fallback only.
+
+    No cost equation, format legality or candidate is manufactured here. A
+    visual cost population requests the measured path; incomplete stats,
+    costs or legal candidates cannot silently turn into a uniform assignment.
+    Without visual costs, text-only probes retain the source-precision control.
+    """
+    visual_names = sorted(n for n in stats if _is_visual_linear(n))
+    visual_cost_names = {n for n in costs if _is_visual_linear(n)}
+    if sensitivity == "fisher" and visual_cost_names:
+        missing = sorted(
+            name for name in set(visual_names) | visual_cost_names
+            if name not in stats or name not in costs or not candidates.get(name)
+        )
+        if missing:
+            raise SystemExit(
+                "[alloc] visual Fisher population is incomplete: measured "
+                "stats, costs and legal candidates are required for every "
+                f"visual/merger Linear. Missing: {', '.join(missing[:8])}"
+            )
+        print(f"[alloc] visual Fisher: retained {len(visual_names)} measured "
+              "visual/merger Linears as allocator decision units", flush=True)
+        return stats, costs, candidates
+    if visual_names:
+        fixed_format_assignment.update({name: visual_format for name in visual_names})
+        fixed_stats.update({name: stats[name] for name in visual_names})
+        visual_names_set = set(visual_names)
+        stats = {name: value for name, value in stats.items() if name not in visual_names_set}
+        costs = {name: value for name, value in costs.items() if name not in visual_names_set}
+        candidates = {name: value for name, value in candidates.items() if name not in visual_names_set}
+        print(
+            f"[alloc] --visual-format={visual_format}: fixed "
+            f"{len(visual_names)} visual Linears as auxiliary to body "
+            "bpp/Δloss accounting",
+            flush=True,
+        )
+    return stats, costs, candidates
 
 
 def _mark_weight_only_nvfp4_stats(
@@ -640,10 +686,9 @@ def apply_visual_format_override(
 ) -> dict[str, str]:
     """Force every visual-encoder Linear in `assignment` to `visual_format`.
 
-    Called after the knapsack DP + fused-sibling promotion so the override
-    wins even if the solver would have picked a different format per
-    per-Linear sensitivity noise (which is meaningless for visual Linears
-    under text-only calibration — see module comment above).
+    This is the explicit uniform/text-only control, not the measured Fisher
+    allocation path. Measured visual/merger decisions retain their selected
+    formats instead of calling this override.
 
     `visual_format="BF16"` is a no-op when a visual Linear already has no
     allocator entry (the export's existing passthrough keeps it at BF16);
@@ -974,13 +1019,15 @@ def _build_bit_attribution(
     candidates: dict[str, list[Candidate]],
     stats_entry_for,
     format_specs: dict[str, "fr.FormatSpec"],
+    *,
+    visual_decision_names: frozenset[str] = frozenset(),
 ) -> tuple[list[dict], list[dict], dict]:
-    """Build (buckets, per_linear_rows, body_totals) for the bit-attribution
-    report over the FINAL resolved body assignment.
+    """Build (buckets, per_linear_rows, body_totals) for final DP decisions.
 
     Read-only: derives everything from the already-resolved assignment,
-    scored candidates, and probe stats. Visual / MTP Linears are excluded
-    (auxiliary to the body budget). Bits are recovered the same way
+    scored candidates, and probe stats. Measured visual decisions participate;
+    fixed visual / MTP entries remain auxiliary. The legacy body_* keys denote
+    this allocator budget domain. Bits are recovered the same way
     ``compute_achieved`` does, so the report's body bpp matches the artifact.
     Entries with no scored candidate (expanded fused-sibling members, experts
     priced at super-item granularity) report ``predicted_dloss=None`` rather
@@ -992,7 +1039,9 @@ def _build_bit_attribution(
     body_params = 0
 
     for name, fmt in assignment_expanded.items():
-        if _is_visual_linear(name) or _is_mtp_linear(name):
+        if _is_mtp_linear(name) or (
+            _is_visual_linear(name) and name not in visual_decision_names
+        ):
             continue
         entry = stats_entry_for(name)
         n_params = None
@@ -1109,6 +1158,7 @@ def _write_bit_attribution_reports(
     candidates: dict[str, list[Candidate]],
     stats_entry_for,
     format_specs: dict[str, "fr.FormatSpec"],
+    visual_decision_names: frozenset[str] = frozenset(),
 ) -> None:
     """Write the bit-attribution JSON / CSV and print a compact per-role rollup.
 
@@ -1120,6 +1170,7 @@ def _write_bit_attribution_reports(
         candidates,
         stats_entry_for,
         format_specs,
+        visual_decision_names=visual_decision_names,
     )
 
     if totals["body_quantizable_params"]:
@@ -1186,7 +1237,7 @@ def _write_bit_attribution_reports(
             agg["bits"] += row["bits"]
         if row["n_params"]:
             agg["params"] += row["n_params"]
-    print("[alloc] bit attribution by role (body only):", flush=True)
+    print("[alloc] bit attribution by role (allocator budget domain):", flush=True)
     for role in sorted(role_roll, key=lambda r: -(role_roll[r]["bits"])):
         agg = role_roll[role]
         mean_bpp = (agg["bits"] / agg["params"]) if agg["params"] else float("nan")
@@ -1208,13 +1259,11 @@ def discover_visual_linear_stats_from_source(
     Keeping shapes is required for exact Pareto byte pricing when the text-only
     probe did not instantiate the visual tower.
 
-    The probe's text-only staging strips the visual tower, so visual
-    Linears never appear in the probe or cost pickles. This helper lets
-    the allocator emit a layer_config entry for them anyway when
-    `--visual-format` is non-BF16 — the exporter can then quantize each
-    of them uniformly under the requested format. Without this scan, the
-    allocator has no way to enumerate visual Linear names (there is no
-    in-memory visual module at allocation time).
+    Text-only staging omits visual probe/cost rows, so this census supplies
+    exact auxiliary floors for the explicit source/uniform control. With
+    measured multimodal inputs it independently checks complete roster and
+    shape coverage before any visual per-Linear decision. It never admits
+    a format that the downstream export/serving gates do not support.
     """
     src = Path(model_path)
     idx_path = src / "model.safetensors.index.json"
@@ -3285,65 +3334,20 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             )
 
     visual_names = sorted(n for n in stats if _is_visual_linear(n))
-    visual_aux_candidates: dict[str, Candidate] = {}
-    if visual_names:
-        visual_cost_names = [name for name in visual_names if name in costs]
-        if visual_cost_names and args.visual_sensitivity == "fisher":
-            visual_stats = {name: stats[name] for name in visual_cost_names}
-            visual_costs = {name: costs[name] for name in visual_cost_names}
-            visual_candidates = build_candidates(
-                visual_stats,
-                visual_costs,
-                [fr.get_format(visual_format_canonical)],
-                calibrated_gains,
-                census_loo=census_loo,
-                source_manifest=source_manifest,
-                target_profile=target_profile,
-                mask_records=candidate_mask_records,
-                activation_pricing=activation_pricing,
-                context_by_unit=tessera_context_by_unit,
-            )
-            visual_aux_candidates = {
-                name: cand for name in visual_cost_names
-                if (
-                    cand := _find_candidate_for_format(
-                        visual_candidates,
-                        name,
-                        visual_format_canonical,
-                    )
-                ) is not None
-            }
-        fixed_format_assignment.update({
-            name: visual_format_canonical for name in visual_names
-        })
-        fixed_stats.update({name: stats[name] for name in visual_names})
-        fixed_chosen_candidates.update(visual_aux_candidates)
-        visual_names_set = set(visual_names)
-        stats = {
-            name: value for name, value in stats.items()
-            if name not in visual_names_set
-        }
-        costs = {
-            name: value for name, value in costs.items()
-            if name not in visual_names_set
-        }
-        candidates = {
-            name: value for name, value in candidates.items()
-            if name not in visual_names_set
-        }
-        print(
-            f"[alloc] --visual-format={visual_format_canonical}: fixed "
-            f"{len(visual_names)} visual Linears as auxiliary to body "
-            f"bpp/Δloss accounting"
-            + (
-                f" ({len(visual_aux_candidates)} measured cost rows tracked)"
-                if visual_aux_candidates else ""
-            ),
-            flush=True,
-        )
+    stats, costs, candidates = _prepare_visual_allocations(
+        stats,
+        costs,
+        candidates,
+        sensitivity=args.visual_sensitivity,
+        visual_format=visual_format_canonical,
+        fixed_format_assignment=fixed_format_assignment,
+        fixed_stats=fixed_stats,
+    )
+    visual_decision_names = frozenset(name for name in visual_names if name in candidates)
 
-    # Text-only probes can omit the complete visual tower. Discover those
-    # source-only Linears *before* Pareto records are built so every candidate
+    # Discover the complete source visual census before Pareto construction:
+    # measured inputs must cover it; text-only probes retain source-only floors.
+    # Include source-only Linears so every candidate
     # JSON, payload price, and budget stamp covers the exact full
     # assignment later emitted by the selector/exporter. The historical late
     # insertion made Pareto files deltas over the final layer_config and could
@@ -3354,6 +3358,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             strict=bool(
                 args.target_disk_gb is not None
                 or visual_format_canonical != "BF16"
+                or visual_decision_names
             ),
         )
         if probe_model_path
@@ -3363,14 +3368,27 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         source_visual_stats,
         model_profile,
     )
+    if visual_decision_names:
+        missing_visual = sorted(set(source_visual_stats) ^ visual_decision_names)
+        mismatched_visual = sorted(
+            name for name in visual_decision_names & source_visual_stats.keys()
+            if _shape_from_stats(stats[name]) != _shape_from_stats(source_visual_stats[name])
+        )
+        if missing_visual or mismatched_visual:
+            raise SystemExit(
+                "[alloc] visual Fisher source roster is incomplete or has mismatched "
+                f"shapes. Missing: {', '.join(missing_visual[:8])}; "
+                f"mismatched: {', '.join(mismatched_visual[:8])}"
+            )
     source_only_visual_stats = {
         name: entry
         for name, entry in source_visual_stats.items()
-        if name not in fixed_format_assignment
+        if name not in fixed_format_assignment and name not in visual_decision_names
     }
     try:
         validate_source_visual_passthrough_contract(
-            source_visual_stats,
+            {name: entry for name, entry in source_visual_stats.items()
+             if name not in visual_decision_names},
             visual_format_canonical,
         )
     except ValueError as exc:
@@ -3439,8 +3457,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     # Per-Linear legal-format sets for serving-unit promotion, snapshotted
     # BEFORE aggregation: both promotion call sites below run on the EXPANDED
     # per-Linear assignment, where an aggregated super-item's candidate list no
-    # longer describes its individual members. Auxiliary MTP/visual names were
-    # already removed from `candidates` and stay absent here on purpose — they
+    # longer describes its individual members. Fixed MTP/unmeasured visual names
+    # were removed from `candidates`; measured visual DP names remain. Fixed names
     # are format-PINNED, not legality-restricted (their candidates were built
     # from a one-format menu), and promotion treats an absent name as
     # unconstrained.
@@ -4152,9 +4170,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             assignment_expanded,
         )
 
-        # Visual-encoder Linears are auxiliary to the language-model budget.
-        # Stamp them with --visual-format for export, but keep them out of the
-        # body DP frontier, default bpp, and default Δloss.
+        # Only unmeasured/explicit-uniform visual Linears are auxiliary.
+        # Measured visual/merger units keep the solver's per-Linear decision.
         visual_format = visual_format_canonical
         visual_sensitivity = args.visual_sensitivity
 
@@ -4165,20 +4182,16 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             any_visual_costs = any(_is_visual_linear(n) for n in costs_d)
             return any_visual_stats and any_visual_costs
 
-        if visual_sensitivity == "fisher" and visual_names:
-            print(
-                "[alloc] --visual-sensitivity=fisher found visual Linears, "
-                "but visual assignments are auxiliary to the body budget; "
-                f"using --visual-format={visual_format} for the layer_config.",
-                flush=True,
-            )
+        if visual_decision_names:
+            print(f"[alloc] visual Fisher: preserved {len(visual_decision_names)} "
+                  "selected visual/merger formats in the layer_config", flush=True)
         elif visual_sensitivity == "fisher" and not _visual_fisher_available(stats, costs):
             print("[alloc] --visual-sensitivity=fisher requested but probe / "
                   "cost pickles have no visual Linear entries; falling back "
                   f"to --visual-format={visual_format} (Phase 1 uniform).",
                   flush=True)
 
-        visual_names_src = sorted(source_visual_stats)
+        visual_names_src = sorted(set(source_visual_stats) - visual_decision_names)
 
         if visual_names_src:
             for vname in visual_names_src:
@@ -4280,7 +4293,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             name: fmt
             for name, fmt in assignment_expanded.items()
             if (
-                not _is_visual_linear(name)
+                (not _is_visual_linear(name) or name in visual_decision_names)
                 and not _is_mtp_linear(name)
                 and name not in fixed_lm_head_names
             )
@@ -4529,6 +4542,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             candidates=candidates,
             stats_entry_for=_stats_entry_for_assignment_name,
             format_specs=format_specs,
+            visual_decision_names=visual_decision_names,
         )
 
 
