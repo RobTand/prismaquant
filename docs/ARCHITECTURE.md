@@ -278,9 +278,16 @@ The optional positive `checkpoint_publication_max_jobs` caps the existing
 finite window-derived geometry without expanding it, so larger bounded host
 graphs can use fewer staging slots instead of inflating memory reservations.
 It requires a positive publication byte budget; absent retains the prior geometry.
-CPU tests and before/after profiling are separate acceptance; no measured
-22.6-second reduction or representative GPU overlap is claimed before those
-profiles and both-Spark telemetry exist.
+Host-checkpoint replay is the authorized CPU/equivalence acceptance: it uses
+fresh output namespaces and the existing measured states, checks exact
+synchronous/shared-engine file digests, durable acknowledgements and resume,
+and records encoder thread ownership. Its balanced host partitions are not
+claimed to reproduce the GPU row's resolved window membership. Representative
+before/after in-process profiles, next-window GPU lag and both-box Netdata are a
+carried obligation under #1253 on the next real Stage B production run, not a
+dedicated bulk rerun. No measured 22.6-second reduction, GPU overlap or default
+promotion is claimed from host replay. The replay entry point is
+`experiments/stageb_checkpoint_host_replay.py`.
 
 Re-stamped 2026-09-30 (PQ #1843, step 1 of #1842): the Tessera campaign
 takes `--allow-pinned` (the allocator's grammar) and `--pinned-roster-only`,
