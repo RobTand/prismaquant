@@ -66,15 +66,21 @@ Each row restarts its own identity-bound checkpoint; external seed adoption is
 not supported by this first delivery. Replanning in a submitted workspace can
 overwrite selection files, so use a new workspace for a different layout.
 
-## Remaining #1314 acceptance
+## Measured #1314 acceptance
 
 CPU fixtures establish selection, planner demand, readset publication and
-plan-derived merge behavior. They do not establish GPU numerics or peak
-residency. Before production use, compare one unsampled routed group against
-all of its fixed-rate chunks under the same immutable producer, calibration,
-family policy, rate, anchor count, cache settings and source proof. Inspect
-terminal/CAS receipts, exact wire bytes, all non-timing cost/anchor fields and
-measured peak memory; deleting one chunk must refuse merge.
+plan-derived merge behavior. A complete unsampled GLM routed group at
+E4M3_K1/R896 now also has [bounded GPU/artifact qualification](results/2026-10-01_fixed_rate_expert_partition.md):
+all 36 p8 chunks match the whole-group run's 864 producer-verified wire blobs,
+canonical non-timing costs, identities and anchors. Action-cgroup peaks and
+terminal/log/CAS records were inspected; missing and duplicated actual chunks
+refuse after the completed positive. This does not establish full-model
+completion, another family/rate, staged residency or performance.
+
+For a new workload outside that evidence, retain the same immutable producer,
+calibration, family policy, rate, anchor count, cache settings and source proof
+for both layouts. Inspect terminal/CAS receipts, exact wire bytes and all
+non-timing cost/anchor fields; missing chunks must refuse merge.
 
 GPU execution needs the coordinator's explicit approval in `PENDING-GPU.md`.
 Use PrismaBuild, priority -10, explicit timeouts, no host pin, bounded native

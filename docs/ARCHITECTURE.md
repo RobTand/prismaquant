@@ -1,5 +1,41 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
+consumer source-prefetch waits in a separate `source_exposed_wait` component,
+using the existing delivery owner and exposed-wait ledger/report. Ready
+Futures add no wait; observer scope closes before teardown. The measured
+pre-CUDA baseline and missing-rate/sample semantics are unchanged. This is
+not full-row coverage: construction/head loads and boundary/checkpoint waits
+remain outside it, so whole-row `exposed_wait.instrumented` stays false.
+CPU fixtures establish contracts only, not GPU occupancy or a speedup;
+real Stage A/profile evidence and the PACT startup leg remain in #1663.
+No numerical, checkpoint-byte, pipeline default, pin, wire or ship-gate change.
+
+Re-stamped 2026-10-01 (PQ #1314): one complete unsampled GLM routed group
+at E4M3_K1/R896 is now qualified against all 36 fixed-rate p8 chunks. Existing
+canonical H/reference and journal owners reconcile identical 864-unit costs,
+identities and non-timing anchors; producer-verified actual wire bytes match
+for all 864 blobs. Missing/duplicate actual chunks and damaged wire controls
+refuse after a completed positive. Action-cgroup peaks and terminal/CAS/log
+records were inspected. This does not claim a full model campaign, another
+rate/family, staged residency, performance, serving promotion or a new default.
+Adaptive and sampled groups remain indivisible. See the
+[bounded qualification record](results/2026-10-01_fixed_rate_expert_partition.md)
+for immutable inputs, commands, receipts and limitations.
+
+Re-stamped 2026-10-01 (PQ #1880, reader slice of #1100): streamed source JSON,
+weight-map profile detection, and checkpoint-index discovery share the
+metadata-text adapter. With an active tier policy it reads the declared
+whole-file binding through the existing resolver and lifetime-pinned reader,
+checks the declared digest, and decodes without reopening the canonical pool
+path. Missing material or a digest mismatch refuses without pool fallback.
+Without a policy, legacy text decoding remains; explicit capture JSON
+authenticators retain their own reads. Source paths and the existing head
+schema stay unchanged. This is not full worker bootstrap closure: AutoConfig
+shadow staging, auxiliary identity hashes, remote-code handling and the
+complete shard-header audit remain #1100. No new cache/executor, serving gate,
+format, numerical method, export wire, serializer or runtime pin.
+
 Re-stamped 2026-10-01 (PQ #1870, declaration slice of #1100): the streaming
 source plan names whole config/index bootstrap reads separately from shard
 header prefixes. The existing quantum compiler projects these metadata reads
@@ -3643,9 +3679,18 @@ said nothing about its own reads between the head and the records.
     measured load rate is `unmeasured`, with no bound. `bound` in the block
     records every take's rates, regime, `bound_s` and
     `excess_s = max(0, wait_s − bound_s)`, plus the row totals. A nonzero `excess_s` is the finding.
-  - **Stage A** has no consumer-side blocked-interval timing. Its counters
-    carry `exposed_wait: {instrumented: false, reason, ...}` instead of a
-    zero that would read as a measurement.
+  - **Stage A** (PQ #1875, part of #1663) scopes an observer on the existing
+    `StreamingContext` through `StreamedCausalLM`, from runner construction's
+    completion through capture, closing it before teardown. Only a pending
+    delivery's consumer `Future.result()` interval enters the shared ledger;
+    ready ownership adds none. Retry ownership and errors stay authoritative.
+    `source_exposed_wait` has `coverage: source-prefetch-only` and uses the
+    same report with a cutoff immediately before projection prewarm; absent
+    baseline samples stay unsampled and absent load rates stay unmeasured.
+    It excludes construction/head loads, boundary/checkpoint and other waits.
+    Whole-row `exposed_wait: {instrumented: false, reason, ...}` therefore
+    remains false, never promoted from a component or CPU fixture. Full
+    Stage A/GPU/profile coverage and PACT after #1654 remain in #1663.
   Gate: `tests/test_exposed_wait_1292.py`. The sink costs about 0.7 us per
   call, and a 96 x 8 file `ReadStream` fixture measured the same take time
   before and after (median 0.239 s vs 0.231 s; `cProfile` `take` 0.348 s vs

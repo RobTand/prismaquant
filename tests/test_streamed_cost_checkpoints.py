@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import nullcontext
 from types import SimpleNamespace
 import weakref
 
@@ -52,6 +53,11 @@ class _FakeStreamingContext:
     def schedule_prefetch(self, layer):
         self.events.append(("prefetch", int(layer)))
         return None
+
+    def observe_source_waits(self, sink):
+        # This logical CPU fixture schedules no Futures and blocks on none.
+        assert callable(sink)
+        return nullcontext()
 
     def shutdown(self):
         self.active.clear()
