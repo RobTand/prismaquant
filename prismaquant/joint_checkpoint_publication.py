@@ -124,6 +124,30 @@ class _EncodedBytes:
             return self._value
 
 
+def _owned_mutable_containers(root: object) -> list[dict | list]:
+    """Prepare retirement while reserved, over an already validated graph."""
+    pending, seen, containers = [root], set(), []
+    while pending:
+        value = pending.pop()
+        if type(value) not in (dict, list, tuple) or id(value) in seen:
+            continue
+        seen.add(id(value))
+        if type(value) is dict:
+            containers.append(value)
+            pending.extend(value.values())
+        else:
+            if type(value) is list:
+                containers.append(value)
+            pending.extend(value)
+    return containers
+
+
+def _dispose_owned_containers(containers: list[dict | list]) -> None:
+    """Break owned mutable cycle edges without GC or a cleanup allocation."""
+    while containers:
+        containers.pop().clear()
+
+
 def _publish_snapshot(path, *, name, identity_sha256, state, max_bytes, encoded_bytes):
     encoded = aura_cost._encode_aura_unit_checkpoint(
         qname=name, identity_sha256=identity_sha256, state=state,
@@ -197,12 +221,14 @@ class CheckpointPublicationLedger:
         # without lending mutable rows or identity graphs to an IO worker.
         # The reservation includes this copy, encoder buffers and memo tables.
         owned = deepcopy(state)
+        containers = _owned_mutable_containers(owned)
         return PublicationJob(
             name, self._slot,
             partial(_publish_snapshot,
                     aura_cost._aura_unit_checkpoint_path(self._root, name),
                     name=name, identity_sha256=self._identity, state=owned,
-                    max_bytes=self._slot // 4, encoded_bytes=self._encoded_bytes))
+                    max_bytes=self._slot // 4, encoded_bytes=self._encoded_bytes),
+            dispose=partial(_dispose_owned_containers, containers))
 
     def submit(self, name: str, state_factory: Callable[[int], Mapping]) -> bool:
         self.poll()
@@ -213,9 +239,13 @@ class CheckpointPublicationLedger:
         if len(self._submitted) == self._jobs:
             self.flush()
         self._publisher.reserve(self._slot)
+        job = None
         try:
-            self._publisher.submit(self._freeze(name, state_factory))
+            job = self._freeze(name, state_factory)
+            self._publisher.submit(job)
         except BaseException:
+            if job is not None and job.dispose is not None:
+                job.dispose()
             self._publisher.release(self._slot)
             raise
         self._submitted.add(name)

@@ -12,14 +12,70 @@ import hashlib
 import json
 from pathlib import Path
 import pickle
+import pickletools
 import threading
 
 from prismaquant import aura_cost
-from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
+from prismaquant.joint_checkpoint_publication import (
+    CheckpointPublicationLedger, publication_geometry)
+
+# Builtin opcode/object/memo/UTF-8 expansion plus simultaneous raw, envelope,
+# payload and decoded graph owners. This is an admission allowance, not RSS.
+SOURCE_LOAD_FACTOR = 128
+SOURCE_FIXED_BYTES = 1 << 20
+_UNBOUNDED_OPCODES = {
+    "GLOBAL", "STACK_GLOBAL", "REDUCE", "BUILD", "NEWOBJ", "NEWOBJ_EX",
+    "INST", "OBJ", "PERSID", "BINPERSID", "EXT1", "EXT2", "EXT4",
+    "NEXT_BUFFER", "READONLY_BUFFER", "BYTEARRAY8", "EMPTY_SET", "FROZENSET",
+    "ADDITEMS",
+}
 
 
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1 << 20):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def _check_builtin_pickle(data: bytes) -> None:
+    """Refuse reducers and sparse memo allocations before any decoding."""
+    memo_count = 0
+    for opcode, argument, _position in pickletools.genops(data):
+        name = opcode.name
+        if name in _UNBOUNDED_OPCODES:
+            raise ValueError(f"source requires bounded builtin pickle: {name}")
+        if name in ("PUT", "BINPUT", "LONG_BINPUT"):
+            if argument != memo_count:
+                raise ValueError("source requires bounded builtin pickle: sparse memo")
+            memo_count += 1
+        elif name == "MEMOIZE":
+            memo_count += 1
+        elif name in ("GET", "BINGET", "LONG_BINGET"):
+            if not 0 <= argument < memo_count:
+                raise ValueError("source requires bounded builtin pickle: invalid memo")
+
+
+def _load_source(path: Path, *, name: str, identity: str, allowance: int) -> dict:
+    """Construct one trusted builtin source within its reserved allowance."""
+    limit = (allowance - SOURCE_FIXED_BYTES) // SOURCE_LOAD_FACTOR
+    if limit <= 0 or path.stat().st_size > limit:
+        raise ValueError("source construction allowance is smaller than its decode bound")
+    with path.open("rb") as handle:
+        raw = handle.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError("source construction allowance exceeded by a growing file")
+    _check_builtin_pickle(raw)
+    envelope = pickle.loads(raw)
+    if type(envelope) is not dict or envelope.get("identity_sha256") != identity:
+        raise ValueError("replay lineage differs from the existing manifest")
+    payload = envelope.get("payload")
+    if type(payload) is not bytes:
+        raise ValueError("replay source has no builtin byte payload")
+    _check_builtin_pickle(payload)
+    return aura_cost._decode_aura_unit_checkpoint(
+        envelope, path=path, qname=name, identity_sha256=identity)
 
 
 def replay(source: Path, destination: Path, *, expected_units: int,
@@ -49,6 +105,8 @@ def replay(source: Path, destination: Path, *, expected_units: int,
                ((len(names) * i // host_windows, len(names) * (i + 1) // host_windows)
                 for i in range(host_windows))]
     sync, asynchronous = destination / "synchronous", destination / "shared-engine"
+    _jobs, source_allowance = publication_geometry(
+        budget_bytes, windows, max_jobs=max_jobs)
     consumer = threading.get_ident()
     calls = {"synchronous": [], "shared-engine": []}
     arm = "synchronous"
@@ -58,13 +116,10 @@ def replay(source: Path, destination: Path, *, expected_units: int,
         calls[arm].append((threading.get_ident(), threading.current_thread().name))
         return encoder(**kwargs)
 
-    def load(name):
+    def load(name, allowance=source_allowance):
         # These are trusted existing campaign pickles, never arbitrary CLI URLs.
-        envelope = pickle.loads(paths[name].read_bytes())
-        if envelope.get("identity_sha256") != identity:
-            raise ValueError("replay lineage differs from the existing manifest")
-        return aura_cost._load_aura_unit_checkpoint(
-            paths[name], qname=name, identity_sha256=identity)
+        return _load_source(paths[name], name=name, identity=identity,
+                            allowance=allowance)
 
     source_digests, expected, input_bytes = {}, {}, 0
     historical_matches = 0
@@ -96,7 +151,7 @@ def replay(source: Path, destination: Path, *, expected_units: int,
             for index, window in enumerate(windows):
                 ledger.start_window(index, window["names"])
                 for name in window["names"]:
-                    if not ledger.submit(name, lambda limit, name=name: load(name)):
+                    if not ledger.submit(name, lambda limit, name=name: load(name, limit)):
                         raise AssertionError("fresh replay skipped a unit")
             ledger.flush()
             if durable != set(names) or checked != durable or done != list(range(host_windows)):
@@ -132,6 +187,9 @@ def replay(source: Path, destination: Path, *, expected_units: int,
             "source_manifest_sha256": manifest_digest, "identity_sha256": identity,
             "file_digest_record_sha256": hashlib.sha256(file_bytes).hexdigest(),
             "units": expected_units, "source_bytes": input_bytes,
+            "source_load_allowance_bytes": source_allowance,
+            "source_load_factor": SOURCE_LOAD_FACTOR,
+            "source_load_fixed_bytes": SOURCE_FIXED_BYTES,
             "host_partitions": [len(w["names"]) for w in windows],
             "original_resolved_window_membership_replayed": False,
             "baseline_candidate_digests_equal": True,

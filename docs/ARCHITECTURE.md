@@ -272,8 +272,11 @@ route-status gate's question. Gate: `tests/test_tessera_partial_superblock.py`.
 Re-stamped 2026-10-01 (PQ #1367, `sol/pq-stageb-7`): the opt-in bounded
 checkpoint publisher now snapshots an owned builtin graph on the consumer and
 runs the existing pickle/hash/envelope encoder and atomic write on the shared
-IO engine. Credits still cover snapshot/encoder ownership, acknowledgements
-remain durable-only, and the default synchronous path and bytes are unchanged.
+IO engine. Owned mutable cycle edges are disposed deterministically before
+success, failure, queued cancellation or refused-submission credit returns;
+this does not depend on cyclic GC or mutate the consumer's input. Credits still
+cover snapshot/encoder ownership, acknowledgements remain durable-only, and
+the default synchronous path and bytes are unchanged.
 The optional positive `checkpoint_publication_max_jobs` caps the existing
 finite window-derived geometry without expanding it, so larger bounded host
 graphs can use fewer staging slots instead of inflating memory reservations.
@@ -281,7 +284,10 @@ It requires a positive publication byte budget; absent retains the prior geometr
 Host-checkpoint replay is the authorized CPU/equivalence acceptance: it uses
 fresh output namespaces and the existing measured states, checks exact
 synchronous/shared-engine file digests, durable acknowledgements and resume,
-and records encoder thread ownership. Its balanced host partitions are not
+and records encoder thread ownership. Its source factory checks an explicit
+size-derived builtin decode allowance before allocation, refuses reducers and
+sparse memo tables, and shares the existing AURA envelope/integrity decoder
+without loading the envelope twice. Its balanced host partitions are not
 claimed to reproduce the GPU row's resolved window membership. Representative
 before/after in-process profiles, next-window GPU lag and both-box Netdata are a
 carried obligation under #1253 on the next real Stage B production run, not a
