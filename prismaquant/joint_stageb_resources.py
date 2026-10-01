@@ -182,6 +182,26 @@ def chain_owner_from_receipt(path, *, action_key, layer, layers, basis=None):
                 "admission and at the roll's cgroup peak")}
 
 
+def _resource_specs_for_layer(names, formats, resolved):
+    """Reuse immutable descriptors in this derivation, preserving unit order.
+
+    ``resolved`` belongs to one ``derive_policy`` invocation, not the registry:
+    the next invocation rechecks the current menu/runtime admission predicates.
+    Per-unit shapes, activation receipts and grouping remain the planner's work.
+    """
+    from . import format_registry as fr
+
+    specs = {}
+    for name in names:
+        unit = {}
+        for fmt in formats[name]:
+            if fmt not in resolved:
+                resolved[fmt] = fr.get_format(fmt)
+            unit[fmt] = resolved[fmt]
+        specs[name] = unit
+    return specs
+
+
 def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_bytes=72 * GIB, candidate_files=None,
                   capture=None, chain=None, cotangent=None):
     """Use the existing statistics planner and retained-window budget owner.
@@ -196,7 +216,6 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
     plane against the container cap before the render bound is derived.
     """
     import torch
-    from . import format_registry as fr
     from .aura_cost import _ZERO_COST_FORMATS
     from .joint_layer_quanta import qname_layer
     from .joint_retained_window_plan import (DECLARED_BUDGET_FIELDS, MEASURED_BUDGET_FIELDS,
@@ -299,11 +318,12 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
     maxima = {**cache.activation_max_abs,
               FORMAT_MAXIMA_KEY: {fmt: activation["effective_max_abs"] for fmt in priced}}
     targets = {}
+    resolved_formats = {}
     for layer, names in sorted(by_layer.items()):
         names.sort()
         modules = {n: torch.nn.Linear(shapes[n][1], shapes[n][0], bias=False, device="meta", dtype=torch.bfloat16)
                    for n in names}
-        specs = {n: {fmt: fr.get_format(fmt) for fmt in formats[n]} for n in names}
+        specs = _resource_specs_for_layer(names, formats, resolved_formats)
         statistics = plan_joint_statistics_target_windows(modules, specs,
             max_statistics_bytes=physical_bytes, activation_max_abs=maxima)
         keys = {n: tuple((n, fmt) for fmt in formats[n]) for n in names}
