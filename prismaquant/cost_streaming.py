@@ -5646,7 +5646,8 @@ class StreamedCausalLM:
 
     def visit_layer_batches(self, input_batches, visitor, *, output_consumer=None,
                             boundary_storage=None, source_phase=None, forward_recovery=None,
-                            batch_offset=0):
+                            batch_offset=0, start=None, stop_layer=None,
+                            boundary_consumer=None):
         """Visit one resident source layer over the original ordered batches.
 
         The original visitor retains one current hidden tensor per batch. With
@@ -5656,11 +5657,34 @@ class StreamedCausalLM:
         The new path requires evaluation mode and observes Torch CPU plus this
         runner's CUDA RNG state around preparation/source calls. RNG-consuming
         sources refuse; this is not equivalence for arbitrary stateful models.
+
+        A capture chain quantum (PQ #1885) visits ``[start.layer, stop_layer)``
+        on the in-memory path: ``start`` supplies each batch's hidden at its
+        boundary, in the dtype it was stored in, and ``boundary_consumer(index,
+        hidden)`` receives each batch's hidden after the last visited layer.
+        Nothing at or past ``stop_layer`` is read.
         """
         if self._pinned_layer is not None:
             raise RuntimeError("layer-batch traversal cannot start with a pinned layer")
         exact = boundary_storage is not None
-        start_layer = 0
+        if exact and (start is not None or stop_layer is not None
+                      or boundary_consumer is not None):
+            raise ValueError("a layer frontier, stop layer or boundary consumer is the "
+                             "in-memory path's; exact storage writes every boundary")
+        stop = self.num_layers if stop_layer is None else stop_layer
+        start_layer = 0 if start is None else start.layer
+        if (type(start_layer) is not int or type(stop) is not int
+                or not 0 <= start_layer < stop <= self.num_layers
+                or (start is not None and start_layer == 0)):
+            raise ValueError("a layer chain visits 0 <= start < stop <= num_layers, "
+                             "and a frontier starts past layer 0")
+        if output_consumer is not None and stop != self.num_layers:
+            raise ValueError("tail logits need the last layer; a stopped traversal has none")
+        bounded = stop != self.num_layers or start is not None
+        if start is not None:
+            from .joint_forward_resume import require_stateless_profile
+            require_stateless_profile(self)
+        frontier = None if start is None else iter(start.hidden_batches())
         if type(batch_offset) is not int or batch_offset < 0:
             raise ValueError("a layer visitor's batch offset is a nonnegative integer")
         if batch_offset and (not exact or forward_recovery is not None):
@@ -5763,8 +5787,20 @@ class StreamedCausalLM:
                             batch.activations_cpu.extend(refs)
                         del hidden, pass_state
                     else:
+                        if frontier is not None:
+                            stored = next(frontier, None)
+                            if stored is None:
+                                raise RuntimeError("the layer frontier has fewer batches than the draw")
+                            if stored.dtype != self.dtype:
+                                raise RuntimeError(
+                                    f"the layer frontier stores {stored.dtype}, "
+                                    f"not this runner's {self.dtype}")
+                            hidden = stored.to(device=self.device)
+                            del stored
                         states.append([ids, hidden, pass_state])
                     del positions, embeddings, mask
+                if frontier is not None and next(frontier, None) is not None:
+                    raise RuntimeError("the layer frontier has more batches than the draw")
                 if not states:
                     raise ValueError("layer-batch traversal requires calibration batches")
                 if exact:
@@ -5776,21 +5812,31 @@ class StreamedCausalLM:
                             start_layer + max(1, self.prefetch_lookahead))):
                         speculate(depth)
                 else:
-                    for depth in range(min(self.num_layers, self.prefetch_lookahead + 1)):
+                    for depth in range(start_layer, min(stop, start_layer + self.prefetch_lookahead + 1)):
                         self.context.schedule_prefetch(depth)
-                for layer in range(start_layer, self.num_layers):
+                for layer in range(start_layer, stop):
                     if layer > start_layer:
                         report_source_phase('source_loading', layer)
                     if exact:
                         check_state()
                         reassert(layer)
                         self.context.install(layer, require_prefetched=True, prefetch_following=False)
+                    elif bounded:
+                        # The runner's own top-up would read past ``stop``. The
+                        # explicit window below is bounded instead, and this
+                        # idempotent re-assert retries a refused speculation
+                        # once, as the exact path's ``reassert`` does.
+                        self.context.schedule_prefetch(layer)
+                        self.context.install(layer, require_prefetched=self.require_prefetched_residency,
+                                             prefetch_following=False)
                     else:
                         self.context.install(layer, require_prefetched=self.require_prefetched_residency)
                     try:
                         if exact:
                             speculate(layer + self.prefetch_lookahead)
-                        else:
+                        elif not bounded:
+                            self.context.schedule_prefetch(layer + self.prefetch_lookahead)
+                        elif layer + self.prefetch_lookahead < stop:
                             self.context.schedule_prefetch(layer + self.prefetch_lookahead)
                         if source_phase is not None:
                             # Loading may retain old source and packing buffers;
@@ -5857,8 +5903,14 @@ class StreamedCausalLM:
                         del initial
                         batch = StreamedForwardBoundaries(_ids, positions, embeddings, mask, [], None)
                         output_consumer(index, self.tail_logits(batch, hidden))
+                if boundary_consumer is not None:
+                    for index, state in enumerate(states):
+                        boundary_consumer(index, state[1])
+                        state[1] = None
         finally:
             states.clear()
+            if frontier is not None and hasattr(frontier, "close"):
+                frontier.close()
             if exact:
                 self.layer_major_prefetch_retries = tuple(retried)
 
