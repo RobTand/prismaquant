@@ -72,8 +72,8 @@ def test_decoded_cyclic_sources_retire_without_gc(monkeypatch, tmp_path, failure
     if failure == "synchronous":
         monkeypatch.setattr(aura_cost, "_write_aura_unit_checkpoint", refuse)
     elif failure == "snapshot":
-        from prismaquant.joint_checkpoint_publication import CheckpointPublicationLedger
-        monkeypatch.setattr(CheckpointPublicationLedger, "_freeze", refuse)
+        from prismaquant import joint_checkpoint_publication
+        monkeypatch.setattr(joint_checkpoint_publication, "snapshot_bound", refuse)
     from experiments.stageb_checkpoint_host_replay import digest
     source_hashes = {path: digest(path) for path in source.rglob("*") if path.is_file()}
     assert len(source_hashes) == 6  # manifest plus all five nested unit files
