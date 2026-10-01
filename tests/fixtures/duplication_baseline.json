@@ -53,8 +53,6 @@
   "hashlib:prismaquant/joint_forward_resume.py::_checked_group",
   "hashlib:prismaquant/joint_forward_resume.py::_read",
   "hashlib:prismaquant/joint_forward_resume.py::build_forward_recovery",
-  "hashlib:prismaquant/joint_layer_quanta.py::emit_quantum_boundary_readsets",
-  "hashlib:prismaquant/joint_layer_quanta.py::emit_quantum_executable_readsets",
   "hashlib:prismaquant/joint_prewarm_phases.py::load_prepare_read_set",
   "hashlib:prismaquant/joint_projection_backend.py::_qualification",
   "hashlib:prismaquant/joint_replay_frontier.py::_framed",

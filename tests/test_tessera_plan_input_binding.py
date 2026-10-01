@@ -28,6 +28,17 @@ V40_CONTRACT = {"contract_version": 40, "producer_interface": {
 V39_CONTRACT = {"contract_version": 39}
 
 
+def _execute_plan_driver(script, *, env):
+    """Keep a finite deadline without mistaking cold startup for a refusal.
+
+    The admitted batch exceeded 30 seconds before its Python helpers finished.
+    Runtime and binding assertions below remain authoritative; only the test
+    harness gets a larger, still bounded cold-start allowance.
+    """
+    return subprocess.run(["bash", "-c", script], env=env,
+                          cwd=ROOT, capture_output=True, text=True, timeout=120)
+
+
 def _run(tmp_path, *, changed=False, manifest="bound", mode="compiled",
          derived=False, translate=False, corrupt_derived=False, extra_env=None,
          contract=V40_CONTRACT):
@@ -126,8 +137,43 @@ python3() {
                TEST_PLAN_ASSIGNMENT=str(derived_path) if derived else "",
                TEST_PLAN_DIGEST=derived_digest)
     env.update(extra_env or {})
-    return subprocess.run(["bash", "-c", preamble + helper + block], env=env,
-                          cwd=ROOT, capture_output=True, text=True, timeout=30)
+    return _execute_plan_driver(preamble + helper + block, env=env)
+
+
+@pytest.fixture
+def delayed_driver_start(monkeypatch):
+    """Reproduce startup beyond the observed 30-second batch deadline."""
+    real_run = subprocess.run
+
+    def run_after_delay(argv, **kwargs):
+        assert argv[:2] == ["bash", "-c"]
+        return real_run([*argv[:2], "sleep 31\n" + argv[2]], **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run_after_delay)
+
+
+@pytest.mark.parametrize("options,expected_code,required_output", [
+    ({"changed": True}, 2, "ASSIGNMENT_DIGEST"),
+    ({"manifest": "missing"}, 2, "allocation"),
+    ({"manifest": "other-stage"}, 2, "allocation"),
+    ({"mode": "compiled"}, 0, "Serve:"),
+], ids=["old-allocation", "missing", "other-stage", "compiled"])
+def test_delayed_start_keeps_real_driver_binding_checks(
+        tmp_path, delayed_driver_start, options, expected_code, required_output):
+    result = _run(tmp_path, **options)
+    output = result.stdout + result.stderr
+    assert result.returncode == expected_code, output
+    assert required_output.lower() in output.lower()
+    if expected_code == 2:
+        assert "TEST_EXPORT_REACHED" not in result.stdout
+    else:
+        command = next(line.split("Serve:", 1)[1].strip()
+                       for line in result.stdout.splitlines() if "Serve:" in line)
+        tokens = shlex.split(command)
+        assert f"IMAGE={IMAGE}" in tokens
+        assert "TESSERA_LANE_EAGER=0" in tokens
+        assert f"TS={tmp_path / 'producer tree'}" in tokens
+        assert str(tmp_path / "work with spaces/exported") in tokens
 
 
 def test_actual_driver_refuses_old_plan_after_allocation_bytes_change(tmp_path):
