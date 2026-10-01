@@ -1299,6 +1299,10 @@ class StreamingContext:
         if self.device.type == 'cuda':
             torch.cuda.empty_cache()
 
+    def _prefetch_result(self, layer, future):
+        """Take one delivery result; retry ownership stays in ``_await_prefetch``."""
+        return future.result()
+
     def _await_prefetch(self, layer, future, *, retry_availability):
         """Await delivery, retaining its owner even when speculation is replaced.
 
@@ -1309,7 +1313,7 @@ class StreamingContext:
         This reports no progress and grants no new phase/watchdog allowance.
         """
         try:
-            return future.result()
+            return self._prefetch_result(layer, future)
         except Exception as exc:
             if (not retry_availability or not _is_prefetch_availability(exc)
                     or getattr(future, '_pq_availability_retried', False)):
@@ -1338,7 +1342,7 @@ class StreamingContext:
                     self._inflight.setdefault(layer, future)
                 raise
             replacement._pq_availability_retried = True
-            return replacement.result()
+            return self._prefetch_result(layer, replacement)
 
     def settle_prefetched_layers(self, layer_indices, *, retry_availability=False):
         """Await an already scheduled window without claiming its owners.
