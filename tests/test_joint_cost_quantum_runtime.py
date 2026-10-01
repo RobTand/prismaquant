@@ -8,6 +8,7 @@ run), write-space isolation, chunk-granular progress cadence, §8.1 counter
 shapes, and the comparison tool on a synthetic pair.
 """
 from pathlib import Path
+from contextlib import nullcontext
 import hashlib
 import json
 import os
@@ -534,6 +535,11 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
         num_layers = 2
         device = "cpu"
         model = object()
+
+        def observe_source_waits(self, sink):
+            # The envelope/identity fixture creates no delivery Futures.
+            assert callable(sink)
+            return nullcontext()
 
         def shutdown(self):
             pass
