@@ -42,6 +42,17 @@ the old identity; that refusal is fail-closed. Gates:
 `tests/test_capture_single_pass_source_1896.py` plus the chain, calibration
 cache and verified-load suites.
 
+Re-stamped 2026-10-01 (PQ #1930): the trusted-base `linked issue` metadata
+check keeps native same-repository closing references and also accepts an
+explicit `Refs #N` or `Part of #N` directive to an OPEN same-repository Issue.
+The parent is fetched from GitHub using query variables; contributor body text
+is data, not code. Closed/cross-repository/non-issue parents, quoted examples
+and missing links fail. Partial slices do not require new bookkeeping issues.
+Actual-head status publishing and fail-closed API behavior remain unchanged.
+This changes repository delivery metadata, not runtime, formats, numerical
+methods, cache/residency, plugin pins or artifact-serving gates. Gate:
+`.github/scripts/linked_issue.test.cjs`.
+
 Re-stamped 2026-10-01 (PQ #1918): `tools/dispatch_capture_chain.py seal`
 takes `--priority` (default -10, unchanged), so a capture chain that feeds a
 gate can run in the campaign band, as `dispatch_tessera_campaign --priority`
