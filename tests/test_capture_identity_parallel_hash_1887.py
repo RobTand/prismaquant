@@ -20,7 +20,7 @@ import torch
 
 from prismaquant import memory_management as mm
 from prismaquant import tessera_calibration_cache as cc
-from prismaquant.io_engine import ENGINE
+from prismaquant import io_engine
 
 SHARDS = ("model-00001.safetensors", "model-00002.safetensors",
           "model-00003.safetensors", "model-00004.safetensors")
@@ -63,12 +63,28 @@ def _plain(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def test_capture_identity_hashes_every_source_file_together_on_the_io_engine(tmp_path, monkeypatch):
+@pytest.fixture
+def engine(monkeypatch):
+    """A fresh IO engine one worker per source file, whatever this runner's CPU set.
+
+    Width is the engine's to decide in production (the CPU affinity). A fixed
+    width here keeps the overlap proof the same on a 2-CPU row and a 20-CPU
+    one; ``capture_identity`` reads ``io_engine.ENGINE`` when it is called.
+    """
+    fresh = io_engine.IOEngine()
+    fresh.width = len(SHARDS) + 1
+    monkeypatch.setattr(io_engine, "ENGINE", fresh)
+    yield fresh
+    if fresh._pool is not None:
+        fresh._pool.shutdown(wait=True)
+
+
+def test_capture_identity_hashes_every_source_file_together_on_the_io_engine(
+        tmp_path, monkeypatch, engine):
     """All five files are in flight at once, on engine threads, with the guard's arguments."""
     source, census = _source(tmp_path)
     parties = len(SHARDS) + 1
-    assert ENGINE.width >= parties, (
-        f"this test needs {parties} engine workers; reserve at least {parties} CPUs")
+    assert engine.width == parties
     barrier = threading.Barrier(parties, timeout=20)
     seen = []
     real = cc.sha256
