@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-import hashlib
 import json
 from pathlib import Path
 
@@ -27,6 +26,7 @@ from prismaquant.artifact_collection import (
     seal_record,
     verify_record,
 )
+from prismaquant.digests import bytes_sha256hex
 
 
 _DTYPE_BITS = {
@@ -68,7 +68,7 @@ def _load_json_source(
         raise ArtifactCollectionError(f"unreadable JSON file: {path}") from exc
     if not isinstance(value, dict):
         _fail(str(path), "expected a top-level object")
-    hexdigest = hashlib.sha256(encoded).hexdigest()
+    hexdigest = bytes_sha256hex(encoded)
     return (
         value,
         make_reference(
