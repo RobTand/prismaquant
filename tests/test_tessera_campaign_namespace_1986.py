@@ -387,7 +387,7 @@ def test_review_fresh_and_identical_publication_establishes_writable_temps(tmp_p
         assert observed.stdout.strip() == rows[0]["env"]["TMPDIR"]
 
 
-@pytest.mark.parametrize("value", ["traversal", "relative", "double_slash", "contained"])
+@pytest.mark.parametrize("value", ["traversal", "relative", "double_slash", "leading_double_slash", "contained"])
 def test_review_path_input_is_canonical_before_overlap(tmp_path, value):
     kwargs = arguments(tmp_path)
     row = kwargs["requests"][0]
@@ -397,6 +397,8 @@ def test_review_path_input_is_canonical_before_overlap(tmp_path, value):
         path = "../new"
     elif value == "double_slash":
         path = str(tmp_path) + "//outside"
+    elif value == "leading_double_slash":
+        path = "/" + str(tmp_path / "new" / "selection.json")
     else:
         path = str(tmp_path / "new" / "model")
     row["argv"][row["argv"].index("--units") + 1] = path

@@ -40,8 +40,9 @@ def refuse_path_symlinks(value: str, *, directory: bool = True) -> None:
 
 def namespace_absolute_path(value: object) -> Path:
     """Validate path syntax without opening or authenticating input artifacts."""
-    if (not isinstance(value, str) or not value.startswith("/") or "\x00" in value
-            or str(PurePosixPath(value)) != value or ".." in PurePosixPath(value).parts):
+    if (not isinstance(value, str) or not value.startswith("/") or value.startswith("//")
+            or "\x00" in value or str(PurePosixPath(value)) != value
+            or ".." in PurePosixPath(value).parts):
         raise RuntimeError("namespace paths must be canonical absolute paths")
     return Path(value)
 
