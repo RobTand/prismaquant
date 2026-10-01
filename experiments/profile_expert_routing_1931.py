@@ -1,4 +1,4 @@
-"""Before/after profile of derive_per_expert_activations on one GLM-5.3 MoE layer (PQ #1931).
+"""Before/after profiles on one GLM-5.3 MoE layer: PQ #1931 and PQ #1935.
 
 One process, one box, one input: the per-expert loop (verbatim, from the
 equality test) against the vectorized routing. The layer is the real
@@ -18,6 +18,13 @@ Records, per variant:
 A second pair of phases adds the census consumer's per-expert work (the
 ``tessera_campaign.accumulate`` amax and Hessian gram) to show what the hook
 as a whole gains.
+
+PQ #1935: the same layer's 864 projected units (288 experts x gate, up, down)
+through ``_checked_projected_units`` -- the old per-unit host copy (verbatim,
+from that issue's test) against the device comparison -- with the live views
+cut from the loaded packed parameters as the census's are. Each pass checks
+the whole layer; the source pages stay cached (``release_source_pages`` off),
+so the passes time the comparison, not the disk.
 """
 from __future__ import annotations
 
@@ -42,12 +49,17 @@ def _utc():
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _load_reference():
-    path = Path(__file__).resolve().parents[1] / "tests" / "test_derive_per_expert_routing_1931.py"
-    spec = importlib.util.spec_from_file_location("routing_1931_reference", path)
+def _test_module(filename, name):
+    path = Path(__file__).resolve().parents[1] / "tests" / filename
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module._reference_derive
+    return module
+
+
+def _load_reference():
+    return _test_module("test_derive_per_expert_routing_1931.py",
+                        "routing_1931_reference")._reference_derive
 
 
 def _build_layer(model_dir: Path, layer: int, device: str):
@@ -62,11 +74,10 @@ def _build_layer(model_dir: Path, layer: int, device: str):
     moe = moe.to(torch.bfloat16).to_empty(device=device).eval()
     index = json.loads((model_dir / "model.safetensors.index.json").read_text())["weight_map"]
     prefix = f"model.language_model.layers.{layer}."
-    # The routing reads the router and gate_up_proj only; down_proj and the
-    # shared experts stay allocated but unread.
+    # The routing reads the router and gate_up_proj; the #1935 check reads
+    # every expert projection. The shared experts stay allocated but unread.
     wanted = {k: v for k, v in index.items()
-              if (k.startswith(prefix + "mlp.gate.") or (
-                  k.startswith(prefix + "mlp.experts.") and not k.endswith("down_proj.weight")))
+              if k.startswith(prefix + "mlp.gate.") or k.startswith(prefix + "mlp.experts.")
               or k == prefix + "post_attention_layernorm.weight"}
     by_file: dict[str, list[str]] = {}
     for key, fname in wanted.items():
@@ -86,9 +97,27 @@ def _build_layer(model_dir: Path, layer: int, device: str):
             ep = f"{prefix}mlp.experts.{e}."
             moe.experts.gate_up_proj[e, :inter].copy_(tensors[ep + "gate_proj.weight"])
             moe.experts.gate_up_proj[e, inter:].copy_(tensors[ep + "up_proj.weight"])
+            moe.experts.down_proj[e].copy_(tensors[ep + "down_proj.weight"])
     ln = tensors[prefix + "post_attention_layernorm.weight"].to(device=device, dtype=torch.bfloat16)
     tensors.clear()
-    return moe, ln, text
+    files = {k: v for k, v in wanted.items() if k.startswith(prefix + "mlp.experts.")}
+    return moe, ln, text, files
+
+
+def _projected_units(moe, files, layer, inter):
+    """The layer's projected units, as the producer binds them, and their live views."""
+    prefix = f"model.language_model.layers.{layer}.mlp.experts."
+    bound, weights = {}, {}
+    for e in range(moe.experts.num_experts):
+        views = {"gate_proj": moe.experts.gate_up_proj[e, :inter],
+                 "up_proj": moe.experts.gate_up_proj[e, inter:],
+                 "down_proj": moe.experts.down_proj[e]}
+        for proj, view in views.items():
+            key = f"{prefix}{e}.{proj}.weight"
+            bound.setdefault(f"layer{layer}.{proj}", {})[key] = {
+                "source_tensor": key, "rows": int(view.shape[0]), "cols": int(view.shape[1])}
+            weights[key] = view
+    return bound, weights, {"tensors": files}
 
 
 def _same(a, b):
@@ -172,15 +201,15 @@ class _Power:
                 "median_w": statistics.median(watts), "min_w": min(watts), "max_w": max(watts)}
 
 
-def _phase(name, fn, seconds):
-    for _ in range(3):
+def _phase(name, fn, seconds, *, warmup=3, min_calls=2):
+    for _ in range(warmup):
         fn()
     torch.cuda.synchronize()
     times = []
     start = _utc()
     deadline = time.perf_counter() + seconds
     with _Power() as power:
-        while time.perf_counter() < deadline:
+        while time.perf_counter() < deadline or len(times) < min_calls:
             t0 = time.perf_counter()
             fn()
             torch.cuda.synchronize()
@@ -236,7 +265,7 @@ def main():
               "gpu": torch.cuda.get_device_name(0), "layer": args.layer, "tokens": args.tokens,
               "git_head": os.environ.get("PQ1931_GIT_HEAD")}
     t0 = time.perf_counter()
-    moe, ln, text = _build_layer(args.model, args.layer, device)
+    moe, ln, text, files = _build_layer(args.model, args.layer, device)
     record["load_s"] = time.perf_counter() - t0
     gen = torch.Generator(device=device).manual_seed(1931)
     X = (torch.randn(1, args.tokens, text.hidden_size, device=device, generator=gen,
@@ -277,11 +306,30 @@ def main():
         phases.append(_phase(f"derive_{name}", calls[name], args.seconds))
     for name in ("loop", "vectorized"):
         phases.append(_phase(f"hook_{name}", hooks[name], args.seconds))
+    # PQ #1935: the layer's projected-unit byte check.
+    from prismaquant import tessera_campaign as campaign
+    old_check = _test_module("test_projected_unit_check_1935.py",
+                             "check_1935_reference")._reference_checked_units
+    bound, weights, source = _projected_units(moe, files, args.layer, text.moe_intermediate_size)
+    check_kwargs = dict(weights=weights, model_path=args.model, source=source,
+                        release_source_pages=False)
+    checks = {"check_host": lambda: old_check(bound, **check_kwargs),
+              "check_device": lambda: campaign._checked_projected_units(bound, **check_kwargs)}
+    for fn in checks.values():
+        assert len(fn()) == len(weights)  # warm the page cache; both accept every unit
+    record["projected_units"] = len(weights)
+    record["check_syncs_per_layer"] = {name: _sync_count(fn) for name, fn in checks.items()}
+    record["check_profile_per_layer"] = {name: _profile(fn) for name, fn in checks.items()}
+    print(json.dumps({k: record[k] for k in ("check_syncs_per_layer",)}), flush=True)
+    for name, fn in checks.items():
+        phases.append(_phase(name, fn, args.seconds, warmup=1))
+
     record["phases"] = phases
     by = {p["phase"]: p for p in phases}
     record["speedup_median"] = {
         "derive": by["derive_loop"]["wall_s_median"] / by["derive_vectorized"]["wall_s_median"],
         "hook": by["hook_loop"]["wall_s_median"] / by["hook_vectorized"]["wall_s_median"],
+        "check": by["check_host"]["wall_s_median"] / by["check_device"]["wall_s_median"],
     }
     record["utc_end"] = _utc()
     args.out.parent.mkdir(parents=True, exist_ok=True)
