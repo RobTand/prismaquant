@@ -281,6 +281,12 @@ def _binding_documents(roots: Iterable, *, skip: Path):
             yield path, document
 
 
+def _binding_names_space(value: str, spellings: set[str]) -> bool:
+    """Keep path matching separate from document traversal and digest matching."""
+    return value.rstrip("/") + "/" in spellings or any(
+        value.startswith(spelling) for spelling in spellings)
+
+
 def check_bindings(roots, *, space: Path, digests: Mapping[str, str]) -> int:
     """Refuse when a document under ``roots`` names the run; return how many were read.
 
@@ -302,8 +308,7 @@ def check_bindings(roots, *, space: Path, digests: Mapping[str, str]) -> int:
                 raise RetirementRefused(
                     f"{path} names this run's {digests[value]} by digest at "
                     f"{pointer or '/'}: a live binding holds the run")
-            if value.rstrip("/") + "/" in spellings or any(
-                    value.startswith(spelling) for spelling in spellings):
+            if _binding_names_space(value, spellings):
                 raise RetirementRefused(
                     f"{path} names {value} inside this run at {pointer or '/'}: "
                     "a live binding holds the run")
