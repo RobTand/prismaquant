@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1937): the admitted-row observer collects Netdata
+through the existing `io_spans.PeriodicSampler`, not a second thread owner.
+One bounded collector callback preserves the 30-second cadence, readiness and
+fail-closed chart validation; an opt-in final tick retains the last partial
+interval when stopped. Other samplers retain their default stop behavior.
+Read-only native thread identity and liveness accessors preserve the existing
+observer affinity assignment and bounded shutdown check without exposing the
+sampler's private thread. No shrink-only allowlist, assertion, sudo/profiler
+readiness policy, workload signal, cache, format, numerical method, pin or
+serving gate changes; CPU closure tests are not GPU/profile qualification or a
+performance claim.
+
 Re-stamped 2026-10-01 (PQ #1936, Refs #1921): allocation first separates
 visual policy from orchestration. A complete measured visual Fisher/cost
 population retains its legal visual and merger candidates in the existing

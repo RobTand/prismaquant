@@ -3,11 +3,29 @@ import ast
 from pathlib import Path
 import time
 import math
+import threading
 from types import SimpleNamespace
+
+from prismaquant.io_spans import PeriodicSampler
 
 import pytest
 
 SOURCE=Path(__file__).resolve().parents[1]/'tools/pq_row_profile_observer.py'
+
+
+def _collect_initial_and_final(space, functions):
+    """Drive the production callback through the actual shared CPU sampler."""
+    space['PeriodicSampler'] = PeriodicSampler
+    space['collection_ready'] = threading.Event()
+    exec(compile(ast.fix_missing_locations(ast.Module(body=functions,type_ignores=[])),str(SOURCE),'exec'),space)
+    sampler = space['collect_netdata']()
+    assert sampler.interval_s == 30
+    try:
+        sampler.start()
+        assert space['collection_ready'].wait(5)
+    finally:
+        sampler.stop(timeout=5)
+    assert not sampler.is_alive()
 
 
 def test_readiness_follows_target_check_and_collection_start():
@@ -23,20 +41,18 @@ def test_readiness_follows_target_check_and_collection_start():
 
 def test_missing_netdata_is_not_silently_qualified(tmp_path):
     tree=ast.parse(SOURCE.read_text())
-    fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='collect_netdata')
-    class Stop:
-        def wait(self,seconds): return True
+    functions=[n for n in tree.body if isinstance(n,ast.FunctionDef)
+               and n.name in ('netdata_tick','collect_netdata')]
     errors=[];events=[];calls=[]
     def fail(*args):
         calls.append(args)
         raise OSError('required series unavailable')
-    space={'time':time,'charts':{'sparky':['power'],'sparklina':['power']},'stop':Stop(),
+    space={'time':time,'charts':{'sparky':['power'],'sparklina':['power']},
            'netdata':fail,'event':lambda *a,**kw:events.append((a,kw)),'out':tmp_path,
            'window_padding':2,
            'telemetry_errors':errors,'collection_ready':SimpleNamespace(set=lambda:None),
            'json':__import__('json'),'urllib':__import__('urllib.parse')}
-    exec(compile(ast.fix_missing_locations(ast.Module(body=[fn],type_ignores=[])),str(SOURCE),'exec'),space)
-    space['collect_netdata']()
+    _collect_initial_and_final(space, functions)
     assert len(calls)==4, 'fixture must reach both hosts in initial and final collection'
     assert errors, 'collector swallowed required series failures and could return success'
 
@@ -52,7 +68,7 @@ def test_readiness_publication_is_atomic():
 def test_successful_but_unmeasured_netdata_refuses(tmp_path, damage):
     tree=ast.parse(SOURCE.read_text())
     functions=[n for n in tree.body if isinstance(n,ast.FunctionDef)
-               and n.name in ('validate_netdata_window','collect_netdata')]
+               and n.name in ('validate_netdata_window','netdata_tick','collect_netdata')]
     payload={'labels':['time','power'], 'data':[[99,42.0]]}
     if damage=='null_only': payload['data']=[[99,None]]
     elif damage=='stale': payload['data']=[[0,42.0]]
@@ -61,12 +77,11 @@ def test_successful_but_unmeasured_netdata_refuses(tmp_path, damage):
     else: payload.pop('labels')
     errors=[]
     space={'time':SimpleNamespace(time=lambda:100),'charts':{'sparky':['power'],'sparklina':['power']},
-           'stop':SimpleNamespace(wait=lambda seconds:True), 'netdata':lambda *args:payload,
+           'netdata':lambda *args:payload,
            'event':lambda *a,**kw:None,'out':tmp_path,'telemetry_errors':errors,
            'collection_ready':SimpleNamespace(set=lambda:None),'math':math,'window_padding':2,
            'json':__import__('json'),'urllib':__import__('urllib.parse')}
-    exec(compile(ast.fix_missing_locations(ast.Module(body=functions,type_ignores=[])),str(SOURCE),'exec'),space)
-    space['collect_netdata']()
+    _collect_initial_and_final(space, functions)
     assert errors, 'unmeasured successful Netdata response was accepted'
 
 
@@ -75,18 +90,17 @@ def test_successful_but_unmeasured_netdata_refuses(tmp_path, damage):
 def test_fresh_finite_netdata_is_a_real_positive(tmp_path, partial_null, sample_time, padding):
     tree=ast.parse(SOURCE.read_text())
     functions=[n for n in tree.body if isinstance(n,ast.FunctionDef)
-               and n.name in ('validate_netdata_window','collect_netdata')]
+               and n.name in ('validate_netdata_window','netdata_tick','collect_netdata')]
     payload={'labels':['time','power'], 'data':[[sample_time,42.0]]}
     if partial_null:
         payload['data'].append([99.5,None])
     errors=[]
     space={'time':SimpleNamespace(time=lambda:100),'charts':{'sparky':['power'],'sparklina':['power']},
-           'stop':SimpleNamespace(wait=lambda seconds:True),'netdata':lambda *args:payload,
+           'netdata':lambda *args:payload,
            'event':lambda *a,**kw:None,'out':tmp_path,'telemetry_errors':errors,
            'collection_ready':SimpleNamespace(set=lambda:None),'math':math,'window_padding':padding,
            'json':__import__('json'),'urllib':__import__('urllib.parse')}
-    exec(compile(ast.fix_missing_locations(ast.Module(body=functions,type_ignores=[])),str(SOURCE),'exec'),space)
-    space['collect_netdata']()
+    _collect_initial_and_final(space, functions)
     assert not errors, errors
     assert (tmp_path/'netdata-sparky.jsonl').read_text()
     assert (tmp_path/'netdata-sparklina.jsonl').read_text()

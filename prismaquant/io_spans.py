@@ -599,20 +599,31 @@ class PeriodicSampler:
     thread; an exception it raises also ends it, so a tick catches what it
     means to survive. ``tick_first`` takes the first reading at once;
     otherwise the thread waits one interval first. The thread is a daemon,
-    so a sampler nobody stops never holds the process open.
+    so a sampler nobody stops never holds the process open. ``tick_last``
+    opts into one final reading when a stop is requested, on the same thread;
+    returning False without a stop does not request that final reading.
     """
 
     def __init__(self, tick: Callable[[], Any], *, interval_s: float, name: str,
-                 tick_first: bool = True):
+                 tick_first: bool = True, tick_last: bool = False):
         self.interval_s = float(interval_s)
         self._tick = tick
         self._tick_first = bool(tick_first)
+        self._tick_last = bool(tick_last)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name=name, daemon=True)
 
     @property
     def stopping(self) -> bool:
         return self._stop.is_set()
+
+    @property
+    def native_id(self) -> int | None:
+        """The sampler thread's OS identity, absent before it starts."""
+        return self._thread.native_id
+
+    def is_alive(self) -> bool:
+        return self._thread.is_alive()
 
     def start(self) -> "PeriodicSampler":
         self._thread.start()
@@ -636,12 +647,16 @@ class PeriodicSampler:
         self.stop()
 
     def _run(self) -> None:
-        if not self._tick_first and self._stop.wait(self.interval_s):
-            return
-        while not self._stop.is_set():
-            if self._tick() is False:
+        try:
+            if not self._tick_first and self._stop.wait(self.interval_s):
                 return
-            self._stop.wait(self.interval_s)
+            while not self._stop.is_set():
+                if self._tick() is False:
+                    return
+                self._stop.wait(self.interval_s)
+        finally:
+            if self._tick_last and self._stop.is_set():
+                self._tick()
 
 
 class MemAvailableFloor:

@@ -7,6 +7,7 @@ workload. Output never enters a wire, cost row or anchor identity.
 """
 import argparse
 from tools.pq_profile_digest import bytes_sha256hex, file_sha256hex
+from prismaquant.io_spans import PeriodicSampler
 import json
 import math
 import os
@@ -41,7 +42,6 @@ profile_dir.mkdir(parents=True, exist_ok=False)
 profile_name = 'boundary-' + local_host + '.speedscope'
 local_profile = profile_dir / profile_name
 lock = threading.Lock()
-stop = threading.Event()
 collection_ready = threading.Event()
 telemetry_errors = []
 
@@ -156,44 +156,36 @@ def validate_netdata_window(data, *, after, before):
         raise RuntimeError('required Netdata dimensions have no measured samples')
 
 
+def netdata_tick(previous):
+    """Collect one bounded window; scheduling belongs to the sampler owner."""
+    now = int(time.time())
+    for host, names in charts.items():
+        for chart in names:
+            try:
+                query = urllib.parse.urlencode(dict(chart=chart, after=previous - window_padding,
+                    before=now, points=max(10, now - previous + 4),
+                    group='average', format='json', options='seconds'))
+                data = netdata(host, 'data?' + query)
+                validate_netdata_window(data, after=previous - window_padding, before=now)
+                with (out / ('netdata-' + host + '.jsonl')).open('a') as f:
+                    f.write(json.dumps({'fetched_epoch': time.time(), 'chart': chart,
+                                       'response': data}) + '\n')
+            except Exception as error:
+                telemetry_errors.append(str(error))
+                event('netdata_error', host=host, chart=chart, error=str(error))
+    return now
+
+
 def collect_netdata():
+    """Build the shared sampler; retain the last partial interval on stop."""
     previous = int(time.time()) - 5
-    while True:
-        now = int(time.time())
-        for host, names in charts.items():
-            for chart in names:
-                try:
-                    query = urllib.parse.urlencode(dict(chart=chart, after=previous - window_padding,
-                        before=now, points=max(10, now - previous + 4),
-                        group='average', format='json', options='seconds'))
-                    data = netdata(host, 'data?' + query)
-                    validate_netdata_window(data, after=previous - window_padding, before=now)
-                    with (out / ('netdata-' + host + '.jsonl')).open('a') as f:
-                        f.write(json.dumps({'fetched_epoch': time.time(), 'chart': chart,
-                                           'response': data}) + '\n')
-                except Exception as error:
-                    telemetry_errors.append(str(error))
-                    event('netdata_error', host=host, chart=chart, error=str(error))
+
+    def tick():
+        nonlocal previous
+        previous = netdata_tick(previous)
         collection_ready.set()
-        previous = now
-        if stop.wait(30):
-            # One final request retains the last partial interval.
-            now = int(time.time())
-            for host, names in charts.items():
-                for chart in names:
-                    try:
-                        query = urllib.parse.urlencode(dict(chart=chart, after=previous - window_padding,
-                            before=now, points=max(10, now - previous + 4),
-                            group='average', format='json', options='seconds'))
-                        data = netdata(host, 'data?' + query)
-                        validate_netdata_window(data, after=previous - window_padding, before=now)
-                        with (out / ('netdata-' + host + '.jsonl')).open('a') as f:
-                            f.write(json.dumps({'fetched_epoch': time.time(), 'chart': chart,
-                                'response': data}) + '\n')
-                    except Exception as error:
-                        telemetry_errors.append(str(error))
-                        event('netdata_error', host=host, chart=chart, error=str(error))
-            return
+
+    return PeriodicSampler(tick, interval_s=30, name='row-netdata', tick_last=True)
 
 
 def matches(pid):
@@ -230,11 +222,10 @@ def profile_target_finished(seen, alive, workload_done):
 
 if find_target() is not None:
     raise RuntimeError('target was already running; startup profile would be incomplete')
-nd = threading.Thread(target=collect_netdata, name='row-netdata', daemon=True)
+nd = collect_netdata()
 nd.start()
 if not collection_ready.wait(60) or telemetry_errors:
-    stop.set()
-    nd.join(90)
+    nd.stop(90)
     raise RuntimeError('required Netdata initialization failed before readiness')
 event('ready', pyspy_version=version.strip(), initial_power_w=float(first_power),
       target_out=a.target_out, charts=charts, local_profile=str(local_profile))
@@ -262,7 +253,10 @@ try:
                     pid = found
                     affinity = sorted(os.sched_getaffinity(pid))
                     os.sched_setaffinity(0, affinity)
-                    os.sched_setaffinity(nd.native_id, affinity)
+                    native_id = nd.native_id
+                    if native_id is None:
+                        raise RuntimeError('Netdata sampler has no native thread id')
+                    os.sched_setaffinity(native_id, affinity)
                     spylog = (out / 'pyspy.log').open('w')
                     spy = subprocess.Popen(profiler_command(pid, a.profile_s, local_profile),
                         stdout=spylog, stderr=subprocess.STDOUT)
@@ -320,8 +314,7 @@ try:
                 next_sample += 1
             time.sleep(0.1)
 finally:
-    stop.set()
-    nd.join(90)
+    nd.stop(90)
     if spy is not None:
         # Own profiler only. Never signal or terminate the quantization row.
         rc = spy.wait(timeout=a.profile_s + 30)
