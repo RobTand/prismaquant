@@ -335,7 +335,7 @@ def main():
     parser.add_argument('--only-dtype', choices=('float32', 'bfloat16'))
     args = parser.parse_args()
     args.output.mkdir(exist_ok=False)
-    device = torch.device(args.device)
+    device = torch.device('cuda', torch.cuda.current_device()) if args.device == 'cuda' else torch.device('cpu')
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision('highest')
     torch.backends.cuda.matmul.allow_tf32 = False
