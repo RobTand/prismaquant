@@ -18,7 +18,8 @@ CONTEXTS={'system.cpu','system.ram','system.io','system.load','nvidia_smi.gpu_po
 
 def netdata(host,endpoint):
     url='http://127.0.0.1:19999/api/v1/'+endpoint
-    raw=subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5',host,
+    raw=subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5',
+                        '-o','ControlMaster=no','-o','ControlPath=none','-o','ControlPersist=no',host,
                         'curl -fsS --max-time 8 --max-filesize 8388608 '+shlex.quote(url)],capture_output=True,text=True,
                        timeout=15,check=True).stdout
     if len(raw.encode())>8*1024**2:
