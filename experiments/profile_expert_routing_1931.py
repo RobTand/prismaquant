@@ -187,7 +187,7 @@ class _HookControlComplete(Exception):
     """End the bounded hook control before complete-capture output handoff."""
 
 
-def _production_hook_phases(moe, inputs, binding, record, telemetry, guard, output, seconds):
+def _production_hook_phases(moe, inputs, binding, record, guard, output, seconds):
     """Measure the actual installed collector, consume_packed and accumulate.
 
     The control supplies one existing captured input directly to the installed
@@ -251,7 +251,7 @@ def _production_hook_phases(moe, inputs, binding, record, telemetry, guard, outp
             arm[0] = name
             before = committed_state()
             phase = _phase(f'hook-{i}-{name}', lambda:hook(moe.experts,(inputs,)),
-                seconds,telemetry,guard,output)
+                seconds,guard,output)
             phase.update(committed_state_before=before,committed_state_after=committed_state(),
                 prefix_stable=before['prefix_rows'] == committed_state()['prefix_rows'])
             assert phase['prefix_stable']
@@ -354,12 +354,11 @@ def _raw_netdata(phase, output):
     _write(output, rows)
 
 
-def _phase(name, fn, seconds, telemetry, guard, output):
+def _phase(name, fn, seconds, guard, output):
     for _ in range(2):
         fn()
     torch.cuda.synchronize()
     guard.registered_gpu_subset_check('before_' + name)
-    telemetry.collect(); telemetry.require_healthy()
     start, mono = time.time(), time.monotonic()
     times = []
     with _Power() as power:
@@ -368,7 +367,6 @@ def _phase(name, fn, seconds, telemetry, guard, output):
             fn(); torch.cuda.synchronize()
             times.append(time.perf_counter()-before)
     end, end_mono = time.time(), time.monotonic()
-    telemetry.collect(); telemetry.require_healthy()
     guard.registered_gpu_subset_check('after_' + name)
     row = dict(phase=name, started_unix=start, finished_unix=end,
         started_monotonic=mono, finished_monotonic=end_mono, calls=len(times),
@@ -405,7 +403,7 @@ def main():
     from prismaquant.residency_map import bind_residency_manifest, residency_resolver
     from prismaquant.staged_tier_policy import activate_staged_tier_policy
     from prismaquant.memory_management import CaptureMemoryGuard
-    from experiments.glm_native_wire_screen_evidence import ScreenTelemetry
+    from experiments.glm_full_capture_profile import CaptureObserver
     activate_staged_tier_policy('ram,ssd')
     bind_residency_manifest(args.data_manifest_sha256)
     torch.set_num_threads(1)
@@ -417,7 +415,7 @@ def main():
             raise RuntimeError('CUDA reservation exceeds the bound GPU subset')
         return guard.check(label)
     guard.registered_gpu_subset_check = require_gpu_budget
-    telemetry = ScreenTelemetry(args.out/'netdata-points.jsonl')
+    observer = CaptureObserver(args.out/'system-observer', profile_layers=())
     record = dict(schema='prismaquant.pq1934_paired_measurement.v1', binding=binding,
         binding_sha256=args.binding_sha256, data_manifest_sha256=args.data_manifest_sha256,
         source_head=os.environ.get('PQ1931_GIT_HEAD'), torch=str(torch.__version__),
@@ -425,10 +423,13 @@ def main():
         gpu_uuid=str(getattr(torch.cuda.get_device_properties(0), 'uuid', '')),
         affinity=sorted(os.sched_getaffinity(0)), native_threads=torch.get_num_threads(),
         phases=[], equality=[], energy_qualified=False,
+        clock_alignment=dict(status='HOLD', cross_host_alignment_qualified=False,
+            reason='Known cross-host offset and variable SSH clock-probe bounds; raw series retained without clock correction'),
+        energy=dict(status='HOLD', reason='Clock alignment unqualified; no work-per-joule claim'),
         scope='one real resident GLM MoE layer; no full-campaign or serving claim')
     routing, checking = _references()
     try:
-        telemetry.start()
+        observer.__enter__()
         with ExitStack() as stack:
             try:
                 moe, inputs, bound, live, source, decoder = _prepare(binding, stack, guard)
@@ -470,7 +471,7 @@ def main():
                 for kind,functions in dict(derive=calls,check=checks).items():
                     for i,arm in enumerate(('before','after','after','before')):
                         record['phases'].append(_phase(f'{kind}-{i}-{arm}', functions[arm],
-                            args.seconds, telemetry, guard, args.out))
+                            args.seconds, guard, args.out))
                         _write(args.out/'partial.json',record)
                         report('measure',1+len(record['phases']),unit='durable_control_phases')
                 torch.cuda.synchronize()
@@ -479,7 +480,7 @@ def main():
                 torch.cuda.empty_cache(); gc.collect()
                 guard.check('after_projected_check_host_cache_release')
                 record['phase_boundary_after_host_cache_release'] = guard.snapshot()
-                _production_hook_phases(moe,inputs,binding,record,telemetry,guard,args.out,args.seconds)
+                _production_hook_phases(moe,inputs,binding,record,guard,args.out,args.seconds)
                 # Every async CPU-buffer consumer completes before any sealed FD closes.
                 torch.cuda.synchronize()
                 del checks,calls,live,bound,source,decoder,moe,inputs
@@ -491,11 +492,13 @@ def main():
                 torch.cuda.synchronize()
         record['sealed_buffers_closed'] = True
     finally:
-        telemetry.collect()
-        record['telemetry_coverage'] = telemetry.finish(record['phases'])
-        _write(args.out/'result.json',record)
-    if not record['telemetry_coverage']['passed']:
-        raise RuntimeError('Netdata coverage failed; measurement remains unqualified')
+        # Existing raw observer records both hosts and raises on recorder
+        # failures. Successful collection does not qualify clock alignment.
+        try:
+            observer.__exit__(*sys.exc_info())
+        finally:
+            record['raw_observer'] = observer.result
+            _write(args.out/'result.json',record)
     record['gain_fraction'] = {}
     for kind in ('derive','hook','check'):
         before = [p['wall_seconds_mean'] for p in record['phases'] if p['phase'].startswith(kind) and p['phase'].endswith('before')]
