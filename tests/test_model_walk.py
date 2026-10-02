@@ -424,6 +424,7 @@ def _shrunken_dsv4():
     return profile, AutoModelForCausalLM.from_config(cfg).eval()
 
 
+@pytest.mark.own_process
 @pytest.mark.slow
 def test_dsv4_real_cpu_walk_discovers_and_decides_wo_a():
     """Acceptance c on the contract's root-B fallback: the real DSv4
@@ -451,6 +452,7 @@ def test_dsv4_real_cpu_walk_discovers_and_decides_wo_a():
         assert result.claims[name].disposition == "pin", name
 
 
+@pytest.mark.own_process
 @pytest.mark.slow
 def test_dsv4_walk_fails_without_the_profile_rules():
     """The wo_a defect, reproduced: with only the generic Linear rule, the

@@ -242,6 +242,7 @@ def test_dispatch_is_explicit_and_fails_fast():
         grouped_linear_groups(bare, _DeclaringProfile())
 
 
+@pytest.mark.own_process
 @pytest.mark.slow
 def test_real_dsv4_wo_a_gets_a_priced_probe_row():
     """End to end on the REAL vendored DSv4 modeling code (toy dims): the
