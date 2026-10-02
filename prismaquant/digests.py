@@ -13,6 +13,8 @@ unless the profile states otherwise:
 - ``DIRECT_ASCII_SPACED_LAX``: default-spaced ``(", ", ": ")`` separators,
   ``ensure_ascii=True``, ``allow_nan=True`` and no fallback serializer. This
   is direct JSON, not a round trip; its inherited spaces are identity bytes.
+- ``DIRECT_UTF8_INDENT2_STRICT``: two-space indentation, UTF-8 characters,
+  strict nonfinite refusal and no fallback serializer. No final LF is added.
 - ``DIRECT_ASCII_INDENT2_LAX``: two-space indentation, ``(",", ": ")``
   separators, ASCII escaping, lax nonfinite values and no fallback serializer.
   File writers retain their own final LF and publication policy.
@@ -50,6 +52,10 @@ Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
   only how the file is read, never the digest. The path may be a ``str`` or a
   ``PathLike``; a missing path or a directory raises what ``open`` raises.
 
+- ``length_framed_bytes_sha256``: caller-owned prefix followed by caller-ordered
+  raw byte frames, each preceded by its eight-byte big-endian byte length.
+  No normalization, sorting, reconstruction or final trailer. Domain tags stay
+  with the caller and are not interchangeable.
 - ``LengthFramedSourceSha256``: incremental records in caller order, each
   strict UTF-8 name preceded by its four-byte big-endian byte length, then a
   payload preceded by its eight-byte big-endian byte length. No sorting,
@@ -286,6 +292,9 @@ DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
 DIRECT_ASCII_SPACED_LAX = JsonProfile(
     "direct-ascii-spaced-lax", ensure_ascii=True, allow_nan=True,
     separators=(", ", ": "))
+DIRECT_UTF8_INDENT2_STRICT = JsonProfile(
+    "direct-utf8-indent2-strict", ensure_ascii=False, allow_nan=False,
+    separators=(",", ": "), indent=2)
 DIRECT_ASCII_INDENT2_LAX = JsonProfile(
     "direct-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
     separators=(",", ": "), indent=2)
@@ -327,6 +336,15 @@ FILE_BLOCK_BYTES = 8 << 20
 #: (``autoscale.selected_anchor_resources``, RobTand/prismaquant#1491), so the
 #: two read the same number from here.
 SOURCE_HASH_BLOCK_BYTES = 16 * 1024**2
+
+
+def length_framed_bytes_sha256(frames: Iterable[bytes], *, prefix: bytes) -> str:
+    """Prefix plus ordered u64-BE-length/raw-byte frames, consumed once."""
+    digest = hashlib.sha256(prefix)
+    for raw in frames:
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+    return digest.hexdigest()
 
 
 class LengthFramedSourceSha256:
@@ -389,13 +407,14 @@ def source_tree_profiles(records: Iterable[tuple[str, bytes]]) -> dict[str, str]
             raise TypeError("source profiles require UTF-8 names and byte contents")
         legacy.update(name, raw)
         encoded.append((name.encode("utf-8"), raw))
-    framed = hashlib.sha256(SOURCE_TREE_V2.encode("ascii") + b"\0")
-    for name, raw in sorted(encoded, key=lambda entry: entry[0]):
-        framed.update(len(name).to_bytes(8, "big"))
-        framed.update(name)
-        framed.update(len(raw).to_bytes(8, "big"))
-        framed.update(raw)
-    return {SOURCE_TREE_V1: legacy.hexdigest(), SOURCE_TREE_V2: framed.hexdigest()}
+    def frames():
+        for name, raw in sorted(encoded, key=lambda entry: entry[0]):
+            yield name
+            yield raw
+
+    framed = length_framed_bytes_sha256(
+        frames(), prefix=SOURCE_TREE_V2.encode("ascii") + b"\0")
+    return {SOURCE_TREE_V1: legacy.hexdigest(), SOURCE_TREE_V2: framed}
 
 
 def compare_source_profiles(left: Mapping[str, str], right: Mapping[str, str]) -> dict[str, str]:

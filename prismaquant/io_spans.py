@@ -39,10 +39,14 @@ every ``every_entries`` entries or ``every_s`` seconds while a long read
 runs. It reports nothing to PrismaBuild. Reads into a disposable scratch are
 not durable work, and PB #480 counts only durable work as progress.
 
-**Instrumentation never raises into the workload.** A counter that cannot
+**Span instrumentation never raises into the workload.** A counter that cannot
 be read is recorded as ``None`` with the reason, and a failure to build or
 print a record is printed and dropped. A workload exception passes through
 the span unchanged. The span records it as the outcome.
+
+Pending-delivery observers have a stricter contract: a failed observation
+refuses an otherwise successful delivery, and annotates an existing delivery
+failure without replacing it.
 
 **Telemetry readers and the sampler thread.** This module is the one home
 of the process and host readers (``/proc/self/io``, ``/proc/meminfo``,
@@ -813,6 +817,34 @@ def drop_page_cache(paths, *, missing_ok: bool = False) -> int:
 EXPOSED_WAIT_SCHEMA = "prismaquant.exposed_wait.v1"
 
 
+def observed_future_result(future, *, sink, kind, info=None, clock=time.time,
+                           observer="load wait observer"):
+    """Observe a pending delivery without changing result or failure ownership.
+
+    Ready futures owe no exposed wait. An observer failure fails a successful
+    delivery, but only annotates an existing delivery failure so its cause is
+    preserved. Retry, verification and residency remain with the caller.
+    """
+    if sink is None or future.done():
+        return future.result()
+    started = clock()
+    failure = None
+    try:
+        return future.result()
+    except BaseException as error:
+        failure = error
+        raise
+    finally:
+        finished = clock()
+        try:
+            sink(kind, started, finished,
+                 {**dict(info or {}), "wait_s": max(0.0, finished - started)})
+        except BaseException as error:
+            if failure is None:
+                raise RuntimeError(f"{observer} failed") from error
+            failure.add_note(f"{observer} failed: {type(error).__name__}: {error}")
+
+
 class ExposedWaitLedger:
     """Thread-safe record of the intervals a consumer spent blocked on a load.
 
@@ -1071,7 +1103,7 @@ def exposed_wait_report(intervals, takes, *, power_times, power_samples,
 
 __all__ = [
     "EXPOSED_WAIT_SCHEMA", "ExposedWaitLedger", "derive_wait_bound",
-    "exposed_wait_report", "idle_baseline",
+    "exposed_wait_report", "idle_baseline", "observed_future_result",
     "GB10_POWER_ENVELOPE_W", "GpuPowerSampler", "GpuPowerSpanSource",
     "IO_SPAN_MARKER", "IO_SPAN_SCHEMA", "IoSpan", "IoSpanLog",
     "MemAvailableFloor", "PROC_IO_FIELDS", "PeriodicSampler",

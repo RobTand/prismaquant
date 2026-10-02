@@ -51,8 +51,9 @@ Transport:
   declared waits while its producer attempt succeeded and is swept once
   that attempt is dead. Today's consumer stages the handoff through a
   static readset and declares nothing, so its producer's batches wait;
-  declaring them is the consumer's ``--after`` edge, which waits on
-  PrismaBuild #946 (PQ #1007).
+  declaring them needs PrismaQuant's consumer integration with the public
+  mixed-read-plan API and runtime retirement qualification (PQ #1007).
+  PrismaBuild #946 is closed and supplies that API's upstream implementation.
 * The consumer streams the plane through ``stream_exact_entry_tensors``
   (windows of the verified exact-entry reader, strict-tier staged when the
   policy is active) and the owner states through the checkpoint's staged small-file
