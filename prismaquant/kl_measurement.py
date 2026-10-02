@@ -28,6 +28,7 @@ from prismaquant import format_registry as fr
 from prismaquant.allocator_candidates import cost_entry_predicted_dloss
 from prismaquant.allocator_solver import _shape_from_stats
 from prismaquant.build_rtn_cache import kl_divergence
+from prismaquant.kl_fisher import forward_kl_per_token
 from prismaquant.memory_management import (
     GPUMemoryBudgetExceeded,
     cuda_memory_info,
@@ -814,10 +815,7 @@ def _replay_lane_kl_totals(
         student_log_probs = F.log_softmax(
             stacked[:, row:row + rows].float(), dim=-1,
         )
-        teacher_probs = teacher.exp().unsqueeze(0)
-        kl_per_pos = (
-            teacher_probs * (teacher.unsqueeze(0) - student_log_probs)
-        ).sum(dim=-1)
+        kl_per_pos = forward_kl_per_token(student_log_probs, teacher.unsqueeze(0))
         # kl_per_pos: [lanes, rows, L] -> mean over positions per row, then
         # sum the per-row (per calibration sample) KLs into the totals.
         kl_totals += kl_per_pos.mean(

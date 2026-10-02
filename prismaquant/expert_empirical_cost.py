@@ -30,7 +30,6 @@ AURA pass never sees) from the baseline incremental cost.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import pickle
 import re
@@ -46,6 +45,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from . import io_spans
+from .digests import bytes_sha256hex
+from .kl_fisher import forward_kl_per_token
 from prismaquant import format_registry as fr
 from prismaquant.tensor_digests import tensor_value_stamp as _tensor_value_stamp
 from prismaquant.routed_experts import (
@@ -217,7 +218,7 @@ def _unit_kl(
                     calib_ids[i:i + bs]
                 ).logits.float(), -1)
             bl = baseline[bi].to(lp.device)
-            kl = (bl.exp() * (bl - lp)).sum(-1)
+            kl = forward_kl_per_token(lp, bl)
             total += float(kl.sum().item())
             n_tok += kl.numel()
         return total / max(n_tok, 1)
@@ -492,7 +493,7 @@ def _unpacked_unit_kl(
                 ).logits.float(), -1
             )
             bl = baseline[bi].to(lp.device)
-            kl = (bl.exp() * (bl - lp)).sum(-1)
+            kl = forward_kl_per_token(lp, bl)
             total += float(kl.sum().item())
             n_tok += kl.numel()
         return total / max(n_tok, 1)
@@ -830,9 +831,9 @@ def _expert_checkpoint_identity(
         "calibration": {
             "shape": [int(dim) for dim in calib.shape],
             "dtype": str(calib.dtype),
-            "sha256": hashlib.sha256(
+            "sha256": bytes_sha256hex(
                 calib.view(torch.uint8).numpy().tobytes()
-            ).hexdigest(),
+            ),
             "calib_hash": calibration_data_hash(calib_ids),
         },
         "formats": [str(fmt) for fmt in formats],
@@ -1417,7 +1418,7 @@ def measure_expert_unit_costs_forked(
                 for w in range(n_windows):
                     lp = F.log_softmax(logits[w].float(), dim=-1)
                     bl = baseline_lp[w].to(lp.device)
-                    kl = (bl.exp() * (bl - lp)).sum(-1)
+                    kl = forward_kl_per_token(lp, bl)
                     wsum = float(kl.sum().item())
                     total += wsum
                     n_tok += kl.numel()
@@ -1839,8 +1840,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "n_calib_samples": int(calib.shape[0]),
         "calib_seqlen": int(calib.shape[1]),
         "calib_seed": args.calib_seed,
-        "calib_sha256": hashlib.sha256(
-            calib.cpu().numpy().tobytes()).hexdigest(),
+        "calib_sha256": bytes_sha256hex(calib.cpu().numpy().tobytes()),
         "expert_units": len(unit_kls),
         "unit_kls": unit_kls,
         "formats_measured": [

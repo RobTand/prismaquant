@@ -49,6 +49,12 @@ import torch
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
 from .digests import bytes_sha256hex, indent2_json_file_bytes
+from .stage_a_selected_row_diagnostic import (
+    RECEIPT_SCHEMA as DIAGNOSTIC_RECEIPT_SCHEMA,
+    SelectedRowDiagnosticRefused, bind_diagnostic_draw, diagnostic_marker_path,
+    load_diagnostic_spec, normalize_diagnostic_spec, require_diagnostic_original_owner,
+    write_diagnostic_marker, write_diagnostic_receipt,
+)
 from .io_spans import (
     EXPOSED_WAIT_SCHEMA, ExposedWaitLedger, GpuPowerSampler, exposed_wait_report,
 )
@@ -1047,6 +1053,7 @@ def run_adjoint_capture_core(
     min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
     arithmetic_extra=None, chain_seed=None, chain_split=None, forward_split=None,
+    selected_row_diagnostic=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -1131,6 +1138,12 @@ def run_adjoint_capture_core(
     no chain state and rolls no chain: the forward join publishes the tail
     checkpoint and the chain state, and the chain split rolls the chain from
     the tail.
+
+    ``selected_row_diagnostic`` retains the full draw's identity but executes
+    one declared global row/probe, computes its fresh tail and rolls through
+    its named boundary. It writes a non-bandable diagnostic receipt and no
+    chain state; it cannot accompany any seed, recovery or split. Original
+    CUDA calls retain the existing source owner's device gate.
     """
     from .cost_streaming import (
         StreamedBoundaryArtifacts,
@@ -1165,6 +1178,26 @@ def run_adjoint_capture_core(
         write_seed_marker,
     )
 
+    diagnostic = None
+    if selected_row_diagnostic is not None:
+        if any(value is not None for value in (
+                chain_resume, chain_seed, chain_split, forward_split, forward_recovery)):
+            raise AdjointIdentityRefused(
+                "selected-row diagnostic requires a fresh forward and tail; no recovery, seed or split")
+        try:
+            if torch.device(runner.device).type != "cpu":
+                require_diagnostic_original_owner(
+                    getattr(runner.context, "source_authentication", None),
+                    device=runner.device)
+            diagnostic = bind_diagnostic_draw(
+                selected_row_diagnostic, calib_ids, execution=execution,
+                num_layers=runner.num_layers)
+        except (SelectedRowDiagnosticRefused, RuntimeError) as exc:
+            raise AdjointIdentityRefused(str(exc)) from exc
+        if int(runner._head().weight.shape[0]) != diagnostic["vocab_size"]:
+            raise AdjointIdentityRefused("selected-row diagnostic vocabulary differs")
+    if diagnostic_marker_path(adjoint_space(output_root)).exists():
+        raise AdjointIdentityRefused("selected-row diagnostic root cannot be reused or resumed")
     split = None
     if chain_split is not None:
         from .stage_a_chain_split import ChainSplitRefused, normalize_chain_split
@@ -1234,6 +1267,10 @@ def run_adjoint_capture_core(
     # spool window from the same partition (PQ #1121).
     batch_rows, row_offsets = plane_partitions(
         n_rows=len(calib_ids), probe_microbatch=probe_microbatch)
+    if diagnostic is not None:
+        # Local artifact batch zero represents the explicit global row in
+        # the diagnostic identity. It is never a partial campaign plane.
+        row_offsets = [diagnostic["selected_global_row"]]
     # The regime must fit the sealed read window before anything is
     # captured: a refusal at the first chain layer would come after the
     # whole forward capture (RobTand/prismaquant#997).
@@ -1300,6 +1337,7 @@ def run_adjoint_capture_core(
         "token_scope": token_scope, "temperature": temperature,
         "execution_partition": execution_partition,
         "campaign_stage": "joint_adjoint_capture",
+        **({"selected_row_diagnostic": diagnostic} if diagnostic is not None else {}),
     }
     run_identity = {
         "plan_sha256": str(plan_sha256),
@@ -1312,6 +1350,7 @@ def run_adjoint_capture_core(
         "seed_base": seed_base,
         "calibration_shape": list(calib_ids.shape),
         "calibration_sha256": bind_identity["calibration_sha256"],
+        **({"selected_row_diagnostic": diagnostic} if diagnostic is not None else {}),
         **({CHAIN_REGIME_KEY: regime_identity}
            if regime_identity is not None else {}),
         # Absent at PyTorch's default, so a default run's identity keeps its
@@ -1446,11 +1485,14 @@ def run_adjoint_capture_core(
     tail_started = None
     chain_started = None
     chain_backwards = 0
+    tail_probe = None
 
     def log(message: str) -> None:
         print(f"joint_cost_stage_a: {message}", flush=True)
 
     resume_record = None
+    if diagnostic is not None:
+        write_diagnostic_marker(space, diagnostic)
     if seed_plan is not None:
         # Before the bind creates anything: this root is a seed's for good,
         # and the band tool refuses it (RobTand/prismaquant#1016).
@@ -1647,7 +1689,8 @@ def run_adjoint_capture_core(
                         else split["through"] if quantum
                         # A forward quantum stops at its tail (PQ #738): the
                         # chain split rolls the chain once the join ran.
-                        else num_layers if forward_quantum else 0)
+                        else num_layers if forward_quantum
+                        else diagnostic["through"] if diagnostic is not None else 0)
         # A seed also seals its last plane, stride boundary or not: the plane
         # at ``through`` is its result, and the end of the walk retires the
         # rolling entries. The stride block and run identity keep the plan's
@@ -1657,6 +1700,9 @@ def run_adjoint_capture_core(
                              else set() if forward_quantum
                              else set(boundaries) if seed_plan is None
                              else set(boundaries) | {seed_plan.through})
+        if diagnostic is not None:
+            checkpoint_layers = {boundary for boundary in boundaries
+                                 if boundary >= chain_bottom} | {chain_bottom}
         # A quantum's payload digests at one named layer, as it writes them:
         # the bitwise check against another run's plane at that layer.
         layer_digests = ({} if quantum and split["digest_layer"] is not None
@@ -1702,6 +1748,8 @@ def run_adjoint_capture_core(
                             for probe_index in range(n_probes):
                                 tail = tail_cpu.to(device=device, dtype=dtype).detach().requires_grad_(True)
                                 logits = runner.tail_logits(batch, tail)
+                                if diagnostic is not None and not bool(torch.isfinite(logits).all()):
+                                    raise AdjointIdentityRefused("selected-row diagnostic nonfinite teacher logits")
                                 if probe_layout is not None and list(logits.shape) != [
                                         len(batch.input_ids), int(calib_ids.shape[1]),
                                         probe_layout["vocab_size"]]:
@@ -1716,10 +1764,26 @@ def run_adjoint_capture_core(
                                             batch_offset + batch_index]}
                                        if probe_layout is not None else {}),
                                 )
+                                if diagnostic is not None:
+                                    if not bool(torch.isfinite(probe)):
+                                        raise AdjointIdentityRefused("selected-row diagnostic nonfinite probe")
+                                    tail_probe = {
+                                        "fresh": True, "seed": seed_base,
+                                        "global_row_offset": row_offsets[batch_index],
+                                        "global_token_count": probe_layout["global_token_count"],
+                                        "noise_layout": ROW_PROBE_LAYOUT,
+                                        "token_scope": token_scope, "temperature": temperature,
+                                        "distribution": "rademacher",
+                                        "teacher_logits_shape": list(logits.shape),
+                                        "teacher_logits_dtype": str(logits.dtype),
+                                        "teacher_logits_sha256": tensor_payload_sha256(logits),
+                                    }
                                 probe.backward()
                                 if tail.grad is None:
                                     raise RuntimeError(
                                         "adjoint capture tail produced no cotangent")
+                                if diagnostic is not None and not bool(torch.isfinite(tail.grad).all()):
+                                    raise AdjointIdentityRefused("selected-row diagnostic nonfinite tail cotangent")
                                 grad_outs[probe_index].append(storage.write(
                                     tail.grad, batch_index=batch_offset + batch_index,
                                     boundary_index=num_layers, probe_index=probe_index))
@@ -1757,7 +1821,7 @@ def run_adjoint_capture_core(
                     str(boundary): [exact_entry_record(batch.activations_cpu[boundary])
                                     for batch in batches]
                     for boundary in range(num_layers)})
-            else:
+            elif diagnostic is None:
                 # The chain state a relaunch resumes from (PQ #1001): written
                 # once, after the tail checkpoint is sealed, so its existence
                 # implies the tail checkpoint's.
@@ -1847,6 +1911,8 @@ def run_adjoint_capture_core(
                     # its checkpoint row and every digest name the global
                     # batch (a split quantum starts at ``batch_offset``).
                     batch = batch_offset + batch_index
+                    if diagnostic is not None and not bool(torch.isfinite(tensor).all()):
+                        raise AdjointIdentityRefused("selected-row diagnostic nonfinite rolled cotangent")
                     if plane_digests is not None and layer == chain_bottom:
                         plane_digests[probe_index, batch] = (
                             tensor_payload_sha256(tensor))
@@ -1937,6 +2003,8 @@ def run_adjoint_capture_core(
     receipt_stride = {"value": int(stride), "source": None,  # filled by caller
                       "boundaries": [int(b) for b in boundaries],
                       "max_chain_layers": int(stride) - 1}
+    if diagnostic is not None:
+        receipt_stride["boundaries"] = sorted(checkpoint_layers | {num_layers}, reverse=True)
     if forward_quantum:
         from .stage_a_forward_split import QUANTUM_RECEIPT_SCHEMA as FORWARD_RECEIPT_SCHEMA
         from .stage_a_forward_split import fragment_path
@@ -2052,7 +2120,10 @@ def run_adjoint_capture_core(
     # the implementation that sealed its checkpoints, carries none.
     declarations = resume_declarations(space, storage.session)
     receipt = {
-        "schema": ADJOINT_RECEIPT_SCHEMA,
+        "schema": (ADJOINT_RECEIPT_SCHEMA if diagnostic is None else DIAGNOSTIC_RECEIPT_SCHEMA),
+        **({"bandable": False, "diagnostic": diagnostic, "tail_probe": tail_probe,
+            "reference_comparison": {"status": "not_performed"}}
+           if diagnostic is not None else {}),
         "entry_point": ADJOINT_CAPTURE_ENTRY_POINT,
         "status": "complete",
         "run_identity": run_identity,
@@ -2386,6 +2457,7 @@ def run_adjoint_capture(
     prefetch_override=None, artifact_budget_bytes=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
     chain_seed=None, head_walk=False, chain_split=None, forward_split=None,
+    source_authentication=None, selected_row_diagnostic=None,
 ) -> dict:
     """Load the head phase and run the adjoint capture (one PB action).
 
@@ -2417,6 +2489,11 @@ def run_adjoint_capture(
     capture: the prep's receipt goes to ``split/forward/prep-receipt.json``
     and a quantum's to ``split/forward/<label>.json``, each with its results
     and counters beside it.
+
+    ``selected_row_diagnostic`` accepts geometry separately from the caller's
+    existing qualified original ``source_authentication`` owner. The owner
+    and its unchanged CUDA gate are checked before device/backend/profile
+    work; the caller keeps close responsibility. No authority is constructed.
     """
     from .aura_cost import _aura_source_sha256
     from .calibration_data import load_calibration_input
@@ -2438,6 +2515,21 @@ def run_adjoint_capture(
     )
     from .tessera_reader import load_declared_reader
 
+    if selected_row_diagnostic is not None or source_authentication is not None:
+        if selected_row_diagnostic is None:
+            raise AdjointIdentityRefused(
+                "original material owner requires an explicit selected-row diagnostic")
+        try:
+            selected_row_diagnostic = normalize_diagnostic_spec(selected_row_diagnostic)
+            # This gate still refuses CUDA. Check it before backend allocation,
+            # config/profile reads or output creation; the selector grants no
+            # additional original-source or device authority.
+            require_diagnostic_original_owner(
+                source_authentication, model=config["model"], device="cuda")
+        except (SelectedRowDiagnosticRefused, RuntimeError) as exc:
+            raise AdjointIdentityRefused(str(exc)) from exc
+    if diagnostic_marker_path(adjoint_space(output_root)).exists():
+        raise AdjointIdentityRefused("selected-row diagnostic root cannot be reused or resumed")
     require_cuda_hot_path("joint_cost_stage_a", "cuda")
     # A malformed bf16 reduction setting refuses before anything is pinned,
     # read or loaded (PQ #1028).
@@ -2609,11 +2701,16 @@ def run_adjoint_capture(
         # own answer to #737's single-worker pin. An explicitly recorded
         # override (#819) replaces the budget for this run only; the plan's
         # block is what the deviation stamp names as sealed.
+        if source_authentication is None:
+            source_profile = detect_profile(config["model"])
+        else:
+            from .layer_streaming import _source_profile
+            source_profile = _source_profile(config["model"], source_authentication)
         runner = build_streamed_causal_lm(
             config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
             offload_folder=str(space / "run" / "offload"),
-            profile=detect_profile(config["model"]), attn_implementation="eager",
-            source_authentication=None,
+            profile=source_profile, attn_implementation="eager",
+            source_authentication=source_authentication,
             source_derivative=execution.get("source_derivative"),
             **prefetch["run_used"])
         source_observation.enter_context(runner.observe_source_waits(source_waits.sink))
@@ -2669,6 +2766,7 @@ def run_adjoint_capture(
             chain_batch_size=chain_batch_size, chain_probe_fusion=chain_probe_fusion,
             chain_resume=chain_resume, chain_seed=chain_seed, chain_split=chain_split,
             forward_split=forward_split,
+            selected_row_diagnostic=selected_row_diagnostic,
             arithmetic_extra={
                 "container_content_sha256": result["env"]["container_content_sha256"],
                 "projection_backend": projection_backend.identity})
@@ -2687,6 +2785,8 @@ def run_adjoint_capture(
         if chain_split is not None or forward_split is not None:
             split_files = _write_split_receipt(space, receipt)
             result["split_receipt"] = split_files["receipt"]
+        elif selected_row_diagnostic is not None:
+            result["diagnostic_receipt"] = write_diagnostic_receipt(space, receipt)
         elif chain_seed is not None:
             from .stage_a_chain_seed import write_seed_receipt
             result["seed_receipt"] = write_seed_receipt(space, receipt)
@@ -2963,6 +3063,11 @@ def main(argv=None) -> int:
                              "writes a seed receipt the band tool refuses "
                              "(RobTand/prismaquant#1016)")
     parser.add_argument("--chain-seed-sha256", default=None)
+    parser.add_argument("--selected-row-diagnostic", type=Path, default=None,
+                        help="explicit dev-only fresh-row diagnostic geometry; "
+                             "requires an enclosing API action's qualified original owner. "
+                             "This CLI does not construct original authority.")
+    parser.add_argument("--selected-row-diagnostic-sha256", default=None)
     parser.add_argument("--chain-split-prep", type=int, default=None, metavar="THROUGH",
                         help="a split round's prep row (PQ #738): seal the round's "
                              "resume record and remove the rolling entries of "
@@ -2989,6 +3094,12 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     chain_split = _chain_split_argument(args, parser)
     forward_split = _forward_split_argument(args, parser)
+    if bool(args.selected_row_diagnostic) != bool(args.selected_row_diagnostic_sha256):
+        parser.error("--selected-row-diagnostic and --selected-row-diagnostic-sha256 must be paired")
+    if args.selected_row_diagnostic is not None and any(value is not None for value in (
+            args.chain_seed, args.resume_chain_state_sha256, args.forward_recovery,
+            chain_split, forward_split)):
+        parser.error("--selected-row-diagnostic requires a fresh forward and tail")
     if bool(args.chain_seed) != bool(args.chain_seed_sha256):
         parser.error("--chain-seed and --chain-seed-sha256 must be paired")
     if args.chain_seed is not None and (
@@ -3029,8 +3140,11 @@ def main(argv=None) -> int:
             chain_probe_fusion=args.chain_probe_fusion == "on",
             chain_resume=_chain_resume_argument(args),
             chain_seed=_chain_seed_argument(args), chain_split=chain_split,
-            forward_split=forward_split)
-    except AdjointIdentityRefused as exc:
+            forward_split=forward_split,
+            selected_row_diagnostic=(None if args.selected_row_diagnostic is None else
+                load_diagnostic_spec(args.selected_row_diagnostic,
+                                     args.selected_row_diagnostic_sha256)))
+    except (AdjointIdentityRefused, SelectedRowDiagnosticRefused) as exc:
         print(f"adjoint_identity_refused: {exc}", flush=True)
         return EXIT_IDENTITY_REFUSED
     print(json.dumps({key: result[key] for key in (
