@@ -112,3 +112,40 @@ integration, queue, merge and cleanup. Only fully proven issue criteria receive
 closing references after the combined gate. Production/serving/research
 umbrellas, parked model-init grant, historical fe02 freshness failure, GPU,
 performance/repricing and release remain held and outside this PR.
+
+
+## 2026-10-02 correction: withdraw the optional fake-trace change
+
+The source-backed `test_dsv4_fake_trace_block_is_still_real` isolation decorator
+in historical head `d672b8733d4633b883704e0796bd2455b4d44b46` was not qualified:
+action `a53490f790dbe1a32318e955b96c474bee0b6059801d6d111c61dc1f45bc90e0`
+skipped it before real registration and assertions because the original config
+was absent. That raw skip remains a skip, not a passed fake-trace ratchet.
+
+Astra withdrew this extra change from the delivered scope. Only its added
+`own_process` decorator is removed; the base `slow` mark, source requirement,
+existing skip, body and every assertion remain byte-identical to base. The two
+qualified actual walk tests retain their isolation marks. The six actual target
+nodes, their four mixed-order regression groups and adopted MXFP4 contracts are
+unchanged, so the existing source-bound evidence is reused for those contracts;
+it is not relabelled as a fresh full-suite run of the reduced head.
+
+The earlier row calling #1992 an umbrella was inaccurate. That issue records
+the same rope-axis registration refusal as #1990, with evidence at
+`tests/test_deepseek_v4_profile.py:212-249`, particularly registration at line228.
+Its rope equality and genuine guard criteria are qualified; #1992 does not
+require source-backed fake-trace qualification. The delivered issue references
+remain limited to the demonstrated node/import-state criteria. No new tracking
+issue or product-gate waiver is created for the withdrawn extra decorator.
+
+The bounded recovery attempt retained a negative result: the sanctioned
+`deepseek-ai/DeepSeek-V4-Flash` config at revision
+`9e165c30e2704aec5d9d593cce3eebd58bbef1cb` returned HTTP404; the publisher API
+reported an invalid revision. The same publisher's current config had1749bytes
+and SHA256 `b628e63398a645abc711d92207f8737dd8140f7a4ef1e0a5b3616019e0ddd818`,
+which did not match required1888bytes/SHA256
+`6c8f3d2d3b48707541b88f32f22ef3f0f8a6b57d8523281e2b8d3cdb0ae9a023`.
+No substitute config was installed, source/model downloaded, fake-trace test
+run or test quantum spent. Raw retrieval headers/response/download remain in
+the external `fake-trace-followup` evidence directory. This supersedes the
+attempted extra isolation change; the base fake-trace behavior is preserved.
