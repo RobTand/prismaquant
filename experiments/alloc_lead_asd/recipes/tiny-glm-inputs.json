@@ -7,18 +7,19 @@
     "phases": [
       {
         "name": "startup",
-        "bytes": 856222,
-        "cumulative_bytes": 856222
+        "bytes": 4057285,
+        "cumulative_bytes": 4057285
       }
-    ]
+    ],
+    "direct_reuse_action": "51bb661a16323d1e59c84197dec752db71e6026baf05be08bdc89be33bcce4a2"
   },
   "produced_by": {
     "tool": "issue1962-tiny-glm-control",
     "size_source": "qualified-output-stat",
     "source_commit": "c2aebf1892d57433c9cc147e515450624b787879"
   },
-  "entry_count": 4,
-  "total_bytes": 856222,
+  "entry_count": 6,
+  "total_bytes": 4057285,
   "entries": [
     {
       "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/config.json",
@@ -43,6 +44,18 @@
       "offset": 0,
       "bytes": 1112,
       "sha256": "049cff02ab92a3a1086d9a848f5ab24a42d81adc683deb993729a419ceef7f28"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control2/inputs.ready.json",
+      "offset": 0,
+      "bytes": 3531,
+      "sha256": "125dad360acb6939e20752e3aad5ef83f38a47ef6bffda50eb2afe78986523f9"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control2/float32.direct.pt",
+      "offset": 0,
+      "bytes": 3197532,
+      "sha256": "a6f3297575c24af0c56cf222f753d3f0239810c155dba6f52ee256a08c87c415"
     }
   ]
 }

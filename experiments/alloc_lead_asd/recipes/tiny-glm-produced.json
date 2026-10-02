@@ -1,8 +1,8 @@
 {
   "schema": "prismaquant.prismabuild.produced_output_template.v1",
   "version": 1,
-  "template_id": "pq1962-tiny-glm-control2",
-  "output_prefix": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control2",
+  "template_id": "pq1962-tiny-glm-control3",
+  "output_prefix": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control3",
   "slots": {
     "boundary_entries": {
       "class": "payload"

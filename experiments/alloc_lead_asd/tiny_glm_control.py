@@ -9,6 +9,7 @@ import argparse
 import contextlib
 import gzip
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -56,10 +57,8 @@ def dependency_identity():
 
 
 def commit(units, phase):
-    import runpy
-    helper = os.environ.get('PRISMABUILD_ACTION_PROGRESS_HELPER')
-    if helper:
-        runpy.run_path(helper)['commit'](units, phase)
+    from prismaquant.prismabuild_progress import report_progress
+    report_progress(units, phase, 'durable_tiny_glm_control')
 
 
 def difference(a, b):
@@ -127,6 +126,14 @@ def model_and_runner(config, state, dtype, device):
     runner = fixture._streamed_runner(model)
     runner.context.device, runner.context.dtype = device, dtype
     runner.device, runner.dtype = device, dtype
+    runner.require_prefetched_residency = True
+    runner.prefetch_lookahead = 1
+    def resident(layer, **kwargs):
+        if 0 <= layer < runner.num_layers:
+            assert all(not p.is_meta and p.device == device for p in runner.layers[layer].parameters()), 'synthetic source layer is not resident'
+        return None
+    runner.context.install = resident
+    runner.context.schedule_prefetch = resident
     runner.context.settle_prefetch_layers = lambda layers: None
     runner.context.settle_prefetched_layers = lambda layers, **kwargs: None
     runner.context.source_residency_snapshot = lambda layers, **kwargs: {'owners': [],
@@ -306,6 +313,7 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--manifest-sha256', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--reuse-fp32-direct', action='store_true')
     args = parser.parse_args()
     args.output.mkdir(exist_ok=False)
     torch.set_num_threads(1)
@@ -341,7 +349,14 @@ def main():
             model, runner, modules = model_and_runner(config, state, dtype, torch.device('cuda'))
             profile = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA])
             with profile:
-                direct_result = direct(model, modules, ids.cuda())
+                if dtype == torch.float32 and args.reuse_fp32_direct:
+                    prior = json.loads(raw['inputs.ready.json'])
+                    assert prior['source_identity_sha256'] == source['model_identity']['content_sha256']
+                    assert prior['tokens_sha256'] == source['tokens_sha256']
+                    direct_result = torch.load(io.BytesIO(raw['float32.direct.pt']), map_location='cpu', weights_only=True)
+                    assert {r['unit'] for r in direct_result['rows']} == set(modules)
+                else:
+                    direct_result = direct(model, modules, ids.cuda())
                 torch.save(direct_result, args.output / f'{label}.direct.pt')
                 captured = capture(runner, model, modules, ids, source['model_identity'], args.output / label, publication)
                 cotangent_differences = {f'L{layer}/p{p}': difference(direct_result['gradients'][layer, p],
@@ -366,6 +381,9 @@ def main():
                 'capture_components': {f'{n}/p{p}': v for (n, p), v in capture_components.items()},
                 'operator_components': operator_components, 'spill': spill,
                 'capture_receipt': captured['receipt']}
+            if dtype == torch.float32 and args.reuse_fp32_direct:
+                results['legs'][label]['direct_reuse'] = {'action': '51bb661a16323d1e59c84197dec752db71e6026baf05be08bdc89be33bcce4a2',
+                    'source': 'fa16aac5cfe', 'scope': 'banked direct graph completed before capture refusal; same unchanged direct function/source/inputs/arithmetic'}
             (args.output / 'result.partial.json').write_text(json.dumps(results, indent=2) + '\n')
             commit(index + 2, 'control')
             del model, runner, direct_result, captured, tensors
