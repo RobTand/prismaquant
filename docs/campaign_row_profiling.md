@@ -60,3 +60,44 @@ throughput result. For an authorized GPU comparison, record each leg's UTC
 window and both-box Netdata CPU and power, label exclusive GPU with ambient CPU,
 and inspect terminal/CAS/profile/output evidence before accepting a speed or
 artifact-equality claim. Respect the coordinator's window and retry rulings.
+
+
+## Optional namespace composition (Refs #1750)
+
+Profiling a namespace-bound direct row after publication changes its argv and
+must refuse. Compose the actual canonical child wrapper first with
+`prepare_namespace_profile_request`, then derive the complete original request
+roster, explicit reconciliation/readset expectations and namespace binding. The
+helper only copies metadata; it does not submit or execute anything.
+
+The existing container spec carries `namespace_profile` with exactly `schema`
+(`prismaquant.tessera_namespace_profile.v1`), `profiler` (`path`, full `sha256`),
+`observations`, `profile_local` and positive integer `row_s`. The profiler path
+must be canonical absolute. Its SHA is a declared typed input, not verification
+that those bytes are present, staged or qualified; actual PB/read-set/dependency
+qualification remains required before a real run.
+
+Namespace preparation retargets observations to
+`<root>/<request_key>/profile/observations`, containing the child trace and its
+adjacent workload-status record. Host-local metadata is retargeted to
+`<existing_local_profiles_root>/<request_key>`. The local policy root remains
+`/home/rob/tmp/claude-campaign-20260926/tmp/row-startup/profiles`; normalization
+uses a `{namespace-row}` placeholder there before computing the future key.
+The shared namespace destination owner validates canonical paths, absence of
+symlink escapes and declared writable identity coverage for both roots. The
+host-only local metadata does not require runtime container access; explicit
+mount coverage is the namespace owner's existing uniform write-ownership rule.
+No new read-set staging capability, root creation, mount or placement is inferred.
+
+Pass the exact sealed observations, local metadata, profiler path and row bound
+to `pq_admitted_profile`. It verifies published ownership and those arguments,
+runs the sealed actual wrapper unchanged and observes the original campaign
+cost output rather than the wrapper's earlier `--out`. Stale observation/local
+outputs refuse before process creation. This does not grant profiler retry or
+change workload/status/sample/telemetry qualification. Every other source and
+publication gate remains enforced by the existing adapter before Docker.
+
+Unbound legacy profiling and direct unprofiled namespace requests retain their
+paths. This optional API is a prerequisite for a future authorized #1750 A/B;
+it does not itself run that comparison, qualify GPU/container dependencies or
+close the planner's throughput issue.

@@ -1,5 +1,29 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1750, optional namespace/profile composition):
+the existing container specification can carry a closed versioned
+`prismaquant.tessera_namespace_profile.v1` declaration. The actual canonical
+same-UID child wrapper is prepared before roster/reconciliation binding,
+namespace hashing and metadata publication. Its full argv remains in the
+request identity; admission never unwraps a changed request or waives a digest.
+The existing namespace destination owner retargets observation/trace/status
+writes below the digest-keyed row, and retargets host-local profile metadata to
+the request-key child of the existing local profile root. The normalized local
+destination contains `{namespace-row}` before hashing, avoiding circular identity.
+Both destinations require explicit writable identity-mount coverage; no mount,
+placement capability or read-set membership is invented. The local metadata
+directory is host-only in use; declaring its identity mount keeps the existing
+namespace ownership checks uniform, not a container requirement of the profiler.
+Profiler path/SHA is a typed input declaration, not byte authentication or proof
+of PB/input qualification. Host observer paths, executable and row bound must
+match the sealed declaration before any process starts; the bound wrapper runs
+unchanged and target lookup addresses the original campaign payload's output.
+Unknown/altered instrumentation, changed post-binding argv and unsafe/colliding
+outputs refuse. Direct unprofiled namespaces, unbound legacy profiling, native
+child/status/sample qualification, source/import/publication gates and runtime
+defaults remain unchanged. This is CPU composition admission, not a GPU profile,
+container availability, immutable-source, measurement window or #1750 speed claim.
+
 Re-stamped 2026-10-02 (Refs #2015, #1929, CI coverage): the full hosted
 Python 3.12 CPU suite runs on every main push and manual dispatch. PRs retain
 the existing pinned-Tessera import/allocator CLI smoke and shrink-only
