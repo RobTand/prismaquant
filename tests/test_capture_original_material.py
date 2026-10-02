@@ -90,7 +90,7 @@ def _owner(m):
 
 @pytest.mark.parametrize('broken', ['publisher-digest', 'revision', 'partial-readset', 'range',
                                    'producer-template', 'producer-weight', 'producer-index', 'native-aux-object'])
-def test_bad_authority_refuses_before_decoder_or_payload_bootstrap(material, monkeypatch, broken):
+def test_bad_authority_refuses_before_model_or_payload_bootstrap(material, monkeypatch, broken):
     m = material
     if broken == 'publisher-digest':
         m['options']['publisher_input']['sha256'] = '0' * 64
@@ -115,13 +115,20 @@ def test_bad_authority_refuses_before_decoder_or_payload_bootstrap(material, mon
         m['publisher']['siblings'][0]['blobId'] = '0' * 40
         m['options']['publisher_input'] = _bound(m['tmp'] / 'bad-publisher.json', m['publisher'])
     decodes = []
-    def forbidden(*args, **kwargs):
-        decodes.append(args)
-        raise AssertionError('original bootstrap decoder reached before authority qualification')
-    monkeypatch.setattr(cc, '_original_bootstrap_json', forbidden)
+    read_json = cc.CaptureSourceAuthentication.read_json
+    def index_only(owner, path):
+        name = Path(path).name
+        decodes.append(name)
+        if name != 'model.safetensors.index.json':
+            raise AssertionError('model bootstrap reached before complete index qualification')
+        return read_json(owner, path)
+    monkeypatch.setattr(cc.CaptureSourceAuthentication, 'read_json', index_only)
     with pytest.raises((RuntimeError, ValueError)):
         _owner(m)
-    assert decodes == []
+    # The independently authenticated index must be interpreted to compare
+    # its tensor map. No other authority refusal permits even that step, and
+    # a mismatched producer map never reaches model/config bootstrap.
+    assert decodes == (['model.safetensors.index.json'] if broken == 'producer-index' else [])
 
 
 def test_same_sealed_object_serves_header_json_and_tensors_despite_pool_mutation(material):

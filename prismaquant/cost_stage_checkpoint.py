@@ -31,6 +31,7 @@ from .digests import bytes_sha256hex, text_sha256hex
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
 UNIT_SCHEMA = "prismaquant.cost_stage_checkpoint.unit.v1"
+MAX_UNIT_IO_WORKERS = 16
 
 
 _TEMP_SUFFIX: "tuple[int, str] | None" = None
@@ -397,6 +398,7 @@ def prepare_journal(
     qnames: Sequence[str],
     manifest_path: str | Path | None = None,
     unit_workers: int = 1,
+    unit_io_workers: int | None = None,
 ) -> tuple[Path, str, dict[str, dict[str, object]]]:
     """Create/validate a journal and return all exact completed unit states.
 
@@ -406,7 +408,9 @@ def prepare_journal(
     ``unit_workers`` optionally overlaps independent envelope reads within
     the assigned CPU affinity. The existing bounded ordered driver preserves
     roster order and joins reads before a corrupt journal can be set aside.
-    Other callers remain serial by default.
+    ``unit_io_workers`` instead selects 1-16 I/O threads independently of that
+    core count; every thread inherits the same assigned CPU mask. Combining
+    the two worker policies refuses. Other callers remain serial by default.
     """
     if type(unit_workers) is not int or unit_workers < 1:
         raise ValueError("journal unit_workers must be a positive integer")
@@ -416,6 +420,13 @@ def prepare_journal(
         assigned = 1
     if unit_workers > max(1, assigned):
         raise ValueError("journal unit_workers exceed the PB-assigned CPU affinity")
+    workers = unit_workers
+    if unit_io_workers is not None:
+        if unit_workers != 1:
+            raise ValueError("journal unit_workers and unit_io_workers cannot be combined")
+        if type(unit_io_workers) is not int or not 0 < unit_io_workers <= MAX_UNIT_IO_WORKERS:
+            raise ValueError(f"journal unit_io_workers must be an integer in 1:{MAX_UNIT_IO_WORKERS}")
+        workers = unit_io_workers
     root = Path(checkpoint_dir)
     if root.exists() and not root.is_dir():
         raise RuntimeError(f"{stage} checkpoint path is not a directory: {root}")
@@ -526,5 +537,5 @@ def prepare_journal(
         if state is not None:
             completed[expected_paths[path]] = state
 
-    _drive_ordered_units(expected_paths, read_unit, retain_unit, workers=unit_workers)
+    _drive_ordered_units(expected_paths, read_unit, retain_unit, workers=workers)
     return root, identity_sha256, completed
