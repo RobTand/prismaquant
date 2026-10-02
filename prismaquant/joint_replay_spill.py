@@ -60,12 +60,13 @@ with no page cache in between, in calls that bound what is in flight.
 from __future__ import annotations
 
 from array import array
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
 import bisect
 import os
+import operator
 import queue
 import threading
 import time
@@ -779,6 +780,60 @@ class _Entry:
         self.checksum = None
 
 
+class _PackedRecords(Sequence):
+    """Firing-order records with fixed roster IDs and interned layouts.
+
+    The legacy six-field tuple is reconstructed only when read. Each stored
+    invocation uses six uint64s, rather than retaining a tuple, layout and
+    Python integers per invocation. Layouts include the replay address residue:
+    interning never discards the pointer alignment contract. The layer's
+    existing maximum part count is a conservative bound for each window's
+    probe-0 gradient records, including empty operands.
+    """
+
+    def __init__(self, names, *, max_records):
+        if type(max_records) is not int or max_records < 0:
+            raise ValueError("Stage B packed record geometry must be nonnegative")
+        self._names = tuple(names)
+        self._name_ids = {name: index for index, name in enumerate(self._names)}
+        self._max_records = max_records
+        self._rows = array("Q")
+        self._layouts = []
+        self._layout_ids = {}
+
+    def __len__(self):
+        return len(self._rows) // 6
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return [self[position] for position in range(*index.indices(len(self)))]
+        index = operator.index(index)
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError("Stage B packed record index out of range")
+        name, owner, entry, logical, nbytes, layout = self._rows[index * 6:index * 6 + 6]
+        return (self._names[name], self._names[owner], entry, logical, nbytes,
+                self._layouts[layout])
+
+    def append(self, record):
+        if len(self) >= self._max_records:
+            raise RuntimeError("Stage B packed records exceed their spill geometry")
+        name, owner, entry, logical, nbytes, layout = record
+        if name not in self._name_ids or owner not in self._name_ids:
+            raise ValueError("Stage B packed record name is outside its window roster")
+        if any(type(value) is not int or not 0 <= value < 1 << 64
+               for value in (entry, logical, nbytes)):
+            raise ValueError("Stage B packed record fields must be unsigned uint64")
+        layout_id = self._layout_ids.get(layout)
+        if layout_id is None:
+            layout_id = len(self._layouts)
+            self._layout_ids[layout] = layout_id
+            self._layouts.append(layout)
+        self._rows.extend((self._name_ids[name], self._name_ids[owner],
+                           entry, logical, nbytes, layout_id))
+
+
 class _Window:
     """One retained window's spilled streams and its probe-0 record order.
 
@@ -919,17 +974,21 @@ class StageBReplaySpill:
     (PQ #1348): one stream over every chunk of every pending window and
     probe, in replay order, read ahead within :meth:`bind_replay_budget`'s
     budget. ``max_block`` is the grid a sealed ceiling was sized on
-    (:func:`require_sealed_spill_bound`).
+    (:func:`require_sealed_spill_bound`). Research ``packed_records=True``
+    compacts probe-0 firing metadata; it does not change the file or replay.
     """
 
     def __init__(self, *, root, max_bytes, geometry, window_names, n_probes,
                  dtype, device, threads=None, accumulation=PER_INVOCATION,
-                 chunk_rows=None, max_block=None, scatter_reads=False):
+                 chunk_rows=None, max_block=None, scatter_reads=False,
+                 packed_records=False):
         from .perturbed_x_cache import StageBSpillScratch
 
         if type(scatter_reads) is not bool:
             raise ValueError("Stage B scatter_reads must be a boolean")
         self._scatter_reads = scatter_reads
+        if type(packed_records) is not bool:
+            raise ValueError("Stage B packed_records must be a boolean")
 
         regime = normalize_replay_regime({"accumulation": accumulation,
                                           "chunk_rows": chunk_rows})
@@ -954,7 +1013,12 @@ class StageBReplaySpill:
         self._cuda = self.device.type == "cuda"
         self._digest = None
         self._threads = DEFAULT_THREADS if threads is None else bool(threads)
-        self._windows = [_Window(names) for names in window_names]
+        self._windows = []
+        for names in window_names:
+            names = tuple(names)
+            records = (_PackedRecords(names, max_records=geometry.max_parts)
+                       if packed_records else None)
+            self._windows.append(_Window(names, records=records))
         self._window_of = {}
         for index, window in enumerate(self._windows):
             for name in window.names:
