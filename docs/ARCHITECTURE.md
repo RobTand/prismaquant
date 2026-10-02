@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #1178): prepared projection-backend identity
+uses the existing prepared-record seal policy at startup, post-intake and
+ProductionWeightCache intake. Dev mode records a changed backend and retains
+both prepared records; certified mode preserves the existing refusals. Source,
+calibration, candidate roster and reader checks remain walls in both modes.
+This enables an explicitly chosen new qualification or reference backend to
+reuse preparation in dev mode; it does not qualify a kernel, certify an old
+price, change arithmetic or select a new production backend. The certified
+GLM shape qualification and dry-run measurement remain separate open gates.
+
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment

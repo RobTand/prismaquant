@@ -2530,12 +2530,13 @@ def seed_source_identity_cache(config, root):
 
 #: The prepared-record bindings that name DIGESTS of things a dev iteration
 #: legitimately changes: which plan the prepare ran under, and which producer
-#: package made it. In dev mode (the default since PQ #1147) these are
-#: records -- ``seal_check`` prints them and the run continues -- while every
-#: other prepared field (the model identity, calibration, roster, backend,
-#: reader) stays a wall even in dev mode: a stale record naming a different
-#: measurement is stale whatever the mode.
-_DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256")
+#: package made it, plus the projection backend's numerical qualification.
+#: In dev mode these are records: ``seal_check`` prints the difference and
+#: reuses the existing preparation without rewriting its completion or cache.
+#: Model identity, calibration, roster and reader remain walls in both modes.
+#: A changed projection backend requires deliberate fresh measurement when it
+#: changes numerics; recording this seal never certifies an old measurement.
+_DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256", "projection_backend")
 
 
 def _prepared_digest_recorded(key, stored, expected):
