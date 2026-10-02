@@ -1143,6 +1143,27 @@ def _assignment_metadata(rows: Mapping, objective: str) -> dict:
     }
 
 
+def signed_probe_quadratic_summary(columns, *, objective: str = "additive") -> dict:
+    """Quadratic moments of complete finite unit/probe columns, without pricing.
+
+    This owns only arithmetic. Raw diagnostic callers must authenticate their
+    measurements; assignment callers still require complete validated rows.
+    """
+    if objective not in ASSIGNMENT_OBJECTIVES:
+        raise ValueError(f"unsupported joint AURA assignment objective: {objective!r}")
+    columns = list(columns)
+    if (not columns or len(columns[0]) < 2
+            or any(len(column) != len(columns[0]) for column in columns)):
+        raise ValueError("joint AURA requires complete aligned unit/probe columns")
+    if any(not math.isfinite(value) for column in columns for value in column):
+        raise ValueError("joint AURA requires finite signed unit/probe columns")
+    samples = zip(*columns)
+    values = [0.5 * (math.fsum(x * x for x in sample) if objective == "additive"
+                     else math.fsum(sample) ** 2) for sample in samples]
+    mean, stderr = _probe_moments(values)
+    return {"mean": mean, "standard_error": stderr, "per_probe": values}
+
+
 def assignment_probe_summary(rows: Mapping, *, objective: str = "additive") -> dict:
     """Summarize one complete assignment on validated, common signed probes.
 
@@ -1152,13 +1173,11 @@ def assignment_probe_summary(rows: Mapping, *, objective: str = "additive") -> d
     updates the background model nor measures held-out assignment quality.
     """
     rows = _validated_assignment(rows, objective)
-    samples = zip(*(row["signed_per_probe"] for row in rows.values()))
-    values = [0.5 * (math.fsum(x * x for x in sample) if objective == "additive"
-                     else math.fsum(sample) ** 2) for sample in samples]
-    mean, stderr = _probe_moments(values)
+    moments = signed_probe_quadratic_summary(
+        (row["signed_per_probe"] for row in rows.values()), objective=objective)
     return {"schema": "prismaquant.joint_aura.assignment_summary.v1",
             **_assignment_metadata(rows, objective),
-            "mean": mean, "standard_error": stderr, "per_probe": values}
+            **moments}
 
 
 def paired_assignment_difference(
