@@ -930,8 +930,43 @@ def _source_package(root: Path) -> bool:
     return (root / "prismaquant" / "__init__.py").is_file()
 
 
-def _package_root(roots: list) -> "tuple[str, Path] | None":
+def _native_import_candidates(directory: Path, stem: str) -> list[Path]:
+    if not directory.is_dir():
+        return []
+    return sorted(path for path in directory.iterdir()
+                  if path.name == stem + ".so"
+                  or (path.name.startswith(stem + ".") and path.name.endswith(".so")))
+
+
+def _refuse_import_shadow(root: Path) -> None:
+    """Conservative opt-in candidates, never an interpreter/ABI simulation.
+
+    A source package wins over same-entry source/sourceless modules. Native
+    package initializers may supersede its __init__.py; any native-looking
+    initializer is ambiguous without the container's suffix authority.
+    """
+    try:
+        package = root / "prismaquant"
+        native_initializers = _native_import_candidates(package, "__init__")
+        candidates = [(path, "ambiguous native initializer")
+                      for path in native_initializers]
+        if not _source_package(root):
+            candidates += [(package / "__init__.pyc", "sourceless package shadow"),
+                           (root / "prismaquant.py", "source module shadow"),
+                           (root / "prismaquant.pyc", "sourceless module shadow")]
+            candidates += [(path, "ambiguous native module shadow")
+                           for path in _native_import_candidates(root, "prismaquant")]
+        for path, reason in candidates:
+            if path.is_file():
+                raise RuntimeError(f"namespace guarded imports {reason}: {path}")
+    except OSError as exc:
+        raise RuntimeError(f"namespace guarded imports cannot inspect root: {root}") from exc
+
+
+def _package_root(roots: list, *, refuse_shadows: bool = False) -> tuple[str, Path] | None:
     for entry, root in roots:
+        if refuse_shadows:
+            _refuse_import_shadow(root)
         if _source_package(root):
             return entry, root
     return None
@@ -941,7 +976,7 @@ def guarded_import_root(spec: dict, *, cwd: str,
                         require_checkout: bool = False) -> tuple[str, Path] | None:
     """Replay safe-path imports; opt-in ownership requires known checkout resolution."""
     roots = import_search_roots(spec, cwd=cwd, safe_path=True)
-    guarded = _package_root(roots)
+    guarded = _package_root(roots, refuse_shadows=require_checkout)
     if require_checkout:
         if guarded is None or guarded[1].resolve() != Path(cwd).resolve():
             raise RuntimeError("namespace guarded imports do not resolve to the executed checkout")

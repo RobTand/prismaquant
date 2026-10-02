@@ -422,6 +422,139 @@ def test_review_guarded_checkout_positive_and_alternate_root_refusal(tmp_path):
         adapter.guarded_import_root(spec, cwd=str(checkout), require_checkout=True)
 
 
+def import_shadow_launch_fixture(tmp_path, monkeypatch, shadow):
+    """Real committed checkout and mounted foreign file; no selection mocks."""
+    checkout = tmp_path / "import-checkout"
+    alternate = tmp_path / "import-alternate"
+    (checkout / "prismaquant").mkdir(parents=True)
+    (checkout / "prismaquant" / "__init__.py").write_text("# checkout package\n")
+    alternate.mkdir()
+    foreign = alternate / shadow
+    foreign.parent.mkdir(parents=True, exist_ok=True)
+    foreign.write_text("raise AssertionError('foreign source must never execute')\n")
+    for argv in (["git", "init", "--quiet", str(checkout)],
+                 ["git", "-C", str(checkout), "add", "prismaquant"],
+                 ["git", "-C", str(checkout), "-c", "user.name=Fixture",
+                  "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "fixture"]):
+        subprocess.run(argv, check=True, capture_output=True, timeout=30)
+    commit = subprocess.run(["git", "-C", str(checkout), "rev-parse", "HEAD"],
+                            check=True, capture_output=True, text=True, timeout=30).stdout.strip()
+    kwargs = arguments(tmp_path)
+    kwargs.update(checkout=str(checkout), executed_commit=commit)
+    row = kwargs["requests"][0]
+    row["cwd"] = str(checkout)
+    spec = json.loads(row["argv"][4])
+    spec["container"]["mounts"].append({"source": str(alternate), "target": "/alternate", "readonly": True})
+    row["env"]["PYTHONPATH"] = "/alternate:/workspace"
+    spec["env"] = row["env"]
+    row["argv"][4] = json.dumps(spec)
+    replace_fixture_request(kwargs, row)
+    row = dispatch.prepare_namespace_requests(**kwargs)[0]
+    dispatch.publish_namespace_requests([row])
+    spec = json.loads(row["argv"][4])
+    monkeypatch.chdir(checkout)
+    for name, value in row["env"].items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("Docker reached past mounted import shadow"))
+    return row, spec, foreign
+
+
+def test_import_shadow_source_module_refused_before_docker(tmp_path, monkeypatch):
+    row, spec, foreign = import_shadow_launch_fixture(tmp_path, monkeypatch, "prismaquant.py")
+    with pytest.raises(RuntimeError, match="namespace guarded imports.*shadow"):
+        adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
+    assert foreign.read_text() == "raise AssertionError('foreign source must never execute')\n"
+
+
+@pytest.mark.parametrize("shadow", [
+    "prismaquant.pyc", "prismaquant.so", "prismaquant.container-unknown.so",
+    "prismaquant/__init__.pyc", "prismaquant/__init__.so",
+    "prismaquant/__init__.container-unknown.so",
+])
+def test_import_shadow_bytecode_native_refused_before_docker(tmp_path, monkeypatch, shadow):
+    row, spec, foreign = import_shadow_launch_fixture(tmp_path, monkeypatch, shadow)
+    with pytest.raises(RuntimeError, match="namespace guarded imports.*shadow|namespace guarded imports.*native initializer") as error:
+        adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
+    assert str(foreign) in str(error.value)
+
+
+@pytest.mark.parametrize("shadow", ["prismaquant.py", "prismaquant.pyc"])
+def test_import_shadow_same_entry_source_package_precedence(tmp_path, shadow):
+    (tmp_path / "prismaquant").mkdir()
+    (tmp_path / "prismaquant" / "__init__.py").write_text("# supported package\n")
+    (tmp_path / shadow).write_bytes(b"not executed")
+    spec = {"env": {"PYTHONPATH": "/workspace"}, "container": {"mounts": []}}
+    assert adapter.guarded_import_root(spec, cwd=str(tmp_path), require_checkout=True) == ("/workspace", tmp_path)
+
+
+@pytest.mark.parametrize("initializer", ["__init__.so", "__init__.container-unknown.so"])
+def test_import_shadow_native_initializer_supersedes_source_ambiguity(tmp_path, initializer):
+    package = tmp_path / "prismaquant"
+    package.mkdir()
+    (package / "__init__.py").write_text("# supported package\n")
+    (package / initializer).write_bytes(b"unknown ABI, must refuse conservatively")
+    spec = {"env": {"PYTHONPATH": "/workspace"}, "container": {"mounts": []}}
+    with pytest.raises(RuntimeError, match="ambiguous native initializer"):
+        adapter.guarded_import_root(spec, cwd=str(tmp_path), require_checkout=True)
+
+
+@pytest.mark.parametrize("prefix", ["/image-only", "$DYNAMIC", "relative-root"])
+def test_import_shadow_unknown_dynamic_prefix_failclosed(tmp_path, prefix):
+    (tmp_path / "prismaquant").mkdir()
+    (tmp_path / "prismaquant" / "__init__.py").write_text("# package\n")
+    spec = {"env": {"PYTHONPATH": prefix + ":/workspace"}, "container": {"mounts": []}}
+    with pytest.raises(RuntimeError, match="unknown earlier root"):
+        adapter.guarded_import_root(spec, cwd=str(tmp_path), require_checkout=True)
+
+
+@pytest.mark.parametrize("layout", ["namespace", "empty", "later-module", "pycache", "unrelated-native"])
+def test_import_shadow_supported_search_controls(tmp_path, layout):
+    checkout, alternate = tmp_path / "checkout", tmp_path / "alternate"
+    (checkout / "prismaquant").mkdir(parents=True)
+    (checkout / "prismaquant" / "__init__.py").write_text("# package\n")
+    alternate.mkdir()
+    if layout == "namespace":
+        (alternate / "prismaquant").mkdir()
+    elif layout == "later-module":
+        (alternate / "prismaquant.py").write_text("raise AssertionError('not executed')\n")
+    elif layout == "pycache":
+        (alternate / "__pycache__").mkdir()
+        (alternate / "__pycache__" / "prismaquant.cpython-314.pyc").write_bytes(b"not a top-level candidate")
+    elif layout == "unrelated-native":
+        (alternate / "prismaquant_helpers.so").write_bytes(b"unrelated")
+    spec = {"env": {"PYTHONPATH": "/workspace:/alternate" if layout == "later-module" else "/alternate:/workspace"},
+            "container": {"mounts": [{"source": str(alternate), "target": "/alternate", "readonly": True}]}}
+    assert adapter.guarded_import_root(spec, cwd=str(checkout), require_checkout=True) == ("/workspace", checkout)
+
+
+def test_import_shadow_inspection_error_failclosed(tmp_path, monkeypatch):
+    (tmp_path / "prismaquant").mkdir()
+    (tmp_path / "prismaquant" / "__init__.py").write_text("# package\n")
+    actual_iterdir = adapter.Path.iterdir
+
+    def unreadable(path):
+        if path == tmp_path / "prismaquant":
+            raise PermissionError("fixture inaccessible mounted directory")
+        return actual_iterdir(path)
+
+    monkeypatch.setattr(adapter.Path, "iterdir", unreadable)
+    spec = {"env": {"PYTHONPATH": "/workspace"}, "container": {"mounts": []}}
+    with pytest.raises(RuntimeError, match="cannot inspect root"):
+        adapter.guarded_import_root(spec, cwd=str(tmp_path), require_checkout=True)
+
+
+def test_import_shadow_legacy_non_opt_in_selection_unchanged(tmp_path):
+    checkout, alternate = tmp_path / "checkout", tmp_path / "alternate"
+    (checkout / "prismaquant").mkdir(parents=True)
+    (checkout / "prismaquant" / "__init__.py").write_text("# package\n")
+    alternate.mkdir()
+    (alternate / "prismaquant.py").write_text("raise AssertionError('not executed')\n")
+    spec = {"env": {"PYTHONPATH": "/alternate:/workspace"},
+            "container": {"mounts": [{"source": str(alternate), "target": "/alternate", "readonly": True}]}}
+    assert adapter.guarded_import_root(spec, cwd=str(checkout)) == ("/workspace", checkout)
+    assert adapter.validate_namespace_launch(spec, [], cwd=str(checkout), environ={}) is None
+
+
 def test_review_temporary_symlink_race_cannot_escape_or_replace_bindings(tmp_path, monkeypatch):
     row = prepared(tmp_path)[0]
     dispatch.publish_namespace_requests([row])
