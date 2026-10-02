@@ -89,3 +89,57 @@ def test_stage_b_post_intake_check_uses_the_shared_reader():
             shared += 1
     assert bare == [], f"bare prepared digest walls at lines {bare}"
     assert shared == 1
+
+
+@pytest.mark.parametrize("site", ["completion", "cache"])
+@pytest.mark.parametrize("certified", [False, True])
+def test_prepared_backend_change_is_one_seal_at_completion_and_cache(
+        monkeypatch, capsys, site, certified):
+    from copy import deepcopy
+    from prismaquant import joint_projection_backend as backend
+    from prismaquant.production_weight_cache import ProductionWeightCache
+
+    qualification, digest = backend._qualification()
+    stored = dict(schema=backend.SCHEMA, name=backend.FUSED_NAME,
+                  qualification_sha256=digest, build=qualification['build'],
+                  runtime=qualification['runtime'],
+                  qualified_shapes=qualification['qualified_shapes'],
+                  ineligible_layout='torch_reference')
+    running = deepcopy(backend.REFERENCE_IDENTITY)
+    completion = {**_completion(), 'reader_identity': {'reader': 'same'},
+                  'projection_backend': deepcopy(stored)}
+    cache = ProductionWeightCache({}, {}, metadata={'projection_backend': deepcopy(stored)})
+    before = deepcopy((completion, cache.metadata))
+    monkeypatch.setenv(DEV_ENV, "0" if certified else "1")
+
+    def intake():
+        if site == "completion":
+            return bridge.check_prepared_completion(completion,
+                plan_sha256="a" * 64, implementation_sha256="b" * 64,
+                reader_identity={'reader': 'same'}, projection_backend=running)
+        return bridge.require_prepared_binding('projection_backend',
+            cache.metadata['projection_backend'], running,
+            where='prepared backend identity')
+
+    if certified:
+        with pytest.raises(ValueError, match='prepared (projection_backend|backend identity)'):
+            intake()
+        assert 'DEV-MODE' not in capsys.readouterr().out
+    else:
+        intake()
+        out = capsys.readouterr().out
+        assert 'DEV-MODE' in out and 'prepared projection_backend' in out
+        # The shared seal reports its first differing field, not a full dump
+        # of both identities. The fused build is absent from the reference.
+        assert 'build' in out and 'None' in out
+        assert qualification['build']['binary_sha256'][:16] in out
+    # Recording a seal must not rewrite either prepared record or its cache.
+    assert (completion, cache.metadata) == before
+
+
+@pytest.mark.parametrize("key", ['reader_identity', 'source_model_identity',
+                                'calibration_input', 'formats_by_qname'])
+def test_backend_recording_does_not_relax_other_prepared_fields(monkeypatch, key):
+    monkeypatch.setenv(DEV_ENV, "1")
+    with pytest.raises(ValueError, match='prepared ' + key):
+        bridge.require_prepared_binding(key, {'stored': True}, {'running': True})

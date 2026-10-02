@@ -112,6 +112,74 @@ IDENTITY_BOUND_WRITES = (
 )
 
 
+class RowWaitTelemetry:
+    """One launch's scoped stream waits, outside every pricing identity.
+
+    The power sampler starts before source/model work. A missing idle baseline
+    or a CPU run retains unsampled time rather than inventing a power band.
+    Closing publishes observations on both successful and failed launches.
+    """
+
+    def __init__(self):
+        from .io_spans import ExposedWaitLedger
+        self.ledger = ExposedWaitLedger()
+        self.path = self.sampler = None
+        self.device = self.row_head = None
+        self.started = self.gpu_work_started = None
+        self.returncode = None
+
+    def start(self, output, device):
+        from .io_spans import GpuPowerSampler
+        self.path = Path(output).with_suffix(".waits.json")
+        self.device = str(device)
+        self.started = time.time()
+        self.sampler = GpuPowerSampler()
+        if self.device == "cuda":
+            self.sampler.start()
+
+    def before_gpu_work(self):
+        if self.device == "cuda" and self.gpu_work_started is None:
+            self.gpu_work_started = time.time()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, _type, error, _traceback):
+        if self.path is None:
+            return
+        from .cost_stage_checkpoint import atomic_write_bytes
+        from .digests import indent2_json_file_bytes
+        from .io_spans import EXPOSED_WAIT_SCHEMA, exposed_wait_report
+        try:
+            power = self.sampler.stop()
+            finished = time.time()
+            snapshot = self.ledger.snapshot()
+            report = exposed_wait_report(
+                snapshot["intervals"], snapshot["takes"],
+                power_times=self.sampler.times, power_samples=self.sampler.samples,
+                interval_s=self.sampler.interval_s,
+                phase_windows=[dict(name="campaign", start_unix=self.started,
+                                    end_unix=finished)], envelope_w=140.0,
+                baseline_end_unix=self.gpu_work_started)
+            report["coverage"] = "row-stream-load-only"
+            record = dict(schema="prismaquant.tessera_campaign_waits.v1",
+                passed=error is None and self.returncode == 0,
+                returncode=self.returncode, device=self.device, row_head=self.row_head,
+                started_unix=self.started, finished_unix=finished,
+                failure=None if error is None else f"{type(error).__name__}: {error}",
+                gpu=power, row_stream_exposed_wait=report,
+                exposed_wait=dict(schema=EXPOSED_WAIT_SCHEMA, instrumented=False,
+                    reason="row-stream loads observed separately; source construction, "
+                           "checkpoint and publication waits not fully instrumented",
+                    gpu_power_envelope_w=140.0))
+            atomic_write_bytes(self.path, indent2_json_file_bytes(record))
+        except BaseException as observation_error:
+            if error is None:
+                raise
+            error.add_note("campaign wait telemetry failed: "
+                           f"{type(observation_error).__name__}: {observation_error}")
+
+
 def admitted_cpus() -> int:
     """The CPUs this process may run on: PrismaBuild's assigned affinity."""
     try:
@@ -208,11 +276,14 @@ class RowStream:
     def __init__(self, *, capture_path, expected_sha256, expected_identity, census, names,
                  policy, weights, hessian_identity, bind, threads, batch_size, device,
                  memo_capacity, resource_check=None, factor_scratch_bytes=0,
-                 load_unit=None, clock=time.monotonic):
+                 load_unit=None, clock=time.monotonic, wait_sink=None):
         from . import tessera_calibration_cache as store
         from .perturbed_x_cache import normalize_verified_activation_load
         self._store = store
         self._clock = clock
+        if wait_sink is not None and not callable(wait_sink):
+            raise TypeError("row stream wait observer must be callable")
+        self.wait_sink = wait_sink
         self._opened = clock()
         policy = normalize_verified_activation_load(policy)
         if policy is None:
@@ -326,8 +397,12 @@ class RowStream:
         """Wait for one submitted read; record or compare its receipts."""
         if name in self._live:
             return self._live[name]
-        future = self._inflight.pop(name)
-        entry = future.result()
+        future = self._inflight[name]
+        from .io_spans import observed_future_result
+        entry = observed_future_result(
+            future, sink=self.wait_sink, kind="row-stream-load",
+            info={"unit": name}, clock=time.time)
+        del self._inflight[name]
         self.stats["entries_read"] += 1
         self.stats["read_seconds"] += entry.read_seconds
         if entry.weight is not None:
