@@ -35,9 +35,24 @@ def run_observed(command, observer_command, observations: Path, *, target_out,
         workload = subprocess.Popen(command)
         row_rc = workload.wait()
         (observations / 'workload_done').write_text(str(row_rc))
-        observer_rc = observer.wait(timeout=observer_exit_timeout)
-        if observer_rc:
-            raise RuntimeError(f'observer failed with status {observer_rc}; profile not qualified')
+        observer_error = None
+        try:
+            observer_rc = observer.wait(timeout=observer_exit_timeout)
+        except (subprocess.TimeoutExpired, OSError) as error:
+            observer_rc = None
+            observer_error = str(error)
+        qualified = row_rc == 0 and observer_rc == 0 and observer_error is None
+        with (observations / 'observer_result.json').open('x') as handle:
+            json.dump({'schema': 'prismaquant.profile_observer_result.v1',
+                       'workload_returncode': row_rc, 'returncode': observer_rc,
+                       'error': observer_error, 'qualified': qualified}, handle)
+        # Qualification failure cannot turn the original failed row into some
+        # unrelated exception exit. Cleanup still joins/stops our observer only.
+        if row_rc:
+            return row_rc
+        if not qualified:
+            raise RuntimeError(f'observer failed with status {observer_rc}; '
+                               f'profile not qualified: {observer_error}')
         return row_rc
     finally:
         # Own observer only. The workload is never signalled or retried here.
@@ -46,13 +61,28 @@ def run_observed(command, observer_command, observations: Path, *, target_out,
             observer.wait(timeout=30)
 
 
+def profiled_row_command(command, *, destination, profiler_executable):
+    """Keep container ownership and original argv; profile its same-UID child."""
+    boundary = 0
+    if 'tools.tessera_campaign_container' in command:
+        module = command.index('tools.tessera_campaign_container')
+        boundary = command.index('--', module) + 1
+    inner = command[boundary:]
+    if not inner or not Path(inner[0]).name.startswith('python'):
+        raise ValueError('profiling requires the original Python row argv')
+    return [*command[:boundary], inner[0], '-u', '-m', 'tools.pq_profile_child',
+            '--profiler-executable', profiler_executable, '--out', str(destination),
+            '--', *inner]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--launch', required=True, help='Frozen JSON argv/env row descriptor')
     parser.add_argument('--observations', required=True)
     parser.add_argument('--profile-local', required=True)
+    parser.add_argument('--profiler-executable', default='py-spy',
+                        help='Pinned executable visible at the same path inside the container')
     parser.add_argument('--row-s', type=int, default=900)
-    parser.add_argument('--profile-s', type=int, default=420)
     args = parser.parse_args(argv)
     row = json.loads(Path(args.launch).read_text())
     command = row['argv']
@@ -60,12 +90,17 @@ def main(argv=None):
             any(not isinstance(part, str) for part in command)):
         raise RuntimeError('launch must carry a nonempty string argv')
     target = command[command.index('--out') + 1]
+    child_profile = Path(args.observations).resolve() / 'child-profile.speedscope'
+    observed_command = profiled_row_command(command, destination=child_profile,
+                                            profiler_executable=args.profiler_executable)
     observer = [sys.executable, '-u', '-m', 'tools.pq_row_profile_observer',
                 '--out', args.observations, '--target-out', target,
                 '--profile-local', args.profile_local, '--wait-s', '60',
-                '--row-s', str(args.row_s), '--profile-s', str(args.profile_s)]
-    return run_observed(command, observer, Path(args.observations), target_out=target,
-                        observer_exit_timeout=args.profile_s + 120)
+                '--profiler-executable', args.profiler_executable,
+                '--child-profile', str(child_profile),
+                '--row-s', str(args.row_s)]
+    return run_observed(observed_command, observer, Path(args.observations), target_out=target,
+                        observer_exit_timeout=120)
 
 
 if __name__ == '__main__':
