@@ -13,6 +13,7 @@ import datetime as dt
 import gc
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -124,7 +125,8 @@ def _prepare(binding, stack, guard):
     decoder = _SealedDecoders(Path(binding['model']), buffers)
     with torch.device('meta'):
         moe = glm.Glm5NextTextMoE(config)
-    moe = moe.to(torch.bfloat16).to_empty(device='cuda').eval()
+    guard.check('before_model_allocation',reserve_bytes=binding['resources']['gpu_weight_bytes'] + 64*1024**2)
+    moe = moe.to(torch.bfloat16).to_empty(device='cuda').eval().requires_grad_(False)
     prefix = f"model.language_model.layers.{binding['layer']}."
     inter = config.moe_intermediate_size
     files = {}
@@ -178,7 +180,7 @@ class _HookControlComplete(Exception):
     """End the bounded hook control before complete-capture output handoff."""
 
 
-def _production_hook_phases(moe, inputs, binding, functions, record, telemetry, guard, output, seconds):
+def _production_hook_phases(moe, inputs, binding, record, telemetry, guard, output, seconds):
     """Measure the actual installed collector, consume_packed and accumulate.
 
     The control supplies one existing captured input directly to the installed
@@ -213,10 +215,41 @@ def _production_hook_phases(moe, inputs, binding, functions, record, telemetry, 
         record['production_hook'] = dict(module=hook.__module__,
             file=hook.__code__.co_filename,line=hook.__code__.co_firstlineno,
             selected_units=len(targets),max_rows=512,shared_packed_inputs=True)
+        collector = inspect.getclosurevars(hook).nonlocals['self']
+        accumulate = inspect.getclosurevars(collector.row_consumer).nonlocals['accumulate']
+        state = inspect.getclosurevars(accumulate).nonlocals
+        def committed_state():
+            return dict(rows_seen=dict(state['seen']),prefix_rows=dict(state['kept']),
+                hessian_bytes=sum(value.numel()*value.element_size()
+                    for value in state['hess'].values() if value is not None))
+        probe = references['before'](moe.experts,inputs,moe)
+        minimum = min(n for n in probe['row_counts'] if n)
+        calls_to_fill = (512+minimum-1)//minimum
+        del probe
+        # Warm the genuine prefix owners to their real cap, on this input.
+        # H/row counters come from the actual closure, never a mirror.
+        guard.check('before_hook_residency',reserve_bytes=
+            binding['resources']['hessian_bytes'] + binding['resources']['prefix_bytes']
+            + 512*1024**2)
+        for _ in range(calls_to_fill):
+            hook(moe.experts,(inputs,))
+        torch.cuda.synchronize()
+        active = [name for name,value in state['seen'].items() if value]
+        prefix_owners = [name for name in state['kept'] if state['seen'][name]]
+        assert all(state['kept'][name] == 512 for name in prefix_owners)
+        record['hook_warmup'] = dict(calls=calls_to_fill,minimum_nonzero_routed_rows=minimum,
+            active_units=len(active),stable_prefix=True,state=committed_state())
+        _write(output/'hook-warmup.json',record['hook_warmup'])
         for i, name in enumerate(('before','after','after','before')):
             arm[0] = name
-            record['phases'].append(_phase(f'hook-{i}-{name}',
-                lambda:hook(moe.experts,(inputs,)), seconds,telemetry,guard,output))
+            before = committed_state()
+            phase = _phase(f'hook-{i}-{name}', lambda:hook(moe.experts,(inputs,)),
+                seconds,telemetry,guard,output)
+            phase.update(committed_state_before=before,committed_state_after=committed_state(),
+                prefix_stable=before['prefix_rows'] == committed_state()['prefix_rows'])
+            assert phase['prefix_stable']
+            record['phases'].append(phase)
+            _write(output/(phase['phase']+'.json'),phase)
             _write(output/'partial.json',record)
             # The iterator executes while the ordinary production hook scope
             # is installed. No-op forward avoids a second source-model draw.
@@ -317,7 +350,7 @@ def _phase(name, fn, seconds, telemetry, guard, output):
     for _ in range(2):
         fn()
     torch.cuda.synchronize()
-    guard.check('before_' + name)
+    guard.registered_gpu_subset_check('before_' + name)
     telemetry.collect(); telemetry.require_healthy()
     start, mono = time.time(), time.monotonic()
     times = []
@@ -328,7 +361,7 @@ def _phase(name, fn, seconds, telemetry, guard, output):
             times.append(time.perf_counter()-before)
     end, end_mono = time.time(), time.monotonic()
     telemetry.collect(); telemetry.require_healthy()
-    guard.check('after_' + name)
+    guard.registered_gpu_subset_check('after_' + name)
     row = dict(phase=name, started_unix=start, finished_unix=end,
         started_monotonic=mono, finished_monotonic=end_mono, calls=len(times),
         elapsed_seconds=end_mono-mono, wall_seconds_mean=statistics.fmean(times),
@@ -369,6 +402,13 @@ def main():
     bind_residency_manifest(args.data_manifest_sha256)
     torch.set_num_threads(1)
     guard = CaptureMemoryGuard('cuda')
+    if guard.cap_bytes < binding['resources']['aggregate_limit_bytes']:
+        raise RuntimeError('PB enforced cgroup limit is smaller than the bound aggregate')
+    def require_gpu_budget(label):
+        if torch.cuda.memory_reserved() > binding['resources']['gpu_limit_bytes']:
+            raise RuntimeError('CUDA reservation exceeds the bound GPU subset')
+        return guard.check(label)
+    guard.registered_gpu_subset_check = require_gpu_budget
     telemetry = ScreenTelemetry(args.out/'netdata-points.jsonl')
     record = dict(schema='prismaquant.pq1934_paired_measurement.v1', binding=binding,
         binding_sha256=args.binding_sha256, data_manifest_sha256=args.data_manifest_sha256,
@@ -383,6 +423,9 @@ def main():
         telemetry.start()
         with ExitStack() as stack:
             moe, inputs, bound, live, source, decoder = _prepare(binding, stack, guard)
+            # LIFO: join every queued consumer before the earlier raw-close
+            # callbacks on cancellation/guard failure as well as success.
+            stack.callback(torch.cuda.synchronize)
             for capture_down in (False, True):
                 for max_rows in (None, 16):
                     kwargs = dict(capture_down=capture_down, max_rows_per_expert=max_rows)
@@ -421,7 +464,13 @@ def main():
                     record['phases'].append(_phase(f'{kind}-{i}-{arm}', functions[arm],
                         args.seconds, telemetry, guard, args.out))
                     _write(args.out/'partial.json',record)
-            _production_hook_phases(moe,inputs,binding,calls,record,telemetry,guard,args.out,args.seconds)
+            torch.cuda.synchronize()
+            record['phase_boundary_before_host_cache_release'] = guard.snapshot()
+            torch._C._accelerator_emptyHostCache()
+            torch.cuda.empty_cache(); gc.collect()
+            guard.check('after_projected_check_host_cache_release')
+            record['phase_boundary_after_host_cache_release'] = guard.snapshot()
+            _production_hook_phases(moe,inputs,binding,record,telemetry,guard,args.out,args.seconds)
             # Every async CPU-buffer consumer completes before any sealed FD closes.
             torch.cuda.synchronize()
             del checks,calls,live,bound,source,decoder,moe,inputs
