@@ -1,5 +1,5 @@
 {
-  "schema": "prismabuild.produced_output_template.v1",
+  "schema": "prismaquant.prismabuild.produced_output_template.v1",
   "version": 1,
   "template_id": "pq-stagea-boundary-entries-v1",
   "output_prefix": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control1",

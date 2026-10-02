@@ -67,7 +67,7 @@ class RowObservation(SignedJointProjectionLease):
         for layer, block in enumerate(model.model.language_model.layers):
             if hasattr(block.mlp, 'experts'):
                 self.routing[layer] = RoutingTap(block.mlp.experts)
-        super().__init__(modules, {name: [SPEC] for name in modules}, {})
+        super().__init__(modules, {name: {SPEC.name: SPEC} for name in modules}, {})
 
     def _validate_delta_coverage(self, name, module):
         pass  # This observer records operands, not a weight perturbation.
@@ -214,7 +214,7 @@ def components(rows, modules):
 
 def statistics(rows, modules, device, spill=None):
     result = {}
-    specs = {name: [SPEC] for name in modules}
+    specs = {name: {SPEC.name: SPEC} for name in modules}
     for probe in range(2):
         with JointOperatorStatisticsLease(modules, specs, max_statistics_bytes=32 << 20,
                 max_candidate_bytes=8 << 20) as lease:
@@ -240,7 +240,7 @@ def spill_control(rows, modules, device, root):
     # The existing spill admits 16-bit source operands. FP32's contraction
     # control uses the same statistics owner directly and records that limit.
     root.mkdir(parents=True, exist_ok=False)
-    names, specs = tuple(modules), {name: [SPEC] for name in modules}
+    names, specs = tuple(modules), {name: {SPEC.name: SPEC} for name in modules}
     geometry = spill_geometry(modules, [names], pending=set(names), batch_tokens=[128],
         n_probes=2, element_size=2, experts_per_token=2)
     with StageBReplaySpill(root=root, max_bytes=16 << 20, geometry=geometry,
