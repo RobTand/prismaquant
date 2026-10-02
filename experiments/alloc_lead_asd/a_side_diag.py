@@ -499,9 +499,10 @@ def main():
     run(args, model)
 
 
-def run(args, model):
+def run(args, model, *, ids=None, progress_callback=None):
     scope, temperature = "all", 1.0
-    ids = load_tokens(args.inputs, args.text, args.n_seqs)
+    if ids is None:
+        ids = load_tokens(args.inputs, args.text, args.n_seqs)
     n_seqs, seqlen = ids.shape
     n_global = n_seqs * seqlen
     units = {name: module for name, module in model.named_modules()
@@ -539,12 +540,16 @@ def run(args, model):
         dens = (part["dens"] if part else
                 torch.zeros(len(SPECS), len(names), seqlen, dtype=torch.float64))
         start = part["done"] if part else 0
+        if progress_callback is not None:
+            progress_callback("pricing", start)
         for i in range(start, n_seqs):
             price_sequence(model, units, names, ids[i:i + 1].to(DEVICE), i, seeds, specs_obj,
                            n_global, scope, temperature, comps, dens)
             if (i + 1) % 8 == 0 or i == n_seqs - 1:
                 atomic_torch_save({"identity": identity, "done": i + 1, "comps": comps,
                                    "dens": dens}, args.output + ".pricing.partial.pt")
+                if progress_callback is not None:
+                    progress_callback("pricing", i + 1)
                 log(f"priced row {i + 1}/{n_seqs} ({time.time() - t0:.0f}s)")
         atomic_torch_save({"comps": comps, "dens": dens, "units": names, "seeds": seeds,
                            "ids_sha256": ids_sha, "specs": list(SPECS), "n_global": n_global,
@@ -578,12 +583,16 @@ def run(args, model):
     dz_stack = torch.empty(len(probe_arms), seqlen * model.config.vocab_size, device=DEVICE,
                            dtype=getattr(torch, args.dz_dtype))
     t1 = time.time()
+    if progress_callback is not None:
+        progress_callback("arms", start)
     for i in range(start, n_seqs):
         arms_sequence(model, ids[i:i + 1].to(DEVICE), i, plan, contexts, probe_arms, seeds, n_global,
                       scope, temperature, dz_stack, res)
         if (i + 1) % 4 == 0 or i == n_seqs - 1:
             atomic_torch_save({"identity": arm_identity, "done": i + 1, "res": res},
                               args.output + ".arms.partial.pt")
+            if progress_callback is not None:
+                progress_callback("arms", i + 1)
             log(f"arms row {i + 1}/{n_seqs} ({time.time() - t1:.0f}s)")
     del dz_stack
     if DEVICE == "cuda":

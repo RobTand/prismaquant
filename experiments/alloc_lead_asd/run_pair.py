@@ -15,10 +15,15 @@ import time
 
 import torch
 import transformers
-from transformers import AutoModelForCausalLM
+from transformers import AutoConfig, AutoModelForCausalLM
+from safetensors.torch import load as load_safetensors
 
 from experiments.alloc_lead_asd import a_side_diag as diag
 from prismaquant.joint_aura import source_execution_identity
+from prismaquant.residency_map import bind_residency_manifest, residency_report
+from prismaquant.staged_tier_policy import activate_staged_tier_policy
+from prismaquant.staged_whole_file import read_staged_whole_file
+from prismaquant.prismabuild_progress import commit as report_progress
 
 
 MODEL_SHA = "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"
@@ -65,17 +70,42 @@ def runtime_identity(model):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--data-manifest-sha256", required=True)
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(exist_ok=False)
     torch.set_num_threads(1)
     torch.set_num_interop_threads(1)
-    model_path = Path("/models/Qwen3-0.6B")
-    input_path = Path("/inputs/inputs_qwen3.safetensors")
-    if file_sha(model_path / "model.safetensors") != MODEL_SHA:
-        raise RuntimeError("model publisher blob digest mismatch")
-    if file_sha(input_path) != INPUT_SHA:
-        raise RuntimeError("input file digest mismatch")
+    model_path = Path("/mnt/shared/models/qwen3-small-alloc-lead/Qwen3-0.6B")
+    input_path = Path("/mnt/shared/tessera-measurements/alloc-lead-asd/inputs_qwen3.safetensors")
+    activate_staged_tier_policy("ram,ssd")
+    bind_residency_manifest(args.data_manifest_sha256)
+    manifest_path = Path(__file__).with_name("recipes") / "pair-inputs.json"
+    manifest_raw = manifest_path.read_bytes()
+    if hashlib.sha256(manifest_raw).hexdigest() != args.data_manifest_sha256:
+        raise RuntimeError("sealed data manifest differs from diagnostic recipe")
+    manifest = json.loads(manifest_raw)
+    bindings = {row["path"]: row["sha256"] for row in manifest["entries"]}
+
+    def read(path):
+        raw = read_staged_whole_file(path, bindings[str(path)], label="surrogate-screen-input")
+        if hashlib.sha256(raw).hexdigest() != bindings[str(path)]:
+            raise RuntimeError(f"staged source digest differs: {path}")
+        return raw
+
+    config_dict = json.loads(read(model_path / "config.json"))
+    if config_dict.get("model_type") != "qwen3":
+        raise RuntimeError("model source config is not Qwen3")
+    config = AutoConfig.for_model(config_dict.pop("model_type"), **config_dict)
+    generation_config = json.loads(read(model_path / "generation_config.json"))
+    raw = read(model_path / "model.safetensors")
+    state_dict = load_safetensors(raw)
+    del raw
+    raw = read(input_path)
+    tokens = load_safetensors(raw)
+    del raw
+    ids = tokens["fit_s42"][:4].contiguous()
+    del tokens
     if transformers.__version__ != "5.16.1":
         raise RuntimeError("producer Transformers version differs from recovered runtime")
     identity = {
@@ -84,19 +114,36 @@ def main():
         "n_probes": 8, "seeds": list(range(7000, 7008)), "text": "fit_s42",
         "model_revision": "c1899de289a04d12100db370d81485cdf75e47ca",
         "model_sha256": MODEL_SHA, "inputs_file_sha256": INPUT_SHA,
+        "data_manifest_sha256": args.data_manifest_sha256,
+        "input_residency": residency_report(),
+        "generation_config": generation_config,
         "source_commit": os.environ.get("PRISMAQUANT_IDENTITY_GIT_COMMIT"),
         "container_content_sha256": os.environ.get("PRISMAQUANT_CONTAINER_CONTENT_SHA256"),
         "legs": {}, "started_unix": time.time(),
     }
-    ids = diag.load_tokens(str(input_path), "fit_s42", 4)
     if tuple(ids.shape) != (4, 512):
         raise RuntimeError("input prefix geometry mismatch")
     identity["input_prefix_sha256"] = hashlib.sha256(ids.numpy().tobytes()).hexdigest()
-    for dtype in ("float32", "bfloat16"):
+    diag.atomic_json_dump(identity, str(output / "inputs.ready.json"))
+    report_progress(1, "startup", "source_input_identity")
+    for leg_index, dtype in enumerate(("float32", "bfloat16")):
+        def progress(phase, count):
+            base = 1 + leg_index * 8 + (4 if phase == "arms" else 0)
+            report_progress(base + count, f"{phase}_{dtype}", "durable_sequence_blocks")
+
         torch.manual_seed(0)
-        model = AutoModelForCausalLM.from_pretrained(
-            str(model_path), torch_dtype=getattr(torch, dtype),
-            attn_implementation="sdpa", local_files_only=True).to("cuda").eval()
+        with torch.device("meta"):
+            model = AutoModelForCausalLM.from_config(
+                config, torch_dtype=getattr(torch, dtype), attn_implementation="sdpa")
+        loaded = model.load_state_dict(state_dict, strict=False, assign=True)
+        expected_missing = (["lm_head.weight"] if config.tie_word_embeddings
+                            and "lm_head.weight" not in state_dict else [])
+        if loaded.missing_keys != expected_missing or loaded.unexpected_keys:
+            raise RuntimeError(f"source state coverage differs: {loaded}")
+        model.tie_weights()
+        if any(parameter.is_meta for parameter in model.parameters()):
+            raise RuntimeError("source state left a meta parameter")
+        model = model.to(device="cuda", dtype=getattr(torch, dtype)).eval()
         for parameter in model.parameters():
             parameter.requires_grad_(False)
         hook = model.get_input_embeddings().register_forward_hook(
@@ -116,7 +163,7 @@ def main():
             n_seqs=4, n_probes=8, seed_base=7000, dtype=dtype, n_single=0,
             layer_arms=False, dz_dtype="float32", pricing_from=None, profile=True,
             smoke_first=False, output=stem)
-        diag.run(job, model)
+        diag.run(job, model, ids=ids, progress_callback=progress)
         meta = json.loads(Path(stem + ".json").read_text())
         if (meta.get("complete") is not True or meta["ids_sha256"] != identity["input_prefix_sha256"]
                 or meta["seeds"] != identity["seeds"] or meta["n_global"] != 2048):
@@ -137,6 +184,7 @@ def main():
     identity["finished_unix"] = time.time()
     identity["complete"] = True
     diag.atomic_json_dump(identity, str(output / "pair.json"))
+    report_progress(18, "publish", "complete_pair")
     files = sorted(p for p in output.iterdir() if p.is_file())
     print(json.dumps({"complete": True, "result": str(output / "pair.json"),
                       "files": [{"name": p.name, "size": p.stat().st_size,
