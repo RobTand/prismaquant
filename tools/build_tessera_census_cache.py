@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-import hashlib
 import json
 import pickle
 import sys
@@ -27,6 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
+from prismaquant.digests import bytes_sha256hex
 from prismaquant.layer_config import (
     LAYER_CONFIG_META_KEY, load_assignment, read_layer_config_metadata,
 )
@@ -42,7 +42,7 @@ from tessera.cached_unit import (
 
 def _bound(path: str, digest: str, label: str) -> bytes:
     raw = Path(path).read_bytes()
-    actual = hashlib.sha256(raw).hexdigest()
+    actual = bytes_sha256hex(raw)
     if actual != digest:
         raise SystemExit(f"{label} {path}: SHA-256 {actual}, expected {digest}")
     return raw
@@ -50,7 +50,7 @@ def _bound(path: str, digest: str, label: str) -> bytes:
 
 def _write(path: Path, raw: bytes) -> str:
     _atomic_write_new_bytes(path, raw)
-    return hashlib.sha256(raw).hexdigest()
+    return bytes_sha256hex(raw)
 
 
 def main(argv=None) -> int:
@@ -115,7 +115,7 @@ def main(argv=None) -> int:
     plan_dropped = None
     if args.plan_layer_config_out:
         config_raw = Path(layer_config).read_bytes()
-        if hashlib.sha256(config_raw).hexdigest() != shas["layer_config"]:
+        if bytes_sha256hex(config_raw) != shas["layer_config"]:
             raise SystemExit(f"layer config {layer_config} changed after it was bound")
         projected, plan_dropped = plan_layer_config_projection(json.loads(config_raw), cost)
         if plan_dropped != outside:
