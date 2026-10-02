@@ -415,7 +415,8 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     """main() with a real capture, projection, encode and receipt; no route scoring.
 
     ``_measure_anchor`` is replaced by the producer's real encode without its
-    served-route admission: this CPU fixture exercises the bridge, while
+    served-route admission: this fixture exercises the bridge on the campaign's
+    selected device, while
     runtime-scoped GPU pricing requires its own measurement. Everything the
     bridge adds -- the population
     gate, the producer request, the binding, the source-byte check, the real
@@ -447,14 +448,18 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
         status="completed",transformers_version=importlib.metadata.version("transformers")))
     source = tmp_path / "source"
     _write_source_checkpoint(model, source, perturb=perturb)
+
+    def from_pretrained(*_args, device_map, dtype, **_kwargs):
+        return model.to(device=device_map, dtype=dtype)
+
     transformers = ModuleType("transformers")
     transformers.AutoModelForCausalLM = SimpleNamespace(
-        from_pretrained=lambda *_args, **_kwargs: model)
+        from_pretrained=from_pretrained)
     monkeypatch.setitem(sys.modules, "transformers", transformers)
     monkeypatch.delenv("PRISMAQUANT_NVFP4_INPUT_GSCALE_FP8_RANGE", raising=False)
     monkeypatch.setattr(model_profiles, "detect_profile", lambda _path: Lfm2MoeProfile())
     monkeypatch.setattr(tessera_render, "tessera_encoder_hessian_status", lambda: {
-        "accepted": True, "reason": "CPU test fixture", "kwargs": [], "recipe": {},
+        "accepted": True, "reason": "synthetic bridge fixture", "kwargs": [], "recipe": {},
     })
     tokens = [batch.to(dtype=torch.bfloat16) for batch in _wide_tokens()]
     monkeypatch.setattr(tessera_campaign, "_calibration_tokens",
