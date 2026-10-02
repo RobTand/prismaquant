@@ -16,6 +16,7 @@ import time
 import torch
 import transformers
 from transformers import AutoConfig, AutoModelForCausalLM
+from transformers.initialization import no_init_weights
 from safetensors.torch import load as load_safetensors
 
 from experiments.alloc_lead_asd import a_side_diag as diag
@@ -65,6 +66,25 @@ def runtime_identity(model):
         "source_execution": source_execution_identity(model), "forwards": forwards,
         "config": model.config.to_dict(),
     }
+
+
+def load_source_model(config, state_dict, *, dtype, device):
+    # Meta construction leaves nonpersistent rotary buffers unmaterialized.
+    # Ordinary construction under the library's no-init context creates those
+    # buffers while avoiding random weight fills. Copy into the requested
+    # parameter dtype, then move devices without casting FP32 rotary buffers.
+    with no_init_weights():
+        model = AutoModelForCausalLM.from_config(
+            config, torch_dtype=dtype, attn_implementation="sdpa")
+    loaded = model.load_state_dict(state_dict, strict=False)
+    expected_missing = (["lm_head.weight"] if config.tie_word_embeddings
+                        and "lm_head.weight" not in state_dict else [])
+    if loaded.missing_keys != expected_missing or loaded.unexpected_keys:
+        raise RuntimeError(f"source state coverage differs: {loaded}")
+    model.tie_weights()
+    if any(tensor.is_meta for tensor in [*model.parameters(), *model.buffers()]):
+        raise RuntimeError("source state left a meta tensor")
+    return model.to(device=device).eval()
 
 
 def main():
@@ -132,18 +152,7 @@ def main():
             report_progress(base + count, f"{phase}_{dtype}", "durable_sequence_blocks")
 
         torch.manual_seed(0)
-        with torch.device("meta"):
-            model = AutoModelForCausalLM.from_config(
-                config, torch_dtype=getattr(torch, dtype), attn_implementation="sdpa")
-        loaded = model.load_state_dict(state_dict, strict=False, assign=True)
-        expected_missing = (["lm_head.weight"] if config.tie_word_embeddings
-                            and "lm_head.weight" not in state_dict else [])
-        if loaded.missing_keys != expected_missing or loaded.unexpected_keys:
-            raise RuntimeError(f"source state coverage differs: {loaded}")
-        model.tie_weights()
-        if any(parameter.is_meta for parameter in model.parameters()):
-            raise RuntimeError("source state left a meta parameter")
-        model = model.to(device="cuda", dtype=getattr(torch, dtype)).eval()
+        model = load_source_model(config, state_dict, dtype=getattr(torch, dtype), device="cuda")
         for parameter in model.parameters():
             parameter.requires_grad_(False)
         hook = model.get_input_embeddings().register_forward_hook(
