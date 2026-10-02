@@ -210,6 +210,11 @@ class SealedBuffer:
         fcntl.fcntl(self._fd, fcntl.F_ADD_SEALS, _SEALS)
         return digest.hexdigest()
 
+    def require_sealed(self) -> None:
+        """Require actual kernel write/grow/shrink/seal protection, not a flag."""
+        if self._fd is None or fcntl.fcntl(self._fd, fcntl.F_GET_SEALS) & _SEALS != _SEALS:
+            raise RuntimeError("original material lacks required kernel seals")
+
     @property
     def path(self) -> str:
         """A path that opens this memfd (``/proc/self/fd``), for decoders that map files."""
