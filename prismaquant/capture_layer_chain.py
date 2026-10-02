@@ -2,42 +2,52 @@
 
 The streamed capture visits every source layer once, in order, and writes
 each layer's units through :class:`~prismaquant.tessera_calibration_cache.CaptureWriter`.
-On a large model that is one long row: an interruption anywhere loses the
-traversal, and the seal re-reads every entry it wrote. This module cuts the
+On a large model that is one long row: an interruption can require replaying
+the traversal. Newly written entries are sealed without readback. This module cuts the
 same traversal at layer boundaries into PrismaBuild rows that run one after
 another, each retryable on its own:
 
-* **A prep row, run once.** It computes the capture identity (the hash of
-  every source file) once, records the stat fingerprint of each file it
-  hashed, mints the boundary generation the quanta share, and seals the prep
-  record (``<capture>/chain/prep.json``): the identity, the layer ranges, the
+* **A prep row, run once.** It computes the capture's traversal identity
+  (everything but the source digests, PQ #1896) without reading a payload,
+  records the stat fingerprint of every source file, mints the boundary
+  generation the quanta share, and seals the prep record
+  (``<capture>/chain/prep.json``): the identity, the layer ranges, the
   calibration batch count, the boundary storage policy and session, and the
-  source fingerprints. It runs no forward.
+  source fingerprints. It runs no forward and hashes nothing.
 * **Quanta, one per layer range ``[a, b)``, in order.** Each rebinds the
   generation as its own owner (``owners/capture-AAA-BBB.json``) and reads its
-  source through a :class:`~prismaquant.tessera_calibration_cache.CaptureSourceAuthentication`
-  built from the prep's hash-bound roster: every file it consumes (the head
-  shards and its own layers' shards, plus the small metadata files) is
-  hashed once through a held descriptor and must equal the prep's digest,
-  and nothing it does not read is hashed. No stat or path record stands in
-  for a digest; the prep's stat fingerprints only refuse. It starts from
-  boundary ``a`` (the predecessor's hidden states, read through the
-  generation's verified windows) and runs ``[a, b)`` with the unchanged
-  capture visitor, so its units are written by the same writer and journal
-  as a monolithic capture's. It re-verifies its own entries once, writes
-  boundary ``b`` for its successor, and records its fragment: the boundary
-  ``b`` entries, its selected initialization witness, and each unit's
-  verified record with the stat fingerprint taken at verification. A quantum
-  never deletes its input boundary.
+  source through a recording
+  :class:`~prismaquant.tessera_calibration_cache.CaptureSourceAuthentication`
+  bound to the prep: every file it consumes (the head shards and its own
+  layers' shards, plus the small metadata files) is hashed once through the
+  held descriptor its tensors are then read through, before its first tensor
+  reaches the capture, and held to the prep's stat fingerprint. A census
+  that declares producer digests is compared there. Nothing it does not read
+  is hashed, and no stat or path record stands in for a digest; the prep's
+  fingerprints only refuse. It starts from boundary ``a`` (the predecessor's
+  hidden states, read through the generation's verified windows) and runs
+  ``[a, b)`` with the unchanged capture visitor, so its units are written by
+  the same writer and journal as a monolithic capture's, each hashed as it
+  is written. It writes boundary ``b`` for its successor and records its
+  fragment: the boundary ``b`` entries, its selected initialization witness,
+  each unit's record with the stat fingerprint taken when it was written,
+  and the source digests it recorded. A quantum never deletes its input
+  boundary.
 * **One join.** It requires the prep's ranges to tile the source layers and
   every owner to be complete, merges the selected witnesses into the full
   traversal's initialization contract and holds it to the census contract,
-  and publishes the complete manifest from the verified records: each entry
-  is held to the fingerprint its quantum took, and nothing is hashed again.
-  Then it retires the interior boundaries.
+  and unions the quanta's recorded source digests: two quanta that read one
+  file and recorded different digests refuse. It hashes only the files no
+  quantum read (MTP sidecars, tokenizer assets), binds the complete roster
+  into the sealed identity, and publishes the manifest from the units'
+  records: each entry is held to the fingerprint its writer took, and no
+  entry is read. Then it retires the interior boundaries.
 
 The capture written this way is the monolith's, entry for entry: the same
 identity, the same journal, the same per-unit files and the same manifest.
+Each owner hashes a consumed file once through its held descriptor (Refs #1896).
+Head shards and shards spanning ranges can recur across quanta; physical tensor
+rereads also remain possible when the kernel reclaims retained clean pages.
 """
 from __future__ import annotations
 
@@ -54,7 +64,10 @@ from .cost_stage_checkpoint import (
 )
 from .digests import bytes_sha256hex, canonical_json_bytes, indent2_json_file_bytes
 
-PREP_SCHEMA = "prismaquant.capture_layer_chain.prep.v1"
+#: v2 (PQ #1896): the prep seals the traversal identity, which binds no
+#: source digests; the join binds the digests the quanta recorded. A v1 prep
+#: (whose identity the prep had hashed) is refused, never resumed.
+PREP_SCHEMA = "prismaquant.capture_layer_chain.prep.v2"
 FRAGMENT_SCHEMA = "prismaquant.capture_layer_chain.fragment.v1"
 JOIN_SCHEMA = "prismaquant.capture_layer_chain.join.v1"
 BIND_SCHEMA = "prismaquant.capture_layer_chain.bind.v1"
@@ -171,9 +184,9 @@ def source_fingerprints(source_root) -> dict:
 def require_source_fingerprints(recorded, source_root, *, where) -> None:
     """Refuse a source file that is no longer the object the prep stat.
 
-    A fence, never a digest's stand-in: it only refuses. The quanta hash what
-    they read against the prep's digests; the join, which reads no source,
-    holds the files the quanta consumed to the prep's record this way. The
+    A fence, never a digest's stand-in: it only refuses. The quanta record digests from what
+    they read, comparing any census producer digests; the join holds consumed
+    files to the prep's stat record and hashes only unconsumed source files. The
     NFS device number is client-local, so another box compares with
     :func:`~prismaquant.cost_streaming.stat_fingerprint_reusable`: the inode,
     size, times and path still bind the object.
@@ -230,31 +243,31 @@ def read_prep(capture_root) -> dict:
 
 def authenticate_quantum_source(capture_root, *, census_path, model, resource_check=None,
                                 release_read_pages=False):
-    """The quantum's source descriptor owner over the prep's hash-bound roster.
+    """The quantum's recording source owner, bound to the prep (PQ #1896).
 
-    The selected-source owner a Stage A row reads through, bound to the
-    prep's sealed identity instead of a complete capture manifest: header
-    inspection may open any shard, and a payload read hashes its shard once
-    through the held descriptor against the prep's digest.
+    Header inspection may open any shard. A payload read hashes its shard
+    once, through the held descriptor its tensors are then read through, and
+    the owner records the digest; every file it opens must still be the object
+    the prep stat. The join binds what the quanta recorded.
     """
-    from .tessera_calibration_cache import CaptureSourceAuthentication
+    from .tessera_calibration_cache import record_capture_source
     prep = read_prep(capture_root)
     census = json.loads(Path(census_path).read_text())
     if census.get("model") != str(model) or prep["source_root"] != str(model):
         raise CaptureChainRefused("the quantum's model is not the source the census and the prep name")
-    producer = ((census.get("expert_projection") or {}).get("producer") or {}).get("source") or {}
-    return CaptureSourceAuthentication(model, prep["identity"], producer,
-        manifest_sha256=prep["prep_sha256"], resource_check=resource_check,
+    return record_capture_source(census_path, model=model, binding_sha256=prep["prep_sha256"],
+        fingerprints=prep["source_fingerprints"], resource_check=resource_check,
         release_read_pages=release_read_pages)
 
 
 def prepare_capture_chain(capture_root, *, census_path, ranges, n_batches, boundary_storage, identity):
-    """The prep row: seal the identity, the ranges and the source once.
+    """The prep row: seal the traversal identity, the ranges and the source's stat once.
 
     ``identity`` is called once, between two fingerprint passes over the
-    source; both passes must agree, so the digests it returns are the digests
-    of the fingerprinted objects. Refuses before hashing when the chain is
-    already prepped.
+    source; both passes must agree. It returns the traversal identity, which
+    binds no source digests: the quanta record those from their own reads
+    and the join binds them (PQ #1896), so the prep reads no payload. Refuses
+    when the chain is already prepped.
     """
     from .cost_streaming import StreamedBoundaryArtifacts
     ranges = require_layer_tiling(ranges)
@@ -267,9 +280,10 @@ def prepare_capture_chain(capture_root, *, census_path, ranges, n_batches, bound
     before = source_fingerprints(source_root)
     captured = identity()
     if source_fingerprints(source_root) != before:
-        raise CaptureChainRefused("the source changed while the prep hashed it")
-    if set(before) != set(captured["source_files"]):
-        raise CaptureChainRefused("the capture identity names other source files than the prep stat")
+        raise CaptureChainRefused("the source changed while the prep sealed it")
+    if "source_files" in captured:
+        raise CaptureChainRefused(
+            "a capture chain prep seals the traversal identity; its quanta record the source")
     session_identity = bind_identity(captured, ranges, n_batches)
     storage = StreamedBoundaryArtifacts(boundary_storage)
     with storage:
@@ -355,15 +369,16 @@ class ChainQuantum:
     the sealed prep, its own range in the prep's tiling of this source, its
     own owner not already complete, its predecessor's owner complete with a
     fragment, the source files' stat fences, and that its runner reads
-    through the descriptor owner of this prep's roster.
+    through a recording descriptor owner bound to this prep.
     """
 
     def __init__(self, capture_root, layers, *, num_layers, source_authentication):
         self.root = Path(capture_root).resolve()
         self.prep = read_prep(self.root)
-        if getattr(source_authentication, "manifest_sha256", None) != self.prep["prep_sha256"]:
+        if (not getattr(source_authentication, "is_recording", False) or
+                getattr(source_authentication, "manifest_sha256", None) != self.prep["prep_sha256"]):
             raise CaptureChainRefused(
-                "a capture chain quantum reads its source through the prep's roster")
+                "a capture chain quantum reads its source through the prep's recording owner")
         self.source_authentication = source_authentication
         self.start, self.stop = (int(value) for value in layers)
         self.num_layers = int(num_layers)
@@ -485,16 +500,43 @@ class ChainQuantum:
 
 # -- the join ------------------------------------------------------------------
 
-def join(capture_root, *, census_path) -> dict:
-    """Publish the complete capture from the quanta's verified records.
+def recorded_source_digests(prep, fragments) -> dict:
+    """The union of the source digests the quanta recorded, ``{file name: sha256}``.
 
-    Reads no entry: each is held to the stat fingerprint its quantum took
-    after re-verifying it. The interior boundaries are retired only after the
-    manifest is published, so a failed join leaves every input of a retry.
+    Each quantum hashed what it read through the held descriptor it read it
+    through (PQ #1896). Two quanta that read one file and recorded different
+    digests read different bytes under one capture, and the join refuses.
+    """
+    from .tessera_calibration_cache import RECORDING_RECEIPT_SCHEMA
+    recorded, reader = {}, {}
+    for fragment in fragments:
+        receipt = fragment.get("source_authentication")
+        label = range_label(*fragment["layers"])
+        if (not isinstance(receipt, dict) or receipt.get("schema") != RECORDING_RECEIPT_SCHEMA
+                or receipt.get("binding_sha256") != prep["prep_sha256"]
+                or not isinstance(receipt.get("verified_files"), list)):
+            raise CaptureChainRefused(f"capture layers {label} recorded no source receipt of this prep")
+        for row in receipt["verified_files"]:
+            name, digest = row.get("name"), row.get("sha256")
+            if recorded.setdefault(name, digest) != digest:
+                raise CaptureChainRefused(
+                    f"{name}: capture quanta {reader[name]} and {label} read different source bytes")
+            reader.setdefault(name, label)
+    return recorded
+
+
+def join(capture_root, *, census_path) -> dict:
+    """Publish the complete capture from the quanta's records.
+
+    Reads no entry: each is held to the stat fingerprint its writer took. The
+    source digests the quanta recorded are unioned and bound; only the files
+    no quantum read are hashed (PQ #1896). The interior boundaries are retired
+    only after the manifest is published, so a failed join leaves every input
+    of a retry.
     """
     from prismaquant import validate_source_initialization_contract
     from .streaming_model import merge_selected_initialization_witnesses
-    from .tessera_calibration_cache import CaptureWriter, sha256
+    from .tessera_calibration_cache import CaptureWriter, record_capture_source, sha256
     root = Path(capture_root).resolve()
     prep = read_prep(root)
     identity = prep["identity"]
@@ -524,11 +566,23 @@ def join(capture_root, *, census_path) -> dict:
     if set(verified) != set(identity["units"]):
         missing = sorted(set(identity["units"]) - set(verified))
         raise CaptureChainRefused(f"the quanta verified no record for {missing[:8]}")
+    recorded = recorded_source_digests(prep, fragments)
+    # The join reads no payload a quantum read: it binds their digests to the
+    # objects the prep stat, and hashes only what no quantum consumed.
+    with record_capture_source(census_path, model=prep["source_root"],
+                               binding_sha256=prep["prep_sha256"],
+                               fingerprints=prep["source_fingerprints"],
+                               release_read_pages=True) as source:
+        source.adopt_recorded_digests(recorded)
+        source_receipt = source.authenticate_complete_source()
+        source_files = source.recorded_source_files()
     writer = CaptureWriter(root, census_path=census_path, identity=identity)
-    receipt = writer.finish(model_load_contract=merged, verified=verified)
+    receipt = writer.finish(model_load_contract=merged, verified=verified,
+                            source_files=source_files)
     retired = retire_interior_boundaries(prep, fragments[:-1])
     document = {"schema": JOIN_SCHEMA, "prep_sha256": prep["prep_sha256"],
-                "manifest": receipt, "retired_boundary_entries": retired}
+                "manifest": receipt, "source_authentication": source_receipt,
+                "retired_boundary_entries": retired}
     atomic_write_bytes(join_path(root), indent2_json_file_bytes(document))
     return document
 

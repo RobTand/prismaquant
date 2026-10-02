@@ -134,13 +134,45 @@ def _baseline_fields(process_baseline_bytes,
                 baseline_policy=policy)
 
 
+def retained_source_page_bytes(layer_files, file_bytes, cache_slots, *, released=True):
+    """Peak page cache a streamed capture's recording owner keeps (PQ #1896).
+
+    The owner keeps a file's pages from the read that hashes it. Under the
+    bounded page policy (``released``) the traversal drops them once no layer
+    from the next one on reads the file (``release_source_pages_before``).
+    While layer ``L`` runs, layers up to ``L + cache_slots - 1`` may already
+    be read, so the owner holds every file read so far that a layer at or
+    after ``L`` still reads. When shards interleave layers (GLM-5.3-Flash:
+    one shard is read by layers 4 and 40), that is far more than the files
+    of any ``cache_slots`` consecutive layers. Without the bounded policy
+    nothing is dropped before the owner closes, so it is every file read.
+    ``layer_files`` maps a layer to the files it reads; ``file_bytes`` maps a
+    file to its size.
+    """
+    layers = sorted(layer_files)
+    if not released:
+        return sum(file_bytes[name] for name in set().union(*layer_files.values()))
+    later, needed = {}, set()
+    for layer in reversed(layers):
+        needed = needed | set(layer_files[layer])
+        later[layer] = needed
+    read_by, read = [], set()
+    for layer in layers:
+        read = read | set(layer_files[layer])
+        read_by.append(read)
+    window = max(1, int(cache_slots))
+    return max((sum(file_bytes[name] for name in
+                    read_by[min(index + window - 1, len(layers) - 1)] & later[layer])
+                for index, layer in enumerate(layers)), default=0)
+
+
 def streamed_calibration_resources(model_path, *, unit_shapes, counts,
                                    nsamples, seqlen, max_act_rows, cache_slots,
                                    prefetch_workers, headroom_gb,
                                    capture_policy='legacy', capture_load_policy=None,
                                    process_baseline_bytes=0, selected_source_units=None,
                                    process_baseline_policy=BASELINE_POLICY_EXPLICIT_RESERVATION,
-                                   source_scope=None):
+                                   source_scope=None, source_recording=False):
     """Bound canonical capture using the shared loader's actual source layout.
 
     Headers and profile mappings determine source residency. Capture owns one
@@ -154,6 +186,16 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
     ``source_scope`` prices a profile-declared out-of-body source (PQ #1316)
     the way the loader reads it: the scope's own key mapping, layer prefix and
     layers. A scope has no forward, so it requires ``selected_source_units``.
+
+    ``source_recording`` reports, beside the plan, the page cache a streamed
+    capture's recording owner keeps (PQ #1896):
+    ``source_retained_page_bytes`` from :func:`retained_source_page_bytes`.
+    It is not in ``memory_bytes`` or any phase. It is clean page cache, which
+    the guard's committed reading omits (``committed_cgroup_bytes``) and the
+    kernel reclaims before it refuses an allocation; charging it against the
+    committed cap would refuse a capture that cannot run out of memory on it.
+    What it decides is whether the source is read once: the pages the slack
+    under the cap cannot hold are reclaimed, and their ranges are read again.
     """
     # Ahead of every return in this function, including the legacy one
     # below: a caller that declares a malformed reservation must be
@@ -360,6 +402,12 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         # The source files each layer's reads open, selected tensors only
         # when a selection is given, like body_source_file_bytes.
         body_source_shards={str(k): sorted(v) for k, v in sorted(body_shards.items())},
+        # Reported, never summed: see the docstring (PQ #1896).
+        **({'source_retained_page_bytes': retained_source_page_bytes(body_shards,
+            {shard: (Path(model_path)/shard).stat().st_size
+             for files in body_shards.values() for shard in files}, cache_slots,
+            released=capture_policy == 'shared-inputs-bounded-v1')}
+           if source_recording else {}),
         live_layer_prefix=live_prefix,
         transient_status='conservative physical allocator bound for direct final-slab packer')
     if capture_policy != 'shared-inputs-bounded-v1':
