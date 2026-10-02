@@ -47,29 +47,39 @@ def main():
     bind_residency_manifest(args.data_manifest_sha256)
     torch.set_num_threads(1); torch.cuda.init()
     before = memfds()
-    buffer = read_staged_sealed_file(args.fixture,args.sha256,args.bytes,label='gpu-lifetime-fixture')
-    buffer.require_sealed()
-    with safe_open(buffer.path,framework='pt',device='cpu') as handle:
-        source = handle.get_tensor('weight')
-        alias = source[5:]
-    # Decoder/native storage and the verified raw delivery remain owned
-    # across private pinned staging, the async H2D copy and stream completion.
-    reference = weakref.ref(source)
-    stream = torch.cuda.Stream()
-    with torch.cuda.stream(stream):
-        pinned = alias.pin_memory()
-        result = torch.empty_like(alias, device='cuda')
-        result.copy_(pinned,non_blocking=True)
-        event = torch.cuda.Event(); event.record(stream)
-    assert reference() is source
-    buffer.require_sealed()
-    event.synchronize()
-    assert torch.equal(result.cpu(),alias)
-    del source,alias,pinned,result,event,stream
-    gc.collect()
-    buffer.close()
-    gc.collect()
-    assert memfds() == before
+    lifecycle = []
+    for stop_after_copy in (False, True):
+        buffer = read_staged_sealed_file(args.fixture,args.sha256,args.bytes,label='gpu-lifetime-fixture')
+        source = alias = pinned = result = event = stream = None
+        try:
+            buffer.require_sealed()
+            with safe_open(buffer.path,framework='pt',device='cpu') as handle:
+                source = handle.get_tensor('weight')
+                alias = source[5:]
+            reference = weakref.ref(source)
+            stream = torch.cuda.Stream()
+            with torch.cuda.stream(stream):
+                pinned = alias.pin_memory()
+                result = torch.empty_like(alias, device='cuda')
+                result.copy_(pinned,non_blocking=True)
+                event = torch.cuda.Event(); event.record(stream)
+            assert reference() is source
+            buffer.require_sealed()
+            if stop_after_copy:
+                raise KeyboardInterrupt('bounded cancellation after async enqueue')
+            event.synchronize()
+            assert torch.equal(result.cpu(),alias)
+            lifecycle.append('equal')
+        except KeyboardInterrupt:
+            lifecycle.append('cancelled_after_enqueue')
+        finally:
+            if stream is not None:
+                stream.synchronize()
+            source = alias = pinned = result = event = stream = None
+            gc.collect()
+            buffer.close()
+        gc.collect()
+        assert memfds() == before
     failures = []
     for case in ('digest','cancel'):
         original = io_engine.SealedBuffer.fill
@@ -95,7 +105,7 @@ def main():
         gpu=torch.cuda.get_device_name(),torch=str(torch.__version__),cuda=torch.version.cuda,
         affinity=sorted(os.sched_getaffinity(0)),source_bytes=args.bytes,
         kernel_sealed=True,async_copy_equal=True,native_alias_held_until_completion=True,
-        memfd_cleanup=True,failures=failures,residency=residency_resolver().report())),flush=True)
+        memfd_cleanup=True,lifecycle=lifecycle,failures=failures,residency=residency_resolver().report())),flush=True)
 
 
 if __name__=='__main__':main()
