@@ -59,6 +59,8 @@ cannot mistake output MSE for measured joint AURA.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import argparse
 import re
 import functools

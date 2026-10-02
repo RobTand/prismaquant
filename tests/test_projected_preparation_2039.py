@@ -62,7 +62,7 @@ def cpu_transport(monkeypatch):
         pool.shutdown(wait=True)
 
 
-def run_check(monkeypatch, values, *, read=None, guard=None, max_bytes=64):
+def run_check(monkeypatch, values, *, read=None, guard=None, max_bytes=64, cancel=None):
     bound = {'s': {f'u{i}':dict(source_tensor=f'w{i}', rows=2, cols=3)
                    for i in range(len(values))}}
     auth = object()
@@ -76,7 +76,7 @@ def run_check(monkeypatch, values, *, read=None, guard=None, max_bytes=64):
         resource_check=guard or (lambda label, **kw:None))
     # The original serial implementation is the causal RED control.
     if 'parallel_preparation' in inspect.signature(campaign._checked_projected_units).parameters:
-        kwargs.update(parallel_preparation=True, preparation_max_bytes=max_bytes)
+        kwargs.update(parallel_preparation=True, preparation_max_bytes=max_bytes, cancel=cancel)
     return campaign._checked_projected_units(bound, **kwargs)
 
 
@@ -221,3 +221,31 @@ def test_shared_pool_consumer_cannot_resize_existing_executor(monkeypatch):
         first.shutdown(wait=True)
         monkeypatch.setattr(layer_streaming,'_LAYER_READ_POOL',None)
         monkeypatch.setattr(layer_streaming,'_LAYER_READ_POOL_THREADS',0)
+
+
+def test_cancellation_stops_new_reads_and_joins_started_private_copies(monkeypatch, cpu_transport):
+    from concurrent.futures import CancelledError
+    cancel, both, finish = threading.Event(), threading.Event(), threading.Event()
+    original_copy = torch.Tensor.copy_
+    started = []
+    lock = threading.Lock()
+    def copy(target, source, *args, **kwargs):
+        with lock:
+            started.append(int(source[0,0]))
+            if len(started) == 2:
+                both.set()
+        assert finish.wait(3)
+        return original_copy(target,source,*args,**kwargs)
+    monkeypatch.setattr(torch.Tensor,'copy_',copy)
+    values=[torch.full((2,3),i,dtype=torch.bfloat16) for i in range(6)]
+    thread,done,result=_foreground(lambda:run_check(monkeypatch,values,cancel=cancel))
+    try:
+        assert both.wait(2)
+        cancel.set()
+        assert not done.wait(.1)
+    finally:
+        finish.set();thread.join(4)
+    assert done.is_set()
+    assert isinstance(result[0],CancelledError),repr(result[0])
+    assert set(started) == {0,1}
+    assert not cpu_transport.synchronized
