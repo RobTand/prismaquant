@@ -2,7 +2,7 @@
 
 Re-stamped 2026-10-02 (`sol/pq-spill-readplan-1086-20261002`, PQ #2115 / Refs #1086):
 constructor-only `StageBReplaySpill(packed_read_plan=True)` reuses the packed
-firing table and a shared bounded uint64 array owner for frozen chunk fields,
+firing table and its common bounded uint64 row-storage abstraction for frozen chunk fields,
 record/offset views and the last-use index. Existing spill geometry caps the
 metadata; a probe-0 firing beyond that declaration refuses before another
 input or payload write. The chunk fields, direct-I/O offsets, record order,
