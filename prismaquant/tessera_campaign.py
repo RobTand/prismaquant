@@ -3788,6 +3788,7 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
                              parallel_kind,
                              context_by_unit: "Mapping[str, ServingContext] | None" = None,
                              family_restriction=None, structure_by_unit=None,
+                             profile=None,
                              ) -> dict[str, list]:
     """One Tessera menu per distinct shape and explicit serving context.
 
@@ -5878,7 +5879,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     menus = expand_menus_for_targets(weights, targets, mode=mode, tp_degree=args.tp_degree,
         parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
         family_restriction=getattr(args, "family_restriction", None),
-        structure_by_unit=structure_by_unit)
+        structure_by_unit=structure_by_unit, profile=profile)
     report_empty_menus(menus, mode=mode)
     projection = None
     if population.declared:
@@ -7098,7 +7099,8 @@ def _main(argv, *, source_scope, waits) -> int:
         full_partition_menus = expand_menus_for_targets(
             menu_weights, partition_menu_targets, mode=mode, tp_degree=args.tp_degree,
             parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
-            family_restriction=args.family_restriction, structure_by_unit=structure_by_unit)
+            family_restriction=args.family_restriction, structure_by_unit=structure_by_unit,
+            profile=profile)
         menus = {name: full_partition_menus[name] for name in targets}
         partition_encode_structure = {name: "routed_moe" for name in partition_menu_targets}
         # Consumers and identity receipts describe only this row's priced units.
@@ -7114,6 +7116,7 @@ def _main(argv, *, source_scope, waits) -> int:
             context_by_unit=context_by_unit,
             family_restriction=args.family_restriction,
             structure_by_unit=structure_by_unit,
+            profile=profile,
         )
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
     # ``attested`` without a dev pin, ``readable`` against a contract that
