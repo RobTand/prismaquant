@@ -47,9 +47,33 @@ comes directly from unchanged `shipcard.verify`. Neither success nor a filled
 card authorizes upload; the publisher's dry-run and the operator's explicit go
 remain mandatory.
 
-## Outputs the current U4 runner does not supply
+## New TR3 Producer Records
 
-The TR3 result has a real nested serve manifest and full-vocabulary KL vectors,
+The existing `experiments/measure_glm_tr3_vllm.py` accepts an optional
+`--gold-record-out /new-window/records/gold.kl.json` on a complete new run.
+The output must not already exist or alias the full result or qualification.
+It cannot be used with `--qualify-hook`; the ordinary qualified full-panel
+or `--qualify-then-score` path still owns measurement and its identity fences.
+
+The producer records all 25 windows / 51,175 positions, full-vocabulary FP64
+method, exact panel/teacher calibration digest, clean producer sources,
+observed disabled speculation, canonical shipcard artifact identity and the
+actual in-process serving manifest with a live engine descendant. The existing
+authenticated checkpoint cache still owns weight-content evidence. No raw
+retained result is read or upgraded, and no canonical serving-manifest file is
+created in the artifact. Ingest the new producer record with the existing
+`--records-dir` interface; missing independent slots remain refusals.
+
+The existing `shipcard_cli fill-control` also accepts this exact producer
+record as `--control-record`, preserving its metrics, method, source, tool and
+no-spec observations. It compares the record's canonical model identity with
+the actual control artifact before using the existing control constructor.
+Unknown producer schemas and malformed/drifted gold records refuse without
+writing. The existing flat gold-result case keeps its original behavior.
+
+## Outputs the Retained U4 Windows Do Not Supply
+
+The retained TR3 result has a real nested serve manifest and full-vocabulary KL vectors,
 but is not a gold shipcard record. It does not serialize the shipcard's
 artifact SHA or its observed no-spec result. This adapter refuses to invent
 those fields, retroactively hash-bind it, or install its manifest as canonical.

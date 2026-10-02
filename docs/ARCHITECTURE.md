@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1589): the existing sealed-panel TR3 scorer can
+optionally publish `--gold-record-out` after a new complete measured panel.
+It records its actual all-position, full-vocabulary FP64 method, authenticated
+panel/teacher calibration context, clean source closure (including the
+fidelity helper), canonical shipcard model identity and observed no-spec
+execution. Existing digest-cache and entry/exit identity/engine fences remain
+the owners; no whole-weight rehash or parallel cache is added. The actual
+self-manifest requires a live engine descendant for this optional output and
+binds the model identity in its runtime context. The producer uses the existing
+slot constructor and atomic JSON writer. Raw retained results are not upgraded;
+qualification-only runs, reused output paths and failed fences cannot publish
+a gold record. Existing offline receipt ingestion consumes the producer record
+without changing the artifact or inventing a canonical manifest. This closes
+no independent PPL, compiled, census, control, quality or served-SLO gate.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
@@ -2153,9 +2168,11 @@ the existing trace constructor; body-only verdicts never substitute. All
 proposed records pass the unchanged verifier (including build/identity checks)
 before `--apply` uses the existing slot writer. Final verification still lists
 every missing slot. No serve, measurement, upload or manifest fabrication runs.
-Raw TR3 output is not gold-slot-shaped and lacks serialized shipcard identity
-and speculative-decoding observation; unsupported output remains a refusal,
-not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
+Legacy raw TR3 output is not gold-slot-shaped and lacks serialized shipcard
+identity and speculative-decoding observation; unsupported output remains a
+refusal, not an inferred pass. A newly measured TR3 run can explicitly publish
+an identity-bound `gold.kl.json` via `--gold-record-out`, for the existing
+`--records-dir` input. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
