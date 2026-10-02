@@ -1,5 +1,6 @@
 # PrismaQuant Architecture
 
+<<<<<<< HEAD
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
@@ -45,6 +46,22 @@ source/profile work; the CLI supplies geometry and constructs no authority.
 CPU selector/plumbing controls do not qualify original CUDA lifetimes, a complete
 provider, historical GLM primal/cotangent agreement, corrected prices or serving.
 See [selected-row diagnostic contract](design/stage_a_selected_row_diagnostic.md).
+=======
+Re-stamped 2026-10-02 (`sol/pq-spill-readplan-1086-20261002`, PQ #2115 / Refs #1086):
+constructor-only `StageBReplaySpill(packed_read_plan=True)` reuses the packed
+firing table and a shared bounded uint64 array owner for frozen chunk fields,
+record/offset views and the last-use index. Existing spill geometry caps the
+metadata; a probe-0 firing beyond that declaration refuses before another
+input or payload write. The chunk fields, direct-I/O offsets, record order,
+checksum gates and last-use semantics retain their existing contract.
+Per-probe IO-engine descriptors bind chunk indexes, resolving frozen metadata
+only on the existing reader. IO-engine scheduling and per-chunk state remain
+unchanged and O(chunks × probes); capture entries and transient per-chunk
+work still have their existing owners. Defaults, sealed phases, numerics,
+source lifetime, spool writers, formats and serving gates are unchanged.
+This CPU research increment does not establish constant total memory or
+close #1086's representative proxy/production acceptance.
+>>>>>>> 8a7cef99 (Bound and compact Stage B chunk and last-use metadata)
 
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number

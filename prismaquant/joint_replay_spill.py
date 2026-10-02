@@ -81,6 +81,7 @@ from .joint_aura import (
     select_invocation_gradient,
 )
 from .io_engine import TerminalReadError
+from .joint_replay_metadata import PackedLastUses, PackedReadPlan, UInt64Rows
 from .joint_replay_regime import OPERATOR_GEMM, PER_INVOCATION, normalize_replay_regime
 from .routed_experts import PackedExpertProjection, ProfileRoutedExpertClassifier
 
@@ -797,7 +798,8 @@ class _PackedRecords(Sequence):
         self._names = tuple(names)
         self._name_ids = {name: index for index, name in enumerate(self._names)}
         self._max_records = max_records
-        self._rows = array("Q")
+        self._storage = UInt64Rows(6, max_rows=max_records)
+        self._rows = self._storage.raw
         self._layouts = []
         self._layout_ids = {}
 
@@ -830,8 +832,8 @@ class _PackedRecords(Sequence):
             layout_id = len(self._layouts)
             self._layout_ids[layout] = layout_id
             self._layouts.append(layout)
-        self._rows.extend((self._name_ids[name], self._name_ids[owner],
-                           entry, logical, nbytes, layout_id))
+        self._storage.append((self._name_ids[name], self._name_ids[owner],
+                              entry, logical, nbytes, layout_id))
 
 
 class _Window:
@@ -864,9 +866,9 @@ class _Window:
         # Avoid a Python object/key per gradient in an already large roster.
         self.g_checksums: dict[int, array] = {}
         # (owner, entry) -> the last plan position that reads it
-        self.last_ref: dict[tuple[str, int], int] = {}
+        self.last_ref: dict[tuple[str, int], int] | PackedLastUses = {}
         # [(owner, chunk)] in replay order
-        self.plan: list[tuple] = []
+        self.plan: Sequence[tuple] = []
         self.entry_cursor: dict[str, int] = {}
         self.record_cursor = 0
         self.dedupe: dict = {}
@@ -976,12 +978,16 @@ class StageBReplaySpill:
     budget. ``max_block`` is the grid a sealed ceiling was sized on
     (:func:`require_sealed_spill_bound`). Research ``packed_records=True``
     compacts probe-0 firing metadata; it does not change the file or replay.
+    Constructor-only ``packed_read_plan=True`` also freezes compact chunk
+    and last-use metadata under that same geometry, enabling the existing
+    packed firing table. The IO engine retains per-chunk descriptors; no
+    constant whole-quantum memory or production selection is implied.
     """
 
     def __init__(self, *, root, max_bytes, geometry, window_names, n_probes,
                  dtype, device, threads=None, accumulation=PER_INVOCATION,
                  chunk_rows=None, max_block=None, scatter_reads=False,
-                 packed_records=False):
+                 packed_records=False, packed_read_plan=False):
         from .perturbed_x_cache import StageBSpillScratch
 
         if type(scatter_reads) is not bool:
@@ -989,6 +995,9 @@ class StageBReplaySpill:
         self._scatter_reads = scatter_reads
         if type(packed_records) is not bool:
             raise ValueError("Stage B packed_records must be a boolean")
+        if type(packed_read_plan) is not bool:
+            raise ValueError("Stage B packed_read_plan must be a boolean")
+        self._packed_read_plan = packed_read_plan
 
         regime = normalize_replay_regime({"accumulation": accumulation,
                                           "chunk_rows": chunk_rows})
@@ -1017,7 +1026,7 @@ class StageBReplaySpill:
         for names in window_names:
             names = tuple(names)
             records = (_PackedRecords(names, max_records=geometry.max_parts)
-                       if packed_records else None)
+                       if packed_records or packed_read_plan else None)
             self._windows.append(_Window(names, records=records))
         self._window_of = {}
         for index, window in enumerate(self._windows):
@@ -1211,14 +1220,28 @@ class StageBReplaySpill:
         from .io_engine import FixedBudget, ReadEntry, read_stream
 
         held = self.replay_chunk_bytes
-        entries = [
-            ReadEntry(key=(index, probe, position), path=None, size=item[1][3],
-                      limit=item[1][3], held_bytes=held, expected_sha256=None,
-                      decoder=None, group=(index, probe, position),
-                      reader=partial(self._read_chunk, window, probe, item))
-            for index, window in enumerate(self._windows) if window.names
-            for probe in range(self.n_probes)
-            for position, item in enumerate(window.plan)]
+        if self._packed_read_plan:
+            entries = []
+            for index, window in enumerate(self._windows):
+                if not window.names:
+                    continue
+                for probe in range(self.n_probes):
+                    for position in range(len(window.plan)):
+                        key = (index, probe, position)
+                        size = window.plan.used_bytes(position)
+                        entries.append(ReadEntry(
+                            key=key, path=None, size=size, limit=size,
+                            held_bytes=held, expected_sha256=None, decoder=None, group=key,
+                            reader=partial(self._read_chunk_at, window, probe, position)))
+        else:
+            entries = [
+                ReadEntry(key=(index, probe, position), path=None, size=item[1][3],
+                          limit=item[1][3], held_bytes=held, expected_sha256=None,
+                          decoder=None, group=(index, probe, position),
+                          reader=partial(self._read_chunk, window, probe, item))
+                for index, window in enumerate(self._windows) if window.names
+                for probe in range(self.n_probes)
+                for position, item in enumerate(window.plan)]
         if not entries:
             return None
         budget = self._replay_budget or FixedBudget(
@@ -1237,6 +1260,10 @@ class StageBReplaySpill:
         buffer = _aligned_buffer(self.read_bytes, self._block, self._cuda)
         self._fill(window, probe, item, memoryview(buffer.numpy()))
         return buffer, (item[1][3],)
+
+    def _read_chunk_at(self, window, probe, position):
+        """Resolve frozen compact metadata only for this admitted chunk read."""
+        return self._read_chunk(window, probe, window.plan[position])
 
     def _require_healthy(self):
         if self._failed:
@@ -1313,6 +1340,9 @@ class StageBReplaySpill:
                 f"Stage B spill refuses a non-dense input for {name}: the "
                 "activation QDQ reads it in place, so a copy is not the same operand")
         window = self._windows[index]
+        if (self._packed_read_plan and self._probe == 0
+                and self._records_seen >= self.geometry.max_parts):
+            raise RuntimeError("Stage B spill firing metadata exceeds its geometry")
         key = (x.untyped_storage().data_ptr(), x.storage_offset(), tuple(x.shape),
                tuple(x.stride()), x._version)
         held = window.dedupe.get(key)
@@ -1658,11 +1688,19 @@ class StageBReplaySpill:
         does not change what the replay computes: only its residue does.
         """
         block = self._block
-        streams: dict[str, list[int]] = {}
+        compact = self._packed_read_plan
+        if compact and len(window.records) > self.geometry.max_parts:
+            raise RuntimeError("Stage B spill read-plan records exceed their geometry")
+        streams = {}
         for position, record in enumerate(window.records):
-            streams.setdefault(record[1], []).append(position)
+            if record[1] not in streams:
+                streams[record[1]] = array("Q") if compact else []
+            streams[record[1]].append(position)
         order = [name for name in window.names if name in streams]
-        plan = []
+        plan = (PackedReadPlan(window.names, max_parts=self.geometry.max_parts)
+                if compact else [])
+        if compact:
+            window.last_ref = PackedLastUses(window.entries, max_parts=self.geometry.max_parts)
 
         def close(owner, records, inputs, gradients):
             cursor, new, placed = 0, [], []
@@ -1706,6 +1744,9 @@ class StageBReplaySpill:
                 close(owner, records, inputs, gradients)
         if any(chunk[3] > self.read_bytes for _, chunk in plan):
             raise RuntimeError("Stage B spill record exceeds its read buffer")
+        if compact:
+            plan.freeze()
+            window.last_ref.freeze()
         return plan
 
     @staticmethod
