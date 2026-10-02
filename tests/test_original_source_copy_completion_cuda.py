@@ -30,17 +30,27 @@ pytestmark = [pytest.mark.skipif(
 @pytest.mark.parametrize('pages', ['0', '1'])
 @pytest.mark.parametrize('material', [torch.float32, torch.bfloat16], indirect=True)
 @pytest.mark.parametrize('case', ['layer', 'read-failure', 'copy-failure', 'cancel',
-                                 'event-record-failure', 'event-sync-failure', 'head', 'dequant'])
+                                 'event-record-failure', 'event-sync-failure', 'head', 'dequant',
+                                 'parallel-layer', 'parallel-read-failure', 'parallel-copy-failure',
+                                 'parallel-cancel', 'parallel-event-record-failure',
+                                 'parallel-event-sync-failure'])
 def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, pages, case):
+    parallel = case.startswith('parallel-')
+    operation = case.removeprefix('parallel-')
     owner = _owner(material)
     real_enter = cc._CaptureSourceSafeOpen.__enter__
     real_get = cc._CaptureSourceSafeOpen.get_tensor
+    real_exit = cc._CaptureSourceSafeOpen.__exit__
     real_to = torch.Tensor.to
     real_event = torch.cuda.Event
     local = threading.local()
+    lock = threading.Lock()
+    streams = []
+    reader_threads = set()
     observed = dict(copies=0, pending_events=0, completed_events=0, decoder_reads=0,
                     credit_before_sync=[], credit_after_sync=[], pending_stream_on_failure=False,
-                    source_dtype=None, delayed_copies_pending_on_return=0)
+                    source_dtype=None, delayed_copies_pending_on_return=0,
+                    reader_attempts=0, readers_entered=0, readers_exited=0)
     cancel = threading.Event()
     primary = None
     profiler = None
@@ -54,7 +64,7 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
         monkeypatch.setattr(owner, 'require_material_device', lambda target: None)
         monkeypatch.setenv('PRISMAQUANT_RELEASE_SOURCE_PAGES', pages)
         monkeypatch.setenv('PRISMAQUANT_DIRECT_CUDA_LOAD', '1')
-        monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '1')
+        monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '2' if parallel else '1')
 
         def enter(reader):
             value = real_enter(reader)
@@ -63,17 +73,32 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
             # API that production readers use; no fake output/Event is installed.
             stream = torch.cuda.Stream(device=device)
             torch.cuda.set_stream(stream)
+            with lock:
+                streams.append(stream)
+                reader_threads.add(threading.get_ident())
+                observed['readers_entered'] += 1
             return value
 
+        def exit_reader(reader, *args):
+            try:
+                return real_exit(reader, *args)
+            finally:
+                with lock:
+                    observed['readers_exited'] += 1
+
         def get(reader, key):
-            if case == 'read-failure' and observed['decoder_reads']:
+            with lock:
+                attempt = observed['reader_attempts']
+                observed['reader_attempts'] += 1
+            if operation == 'read-failure' and attempt:
                 raise RuntimeError('qualification second-payload failure')
             value = real_get(reader, key)
             assert value.device.type == 'cpu'
-            assert observed['source_dtype'] in (None, str(value.dtype))
-            observed['source_dtype'] = str(value.dtype)
+            with lock:
+                assert observed['source_dtype'] in (None, str(value.dtype))
+                observed['source_dtype'] = str(value.dtype)
+                observed['decoder_reads'] += 1
             local.native.append(weakref.ref(value))
-            observed['decoder_reads'] += 1
             return value
 
         def transfer(value, target=None, *args, **kwargs):
@@ -85,8 +110,10 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
                 torch.cuda._sleep(500_000_000)
                 delay_finished = real_event()
                 delay_finished.record(torch.cuda.current_stream(device))
-                observed['copies'] += 1
-                if case == 'cancel':
+                with lock:
+                    observed['copies'] += 1
+                    copy_number = observed['copies']
+                if operation == 'cancel':
                     cancel.set()
             if target is not None:
                 result = real_to(value, target, *args, **kwargs)
@@ -96,8 +123,9 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
                 # The H2D copy follows this still-pending real event on the
                 # same stream. An event pending only after a synchronous copy
                 # is insufficient evidence for the source lifetime interval.
-                observed['delayed_copies_pending_on_return'] += 1
-            if case == 'copy-failure' and observed['copies'] == 2:
+                with lock:
+                    observed['delayed_copies_pending_on_return'] += 1
+            if operation == 'copy-failure' and delay_finished is not None and copy_number == 2:
                 raise RuntimeError('qualification failure after real copy enqueue')
             return result
 
@@ -106,26 +134,32 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
                 self.event = real_event()
             def record(self, stream):
                 self.native = list(local.native)
-                if case == 'event-record-failure':
-                    observed['pending_stream_on_failure'] = not stream.query()
+                if operation == 'event-record-failure':
+                    with lock:
+                        observed['pending_stream_on_failure'] |= not stream.query()
                     raise RuntimeError('qualification injected event record failure')
                 self.event.record(stream)
                 if not self.event.query():
-                    observed['pending_events'] += 1
+                    with lock:
+                        observed['pending_events'] += 1
             def synchronize(self):
                 assert all(ref() is not None for ref in self.native)
                 held = owner.material_live_bytes
                 assert held == len(material['raws']['one.safetensors'])
-                observed['credit_before_sync'].append(held)
-                if case == 'event-sync-failure':
-                    observed['pending_stream_on_failure'] = not self.event.query()
+                with lock:
+                    observed['credit_before_sync'].append(held)
+                if operation == 'event-sync-failure':
+                    with lock:
+                        observed['pending_stream_on_failure'] |= not self.event.query()
                     raise RuntimeError('qualification injected event sync failure')
                 self.event.synchronize()
                 assert self.event.query()
-                observed['completed_events'] += 1
-                observed['credit_after_sync'].append(owner.material_live_bytes)
+                with lock:
+                    observed['completed_events'] += 1
+                    observed['credit_after_sync'].append(owner.material_live_bytes)
 
         monkeypatch.setattr(cc._CaptureSourceSafeOpen, '__enter__', enter)
+        monkeypatch.setattr(cc._CaptureSourceSafeOpen, '__exit__', exit_reader)
         monkeypatch.setattr(cc._CaptureSourceSafeOpen, 'get_tensor', get)
         monkeypatch.setattr(torch.Tensor, 'to', transfer)
         monkeypatch.setattr(torch.cuda, 'Event', ObservedEvent)
@@ -134,23 +168,23 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
                 torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA])
             profiler.__enter__()
         path = str(owner.root / 'one.safetensors')
-        if case in ('layer', 'read-failure', 'copy-failure', 'cancel',
+        if operation in ('layer', 'read-failure', 'copy-failure', 'cancel',
                     'event-record-failure', 'event-sync-failure'):
-            names = ['layer.a', 'layer.b']
+            names = [f'layer.{index}' for index in range(16 if parallel else 2)]
             try:
                 output = ls._read_layer_to_device(
                     'layer.', {n: path for n in names}, {n: 'w' for n in names},
                     torch.bfloat16, device, source_authentication=owner,
-                    cancel=cancel if case == 'cancel' else None)
+                    cancel=cancel if operation == 'cancel' else None)
             except (RuntimeError, CancelledError) as error:
                 primary = error
-                if case == 'read-failure':
+                if operation == 'read-failure':
                     assert 'second-payload' in str(error)
-                elif case == 'cancel':
+                elif operation == 'cancel':
                     assert isinstance(error, CancelledError)
-                elif case == 'copy-failure':
+                elif operation == 'copy-failure':
                     assert 'real copy enqueue' in str(error)
-                elif case in ('event-record-failure', 'event-sync-failure'):
+                elif operation in ('event-record-failure', 'event-sync-failure'):
                     assert 'injected event' in str(error)
                     assert owner.material_live_bytes > 0
                     with pytest.raises(RuntimeError, match='live readers or consumers'):
@@ -159,16 +193,17 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
                     # qualification harness separately drains that real stream
                     # before releasing the error frame; production did not
                     # declare this failed invocation successful.
-                    torch.cuda.current_stream(device).synchronize()
+                    for stream in streams:
+                        stream.synchronize()
                     assert owner.material_live_bytes > 0
                 else:
                     raise
             else:
-                assert case == 'layer', 'failure/cancellation returned installable output'
+                assert operation == 'layer', 'failure/cancellation returned installable output'
                 expected = torch.arange(32).reshape(4, 8).to(torch.bfloat16)
                 assert all(torch.equal(value.cpu(), expected) for value in output.values())
                 output = None
-        elif case == 'head':
+        elif operation == 'head':
             model = torch.nn.Linear(8, 4, bias=False)
             assert ls._materialize(model, ['weight'], {'weight': path}, {'weight': 'w'},
                                    device, torch.bfloat16, source_authentication=owner) == 1
@@ -187,7 +222,10 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
         assert observed['copies'] > 0
         assert observed['delayed_copies_pending_on_return'] > 0, (
             'no H2D copy returned behind a still-pending real stream dependency')
-        if case in ('event-record-failure', 'event-sync-failure'):
+        assert observed['readers_entered'] == observed['readers_exited']
+        if parallel:
+            assert len(streams) == 2 and len(reader_threads) == 2
+        if operation in ('event-record-failure', 'event-sync-failure'):
             assert observed['pending_stream_on_failure']
             assert observed['completed_events'] == 0
         else:
@@ -206,6 +244,7 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
         assert source_dtype in ('torch.bfloat16', 'torch.float32')
         raw = dict(schema='prismaquant.original_copy_cuda_control.v1', case=case, pages=pages,
                    source_dtype=source_dtype,
+                   reader_threads=len(reader_threads), copy_streams=len(streams), parallel=parallel,
                    original_owner_type=type(owner).__name__, device=str(device),
                    source_control_override='fixture-owner device predicate only; production remains closed',
                    automatic_capture_qualified=False, actual_glm=False, observations=observed,
