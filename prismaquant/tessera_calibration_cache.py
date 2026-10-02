@@ -23,6 +23,7 @@ from .digests import (
     DIRECT_ASCII_STRICT,
     SOURCE_HASH_BLOCK_BYTES,
     bytes_sha256hex,
+    git_blob_sha1hex,
     hex_chain_sha256hex,
     indent2_json_file_bytes,
 )
@@ -335,6 +336,16 @@ def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live
     return digests, bytes_sha256hex(raw)
 
 
+def _original_bootstrap_json(path):
+    """Decode only an already-authenticated original-material descriptor."""
+    from .schemas import strict_json_loads
+
+    with open(path, 'rb') as handle:
+        return strict_json_loads(handle.read(),
+            duplicate=lambda key: RuntimeError(f'original bootstrap duplicate key {key}'),
+            constant=lambda name: RuntimeError(f'original bootstrap invalid constant {name}'))
+
+
 class CaptureSourceAuthentication:
     """One complete capture's source descriptors, not a weight/digest cache.
 
@@ -400,6 +411,146 @@ class CaptureSourceAuthentication:
         self._fingerprints = fingerprints
         return self
 
+    @classmethod
+    def qualified_original_material(cls, root, producer_source, *, publisher_input,
+                                    publisher_id, publisher_revision, readset_input,
+                                    source_paths, max_material_bytes, resource_check):
+        """Internal CPU whole-file material, not automatic capture admission.
+
+        Publisher/readset bindings must come from the enclosing reviewed action.
+        The native publication, producer and complete mapped roster agree before
+        any auxiliary is decoded. All auxiliaries are authenticated before the
+        bootstrap JSON/index is inspected. Every later decoder reads a new or
+        retained independently verified, kernel-sealed delivery, never the pool.
+        """
+        from .source_generation import original_generation_coordinates
+
+        if type(max_material_bytes) is not int or max_material_bytes <= 0 or not callable(resource_check):
+            raise RuntimeError('original material requires finite admitted material bytes and resource check')
+        coordinates, tensors = original_generation_coordinates(
+            publisher_input=publisher_input, publisher_id=publisher_id,
+            publisher_revision=publisher_revision, readset_input=readset_input,
+            source_paths=source_paths, producer_source=producer_source, resource_check=resource_check)
+        if any(row.size > max_material_bytes for row in coordinates.values()):
+            raise RuntimeError('original material exceeds the admitted material byte bound')
+        self = cls.__new__(cls)
+        self._setup(root, producer_source, manifest_sha256=publisher_input['sha256'],
+                    resource_check=resource_check, release_read_pages=False,
+                    source_files={name: row.sha256 for name, row in coordinates.items()})
+        self._identity_json = None
+        self._original = dict(coordinates=coordinates, limit=max_material_bytes,
+                              windows={}, verified={}, publisher_id=publisher_id,
+                              publisher_revision=publisher_revision,
+                              readset_sha256=readset_input['sha256'])
+        try:
+            # This bounded first lane checks the closed auxiliary bootstrap, not
+            # just config/index. No model payload/header is read before it ends.
+            for name in sorted(coordinates):
+                if not name.endswith('.safetensors'):
+                    with self.material_window([self.root / name]):
+                        pass
+            with self.material_window([self.root / 'model.safetensors.index.json']):
+                index = self.read_json(self.root / 'model.safetensors.index.json')
+            weight_map = index.get('weight_map') if isinstance(index, dict) else None
+            weights = {name for name in coordinates if name.endswith('.safetensors')}
+            if (not isinstance(weight_map, dict) or not weight_map or
+                    set(weight_map.values()) != weights or weight_map != tensors):
+                raise RuntimeError('original generation complete index differs from producer/publisher')
+            with self.material_window([self.root / 'config.json']):
+                value = _original_bootstrap_json(self._source_read_path(self._files['config.json']))
+            if (not isinstance(value, dict) or value.get('configuration_files') or value.get('auto_map')):
+                raise RuntimeError('unsupported dynamic original bootstrap configuration')
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    @property
+    def is_qualified_original_material(self):
+        return self._original is not None
+
+    def _reap_original_material(self):
+        """Called only under the owner lock; native storage aliases retain credit."""
+        if self._original is None:
+            return
+        windows = self._original['windows']
+        for name, state in list(self._files.items()):
+            state['storages'] = {key: ref for key, ref in state['storages'].items() if not ref.expired()}
+            if not windows.get(name) and not state['readers'] and not state['storages']:
+                self._close_source_state(state)
+                del self._files[name]
+
+    @property
+    def material_live_bytes(self):
+        with self._lock:
+            self._reap_original_material()
+            return sum(state['before'].st_size for state in self._files.values()) if self._original else 0
+
+    @contextmanager
+    def material_window(self, paths):
+        """Finite whole-file admission; late CPU storage aliases keep their charge.
+
+        Windows may overlap and repeated logical names share the same material.
+        Exiting stops new reads, cancels admission on failure, and reaps only
+        material without an active reader or any native storage consumer.
+        CUDA transfers and dynamic factories are outside this first lane.
+        """
+        names = sorted({self._name(path) for path in paths})
+        with self._lock:
+            self._require_open()
+            if self._original is None or not names:
+                raise RuntimeError('qualified original material window required')
+            self._reap_original_material()
+            new_bytes = sum(self._original['coordinates'][name].size for name in names if name not in self._files)
+            live_bytes = sum(state['before'].st_size for state in self._files.values())
+            if live_bytes + new_bytes > self._original['limit']:
+                raise RuntimeError('original material exceeds the admitted material byte bound')
+            windows = self._original['windows']
+            for name in names:
+                windows[name] = windows.get(name, 0) + 1
+            try:
+                # A reentrant shared guard may release/reap other material.
+                # Pin the objects this window priced as reusable before it
+                # runs, so a zero incremental reservation never reacquires.
+                reserve_allocation(self.resource_check, 'before_original_material_window', cpu_bytes=new_bytes)
+                for name in names:
+                    self._file(self.root / name)
+            except BaseException:
+                for name in names:
+                    windows[name] -= 1
+                self._reap_original_material()
+                raise
+        try:
+            yield self
+        finally:
+            with self._lock:
+                for name in names:
+                    windows[name] -= 1
+                self._reap_original_material()
+
+    def _retain_source_tensor(self, state, value):
+        if self._original is not None:
+            import torch
+            from torch.multiprocessing.reductions import StorageWeakRef
+
+            if not isinstance(value, torch.Tensor) or value.device.type != 'cpu':
+                raise RuntimeError('unsupported original material tensor consumer')
+            reference = StorageWeakRef(value.untyped_storage())
+            with self._lock:
+                state['storages'][reference.cdata] = reference
+        return value
+
+    def _reader_started(self, state):
+        self._readers += 1
+        if self._original is not None:
+            state['readers'] += 1
+
+    def _reader_finished(self, state):
+        self._readers -= 1
+        if self._original is not None:
+            state['readers'] -= 1
+            self._reap_original_material()
+
     def _setup(self, root, producer_source, *, manifest_sha256, resource_check,
                release_read_pages, source_files):
         self.root = Path(os.path.abspath(root))
@@ -425,6 +576,7 @@ class CaptureSourceAuthentication:
         self._lock = threading.RLock()
         self._readers = 0
         self._closed = False
+        self._original = None
 
     def __enter__(self):
         self._require_open()
@@ -447,25 +599,61 @@ class CaptureSourceAuthentication:
         name = self._name(path)
         with self._lock:
             self._require_open()
+            if self._original is not None and not self._original['windows'].get(name):
+                raise RuntimeError('original source read requires an active material window')
             if name not in self._files:
-                # A replaced FIFO must be refused by fstat, never block in
-                # open waiting for a writer. Regular files and HF symlinks
-                # retain the same read semantics with O_NONBLOCK.
-                fd = os.open(self.root/name, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
-                try:
-                    before = os.fstat(fd)
-                    if not stat.S_ISREG(before.st_mode):
-                        raise RuntimeError('authenticated source must be a regular file')
-                    state = dict(fd=fd, before=before, sha256=None, sha256_source=None,
-                                 payload_reads=0,
-                                 lock=threading.Lock())
-                    self._check_file(name, state)
-                    self._check_fingerprint(name, before)
-                    self._files[name] = state
-                except BaseException:
-                    os.close(fd)
-                    raise
+                self._files[name] = self._open_source_state(name)
             return name, self._files[name]
+
+    def _open_source_state(self, name):
+        """Acquire one source object's state before making it decoder-visible."""
+        if self._original is not None:
+            from .staged_whole_file import read_staged_sealed_file
+
+            row = self._original['coordinates'][name]
+            buffer = read_staged_sealed_file(Path(row.path), row.sha256, row.size, label='original-material')
+            fd = None
+            try:
+                buffer.require_sealed()
+                if row.git_blob is not None:
+                    with buffer.readonly() as view:
+                        observed = git_blob_sha1hex(view)
+                    if observed != row.git_blob:
+                        raise RuntimeError(f'{name}: delivered auxiliary differs from publisher Git object')
+                fd = os.open(buffer.path, os.O_RDONLY | os.O_CLOEXEC)
+                state = dict(fd=fd, before=os.fstat(fd), buffer=buffer, sha256=row.sha256,
+                             sha256_source='publisher_bound_kernel_sealed_delivery', payload_reads=0,
+                             lock=threading.Lock(), readers=0, storages={})
+                self._original['verified'][name] = dict(name=name, sha256=row.sha256, bytes_hashed=row.size)
+                return state
+            except BaseException:
+                if fd is not None:
+                    os.close(fd)
+                buffer.close()
+                raise
+        # O_NONBLOCK lets fstat refuse a replaced FIFO without waiting on it.
+        fd = os.open(self.root/name, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise RuntimeError('authenticated source must be a regular file')
+            state = dict(fd=fd, before=before, sha256=None, sha256_source=None,
+                         payload_reads=0, lock=threading.Lock())
+            self._check_file(name, state)
+            self._check_fingerprint(name, before)
+            return state
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def _source_read_path(self, state):
+        """The held object used by JSON, header and tensor readers alike."""
+        return f"/proc/self/fd/{state['fd']}"
+
+    def _close_source_state(self, state):
+        os.close(state['fd'])
+        if 'buffer' in state:
+            state['buffer'].close()
 
     def _check_fingerprint(self, name, observed):
         """Hold a recording owner's held object to the object its prep stat."""
@@ -477,6 +665,9 @@ class CaptureSourceAuthentication:
             raise RuntimeError(f'source file changed since the capture prep stat it: {name}')
 
     def _check_file(self, name, state):
+        if self._original is not None:
+            state['buffer'].require_sealed()
+            return
         try:
             current = (os.fstat(state['fd']), os.stat(self.root/name))
             if any(file_stat_signature(value) != file_stat_signature(state['before']) for value in current):
@@ -537,6 +728,8 @@ class CaptureSourceAuthentication:
         must hash to it, checked before any held state changes. A caller that
         planned a proof by digest (a Stage A row, PQ #1497) passes it.
         """
+        if self._original is not None:
+            raise RuntimeError('original material admits no mutable descriptor identity proof')
         if self.is_recording:
             raise RuntimeError('a recording capture owner records digests from its own reads; '
                                'it adopts no identity proof')
@@ -697,6 +890,8 @@ class CaptureSourceAuthentication:
             return {name: self._files[name]['sha256'] for name in sorted(self._roster)}
 
     def source_files(self, root, census_digest, names, producer_digests):
+        if self._original is not None:
+            raise RuntimeError('unsupported complete capture identity from internal original material')
         if self.is_recording:
             raise RuntimeError('a recording owner has no sealed source roster')
         canonical = json.loads(self._identity_json)
@@ -719,18 +914,24 @@ class CaptureSourceAuthentication:
             name, state = self._file(path)
             if name.endswith('.safetensors'):
                 raise RuntimeError('source JSON reader cannot read a payload shard')
-            self._readers += 1
+            self._reader_started(state)
         try:
             self._authenticate(name, state)
-            with open(f"/proc/self/fd/{state['fd']}", 'rb') as handle:
+            with open(self._source_read_path(state), 'rb') as handle:
                 result = json.load(handle)
             self._check_file(name, state)
             return result
         finally:
             with self._lock:
-                self._readers -= 1
+                self._reader_finished(state)
 
     def safe_open(self, factory, path, *args, **kwargs):
+        if self._original is not None:
+            from safetensors import safe_open
+
+            if (factory is not safe_open or args or kwargs.get('framework') != 'pt' or
+                    set(kwargs) - {'framework', 'device'} or kwargs.get('device', 'cpu') != 'cpu'):
+                raise RuntimeError('unsupported original material range/dynamic/GPU decoder route')
         return _CaptureSourceSafeOpen(self, factory, path, args, kwargs)
 
     def file_stat(self, path):
@@ -743,10 +944,22 @@ class CaptureSourceAuthentication:
         self._check_file(name, state)
         if state['sha256'] is None:
             raise RuntimeError('source payload descriptor has not been authenticated')
-        return f"/proc/self/fd/{state['fd']}"
+        return self._source_read_path(state)
 
     def receipt(self):
         self.require_unchanged()
+        if self._original is not None:
+            return dict(schema='prismaquant.original_source_material.v1',
+                        publisher_control_sha256=self.manifest_sha256,
+                        publisher_id=self._original['publisher_id'],
+                        publisher_revision=self._original['publisher_revision'],
+                        readset_sha256=self._original['readset_sha256'],
+                        authentication='independent publisher/readset SHA256 and native Git auxiliary objects; kernel-sealed whole-file delivery',
+                        automatic_capture_qualified=False,
+                        verified_files=[dict(row) for name, row in sorted(self._original['verified'].items())
+                                        if name.endswith('.safetensors')],
+                        auxiliary_verified=sorted(name for name in self._original['verified'] if not name.endswith('.safetensors')),
+                        material_live_bytes=self.material_live_bytes)
         if self.is_recording:
             return self._recording_receipt()
         adopted = self.adopted_identity_cache_sha256 is not None
@@ -832,6 +1045,10 @@ class CaptureSourceAuthentication:
         with self._lock:
             if self._closed:
                 return
+            if self._original is not None:
+                self._reap_original_material()
+                if self._files or any(self._original['windows'].values()):
+                    raise RuntimeError('cannot close original material with live readers or consumers')
             if self._readers:
                 raise RuntimeError('cannot close capture source with active readers')
             try:
@@ -848,7 +1065,7 @@ class CaptureSourceAuthentication:
                             os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
                         except OSError:
                             pass
-                    os.close(state['fd'])
+                    self._close_source_state(state)
 
 
 class _CaptureSourceSafeOpen:
@@ -858,10 +1075,11 @@ class _CaptureSourceSafeOpen:
         with owner._lock:
             _, self.state = owner._file(path)
             owner._check_file(self.name, self.state)
-            owner._readers += 1
+            owner._reader_started(self.state)
         self.context = None
+        self._slices = []
         try:
-            self.context = factory(f"/proc/self/fd/{self.state['fd']}", *args, **kwargs)
+            self.context = factory(owner._source_read_path(self.state), *args, **kwargs)
             owner._check_file(self.name, self.state)
         except BaseException as exc:
             try:
@@ -869,7 +1087,7 @@ class _CaptureSourceSafeOpen:
                     self.context.__exit__(type(exc), exc, exc.__traceback__)
             finally:
                 with owner._lock:
-                    owner._readers -= 1
+                    owner._reader_finished(self.state)
             raise
 
     def __enter__(self):
@@ -890,8 +1108,14 @@ class _CaptureSourceSafeOpen:
             self.owner._check_file(self.name, self.state)
         finally:
             self.closed = True
+            if self.owner._original is not None:
+                self.context = None
+                self.handle = None
+                for item in self._slices:
+                    item.value = None
+                self._slices.clear()
             with self.owner._lock:
-                self.owner._readers -= 1
+                self.owner._reader_finished(self.state)
 
     def _require_entered(self):
         if not self.entered or self.closed:
@@ -916,11 +1140,14 @@ class _CaptureSourceSafeOpen:
 
     def get_tensor(self, name):
         self._payload()
-        return self.handle.get_tensor(name)
+        return self.owner._retain_source_tensor(self.state, self.handle.get_tensor(name))
 
     def get_slice(self, name):
         self._require_entered()
-        return _CaptureSourceSlice(self, self.handle.get_slice(name))
+        value = _CaptureSourceSlice(self, self.handle.get_slice(name))
+        if self.owner._original is not None:
+            self._slices.append(value)
+        return value
 
 
 class _CaptureSourceSlice:
@@ -937,7 +1164,7 @@ class _CaptureSourceSlice:
 
     def __getitem__(self, index):
         self.reader._payload()
-        return self.value[index]
+        return self.reader.owner._retain_source_tensor(self.reader.state, self.value[index])
 
 
 def _validate_tensors(name, payload, census, max_rows, *, check_finite=True):

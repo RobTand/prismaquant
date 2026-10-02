@@ -33,8 +33,10 @@ unless the profile states otherwise:
   ``allow_nan=True``, so ``NaN`` and ``Infinity`` are written, not refused.
 - ``DIRECT_ASCII_LAX_DEFAULT_STR``: ``DIRECT_ASCII_LAX`` with ``default=str``.
 
-Byte profiles, all lowercase-hex SHA-256:
+Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
 
+- ``git_blob_sha1hex``: native Git blob SHA1 over its ASCII type/length/NUL
+  header and exact owned payload, for independently published auxiliary IDs.
 - ``bytes_sha256hex``: the bytes as given (``bytes``, ``bytearray`` or
   ``memoryview``).
 - ``text_sha256hex``: the text encoded as strict UTF-8, so a lone surrogate
@@ -414,6 +416,17 @@ def compare_source_profiles(left: Mapping[str, str], right: Mapping[str, str]) -
         raise ValueError(f"{profile}: source profile mismatch")
     return {"status": "framed_v2" if profile == SOURCE_TREE_V2 else "legacy_framing",
             "profile": profile, "sha256": left[profile]}
+
+
+def git_blob_sha1hex(data: bytes | bytearray | memoryview) -> str:
+    """Native Git object ID: SHA1 of ``b'blob ' + size + b'\\0' + data``.
+
+    Publisher Git auxiliaries name this recipe, not plain payload SHA1. The
+    caller supplies its already-owned contiguous bytes; no file is opened.
+    """
+    digest = hashlib.sha1(b'blob ' + str(len(data)).encode('ascii') + b'\0')
+    digest.update(data)
+    return digest.hexdigest()
 
 
 def bytes_sha256hex(data: bytes | bytearray | memoryview) -> str:

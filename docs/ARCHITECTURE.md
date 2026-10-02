@@ -1,5 +1,31 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #2010, #2008): the existing capture source
+owner has an internal CPU whole-file original-material path. Independently
+bound reviewed publisher and PB readset control inputs define a closed roster
+and canonical logical-to-physical mapping. Publisher LFS SHA256/lengths, native
+Git auxiliary object IDs, complete checkpoint index and producer declarations
+must agree before original bootstrap. The generation-bound public PB client
+SDK validates admitted sealed readset control bytes; a bare installed core
+cannot choose another parser. Every auxiliary is authenticated before
+config/index decoding. Delivery uses the existing PB reader-lease window and
+IO-engine SealedBuffer, verifies the actual whole-file digest and kernel
+write/grow/shrink/seal mask, then exposes that same memfd for JSON, header and
+CPU safetensors reads. Mutable pool paths are not certified immutable.
+Finite material windows reserve prospective committed shmem through the shared
+resource check, deduplicate repeated logical names and retain the charge while
+any supported native Torch storage alias survives its reader. Failed reads and
+cancellation publish no accepted material; close refuses live windows/readers
+or consumers. This path creates no persistent manifest, cache or dispatcher.
+Range adapters, dynamic configuration/bootstrap, implicit source discovery,
+raw descriptor escape and GPU transfers are unsupported. Automatic campaign
+recording still refuses unconditionally; no full capture/chain, GPU, performance,
+serving or complete source-provider qualification follows from these CPU controls.
+The approved GLM a6c167b62691b2bac901344b65cb651a70f53e43 target is unchanged;
+old w03/s35 chat-template declarations still conflict with its publisher bytes
+and must refuse until an explicitly reviewed new producer binding exists.
+See [internal original-material contract](design/capture_original_material.md).
+
 Re-stamped 2026-10-02 (Refs #1750, optional namespace/profile composition):
 the existing container specification can carry a closed versioned
 `prismaquant.tessera_namespace_profile.v1` declaration. The actual canonical

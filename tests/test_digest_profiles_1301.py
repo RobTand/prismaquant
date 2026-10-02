@@ -371,3 +371,15 @@ def test_canonical_pickle_bytes_refuse_a_container_that_contains_itself():
     loop.append(loop)
     with pytest.raises(ValueError, match="contains itself"):
         digests.canonical_pickle_bytes({"loop": loop})
+
+
+@pytest.mark.parametrize("raw, expected", [
+    (b"", "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"),
+    (b"hello\n", "ce013625030ba8dba906f756967f9e9ca394464a"),
+])
+def test_native_git_blob_profile_uses_git_type_length_and_payload(raw, expected):
+    from prismaquant.digests import git_blob_sha1hex
+
+    assert git_blob_sha1hex(raw) == expected
+    assert git_blob_sha1hex(bytearray(raw)) == expected
+    assert git_blob_sha1hex(memoryview(raw)) == expected
