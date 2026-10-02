@@ -820,9 +820,10 @@ class _OwnProcessGroup:
 class OwnProcessItem(pytest.Item):
     """Stands in for one test of an own-process module in a shared session."""
 
-    def __init__(self, *, group, **kwargs):
+    def __init__(self, *, group, source_reportinfo, **kwargs):
         super().__init__(**kwargs)
         self.group = group
+        self.source_reportinfo = source_reportinfo
 
     def runtest(self):
         result = self.group.run(self.config)
@@ -856,7 +857,8 @@ class OwnProcessItem(pytest.Item):
         return super().repr_failure(excinfo)
 
     def reportinfo(self):
-        return self.path, None, f"{self.nodeid} (own process)"
+        path, line, _description = self.source_reportinfo
+        return path, line, f"{self.nodeid} (own process)"
 
 
 @pytest.hookimpl(trylast=True)
@@ -879,7 +881,8 @@ def pytest_collection_modifyitems(session, config, items):
         for index in indices:
             original = items[index]
             items[index] = OwnProcessItem.from_parent(
-                original.parent, name=original.name, group=group)
+                original.parent, name=original.name, group=group,
+                source_reportinfo=original.reportinfo())
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)

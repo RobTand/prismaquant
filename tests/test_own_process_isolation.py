@@ -19,6 +19,7 @@ reported.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 from pathlib import Path
@@ -138,6 +139,25 @@ def test_xdist_workers_share_one_child_per_module(tmp_path):
     assert proc.returncode == 1, output
     _check_mapped_outcomes(outcomes, output)
     assert len(_child_imports(out)) == 1, output
+
+
+@pytest.mark.parametrize("workers", [0, 2], ids=["serial", "xdist"])
+def test_module_skip_reports_original_source_location(tmp_path, workers):
+    if workers:
+        pytest.importorskip("xdist")
+    extra = ("-n", str(workers)) if workers else ()
+    proc, output, outcomes, _out = _session(
+        tmp_path, "sample_marked_skip.py", "sample_shared.py", extra=extra)
+    assert proc.returncode == 0, output
+    assert set(outcomes) == {"test_marked_skip", "test_shared"}, output
+    assert outcomes["test_shared"] == ("passed", "")
+    kind, reason = outcomes["test_marked_skip"]
+    assert kind == "skipped" and "sample module skip 2113" in reason
+    sample = SAMPLES / "sample_marked_skip.py"
+    location = next(node.lineno for node in ast.parse(sample.read_text()).body
+                    if isinstance(node, ast.FunctionDef)
+                    and node.name == "test_marked_skip")
+    assert f"{sample}:{location}" in reason, reason
 
 
 def test_a_test_the_child_never_reported_fails_by_name(tmp_path):
