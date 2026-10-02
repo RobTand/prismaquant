@@ -5,15 +5,27 @@ Missing measurements refuse; an operator may explicitly override the gate.
 """
 from __future__ import annotations
 
+import base64
+import re
 import math
 from collections.abc import Mapping
 
-from .digests import canonical_json_sha256, is_sha256hex
+from .digests import bytes_sha256hex, canonical_json_sha256, is_sha256hex
 from .io_spans import EXPOSED_WAIT_SCHEMA, GB10_POWER_ENVELOPE_W, derive_wait_bound
 from .joint_replay_regime import normalize_replay_regime
 
 PILOT_SCHEMA = "prismaquant.joint_dispatch_pilot.v1"
 QUANTUM_COMPLETION_SCHEMA = "prismaquant.joint_layer_quantum.completion.v1"
+QUANTUM_RECORD_MAX_BYTES = 1024 * 1024
+PILOT_SOURCE_SCHEMA = "prismaquant.joint_dispatch_pilot.source.v1"
+PILOT_LAUNCHER = ["python3", "-m", "tools.tessera_campaign_container"]
+PILOT_ENTRY = ["python3", "-m", "prismaquant.joint_cost_quantum"]
+
+#: The completion's inlined original-quantum-record block names these three
+#: fields; the wire bytes are base64 and must decode to exactly
+#: ``quantum_record_bytes`` bytes hashing to ``quantum_record_sha256``.
+QUANTUM_RECORD_FIELDS = (
+    "quantum_record", "quantum_record_bytes", "quantum_record_sha256")
 
 
 class PilotRefused(ValueError):
@@ -21,13 +33,23 @@ class PilotRefused(ValueError):
 
 
 def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
-                              counters_sha256: str, counters_bytes: int) -> dict:
+                              counters_sha256: str, counters_bytes: int,
+                              quantum_record_sha256: str,
+                              quantum_record_bytes: int | None = None) -> dict:
     """Match supplied counters to an authenticated PB producer completion.
 
     The caller must obtain ``completion`` from the successful action's
     verified CAS result. A caller-supplied completion or terminal key alone
     does not establish this provenance. Paths are retained as provenance;
     the byte digest permits an exact copy of the counters to be consumed.
+
+    The completion also inlines the ORIGINAL quantum wire bytes the producer
+    authenticated (PQ #1293). ``quantum_record_sha256``/``quantum_record_bytes``
+    authenticates the sealed ``--quantum-sha256``; an optional independently
+    known length must agree too. The declared length is capped before decode,
+    then checked against the owned bytes. The caller derives the pilot binding
+    from those authenticated bytes, never from the record path, so
+    cross-output-namespace equivalence is preserved.
     """
     try:
         if not isinstance(completion, Mapping) or completion.get("schema") != QUANTUM_COMPLETION_SCHEMA:
@@ -57,14 +79,100 @@ def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
         _pilot_binding_digest(reference["sha256"], "producer counters digest")
         if (reference["sha256"] != counters_sha256 or reference["bytes"] != counters_bytes):
             raise PilotRefused("pilot counters bytes differ from the PB producer result")
-        return dict(reference)
+        record = _authenticated_quantum_record(
+            completion, quantum_record_sha256=quantum_record_sha256,
+            quantum_record_bytes=quantum_record_bytes)
+        return {**dict(reference), "quantum_record": record}
     except (KeyError, TypeError, AttributeError) as error:
         raise PilotRefused("pilot PB completion reference is incomplete or malformed") from error
+
+
+def _authenticated_quantum_record(completion, *, quantum_record_sha256,
+                                  quantum_record_bytes):
+    """The completion's inlined original record bytes, authenticated.
+
+    The inlined block is the producer's own owned read, bounded before decode
+    and matched byte for byte against the sealed ``--quantum-sha256``. A
+    missing, oversized, over-large-after-decode or digest-mismatched block
+    refuses; no path is reopened and nothing is canonical-reencoded.
+    """
+    if set(completion) & set(QUANTUM_RECORD_FIELDS) != set(QUANTUM_RECORD_FIELDS):
+        raise PilotRefused("pilot PB completion carries no original quantum record")
+    encoded = completion["quantum_record"]
+    declared_bytes = completion["quantum_record_bytes"]
+    declared_sha = completion["quantum_record_sha256"]
+    if not isinstance(encoded, str) or not encoded:
+        raise PilotRefused("pilot completion quantum record is not a base64 string")
+    if type(declared_bytes) is not int or declared_bytes <= 0:
+        raise PilotRefused("pilot completion quantum record length is malformed")
+    if declared_bytes > QUANTUM_RECORD_MAX_BYTES:
+        raise PilotRefused("pilot completion quantum record exceeds the control-byte cap")
+    _pilot_binding_digest(declared_sha, "completion quantum record digest")
+    _pilot_binding_digest(quantum_record_sha256, "sealed quantum record digest")
+    if quantum_record_bytes is not None and (
+            type(quantum_record_bytes) is not int or quantum_record_bytes <= 0):
+        raise PilotRefused("sealed quantum record length is malformed")
+    if ((quantum_record_bytes is not None and declared_bytes != quantum_record_bytes)
+            or declared_sha != quantum_record_sha256):
+        raise PilotRefused("pilot completion names another quantum record than the sealed argv")
+    if len(encoded) > _MAX_BASE64_CHARS(declared_bytes):
+        raise PilotRefused("pilot completion quantum record exceeds its declared length")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, base64.binascii.Error) as error:
+        raise PilotRefused("pilot completion quantum record is not valid base64") from error
+    if len(raw) != declared_bytes or bytes_sha256hex(raw) != declared_sha:
+        raise PilotRefused("pilot completion quantum record bytes do not match their digest")
+    return raw
+
+
+def _MAX_BASE64_CHARS(declared_bytes: int) -> int:
+    """The most base64 characters that can carry ``declared_bytes`` bytes.
+
+    Computed before decoding, so an oversized or hostile block is refused on
+    its encoded length rather than after allocating the decoded form. Four
+    characters per three bytes, rounded up to the next 4-character group.
+    """
+    return 4 * ((declared_bytes + 2) // 3)
 
 
 def _pilot_binding_digest(value, where):
     if not is_sha256hex(value):
         raise PilotRefused(f"pilot {where}: expected a full SHA-256")
+    return value
+
+
+def validate_pilot_source_contract(value, *, implementation_sha256) -> dict:
+    """An independently supplied, reviewed source/invocation contract.
+
+    The snapshot-to-package relation is an explicit reviewer input. Neither
+    a result payload nor its counter table can introduce an accepted source.
+    PB authenticates the matching declared input descriptor; this domain
+    contract supplies the source and environment the reviewer accepted.
+    """
+    fields = {"schema", "snapshot", "snapshot_commit", "implementation_sha256", "launcher_argv",
+              "quantum_argv", "container_spec", "outer_environment"}
+    if not isinstance(value, dict) or set(value) != fields or value["schema"] != PILOT_SOURCE_SCHEMA:
+        raise PilotRefused("pilot source contract is missing, malformed or unsupported")
+    if _pilot_binding_digest(value["implementation_sha256"], "accepted code digest") != implementation_sha256:
+        raise PilotRefused("pilot source contract does not name the proposed implementation")
+    descriptor = value["snapshot"]
+    if (not isinstance(descriptor, dict) or set(descriptor) != {"id", "sha256", "bytes"}
+            or descriptor["id"] != "pbrun.checkout-snapshot"
+            or type(descriptor["bytes"]) is not int or descriptor["bytes"] <= 0):
+        raise PilotRefused("pilot source contract needs an exact snapshot input descriptor")
+    _pilot_binding_digest(descriptor["sha256"], "accepted snapshot digest")
+    if (not isinstance(value["snapshot_commit"], str)
+            or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["snapshot_commit"]) is None):
+        raise PilotRefused("pilot source contract needs the exact selected snapshot commit")
+    if value["launcher_argv"] != PILOT_LAUNCHER or value["quantum_argv"] != PILOT_ENTRY:
+        raise PilotRefused("pilot source contract names an unsupported launcher or quantum entry")
+    spec, environment = value["container_spec"], value["outer_environment"]
+    if (not isinstance(spec, dict) or not isinstance(spec.get("container"), dict)
+            or not isinstance(spec.get("env", {}), dict)
+            or not isinstance(environment, dict) or not environment.get("PATH")
+            or any(not isinstance(k, str) or not isinstance(v, str) for k, v in environment.items())):
+        raise PilotRefused("pilot source contract needs explicit container and outer environments")
     return value
 
 
@@ -126,8 +234,9 @@ def _pilot_measurement_phase(counters, start):
 def validate_pilot(counters: Mapping, expected: Mapping) -> dict:
     """Check a published producer receipt; re-derive bounds from its rates.
 
-    The caller verifies the exact document digest and successful terminal PB
-    origin. Aggregate bound/excess fields alone never authorize a fanout.
+    The caller binds the exact counter bytes to the selected PB result,
+    reviewed source contract and authenticated invocation/record. Aggregate
+    bound/excess fields alone never authorize a fanout.
     """
     try:
         pilot = counters["pilot"]

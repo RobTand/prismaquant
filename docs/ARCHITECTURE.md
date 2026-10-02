@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2106, Refs #1293, selected-result consumer):
+fan-out pilot admission uses the reviewed SDK4 public selected-action result
+reader and standard-capture binder. Explicit publication/attempt selectors
+and an independently digest-bound versioned source contract bind the exact
+PB snapshot input and selected commit, reviewed package relation, known entries,
+image and complete environments. Candidate counters cannot introduce an
+accepted source. The producer inlines the original bounded quantum wire from
+its shared owned read; the consumer authenticates those bytes and committed
+counters against the selected completion, validates record/adjoint identities,
+and derives actual plan/regime/shape/cotangent admission before publication.
+Equivalent byte-bound inputs and output namespaces retain their existing
+admission semantics. Legacy, foreign, substituted and ambiguous evidence
+refuses; the explicit unverified override remains stamped. The 1 MiB record
+cap precedes parsing/encoding/decoding; 8 MiB documents bound result/counter
+reads, with JSON overhead additional. This is CPU consumer/source qualification;
+worker activation and the genuine #1293 GPU pilot remain independent gates.
+No numerical, cache, pipeline-default, wire or serving change is introduced.
+See [pilot source contract and finite measurement protocol](design/joint_dispatch_pilot.md).
+
 Re-stamped 2026-10-02 (Refs PQ #1293, producer provenance prerequisite):
 the existing quantum output publisher records the exact SHA-256 and byte
 length of its committed counters in results.json. Its existing final stdout

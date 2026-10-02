@@ -26,6 +26,7 @@ cache, no cross-layer state, no writes outside
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -40,6 +41,7 @@ from types import SimpleNamespace
 
 import torch
 
+from .digests import bytes_sha256hex
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .cost_currency import probe_identity_seals, probe_identity_walls_differ
 from .dev_mode import seal_check
@@ -197,15 +199,20 @@ def verify_quantum_identity(
     prepared_path: Path, prepared_sha256: str,
     adjoint_path: Path, adjoint_sha256: str,
     output_root: Path,
-) -> tuple[dict, dict]:
+) -> tuple[dict, dict, bytes]:
     """Verify the four digests and the record's campaign binding.
 
     ``adjoint_path`` is the quantum's stage-A slice (PQ #993), never a whole
     receipt: the file is the slice's canonical JSON, so its digest is the
     ``slice_sha256`` the record binds.
 
-    Returns ``(record, adjoint_slice)``; raises :class:`QuantumIdentityRefused`
-    (the caller exits 3) with nothing written. The producer's
+    Returns ``(record, adjoint_slice, record_bytes)``, where ``record_bytes``
+    is the exact owned read the digest check authenticated (PQ #1293): the
+    producer inlines these ORIGINAL bytes in its typed completion so a
+    consumer can bind the pilot to the record that actually ran, without
+    reopening a mutable path or canonical-reencoding. Raises
+    :class:`QuantumIdentityRefused` (the caller exits 3) with nothing written.
+    The producer's
     ``check_quantum_for_campaign`` runs too when the producer module has
     landed; until then the same checks run here from the record's own fields,
     so a record built for another campaign revision refuses the same way.
@@ -225,7 +232,11 @@ def verify_quantum_identity(
         except ValueError:
             raise QuantumIdentityRefused(
                 f"quantum record digest mismatch at {quantum_path}")
-        record = json.loads(raw.decode("utf-8"))
+        from .joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
+        if len(raw) > QUANTUM_RECORD_MAX_BYTES:
+            raise QuantumIdentityRefused("quantum record exceeds the control-byte cap")
+        record_bytes = raw
+        record = json.loads(record_bytes.decode("utf-8"))
         if record.get("schema") != QUANTUM_RECORD_SCHEMA:
             raise QuantumIdentityRefused(
                 f"quantum record schema mismatch: {record.get('schema')!r}")
@@ -357,7 +368,7 @@ def verify_quantum_identity(
     except (KeyError, TypeError, ValueError, OSError) as exc:
         raise QuantumIdentityRefused(
             f"quantum record is not a valid {QUANTUM_RECORD_SCHEMA} document: {exc}") from exc
-    return record, adjoint_slice
+    return record, adjoint_slice, record_bytes
 
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -4127,11 +4138,24 @@ def run_layer_quantum(
     return result
 
 
-def quantum_completion_record(result: Mapping) -> dict:
-    """The producer's single completion record carried by PB stdout."""
-    from .joint_dispatch_pilot import QUANTUM_COMPLETION_SCHEMA
+def quantum_completion_record(result: Mapping, *, record_bytes: bytes) -> dict:
+    """The producer's single completion record carried by PB stdout.
+
+    ``record_bytes`` is the exact owned quantum wire read the identity gate
+    authenticated (PQ #1293). The consumer binds its pilot to the record that
+    actually ran by comparing these bytes to the sealed ``--quantum-sha256``;
+    the bytes are the ORIGINAL wire, never a canonical re-encoding.
+    """
+    from .joint_dispatch_pilot import QUANTUM_COMPLETION_SCHEMA, QUANTUM_RECORD_MAX_BYTES
+
+    if (not isinstance(record_bytes, bytes) or not record_bytes
+            or len(record_bytes) > QUANTUM_RECORD_MAX_BYTES):
+        raise QuantumIdentityRefused("completion quantum record exceeds the control-byte cap or is absent")
 
     return {"schema": QUANTUM_COMPLETION_SCHEMA,
+            "quantum_record": base64.b64encode(record_bytes).decode("ascii"),
+            "quantum_record_bytes": len(record_bytes),
+            "quantum_record_sha256": bytes_sha256hex(record_bytes),
             **{key: result[key] for key in (
                 "quantum_id", "passed", "status", "units_done", "units_total", "counters")}}
 
@@ -4211,7 +4235,7 @@ def main(argv=None) -> int:
     progress_grace = progress_grace_stamps(args.progress_grace_derivation)
     try:
         require_dev_mode("joint_cost_quantum")
-        record, adjoint_slice = verify_quantum_identity(
+        record, adjoint_slice, record_bytes = verify_quantum_identity(
             quantum_path=args.quantum, quantum_sha256=args.quantum_sha256,
             plan_path=args.plan, plan_sha256=args.plan_sha256,
             prepared_path=args.prepared, prepared_sha256=args.prepared_sha256,
@@ -4299,7 +4323,7 @@ def main(argv=None) -> int:
                 "cumulative").print_stats(100)
             (Path(record["output_space"]["root"]) / "profile.txt").write_text(
                 text.getvalue())
-    print(json.dumps(quantum_completion_record(result)))
+    print(json.dumps(quantum_completion_record(result, record_bytes=record_bytes)))
     if result["status"] != "complete":
         return EXIT_GAPPED
     return EXIT_OK
