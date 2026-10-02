@@ -4907,8 +4907,61 @@ def _check_projected_unit(name, unit, *, live, model_path, source,
     Returns ``None`` when the two are equal, else the mismatch description the
     refusal names. The bytes read are the shard the producer hashed, through
     the owner the snapshot read it with. With ``release_source_pages`` the
-    unit's own consumed span is advised as soon as it compares equal. Nothing
+    unit's own consumed span is advised away once its bytes are read. Nothing
     here reserves memory: the serial caller reserves around it.
+    """
+    check = _start_projected_unit_check(
+        name, unit, live=live, model_path=model_path, source=source,
+        release_source_pages=release_source_pages,
+        source_authentication=source_authentication)
+    return _settle_projected_unit_checks([check])[0]
+
+
+class _UnitCheck:
+    """One unit's comparison: decided on the host, or a device flag to read later."""
+
+    __slots__ = ("description", "differs", "flag")
+
+    def __init__(self, description, *, differs=None, flag=None):
+        self.description = description
+        self.differs = differs
+        self.flag = flag
+
+
+def _device_comparable(dtype) -> bool:
+    """Whether ``!=`` on the device is the element comparison ``torch.equal`` makes.
+
+    Floating and integer dtypes compare elementwise in both, NaN unequal and
+    signed zeros equal. Any other dtype keeps the host comparison.
+    """
+    import torch
+    return dtype in (torch.bfloat16, torch.float16, torch.float32, torch.float64,
+                     torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                     torch.bool)
+
+
+def _device_differs(live, staged):
+    """A 0-d device flag: does any element of ``live`` differ from ``staged``."""
+    import torch
+    return torch.ne(live, staged).any()
+
+
+def _host_differs(live, weight) -> bool:
+    import torch
+    return not torch.equal(live.cpu(), weight)
+
+
+def _start_projected_unit_check(name, unit, *, live, model_path, source,
+                                release_source_pages=False, source_authentication=None):
+    """Read one unit's source tensor and start its comparison with ``live``.
+
+    A unit whose dtype or shape differs is decided at once. A device-resident
+    ``live`` of a comparable dtype is compared on its device: the source bytes
+    are staged through pinned host memory, copied without blocking, and the
+    verdict stays a device flag until ``_settle_projected_unit_checks`` reads
+    every flag with one sync (PQ #1931's pattern; PQ #1935). Anything else is
+    compared on the host, as before. The unit's pages are advised away once
+    its bytes are staged: the copy no longer reads them.
     """
     import torch
 
@@ -4916,13 +4969,41 @@ def _check_projected_unit(name, unit, *, live, model_path, source,
         name, unit, model_path=model_path, source=source,
         release_source_pages=release_source_pages,
         source_authentication=source_authentication)
-    live = live.detach().cpu()
-    if live.dtype != weight.dtype or not torch.equal(live, weight):
-        return (f"{name} (live {tuple(live.shape)} {live.dtype} vs source "
-                f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
-    del weight, live
+    live = live.detach()
+    description = (f"{name} (live {tuple(live.shape)} {live.dtype} vs source "
+                   f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
+    if live.dtype != weight.dtype or live.shape != weight.shape:
+        return _UnitCheck(description, differs=True)
+    if live.device.type != "cuda" or not _device_comparable(live.dtype):
+        differs = _host_differs(live, weight)
+        if not differs:
+            del weight
+            release()
+        return _UnitCheck(description, differs=differs)
+    # The caching host allocator keeps a pinned block until the copy that
+    # reads it completes, so the block outlives this frame safely.
+    pinned = torch.empty_like(weight, pin_memory=True)
+    pinned.copy_(weight)
+    del weight
     release()
-    return None
+    staged = pinned.to(live.device, non_blocking=True)
+    return _UnitCheck(description, flag=_device_differs(live, staged))
+
+
+def _settle_projected_unit_checks(checks) -> list:
+    """Each check's mismatch description, or ``None``: one sync per device."""
+    import torch
+
+    by_device: dict = {}
+    for index, check in enumerate(checks):
+        if check.differs is None:
+            by_device.setdefault(check.flag.device, []).append(index)
+    for indices in by_device.values():
+        flags = torch.stack([checks[i].flag for i in indices]).tolist()
+        for i, differs in zip(indices, flags):
+            checks[i].differs = bool(differs)
+            checks[i].flag = None
+    return [check.description if check.differs else None for check in checks]
 
 
 def _read_projected_unit(name, unit, *, model_path, source, release_source_pages=False,
@@ -5058,22 +5139,30 @@ def _checked_projected_units(bound, *, weights, model_path, source,
     This is the serial pass the load-all head and the census run. The stream
     head snapshots no projected unit, so it has nothing to compare: its readers
     price the source tensor itself (``_read_projected_unit``, PQ #1654).
+    Device-resident views are compared on their device and their verdicts read
+    with one sync for the whole pass (PQ #1935).
     """
-    projected: dict[str, dict] = {}
-    mismatched: list[str] = []
-    for name, unit in _measured_projected_units(bound, measured).items():
+    units = _measured_projected_units(bound, measured)
+    checks = []
+    for name, unit in units.items():
         if resource_check is not None:
             resource_check(f'before_source_projection_check:{name}')
-        mismatch = _check_projected_unit(
+        checks.append(_start_projected_unit_check(
             name, unit, live=weights[name], model_path=model_path, source=source,
             release_source_pages=release_source_pages,
-            source_authentication=source_authentication)
+            source_authentication=source_authentication))
+        if resource_check is not None:
+            resource_check(f'after_source_projection_check:{name}')
+    # One host sync reads every device verdict; the loop above issued none
+    # (PQ #1935).
+    outcomes = _settle_projected_unit_checks(checks)
+    projected: dict[str, dict] = {}
+    mismatched: list[str] = []
+    for (name, unit), mismatch in zip(units.items(), outcomes):
         if mismatch is None:
             projected[name] = unit
         else:
             mismatched.append(mismatch)
-        if resource_check is not None:
-            resource_check(f'after_source_projection_check:{name}')
     if mismatched:
         raise RuntimeError(PROJECTED_BYTES_REFUSAL.format(units=", ".join(mismatched)))
     return projected
