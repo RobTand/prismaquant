@@ -1,7 +1,11 @@
 {
   "schema": "prismaquant.prismabuild.data_manifest.v1",
   "mount_prefix": "/mnt/shared",
-  "annotations": {"scope": "issue1962-bounded-dense-screen", "allowed_tiers": "ram,ssd"},
+  "annotations": {
+    "scope": "issue1962-bounded-dense-screen",
+    "allowed_tiers": "ram,ssd",
+    "phases": [{"name": "startup", "bytes": 1505923749, "cumulative_bytes": 1505923749}]
+  },
   "produced_by": {
     "tool": "issue1962-bounded-dense-screen",
     "size_source": "stat",
