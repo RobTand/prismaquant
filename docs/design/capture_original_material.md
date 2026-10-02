@@ -74,6 +74,25 @@ implicit/chain consumers remain refused. GLM publisher authority stays
 or accepted by this internal path. Full consumer coverage, immutable delivery
 provenance across the chain and complete GPU/admission lifetimes remain open.
 
+For explicitly selected original owners, `original_checkpoint_descriptor`
+exposes expected whole-file coordinates from the independently bound publisher/
+readset parser and config/complete-index facts authenticated from owned sealed
+buffers during construction. It reuses immutable metadata facts under the
+existing owner lock and charges metadata decoding through the same resource
+check. Missing publication/readset/auxiliary proof or an incomplete roster
+refuses. It does not open/stat mutable pool paths or license future deliveries:
+every later decoder still independently authenticates its own held whole file.
+
+The existing `build_streamed_model_identity` and explicitly owned
+`build_source_checkpoint_identity` consume those descriptors using their existing
+v1 schemas. Streamed identity additionally checks stock resolved config through
+the shared semantic-config rules and exact profile-derived live/checkpoint/shard
+maps against the complete authenticated index. Incomplete body scopes and legacy
+stat identity/digest-cache inputs refuse. Expected file identity is not an
+actual-read receipt or complete-provider proof. Stage A bypasses legacy identity
+cache seeding and records `original_source_material` separately from the model
+and chain identity, with the original admission gates still closed.
+
 The internal `load_original_streaming_bootstrap` and existing
 `_build_streaming_context` now consume owned strict config/index metadata,
 profile selection and the shared pure `text_only_stage_config` rules. The stock

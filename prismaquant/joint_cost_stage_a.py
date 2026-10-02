@@ -2435,16 +2435,29 @@ def _stage_a_device_envelope(config, *, environ=None):
             "requested_bytes": requested, "plan_max_gpu_bytes": limit}
 
 
+def _refuse_original_identity_caches(config, identity_cache_path=None):
+    if identity_cache_path is not None or any(config.get(key) is not None for key in (
+            'source_identity_cache', 'source_digest_cache')):
+        raise RuntimeError('original source identity accepts no legacy stat identity/cache inputs')
+
+
 def _stage_a_source_identity(runner, config, identity_cache_path):
     """Build the Stage A source identity behind the #1374 identity proof.
 
     A GPU row that lacks the identity quantum's proof for a shard refuses
     before it hashes a byte (PQ #1392); the proof arguments come from the one
     shared helper, not a second mechanism.
+
+    An explicitly selected qualified original context uses that same identity
+    mechanism's owned descriptor intake and refuses legacy stat-cache inputs.
     """
     from .cost_streaming import build_streamed_model_identity
     from .tessera_joint_aura import source_identity_proof_kwargs
 
+    if getattr(getattr(runner.context, 'source_authentication', None),
+               'is_qualified_original_material', False):
+        _refuse_original_identity_caches(config, identity_cache_path)
+        return build_streamed_model_identity(runner, config['model'])
     return build_streamed_model_identity(
         runner, config["model"], identity_cache_path=identity_cache_path,
         **source_identity_proof_kwargs(
@@ -2526,6 +2539,7 @@ def run_adjoint_capture(
             # additional original-source or device authority.
             require_diagnostic_original_owner(
                 source_authentication, model=config["model"], device="cuda")
+            _refuse_original_identity_caches(config)
         except (SelectedRowDiagnosticRefused, RuntimeError) as exc:
             raise AdjointIdentityRefused(str(exc)) from exc
     if diagnostic_marker_path(adjoint_space(output_root)).exists():
@@ -2692,7 +2706,8 @@ def run_adjoint_capture(
         result["calibration_input"] = calibration
         result["head"] = head.record
 
-        identity_cache_path = seed_source_identity_cache(config, space / "run")
+        identity_cache_path = (seed_source_identity_cache(config, space / "run")
+                               if source_authentication is None else None)
         # The single-run path threads the plan's derivative binding and its
         # source-prefetch budget into the model build (tessera_joint_aura's
         # execute()); stage A builds the same model and threads the same two
@@ -2781,6 +2796,12 @@ def run_adjoint_capture(
         # Outside the run identity and the chain state: which arm read the
         # head is a fact about this launch, not about the science.
         receipt["head"] = head.record
+        if source_authentication is not None:
+            # Expected whole-file model identity does not establish actual
+            # delivery or complete-source capture. Retain the owner's actual
+            # held-decoder/readset evidence separately, outside chain identity.
+            result['original_source_material'] = source_authentication.receipt()
+            receipt['original_source_material'] = result['original_source_material']
         split_files = None
         if chain_split is not None or forward_split is not None:
             split_files = _write_split_receipt(space, receipt)

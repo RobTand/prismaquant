@@ -460,6 +460,14 @@ class CaptureSourceAuthentication:
                 value = self.read_json(self.root / 'config.json')
             if (not isinstance(value, dict) or value.get('configuration_files') or value.get('auto_map')):
                 raise RuntimeError('unsupported dynamic original bootstrap configuration')
+            # Keep the already authenticated metadata facts, not a pool/stat
+            # cache or a second source identity. Strings expose no mutable
+            # parsed object to later consumers; tensor delivery stays owned.
+            reserve_allocation(resource_check, 'before_original_identity_metadata',
+                               cpu_bytes=2 * (coordinates['config.json'].size
+                                              + coordinates['model.safetensors.index.json'].size))
+            self._original['bootstrap_json'] = json.dumps(
+                {'config': value, 'index': index}, sort_keys=True, allow_nan=False)
             return self
         except BaseException:
             self.close()
@@ -474,6 +482,52 @@ class CaptureSourceAuthentication:
         import torch
         if self._original is not None and torch.device(device).type != 'cpu':
             raise RuntimeError('original material GPU loads/transfers are not qualified')
+
+    def original_checkpoint_descriptor(self):
+        """Independently bound expected whole-file facts; not delivery completion.
+
+        The constructor authenticated all auxiliaries and interpreted config/
+        complete index from the actual sealed buffers. This method reuses those
+        immutable metadata facts. Every later tensor decoder still authenticates
+        its delivered whole file; the receipt, separately, names actual reads.
+        """
+        from .digests import is_sha256hex
+        from .source_generation import OriginalCoordinate
+
+        with self._lock:
+            self._require_open()
+            original = self._original
+            if (original is None or not is_sha256hex(self.manifest_sha256)
+                    or not is_sha256hex(original.get('readset_sha256'))
+                    or not original.get('bootstrap_json')):
+                raise RuntimeError('original identity requires bound publisher/readset/bootstrap proof')
+            coordinates = original['coordinates']
+            if (not coordinates or set(coordinates) != set(self._expected)
+                    or any(not isinstance(row, OriginalCoordinate) or row.sha256 != self._expected[name]
+                           for name, row in coordinates.items())):
+                raise RuntimeError('original identity coordinate/publisher roster differs')
+            for name, row in coordinates.items():
+                if name.endswith('.safetensors'):
+                    continue
+                proof = original['verified'].get(name)
+                if (not isinstance(proof, dict) or proof.get('sha256') != row.sha256
+                        or proof.get('bytes_hashed') != row.size):
+                    raise RuntimeError('original identity requires every authenticated auxiliary proof')
+            reserve_allocation(self.resource_check, 'before_original_identity_decode',
+                               cpu_bytes=2 * (coordinates['config.json'].size
+                                              + coordinates['model.safetensors.index.json'].size))
+            metadata = json.loads(original['bootstrap_json'])
+            index = metadata['index']['weight_map']
+            weights = {name for name in coordinates if name.endswith('.safetensors')}
+            if not index or set(index.values()) != weights:
+                raise RuntimeError('original identity incomplete checkpoint index/roster')
+            return {
+                'config': metadata['config'], 'index': metadata['index'],
+                'shards': [dict(name=name, path=str(self.root / name), size=coordinates[name].size,
+                                sha256=coordinates[name].sha256) for name in sorted(weights)],
+                'metadata': [dict(name=name, size=row.size, sha256=row.sha256)
+                             for name, row in sorted(coordinates.items()) if name not in weights],
+            }
 
     def _reap_original_material(self):
         """Called only under the owner lock; native storage aliases retain credit."""

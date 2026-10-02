@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original identity intake): when the
+existing qualified original owner is explicitly selected, the existing model
+and source-checkpoint identity mechanisms consume its independently bound
+publisher descriptors and authenticated config/complete-index facts. Model
+resolution and the complete live/checkpoint shard roster must agree; missing
+proof, incomplete scopes and legacy stat-cache inputs refuse. Existing v1
+identity schemas and value meaning remain intact. Expected whole-file identity
+does not establish actual delivery: Stage A retains the owner's held-decoder/
+readset receipt separately. No logical-pool stat/index reopening or redundant
+bulk identity hash occurs on this path. Original CUDA/automatic admission and
+actual full-source GLM fresh-g6 acceptance remain separate closed gates.
+
 Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original copy completion): the
 existing layer reader's copy-stream completion bookkeeping retains native
 original source aliases and converted/stacked host staging through a successful
