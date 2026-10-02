@@ -30,7 +30,11 @@ from prismaquant import measure_quant_cost as mqc, tessera_campaign as campaign
 
 
 def _write(path, value):
-    path.write_text(json.dumps(value, indent=2, allow_nan=False) + '\n')
+    temporary = path.with_name(path.name + '.writing')
+    with temporary.open('w') as handle:
+        handle.write(json.dumps(value, indent=2, allow_nan=False) + '\n')
+        handle.flush(); os.fsync(handle.fileno())
+    os.replace(temporary,path)
 
 
 def _test_module(filename, name):
@@ -422,60 +426,62 @@ def main():
     try:
         telemetry.start()
         with ExitStack() as stack:
-            moe, inputs, bound, live, source, decoder = _prepare(binding, stack, guard)
-            # LIFO: join every queued consumer before the earlier raw-close
-            # callbacks on cancellation/guard failure as well as success.
-            stack.callback(torch.cuda.synchronize)
-            for capture_down in (False, True):
-                for max_rows in (None, 16):
-                    kwargs = dict(capture_down=capture_down, max_rows_per_expert=max_rows)
-                    old = routing._reference_derive(moe.experts, inputs, moe, **kwargs)
-                    new = mqc.derive_per_expert_activations(moe.experts, inputs, moe, **kwargs)
-                    row = dict(capture_down=capture_down, max_rows=max_rows, equal=_same(old,new),
-                        zero_row_experts=old['row_counts'].count(0))
-                    record['equality'].append(row)
-                    del old,new
-                    if not row['equal']:
-                        raise RuntimeError('routed outputs changed')
-            calls = dict(before=lambda: routing._reference_derive(moe.experts, inputs, moe),
-                         after=lambda: mqc.derive_per_expert_activations(moe.experts, inputs, moe))
-            checks = {name:(lambda fn=fn: fn(bound, weights=live, model_path=binding['model'],
-                source=source, source_authentication=decoder)) for name,fn in dict(
-                    before=checking._reference_checked_units, after=campaign._checked_projected_units).items()}
-            for fn in checks.values():
-                assert len(fn()) == 864
-            first = next(iter(campaign._measured_projected_units(bound)))
-            live[first].view(torch.int16)[0,0] ^= 1
-            messages = []
             try:
+                moe, inputs, bound, live, source, decoder = _prepare(binding, stack, guard)
+                for capture_down in (False, True):
+                    for max_rows in (None, 16):
+                        kwargs = dict(capture_down=capture_down, max_rows_per_expert=max_rows)
+                        old = routing._reference_derive(moe.experts, inputs, moe, **kwargs)
+                        new = mqc.derive_per_expert_activations(moe.experts, inputs, moe, **kwargs)
+                        row = dict(capture_down=capture_down, max_rows=max_rows, equal=_same(old,new),
+                            zero_row_experts=old['row_counts'].count(0))
+                        record['equality'].append(row)
+                        del old,new
+                        if not row['equal']:
+                            raise RuntimeError('routed outputs changed')
+                calls = dict(before=lambda: routing._reference_derive(moe.experts, inputs, moe),
+                             after=lambda: mqc.derive_per_expert_activations(moe.experts, inputs, moe))
+                checks = {name:(lambda fn=fn: fn(bound, weights=live, model_path=binding['model'],
+                    source=source, source_authentication=decoder)) for name,fn in dict(
+                        before=checking._reference_checked_units, after=campaign._checked_projected_units).items()}
                 for fn in checks.values():
-                    try:
-                        fn()
-                    except RuntimeError as error:
-                        messages.append(str(error))
-                assert len(messages) == 2 and messages[0] == messages[1] and first in messages[0]
-            finally:
+                    assert len(fn()) == 864
+                first = next(iter(campaign._measured_projected_units(bound)))
                 live[first].view(torch.int16)[0,0] ^= 1
-            record['mismatch_refusals'] = messages
-            record['sync_sites'] = {kind:{name:routing.sync_sites(fn) for name,fn in functions.items()}
-                for kind,functions in dict(derive=calls,check=checks).items()}
-            for kind,functions in dict(derive=calls,check=checks).items():
-                for i,arm in enumerate(('before','after','after','before')):
-                    record['phases'].append(_phase(f'{kind}-{i}-{arm}', functions[arm],
-                        args.seconds, telemetry, guard, args.out))
-                    _write(args.out/'partial.json',record)
-            torch.cuda.synchronize()
-            record['phase_boundary_before_host_cache_release'] = guard.snapshot()
-            torch._C._accelerator_emptyHostCache()
-            torch.cuda.empty_cache(); gc.collect()
-            guard.check('after_projected_check_host_cache_release')
-            record['phase_boundary_after_host_cache_release'] = guard.snapshot()
-            _production_hook_phases(moe,inputs,binding,record,telemetry,guard,args.out,args.seconds)
-            # Every async CPU-buffer consumer completes before any sealed FD closes.
-            torch.cuda.synchronize()
-            del checks,calls,live,bound,source,decoder,moe,inputs
-            gc.collect()
-            record['residency'] = residency_resolver().report()
+                messages = []
+                try:
+                    for fn in checks.values():
+                        try:
+                            fn()
+                        except RuntimeError as error:
+                            messages.append(str(error))
+                    assert len(messages) == 2 and messages[0] == messages[1] and first in messages[0]
+                finally:
+                    live[first].view(torch.int16)[0,0] ^= 1
+                record['mismatch_refusals'] = messages
+                record['sync_sites'] = {kind:{name:routing.sync_sites(fn) for name,fn in functions.items()}
+                    for kind,functions in dict(derive=calls,check=checks).items()}
+                for kind,functions in dict(derive=calls,check=checks).items():
+                    for i,arm in enumerate(('before','after','after','before')):
+                        record['phases'].append(_phase(f'{kind}-{i}-{arm}', functions[arm],
+                            args.seconds, telemetry, guard, args.out))
+                        _write(args.out/'partial.json',record)
+                torch.cuda.synchronize()
+                record['phase_boundary_before_host_cache_release'] = guard.snapshot()
+                torch._C._accelerator_emptyHostCache()
+                torch.cuda.empty_cache(); gc.collect()
+                guard.check('after_projected_check_host_cache_release')
+                record['phase_boundary_after_host_cache_release'] = guard.snapshot()
+                _production_hook_phases(moe,inputs,binding,record,telemetry,guard,args.out,args.seconds)
+                # Every async CPU-buffer consumer completes before any sealed FD closes.
+                torch.cuda.synchronize()
+                del checks,calls,live,bound,source,decoder,moe,inputs
+                gc.collect()
+                record['residency'] = residency_resolver().report()
+            finally:
+                # Join even partial preparation, cancellation and guard failure
+                # while every raw descriptor is still owned by this stack.
+                torch.cuda.synchronize()
         record['sealed_buffers_closed'] = True
     finally:
         telemetry.collect()
