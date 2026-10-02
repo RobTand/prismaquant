@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PR #2046, Refs #1504): a context-scoped Tessera
+format query resolves the producer's wire for its descriptor and price, then
+reports the existing producer-eligibility gate's answer. A valid unattested
+rung returns `producer_eligible=False` instead of raising during recipe
+resolution. Invalid structures still raise. Planning and rendering a served
+wire retain the existing strict refusal; pins, menus and serving/export gates
+are unchanged.
+
 Re-stamped 2026-10-02 (Refs #1492, explicit head I/O width): the existing
 ordered head-walk driver accepts an explicit `head_walk_workers` plan input,
 `--head-walk-workers` in the selected-cache CLI, or the existing environment
@@ -21,6 +29,20 @@ This enables an explicitly chosen new qualification or reference backend to
 reuse preparation in dev mode; it does not qualify a kernel, certify an old
 price, change arithmetic or select a new production backend. The certified
 GLM shape qualification and dry-run measurement remain separate open gates.
+
+Re-stamped 2026-10-02 (Refs #1504): Tessera rendering, planned lane facts and
+context-scoped synthesized format prices share the existing served-recipe
+resolver. A declared routed E2M1x2 sub-cap unit therefore plans and renders
+the same span-2 TCQ wire its menu prices. An explicit recipe remains
+authoritative; absent serving structure retains the research recipe. The
+production render accepts an optional `tessera_structure_by_unit` lever map;
+when present it must name this unit with a valid structure, and the existing
+render identity binds the declaration. Missing or invalid declarations refuse
+before encoding. This adds no inferred topology or alternate cache. Existing
+manifest-ratio slack remains part of the whole-container estimate; the plane
+extent is exact. The immutable pin, serving/export gates, menu and pipeline
+defaults are unchanged. CPU wire agreement is not GPU, served-quality or
+upstream Tessera accountant qualification; those #1504 boundaries remain open.
 
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
