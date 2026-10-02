@@ -73,6 +73,14 @@ Ready deliveries record no wait; observer failures preserve an existing
 delivery exception and refuse a successful delivery whose observation failed.
 This refactor preserves Stage A's source-only coverage and adds no numerical,
 format, serving, memory-admission or pipeline-default change.
+Re-stamped 2026-10-02 (PQ #2086, Refs #2010): direct original FP8-map calls
+that omit config now bind it through the existing owned source JSON/window
+seam before profile/map construction. Block size and MXFP4 declarations then
+consume those admitted original bytes for both supplied and inferred profiles;
+the mutable logical pool cannot select them. Explicit already-owned config and
+legacy routes retain their behavior. Original GPU and automatic capture gates
+stay closed; no format, calibration, generation or production default changes.
+
 Re-stamped 2026-10-02 (PQ #2074, Refs #2010, internal CPU streaming integration):
 the existing source JSON, layer/head and cache-header reader seams enter finite
 whole-file material windows for the qualified original owner. Its private
