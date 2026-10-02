@@ -93,7 +93,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
-from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, file_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, DIRECT_ASCII_STRICT, bytes_sha256hex, file_sha256hex
 from .lane_eligibility import (
     STRUCTURE_DENSE, STRUCTURE_ROUTED_MOE, STRUCTURES, EligibilityTable,
     LaneEligibilityError, ServingContext, cell_lane_admits,
@@ -103,7 +103,8 @@ from .measured_runtime_prices import (
     MOE_MEMBER_ROLE_AXES, OperatorMeasurement, RuntimePriceError, RuntimeResources,
     _integer, _json, _object, _string, bootstrap_sum, rank_local_member_shapes,
 )
-from .runtime_provenance import ArtifactReader
+from .runtime_provenance import ArtifactReader, _strict_json as _parse_bound_json
+from .schemas import strict_json_loads
 
 SCHEMA = "prismaquant.shape_runtime_prices.v1"
 ADMISSION_SCHEMA = "prismaquant.shape_runtime_admission.v1"
@@ -407,7 +408,7 @@ def _parse_shape_table(payload: Mapping, source_path: str) -> ShapeRuntimeTable:
         rows[key] = ShapeRow(key, KernelLane.from_dict(item["kernel_lane"], where + ".kernel_lane"),
                              measurement)
     regimes_seen = {key.m for key in rows}
-    if not regimes_seen <= set(context.regimes):
+    if regimes_seen != set(context.regimes):
         raise ShapeRuntimeError(
             f"context declares regimes {list(context.regimes)} but rows carry {sorted(regimes_seen)}")
     if not isinstance(body["rate_pools"], list):
@@ -472,12 +473,13 @@ def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
 def _rebind_shape_row_to_receipt(table: ShapeRuntimeTable, receipt_path: Path, raw: bytes) -> None:
     """Compare each row reading this receipt against its authenticated samples."""
     try:
-        panel = json.loads(raw, object_pairs_hook=_strict_pairs, parse_constant=_strict_nonfinite)
+        panel = _parse_observation_json(raw)
     except (ValueError, UnicodeError) as exc:
         raise ShapeRuntimeError(f"shape-time receipt {receipt_path}: invalid JSON: {exc}") from exc
     if isinstance(panel, Mapping) and panel.get("schema") == CHECKER_RECEIPT_SCHEMA:
         projection = _verify_checker_receipt(panel)
-        if canonical_strict(table.context.as_dict()) != canonical_strict(projection["context"].as_dict()):
+        if DIRECT_ASCII_STRICT.text(table.context.as_dict()) != DIRECT_ASCII_STRICT.text(
+                projection["context"].as_dict()):
             raise ShapeRuntimeError("shape table context differs from its checker observation")
         expected_key = ShapeKey(projection["structure"], projection["rank_local_shape"],
                                 projection["family"], projection["rate_q256"], projection["m"])
@@ -931,8 +933,7 @@ def _verify_checker_receipt(receipt: Mapping) -> dict:
     try:
         observation_path, raw = reader.bytes(top["observation"], "checker observation",
                                              max_bytes=CHECKER_RESULT_MAX_BYTES)
-        observation = json.loads(raw, object_pairs_hook=_strict_pairs,
-                                 parse_constant=_strict_nonfinite)
+        observation = _parse_observation_json(raw)
     except (RuntimePriceError, ValueError, UnicodeError) as exc:
         raise ShapeRuntimeError(f"checker observation refused: {exc}") from exc
     try:
@@ -979,13 +980,12 @@ def _verify_checker_receipt(receipt: Mapping) -> dict:
     emitted = []
     for line in payload.splitlines():
         try:
-            value = json.loads(line, object_pairs_hook=_strict_pairs,
-                               parse_constant=_strict_nonfinite)
+            value = _parse_observation_json(line)
         except (ValueError, UnicodeError):
             continue
         if isinstance(value, Mapping) and value.get("schema") == SHAPE_TIME_OBSERVATION_SCHEMA:
             emitted.append(value)
-    if len(emitted) != 1 or canonical_strict(emitted[0]).encode() + b"\n" != raw:
+    if len(emitted) != 1 or DIRECT_ASCII_STRICT.encoded(emitted[0]) + b"\n" != raw:
         raise ShapeRuntimeError("observation bytes differ from the PB checker's owned output")
     projection = _observation_projection(observation)
     projection["observation_bytes"] = raw
@@ -1032,10 +1032,6 @@ def _observation_regimes(scope_payload: Mapping, where: str) -> tuple[int, ...]:
     shape = _object(scope["shape"], ("M", "N", "K"), where + ".shape")
     return (_integer(shape["M"], where + " M", 1),)
 
-def _read_json_bound(reader: ArtifactReader, binding, where: str) -> Mapping:
-    return reader.json(binding, where)[1]
-
-
 def read_shape_time_observation(path: str | Path) -> tuple[Mapping, tuple[Path, bytes]]:
     """Return bounded strict JSON and its owned ``(path, raw)`` bytes.
 
@@ -1050,7 +1046,7 @@ def read_shape_time_observation(path: str | Path) -> tuple[Mapping, tuple[Path, 
     except (OSError, RuntimePriceError) as exc:
         raise ShapeRuntimeError(f"shape-time observation: cannot read {root}: {exc}") from exc
     try:
-        value = json.loads(raw, object_pairs_hook=_strict_pairs, parse_constant=_strict_nonfinite)
+        value = _parse_observation_json(raw)
     except (ValueError, UnicodeError) as exc:
         raise ShapeRuntimeError(f"shape-time observation: invalid JSON {root}: {exc}") from exc
     if not isinstance(value, Mapping):
@@ -1058,17 +1054,12 @@ def read_shape_time_observation(path: str | Path) -> tuple[Mapping, tuple[Path, 
     return value, (root, raw)
 
 
-def _strict_pairs(items):
-    body: dict = {}
-    for key, item in items:
-        if key in body:
-            raise ShapeRuntimeError(f"shape-time observation: duplicate JSON key {key!r}")
-        body[key] = item
-    return body
-
-
-def _strict_nonfinite(token):
-    raise ShapeRuntimeError(f"shape-time observation: nonfinite JSON constant {token}")
+def _parse_observation_json(raw: bytes) -> Any:
+    return strict_json_loads(
+        raw, duplicate=lambda key: ShapeRuntimeError(
+            f"shape-time observation: duplicate JSON key {key!r}"),
+        constant=lambda token: ShapeRuntimeError(
+            f"shape-time observation: nonfinite JSON constant {token}"))
 
 
 def _observation_binding(reader: ArtifactReader, reference, where: str) -> tuple[Path, bytes]:
@@ -1098,14 +1089,14 @@ def _observation_projection(observation: Mapping) -> dict:
     if dict(top["claims"]) != _OBSERVATION_CLAIMS:
         raise ShapeRuntimeError(f"shape-time observation claims must be exactly {_OBSERVATION_CLAIMS}")
     reader = ArtifactReader(Path())
-    panel_path, _panel_raw = reader.bytes(top["panel"], "observation.panel")
+    panel_path, panel_raw = reader.bytes(top["panel"], "observation.panel")
     _observation_sha(top["expected_panel_sha256"], "observation.expected_panel_sha256")
-    panel = _read_json_bound(reader, top["panel"], "observation.panel")
+    panel = _parse_bound_json(panel_raw, panel_path, "observation.panel")
     _equal_strict(panel.get("schema"), SHAPE_TIME_PANEL_SCHEMA, "observation.panel schema")
     if panel.get("status") != "measured":
         raise ShapeRuntimeError("observation.panel must be a measured shape-time panel")
-    request = _read_json_bound(reader, top["request"], "observation.request")
-    expected_runtime = _read_json_bound(reader, top["expected_runtime"], "observation.expected_runtime")
+    request = reader.json(top["request"], "observation.request")[1]
+    expected_runtime = reader.json(top["expected_runtime"], "observation.expected_runtime")[1]
     reader.bytes(top["contract"], "observation.contract")
     evidence = _object(top["evidence"], _OBSERVATION_EVIDENCE, "observation.evidence")
     bound: dict[str, tuple[Path, bytes]] = {}
@@ -1192,16 +1183,18 @@ def _observation_projection(observation: Mapping) -> dict:
         raise ShapeRuntimeError("observation timing summary count/method differs from its samples")
     derived = _timing_summary(finite)
     for name in ("median_ms", "p25_ms", "p75_ms", "iqr_ms", "quartiles"):
-        if canonical_strict(summary[name]) != canonical_strict(derived[name]):
+        if DIRECT_ASCII_STRICT.text(summary[name]) != DIRECT_ASCII_STRICT.text(derived[name]):
             raise ShapeRuntimeError(f"observation timing {name} differs from its raw samples")
-    raw_samples = _read_json_bound(reader, evidence["samples"], "observation.evidence.samples")
+    samples_path, samples_raw = bound["samples"]
+    raw_samples = _parse_bound_json(samples_raw, samples_path, "observation.evidence.samples")
     if raw_samples.get("samples_ms") != list(samples["samples_ms"]):
         raise ShapeRuntimeError("observation samples differ from its bound raw sample bytes")
     if raw_samples.get("warmup_iterations") != warmup:
         raise ShapeRuntimeError("observation warmup count differs from its bound raw sample bytes")
     if raw_samples.get("interval_unix") != list(interval):
         raise ShapeRuntimeError("observation sample interval differs from its bound raw sample bytes")
-    routes = _read_json_bound(reader, evidence["routes"], "observation.evidence.routes")
+    routes_path, routes_raw = bound["routes"]
+    routes = _parse_bound_json(routes_raw, routes_path, "observation.evidence.routes")
     records = routes.get("records")
     if not isinstance(records, list) or len(records) != len(finite):
         raise ShapeRuntimeError("observation requires one fresh route record per timed sample")
@@ -1216,7 +1209,7 @@ def _observation_projection(observation: Mapping) -> dict:
             "observation operator projection must read one M-row operator at batch_size=1")
     producer_binding = _object(top["producer"], _OBSERVATION_BINDING, "observation.producer")
     _observation_sha(producer_binding["sha256"], "observation.producer.sha256")
-    producer = _read_json_bound(reader, producer_binding, "observation.producer")
+    producer = reader.json(producer_binding, "observation.producer")[1]
     if request.get("producer_identity") != producer_binding:
         raise ShapeRuntimeError("observation producer differs from its bound request")
     replay = _object(top["replay"], _OBSERVATION_REPLAY, "observation.replay")
@@ -1246,10 +1239,6 @@ def _observation_projection(observation: Mapping) -> dict:
 def _equal_strict(actual, expected, where: str) -> None:
     if actual != expected:
         raise ShapeRuntimeError(f"{where}: {actual!r} != {expected!r}")
-
-
-def canonical_strict(value) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def _timing_summary(samples: Sequence[float]) -> dict:
@@ -1290,8 +1279,8 @@ def consume_shape_time_observation(observations: Sequence[Path], *, table_id: st
             raise ShapeRuntimeError("checker receipt names different observation bytes")
         projection["receipt_path"] = str(Path(checker_receipts[index]).resolve())
         projection["receipt_sha256"] = bytes_sha256hex(proof_raw)
-        if any(canonical_strict(projection["context"].as_dict())
-               == canonical_strict(previous["context"].as_dict())
+        if any(DIRECT_ASCII_STRICT.text(projection["context"].as_dict())
+               == DIRECT_ASCII_STRICT.text(previous["context"].as_dict())
                and projection["rank_local_shape"] == previous["rank_local_shape"]
                and projection["family"] == previous["family"]
                and projection["rate_q256"] == previous["rate_q256"]
@@ -1301,7 +1290,7 @@ def consume_shape_time_observation(observations: Sequence[Path], *, table_id: st
                 f"observation {index}: duplicate shape key {projection['rank_local_shape']} "
                 f"{projection['family']} R{projection['rate_q256']} M{projection['m']}")
         projections.append(projection)
-    contexts = {canonical_strict(projection["context"].as_dict()) for projection in projections}
+    contexts = {DIRECT_ASCII_STRICT.text(projection["context"].as_dict()) for projection in projections}
     if len(contexts) != 1:
         raise ShapeRuntimeError("every observation in one conversion must share one runtime context")
     context = projections[0]["context"]
@@ -1332,7 +1321,7 @@ def consume_shape_time_observation(observations: Sequence[Path], *, table_id: st
 def write_shape_table(table: ShapeRuntimeTable, out: str | Path) -> tuple[Path, str]:
     """Publish the table to ``--out`` durably; a crash leaves old or new bytes."""
     path = Path(out)
-    payload = canonical_strict(table.as_dict()).encode("utf-8") + b"\n"
+    payload = DIRECT_ASCII_STRICT.encoded(table.as_dict()) + b"\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + f".tmp{os.getpid()}")
     with temporary.open("wb") as handle:
@@ -1408,8 +1397,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                                                    expected_scope=scope,
                                                    eligibility=_convert_eligibility(scope))
             path, digest = write_shape_table(table, args.out)
-            print(json.dumps({**table.identity(), "source_path": str(path),
-                              "out_sha256": digest}, sort_keys=True), flush=True)
+            print(DIRECT_ASCII_SPACED_LAX.text({**table.identity(), "source_path": str(path),
+                                              "out_sha256": digest}), flush=True)
             return 0
         table = load_shape_table(args.table)
         print(json.dumps(table.identity()), flush=True)

@@ -198,6 +198,13 @@ def test_a_malformed_table_is_refused_by_name(mutate, needle):
         srp.parse_shape_table(doc)
 
 
+def test_a_declared_but_unmeasured_regime_is_refused():
+    doc = _doc([_row("dense", "4096x1024", E4M3, 1024, 2048, DENSE_E4M3,
+                     (1.5, 1.6, 1.4))], regimes=(512, 2048))
+    with pytest.raises(srp.ShapeRuntimeError, match="context declares regimes"):
+        srp.parse_shape_table(doc)
+
+
 def test_load_verifies_every_receipt_digest(tmp_path):
     receipt = tmp_path / "bench.json"
     receipt.write_bytes(b"{}")
@@ -585,7 +592,7 @@ def _consume_observations(observations, **kwargs):
 
 
 def _obs_write(path, value, raw=False):
-    path.write_bytes(value if raw else srp.canonical_strict(value).encode() + b"\n")
+    path.write_bytes(value if raw else srp.DIRECT_ASCII_STRICT.encoded(value) + b"\n")
     import hashlib
     body = path.read_bytes()
     return {"path": str(path), "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
@@ -728,6 +735,35 @@ def test_observation_converts_to_one_proposal_row(tmp_path):
     assert table.lookup(srp.ShapeKey("dense", "256x256", OBS_FAMILY, 896, 1)) is None
 
 
+def test_observation_parses_the_already_bound_panel_samples_and_routes(tmp_path, monkeypatch):
+    observation_fixture(tmp_path)
+    reads = []
+    original = srp.ArtifactReader.bytes
+
+    def read(reader, binding, where, **kwargs):
+        result = original(reader, binding, where, **kwargs)
+        reads.append(result[0])
+        return result
+
+    monkeypatch.setattr(srp.ArtifactReader, "bytes", read)
+    _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    for name in ("panel.json", "samples.json", "routes.json"):
+        assert reads.count(tmp_path / "obs" / name) == 1
+
+
+@pytest.mark.parametrize("raw, needle", [
+    (b'{"schema":"first","schema":"second"}', "duplicate JSON key"),
+    (b'{"value":NaN}', "nonfinite JSON constant"),
+    (b'{"value":Infinity}', "nonfinite JSON constant"),
+    (b'{"value":-Infinity}', "nonfinite JSON constant"),
+])
+def test_observation_reader_retains_strict_json_refusals(tmp_path, raw, needle):
+    path = tmp_path / "observation.json"
+    path.write_bytes(raw)
+    with pytest.raises(srp.ShapeRuntimeError, match=needle):
+        srp.read_shape_time_observation(path)
+
+
 def test_observation_itself_refuses_a_tp2_scope(tmp_path):
     observation_fixture(tmp_path, tp_degree=2)
     with pytest.raises(srp.ShapeRuntimeError):
@@ -836,7 +872,7 @@ def test_load_refuses_a_row_whose_samples_were_edited_with_a_valid_receipt(tmp_p
               "--observations", str(tmp_path / "obs" / "observation.json")])
     document = json.loads(table_path.read_text())
     document["rows"][0]["measurement"]["samples_ms"] = [10.0, 20.0, 30.0, 40.0]
-    table_path.write_text(srp.canonical_strict(document))
+    table_path.write_text(srp.DIRECT_ASCII_STRICT.text(document))
     with pytest.raises(srp.ShapeRuntimeError, match="differ from the receipt's raw samples"):
         srp.load_shape_table(table_path)
 

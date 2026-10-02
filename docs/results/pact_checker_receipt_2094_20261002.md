@@ -83,3 +83,42 @@ This is one operator-sum proposal row. Full PACT, TP2/MoE coverage, model
 quality, compiled serving, placement, energy and served-latency qualification
 remain outside this acceptance. The PQ branch is based on `693a38f3` and
 retains the #2092 descriptor-lifetime and #2082 owned-quantum-read fixes.
+
+## Root Review Follow-Up
+
+The regime subset relaxation was unnecessary for this singleton: conversion
+already declares only M=512. Exact equality between declared and measured
+regimes is restored. The consumer uses `schemas.strict_json_loads` for its
+strict observation parser and the existing provenance parser for held panel,
+sample and route bytes, without reopening those three artifacts. Canonical
+JSON uses `DIRECT_ASCII_STRICT`, the identical original byte recipe; the CLI
+summary uses the identical `DIRECT_ASCII_SPACED_LAX` recipe. Checker source
+selection, authentication and projection checks are unchanged.
+
+| Follow-up work | PB action | Actual result | CAS receipt SHA-256 |
+| --- | --- | --- | --- |
+| Causal controls before the fix | `4b8395f51bc938e8ad54821e62fc1db5b23243c9623867fb1ab1e4f83302c995` | rc1: both controls failed as expected; an extra declared regime was accepted and the panel was read twice | no success receipt |
+| Mistyped shared test filenames | `f15b54281e1acb9c167ff49df0513d3c6e9600653ab79069ee2b1c0a6929ca90` | action rc5: no tests collected; not acceptance evidence | no success receipt |
+| Shared parser/digest/provenance, shape and duplication controls | `d10e028f988a77930d59a6d3d54dc7026295c7ba62c1fca9083a2c03b581692b` | rc1: 616 passed, one duplication control found the remaining CLI sorted-JSON site; it was then moved to its named profile | no success receipt |
+| Final affected controls and compile checks | `5b7225cb161ebf534788d88dd9e7484f6ec1eae02db10f06982521e58470767a` | rc0: 98 passed, zero skips or missing modules | `5dcd1ffa4fe716878ec163ee30ed0f5ce5221a96ea70ef4d2942291a522bc934` |
+| Real SDK replay of the retained checker and forged-input controls | `09244e748798a50fa42350b71878131e7ae7f884225ddc2d3c6f8ab3790cb9a1` | rc0: same one admitted TP1 row/30 samples/median; TP2 and forged conversion/reload refuse | `5507774eef6a7cc3f9070a6e8086f6e77a2a5536229e4ed5c8bd2db1489d90d6` |
+
+The final controls compiled `shape_runtime_prices.py`, its test module and
+`experiments/pact_checker_receipt_acceptance.py`, then ran
+`pytest -q -n 4 tests/test_shape_runtime_prices.py
+tests/test_duplication_baseline.py tests/test_architecture_doc.py
+tests/test_docs_staleness.py`. Published `pbrun` reserved four CPUs and 6 GiB;
+native threads were one and CUDA was withheld. The prior shared-owner run
+used six CPUs and 8 GiB, additionally covering `test_runtime_provenance.py`,
+`test_digest_profiles_1301.py` and `test_contract_checks_1300.py`. Both ran
+on dl380g10 in the same scoped interpreter recorded above. The real SDK
+replay reserved one CPU and 3 GiB and reused the exact original checker
+selector and reviewed source config. These are CPU correctness checks, not
+performance measurements or another GPU pilot.
+
+The new owned trace is `review-fix-trace/acceptance.json` under the existing
+evidence root. Its table hash is
+`0405b8b2b521df7801a96fafb805d057f1204280fc7a453be41be60c1f96e783`;
+its receipt paths name the new trace directory, not a rewritten earlier table.
+Direct rehashes still give original panel `fd5c2b4f...`, request `3d252977...`
+and checker-config `7a8c58b9...`. Earlier evidence remains source-specific.

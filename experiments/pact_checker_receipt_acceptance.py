@@ -11,11 +11,11 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant import shape_runtime_prices as prices, staged_lease
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_STRICT, bytes_sha256hex
 
 
 def publish(path, value):
-    raw = prices.canonical_strict(value).encode() + b"\n"
+    raw = DIRECT_ASCII_STRICT.encoded(value) + b"\n"
     path.write_bytes(raw)
     return {"path": str(path), "bytes": len(raw), "sha256": bytes_sha256hex(raw)}
 
