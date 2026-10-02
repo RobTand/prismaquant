@@ -129,7 +129,10 @@ def test_prepared_backend_change_is_one_seal_at_completion_and_cache(
         intake()
         out = capsys.readouterr().out
         assert 'DEV-MODE' in out and 'prepared projection_backend' in out
-        assert backend.FUSED_NAME in out and "torch" in out
+        # The shared seal reports its first differing field, not a full dump
+        # of both identities. The fused build is absent from the reference.
+        assert 'build' in out and 'None' in out
+        assert qualification['build']['binary_sha256'][:16] in out
     # Recording a seal must not rewrite either prepared record or its cache.
     assert (completion, cache.metadata) == before
 
