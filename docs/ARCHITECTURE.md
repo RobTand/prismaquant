@@ -11,6 +11,9 @@ key, lane, warmups and samples. Bare panels and observations refuse. The
 checker config carries no automatic source approval. This CPU handoff keeps
 the immutable serving pin and the existing lane admission gate; it does not
 qualify a new price population, TP world, serving SLO or GPU measurement.
+The table declares exactly its measured M regimes. Artifact projection parses
+the held digest-bound panel, samples and routes through the shared strict JSON
+reader; canonical bytes use the existing direct ASCII strict digest profile.
 
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
@@ -21117,7 +21120,7 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
   `kernel_lane` its launch ran on. It carries no weight identity.
 - **Context.** The table's context names the runtime image, Tessera commit,
   contract digest, tensor-parallel world, platform, execution mode, residency,
-  batch size 1 and the measured `M` regimes.
+  batch size 1 and exactly the measured `M` regimes.
 - **Fixed claims.** `claims` is always `operator_sum_proposal`,
   `certifies_placement: false` and `served_p95: not_claimed`. A table that
   states anything else is refused.
@@ -21129,8 +21132,8 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
     rate and must name the row's launch in `executes`.
   - The published predicate of that launch's lane must admit the rate
     (`lane_eligibility.cell_lane_admits`, asked about that one launch).
-  So the fused routed launch admits at R1024 and is refused at R896, where its
-  `column_rates` requirement fails.
+  Since contract v45, the fused routed E4M3 launch admits at R1024 and R896;
+  the earlier v44 `column_rates` predicate refused R896.
 - **Rate pools.** Rates are pooled only where the table declares a
   `rate_pools` entry, and all of the pool's rows must share one lane. Pooled
   samples are the source rows' samples concatenated in rate order. The pool
@@ -21154,16 +21157,20 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
   `consume_shape_time_observation` reads each observation through the existing
   `ArtifactReader` (path + SHA-256 + exact byte length), re-binds the panel,
   request, expected runtime, contract, evidence, preflight, original producer
-  and a distinct replay-validator identity, checks the raw samples/count/lane
+  and replay-validator identity, checks the raw samples/count/lane
   against the observation's own timing summary and route records, derives the
   existing `ShapeRuntimeContext`/`ShapeKey`/`KernelLane`/`OperatorMeasurement`,
   and then runs the unchanged `admit_shape_table` against PQ's own pinned
   `EligibilityTable` when `--expected-scope` is given. It restates no Tessera
   validator and deserializes no private token. A malformed, incomplete or
-  unsupported observation refuses the conversion as a whole; `convert` writes
-  `--out` atomically only after every check passes. `load_shape_table`
-  re-binds each row to the referenced panel's raw samples and lane, so a table
-  edited under a still-valid receipt digest is refused. A TP1 observation
+  unsupported observation refuses the conversion as a whole. Each observation
+  requires an explicit PB checker completion selected by action, publication
+  and attempt and joined to the independently reviewed exact checker config;
+  bare panel and observation bytes refuse. Converted rows reference that
+  checker receipt. `convert` writes `--out` atomically only after every check
+  passes. `load_shape_table` rejoins the checker completion and compares each
+  row's context, key, lane, warmups and raw samples, so a table edited under a
+  still-valid receipt digest is refused. A TP1 observation
   admits only a TP1 scope; no decoded-M row is invented, so `lookup` at M=1 is
   a gap, never a fabricated decode price.
 
