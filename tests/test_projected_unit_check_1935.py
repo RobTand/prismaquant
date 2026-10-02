@@ -216,6 +216,7 @@ def test_device_comparison_preserves_equal_semantics(monkeypatch, device, dtype)
     source = torch.tensor([[0, 1], [2, 0]], dtype=dtype)
     unit = dict(source_tensor="source", rows=2, cols=2)
     monkeypatch.setattr(campaign, "_read_projected_unit", lambda *a, **kw: (source, lambda: None))
+    monkeypatch.setitem(globals(), "_read_projected_unit", lambda *a, **kw: (source, lambda: None))
     live = source.to(device).clone()
     kwargs = dict(live=live, model_path="unused", source={})
     assert campaign._check_projected_unit("unit", unit, **kwargs) is None
@@ -230,6 +231,7 @@ def test_nan_and_signed_zero_keep_the_host_verdict(monkeypatch, device):
         (torch.tensor([[0., -0.]]), torch.tensor([[-0., 0.]])),
         (torch.tensor([[float("nan"), 0.]]), torch.tensor([[float("nan"), 0.]]))]:
         monkeypatch.setattr(campaign, "_read_projected_unit", lambda *a, **kw: (source, lambda: None))
+        monkeypatch.setitem(globals(), "_read_projected_unit", lambda *a, **kw: (source, lambda: None))
         kwargs = dict(live=live.to(device), model_path="unused", source={})
         assert campaign._check_projected_unit("unit", unit, **kwargs) == _reference_check_unit("unit", unit, **kwargs)
 
