@@ -151,7 +151,7 @@ def test_global_probe_second_moment_matches_production_kl_hessian(
         return target
 
     monkeypatch.setattr(torch.Tensor, 'bernoulli_', complete_draw)
-    gradients = []
+    gradients, wrong_normalizer_gradients = [], []
     for draw in noise:
         current.update(noise=draw.reshape(selected.shape), row=0)
         leaf = logits.detach().requires_grad_(True)
@@ -161,12 +161,18 @@ def test_global_probe_second_moment_matches_production_kl_hessian(
         gradient, = torch.autograd.grad(probe, leaf)
         assert current['row'] == len(logits)
         gradients.append(gradient.reshape(-1))
+        current['row'] = 0
+        wrong_probe = fisher_probe_scalar(leaf, seed=7000, token_scope=scope,
+            temperature=temperature, distribution='rademacher',
+            token_count_override=token_count * 4, global_row_offset=0)
+        wrong_gradient, = torch.autograd.grad(wrong_probe, leaf)
+        wrong_normalizer_gradients.append(wrong_gradient.reshape(-1))
     matrix = torch.stack(gradients)
     second_moment = matrix.T @ matrix / len(matrix)
     teacher_lp = torch.log_softmax(selected.float() / temperature, dim=-1).detach()
 
     def measured_loss(student):
-        return kl_divergence(select_token_scope(student, scope) / temperature, teacher_lp)
+        return kl_divergence(select_token_scope(student, scope).float() / temperature, teacher_lp)
 
     hessian = torch.autograd.functional.hessian(measured_loss, logits).reshape(24, 24)
     assert torch.isfinite(second_moment).all() and torch.isfinite(hessian).all()
@@ -175,4 +181,11 @@ def test_global_probe_second_moment_matches_production_kl_hessian(
     torch.testing.assert_close(second_moment, hessian, rtol=3e-6, atol=1e-8)
     # A fourfold wrong token normalizer quarters the squared price and must
     # fail this gate. Keep that discriminating control explicit.
-    assert not torch.allclose(second_moment / 4, hessian, rtol=3e-6, atol=1e-8)
+    wrong_matrix = torch.stack(wrong_normalizer_gradients)
+    wrong_second_moment = wrong_matrix.T @ wrong_matrix / len(wrong_matrix)
+    torch.testing.assert_close(wrong_second_moment, second_moment / 4, rtol=3e-6, atol=1e-8)
+    assert not torch.allclose(wrong_second_moment, hessian, rtol=3e-6, atol=1e-8)
+    print({'scope': scope, 'temperature': temperature, 'tokens': token_count,
+           'orthogonal_draws': len(matrix),
+           'max_abs_second_moment_minus_kl_hessian': float((second_moment - hessian).abs().max()),
+           'wrong_global_normalizer_refused': True})
