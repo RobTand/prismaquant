@@ -318,3 +318,55 @@ That alternative still needs a 25-row projection decomposition; tiny controls
 and metadata do not establish the actual factor-seven cause.
 
 The first 512-logit prefix audit passed PB `a994f9927e8e2124dc09c9fa25f788081b48fbd7c2e8fd9a0abbb4da532ced6e`, exit 0 and cleanup complete. Its saved first 512-position WA−W is 0.00411478698 ± 0.00265704925; the matched-row price remains unavailable. Machine-readable output is `glm-comparison-alllogits-audit.json`. Final compile of the research directory and incidental staged-reader docstring passed PB `e3ba1ddf8529ae76759357efa5afc8cff907ef4bf297232fdabff73a36159104`, source parent `0a11e08d818`, exit 0 and cleanup complete.
+
+## Review guard corrections, after the banked measurements
+
+The measured baseline above is commit
+`1cb255a486928b3166cc0b783d9005006491c344`. Later review found that
+`--pricing-from` checked tokens/probes/units but not the immutable loaded model,
+dtype, global normalization or implementation binding. A separate partial-resume
+path trusted a mutable model-name identity. Neither path has a qualified
+loaded-model/run contract, so both now refuse clearly and preserve the existing
+artifact. Fresh runs use an unused output stem. This correction does not discard
+or reinterpret the completed FP32/BF16 artifacts described above.
+
+The profile crosscheck also allowed NaN errors through greater-than comparisons.
+It now requires finite component/arm observations, finite positive reference
+RMS bounds, a nonzero reference KL bound and finite derived errors before the
+unchanged comparison thresholds can pass. KL, Q and realized-probe observations
+are all checked. The missing-token CLI path now names the requested immutable
+artifact instead of invoking the absent `prep_inputs.py` tokenizer helper.
+
+Causal CPU controls, GPU unattached:
+
+- `f0a19b9d96556144be35da075df494c33c7e33c24ea1efdfa53136490a356a2c`
+  demonstrated false-green NaN component/KL/Q/probe observations and overflowed
+  reference RMS. Its finite positive control passed; its earlier reuse fixture
+  reached an unrelated fake-model forward and is not the causal reuse receipt.
+- `e3bd29dd2605880c26a38144950ad8fd04914e52fb0ff7c0b96eb7c23e7a8789`
+  demonstrated all four foreign model/dtype/global-N/implementation cases
+  publishing a complete decision artifact, and the missing-input helper defect.
+- `5f551f14d8006a3d0de4d87bd7a7ff51cfd8280a2af6f4593d162fc677377e51`
+  demonstrated unbound partial resume under a mutable model name.
+- `cf3d741b756f4f02ff4704359f1ec8fe9ff83b161d7b414762b2b43bbd60c18d`
+  passed all six unittest methods on guard code head
+  `a6d3b4fe997e96d5631933eb998f3b99731a35a2`, including the refusal cases and
+  finite/fresh positives, exit 0 and cleanup complete. Fixtures authenticate
+  the banked FP32 pricing/summary SHA256 values `311be7d2...`/`b5bfe184...`
+  and reuse their actual component/KL/probe observations. The fixture profiler
+  is disabled; its logged durations are not measurements. CAS receipt
+  `cabe6420e0569106a4642d28d8914981ff0dd7cc3679f671ef77ba08a29a06c7`;
+  payload `bad1c0273e3d1bf3a079c0cdc0a0fc3ea390aca5a7a8f6e9e42f962ed3cb1b9c`
+  was read and hash-verified.
+- Compilation passed `a73667524d538e23756f416656392b71196c823b79eaccc490ad07b16010a562`
+  on the same guard code head, exit 0 and cleanup complete. The source mount
+  remains read-only; Python's existing pycache prefix redirects bytecode to
+  the task's writable temporary directory. The preceding readonly-pycache
+  refusal `df214f5b...` is not a syntax failure or a pass.
+
+`source-binding-packet.json` under the shared evidence root records raw CAS
+request/source-bundle hashes, exact executed snapshots and Git/AST comparisons
+by code owner. It preserves the failed containing-pair statuses and separately
+attributes their complete FP32 legs and later BF16 completions. The new guard
+receipts qualify the later guard changes; they do not recertify the historical
+measurements or supply blanket credit from a default repository pytest run.
