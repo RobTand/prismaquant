@@ -1986,9 +1986,9 @@ def test_a_funding_lock_that_never_clears_leaves_diagnosed_debt(
 # the refusal is the category and the receipt is the cause.
 #
 # These tests drive the REAL bound owner and the real release path; only
-# the egress receipt is substituted, because provoking a genuine own-copy
-# deferral needs the PrismaBuild candidate that is not pinned yet. The
-# shapes below are the confirmed ones, not invented ones.
+# the egress receipt is substituted to select each retry transition
+# deterministically. SDK4 carries this receipt shape; these controls do not
+# establish a concurrent own-copy handoff measurement.
 
 
 def _staged_group(tmp_path, monkeypatch, **kwargs):
