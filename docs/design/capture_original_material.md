@@ -1,7 +1,8 @@
 # Internal capture original material — 2026-10-02
 
 Refs #2010 and #2008. This CPU-only path is not automatic campaign admission.
-The automatic guard remains closed. No model payload, GPU capture, source
+The automatic guard remains closed. Internal CPU qualification uses tiny
+synthetic native safetensors. No original GLM payload, GPU capture, source
 overwrite, producer restamp or performance qualification was performed.
 
 `CaptureSourceAuthentication.qualified_original_material` interprets the
@@ -46,7 +47,7 @@ authenticated document can be interpreted.
 CPU `framework="pt"` safetensors is the only tensor decoder admitted in this slice.
 The shared layer-streaming source seam selects that whole-file decoder directly,
 so a range adapter cannot read a pool header and a different staged payload.
-Outside-window reads, arbitrary factories and device transfers refuse. Raw
+Direct outside-window reads, arbitrary factories and device transfers refuse. Raw
 descriptor escape is unsupported; the public descriptor path remains a scoped
 inspection seam, not permission to open an untracked long-lived consumer.
 
@@ -65,10 +66,38 @@ the live serialized shmem bound, not a complete capture memory envelope.
 The material receipt records publication/readset bindings and actual verified
 deliveries, with `automatic_capture_qualified: false`. It is not a canonical
 complete-capture identity or a preparation/join qualification token. Unsupported
-implicit/bootstrap/chain consumers remain refused. GLM publisher authority stays
+implicit/chain consumers remain refused. GLM publisher authority stays
 `zai-org/GLM-5.3-Flash-BF16` at
 `a6c167b62691b2bac901344b65cb651a70f53e43`; local edited auxiliary files and
 61f77 provenance are preserved separately. w03/s35 producer template SHA256
 `34d5ee66…` conflicts with original a6 `41cff9af…`; no existing census is rewritten
 or accepted by this internal path. Full consumer coverage, immutable delivery
 provenance across the chain and complete GPU/admission lifetimes remain open.
+
+The internal `load_original_streaming_bootstrap` and existing
+`_build_streaming_context` now consume owned strict config/index metadata,
+profile selection and the shared pure `text_only_stage_config` rules. The stock
+AutoConfig adapter reads a privately sealed derived configuration, charged before
+allocation through the owner's existing resource check. Dynamic configuration
+or file indirection, visual inputs, out-of-body source scopes and implicit cache
+autoscaling refuse. Cache headroom, maximum slots and prefetch workers must be
+explicit. Construction mode remains distinct from visual-input authorization.
+Profiles may receive the parsed complete index through their existing private
+metadata intake; Qwen MoE uses it for namespace evidence instead of a pool read.
+
+Existing source JSON, layer/head tensor and cache-header reads enter the owner's
+finite whole-file windows automatically. Every payload/header decoder still
+uses the same authenticated held memfd. CPU output views retain source material
+until all model/cache/caller aliases are gone; `shutdown()` joins readers but
+does not dispose of an externally retained model or cache. The enclosing action
+still owns decoded metadata, model tensors and conversion/packing scratch
+accounting. Original context/head/layer/direct dequant GPU routes refuse before
+material acquisition or CUDA work. Existing legacy CUDA completion fences remain
+unchanged and have not been qualified for this original path.
+
+This scope is the internal CPU context. Higher-level runner/profile/calibration
+input propagation, exact source-generation adoption, tokenizer consumers,
+complete original capture and numerical qualification remain separate gates.
+The cache estimator still reads whole admitted shards for headers; it can
+reacquire released header-only material when tensors are later demanded. No
+single-pass, GPU-bound or cold-source performance claim follows.
