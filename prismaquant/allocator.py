@@ -4831,20 +4831,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                         "after_hull": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},
                     "vertices": [_pact_vertex_record(v.assignment) for v in hull.vertices]}
 
-        def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
-            if lane.allocation_selection_request_path(args):
-                raise ValueError("PACT replay requires materialized wires, not a selection request")
-            try:
-                assign = probe_assignment(pact_candidates, pact_time_ms, weights,
-                                          max_memory_bytes=pact_budget, **pact_limits)
-            except (PactHullError, RuntimeFrontierLimitError) as exc:
-                raise ValueError(f"PACT replay probe refused: {exc}") from None
+        def _pact_write_replay(assign, expected_assignment, provenance, *, dloss=None) -> None:
+            """One exact assignment check/accountant and layer-config replay writer."""
             record = _pact_vertex_record(assign)
             if not record["feasible"] or record["assignment"] != expected_assignment:
                 raise ValueError("PACT replay: the recorded probe re-derives a different "
                                  "assignment than the hull vertex")
-            dloss = math.fsum(float(pact_options[(unit, fmt)].predicted_dloss)
-                              for unit, fmt in assign.items())
+            if dloss is None:
+                dloss = math.fsum(float(pact_options[(unit, fmt)].predicted_dloss)
+                                  for unit, fmt in assign.items())
             budget_stamp = None
             if pact_disk is not None:
                 budget_stamp = whole_artifact_budget_stamp(
@@ -4857,6 +4852,16 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             args.bit_attribution_json = args.bit_attribution_csv = None
             _write_layer_config(assign, record["achieved_bits"], dloss, dloss, replay=provenance,
                                 selected_whole_artifact_budget_stamp=budget_stamp)
+
+        def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
+            if lane.allocation_selection_request_path(args):
+                raise ValueError("PACT replay requires materialized wires, not a selection request")
+            try:
+                assign = probe_assignment(pact_candidates, pact_time_ms, weights,
+                                          max_memory_bytes=pact_budget, **pact_limits)
+            except (PactHullError, RuntimeFrontierLimitError) as exc:
+                raise ValueError(f"PACT replay probe refused: {exc}") from None
+            _pact_write_replay(assign, expected_assignment, provenance)
 
         measured_runtime_sweep(PactHullSweep(
             build_hull=_pact_build_hull,
