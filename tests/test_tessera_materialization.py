@@ -129,7 +129,7 @@ class ReceiptAPI:
     def encoder_source_sha256(self):
         return 'producer-source'
 
-    def unit_input_identity(self, weight, unit, grid, rung, activation=None):
+    def unit_input_identity(self, weight, unit, grid, rung, activation=None, *, structure=None):
         return dict(schema='tessera.cached_unit_inputs.v1', unit=unit['tensor'][:-7],
             encoder_source_sha256=self.encoder_source_sha256(),
             recipe=dict(grid=grid.name, q256=rung),
@@ -286,6 +286,12 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
             cost_path=s.cost_path,cost_payload=s.cost,output_path=s.output)
     path, _data, _calls = _plan(s, monkeypatch)
     api = ReceiptAPI()
+    identity_structures = []
+    original_identity = api.unit_input_identity
+    def unit_identity(*args, structure=None, **kwargs):
+        identity_structures.append(structure)
+        return original_identity(*args, **kwargs)
+    api.unit_input_identity = unit_identity
     api.make_unit_record = lambda blob, identity, filename: dict(file=filename,
         blob_bytes=len(blob), blob_sha256=hashlib.sha256(blob).hexdigest(), identity=identity)
     monkeypatch.setattr(tc, '_checkpoint_identity_api', lambda:api)
@@ -312,6 +318,7 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
     measured = []
     def measure(**kwargs):
         name = kwargs['qname']
+        assert kwargs.get('structure') == 'routed_moe'
         measured.append((name, kwargs['format_name']))
         record = s.case.receipts[name]
         (kwargs['wire_dir']/record['file']).write_bytes((s.case.wire_dir/record['file']).read_bytes())
@@ -322,18 +329,22 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
     monkeypatch.setattr(tc, '_measure_anchor', measure)
     batches = []
     def batch(**kwargs):
+        assert kwargs.get('structures') == {name: 'routed_moe' for name in kwargs['qnames']}
         batches.append(kwargs['qnames'])
-        return [measure(qname=n, format_name=kwargs['format_name'], wire_dir=kwargs['wire_dir'])
+        return [measure(qname=n, format_name=kwargs['format_name'], wire_dir=kwargs['wire_dir'],
+                        structure=kwargs['structures'][n])
                 for n in kwargs['qnames']]
     monkeypatch.setattr(tc, '_measure_anchor_batch', batch)
     from prismaquant import tessera_render
     monkeypatch.setattr(tessera_render, 'require_tessera_batch_encoder', lambda:None)
     tm.run(path, 0, anchor_batch_size=batch_size)
+    assert identity_structures == ['routed_moe'] * len(_units())
     assert measured == [(n,FMT) for n in expected_missing]
     assert batches == ([] if batch_size == 1 else [expected_missing])
     assert captures == ([] if reuse else [(sorted(_units()),4)])
     assert not s.output.exists()
     tm.run(path, 0, anchor_batch_size=1)
+    assert identity_structures == ['routed_moe'] * (2 * len(_units()))
     assert measured == [(n,FMT) for n in expected_missing]
     report = tm.finalize(path)
     assert report['verified_source_units'] == len(_units())
@@ -344,6 +355,30 @@ def test_run_encodes_only_missing_selection_and_resume_verifies_existing_bytes(s
             handle.write(' ')
         with pytest.raises(RuntimeError,match='priced calibration capture manifest changed'):
             tm.run(path,0)
+
+@pytest.mark.parametrize('rung', [640, 768])
+def test_selected_subcap_identity_verifies_real_served_wire_and_refuses_research_recipe(selection, rung):
+    from prismaquant.tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
+    from prismaquant.tessera_render import encode_tessera_unit
+
+    api = tc._checkpoint_identity_api()
+    _, _, _, units, _ = tm._request(selection.request)
+    unit = units[selection.missing]
+    weight = torch.ones(unit['rows'], unit['cols'], dtype=torch.bfloat16)
+    fmt = f'TESSERA_E2M1_K2_R{rung}'
+    family, _ = parse_tessera_format_name(fmt)
+    served = tessera_served_wire_recipe(family, rung, structure='routed_moe')
+    expected = tm._expert_input_identity(api, weight, unit, fmt, None)
+    assert expected['recipe'] == {'grid': family.payload_grid().name, 'q256': rung,
+                                  **served.to_config()}
+    _, blob = encode_tessera_unit(weight, fmt, hessian_required=False, recipe=served)
+    record = api.make_unit_record(blob, expected, filename='selected.tessera')
+    api.verify_cached_unit(blob, record, expected)
+    research = api.unit_input_identity(weight, unit, family.payload_grid(), rung)
+    assert research['recipe'] != expected['recipe']
+    with pytest.raises(ValueError, match='identity|inputs'):
+        api.verify_cached_unit(blob, record, research)
+
 
 def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, monkeypatch):
     """Real source/capture/encoder/receipt/translator; no served-route scoring."""
