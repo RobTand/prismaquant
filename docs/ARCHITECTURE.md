@@ -24,6 +24,49 @@ child/status/sample qualification, source/import/publication gates and runtime
 defaults remain unchanged. This is CPU composition admission, not a GPU profile,
 container availability, immutable-source, measurement window or #1750 speed claim.
 
+Re-stamped 2026-10-02 (Refs #2015, #1929, CI coverage): the full hosted
+Python 3.12 CPU suite runs on every main push and manual dispatch. PRs retain
+the existing pinned-Tessera import/allocator CLI smoke and shrink-only
+allowlists, with the full composed candidate covered by the required
+PrismaBuild `pb-tests` check. The current PB environment uses Python 3.14.4;
+it does not replace full coverage of the Python 3.12 floor on main/manual
+runs. Full-suite commands, cgroup coverage and main-run concurrency are
+unchanged. This changes CI triggers, with no production/default/pin/wire or
+serving-gate change and no measured whole-suite speed claim.
+
+Re-stamped 2026-10-02 (PQ #2013, Refs #2010, #2008): automatic streamed
+capture recording now refuses at the existing source-owner admission seam
+before model/config/tokenizer reads, recording or publication. Both capture
+policies and monolithic/prep/quantum/join campaign routes require the same
+qualification; direct campaign bookends retain the guard. No currently
+supported provider establishes an independently authenticated complete original
+generation, immutable decoder material and admitted lifetimes. Stat tuples,
+producer/census digest declarations, read-only mounts and PB lifetime pins do
+not qualify that provider. There is no override or fabricated positive route.
+Explicit descriptor-owner operations and selected capture reuse retain their
+existing contracts; neither gains an immutable-source qualification claim.
+The recovered recording, write-time output digest and independent downstream
+verification mechanisms remain available for those explicit operations.
+This bounded fail-closed slice is not end-to-end immutable capture, residency,
+GPU, numerical, serving, pin, format or export-wire qualification. Wider parents
+#1896/#1887 and source/provider acceptance in #2010/#2008 remain open.
+
+Re-stamped 2026-10-02 (PQ #2008, Refs #1896, #1887): recovery preserves
+current-main domain-qualified capture-chain definitions and compatibility
+aliases, source descriptor recording, producer/stat fences, and write-time
+output digests. Source pages are reported clean cache, not charged resident
+memory. No full-source cold-pass guarantee or globally single-pass chain is
+established: quanta reread shared head/boundary shards, and kernel reclamation
+can force tensor rereads. The #1885 prep/GPU wording below records its initial
+implementation, superseded by prep v2 and the original narrow GPU receipts;
+those receipts are not rebased-source GPU qualification. Existing parallel
+fallback hashing (#1889) remains. Numerical, serving, pins and export wire are
+unchanged. Stat fences detect metadata-observable mutation, not arbitrary
+same-signature byte mutation: #2010 records two same-signature admissions in
+a bounded ZFS diagnostic, with no end-to-end corrupted artifact demonstrated.
+That original integrity requirement remains unmet; the exit-only regression
+now constructs deterministic drift, not a stronger production guarantee.
+See [recovery acceptance census](measurements/pr1924-recovery-2026-10-02.md).
 Re-stamped 2026-10-02 (PQ #1986, Refs #1588), integrated on
 `sol/pq1986-integrated-20261002` from current main and the preserved component commits. The opt-in campaign namespace preparation API extends the
 existing dispatcher, without a new scheduler or CLI: a complete hash-keyed
@@ -218,6 +261,49 @@ takes `--priority` (default -10, unchanged), so a capture chain that feeds a
 gate can run in the campaign band, as `dispatch_tessera_campaign --priority`
 already allows. Rows sealed without it are byte-identical. Gate:
 `tests/test_dispatch_capture_chain.py`.
+
+Re-stamped 2026-10-01 (Refs #1896, #1887): a streamed calibration capture
+records each owner's source digests at first use and does not reread newly
+written output entries at seal. The monolith and every chain
+quantum read the source through a recording `CaptureSourceAuthentication`
+(`record_capture_source`). The first payload read of a file hashes all of it
+through the held descriptor the tensors are then read through and records the
+digest. The hash keeps the file's pages for those reads, so while the pages
+stay in memory the bytes come off storage once. A census that declares
+producer digests is compared at that first use, and a mismatch refuses before
+the first tensor. Under the
+bounded capture policy the owner drops a file's pages after the last layer that
+reads it (`StreamingContext.release_source_pages_before`). Files the forward
+never reads (MTP or vision shards, tokenizer assets) are hashed once at the seal
+(`authenticate_complete_source`). The identity splits in two.
+`capture_identity` through a recording owner returns the traversal identity,
+which binds no `source_files`; it keys the journal. The seal binds the recorded
+digests (`bind_capture_source`), so the sealed manifest identity has its old
+shape, and every downstream reader still verifies against it unchanged. The
+chain prep now hashes nothing (prep schema v2; a v1 prep refuses). The join
+unions the digests the quanta recorded, refuses two quanta that recorded
+different digests for one file, and hashes only what no quantum read. On the
+output side, `CaptureWriter` and `publish_capture` hash each entry while it is
+written (`SerializedEntryDigest`). The seal holds each entry to the stat
+fingerprint taken then and reads nothing back; the manifest digest is of the
+bytes written. The retained pages are clean page cache. With
+`source_recording=True`, `streamed_calibration_resources` reports their peak
+as `source_retained_page_bytes` (`retained_source_page_bytes`) beside the plan.
+It does not add the peak to `memory_bytes`: the guard's committed reading omits
+clean pages, and the kernel reclaims them before it refuses an allocation.
+When the peak exceeds the slack under the cap, the kernel reclaims pages and
+their ranges are read twice. The capture prints both numbers
+(`capture_source_retained_pages`). GLM-5.3-Flash-BF16 has shards that
+interleave layers; one shard is read by layers 4 and 40. For the attention
+capture (cap 111.7 GB, plan 98.4 GB), the bounded peak at two cache slots is
+69.7 GB against 13.3 GB of slack. That capture therefore re-reads the
+interleaved ranges it cannot hold, on top of one hash pass over the 643 GB
+source. Not changed: the stat fence, `resource_check`, the
+manifest schema, formats, defaults, runtime pins and serving gates. A capture
+journalled before this change will not resume, because its journal is keyed on
+the old identity; that refusal is fail-closed. Gates:
+`tests/test_capture_single_pass_source_1896.py` plus the chain, calibration
+cache and verified-load suites.
 
 Re-stamped 2026-10-01 (PQ #1885): the streamed calibration capture can run
 as a chain of retryable layer-range rows instead of one forward
@@ -5821,6 +5907,13 @@ re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
 resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
+
+As of: 2026-10-01 · `claude/pq-1896-single-pass-source`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-10-01, `claude/pq-1896-single-pass-source`) for **the
+streamed capture source recording and output digests** (Refs #1896, #1887);
+see the stamp at the top of this document.
 
 As of: 2026-10-01 · `claude/pq-1918-chain-priority`.
 Stamps follow, newest first, each recording its own branch and date.
@@ -26882,8 +26975,12 @@ source check carries one named, passing exception: DeepSeek still returns
 rather than uniform-format. Direct profile coverage asserts the spec stays
 empty so a native-lane assumption cannot silently constrain the Gridbook
 allocation.
-And there is CI to run it — `.github/workflows/ci.yml` (#18, `1cc7b90`) executes the suite on
-every push and PR, on Python 3.12 with CPU torch. Before PrismaQuant is
+And there is CI to run it — `.github/workflows/ci.yml` executes the full suite
+on main pushes and manual dispatches, on Python 3.12 with CPU torch. PRs keep
+the hosted import/CLI smoke and allowlist checks; the required PrismaBuild
+`pb-tests` check covers the full composed pre-merge candidate (Refs #2015,
+#1929). Its current Python 3.14.4 environment is distinct from the hosted
+3.12 floor. Before PrismaQuant is
 installed, both jobs use the stdlib-only `tools/resolve_tessera_dev_pin.py` to
 derive the exact Tessera checkout from `TESSERA_DEV_PIN_COMMIT`, stop
 without publishing a ref if that resolution fails, and install that checkout
@@ -28135,7 +28232,7 @@ unplumbed).
 | ~~D8~~ | **CLOSED 2026-07-30 (re-vet R24).** `_production_cache_prefetch_assignment` gained a `require` mode mirroring `production_weight_cache.prefetch_assignment(require=…)`, exposed as `--production-cache-prefetch {require,warn}`; `run-pipeline.sh` passes `require` on the native lane (matching `VALIDATED_SOURCE_PREFETCH=require`), and the CB/GGUF lanes read no production cache at all. A total miss is now a named failure instead of a silent NVMe-bound export. | `export_native_compressed._production_cache_prefetch_assignment` | ~~MED~~ | closed |
 | ~~D9~~ | **CLOSED 2026-07-30 (re-vet R24).** The guard is at `main()` entry (not import time) in all seven — `incremental_probe`, `incremental_measure_quant_cost`, `aura_cost`, `production_render_cost`, `export_nvfp4_cb[_streaming]`, `export_gguf`, `select_validated_frontier` — verified against every CPU-only test import first, and a parametrized test pins all twelve callers so a refactor cannot drop one. | `gpu_guard.py` | ~~MED~~ | closed |
 | ~~D10~~ | **CLOSED 2026-07-30 (re-vet R5).** `pipeline.py` now has one real job — settings-hash authority (§3.4) — and the bookkeeping is honest: the two owner names that existed nowhere in the tree are deleted, `streaming_model_weights` names `layer_streaming.LayerCache`, and a test asserts every approved owner has a class behind it. `QuantWeightCache` went to the archive wall with L3, so it is no longer an unmodelled holder. The *spec* half stays explicitly descriptive (§3.6); modelling the ten executed-but-unmodelled stages was refused as fiction-surface. | §3.6; `pipeline.py` | ~~MED~~ | closed |
-| D11 | **MOSTLY FIXED 2026-07-30.** `model_profiles/validate.py`'s 8 conformance checks had zero callers and there were no workflow files in the tree. Both halves closed: `.github/workflows/ci.yml` (#18, `1cc7b90`) runs the suite on every push and PR (Python 3.12, CPU torch), and `tests/test_model_profile_conformance.py` drives the CPU-safe checks (1, 6, 8 + four structural invariants) over every registered profile, with 2/3/4 behind `integration` and 6/7 behind `slow`, and known gaps encoded as ratchets rather than bare xfails. **Residual (2026-07-30, R12): the check-5 half is now covered** — `test_has_mtp_implies_a_buildable_mtp_module` asserts `build_mtp_module` is a real override (and `mtp_source_prefix()` non-empty) whenever `has_mtp()`, which is the declarative part of the check that would catch L2/D2; check 5 proper still materialises a decoder layer and stays out of CI. Remaining: nothing invokes the validator as a `run-pipeline.sh` preflight for the actual `MODEL_PATH`. | `.github/workflows/ci.yml`; `tests/test_model_profile_conformance.py:9-31,223-249` | LOW (was MED) | Add a preflight invocation for `MODEL_PATH`. |
+| D11 | **MOSTLY FIXED 2026-07-30.** `model_profiles/validate.py`'s 8 conformance checks had zero callers and there were no workflow files in the tree. Both halves closed: `.github/workflows/ci.yml` runs the full suite on main/manual (Python 3.12, CPU torch), PR import/CLI smoke and allowlist checks remain, and the required PrismaBuild `pb-tests` gate covers the full composed PR candidate (Refs #2015, #1929; current PB Python 3.14.4), and `tests/test_model_profile_conformance.py` drives the CPU-safe checks (1, 6, 8 + four structural invariants) over every registered profile, with 2/3/4 behind `integration` and 6/7 behind `slow`, and known gaps encoded as ratchets rather than bare xfails. **Residual (2026-07-30, R12): the check-5 half is now covered** — `test_has_mtp_implies_a_buildable_mtp_module` asserts `build_mtp_module` is a real override (and `mtp_source_prefix()` non-empty) whenever `has_mtp()`, which is the declarative part of the check that would catch L2/D2; check 5 proper still materialises a decoder layer and stays out of CI. Remaining: nothing invokes the validator as a `run-pipeline.sh` preflight for the actual `MODEL_PATH`. | `.github/workflows/ci.yml`; `tests/test_model_profile_conformance.py:9-31,223-249` | LOW (was MED) | Add a preflight invocation for `MODEL_PATH`. |
 | ~~D12~~ | **CLOSED 2026-07-30 (re-vet R1).** `TARGET_DISK_GB` is plumbed through `run-pipeline.sh`: it overrides `TARGET_BITS`, narrows the Pareto sweep to the byte-feasible bracket, flips `SELECTION_MODE` to `validated-surrogate` and the frontier pick to `budget` = min measured KL among the rows that fit. Kneedle stays the default without a card and stays a diagnostic. See §4.6. | §4.6; `select_validated_frontier --mode budget` | ~~MED~~ | closed |
 | D13 | **FIXED 2026-07-30 (R22 + R27).** The two hardcoded MiniMax arch tests now route through `profile.bypass_hf_fp8_module_rewrite()` and `profile.packed_expert_module_class_names()`; `specs/minimax_m2.json` exists and declares all eight of that profile's overrides; `deepseek_v4.json` declares `default_serving_profile: vllm_packed_moe`. Core-stack arch literals in control flow: **0**. Residual (not debt, sequencing): the MiniMax Python overrides stay until the equivalence gate `tests/test_minimax_m2_spec.py` has held for a release. | §8.4, §8.5 L4 | closed | — |
 | ~~D14~~ | **CLOSED 2026-08-01.** Runtime documentation now lives with the sole canonical Gridbook package. PrismaQuant documents only its producer/export contract and points to the pinned package's machine-readable runtime contract; the former in-tree README was deleted with the vendored runtime. | external Gridbook `README.md`; `prismaquant/gridbook_runtime/gridbook_runtime_pin.json` | ~~MED~~ | closed |
@@ -30077,22 +30174,27 @@ each row; all three kinds require `--streaming` and
 `--capture-calibration-out`.
 
 **Prep** (`--capture-chain prep --capture-chain-ranges 0:a,a:b,...
---capture-chain-boundary-storage JSON`). Loads no model. It refuses ranges
-that overlap or leave a gap, and refuses if a prep record already exists. It
-computes the capture identity once (`capture_identity`, which hashes every
-source file), with the source files' stat fingerprints taken before and after
-the hash and required to be equal. It binds a published generation of the v2
-`layer_major` boundary storage and seals `chain/prep.json`: the identity, the
-ranges, the batch count, the storage policy, the generation's session and the
-fingerprints.
+--capture-chain-boundary-storage JSON`). Loads no model and reads no source
+payload (PQ #1896). It refuses ranges that overlap or leave a gap, and refuses
+if a prep record already exists. It computes the traversal identity
+(`capture_identity` through a recording owner, which binds no source digests),
+with the source files' stat fingerprints taken before and after and required
+to be equal. It binds a published generation of the v2 `layer_major` boundary
+storage and seals `chain/prep.json` (schema `prep.v2`; a v1 prep refuses): the
+identity, the ranges, the batch count, the storage policy, the generation's
+session and the fingerprints.
 
 **Quantum** (`--capture-chain quantum --capture-layer-range a:b`). The row
-builds its streamed model with a `CaptureSourceAuthentication` owner bound to
-the prep's identity and the prep record's digest (`authenticate_quantum_source`).
-Each shard the quantum reads is hashed once, through the held descriptor,
-against the prep's roster digest; shards it only inspects are not hashed, and
-the small metadata files are. A quantum therefore hashes the head shards, its
-own layers' shards and the metadata files, never the whole source.
+builds its streamed model with a recording `CaptureSourceAuthentication`
+owner bound to the prep record's digest and its stat fingerprints
+(`authenticate_quantum_source`). Each file the quantum reads is hashed once,
+by its first payload read, through the held descriptor the tensors are then
+read through, and the digest is recorded; a census producer digest is
+compared there. Files it only inspects are not hashed. A quantum therefore
+hashes the head shards, its own layers' shards and the metadata files it
+reads, never the whole source. Shards the chain reads more than once are the
+head shards (every quantum) and a shard that straddles a range boundary (both
+neighbours); each such read is that quantum's one read, not a second pass.
 `ChainQuantum` refuses to run if:
 
 - the prep's ranges do not tile the loaded source's layers;
@@ -30113,12 +30215,13 @@ layers `[a, b)`:
 - The exact (per-batch) boundary storage path refuses a frontier.
 
 The unchanged capture visitor journals the range's units through
-`CaptureWriter`. `CaptureWriter.verify_entries` re-reads each entry once
-(sha256 and tensor validation) and records its stat fingerprint. The quantum
-then writes boundary `b` (none for the last range) and a sealed fragment:
-the boundary records, the verified unit records, the range's selected
-initialization witness and the source authentication receipt. Last, it marks
-its owner `complete`.
+`CaptureWriter`, which hashes each entry as it writes it and records its stat
+fingerprint then; `CaptureWriter.verify_entries` returns those records and
+reads nothing (PQ #1896). The quantum then writes boundary `b` (none for the
+last range) and a sealed fragment: the boundary records, the unit records,
+the range's selected initialization witness and the recording receipt
+(`prismaquant.capture_source_recording.v1`) of the digests it read. Last, it
+marks its owner `complete`.
 
 **Join** (`--capture-chain join`). Loads no model. It checks, in order:
 
@@ -30132,14 +30235,20 @@ its owner `complete`.
    contract; quanta that disagree about a head record refuse) equal the
    census's model load contract.
 7. The verified units cover the identity's units exactly once.
+8. The quanta's recorded source digests agree: two quanta that recorded
+   different digests for one file refuse (`recorded_source_digests`).
 
-`CaptureWriter.finish(verified=)` then publishes the manifest. Each entry is
-held to the fingerprint its quantum recorded instead of being read again;
+A recording owner bound to the prep then adopts those digests for the objects
+the prep stat (`adopt_recorded_digests`) and hashes only the files no quantum
+read (`authenticate_complete_source`). `CaptureWriter.finish(verified=,
+source_files=)` publishes the manifest with the complete recorded roster bound
+into its identity. Each entry is held to the fingerprint its writer took
+instead of being read again;
 the `mount` rule of `stat_fingerprint_reuse` admits a different NFS client
 device. A changed entry refuses. After the manifest is published, the join
 unlinks the interior boundaries' entry files by exact path inside the
-generation, and writes `chain/join.json`. The generation directory and its
-owner records are left in place. The join writes no capture-load execution
+generation, and writes `chain/join.json` with the join's source receipt.
+The generation directory and its owner records are left in place. The join writes no capture-load execution
 record, because it loads nothing.
 
 **Dispatch** (`tools/dispatch_capture_chain.py`). A quantum commits no

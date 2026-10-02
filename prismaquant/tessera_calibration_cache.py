@@ -37,6 +37,8 @@ SOURCE = 'tessera_campaign_prefix_f32_v1'
 # making a successful large campaign an unbounded metadata cache.
 MAX_CAPTURE_METADATA_BYTES = 16 * 1024**2
 MAX_CAPTURE_EXECUTION_POLICIES = 8
+#: The receipt of a streamed capture's recording source owner (PQ #1896).
+RECORDING_RECEIPT_SCHEMA = 'prismaquant.capture_source_recording.v1'
 
 
 #: The guarded source hash's read block is ``digests.SOURCE_HASH_BLOCK_BYTES``,
@@ -84,34 +86,46 @@ def sha256(path, *, resource_check=None, release_read_pages=False, file_descript
 
 
 @contextmanager
+def _on_io_engine(calls):
+    """Run ``{key: callable}`` together on the process's IO engine; yield ``result_of(key)``.
+
+    The pool is ``io_engine.ENGINE`` (#1294 forbids a new one). Read the
+    results in the serial loop's order, so the first error raised is the one
+    that loop raised. On exit the calls not yet started are cancelled and the
+    running ones awaited, so no read is still in flight when an error
+    propagates.
+    """
+    from concurrent.futures import wait
+    from .io_engine import ENGINE
+    futures = {key: ENGINE.submit(call) for key, call in calls.items()}
+    try:
+        yield lambda key: futures[key].result()
+    finally:
+        for future in futures.values():
+            future.cancel()
+        wait(futures.values())
+
+
+@contextmanager
 def _engine_source_hashes(paths, *, resource_check=None, release_read_pages=False):
     """Hash ``paths`` together on the process's IO engine (PQ #1887).
 
     Each file gets the same guarded :func:`sha256` the serial loop ran: every
     byte, the identity fence, ``resource_check`` and page release. Only the
     files overlap. One reader at a time took 71 min over the 599 GB
-    GLM-5.3-Flash source on NFS-RDMA while the row's GPU idled. The pool is
-    ``io_engine.ENGINE`` (#1294 forbids a new one), so at most
+    GLM-5.3-Flash source on NFS-RDMA while the row's GPU idled. At most
     ``min(ENGINE.width, len(paths))`` hashes are in flight, each holding two
     ``SOURCE_HASH_BLOCK_BYTES`` blocks; this runs before the model is
     resident, and ``resource_check`` still refuses on absolute bytes.
 
-    Yields ``digest_of(path)``. Read the paths in the serial loop's order, so
-    the first error raised is the one that loop raised. On exit the hashes
-    not yet started are cancelled and the running ones awaited, so no read
-    is still in flight when the error propagates.
+    Yields ``digest_of(path)``, with :func:`_on_io_engine`'s ordering and
+    cancellation. A streamed capture does not take this path: it records
+    each digest from the read that streams the file (PQ #1896).
     """
-    from concurrent.futures import wait
-    from .io_engine import ENGINE
-    futures = {path: ENGINE.submit(partial(sha256, path, resource_check=resource_check,
-                                           release_read_pages=release_read_pages))
-               for path in paths}
-    try:
-        yield lambda path: futures[path].result()
-    finally:
-        for future in futures.values():
-            future.cancel()
-        wait(futures.values())
+    with _on_io_engine({path: partial(sha256, path, resource_check=resource_check,
+                                      release_read_pages=release_read_pages)
+                        for path in paths}) as digest_of:
+        yield digest_of
 
 
 def _json(path, value):
@@ -132,9 +146,16 @@ def capture_identity(census_path, *, calibration, max_act_rows,
                      source_authentication=None):
     """Preserve full identity; selected readers authenticate consumed objects.
 
-    Canonical capture hashes every source file. A hash-bound complete capture
-    can supply its original roster only through the descriptor owner below;
-    no pathname/mtime digest cache authorizes a selected source read.
+    Without an owner, canonical capture hashes every source file. A
+    hash-bound complete capture can supply its original roster only through
+    the descriptor owner below; no pathname/mtime digest cache authorizes a
+    selected source read.
+
+    A recording owner (:meth:`CaptureSourceAuthentication.recording`) is a
+    streamed capture's (PQ #1896): its source digests are the digests of the
+    bytes the capture reads, recorded as it reads them, so they do not exist
+    yet. The identity it returns carries no ``source_files``; the capture
+    binds them at its seal (:func:`bind_capture_source`).
     """
     import importlib.metadata
     import torch
@@ -163,9 +184,22 @@ def capture_identity(census_path, *, calibration, max_act_rows,
     # Check those bytes too, without inventing another producer identity.
     producer = (census.get('expert_projection') or {}).get('producer') or {}
     declared = producer.get('source') or {}
-    expected = {**declared.get('files',{}),**declared.get('auxiliary_sha256',{})}
-    if declared.get('config_sha256'):
-        expected['config.json'] = declared['config_sha256']
+    expected = _producer_digests(declared)
+    fields = dict(schema=SCHEMA, model_load_contract=contract,
+                  attention_implementation=attention_implementation,
+                  census_sha256=census_digest, capture_runtime=runtime,
+                  calibration=dict(calibration), max_act_rows=int(max_act_rows),
+                  storage_source=SOURCE,
+                  units={name: list(shape) for name, shape in sorted(census['unit_shapes'].items())})
+    if getattr(source_authentication, 'is_recording', False):
+        if not isinstance(source_authentication, CaptureSourceAuthentication):
+            raise TypeError('a recording source owner must be the capture descriptor owner')
+        # Nothing is hashed here: each file is hashed from the read that
+        # consumes it, and the rest at the seal (PQ #1896).
+        source_authentication.require_recording_roster(root, {p.name for p in files}, expected)
+        if not any(p.name.endswith('.safetensors') for p in files):
+            raise RuntimeError('calibration capture source has no safetensors weights')
+        return fields
     if source_authentication is None:
         present = [p for p in files if p.is_file()]
         with _engine_source_hashes(present, **hashing) as digest_of:
@@ -183,12 +217,33 @@ def capture_identity(census_path, *, calibration, max_act_rows,
             {p.name for p in files if p.is_file()}, expected)
     if not any(name.endswith('.safetensors') for name in source):
         raise RuntimeError('calibration capture source has no safetensors weights')
-    return dict(schema=SCHEMA, model_load_contract=contract,
-                attention_implementation=attention_implementation,
-                census_sha256=census_digest,capture_runtime=runtime,
-                source_files=source, calibration=dict(calibration),
-                max_act_rows=int(max_act_rows), storage_source=SOURCE,
-                units={name:list(shape) for name,shape in sorted(census['unit_shapes'].items())})
+    return dict(fields, source_files=source)
+
+
+def _require_sha256_roster(source_files, *, what):
+    for name, digest in source_files.items():
+        if (not isinstance(name, str) or not name or Path(name).name != name or
+                name in ('.', '..') or not isinstance(digest, str) or
+                len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest)):
+            raise RuntimeError(f'{what} has an invalid path or SHA256')
+
+
+def bind_capture_source(identity, source_files):
+    """A streamed capture's identity with the source digests it recorded (PQ #1896).
+
+    The traversal identity (``capture_identity`` through a recording owner)
+    names everything a capture is computed from except the source digests,
+    which exist only once every file has been read. The seal binds them
+    here, and the sealed manifest's identity has the shape every downstream
+    reader already verifies against.
+    """
+    if 'source_files' in identity:
+        raise RuntimeError('this capture identity already binds its source files')
+    source_files = dict(sorted(source_files.items()))
+    _require_sha256_roster(source_files, what='recorded capture source')
+    if not any(name.endswith('.safetensors') for name in source_files):
+        raise RuntimeError('calibration capture source has no safetensors weights')
+    return dict(identity, source_files=source_files)
 
 
 def _producer_digests(producer_source):
@@ -288,14 +343,69 @@ class CaptureSourceAuthentication:
     lifetime. Stat fences reject mutation/replacement; only SHA256 authenticates
     content. Ordinary source files must remain stable through their read leases.
     Construct through ``authenticate_selected_capture_source``.
+
+    **Explicit recording mode** (:meth:`recording`, PQ #1896) retains the
+    descriptor/producer/stat contract; it does not qualify immutable source
+    material. Automatic campaigns refuse until an enforced original-generation
+    provider is qualified (Refs #2010). No sealed roster exists to compare
+    against, so the first
+    payload read of a file hashes all of it through the held descriptor and
+    records the digest; a census that declares producer digests is compared
+    there, and a mismatch refuses before the first tensor. The hash leaves the
+    file's clean pages cached for subsequent tensor reads; kernel reclamation
+    can still cause physical rereads. :meth:`release_retained_pages` drops a file's pages
+    after its last consumer, and :meth:`authenticate_complete_source` hashes
+    the files the capture never read.
     """
 
     def __init__(self, root, identity, producer_source, *, manifest_sha256,
                  resource_check=None, release_read_pages=False):
-        self.root = Path(os.path.abspath(root))
+        self._setup(root, producer_source, manifest_sha256=manifest_sha256,
+                    resource_check=resource_check, release_read_pages=release_read_pages,
+                    source_files=dict(identity['source_files']))
         self._identity_json = json.dumps(identity, sort_keys=True, allow_nan=False)
-        self._source_files = dict(identity['source_files'])
-        self._expected = dict(self._source_files)
+
+    @classmethod
+    def recording(cls, root, producer_source, *, binding_sha256=None, fingerprints=None,
+                  resource_check=None, release_read_pages=False):
+        """A streamed capture's owner: digests are recorded from its own reads.
+
+        The roster is every file a capture identity names
+        (:func:`capture_source_files`), plus any auxiliary file the census
+        producer declares, which is authenticated but stays outside the
+        identity as it always has. ``fingerprints`` (a capture chain prep's
+        ``source_fingerprints``) holds every file this owner opens to the
+        object the prep stat. ``binding_sha256`` names what the owner is bound
+        to (the chain prep's seal), carried on its receipt.
+
+        ``release_read_pages`` is the bounded capture's page policy: retained
+        pages are dropped after a file's last consumer and at close. A payload
+        hash never drops them block by block, because the tensor reads that
+        follow it are the ones that need them.
+        """
+        self = cls.__new__(cls)
+        self._setup(root, producer_source, manifest_sha256=binding_sha256,
+                    resource_check=resource_check, release_read_pages=release_read_pages,
+                    source_files=None)
+        self._identity_json = None
+        roster = frozenset(path.name for path in capture_source_files(self.root))
+        if not roster:
+            raise RuntimeError('calibration capture needs a complete local source checkpoint')
+        if fingerprints is not None:
+            if set(fingerprints) != roster:
+                raise RuntimeError('the capture source roster changed since its prep')
+            fingerprints = dict(fingerprints)
+        self._roster = roster
+        self._authorized = roster | frozenset(self._expected)
+        self._fingerprints = fingerprints
+        return self
+
+    def _setup(self, root, producer_source, *, manifest_sha256, resource_check,
+               release_read_pages, source_files):
+        self.root = Path(os.path.abspath(root))
+        self.is_recording = source_files is None
+        self._source_files = source_files
+        self._expected = {} if source_files is None else dict(source_files)
         declared = _producer_digests(producer_source)
         self._producer = dict(declared)
         self._derived_censuses = {}
@@ -303,11 +413,11 @@ class CaptureSourceAuthentication:
             if name in self._expected and self._expected[name] != digest:
                 raise RuntimeError(f'capture source roster differs from census producer: {name}')
             self._expected[name] = digest
-        for name, digest in self._expected.items():
-            if (not isinstance(name, str) or not name or Path(name).name != name or
-                    name in ('.', '..') or not isinstance(digest, str) or
-                    len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest)):
-                raise RuntimeError('capture source roster has an invalid path or SHA256')
+        _require_sha256_roster(self._expected, what='capture source roster')
+        self._roster = None
+        self._authorized = frozenset(self._expected)
+        self._fingerprints = None
+        self._released = set()
         self.manifest_sha256 = manifest_sha256
         self.resource_check = resource_check
         self.release_read_pages = release_read_pages
@@ -329,7 +439,7 @@ class CaptureSourceAuthentication:
 
     def _name(self, path):
         value = Path(os.path.abspath(path))
-        if value.parent != self.root or value.name not in self._expected:
+        if value.parent != self.root or value.name not in self._authorized:
             raise RuntimeError(f'consumed source is absent from the sealed roster: {path}')
         return value.name
 
@@ -350,11 +460,21 @@ class CaptureSourceAuthentication:
                                  payload_reads=0,
                                  lock=threading.Lock())
                     self._check_file(name, state)
+                    self._check_fingerprint(name, before)
                     self._files[name] = state
                 except BaseException:
                     os.close(fd)
                     raise
             return name, self._files[name]
+
+    def _check_fingerprint(self, name, observed):
+        """Hold a recording owner's held object to the object its prep stat."""
+        if self._fingerprints is None or name not in self._fingerprints:
+            return
+        from .cost_streaming import stat_fingerprint, stat_fingerprint_reusable
+        live = stat_fingerprint(str((self.root/name).resolve()), observed)
+        if not stat_fingerprint_reusable(live, self._fingerprints[name]):
+            raise RuntimeError(f'source file changed since the capture prep stat it: {name}')
 
     def _check_file(self, name, state):
         try:
@@ -370,15 +490,28 @@ class CaptureSourceAuthentication:
             for name, state in self._files.items():
                 self._check_file(name, state)
 
-    def _authenticate(self, name, state):
+    def _authenticate(self, name, state, *, unconsumed=False):
+        """Hash ``name`` once through its held descriptor; compare or record.
+
+        A sealed owner compares with the sealed digest. A recording owner
+        compares with a census producer's digest where one is declared and
+        records the digest otherwise. Its payload hash keeps the pages the
+        tensor reads need; ``unconsumed`` (a file no reader will consume)
+        drops them block by block under the bounded page policy.
+        """
         with state['lock']:
             self._check_file(name, state)
             if state['sha256'] is None:
+                release = (self.release_read_pages if not self.is_recording
+                           else unconsumed and self.release_read_pages)
                 digest = sha256(self.root/name, file_descriptor=state['fd'],
-                    resource_check=self.resource_check,
-                    release_read_pages=self.release_read_pages)
+                    resource_check=self.resource_check, release_read_pages=release)
                 self._check_file(name, state)
-                if digest != self._expected[name]:
+                expected = self._expected.get(name)
+                if self.is_recording:
+                    if expected is not None and digest != expected:
+                        raise RuntimeError(f'calibration source differs from census producer: {name}')
+                elif digest != expected:
                     raise RuntimeError(f'calibration source content differs from sealed capture: {name}')
                 state['sha256'] = digest
                 state['sha256_source'] = 'fresh_descriptor_sha256'
@@ -404,6 +537,9 @@ class CaptureSourceAuthentication:
         must hash to it, checked before any held state changes. A caller that
         planned a proof by digest (a Stage A row, PQ #1497) passes it.
         """
+        if self.is_recording:
+            raise RuntimeError('a recording capture owner records digests from its own reads; '
+                               'it adopts no identity proof')
         held = {}
 
         def live_stat(name):
@@ -466,6 +602,8 @@ class CaptureSourceAuthentication:
         digest is then the one other census :meth:`source_files` accepts.
         Returns that digest.
         """
+        if self.is_recording:
+            raise RuntimeError('a derived census binds a sealed capture roster, not a recording one')
         raw = Path(census_path).read_bytes()
         census = json.loads(raw)
         digest = bytes_sha256hex(raw)
@@ -479,7 +617,88 @@ class CaptureSourceAuthentication:
             self._derived_censuses[digest] = str(Path(os.path.abspath(census_path)))
         return digest
 
+    def require_recording_roster(self, root, names, producer_digests):
+        """A streamed capture's identity names this owner's source and producer."""
+        if (not self.is_recording or Path(os.path.abspath(root)) != self.root or
+                set(names) != self._roster or producer_digests != self._producer):
+            raise RuntimeError('streamed capture source, roster or census producer differs '
+                               'from its recording owner')
+
+    def adopt_recorded_digests(self, digests):
+        """Bind digests other readers of these objects recorded; nothing is read.
+
+        A capture chain's join (PQ #1896) holds the digests its quanta
+        recorded, each from the held descriptor it streamed a file through.
+        Each file is opened and fenced here as any read would be, held to the
+        prep's stat fingerprint, and compared with a declared producer digest.
+        Returns the count bound.
+        """
+        if not self.is_recording:
+            raise RuntimeError('only a recording owner binds recorded digests')
+        _require_sha256_roster(digests, what='recorded capture source digests')
+        for name, digest in sorted(digests.items()):
+            _, state = self._file(self.root/name)
+            with state['lock']:
+                self._check_file(name, state)
+                expected = self._expected.get(name)
+                if expected is not None and digest != expected:
+                    raise RuntimeError(f'calibration source differs from census producer: {name}')
+                if state['sha256'] is not None and state['sha256'] != digest:
+                    raise RuntimeError(f'recorded source digests disagree: {name}')
+                if state['sha256'] is None:
+                    state['sha256'] = digest
+                    state['sha256_source'] = 'recorded_by_capture_reader'
+        return len(digests)
+
+    def release_retained_pages(self, keep=()):
+        """Drop the retained pages of every recorded file not named in ``keep``.
+
+        The bounded page policy of a recording owner (PQ #1896): a payload
+        hash keeps a file's pages for the tensor reads that follow it, and the
+        traversal calls this once a file has no later consumer. ``keep`` holds
+        the files a later layer still reads. Advice is not proof of release;
+        the capture guard stays final. Returns the names released.
+        """
+        if not self.is_recording or not self.release_read_pages:
+            return ()
+        keep = {self._name(path) for path in keep}
+        with self._lock:
+            self._require_open()
+            ready = [(name, state) for name, state in sorted(self._files.items())
+                     if state['sha256'] is not None
+                     and name not in keep and name not in self._released]
+        released = []
+        for name, state in ready:
+            with state['lock']:
+                self._check_file(name, state)
+                os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
+            with self._lock:
+                self._released.add(name)
+            released.append(name)
+        return tuple(released)
+
+    def recorded_source_files(self):
+        """The identity roster's recorded digests, for :func:`bind_capture_source`.
+
+        Requires every roster file authenticated (``authenticate_complete_source``)
+        and the source directory to still list exactly the roster this owner
+        was built over: a file added or removed during the capture refuses.
+        """
+        if not self.is_recording:
+            raise RuntimeError('only a recording owner has recorded source files')
+        if frozenset(path.name for path in capture_source_files(self.root)) != self._roster:
+            raise RuntimeError('the capture source roster changed during the capture')
+        with self._lock:
+            self.require_unchanged()
+            missing = sorted(name for name in self._roster
+                             if (self._files.get(name) or {}).get('sha256') is None)
+            if missing:
+                raise RuntimeError(f'capture source digests are incomplete: {missing[:8]}')
+            return {name: self._files[name]['sha256'] for name in sorted(self._roster)}
+
     def source_files(self, root, census_digest, names, producer_digests):
+        if self.is_recording:
+            raise RuntimeError('a recording owner has no sealed source roster')
         canonical = json.loads(self._identity_json)
         if (Path(os.path.abspath(root)) != self.root or
                 census_digest not in {canonical['census_sha256'], *self._derived_censuses} or
@@ -528,6 +747,8 @@ class CaptureSourceAuthentication:
 
     def receipt(self):
         self.require_unchanged()
+        if self.is_recording:
+            return self._recording_receipt()
         adopted = self.adopted_identity_cache_sha256 is not None
         verified = [{"name": name, "sha256": state['sha256'],
             "bytes_hashed": (state['before'].st_size if state['sha256_source'] ==
@@ -553,6 +774,26 @@ class CaptureSourceAuthentication:
             metadata_only_shards=sorted(name for name, state in self._files.items()
                 if name.endswith('.safetensors') and state['sha256'] is None))
 
+    def _recording_receipt(self):
+        """What a recording owner read and recorded, the data a chain join consumes."""
+        verified = [{"name": name, "sha256": state['sha256'],
+            "sha256_source": state['sha256_source'],
+            "bytes_hashed": (state['before'].st_size if state['sha256_source'] ==
+                             'fresh_descriptor_sha256' else 0),
+            "payload_reads": state['payload_reads']}
+            for name, state in sorted(self._files.items()) if state['sha256'] is not None]
+        return dict(schema=RECORDING_RECEIPT_SCHEMA, binding_sha256=self.manifest_sha256,
+            authentication='SHA256 recorded through the held read-only descriptors the '
+                           'capture read its source through',
+            producer_verified=sorted(name for name in self._producer
+                                     if (self._files.get(name) or {}).get('sha256') is not None),
+            verified_files=verified,
+            payload_bytes_hashed=sum(row['bytes_hashed'] for row in verified
+                                     if row['name'].endswith('.safetensors')),
+            released_files=sorted(self._released),
+            metadata_only_shards=sorted(name for name, state in self._files.items()
+                if name.endswith('.safetensors') and state['sha256'] is None))
+
     def authenticate_complete_source(self):
         """Finish a complete-capture consumer's full source-byte proof.
 
@@ -563,12 +804,27 @@ class CaptureSourceAuthentication:
         this owner; finish only the untouched files before publishing a
         prepared artifact. Every hash uses the same held descriptor and stat
         fences as a selected read, so a replaced or changed source refuses.
+
+        A recording owner (PQ #1896) finishes the files its capture never
+        read -- MTP sidecar shards, tokenizer and config files -- together on
+        the IO engine, since no other reader wants those bytes, and checks
+        them in name order so the first error is the serial loop's.
         """
-        for name in sorted(self._expected):
-            _, state = self._file(self.root / name)
-            self._authenticate(name, state)
+        names = sorted(self._authorized)
+        if not self.is_recording:
+            for name in names:
+                _, state = self._file(self.root / name)
+                self._authenticate(name, state)
+        else:
+            states = {name: self._file(self.root / name)[1] for name in names}
+            pending = [name for name in names if states[name]['sha256'] is None]
+            with _on_io_engine({name: partial(self._authenticate, name, states[name],
+                                              unconsumed=True)
+                                for name in pending}) as finished:
+                for name in pending:
+                    finished(name)
         receipt = self.receipt()
-        if {row['name'] for row in receipt['verified_files']} != set(self._expected):
+        if {row['name'] for row in receipt['verified_files']} != set(self._authorized):
             raise RuntimeError('complete capture source authentication omitted a file')
         return receipt
 
@@ -582,7 +838,16 @@ class CaptureSourceAuthentication:
                 self.require_unchanged()
             finally:
                 self._closed = True
-                for state in self._files.values():
+                for name, state in self._files.items():
+                    if (self.is_recording and self.release_read_pages
+                            and name not in self._released):
+                        # The bounded page policy's last word: nothing this
+                        # owner retained outlives it. Advice only, so a
+                        # failure to advise never leaks a descriptor.
+                        try:
+                            os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
+                        except OSError:
+                            pass
                     os.close(state['fd'])
 
 
@@ -851,35 +1116,70 @@ def _reverify_capture_entry(path, name, record, *, census, max_rows, execution,
     return True
 
 
+def _write_capture_entry(root, name, *, inputs, hessian, count, max_abs):
+    """Write one unit's entry and hash it as it is written (PQ #1896).
+
+    The digest is of the bytes the serializer handed the file
+    (``SerializedEntryDigest``), the file is fsynced before it is published,
+    and the stat fingerprint taken here is what the seal holds the entry to.
+    Nothing reads the entry back: re-reading the 37 GB GLM-5.3 cache it had
+    just written was the capture seal's whole final phase on s27. Returns
+    ``(path, record, fingerprint)``.
+    """
+    from .perturbed_x_cache import (SerializedEntryDigest, activation_cache_filename,
+                                    write_activation_cache_entry)
+    digest = SerializedEntryDigest()
+    path = write_activation_cache_entry(Path(root)/'inputs', name, inputs, source=SOURCE,
+        durable=True, serialized_digest=digest, hessian=hessian, count=count, max_abs=max_abs)
+    fingerprint = capture_entry_fingerprint(path)
+    if fingerprint['size'] != digest.bytes:
+        raise RuntimeError(f'{name}: capture entry differs from its serialized bytes')
+    record = dict(path=str(Path('inputs')/activation_cache_filename(name)),
+                  sha256=digest.hexdigest())
+    return path, record, fingerprint
+
+
 def _require_verified_entry(path, name, record, verified):
-    """An entry a chain quantum re-verified, still the object it verified."""
+    """An entry this capture wrote or verified, still the object it was then."""
     from .cost_streaming import stat_fingerprint_reusable
     if (not isinstance(verified, dict) or verified.get('sha256') != record['sha256']
             or verified.get('path') != record['path']):
         raise RuntimeError(f'{name}: verified capture record differs from the journal')
     if not stat_fingerprint_reusable(capture_entry_fingerprint(path), verified.get('fingerprint')):
-        raise RuntimeError(f'{name}: capture entry changed since its quantum verified it')
+        raise RuntimeError(f'{name}: capture entry changed since its writer or quantum verified it')
 
 
 def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
                     counts=None, maxima=None, existing_entries=None,
                     release_file_pages=False, resource_check=None,
-                    verified_load_policy=None, load_execution=None, verified=None):
+                    verified_load_policy=None, load_execution=None, verified=None,
+                    source_files=None):
     """Seal a complete capture, journalling per-unit file receipts atomically.
 
     ``existing_entries`` seals a previously measured raw capture without another
     model forward. Its bytes receive exactly the ordinary writer's validation.
 
-    ``verified`` maps a unit to the record a capture chain quantum re-verified
-    (sha256 and tensor validation) and the stat fingerprint it took then
-    (PQ #1885). Such an entry is held to that fingerprint instead of being
-    read again.
+    ``verified`` maps a unit to the record its writer hashed as it wrote it,
+    or a capture chain quantum or a resumed writer verified, and the stat
+    fingerprint taken then (PQ #1885, #1896). Such an entry is held to that
+    fingerprint instead of being read again. An entry this call writes is
+    hashed as it is written and never read back.
+
+    ``source_files`` is a streamed capture's recorded source roster (PQ
+    #1896): ``identity`` is then the traversal identity, which keys the
+    journal, and the manifest seals ``bind_capture_source(identity,
+    source_files)``. Without it ``identity`` must already bind its source.
     """
-    import torch
-    from .perturbed_x_cache import activation_cache_filename, write_activation_cache_entry
+    from .perturbed_x_cache import activation_cache_filename
     root = Path(root).resolve()
     census = json.loads(Path(census_path).read_text())
-    execution = _load_execution(verified_load_policy, identity, load_execution)
+    if source_files is None:
+        if 'source_files' not in identity:
+            raise RuntimeError('a capture seals the source it read: its identity binds no source files')
+        sealed_identity = identity
+    else:
+        sealed_identity = bind_capture_source(identity, source_files)
+    execution = _load_execution(verified_load_policy, sealed_identity, load_execution)
     names = sorted(identity['units'])
     if len({activation_cache_filename(n) for n in names}) != len(names):
         raise RuntimeError('calibration unit filenames collide')
@@ -907,10 +1207,9 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
             payload = dict(inputs=acts[name],hessian=hessians[name],count=counts[name],
                            max_abs=maxima[name],name=name,source=SOURCE)
             _validate_tensors(name,payload,census,identity['max_act_rows'])
-            path = write_activation_cache_entry(root/'inputs',name,acts[name],
-                source=SOURCE,durable=True,hessian=hessians[name],count=counts[name],max_abs=maxima[name])
+            path, record, _fingerprint = _write_capture_entry(root, name, inputs=acts[name],
+                hessian=hessians[name], count=counts[name], max_abs=maxima[name])
             file_stat = path.stat() if release_file_pages else None
-            record = dict(path=str(expected_path),sha256=sha256(path))
         else:
             if record.get('path') != str(expected_path):
                 raise RuntimeError(f'{name}: capture file is outside its canonical location')
@@ -933,12 +1232,14 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
         records[name] = record
         if resource_check is not None:
             resource_check(f'after_capture_seal:{name}')
-    manifest = dict(schema=SCHEMA,status='complete',identity=identity,entries=records)
+    manifest = dict(schema=SCHEMA,status='complete',identity=sealed_identity,entries=records)
     path = root/'capture_manifest.json'
     if path.exists() and json.loads(path.read_text()) != manifest:
         raise RuntimeError('existing complete calibration capture changed')
-    _json(path,manifest)
-    return dict(path=str(path),sha256=sha256(path))
+    # The manifest's digest is of the bytes written, as every entry's is.
+    raw = indent2_json_file_bytes(manifest)
+    atomic_write_bytes(path, raw)
+    return dict(path=str(path),sha256=bytes_sha256hex(raw))
 
 
 class CaptureWriter:
@@ -948,6 +1249,12 @@ class CaptureWriter:
     manifest. A retry recomputes the source forward and must match every entry
     it reuses. Completion additionally requires the actual initialization
     witness from that traversal, not only the census's expected descriptor.
+
+    Each entry is hashed as it is written and the seal holds it to the stat
+    fingerprint taken then; nothing this writer wrote, or verified on resume,
+    is read again (PQ #1896). ``identity`` may be a streamed capture's
+    traversal identity, which keys the journal; :meth:`finish` then binds the
+    source digests the capture recorded.
     """
 
     def __init__(self, root, *, census_path, identity,
@@ -987,9 +1294,12 @@ class CaptureWriter:
                 policy=self.load_execution['policy'], census=self.census,
                 max_rows=self.identity['max_act_rows'])
         self.records = {}
+        # Each entry this process wrote or replay-verified, with its stat
+        # fingerprint: the seal and a chain join hold it to that (PQ #1896).
+        self.verified = {}
 
     def write(self, *, acts, hessians, counts, maxima):
-        from .perturbed_x_cache import activation_cache_filename, write_activation_cache_entry
+        from .perturbed_x_cache import activation_cache_filename
         names = set(acts)
         if (not names <= set(self.names) or names.intersection(self.records) or
                 any(set(values) != names for values in (hessians, counts, maxima))):
@@ -1008,6 +1318,7 @@ class CaptureWriter:
                 file_stat = path.stat() if self.release_file_pages else None
                 if previous.get('path') != expected:
                     raise RuntimeError(f'{name}: interrupted capture entry changed')
+                fingerprint = capture_entry_fingerprint(path)
                 _old_receipt = None
                 if self.load_execution is None:
                     if sha256(path) != previous.get('sha256'):
@@ -1030,12 +1341,13 @@ class CaptureWriter:
                     # One loaded validation entry expires before its successor,
                     # including when replay equality or geometry refuses.
                     del old, old_x, old_h, _old_receipt
+                if capture_entry_fingerprint(path) != fingerprint:
+                    raise RuntimeError(f'{name}: interrupted capture entry changed while it was verified')
             else:
-                path = write_activation_cache_entry(self.root/'inputs', name, acts[name],
-                    source=SOURCE, durable=True, hessian=hessians[name],
-                    count=counts[name], max_abs=maxima[name])
+                path, record, fingerprint = _write_capture_entry(self.root, name,
+                    inputs=acts[name], hessian=hessians[name], count=counts[name],
+                    max_abs=maxima[name])
                 file_stat = path.stat() if self.release_file_pages else None
-                record = dict(path=str(Path('inputs')/activation_cache_filename(name)), sha256=sha256(path))
             if self.release_file_pages and (self.load_execution is None or previous is None):
                 from .perturbed_x_cache import release_activation_cache_file_pages
                 release_activation_cache_file_pages(path, expected_stat=file_stat)
@@ -1043,38 +1355,38 @@ class CaptureWriter:
                 write_unit(self.journal, stage=STAGE, qname=name,
                            identity_sha256=self.digest, state=record)
             self.records[name] = record
+            self.verified[name] = dict(record, fingerprint=fingerprint)
             if self.resource_check is not None:
                 self.resource_check(f'after_capture_write:{name}')
 
     def verify_entries(self, names):
-        """Re-read this process's entries once, as the seal would, and fingerprint them.
+        """This process's entry records, each with the fingerprint taken when it was written.
 
-        A capture chain quantum (PQ #1885) runs the seal's sha256 and tensor
-        validation over its own units, so the join publishes without reading
-        1.68 TB again: it holds each entry to the fingerprint returned here.
+        A capture chain quantum (PQ #1885) hands these to the join, which
+        holds each entry to its fingerprint instead of reading it. Each digest
+        is of the bytes the serializer wrote (PQ #1896), so nothing is read
+        back here either; a resumed entry's is the one its replay verified.
         """
         verified = {}
         for name in sorted(names):
-            record = self.records.get(name)
+            record = self.verified.get(name)
             if record is None:
                 raise RuntimeError(f'{name}: this capture process wrote no entry to verify')
             path = self.root/record['path']
-            file_stat = path.stat() if self.release_file_pages else None
-            loaded = _reverify_capture_entry(path, name, record, census=self.census,
-                max_rows=self.identity['max_act_rows'], execution=self.load_execution,
-                resource_check=self.resource_check, release_file_pages=self.release_file_pages,
-                file_stat=file_stat)
-            if self.release_file_pages and not loaded:
-                from .perturbed_x_cache import release_activation_cache_file_pages
-                release_activation_cache_file_pages(path, expected_stat=file_stat)
-            verified[name] = dict(record, fingerprint=capture_entry_fingerprint(path))
+            _require_verified_entry(path, name, self.records[name], record)
+            verified[name] = dict(record)
         return verified
 
-    def finish(self, *, model_load_contract, verified=None):
+    def finish(self, *, model_load_contract, verified=None, source_files=None):
+        """Seal the capture; a traversal identity binds ``source_files`` here (PQ #1896)."""
         from prismaquant import validate_source_initialization_contract
         actual = validate_source_initialization_contract(model_load_contract)
         if actual != self.identity['model_load_contract']:
             raise RuntimeError('actual capture initialization differs from the census')
+        held = dict(verified or {})
+        for name, record in self.verified.items():
+            if held.setdefault(name, record) != record:
+                raise RuntimeError(f'{name}: two verified records name one capture entry')
         extra = {}
         if self.load_execution is not None:
             self.seal_load_execution = {}
@@ -1087,7 +1399,8 @@ class CaptureWriter:
                                identity=self.identity,
                                existing_entries={**self.completed, **self.records},
                                release_file_pages=self.release_file_pages,
-                               resource_check=self.resource_check, verified=verified, **extra)
+                               resource_check=self.resource_check, verified=held or None,
+                               source_files=source_files, **extra)
 
 
 def require_capture_contract(path, expected_sha256=None):
@@ -1400,6 +1713,44 @@ def authenticate_selected_capture_source(census_path, capture_path, *, expected_
     except BaseException:
         owner.close()
         raise
+
+
+def require_automatic_capture_source_recording():
+    """Refuse automatic recording until an enforced source provider is qualified.
+
+    No currently supported source/delivery route proves an independently
+    authenticated complete original generation with immutable decoder bytes
+    and admitted lifetimes. Producer/census digests, stat fences, read-only
+    mounts and PB lifetime pins cannot supply that missing qualification.
+    Explicit descriptor-owner construction retains its existing contract;
+    it is not positive immutable-source qualification. There is no override.
+    """
+    raise RuntimeError(
+        'automatic capture recording requires a qualified immutable source; '
+        'no enforced original-generation/delivery provider is qualified '
+        '(Refs #2010, #2008)')
+
+
+def record_capture_source(census_path, *, model, binding_sha256=None, fingerprints=None,
+                          resource_check=None, release_read_pages=False):
+    """Construct an explicit recording owner with the existing descriptor contract.
+
+    This operation does not qualify immutable original-source delivery.
+    Automatic campaigns separately require enforced source qualification.
+    The streamed runner reads ``model`` through this owner, so every file the
+    capture consumes is hashed once, through the held descriptor its tensors
+    are read through, before its first tensor reaches the capture. The census
+    must name the same source: a capture that streams one checkpoint and
+    seals another's digests would be a lie the manifest tells downstream.
+    """
+    census = json.loads(Path(census_path).read_text())
+    if (not isinstance(census.get('model'), str) or
+            Path(os.path.abspath(census['model'])) != Path(os.path.abspath(model))):
+        raise RuntimeError('a streamed capture reads the source its census names')
+    producer = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
+    return CaptureSourceAuthentication.recording(model, producer,
+        binding_sha256=binding_sha256, fingerprints=fingerprints,
+        resource_check=resource_check, release_read_pages=release_read_pages)
 
 
 def capture_read_threads() -> int:
