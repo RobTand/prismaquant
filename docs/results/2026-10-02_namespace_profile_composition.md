@@ -42,3 +42,17 @@ real new-destination gap: the old shadow refusal checked only the cost row.
 The existing owner now applies that same refusal to every owned destination,
 including host-local metadata. No new mount policy or baseline growth. The
 failed action has no successful CAS result and is not called GREEN.
+
+
+## Append: unbound instrumentation adapter refusal
+
+Source audit after the 261-pass corrected gate found that a declared
+`namespace_profile` without `namespace_binding` still took the adapter's legacy
+path. Causal PB action
+`0e33fde039ff69481eddf1275823f38b3a626ed455afc5e35153ce4639c58cda`
+on `5df1f460e` failed both known/unknown declaration controls by reaching the
+Docker boundary. The existing adapter now refuses this explicit declaration
+unless it has bound published ownership. Legacy specs with no profile declaration
+are unchanged. The final adapter/composition-only gate qualifies this narrow
+correction; preceding 261-pass evidence is reused only for unchanged sources.
+Failed causal artifacts are retained and are not relabeled as successful results.
