@@ -110,6 +110,18 @@ Existing immutable end-to-end goldens and independent source framing oracles
 preserve their distinct identities. No wire/profile migration, source
 acquisition, cache, numerical, runtime pin, default or performance change.
 
+Re-stamped 2026-10-02 (Refs #1504, #1588): selected-wire materialization uses
+the carried producer expert projection to declare `routed_moe` consistently
+for receipt identity, Hessian applicability, batch grouping and single/batch
+anchor measurement. The existing served-recipe resolver therefore determines
+the bytes completed at a selected routed E2M1x2 sub-cap rung. Prior research-wire
+receipts that disagree refuse at the unchanged cached-unit content gate;
+no journal, recipe or receipt is rewritten to adopt them. Existing calibration
+reuse, selected-only encoding, resume verification and finalization retain their
+contracts. No alternate cache or dispatcher, pin, serving gate, menu or production
+default is introduced. This CPU wiring is not full-gamut pricing or served
+qualification, and the parent measurement acceptance remains open.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
