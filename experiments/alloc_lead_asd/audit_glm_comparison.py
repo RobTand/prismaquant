@@ -69,6 +69,7 @@ def main():
     totals['within_unit_predicted_WA_minus_W'] = totals['cost'] - totals['w']
     bands = {}
     for name, (lo, hi) in {'same_context_0_510': (0, 511),
+                           'same_prefix_all_logit_scope_0_511': (0, 512),
                            'cross_row_context_511_2046': (511, 2047),
                            'all_0_2046': (0, 2047)}.items():
         w = values['a8_routed_only_w'][:, lo:hi].mean(axis=1)
@@ -88,7 +89,11 @@ def main():
               'inputs': identities, 'null_bitwise_windows': 25,
               'same_context_original_calibration_rows': same_rows,
               'same_context_row_count': len(same_rows),
-              'same_context_output_positions': [0, 510],
+              'historical_same_context_output_positions': [0, 510],
+              'all_logit_scope_common_prefix_positions': [0, 511],
+              'all_logit_scope_condition': 'Distribution KL has no next-token target; '
+                                          'position511 is scored against source logits. '
+                                          'Actual prefix independence still needs the source-provider gate.',
               'priced_probe_identity': {key: probe[key] for key in (
                   'calibration_sha256', 'calibration_shape', 'token_scope', 'normalization',
                   'noise_layout', 'n_probes', 'seed_base', 'temperature', 'distribution')},
@@ -101,8 +106,10 @@ def main():
               'reason': 'Saved per-unit components are sums over512 complete sequences. '
                         'No per-sequence components survive in the inspected replay directory. '
                         'The selected25 sequences and output positions0..510 cannot be recovered '
-                        'from draw sums. Removing activation position511 would also retain the '
-                        'output-position511 Fisher contribution in earlier activation cotangents.',
+                        'from draw sums. For the historical0..510 band, removing activation '
+                        'position511 would also retain its output Fisher contribution in earlier '
+                        'activation cotangents. Using0..511 distribution KL instead matches '
+                        'the all-logit scope, subject to source-prefix independence qualification.',
               'not_established': ['subset variance bound', 'actual GLM row correctness',
                                   'cause of the historical factor-seven A/W ratio',
                                   'matched standalone A or joint-network Fisher versus actual KL']}
