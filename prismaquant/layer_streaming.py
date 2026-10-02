@@ -527,6 +527,8 @@ def _build_fp8_scale_inv_map(model_path: str, *,
     reaches a profile's `fp8_scale_pairs` override, so DeepSeek-V4's pairing
     scans the caller's index instead of opening its own.
     """
+    if config is None and getattr(source_authentication, 'is_qualified_original_material', False):
+        config = _source_json(os.path.join(model_path, 'config.json'), source_authentication)
     # Profile-driven dispatch (refactor #32). Profiles that store FP8
     # scales under a non-standard path (DSv4 uses `.scale` siblings)
     # return a fully populated map from `fp8_scale_pairs`. Profiles

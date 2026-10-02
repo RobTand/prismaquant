@@ -88,6 +88,9 @@ subclasses and other coercible/nonpositive values refuse; legacy parsing remains
 unchanged.
 Profiles may receive the parsed complete index through their existing private
 metadata intake; Qwen MoE uses it for namespace evidence instead of a pool read.
+Direct FP8-map consumers that omit parsed config bind it through the same owned
+JSON/window seam before selecting the profile or interpreting block/MXFP4
+declarations. Passing a profile alone never selects pool metadata.
 
 Existing source JSON, layer/head tensor and cache-header reads enter the owner's
 finite whole-file windows automatically. Every payload/header decoder still
