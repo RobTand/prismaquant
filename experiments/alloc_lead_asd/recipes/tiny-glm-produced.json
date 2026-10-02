@@ -14,12 +14,12 @@
     "temp_max_bytes": 67108864
   },
   "working_demands": {
-    "ram": {
+    "stage/ram": {
       "minimum_gib": 1,
       "window_gib": 2
     }
   },
   "permitted_tiers": [
-    "ram"
+    "stage/ram"
   ]
 }
