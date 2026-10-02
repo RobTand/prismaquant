@@ -33,6 +33,41 @@ a bounded ZFS diagnostic, with no end-to-end corrupted artifact demonstrated.
 That original integrity requirement remains unmet; the exit-only regression
 now constructs deterministic drift, not a stronger production guarantee.
 See [recovery acceptance census](measurements/pr1924-recovery-2026-10-02.md).
+Re-stamped 2026-10-02 (PQ #1986, Refs #1588), integrated on
+`sol/pq1986-integrated-20261002` from current main and the preserved component commits. The opt-in campaign namespace preparation API extends the
+existing dispatcher, without a new scheduler or CLI: a complete hash-keyed
+reconciliation roster explicitly selects unfinished requests and independently
+supplied evidence/readset/dependency expectations bind each digest-keyed row.
+Reviewed baseline and executed full commits remain distinct. Owned output and
+cache/temp destinations are deterministic; shared no-clobber publication admits
+only identical ownership/request bytes on resume. The container adapter checks
+publication, command/environment, paths and the committed full executed source
+before Docker inspection. Guarded import resolution must reach that actual
+checkout, not a defaulted or image-only root. Every owned output/cache/temp path
+requires a writable identity-mapped persistent mount. Path-valued input references
+must be canonical before overlap checks, without reading their artifacts. After
+ownership publication/admission, descriptor-anchored no-follow directory creation
+establishes writable TMPDIR/TMP/TEMP destinations; preparation remains write-free.
+Every mount source and target passes the shared canonical absolute-path grammar
+before containment or writable coverage comparisons, including refusal of leading
+`//`. Opt-in guarded import selection conservatively refuses earlier mounted
+source modules, sourceless bytecode/package initializers and native-looking shared
+objects before Docker inspection; source-package precedence and legacy unguarded
+selection remain unchanged. This declared-path admission does not freeze host
+source/model bytes: a read-only bind mount is not immutable-generation evidence.
+Dynamic import hooks and container ABI resolution remain outside this CPU proof.
+Namespace metadata publication opts into the existing shared no-clobber publisher's
+no-follow mode. Every parent is opened or created through directory descriptors;
+staging, hard-link publication, cleanup and directory fsync stay relative to that
+same admitted parent. A parent replaced by a symlink after preflight cannot redirect
+metadata writes. Legacy publisher callers retain the existing default path behavior.
+No contract means unchanged legacy behavior. This
+metadata-only CPU slice does not verify completion evidence or input bytes,
+rederive resource demand, prove legacy/current runtime compatibility, adopt
+seeds, submit rows, or qualify prices/serving/GPU recovery. Existing campaign
+seed, checkpoint and journal gates, caches, pins, formats and ship gates remain
+unchanged. Gate: `tests/test_tessera_campaign_namespace_1986.py`.
+
 Re-stamped 2026-10-02 (Refs #1992, DSv4 CPU fixture family): the real
 vendored rope, model-walk, grouped-Fisher and compressor-layout tests use the
 existing item-level `own_process` boundary in mixed-file sessions. Unsupported
@@ -118,6 +153,30 @@ consumers, establish retirement/spill lifetime, or prove an executed consumer
 chain. Sealed records, handoff JSON bytes/schema, kernels, numerical behavior,
 export wire, pins, pipeline defaults and serving gates are unchanged. CPU
 fixtures are not GPU/model admission.
+
+Re-stamped 2026-10-02 (PQ #1942): admitted row profiling separates
+profile generation/publication from host telemetry. PB's deliberate
+`NoNewPrivileges=1` is preserved: the observer does not invoke sudo or attach
+a privileged profiler. A same-UID py-spy parent runs inside the workload's
+existing container and namespace, retaining the original Python argv as its
+child. Its completion record binds the actual workload PID in the profiler's
+own namespace; valid frame references and nonempty samples for that PID are
+required before publication. Status-worker-only traces cannot qualify a row.
+A nonzero workload exit survives py-spy shutdown errors and observer rejection;
+profiler and observer outcomes are recorded independently. Publication requires
+both a successful workload and a successful profiler. Both-box Netdata readiness,
+atomic publication and row/observer failure gates remain mandatory. The
+existing PB row deadline bounds the process tree; no profiler duration cutoff
+signals a quantization row. This changes opt-in instrumentation only, not
+runtime/encoder source, numerical flags, formats, caches, pins or ship gates.
+The host observer loads the authoritative stdlib-only `io_spans.PeriodicSampler`
+through the same source-owner loader as its digest bridge, without executing
+production package initialization or importing Torch/container dependencies.
+Sampler lifetime, native identity and sticky observer timeout refusal are unchanged;
+`tests/test_profile_observer_bootstrap_1942.py` executes the actual observer import
+chain in a fresh no-site interpreter. No production package namespace is replaced.
+CPU tests and native same-UID profiling do not establish a GPU A/B result.
+See `docs/campaign_row_profiling.md` for the admitted dependency contract.
 
 Re-stamped 2026-10-01 (PQ #1936, Refs #1921): allocation first separates
 visual policy from orchestration. A complete measured visual Fisher/cost
