@@ -656,7 +656,7 @@ def _obs_scope(**overrides):
 def test_observation_converts_to_one_proposal_row(tmp_path):
     observation_fixture(tmp_path)
     table = srp.consume_shape_time_observation([tmp_path / "obs" / "observation.json"], table_id="pilot")
-    assert table.context.tensor_parallel == 1 and table.context.regimes == (1,)
+    assert table.context.tensor_parallel == 1 and table.context.regimes == (512,)
     assert len(table.rows) == 1 and table.rate_pools == ()
     row = table.rows[0]
     assert row.key == srp.ShapeKey("dense", "256x256", OBS_FAMILY, 896, 512)
@@ -664,7 +664,7 @@ def test_observation_converts_to_one_proposal_row(tmp_path):
     assert row.measurement.method == "cuda_events"
     assert row.measurement.samples_ms == (1.0, 2.0, 3.0, 4.0)
     assert row.measurement.median_ms == 2.5 and row.measurement.warmup_iterations == 5
-    # The observation itself binds a receipt; conversion does not invent a decode row.
+    # The observation times one M; conversion does not invent a decode row.
     assert table.lookup(srp.ShapeKey("dense", "256x256", OBS_FAMILY, 896, 1)) is None
 
 
@@ -725,7 +725,9 @@ def test_observation_refuses_tampered_or_unbound_fields(tmp_path, mutation):
         elif mutation == "lane":
             doc["kernel_lane"] = ["x", "y"]
         elif mutation == "family":
-            doc["family"] = "TESSERA_FP8"
+            # Self-consistent with the panel's own claims: the observation
+            # names a family its bound payload route does not resolve to.
+            doc["family"] = "TESSERA_E2M1_K2"
         elif mutation == "token":
             doc["replay"]["tool_source_sha256"] = OBS_PRODUCER_TOOL
     obs = [tmp_path / "obs" / "observation.json"]
