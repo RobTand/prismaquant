@@ -197,3 +197,41 @@ required before a real copy. No new speed/peak-memory claim is inferred
 from this failure-state fix, and the old profiles are not relabeled as
 profiles of the correction commit. Real CUDA/pinned-page and production
 admission acceptance remain open in parent #1250.
+
+## Root review correction: drain callback failure
+
+Root QA found that preserving `_waiting` through `_deliver` allowed a
+second drain to retry consumed rows after a roll/durable callback failed
+mid-step. Separate commit `3ce42de9404ffde8a93105fceb4bdaea1d6d6312` restores
+baseline detachment **before** delivery. The failed DMA owner and captured
+stream ledger independently retain unproven banks; `_waiting` is no longer
+used as a retry queue for a possibly durable prefix.
+
+Causal RED `f7b26e63574a9e851a20e479e9f04a86165b01e8c766ab2ee4e14138407d9c2b`
+failed four cases on real prior code: default/reuse paths, each with either
+roll or durable callback failure on the second row, followed by drain.
+The failure was attempted delivery of a consumed `None` row; 29 other
+cases were deselected. The correction checks subsequent drain/abandon
+cannot duplicate callbacks or deliver a consumed row.
+
+| Corrected source gate | Full action key | Result |
+|---|---|---|
+| All owner/lifetime/callback/bytes cases | `bca54a56949c464bf459f8e589e509644a10c66c648ace286bcf33c049418bf3` | 33 passed, no skips |
+| Existing chain behavior | `2a03408fff1025e7800ad8107919efb3315befe5ca1c380c48b4ca11ef0f9202` | 31 passed, 6 existing CUDA skips |
+| Architecture mechanics | `85472c63f6deaa21150756694f8d9e43227232f10e056d052a73380568bfc3cf` | 13 passed |
+| Compile / exact pins | `04c916f72a19c52ae05f87150e7b6b7be2401d3f686a350d4eca6287f02e9ff5` | 4 modules compiled, rc 0 |
+
+All 83 cases reconcile without missing collection. The selected total,
+including the 32 unchanged disjoint cases, is now 109 passed / 6 skipped /
+0 failed, 115 collected. Negative Event/stream-fence, previous-step, two
+original streams, GC retention, closed new-owner, alias, and exact entry
+file controls remain green after detachment. The drain Event-failure
+control now expects `_waiting=None` while the actual banks/credit and
+original stream proof remain retained; failed `abandon` still preserves
+its step until completion is proven.
+
+All four final successful terminals/CAS payloads and their five delivered
+qualified source files were independently checked in `DRAIN-EVIDENCE.json`
+and `DRAIN-VERIFIED.json`. Measurement attribution and remaining real
+CUDA/admission/profile gates above are unchanged; this correction adds no
+new performance or GPU assumption.
