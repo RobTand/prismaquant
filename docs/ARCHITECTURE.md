@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2111, Refs PrismaBuild #905): the opt-in CPU
+checkpoint-export component freezes twelve distinct 64-entry cohorts and six
+paced/unpaced pairs. It reads original archive bytes through the existing
+serial exact-entry scratch and staged checkpoint owners, then calls the
+existing produced-file writer, spool, PB export, origin commit and release.
+The experiment changes only the per-group `paced` argument. It adds no cache,
+dispatcher, production default or serving gate. Authentication can fan out
+through PB; the paired export remains one action. Component completion always
+reports `pb905_gate_qualified=False`: organic application mover contention and
+reviewed profiling/placement remain required for the PB #905 default gate.
+See `docs/design/pb905_checkpoint_export_component.md` for the finite input,
+retained-origin and launch-review contracts.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
