@@ -102,6 +102,9 @@ class ModelProfile(ABC):
         # an on-disk census to disambiguate two source layouts that share the
         # same HF config declaration.
         self._declared_model_path: Path | None = None
+        # A source owner may already hold the complete parsed checkpoint index.
+        # Families needing namespace evidence then consume it without file IO.
+        self._declared_checkpoint_index: dict | None = None
         # The parsed config.json detection resolved this profile from, when
         # detection had one (`detect_profile`, `profile_from_config`). Empty
         # for a hand-built profile. Private intake context, like the path: a
@@ -115,6 +118,12 @@ class ModelProfile(ABC):
     def _declare_config_document(self, config: dict | None) -> None:
         """Attach the parsed config.json detection resolved this profile from."""
         self._declared_config = config if isinstance(config, dict) else None
+
+    def _declare_checkpoint_index(self, index: dict) -> None:
+        """Attach owned index evidence instead of reopening a mutable path."""
+        if not isinstance(index, dict):
+            raise ValueError('declared checkpoint index is not a JSON object')
+        self._declared_checkpoint_index = index
 
     def declare_config(
         self,
