@@ -34,6 +34,21 @@ rederive resource demand, prove legacy/current runtime compatibility, adopt
 seeds, submit rows, or qualify prices/serving/GPU recovery. Existing campaign
 seed, checkpoint and journal gates, caches, pins, formats and ship gates remain
 unchanged. Gate: `tests/test_tessera_campaign_namespace_1986.py`.
+
+Re-stamped 2026-10-02 (Refs #1992, DSv4 CPU fixture family): the real
+vendored rope, model-walk, grouped-Fisher and compressor-layout tests use the
+existing item-level `own_process` boundary in mixed-file sessions. Unsupported
+AutoModel configuration refusals can import native DSv4 while formatting the
+lazy mapping; restoring an error ledger does not restore that namespace. The
+shared real predecessor/session helper retains native-package and dead-override
+refusals; assertions, widths and numerical/layout contracts are unchanged.
+The source-backed fake-trace test retains its base process behavior and source
+requirement; its unqualified extra isolation decorator was withdrawn from this
+delivery. The previously isolated MXFP4 target file is unchanged. This is test isolation,
+not a production/runtime/default/format/cache/export/serving-gate change or a
+GPU/model/performance qualification. Evidence and per-node acceptance:
+[DSv4 CPU fixture family](results/2026-10-02_dsv4_cpu_fixture_family.md).
+
 Re-stamped 2026-10-01 (Refs PQ #1171, forward preparation slice): newly
 built Stage A forward group manifests carry the same complete head/forward
 read set and round metadata. Group execution samples remain in the existing
