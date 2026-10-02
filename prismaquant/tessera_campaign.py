@@ -4533,11 +4533,11 @@ def _campaign_layer_scope(names, layer_stride: int) -> list[str]:
     """The same explicit layer scope for supported and unsupported units."""
     if layer_stride <= 1:
         return list(names)
-    import re
+    from .qnames import DOTTED_LAYER_QNAME
 
     selected = []
     for name in names:
-        match = re.search(r"\.layers\.(\d+)\.", name)
+        match = DOTTED_LAYER_QNAME.search(name)
         if match is None or int(match.group(1)) % layer_stride == 0:
             selected.append(name)
     return selected
