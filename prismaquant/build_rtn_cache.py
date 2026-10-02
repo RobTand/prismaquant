@@ -407,10 +407,10 @@ def cache_reference_log_probs(
 
 
 def kl_divergence(student_logits, teacher_log_probs):
+    from .kl_fisher import forward_kl_per_token
+
     student_log_probs = F.log_softmax(student_logits.float(), dim=-1)  # fp32!
-    teacher_probs = teacher_log_probs.exp()
-    kl = (teacher_probs * (teacher_log_probs - student_log_probs)).sum(dim=-1)
-    return kl.mean()
+    return forward_kl_per_token(student_log_probs, teacher_log_probs).mean()
 
 
 @torch.no_grad()
