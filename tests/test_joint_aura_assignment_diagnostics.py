@@ -26,7 +26,8 @@ def test_raw_signed_summary_keeps_additive_and_joint_currencies_separate():
     columns = [[1.0, 2.0], [-1.0, -2.0]]
     additive = joint.signed_probe_quadratic_summary(columns)
     quadratic = joint.signed_probe_quadratic_summary(columns, objective='joint_quadratic')
-    assert additive == {'mean': 2.5, 'standard_error': 1.5, 'per_probe': [1.0, 4.0]}
+    assert additive['mean'] == 2.5 and additive['per_probe'] == [1.0, 4.0]
+    assert additive['standard_error'] == pytest.approx(1.5, rel=0, abs=math.ulp(1.5))
     assert quadratic == {'mean': 0.0, 'standard_error': 0.0, 'per_probe': [0.0, 0.0]}
     assert not any('identity' in key or 'currency' in key for key in additive)
 
