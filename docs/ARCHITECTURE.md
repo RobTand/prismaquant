@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1301, preparation digest encodings): selected-cache
+input and manifest hashes use the existing exact byte owner. Its manifest
+writer retains strict ASCII-escaped pretty JSON plus LF; read-path publication
+retains the distinct lax ASCII-escaped pretty profile plus LF; stdout retains
+spaced lax ASCII JSON. The shared journal writer uses the explicit
+`DIRECT_UTF8_INDENT2_STRICT` profile, preserving literal Unicode and no final
+LF. Migration pin deduplication uses the existing spaced lax profile. Encoding
+options, acquired bytes, error behavior, ordering, publication and identities
+are preserved; no stored identity migration or profile collapse is performed.
+Old production outcomes are frozen per site before replacement, and the
+primitive-site baseline removes exactly five scopes.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
