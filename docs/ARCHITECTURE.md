@@ -5,7 +5,9 @@ owner has an internal CPU whole-file original-material path. Independently
 bound reviewed publisher and PB readset control inputs define a closed roster
 and canonical logical-to-physical mapping. Publisher LFS SHA256/lengths, native
 Git auxiliary object IDs, complete checkpoint index and producer declarations
-must agree before original bootstrap. Every auxiliary is authenticated before
+must agree before original bootstrap. The generation-bound public PB client
+SDK validates admitted sealed readset control bytes; a bare installed core
+cannot choose another parser. Every auxiliary is authenticated before
 config/index decoding. Delivery uses the existing PB reader-lease window and
 IO-engine SealedBuffer, verifies the actual whole-file digest and kernel
 write/grow/shrink/seal mask, then exposes that same memfd for JSON, header and

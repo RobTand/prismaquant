@@ -12,7 +12,10 @@ and expected publisher ID/full revision; a digest supplied by the mutable pool
 itself is not publisher authority. The parser adds no persistent protocol or
 network fetch. Its in-memory coordinates project the exact closed publisher
 names into explicit canonical physical paths in the existing whole-file readset.
-The PB validator owns that readset's schema. Missing/duplicate names, incomplete
+The public PB client SDK from the same qualified helper generation as reader
+leases validates an admitted transient sealed copy of those already-bound
+control bytes; a container-installed core is not imported. The readset keeps
+PB's existing schema. Missing/duplicate names, incomplete
 whole-file coverage, publisher length/LFS digest disagreement and conflicting
 producer config/auxiliary/weight declarations refuse before bootstrap. The full
 producer tensor map must match the authenticated complete checkpoint index.

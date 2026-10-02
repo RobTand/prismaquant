@@ -14,6 +14,7 @@ import re
 from .schemas import Contract, strict_json_loads
 from .digests import is_sha256hex
 from .stage_inputs import read_bound, require_source_identity
+from .memory_management import reserve_allocation
 
 
 _contract = Contract(RuntimeError, 'original generation: ')
@@ -29,9 +30,11 @@ def _control(record, label):
     _require(isinstance(record, dict) and set(record) == {'path', 'sha256'} and
              is_sha256hex(record.get('sha256')), f'{label} needs independently bound control input')
     _require(Path(record['path']).stat().st_size <= 16 * 1024**2, f'{label} control input too large')
-    return strict_json_loads(read_bound(record, label),
-                            duplicate=lambda key: RuntimeError(f'{label}: duplicate key {key}'),
-                            constant=lambda name: RuntimeError(f'{label}: invalid constant {name}'))
+    raw = read_bound(record, label)
+    value = strict_json_loads(raw,
+                             duplicate=lambda key: RuntimeError(f'{label}: duplicate key {key}'),
+                             constant=lambda name: RuntimeError(f'{label}: invalid constant {name}'))
+    return raw, value
 
 
 @dataclass(frozen=True)
@@ -43,14 +46,14 @@ class OriginalCoordinate:
 
 
 def original_generation_coordinates(*, publisher_input, publisher_id, publisher_revision,
-                                    readset_input, source_paths, producer_source):
+                                    readset_input, source_paths, producer_source, resource_check):
     """Closed native HF sibling roster projected into existing PB whole-file entries.
 
     A Git auxiliary's SHA256 comes from the separately bound readset; delivered
     bytes must ALSO authenticate to the publisher's native Git blob ID before
     bootstrap. LFS SHA256 and lengths are independently publisher-derived.
     """
-    publisher = _control(publisher_input, 'publisher authority')
+    _publisher_raw, publisher = _control(publisher_input, 'publisher authority')
     _contract.string(publisher_id, where='explicit publisher ID')
     _contract.string(publisher_revision, where='full publisher revision', pattern=_GIT_OBJECT_ID)
     _require(isinstance(publisher, dict) and publisher.get('id') == publisher_id and
@@ -75,8 +78,20 @@ def original_generation_coordinates(*, publisher_input, publisher_id, publisher_
         native[name] = row
     _require(isinstance(source_paths, dict) and set(source_paths) == set(native),
              'source mapping must cover exactly the closed publisher roster')
-    from prismabuild.core import validate_data_manifest
-    readset = validate_data_manifest(_control(readset_input, 'original material readset'))
+    from .io_engine import SealedBuffer
+    from .staged_lease import client_sdk
+
+    raw, _readset_document = _control(readset_input, 'original material readset')
+    client = client_sdk()  # The same qualified generation owns parsing and leases.
+    reserve_allocation(resource_check, 'before_original_generation_control', cpu_bytes=len(raw))
+    control = SealedBuffer(len(raw))
+    try:
+        control.fill_bytes(raw)
+        _require(control.seal() == readset_input['sha256'], 'readset control binding changed')
+        control.require_sealed()
+        readset, _encoding = client.read_data_manifest(control.path)
+    finally:
+        control.close()
     entries = {(row['path'], row['offset']): row for row in readset['entries']}
     coordinates = {}
     for name, row in native.items():

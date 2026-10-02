@@ -430,7 +430,7 @@ class CaptureSourceAuthentication:
         coordinates, tensors = original_generation_coordinates(
             publisher_input=publisher_input, publisher_id=publisher_id,
             publisher_revision=publisher_revision, readset_input=readset_input,
-            source_paths=source_paths, producer_source=producer_source)
+            source_paths=source_paths, producer_source=producer_source, resource_check=resource_check)
         if any(row.size > max_material_bytes for row in coordinates.values()):
             raise RuntimeError('original material exceeds the admitted material byte bound')
         self = cls.__new__(cls)
