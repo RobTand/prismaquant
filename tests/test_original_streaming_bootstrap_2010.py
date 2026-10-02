@@ -323,3 +323,37 @@ def test_mid_layer_reader_failure_retains_aliases_until_error_frame_release(orig
     gc.collect()
     assert owner.material_live_bytes == 0
     owner.close()
+
+
+class _IntegerSubclass(int):
+    pass
+
+
+@pytest.mark.parametrize('field', ['max_cache_slots', 'prefetch_workers'])
+@pytest.mark.parametrize('value', [None, 'auto', 'AUTO', '', ' ', '2', True, False, 0, -1,
+                                  1.0, _IntegerSubclass(1)])
+def test_original_entry_refuses_nonexact_positive_counts_before_bootstrap(material, monkeypatch, field, value):  # noqa: F811
+    m = material
+    with _owner(m) as owner:
+        before = list(m['checks'])
+        def unexpected(*args, **kwargs):
+            raise AssertionError('invalid original count reached model/bootstrap or autoscaling')
+        monkeypatch.setattr(streaming_model, 'load_original_streaming_bootstrap', unexpected)
+        options = dict(cache_headroom_gb=0, max_cache_slots=2, prefetch_workers=1)
+        options[field] = value
+        with pytest.raises(RuntimeError, match=f'original CPU source: {field} must be an integer'):
+            streaming_model._build_streaming_context(str(m['root']), device=torch.device('cpu'),
+                dtype=torch.float32, offload_folder='unused', source_authentication=owner, **options)
+        assert m['checks'] == before and owner.material_live_bytes == 0
+
+
+@pytest.mark.parametrize('slots,workers,expected_workers', [
+    (_IntegerSubclass(2), 'auto', 2), (2, '', 2), (2, _IntegerSubclass(1), 1)])
+def test_legacy_entry_keeps_auto_and_integer_subclass_semantics(original_model, slots, workers, expected_workers):
+    m = original_model
+    context = streaming_model._build_streaming_context(str(Path(m['paths']['config.json']).parent),
+        device=torch.device('cpu'), dtype=torch.float32, offload_folder=str(m['tmp'] / 'legacy-counts'),
+        cache_headroom_gb=0, max_cache_slots=slots, prefetch_workers=workers,
+        prefetch_min_available_gb=0, attn_implementation='eager')
+    assert context.prefetch_workers == expected_workers
+    context.shutdown()

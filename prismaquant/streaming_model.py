@@ -2059,7 +2059,8 @@ def _build_streaming_context(model_path: str, *,
         raise TypeError('source_snapshot_only must be a bool')
     if source_snapshot_only and source_authentication is None:
         raise RuntimeError('snapshot-only source requires authenticated source ownership')
-    if max_cache_slots is not None:
+    original_material = getattr(source_authentication, 'is_qualified_original_material', False)
+    if not original_material and max_cache_slots is not None:
         if (
             isinstance(max_cache_slots, bool)
             or not isinstance(max_cache_slots, int)
@@ -2073,15 +2074,18 @@ def _build_streaming_context(model_path: str, *,
     # Construction can require a multimodal class even for token-only input.
     # Only the caller's input declaration permits materializing a visual tower.
     materialize_visual = multimodal
-    original_material = getattr(source_authentication, 'is_qualified_original_material', False)
     original_config = None
     original_profile = None
     if original_material:
         source_authentication.require_material_device(device)
         if source_scope is not None:
             raise RuntimeError('original bootstrap source scopes are not qualified')
-        if cache_headroom_gb is None or max_cache_slots is None or prefetch_workers is None:
-            raise RuntimeError('original CPU source requires explicit cache headroom, slots and prefetch workers')
+        if cache_headroom_gb is None:
+            raise RuntimeError('original CPU source requires explicit cache headroom')
+        from .schemas import Contract
+        original_entry = Contract(RuntimeError, 'original CPU source: ')
+        original_entry.integer(max_cache_slots, where='max_cache_slots', minimum=1)
+        original_entry.integer(prefetch_workers, where='prefetch_workers', minimum=1)
         config, original_profile, multimodal, original_config = load_original_streaming_bootstrap(
             model_path, source_authentication, multimodal=multimodal)
     if source_authentication is not None:

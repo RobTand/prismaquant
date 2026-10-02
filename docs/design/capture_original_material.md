@@ -82,6 +82,10 @@ allocation through the owner's existing resource check. Dynamic configuration
 or file indirection, visual inputs, out-of-body source scopes and implicit cache
 autoscaling refuse. Cache headroom, maximum slots and prefetch workers must be
 explicit. Construction mode remains distinct from visual-input authorization.
+Original slots and prefetch worker counts must be exact positive integers through
+the shared contract before bootstrap. Auto/empty strings, booleans, integer
+subclasses and other coercible/nonpositive values refuse; legacy parsing remains
+unchanged.
 Profiles may receive the parsed complete index through their existing private
 metadata intake; Qwen MoE uses it for namespace evidence instead of a pool read.
 

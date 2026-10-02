@@ -6,7 +6,10 @@ whole-file material windows for the qualified original owner. Its private
 bootstrap resolves the profile from strict owned config/index metadata, applies
 the existing pure text-only rules and uses the existing stock AutoConfig adapter
 over a privately sealed derived config. Explicit cache headroom, slots and
-prefetch workers are required; filesystem staging, implicit autoscaling, dynamic
+prefetch workers are required. Slots and worker counts use the shared exact-int
+contract with minimum one before bootstrap; booleans, integer subclasses,
+strings (including `auto` and empty), nonintegers, zero and negatives refuse.
+Legacy entry parsing retains its behavior. Filesystem staging, implicit autoscaling, dynamic
 configuration, visual inputs and additional source scopes are refused. Skeleton
 construction mode never authorizes visual input materialization. Native CPU
 storage aliases retain the owner's serialized-memory charge after each reader
