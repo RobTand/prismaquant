@@ -310,6 +310,73 @@ def test_identity_refusals_exit_3_nothing_written(identity_files, tamper, monkey
     assert not (identity_files["output_root"]).exists()
 
 
+def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, monkeypatch):
+    """PQ #2067: the record's bytes are hashed and parsed from one read.
+
+    A replacement between a digest check and a separate parse can hand the
+    gate an internally valid record whose raw wire bytes it never hashed.
+    The gate must return the authenticated record, never the substituted
+    one, and must consume the record bytes exactly once.
+    """
+    from prismaquant.joint_cost_quantum import QuantumIdentityRefused
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+
+    original = _valid_record(identity_files)
+    record_path = identity_files["output_root"].parent / "record.json"
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    original_bytes = json.dumps(original).encode("utf-8")
+    record_path.write_bytes(original_bytes)
+    original_sha = hashlib.sha256(original_bytes).hexdigest()
+
+    # A second, internally valid record for the same campaign: an advisory
+    # window name this verifier expressly ignores (later resolution checks
+    # it). It binds its own identity, so the canonical self-check passes.
+    substituted = json.loads(json.dumps(original))
+    substituted["windows"][0]["names"] = ["advisory-window"]
+    substituted.pop("identity_sha256")
+    substituted["identity_sha256"] = canonical_json_sha256(
+        substituted, where="substituted record")
+    substituted_bytes = json.dumps(substituted).encode("utf-8")
+    assert substituted["identity_sha256"] != original["identity_sha256"]
+
+    real_read_bytes = Path.read_bytes
+    consumed: list[Path] = []
+
+    def racing_read_bytes(self):
+        if self == record_path:
+            consumed.append(self)
+            payload = real_read_bytes(self)
+            # Replace the live file before any second read can see it.
+            swap = record_path.with_suffix(".swap")
+            swap.write_bytes(substituted_bytes)
+            os.replace(swap, record_path)
+            return payload
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", racing_read_bytes)
+
+    kwargs = dict(
+        quantum_path=record_path, quantum_sha256=original_sha,
+        plan_path=identity_files["plan"][0], plan_sha256=identity_files["plan"][1],
+        prepared_path=identity_files["prepared"][0],
+        prepared_sha256=identity_files["prepared"][1],
+        adjoint_path=identity_files["adjoint"][0],
+        adjoint_sha256=identity_files["adjoint"][1],
+        output_root=identity_files["output_root"])
+
+    verified, _slice = verify_quantum_identity(**kwargs)
+    assert verified["identity_sha256"] == original["identity_sha256"]
+    assert "names" not in verified["windows"][0]
+    assert len(consumed) == 1
+
+    # The live file has changed; the old digest must now refuse.
+    monkeypatch.setattr(Path, "read_bytes", real_read_bytes)
+    assert record_path.read_bytes() == substituted_bytes
+    with pytest.raises(QuantumIdentityRefused, match="digest mismatch"):
+        verify_quantum_identity(**kwargs)
+
+
 
 def test_dev_mode_runs_a_record_under_a_re_declared_plan(identity_files, monkeypatch, capsys):
     """PQ #1147: a plan re-declared after the record was sealed stamps by default.

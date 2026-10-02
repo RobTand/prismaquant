@@ -212,10 +212,20 @@ def verify_quantum_identity(
     """
     try:
         _require_hex(quantum_sha256, "--quantum-sha256")
-        if _digest_of(quantum_path) != quantum_sha256:
+        # One owned read: the record's bytes are hashed and parsed from the
+        # same authenticated copy, so a replacement between a digest check
+        # and a separate parse cannot smuggle a different, internally valid
+        # record past the gate (PQ #2067). ``read_bound`` is the shared
+        # bound-cache/staged-reader owner; a digest mismatch still refuses.
+        from .stage_inputs import read_bound as _read_bound
+        try:
+            raw = _read_bound(
+                {"path": str(quantum_path), "sha256": quantum_sha256},
+                "quantum record")
+        except ValueError:
             raise QuantumIdentityRefused(
                 f"quantum record digest mismatch at {quantum_path}")
-        record = json.loads(Path(quantum_path).read_text())
+        record = json.loads(raw.decode("utf-8"))
         if record.get("schema") != QUANTUM_RECORD_SCHEMA:
             raise QuantumIdentityRefused(
                 f"quantum record schema mismatch: {record.get('schema')!r}")

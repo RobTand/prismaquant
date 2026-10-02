@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2067): `verify_quantum_identity` reads the layer
+quantum record through the shared `stage_inputs.read_bound` owner, so the
+record's wire bytes are hashed and parsed from one authenticated copy. A
+replacement between the digest check and the parse can no longer hand the gate
+a different, internally valid record whose raw bytes it never hashed. The
+`QuantumIdentityRefused` refusal type, the digest-mismatch diagnostic, and the
+schema, identity, campaign, adjoint, chunk and window checks are unchanged;
+plan and prepared inputs keep their existing digest checks. No format, stage,
+pipeline default or serving gate changes.
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
