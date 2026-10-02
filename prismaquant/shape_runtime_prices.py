@@ -927,6 +927,27 @@ def _observation_lane(value, where) -> KernelLane:
     return KernelLane(symbol, decoder)
 
 
+def _route_payload_family(route: str) -> str:
+    """The payload family a Tessera route token resolves to, from the pinned map.
+
+    ``TESSERA_FP8`` is the ROUTE; the family a lane cell names is
+    ``TESSERA_E4M3_K1``. The pinned lane-eligibility table publishes the one
+    map both the producer and PQ derive from, so a shape row is keyed by the
+    payload family and a receipt may never restate the route as the family.
+    """
+    from .tessera_runtime_contract import PAYLOAD_FAMILY_BY_ROUTE
+    family = PAYLOAD_FAMILY_BY_ROUTE.get(route)
+    if not isinstance(family, str) or not family:
+        raise ShapeRuntimeError(
+            f"route {route!r} names no payload family in the pinned contract")
+    return family
+
+
+def _bound_bytes(reader: ArtifactReader, reference) -> bytes:
+    """The authenticated bytes a binding names, without re-reading the path."""
+    return reader.bytes(reference, "bound artifact")[1]
+
+
 def _observation_context(payload: Mapping, where: str, *, scope: Mapping,
                          scope_where: str) -> ShapeRuntimeContext:
     runtime = _object(payload, _OBSERVATION_RUNTIME, where)
@@ -1103,6 +1124,15 @@ def _verify_observation(observation: Mapping) -> dict:
     payload = _object(top["payload"], ("route", "grid", "q256", "rows", "columns"), "observation.payload")
     if payload["route"] != top["scope"]["route"] or payload["grid"] != top["scope"]["grid"]:
         raise ShapeRuntimeError("observation payload route/grid differs from its scope")
+    # The row's family is the PAYLOAD family the route resolves to, not the
+    # route token the wire declares (``TESSERA_FP8`` vs ``TESSERA_E4M3_K1``).
+    # The pinned contract's own map is the authority; a mismatched family is a
+    # second author of the runtime's vocabulary and refuses here.
+    expected_family = _route_payload_family(top["scope"]["route"])
+    if family != expected_family:
+        raise ShapeRuntimeError(
+            f"observation family {family!r} is not the payload family "
+            f"{expected_family!r} its route {top['scope']['route']!r} resolves to")
     if payload["rows"] != n or payload["columns"] != k or payload["q256"] != top["scope"]["q256"]:
         raise ShapeRuntimeError("observation payload geometry differs from its scope")
     rate = _integer(top["scope"]["q256"], "observation scope q256", 1)
@@ -1150,20 +1180,31 @@ def _verify_observation(observation: Mapping) -> dict:
     if projection["batch_size"] != 1 or projection["rows"] != m:
         raise ShapeRuntimeError(
             "observation operator projection must read one M-row operator at batch_size=1")
-    producer = _object(top["producer"], _OBSERVATION_BINDING, "observation.producer")
-    _observation_sha(producer["sha256"], "observation.producer.sha256")
-    _read_json_bound(reader, producer, "observation.producer")
-    if request.get("producer_identity") != producer:
+    producer_binding = _object(top["producer"], _OBSERVATION_BINDING, "observation.producer")
+    _observation_sha(producer_binding["sha256"], "observation.producer.sha256")
+    producer = _read_json_bound(reader, producer_binding, "observation.producer")
+    if request.get("producer_identity") != producer_binding:
         raise ShapeRuntimeError("observation producer differs from its bound request")
+    # PQ re-binds the SEALED producer's own bytes and reads its source identity,
+    # rather than trusting the binding envelope. A replay that shares a source
+    # tree with the producer is legitimate (the original replay does); what is
+    # NOT legitimate is the replay claiming to be the producer, or the replay's
+    # tool bytes being the sealed producer's.
     replay = _object(top["replay"], _OBSERVATION_REPLAY, "observation.replay")
     _observation_sha(replay["source_tree_sha256"], "observation.replay.source_tree_sha256")
     _observation_sha(replay["tool_source_sha256"], "observation.replay.tool_source_sha256")
     _integer(replay["source_tree_members"], "observation.replay.source_tree_members", 1)
     _object(replay["tool"], _OBSERVATION_BINDING, "observation.replay.tool")
-    reader.bytes(replay["tool"], "observation.replay.tool")
-    if replay["tool_source_sha256"] == producer.get("tool_source_sha256"):
+    _replay_tool_path, replay_tool_raw = reader.bytes(replay["tool"], "observation.replay.tool")
+    producer_tool_source = producer.get("tool_source_sha256")
+    if not isinstance(producer_tool_source, str) or not _FLAT_SHA.fullmatch(producer_tool_source):
+        raise ShapeRuntimeError("observation producer identity carries no tool-closure digest")
+    if replay["tool_source_sha256"] == producer_tool_source:
         raise ShapeRuntimeError(
-            "observation replay-validator and original producer identity must be distinct")
+            "observation replay-validator claims the original producer's tool identity")
+    if replay_tool_raw == _bound_bytes(reader, producer_binding):
+        raise ShapeRuntimeError(
+            "observation replay tool bytes are the sealed producer's own bytes")
     invocation = _object(top["invocation"], ("command", "phase", "returncode"), "observation.invocation")
     if invocation["phase"] != "runtime-preflight" or invocation["returncode"] != 0:
         raise ShapeRuntimeError("observation must be issued after a successful CPU preflight")

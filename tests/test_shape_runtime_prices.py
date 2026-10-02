@@ -646,7 +646,11 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
 
 
 def _obs_scope(**overrides):
-    base = {"contract_sha256": OBS_CONTRACT, "tessera_commit": OBS_COMMIT,
+    # ``eligibility`` in this module is the pinned table under the fixture's own
+    # digests (SHA/COMMIT); admission compares the scope's contract digest to
+    # that table's, so the expected scope carries the fixture's committed pair
+    # while the observation itself keeps its own independently bound b40 bytes.
+    base = {"contract_sha256": SHA, "tessera_commit": COMMIT,
             "runtime_image_digest": OBS_IMAGE, "tensor_parallel": 1, "platform": "sm_121",
             "residency": "resident", "execution_mode": "eager"}
     base.update(overrides)
@@ -729,7 +733,10 @@ def test_observation_refuses_tampered_or_unbound_fields(tmp_path, mutation):
             # names a family its bound payload route does not resolve to.
             doc["family"] = "TESSERA_E2M1_K2"
         elif mutation == "token":
-            doc["replay"]["tool_source_sha256"] = OBS_PRODUCER_TOOL
+            # The replay may share the producer's SOURCE TREE; what it may not
+            # do is be the sealed producer tool itself. Point the replay tool
+            # at the producer's own bound bytes.
+            doc["replay"]["tool"] = dict(doc["producer"])
     obs = [tmp_path / "obs" / "observation.json"]
     if mutation == "duplicate":
         observation_fixture(tmp_path)
