@@ -240,8 +240,8 @@ def test_the_synthesized_format_spec_prices_by_shape_and_never_by_a_scalar():
     from prismaquant.tessera_render import synthesize_tessera_spec
 
     # ``bits_for_shape_fn`` routes through ``tessera_tensor_payload_breakdown``,
-    # which refuses a column count that is not a whole number of 256-column
-    # superblocks, so every shape here is one.
+    # which also prices trailing partial superblocks (#1849); these cases
+    # use whole superblocks.
     for name, shape in (("TESSERA_E2M1_K2_R896", (64, 512)),
                         ("TESSERA_E2M1_K1_R512", (96, 768)),
                         ("TESSERA_E4M3_K1_R1024", (96, 512))):
