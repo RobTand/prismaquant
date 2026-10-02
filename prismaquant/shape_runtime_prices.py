@@ -919,8 +919,12 @@ def _observation_sha_in(value, candidates, where) -> None:
 
 
 def _observation_lane(value, where) -> KernelLane:
-    pair = _object(value, ("symbol", "decoder"), where)
-    return KernelLane.from_dict(pair, where)
+    """The observation records the launch as the ``[symbol, decoder]`` pair."""
+    if not isinstance(value, list) or len(value) != 2:
+        raise ShapeRuntimeError(f"{where}: requires a [symbol, decoder] pair")
+    symbol = _string(value[0], where + ".symbol")
+    decoder = _string(value[1], where + ".decoder")
+    return KernelLane(symbol, decoder)
 
 
 def _observation_context(payload: Mapping, where: str) -> ShapeRuntimeContext:
