@@ -955,14 +955,16 @@ def _observation_context(payload: Mapping, where: str) -> ShapeRuntimeContext:
 
 
 def _observation_regimes(_payload: Mapping) -> tuple[int, ...]:
-    """The observation slice times one M; the decode regime is PQ's own reading.
+    """The M the observation's own scope names, as the one measured regime.
 
-    The producer times one operator apply and does not publish a decode row, so
-    the consumer does not invent one. A table may still carry the decode regime
-    because :meth:`ShapeRuntimeTable.lookup` returns ``None`` for a key no row
-    measures -- an absent price is a gap, not a fabricated number.
+    The producer times one operator apply at a single M; PQ declares exactly
+    that M and does not add a decode row for M=1. A caller that later asks
+    :meth:`ShapeRuntimeTable.lookup` for an unmeasured regime gets ``None`` --
+    a gap, never a fabricated number.
     """
-    return (1,)
+    scope = _object(_payload.get("scope"), _OBSERVATION_SCOPE, "observation.scope")
+    shape = _object(scope["shape"], ("M", "N", "K"), "observation.scope.shape")
+    return (_integer(shape["M"], "observation scope M", 1),)
 
 def _read_json_bound(reader: ArtifactReader, binding, where: str) -> Mapping:
     return reader.json(binding, where)[1]
