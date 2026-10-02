@@ -90,7 +90,8 @@ foreign quantum IDs, inconsistent/noncomplete units and malformed references;
 its caller must supply a completion from the chosen execution's authenticated
 CAS result. This publisher/validator prerequisite does not itself wire that
 public PB result reader or authenticate a sealed invocation/source closure.
-Those consumer bindings and the genuine GPU pilot remain open under #1293.
+The selected-result consumer above supplies those bindings; the genuine GPU
+pilot remains open under #1293.
 Counter encoding, arithmetic, pipeline defaults and serving gates are unchanged.
 
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
