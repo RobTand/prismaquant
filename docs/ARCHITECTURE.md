@@ -1,5 +1,35 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 drain correction):
+`_RollPipeline.drain` detaches its pending delivery before callbacks, as the
+original path did. If roll or durable callbacks fail after committing a
+prefix, subsequent drain/abandon cannot deliver consumed rows or report
+that prefix again. Unproven research DMA remains independently owned by
+the retained banks and exact stream ledger; detaching delivery releases
+no bank or credit before its submitting stream is proven complete.
+
+Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 failure ownership):
+a failed reusable `_RollPipeline` copy retains its actual banks and host-byte
+credit with the exact streams that submitted them. Event creation, recording
+or synchronization failures cannot release that ownership. The failed owner
+is held beyond caller/traceback lifetime, and CUDA roll construction/submission
+in this process refuses while it remains unresolved. Only that owner's
+`abandon` retries its captured streams; all outstanding bank copies, including
+the previous step, must be proven complete before any bank/credit is released.
+An unprovable or poisoned context retains ownership until process containment
+or exit. This is default-off research failure ownership, with no polling
+thread, alternate cache or production admission/default change.
+
+Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 / Refs #1250):
+the existing `_RollPipeline` has a constructor-only, default-off research
+mode for two reusable banks of compact CUDA host rows. Only a consumer that
+cannot retain rows is admitted; the first group bounds layout and bank size,
+and subsequent larger or incompatible layouts refuse before copying.
+Public callers, sealed execution inputs and production admission are unchanged.
+CPU simulated-event checks qualify control flow and exact serialized entry
+bytes; CUDA lifetime, admission integration and representative before/after
+in-process plus both-Spark Netdata evidence remain required by #1250.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
@@ -29201,6 +29231,34 @@ of a backward is not that point, since the row rolls one backward later.
 
 Measured claims about the regime's speed and energy live in the PR and the
 PQ #997 record, not here; this section states only the contract.
+
+**Research host reuse (#2097, parent #1250).** Explicit constructor-only
+`reuse_host_buffers=True` requires `roll_may_keep=False`. Two banks cover
+the new copy and the previous backward's rows; every bank owns compact
+individual row storages, reused only after its event fence and roll return.
+The first group's row shape, dtype and count bound both banks. Smaller tail
+groups reuse the prefix; incompatible geometry refuses before allocating or
+copying another group. Window drains fence delivery and retain the banks;
+abandonment fences the pending copy before releasing them. A callback may
+borrow a row only during its invocation and may not reenter the pipeline.
+A partial copy failure fences already-submitted copies before abandonment;
+cleanup failures annotate the original exception. Default/public callers retain the
+existing allocating path. This mode is not wired into Stage A or Stage B
+execution and supplies no GPU speed, energy or peak-residency claim.
+
+On an unproven copy failure the same pipeline retains both banks and each
+bank's original copy stream. `held_host_bytes` continues to report the held
+row bytes. A bounded failed-owner retention set closes CUDA roll work in
+the process; it stores failure ownership, never reusable data for another
+consumer. Only the original owner can recover with `abandon`, which fences
+every captured stream before clearing ownership. A failed fence preserves
+all bank references and credit, even if exceptions/tracebacks are dropped.
+No background poll or guessed completion exists. A poisoned context stays
+retained until process containment or exit; production/default callers do
+not enter this state unless an explicit research owner was used first.
+Draining detaches the delivery step before invoking roll/durable callbacks.
+A failed callback's committed prefix is never retried by another drain;
+failed DMA still retains its banks/stream proof until original-owner cleanup.
 
 ### Stage A checkpoints written as the chain rolls (#1002)
 
