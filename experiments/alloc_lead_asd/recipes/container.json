@@ -5,6 +5,8 @@
     "content_sha256": "eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd",
     "mounts": [
       {"source": "/mnt/shared", "target": "/mnt/shared", "readonly": true},
+      {"source": "/mnt/shared/prismabuild-fleet/pb-queue", "target": "/mnt/shared/prismabuild-fleet/pb-queue", "readonly": false},
+      {"source": "/ram/prewarm", "target": "/ram/prewarm", "readonly": true},
       {"source": "/mnt/shared/tessera-measurements/pq1962-sol-20261002", "target": "/output", "readonly": false}
     ]
   },
