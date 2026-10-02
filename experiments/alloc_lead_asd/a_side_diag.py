@@ -41,6 +41,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import random
 import time
@@ -438,9 +439,16 @@ def profile_and_crosscheck(args, model, units, names, ids, seeds, specs_obj, n_g
     diffs = {}
     for si, spec in enumerate(SPECS):
         a, b = v1[si, :, :, 0], comps_v2[si, :, :2, 0]
+        if not bool(torch.isfinite(a).all()) or not bool(torch.isfinite(b).all()):
+            raise SystemExit(f"nonfinite component observation in {spec} crosscheck")
         rms = float(a.pow(2).mean().sqrt())
-        diffs[spec] = {"max_abs": float((a - b).abs().max()), "rms_v1": rms,
-                       "max_rel_to_rms": float((a - b).abs().max()) / rms if rms else None}
+        if not math.isfinite(rms) or rms <= 0:
+            raise SystemExit(f"invalid reference RMS in {spec} crosscheck: {rms}")
+        maximum = float((a - b).abs().max())
+        relative = maximum / rms
+        if not math.isfinite(maximum) or not math.isfinite(relative):
+            raise SystemExit(f"nonfinite component error in {spec} crosscheck")
+        diffs[spec] = {"max_abs": maximum, "rms_v1": rms, "max_rel_to_rms": relative}
     report["component_crosscheck"] = diffs
     log(f"component cross-check v1 vs v2: {json.dumps(diffs)}")
 
@@ -459,11 +467,19 @@ def profile_and_crosscheck(args, model, units, names, ids, seeds, specs_obj, n_g
           lambda: arms_sequence(model, row.to(DEVICE), 0, plan, contexts, {"A_all": 0}, k2, n_global,
                                 scope, temperature, dz_stack, res))
     del dz_stack
+    for label, observation in (("reference", m1), ("candidate", res["A_all"])):
+        for field in ("kl", "q", "s_real"):
+            if not bool(torch.isfinite(observation[field]).all()):
+                raise SystemExit(f"nonfinite {label} arm {field} observation in crosscheck")
     kl_check = {"kl_v1": float(m1["kl"][0]), "kl_v2": float(res["A_all"]["kl"][0]),
                 "q_v1": float(m1["q"][0]), "q_v2": float(res["A_all"]["q"][0]),
                 "s_real_v1": m1["s_real"][:, 0].tolist(),
                 "s_real_v2": res["A_all"]["s_real"][:, 0].tolist()}
+    if abs(kl_check["kl_v1"]) <= 0:
+        raise SystemExit("invalid reference KL bound in crosscheck")
     kl_check["kl_rel_diff"] = abs(kl_check["kl_v1"] - kl_check["kl_v2"]) / abs(kl_check["kl_v1"])
+    if not math.isfinite(kl_check["kl_rel_diff"]):
+        raise SystemExit("nonfinite KL error in crosscheck")
     report["arm_crosscheck"] = kl_check
     log(f"arm cross-check v1 vs v2: {json.dumps(kl_check)}")
     with open(args.output + ".profile.txt", "w") as handle:
