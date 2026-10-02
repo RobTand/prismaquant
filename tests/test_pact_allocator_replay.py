@@ -265,6 +265,32 @@ def test_hull_replay_refuses_changed_numeric_claims(tmp_path, monkeypatch, field
     assert not output.exists()
 
 
+def test_hull_replay_refuses_boolean_zero_loss(tmp_path, monkeypatch):
+    monkeypatch.setitem(MENU, SLOW, (0.0, 1.0))
+    case = _fixture(tmp_path, monkeypatch)
+    frontier, doc = _hull(tmp_path, case.argv, "--bootstrap-draws", "20")
+    vertex = doc["vertices"][0]
+    assert vertex["predicted_dloss"] == 0.0
+    vertex["predicted_dloss"] = False
+    frontier.write_text(json.dumps(doc))
+    output = tmp_path / "out.json"
+    with pytest.raises(SystemExit) as refused:
+        _replay(frontier, vertex["assignment_sha256"], output)
+    assert refused.value.code == 2
+    assert not output.exists()
+
+
+def test_hull_replay_accepts_integer_real_claims(tmp_path, monkeypatch):
+    monkeypatch.setitem(MENU, SLOW, (0.0, 1.0))
+    case = _fixture(tmp_path, monkeypatch)
+    frontier, doc = _hull(tmp_path, case.argv, "--bootstrap-draws", "20")
+    vertex = doc["vertices"][0]
+    vertex["predicted_dloss"] = 0
+    vertex["operator_sum_ms"] = int(vertex["operator_sum_ms"])
+    frontier.write_text(json.dumps(doc))
+    assert _replay(frontier, vertex["assignment_sha256"], tmp_path / "out.json") == 0
+
+
 @pytest.mark.parametrize("extra,diagnostic", [
     (["--serve-device-budget-bytes", "1000000"], "tessera#624"),
     (["--slo-prefill-p95-ttft-ms", "5"], "mutually exclusive"),

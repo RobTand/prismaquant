@@ -890,6 +890,7 @@ def load_pact_baseline(path: Path, expected_sha256: str, *, table_identity: dict
     admitted resources as the candidates, not from this file's numbers.
     """
     from .layer_config import canonicalize_assignment, layer_config_metadata
+    from .runtime_provenance import _equal
     from .schemas import validate_layer_config_payload
 
     raw = path.read_bytes()
@@ -904,16 +905,16 @@ def load_pact_baseline(path: Path, expected_sha256: str, *, table_identity: dict
         raise PrefillFrontierError("PACT baseline has duplicate canonical assignment names")
     meta = layer_config_metadata(payload)
     declared_serving = meta.get("tessera_serving_scope")
-    if "tessera_serving_scope" in meta and declared_serving != _as_json(serving_scope):
-        raise PrefillFrontierError("PACT baseline declared serving scope differs")
+    if "tessera_serving_scope" in meta:
+        _equal(declared_serving, _as_json(serving_scope), "PACT baseline declared serving scope")
     replay = meta.get("prefill_frontier_replay")
     if "prefill_frontier_replay" in meta:
         if not isinstance(replay, dict):
             raise PrefillFrontierError("PACT baseline replay must be an object")
-        for key, value in (("table_identity", table_identity), ("regime_m", regime_m),
+        for key, value in (("table_identity", table_identity), ("scope", scope), ("regime_m", regime_m),
                            ("tensor_parallel", tensor_parallel)):
-            if key in replay and replay[key] != _as_json(value):
-                raise PrefillFrontierError(f"PACT baseline declared replay {key} differs")
+            if key in replay:
+                _equal(replay[key], _as_json(value), f"PACT baseline declared replay {key}")
     if meta.get("schema") == ASSIGNMENT_SCHEMA:
         for key, value in (("table_id", table_identity["table_id"]),
                            ("table_sha256", table_identity["sha256"])):
@@ -944,6 +945,8 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
     if document.get("research_only") is not True or document.get("certifies_placement") is not False:
         raise PrefillFrontierError("replay requires a research-only, non-placement-certified PACT hull")
     from .pact_hull import CANDIDATE_GENERATOR
+    from .allocator_solver import _runtime_float, _runtime_int
+    from .runtime_provenance import _equal
     generator = document.get("candidate_generator")
     if generator not in (CANDIDATE_GENERATOR, CONSTRAINED_GENERATOR):
         raise PrefillFrontierError("replay refuses an unknown PACT candidate generator")
@@ -957,7 +960,10 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
                 or document.get("pact_selection") is not None):
             raise PrefillFrontierError("constrained replay requires its closed proposal semantics")
         points = document.get("points")
-        if not isinstance(points, list) or len(points) != 1 or points[0].get("point") != 0:
+        if (not isinstance(points, list) or len(points) != 1
+                or not isinstance(points[0], dict)):
+            raise PrefillFrontierError("constrained replay requires exactly its selected point")
+        if _runtime_int(points[0].get("point"), "PACT replay point") != 0:
             raise PrefillFrontierError("constrained replay requires exactly its selected point")
     if constrained and digest != document.get("selected_assignment_sha256"):
         raise PrefillFrontierError("constrained replay requires its selected assignment")
@@ -991,21 +997,22 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
             raise PrefillFrontierError("a PACT hull replay reached a non-PACT allocator run")
         if (ctx.selection_mode == "constrained") != constrained:
             raise PrefillFrontierError("replay selection mode differs from the recorded generator")
+        _runtime_float(provenance["target_bits"], "PACT replay target_bits")
         for key, actual in (("table_identity", ctx.table_identity), ("scope", ctx.scope),
                             ("regime_m", ctx.regime_m), ("tensor_parallel", ctx.tensor_parallel),
                             ("target_bits", ctx.target_bits), ("cost_path", ctx.cost_path),
                             ("probe_path", ctx.probe_path)):
-            if provenance[key] != _as_json(actual):
-                raise PrefillFrontierError(f"replay {key} differs from the hull provenance")
+            _equal(provenance[key], _as_json(actual), f"replay {key} differs from the hull provenance")
         if constrained:
+            if document.get("time_ceiling_ms") is not None:
+                _runtime_float(document["time_ceiling_ms"], "PACT replay time_ceiling_ms")
             for key, actual in (("table_identity", ctx.table_identity), ("scope", ctx.scope),
                                 ("regime_m", ctx.regime_m), ("tensor_parallel", ctx.tensor_parallel),
                                 ("time_ceiling_ms", ctx.time_ceiling_ms),
                                 ("max_memory_bytes", ctx.max_memory_bytes),
                                 ("max_states", ctx.max_states), ("max_transitions", ctx.max_transitions),
                                 ("whole_artifact_budget", ctx.whole_artifact_budget)):
-                if document.get(key) != _as_json(actual):
-                    raise PrefillFrontierError(f"constrained replay {key} differs")
+                _equal(document.get(key), _as_json(actual), f"constrained replay {key} differs")
         stamp = {
             "schema": REPLAY_SCHEMA,
             "frontier_sha256": bytes_sha256hex(raw),
@@ -1034,7 +1041,8 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
                          numeric_semantics=document["numeric_semantics"])
         else:
             selection_input = vertex["finding_probe"]["weights"]
-            stamp.update(vertex=vertex["vertex"], probe_weights=list(selection_input))
+            stamp.update(vertex=_runtime_int(vertex["vertex"], "PACT replay vertex"),
+                         probe_weights=list(selection_input))
         ctx.emit_replay(selection_input, expected, stamp)
         emitted = True
 

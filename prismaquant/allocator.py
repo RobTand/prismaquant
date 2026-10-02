@@ -4929,6 +4929,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         def _pact_write_replay(assign, expected_assignment, provenance, *,
                                dloss=None, prefill_ms=None) -> None:
             """One exact assignment check/accountant and layer-config replay writer."""
+            from .allocator_solver import _runtime_float, _runtime_int
+            from .runtime_provenance import _equal, _mapping
             record = _pact_vertex_record(assign)
             if not record["feasible"] or record["assignment"] != expected_assignment:
                 raise ValueError("PACT replay: the recorded solve re-derives a different "
@@ -4944,8 +4946,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                              **{key: record[key] for key in (
                                  "achieved_bits", "payload_bytes", "whole_artifact_upper_bound_bytes")
                                 if key in record}}
-            if provenance.get("point_claims") != actual_claims:
-                raise ValueError("PACT replay point claims differ from the recorded solve")
+            claims = _mapping(provenance.get("point_claims"), "PACT replay point claims")
+            for key in actual_claims:
+                label = f"PACT replay point claims {key}"
+                if key.endswith("_bytes"):
+                    _runtime_int(claims.get(key), label)
+                else:
+                    _runtime_float(claims.get(key), label, nonnegative=key != "predicted_dloss")
+            _equal(claims, actual_claims, "PACT replay point claims differ from the recorded solve")
             budget_stamp = None
             if pact_disk is not None:
                 budget_stamp = whole_artifact_budget_stamp(
@@ -4960,6 +4968,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                                 selected_whole_artifact_budget_stamp=budget_stamp)
 
         def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
+            from .allocator_solver import _runtime_float
+            from .runtime_provenance import _equal, _mapping
             if lane.allocation_selection_request_path(args):
                 raise ValueError("PACT replay requires materialized wires, not a selection request")
             if args.pact_selection_mode == "constrained":
@@ -4967,13 +4977,19 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 constraints = {"max_memory_bytes": pact_budget,
                                "max_prefill_ms": built["baseline"]["derived_operator_sum_ms"],
                                **pact_limits}
-                if weights != {"baseline": built["baseline"], "constraints": constraints}:
-                    raise ValueError("PACT constrained replay baseline or constraints differ")
+                for section, key in (("baseline", "derived_operator_sum_ms"),
+                                     ("constraints", "max_prefill_ms")):
+                    bound = _mapping(weights[section], f"PACT replay {section}")
+                    _runtime_float(bound.get(key), f"PACT replay {section} {key}")
+                _equal(weights, {"baseline": built["baseline"], "constraints": constraints},
+                       "PACT constrained replay baseline or constraints differ")
                 _pact_write_replay(built["solution"].assignment, expected_assignment, provenance,
                                    dloss=built["solution"].predicted_dloss,
                                    prefill_ms=built["solution"].prefill_ms)
                 return
             try:
+                for weight in weights:
+                    _runtime_float(weight, "PACT replay probe weight")
                 assign = probe_assignment(pact_candidates, pact_time_ms, weights,
                                           max_memory_bytes=pact_budget, **pact_limits)
             except (PactHullError, RuntimeFrontierLimitError) as exc:

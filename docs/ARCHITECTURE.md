@@ -14,7 +14,11 @@ The new generator `exact_runtime_frontier_constrained` extends the existing
 PACT document/replay owner and shares whole-artifact accounting and the sole
 layer-config writer. Replay re-derives its binding, bounds, selected assignment
 and numeric claims before writing. This is a minimum-loss choice over current
-admitted time-priced candidates with sorted-unit binary64 loss/time sums, not
+admitted time-priced candidates. Typed replay claims refuse booleans in numeric
+fields and require actual integers for bytes, indices and integer context/bounds;
+declared baseline replay scope must agree. Real loss/time claims retain valid
+integer/float equivalence through the existing numeric validators.
+The choice uses sorted-unit binary64 loss/time sums, not
 full-gamut or full-model scalability, corrected quality, placement or served
 latency qualification. The Tessera #688 receipt converter remains a refusing
 stub; no prices, formats, pin, producer or production defaults change.

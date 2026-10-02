@@ -127,6 +127,7 @@ def test_whole_artifact_bytes_bind_inside_search_and_replay(tmp_path, monkeypatc
     ("serving_scope", "serving scope"), ("null_scope", "serving scope"),
     ("null_replay", "replay must be an object"), ("replay_m", "regime_m"),
     ("replay_table", "table_identity"), ("replay_tp", "tensor_parallel"),
+    ("replay_tp_boolean", "tensor_parallel"), ("replay_scope", "scope"),
 ])
 def test_baseline_population_and_declared_context_refuse(tmp_path, monkeypatch, mutation, diagnostic):
     owner, case, baseline = _unsupported_fixture(tmp_path, monkeypatch)
@@ -141,7 +142,9 @@ def test_baseline_population_and_declared_context_refuse(tmp_path, monkeypatch, 
     else:
         key, value = {"replay_m": ("regime_m", owner.M+1),
                       "replay_table": ("table_identity", {}),
-                      "replay_tp": ("tensor_parallel", 2)}[mutation]
+                      "replay_tp": ("tensor_parallel", 2),
+                      "replay_tp_boolean": ("tensor_parallel", True),
+                      "replay_scope": ("scope", {})}[mutation]
         payload[LAYER_CONFIG_META_KEY] = {"prefill_frontier_replay": {key:value}}
     baseline.write_text(json.dumps(payload))
     with pytest.raises(ValueError, match=diagnostic):
@@ -184,7 +187,8 @@ def test_constrained_limits_refuse_without_partial_publication(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("change", ["baseline_file", "bound", "generator", "assignment", "mode",
-                                    "time", "loss", "bytes", "top_bound", "semantics", "whole_budget"])
+                                    "time", "loss", "bytes", "top_bound", "semantics", "whole_budget",
+                                    "bytes_float", "point_boolean", "baseline_tp_boolean"])
 def test_constrained_replay_binding_refuses_before_write(tmp_path, monkeypatch, change):
     owner, case, baseline = _unsupported_fixture(tmp_path, monkeypatch)
     frontier = tmp_path / "constrained.json"
@@ -199,6 +203,10 @@ def test_constrained_replay_binding_refuses_before_write(tmp_path, monkeypatch, 
     elif change == "top_bound":doc["max_memory_bytes"] += 1
     elif change == "semantics":doc["numeric_semantics"] = "exact rational objective"
     elif change == "whole_budget":doc["whole_artifact_budget"] = {"budget_bytes":1}
+    elif change == "bytes_float":
+        doc["points"][0]["candidate_bytes"] = float(doc["points"][0]["candidate_bytes"])
+    elif change == "point_boolean":doc["points"][0]["point"] = False
+    elif change == "baseline_tp_boolean":doc["baseline"]["tensor_parallel"] = True
     else:
         i = doc["provenance"]["allocator_argv"].index("--pact-selection-mode")
         doc["provenance"]["allocator_argv"][i+1] = "hull"
@@ -219,6 +227,16 @@ def test_existing_complete_layer_config_is_a_baseline_without_hull_membership(tm
     second = _constrained(case, recipe, tmp_path / "second.json")
     assert second["baseline"]["file_sha256"] == bytes_sha256hex(recipe.read_bytes())
     assert second["baseline"]["assignment_sha256"] == doc["selected_assignment_sha256"]
+    assert second["constraints"]["max_prefill_ms"] == 8.0
+
+
+def test_declared_matching_baseline_replay_scope_is_accepted(tmp_path, monkeypatch):
+    _, case, baseline = _unsupported_fixture(tmp_path, monkeypatch)
+    first = _constrained(case, baseline, tmp_path / "first.json")
+    payload = json.loads(baseline.read_text())
+    payload[LAYER_CONFIG_META_KEY] = {"prefill_frontier_replay": {"scope":first["scope"]}}
+    baseline.write_text(json.dumps(payload))
+    second = _constrained(case, baseline, tmp_path / "second.json")
     assert second["constraints"]["max_prefill_ms"] == 8.0
 
 
