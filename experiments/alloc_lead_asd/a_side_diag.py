@@ -394,6 +394,12 @@ def load_partial(path, identity):
     return saved
 
 
+def refuse_unbound_pricing_reuse(path):
+    if path:
+        raise SystemExit("cached pricing reuse is unsupported: this artifact has no immutable "
+                         "loaded-model/run binding; use the existing identity-bound partial resume")
+
+
 # ----------------------------------------------------------------------------- profile
 def profile_and_crosscheck(args, model, units, names, ids, seeds, specs_obj, n_global, scope,
                            temperature):
@@ -507,7 +513,7 @@ def main():
     ap.add_argument("--dz-dtype", default="float32", choices=["float32", "bfloat16"],
                     help="storage of the probe arms' logit changes for the s_real GEMV")
     ap.add_argument("--pricing-from", default=None,
-                    help="reuse a STEM.pricing.pt from an earlier run on the same tokens/probes")
+                    help="unsupported cached-pricing reuse; refuses before model loading")
     ap.add_argument("--profile", action="store_true",
                     help="v1 vs v2 on sequence 0 under torch.profiler, with cross-checks")
     ap.add_argument("--deterministic-backward", action="store_true",
@@ -516,6 +522,7 @@ def main():
                     help="run a 2-sequence, 2-probe pass end to end before the real one")
     ap.add_argument("--output", required=True, help="stem; writes STEM.json and STEM.pt")
     args = ap.parse_args()
+    refuse_unbound_pricing_reuse(args.pricing_from)
 
     torch.manual_seed(0)
     dtype = getattr(torch, args.dtype)
@@ -537,6 +544,7 @@ def main():
 
 
 def run(args, model, *, ids=None, progress_callback=None):
+    refuse_unbound_pricing_reuse(args.pricing_from)
     scope, temperature = "all", 1.0
     if ids is None:
         ids = load_tokens(args.inputs, args.text, args.n_seqs)
@@ -565,16 +573,7 @@ def run(args, model, *, ids=None, progress_callback=None):
     if args.profile:
         profile_report = profile_and_crosscheck(args, model, units, names, ids, seeds, specs_obj,
                                                 n_global, scope, temperature)
-    if args.pricing_from:
-        saved = torch.load(args.pricing_from)
-        if (saved["units"] != names or saved["seeds"] != seeds or saved["ids_sha256"] != ids_sha
-                or list(saved["specs"]) != list(SPECS)
-                or bool(saved.get("args", {}).get("deterministic_backward", False)) != deterministic):
-            raise SystemExit(f"{args.pricing_from} was priced on other units/probes/tokens")
-        comps = saved["comps"].double()
-        dens = saved.get("dens")
-        log(f"reused pricing from {args.pricing_from}")
-    else:
+    if not args.pricing_from:
         part = load_partial(args.output + ".pricing.partial.pt", identity)
         comps = (part["comps"] if part else
                  torch.zeros(len(SPECS), len(names), len(seeds), n_seqs, dtype=torch.float64))
