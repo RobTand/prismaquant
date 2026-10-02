@@ -46,6 +46,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from . import io_spans
+from .kl_fisher import forward_kl_per_token
 from prismaquant import format_registry as fr
 from prismaquant.tensor_digests import tensor_value_stamp as _tensor_value_stamp
 from prismaquant.routed_experts import (
@@ -217,7 +218,7 @@ def _unit_kl(
                     calib_ids[i:i + bs]
                 ).logits.float(), -1)
             bl = baseline[bi].to(lp.device)
-            kl = (bl.exp() * (bl - lp)).sum(-1)
+            kl = forward_kl_per_token(lp, bl)
             total += float(kl.sum().item())
             n_tok += kl.numel()
         return total / max(n_tok, 1)
@@ -492,7 +493,7 @@ def _unpacked_unit_kl(
                 ).logits.float(), -1
             )
             bl = baseline[bi].to(lp.device)
-            kl = (bl.exp() * (bl - lp)).sum(-1)
+            kl = forward_kl_per_token(lp, bl)
             total += float(kl.sum().item())
             n_tok += kl.numel()
         return total / max(n_tok, 1)
@@ -1417,7 +1418,7 @@ def measure_expert_unit_costs_forked(
                 for w in range(n_windows):
                     lp = F.log_softmax(logits[w].float(), dim=-1)
                     bl = baseline_lp[w].to(lp.device)
-                    kl = (bl.exp() * (bl - lp)).sum(-1)
+                    kl = forward_kl_per_token(lp, bl)
                     wsum = float(kl.sum().item())
                     total += wsum
                     n_tok += kl.numel()

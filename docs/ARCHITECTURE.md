@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
+base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
+measurements use `kl_fisher.forward_kl_per_token` for the existing
+exp/subtract/multiply/vocabulary-sum expression. FP32 log-softmax, teacher
+transfer, calibration batching, token/window normalization and weight
+restoration remain caller-owned. CPU compatibility evidence does not qualify
+GPU arithmetic or served quality.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
