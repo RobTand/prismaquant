@@ -111,6 +111,7 @@ def _two_dynamic_rungs(menus):
             continue
         family, rung = parse_tessera_format_name(name)
         by_family.setdefault(family.name, []).append((int(rung), name))
+    assert by_family, 'the fixture must admit a dynamic activation family'
     # This test owns stack sampling and anchor lifetimes, not family breadth.
     # CHANNEL-plane E4M3 admits partial superblocks: real menus at the tiny
     # (32, 64)/(64, 32) shapes share R256 and R264. Keep the producer's normal

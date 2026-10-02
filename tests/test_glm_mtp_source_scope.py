@@ -42,7 +42,7 @@ STACK = f"{PREFIX}mlp.experts"
 
 @pytest.fixture(scope="module")
 def _narrow_source_capture():
-    """One identical BF16 source/capture; the wide pricing source is separate.
+    """One identical BF16 source/capture; pricing owns a separate source.
 
     Built on first use, after the function-scoped CPU and provenance fixtures
     are active. Only completed setup is retained, never a runner or an open
@@ -55,7 +55,7 @@ def _narrow_source_capture():
 @pytest.fixture
 def mtp_source(request, tmp_path, tmp_path_factory, monkeypatch, _narrow_source_capture):
     param = request.param
-    if isinstance(param, dict) and param.get("wide", False):
+    if isinstance(param, dict) and param.get("independent", False):
         yield _fresh_mtp_source.__wrapped__(request, tmp_path, monkeypatch)
         return
 
@@ -280,7 +280,7 @@ def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, published
     assert used - WHOLE_SCOPE_RUNNER_USES <= set(SELECTED_SOURCE_MEMBERS), used
 
 
-@pytest.mark.parametrize("mtp_source", [{"dtype": torch.bfloat16, "wide": True}], indirect=True)
+@pytest.mark.parametrize("mtp_source", [{"dtype": torch.bfloat16, "independent": True}], indirect=True)
 def test_campaign_row_prices_mtp_units_from_the_mtp_capture(
         mtp_source, published_mtp_capture, monkeypatch, tmp_path):
     """A ``--source-scope mtp`` row prices the shared expert and the routed
@@ -289,6 +289,12 @@ def test_campaign_row_prices_mtp_units_from_the_mtp_capture(
     from prismaquant import tessera_campaign as campaign
 
     env = mtp_source
+    # The producer's CHANNEL plane and exact whole-unit quota admit partial
+    # superblocks. R1024 really encodes both (32, 64) and (64, 32), so the
+    # existing tiny source prices the same shared unit and all twelve routed
+    # projections without a second, artificially widened model domain.
+    assert env.text_config.n_routed_experts == 4
+    assert env.text_config.num_experts_per_tok == 2
     published = published_mtp_capture
     census = published.census
     groups = [f"u:{SHARED_DOWN}", f"s:{STACK}"]
