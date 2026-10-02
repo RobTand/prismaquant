@@ -1,5 +1,6 @@
 # PrismaQuant Architecture
 
+<<<<<<< HEAD
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
@@ -45,6 +46,20 @@ source/profile work; the CLI supplies geometry and constructs no authority.
 CPU selector/plumbing controls do not qualify original CUDA lifetimes, a complete
 provider, historical GLM primal/cotangent agreement, corrected prices or serving.
 See [selected-row diagnostic contract](design/stage_a_selected_row_diagnostic.md).
+=======
+Re-stamped 2026-10-02 (PQ #2111, Refs PrismaBuild #905): the opt-in CPU
+checkpoint-export component freezes twelve distinct 64-entry cohorts and six
+paced/unpaced pairs. It reads original archive bytes through the existing
+serial exact-entry scratch and staged checkpoint owners, then calls the
+existing produced-file writer, spool, PB export, origin commit and release.
+The experiment changes only the per-group `paced` argument. It adds no cache,
+dispatcher, production default or serving gate. Authentication can fan out
+through PB; the paired export remains one action. Component completion always
+reports `pb905_gate_qualified=False`: organic application mover contention and
+reviewed profiling/placement remain required for the PB #905 default gate.
+See `docs/design/pb905_checkpoint_export_component.md` for the finite input,
+retained-origin and launch-review contracts.
+>>>>>>> 7fdd8a1b (Add opt-in genuine checkpoint export component for PB905)
 
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
