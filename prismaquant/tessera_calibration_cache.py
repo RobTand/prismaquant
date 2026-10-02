@@ -448,18 +448,17 @@ class CaptureSourceAuthentication:
                 if not name.endswith('.safetensors'):
                     with self.material_window([self.root / name]):
                         pass
-            for name in ('config.json', 'model.safetensors.index.json'):
-                with self.material_window([self.root / name]):
-                    value = _original_bootstrap_json(self._source_read_path(self._files[name]))
-                if name == 'config.json':
-                    if (not isinstance(value, dict) or value.get('configuration_files') or value.get('auto_map')):
-                        raise RuntimeError('unsupported dynamic original bootstrap configuration')
-                else:
-                    weight_map = value.get('weight_map') if isinstance(value, dict) else None
-                    weights = {name for name in coordinates if name.endswith('.safetensors')}
-                    if (not isinstance(weight_map, dict) or not weight_map or
-                            set(weight_map.values()) != weights or weight_map != tensors):
-                        raise RuntimeError('original generation complete index differs from producer/publisher')
+            with self.material_window([self.root / 'model.safetensors.index.json']):
+                index = self.read_json(self.root / 'model.safetensors.index.json')
+            weight_map = index.get('weight_map') if isinstance(index, dict) else None
+            weights = {name for name in coordinates if name.endswith('.safetensors')}
+            if (not isinstance(weight_map, dict) or not weight_map or
+                    set(weight_map.values()) != weights or weight_map != tensors):
+                raise RuntimeError('original generation complete index differs from producer/publisher')
+            with self.material_window([self.root / 'config.json']):
+                value = _original_bootstrap_json(self._source_read_path(self._files['config.json']))
+            if (not isinstance(value, dict) or value.get('configuration_files') or value.get('auto_map')):
+                raise RuntimeError('unsupported dynamic original bootstrap configuration')
             return self
         except BaseException:
             self.close()

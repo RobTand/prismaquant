@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-import re
 
 from .schemas import Contract, strict_json_loads
 from .stage_inputs import read_bound, require_source_identity
@@ -17,7 +16,6 @@ from .stage_inputs import read_bound, require_source_identity
 
 _contract = Contract(RuntimeError, 'original generation: ')
 _require = _contract.require
-_GIT_HEX = re.compile(r'[0-9a-f]{40}\Z')
 
 
 def _hex(value, length):

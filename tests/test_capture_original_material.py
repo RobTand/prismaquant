@@ -89,7 +89,7 @@ def _owner(m):
 
 
 @pytest.mark.parametrize('broken', ['publisher-digest', 'revision', 'partial-readset', 'range',
-                                   'producer-template', 'producer-weight', 'native-aux-object'])
+                                   'producer-template', 'producer-weight', 'producer-index', 'native-aux-object'])
 def test_bad_authority_refuses_before_decoder_or_payload_bootstrap(material, monkeypatch, broken):
     m = material
     if broken == 'publisher-digest':
@@ -105,6 +105,8 @@ def test_bad_authority_refuses_before_decoder_or_payload_bootstrap(material, mon
         readset['entry_count'] = len(readset['entries'])
         readset['total_bytes'] = sum(row['bytes'] for row in readset['entries'])
         m['options']['readset_input'] = _bound(m['tmp'] / 'bad-readset.json', readset)
+    elif broken == 'producer-index':
+        m['producer']['tensors']['w'] = 'two.safetensors'
     elif broken.startswith('producer'):
         which = 'auxiliary_sha256' if broken == 'producer-template' else 'files'
         name = 'chat_template.jinja' if broken == 'producer-template' else 'one.safetensors'
@@ -273,3 +275,34 @@ def test_internal_material_does_not_admit_automatic_campaigns(material):
     with _owner(material):
         with pytest.raises(RuntimeError, match='qualified immutable source'):
             cc.require_automatic_capture_source_recording()
+
+
+def test_concurrent_overlapping_windows_share_material_until_both_release(material):
+    import threading
+    m = material
+    owner = _owner(m)
+    entered = threading.Event()
+    release = threading.Event()
+    paths = []
+    errors = []
+    def borrow():
+        try:
+            with owner.material_window([m['root'] / 'one.safetensors']):
+                paths.append(owner.descriptor_path(m['root'] / 'one.safetensors'))
+                entered.set()
+                assert release.wait(10)
+        except BaseException as error:
+            errors.append(error)
+    thread = threading.Thread(target=borrow)
+    thread.start()
+    try:
+        assert entered.wait(10)
+        with owner.material_window([m['root'] / 'one.safetensors']):
+            assert owner.descriptor_path(m['root'] / 'one.safetensors') == paths[0]
+        assert owner.material_live_bytes == len(m['raws']['one.safetensors'])
+    finally:
+        release.set()
+        thread.join(10)
+    assert not thread.is_alive() and errors == []
+    assert owner.material_live_bytes == 0
+    owner.close()
