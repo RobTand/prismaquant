@@ -505,11 +505,14 @@ class CaptureSourceAuthentication:
             live_bytes = sum(state['before'].st_size for state in self._files.values())
             if live_bytes + new_bytes > self._original['limit']:
                 raise RuntimeError('original material exceeds the admitted material byte bound')
-            reserve_allocation(self.resource_check, 'before_original_material_window', cpu_bytes=new_bytes)
             windows = self._original['windows']
             for name in names:
                 windows[name] = windows.get(name, 0) + 1
             try:
+                # A reentrant shared guard may release/reap other material.
+                # Pin the objects this window priced as reusable before it
+                # runs, so a zero incremental reservation never reacquires.
+                reserve_allocation(self.resource_check, 'before_original_material_window', cpu_bytes=new_bytes)
                 for name in names:
                     self._file(self.root / name)
             except BaseException:
