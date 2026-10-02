@@ -78,7 +78,15 @@ def _encode(family, rung, shape):
 
 
 @pytest.mark.parametrize("family,rung,shape", CASES, ids=IDS)
-def test_the_price_covers_the_container_the_writer_produced(family, rung, shape):
+def test_the_price_covers_the_container_and_fused_wire_and_is_tight(family, rung, shape):
+    """One genuine encode carries both byte-accounting regressions (#2011).
+
+    Container coverage and fused tightness consume the same deterministic
+    writer output. Keep both checks beside that output so each case pays for
+    the producer once, including under xdist scheduling.
+    """
+    from tessera.fused import pack_fused
+
     spec, exported = _encode(family, rung, shape)
     price = tessera_tensor_payload_breakdown(
         shape, family=spec, body_rate_q256=rung
@@ -89,20 +97,10 @@ def test_the_price_covers_the_container_the_writer_produced(family, rung, shape)
         f"(plane region {exported.exact_bytes} B)"
     )
 
-
-@pytest.mark.parametrize("family,rung,shape", CASES, ids=IDS)
-def test_the_price_covers_the_fused_wire_and_is_tight(family, rung, shape):
-    from tessera.fused import pack_fused
-
-    spec, exported = _encode(family, rung, shape)
     member = "down_proj"
     wire = pack_fused([(member, shape[0], exported.blob)])
     # Without a caller-supplied name the price carries the frame but not the
     # name; add the name back to compare with the wire.
-    price = tessera_tensor_payload_breakdown(
-        shape, family=spec, body_rate_q256=rung
-    )["total_bytes"]
-    assert isinstance(price, int)
     slack = price + len(member) - len(wire)
     assert 0 <= slack <= SLACK_BOUND, (
         f"priced {price} B (+{len(member)} B name), wire is {len(wire)} B, "
