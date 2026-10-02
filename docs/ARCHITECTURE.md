@@ -99,6 +99,17 @@ are preserved; no stored identity migration or profile collapse is performed.
 Old production outcomes are frozen per site before replacement, and the
 primitive-site baseline removes exactly five scopes.
 
+Re-stamped 2026-10-02 (Refs #1301, length-framed byte owner): joint anchor
+qualification and source-tree v2 share the explicit u64-big-endian raw-byte
+frame primitive in `digests.length_framed_bytes_sha256`. The qualification
+caller retains its schema-plus-LF domain, sorted cell order and strict UTF-8
+row encoder; source-tree v2 retains its own tag-plus-NUL domain, UTF-8 byte
+sort and alternating name/content frames. Legacy source v1 is untouched.
+Each stream is consumed once, with one qualification row buffered at a time.
+Existing immutable end-to-end goldens and independent source framing oracles
+preserve their distinct identities. No wire/profile migration, source
+acquisition, cache, numerical, runtime pin, default or performance change.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment

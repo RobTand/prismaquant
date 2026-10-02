@@ -127,7 +127,6 @@
   "hashlib:prismaquant/tessera_export_lane.py::hessian_capture_sha256",
   "hashlib:prismaquant/tessera_hessian.py::token_ids_sha256",
   "hashlib:prismaquant/tessera_joint_allocation.py::handoff",
-  "hashlib:prismaquant/tessera_joint_aura.py::_qualification_cells_sha256",
   "hashlib:prismaquant/tessera_joint_eval_panel.py::_sha_ids",
   "hashlib:prismaquant/tessera_route_receipt.py::_text_sha",
   "hashlib:prismaquant/tessera_runtime_contract.py::_published_tensor_parallel",
