@@ -144,3 +144,56 @@ Use in-process traces and both-Spark Netdata; report allocation/page-fault
 counts and measured peak memory. GPU speed/energy claims require qualified
 power/clock evidence and useful work per joule. No GPU command is authorized
 or launched by this CPU prerequisite.
+
+## Root review correction: failed-copy ownership
+
+The source above was not accepted by root QA. A partial copy whose cleanup
+Event could not be created, recorded or synchronized had no proven fence;
+`abandon` then fenced only the previous step and cleared both banks. This
+finding was fixed in a separate commit,
+`ee2d874b292271d9ba983936e72489fa10d45d0e`, without selecting the mode in
+production or changing its ordinary row allocations.
+
+The existing `_RollPipeline` now records each bank's exact submitting
+stream before any copy. If an Event fence fails, it retains the actual bank
+references and `held_host_bytes`, strongly holds the failed owner after
+exception/traceback GC, and refuses CUDA roll construction/submission/drain
+in this process. Only the original owner can `abandon` it. Recovery fences
+all captured outstanding streams, including the previous step; one failed
+stream fence retains every bank and its credit. A later current stream
+cannot prove completion. Missing stream-fence capability refuses before a
+copy. A poisoned context stays retained until process containment or exit;
+there is no polling thread, alternate cache or memory-limit change.
+
+Causal RED `5e342619ddcbe61db96b7388027b3e7f850dfbbd3962b452a77bb2553db80b32`
+ran the prior real core and failed all five partial/full-copy Event
+creation/record/synchronization cases at the absent abandonment refusal;
+20 other cases were deselected. It is not an API/import RED.
+
+| Final correction gate | Full PB action key | Result |
+|---|---|---|
+| Copy ownership, alias lifetime and exact files | `e49cd2fc6d72a44719817b76e32283f2e22d9e41c8a99d4a33f2db1f3d852987` | 29 passed, no skips |
+| Existing chain behavior | `7e6723725e6c505830a040bf5fd6f201ba77419ea31eedc57fe3f518a1e4df1f` | 31 passed, 6 existing CUDA skips |
+| Updated architecture mechanics | `0b7380d30cf78ac4bd06cfb181e3cf481e9e6f0cd071ee17fa7f9b89cdbcbd6d` | 13 passed |
+| Compile and exact dependency pins | `f692bc0d9047302603c59194fdba1dcbefc36118165b3a8f004d01956a11f8e8` | 4 modules, rc 0 |
+
+These three shards collected and reconciled all 79 cases. With the 32
+unchanged checkpoint/documentation cases already recorded, selected
+coverage is now **105 passed / 6 skipped / 0 failed**, 111 collected.
+New controls cover exact original stream identity after current-stream
+replacement, both banks on distinct streams, blocked-stream recovery,
+previous-step Event failure, held credit after GC and refusal of new CUDA
+owners until recovery. Every final terminal and actual CAS payload was
+checked; their qualified five source files match the correction commit.
+Detailed records are in `FAILURE-OWNERSHIP-EVIDENCE.json` and
+`FAILURE-OWNERSHIP-VERIFIED.json` beside the earlier evidence manifest.
+
+The earlier CPU allocation measurements remain attributable to their
+recorded source. Their metric is reused: the two-bank allocation requests,
+row shapes, copies and serialized output arithmetic are unchanged, and the
+final controls recheck allocation counts and exact entry files. The
+experimental fake stream now supplies the same synchronization interface
+required before a real copy. No new speed/peak-memory claim is inferred
+from this failure-state fix, and the old profiles are not relabeled as
+profiles of the correction commit. Real CUDA/pinned-page and production
+admission acceptance remain open in parent #1250.
