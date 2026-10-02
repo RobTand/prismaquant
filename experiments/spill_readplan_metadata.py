@@ -18,7 +18,6 @@ import resource
 import struct
 import subprocess
 import sys
-import threading
 import tracemalloc
 from types import SimpleNamespace
 
@@ -97,7 +96,7 @@ def arm(args):
                   plan_peak_bytes=plan_peak, plan_and_engine_retained_bytes=retained,
                   plan_and_engine_peak_bytes=peak,
                   process_maxrss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
-                  retained_reader_chunk_objects=sum(
+                  retained_reader_chunk_bindings=sum(
                       isinstance(entry.reader.args[-1], tuple) for entry in stream._entries),
                   ordered_plan_last_use_sha256=plan_digest(window))
     session.close_replay_stream()
