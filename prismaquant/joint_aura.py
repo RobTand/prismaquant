@@ -1091,11 +1091,23 @@ def paired_squared_probe_summary(squared_a, squared_b) -> dict:
     interval. Validated rows and explicitly historical raw-sample diagnostics
     use the same operation order, including scaling after subtraction.
     """
+    if (not isinstance(squared_a, (list, tuple)) or not isinstance(squared_b, (list, tuple))
+            or len(squared_a) != len(squared_b) or len(squared_a) < 2):
+        raise ValueError("paired squared probes require at least two aligned samples")
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(value) or value < 0 for value in (*squared_a, *squared_b)):
+        raise ValueError("paired squared probes require finite nonnegative scalars")
     values = [0.5 * (a - b) for a, b in zip(squared_a, squared_b)]
     n = len(values)
     mean = sum(values) / n
-    variance = sum((value - mean)**2 for value in values) / (n - 1) if n > 1 else 0.0
-    return {"mean_difference": mean, "paired_standard_error": math.sqrt(variance / n),
+    try:
+        variance = sum((value - mean)**2 for value in values) / (n - 1)
+        stderr = math.sqrt(variance / n)
+    except OverflowError as exc:
+        raise ValueError("paired squared probe moments overflow") from exc
+    if not math.isfinite(mean) or not math.isfinite(stderr):
+        raise ValueError("paired squared probe moments must be finite")
+    return {"mean_difference": mean, "paired_standard_error": stderr,
             "difference_per_probe": values}
 
 

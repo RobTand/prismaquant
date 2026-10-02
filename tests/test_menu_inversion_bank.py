@@ -1,5 +1,4 @@
 """Mutation-sensitive controls for the explicitly historical raw-bank screen."""
-import copy
 import math
 
 import pytest
