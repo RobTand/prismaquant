@@ -29,7 +29,10 @@ the_large_shapes_too`, behind ``PRISMAQUANT_TESSERA_SLOW_ENCODE`` because a
 Measured green on all six on 2026-09-03; the run is in the issue thread.
 
 CPU only, and the seed is irrelevant: ``exact_bytes`` is a property of the
-layout, not of the weights.
+layout, not of the weights.  The routine exporter legs use ``scale_refit=0``:
+one real trellis search and the real serializer/round-trip check, without
+quality refits that change plane values but not their extents.  The opt-in
+large-shape encodes retain the default refits.
 """
 
 import os
@@ -133,7 +136,8 @@ def test_the_accountant_prices_what_the_exporter_writes(family, grid, rung, shap
     priced = _priced_bytes(family, rung, shape)
     torch.manual_seed(11)
     exported = encode_linear(
-        torch.randn(rows, columns), grid=grid_for_name(grid), q256=rung
+        torch.randn(rows, columns), grid=grid_for_name(grid), q256=rung,
+        scale_refit=0,
     ).exact_bytes
     assert priced == exported, (family, rung, shape)
     breakdown = tessera_tensor_payload_breakdown(
@@ -351,12 +355,14 @@ def test_the_window_families_agree_with_the_exporter_too(family, grid, rung):
     accountants; if a plane were added that *both* of them missed, only an
     encode would say so, and an encode leg that covers one body kind is not a
     statement about the wire.  One rung each, at the family's floor, on a
-    64x512 unit: about nine seconds apiece on CPU, against minutes at L=14 on
-    a wide one.
+    64x512 unit.  Scale refits improve reconstruction quality, which this
+    byte-extent identity does not inspect; the real encoder still selects
+    codes, serializes every plane and verifies the round trip.
     """
     torch.manual_seed(11)
     exported = encode_linear(
-        torch.randn(64, 512), grid=grid_for_name(grid), q256=rung
+        torch.randn(64, 512), grid=grid_for_name(grid), q256=rung,
+        scale_refit=0,
     ).exact_bytes
     assert _priced_bytes(family, rung, (64, 512)) == exported
 
