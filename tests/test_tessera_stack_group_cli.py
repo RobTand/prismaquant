@@ -28,7 +28,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 
 from test_glm_campaign_streaming import (  # noqa: E402,F401
-    _torch_only_causal_conv1d, glm_checkpoint,
+    _torch_only_causal_conv1d, glm_checkpoint, write_original_layout_checkpoint,
 )
 from test_tessera_stack_sample_cost import _packed_probe_row  # noqa: E402
 
@@ -144,6 +144,9 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
     # superblock wire domain. A second 256-wide model needlessly multiplied
     # Viterbi's row/column work; sampling and page advice do not require it.
     model, source = glm_checkpoint
+    # The campaign prices BF16 live weights. Keep the original test's BF16
+    # source bytes too: its projection gate correctly refuses FP32 originals.
+    write_original_layout_checkpoint(model.to(torch.bfloat16), source)
     assert model.config.text_config.n_routed_experts == 4
     assert model.config.text_config.num_experts_per_tok == 2
     tokens = [torch.arange(257).remainder(126).add(2).reshape(1, -1)]
