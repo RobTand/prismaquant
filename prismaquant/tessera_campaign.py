@@ -5511,8 +5511,21 @@ def _streamed_capture_identity(args, census, tokens, corpus_text, *, attention_i
         source_authentication=source_authentication)
 
 
+def _require_automatic_capture_recording(args):
+    """The campaign's automatic recording decision, before original-source reads.
+
+    Explicit descriptor-owner operations and selected capture reuse retain
+    their existing contract. This seam owns automatic monolith and chain
+    admission; source digests and stat/lifetime fences are not immutability.
+    """
+    if args.streaming and args.capture_calibration_out:
+        from . import tessera_calibration_cache as store
+        store.require_automatic_capture_source_recording()
+
+
 def _run_capture_chain_bookends(args, saved_calibration):
     """A capture chain's prep or join row (PQ #1885): no model, no forward."""
+    _require_automatic_capture_recording(args)
     from . import capture_layer_chain as chain
     if args.capture_chain == "join":
         record = chain.join(args.capture_calibration_out, census_path=args.calibration_census)
@@ -6174,6 +6187,7 @@ def _main(argv, *, source_scope) -> int:
         ap.error("--campaign-identity-bytes cannot be negative")
     if args.campaign_identity_threads is not None and args.campaign_identity_threads < 1:
         ap.error("--campaign-identity-threads must be positive")
+    _require_automatic_capture_recording(args)
     if args.capture_chain in ("prep", "join"):
         # Neither runs a forward, so neither loads the model.
         return _run_capture_chain_bookends(args, saved_calibration)

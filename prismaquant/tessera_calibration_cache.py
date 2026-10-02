@@ -1712,6 +1712,15 @@ def authenticate_selected_capture_source(census_path, capture_path, *, expected_
         raise
 
 
+def require_automatic_capture_source_recording():
+    """The existing source owner owns automatic capture recording admission.
+
+    Separated from explicit descriptor-owner construction so caller policy
+    cannot turn an observed digest or lifetime/stat fence into qualification.
+    """
+    return None
+
+
 def record_capture_source(census_path, *, model, binding_sha256=None, fingerprints=None,
                           resource_check=None, release_read_pages=False):
     """The recording source owner of a streamed capture of ``census_path`` (PQ #1896).
