@@ -1281,7 +1281,7 @@ def discover_visual_linear_stats_from_source(
         for key, shard in wm.items():
             if not key.endswith(".weight"):
                 continue
-            if not _VISUAL_PREFIX_RE.match(key):
+            if not _is_visual_linear(key):
                 continue
             by_shard[shard].append(key)
         try:
@@ -1335,7 +1335,7 @@ def discover_visual_linear_stats_from_source(
                 for k in sf.keys():
                     if not k.endswith(".weight"):
                         continue
-                    if not _VISUAL_PREFIX_RE.match(k):
+                    if not _is_visual_linear(k):
                         continue
                     try:
                         tensor_slice = sf.get_slice(k)
