@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #1663): pending-delivery wait observation
+is owned by `io_spans.observed_future_result`. The streamed source owner
+delegates to it while retaining retry, verification and residency ownership.
+Ready deliveries record no wait; observer failures preserve an existing
+delivery exception and refuse a successful delivery whose observation failed.
+This refactor preserves Stage A's source-only coverage and adds no numerical,
+format, serving, memory-admission or pipeline-default change.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
