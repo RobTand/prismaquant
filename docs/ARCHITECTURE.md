@@ -5,8 +5,9 @@ base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
 exp/subtract/multiply/vocabulary-sum expression. FP32 log-softmax, teacher
 transfer, calibration batching, token/window normalization and weight
-restoration remain caller-owned. CPU compatibility evidence does not qualify
-GPU arithmetic or served quality.
+restoration remain caller-owned. Lane replay also delegates the expression, preserving its teacher regrouping,
+row-count refusals and per-row position mean followed by row sum. CPU
+compatibility evidence does not qualify GPU arithmetic or served quality.
 
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
