@@ -27,6 +27,7 @@ import urllib.request
 
 import torch
 from prismaquant import measure_quant_cost as mqc, tessera_campaign as campaign
+from prismaquant.prismabuild_progress import report
 
 
 def _write(path, value):
@@ -255,6 +256,7 @@ def _production_hook_phases(moe, inputs, binding, record, telemetry, guard, outp
             record['phases'].append(phase)
             _write(output/(phase['phase']+'.json'),phase)
             _write(output/'partial.json',record)
+            report('measure',1+len(record['phases']),unit='durable_control_phases')
             # The iterator executes while the ordinary production hook scope
             # is installed. No-op forward avoids a second source-model draw.
             yield torch.zeros((1,1),dtype=torch.long)
@@ -461,11 +463,14 @@ def main():
                 record['mismatch_refusals'] = messages
                 record['sync_sites'] = {kind:{name:routing.sync_sites(fn) for name,fn in functions.items()}
                     for kind,functions in dict(derive=calls,check=checks).items()}
+                _write(args.out/'startup.json',record)
+                report('startup',1,unit='durable_control_phases')
                 for kind,functions in dict(derive=calls,check=checks).items():
                     for i,arm in enumerate(('before','after','after','before')):
                         record['phases'].append(_phase(f'{kind}-{i}-{arm}', functions[arm],
                             args.seconds, telemetry, guard, args.out))
                         _write(args.out/'partial.json',record)
+                        report('measure',1+len(record['phases']),unit='durable_control_phases')
                 torch.cuda.synchronize()
                 record['phase_boundary_before_host_cache_release'] = guard.snapshot()
                 torch._C._accelerator_emptyHostCache()
@@ -496,6 +501,7 @@ def main():
         record['gain_fraction'][kind] = 1 - statistics.fmean(after)/statistics.fmean(before)
     record['hotpath_screen_passed'] = all(record['gain_fraction'][k] >= .02 for k in ('hook','check'))
     _write(args.out/'result.json',record)
+    report('publish',2+len(record['phases']),unit='durable_control_phases')
     print(json.dumps(dict(gain_fraction=record['gain_fraction'],hotpath_screen_passed=record['hotpath_screen_passed'])),flush=True)
 
 
