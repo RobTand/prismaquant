@@ -5487,7 +5487,12 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
 
 def _streamed_capture_identity(args, census, tokens, corpus_text, *, attention_implementation,
                                guard=None, release_read_pages=None, source_authentication=None):
-    """The canonical capture identity of this draw over the census's source."""
+    """The canonical capture identity of this draw over the census's source.
+
+    Through a streamed capture's recording owner (PQ #1896) this is the
+    traversal identity: nothing is hashed here, and the capture binds the
+    digests of the bytes it read at its seal.
+    """
     from . import tessera_calibration_cache as store
     if (census.get('model_load_contract') or {}).get('schema') != 'prismaquant.streaming_initialization.v1':
         raise RuntimeError('streamed capture requires a census from the qualified streaming source route')
@@ -5506,24 +5511,39 @@ def _streamed_capture_identity(args, census, tokens, corpus_text, *, attention_i
         source_authentication=source_authentication)
 
 
+def _require_automatic_capture_recording(args):
+    """The campaign's automatic recording decision, before original-source reads.
+
+    Explicit descriptor-owner operations and selected capture reuse retain
+    their existing contract. This seam owns automatic monolith and chain
+    admission; source digests and stat/lifetime fences are not immutability.
+    """
+    if args.streaming and args.capture_calibration_out:
+        from . import tessera_calibration_cache as store
+        store.require_automatic_capture_source_recording()
+
+
 def _run_capture_chain_bookends(args, saved_calibration):
     """A capture chain's prep or join row (PQ #1885): no model, no forward."""
+    _require_automatic_capture_recording(args)
     from . import capture_layer_chain as chain
     if args.capture_chain == "join":
         record = chain.join(args.capture_calibration_out, census_path=args.calibration_census)
         print(f"[campaign] joined streamed calibration capture: {record['manifest']}", flush=True)
         return 0
+    from . import tessera_calibration_cache as store
     census = load_calibration_census(args.calibration_census, args=args)
     tokens, corpus_text = (saved_calibration if saved_calibration is not None else
                            _calibration_tokens(args.model, args.nsamples, args.seqlen, args.seed))
-    # The prep hashes the whole source once; a bounded capture's prep drops
-    # those pages as it reads, as the monolith's guarded identity does.
-    bounded = args.streaming_capture_policy == 'shared-inputs-bounded-v1'
-    record = chain.prepare(args.capture_calibration_out, census_path=args.calibration_census,
-        ranges=args.capture_chain_ranges, n_batches=len(tokens),
-        boundary_storage=args.capture_chain_boundary_storage,
-        identity=lambda: _streamed_capture_identity(args, census, tokens, corpus_text,
-            attention_implementation=args.attention_implementation, release_read_pages=bounded))
+    # The prep reads no payload (PQ #1896): it seals the traversal identity,
+    # the quanta record the digests of what they read, and the join binds them.
+    with store.record_capture_source(args.calibration_census, model=args.model) as source:
+        record = chain.prepare(args.capture_calibration_out, census_path=args.calibration_census,
+            ranges=args.capture_chain_ranges, n_batches=len(tokens),
+            boundary_storage=args.capture_chain_boundary_storage,
+            identity=lambda: _streamed_capture_identity(args, census, tokens, corpus_text,
+                attention_implementation=args.attention_implementation,
+                source_authentication=source))
     print(f"[campaign] prepped streamed calibration capture chain: {record['path']}", flush=True)
     return 0
 
@@ -5544,8 +5564,15 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
                               dense_targets, expert_targets, scope_groups,
                               tokens, corpus_text, census, context_by_unit,
                               attention_implementation, capture_runtime,
-                              structure_by_unit=None, pinned_roster=None):
-    """Wire canonical collection to the existing resident layer traversal."""
+                              structure_by_unit=None, pinned_roster=None,
+                              capture_guard=None):
+    """Wire canonical collection to the existing resident layer traversal.
+
+    A capture reads its source once (PQ #1896): the runner reads through the
+    recording owner that hashes each file at its first payload read, and the
+    seal binds those digests. ``capture_guard`` is the bounded capture's
+    memory guard, created before the runner so the owner's hashes check it.
+    """
     import torch
     from . import tessera_calibration_cache as store
     from .routed_experts import refresh_packed_expert_projections
@@ -5577,11 +5604,13 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     shared_capture = capture_policy in ('shared-inputs-release-v1', 'shared-inputs-bounded-v1')
     bounded_capture = capture_policy == 'shared-inputs-bounded-v1'
     capture_load_policy = getattr(args, 'capture_load_policy', None)
-    guard = None
-    if bounded_capture and runner.device.type == 'cuda':
+    guard = capture_guard
+    if guard is None and bounded_capture and runner.device.type == 'cuda':
         from .memory_management import CaptureMemoryGuard
         guard = CaptureMemoryGuard(runner.device)
+    if guard is not None:
         guard.check('before_capture_identity')
+    source = runner.context.source_authentication
     # A capture chain quantum (PQ #1885) runs layers [start, stop) of this
     # same traversal; everything else about the capture is unchanged.
     quantum = None
@@ -5596,12 +5625,15 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
                    if quantum.start <= runner.layer_index_for_qname(name) < quantum.stop]
     writer = None
     if census is not None:
-        # The prep hashed the whole source once. A quantum's identity comes
-        # from the prep's hash-bound roster through the descriptor owner its
-        # runner reads with, which hashes each file the quantum consumes.
+        # The capture reads its source once (PQ #1896): the runner reads
+        # through a recording owner, which hashes each file at its first
+        # payload read through the descriptor its tensors are read through.
+        # The identity binds no digests yet; the seal (or the chain's join)
+        # binds what was read.
+        if not getattr(source, 'is_recording', False):
+            raise RuntimeError('a streamed capture reads its source through its recording owner')
         identity = _streamed_capture_identity(args, census, tokens, corpus_text,
-            attention_implementation=attention_implementation, guard=guard,
-            source_authentication=None if quantum is None else quantum.source_authentication)
+            attention_implementation=attention_implementation, source_authentication=source)
         if quantum is not None:
             quantum.require_identity(identity, n_batches=len(tokens))
         writer = store.CaptureWriter(args.capture_calibration_out,
@@ -5620,7 +5652,8 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             max_act_rows=args.max_act_rows, cache_slots=args.streaming_cache_slots,
             prefetch_workers=args.streaming_prefetch_workers,
             headroom_gb=args.streaming_cache_headroom_gb, capture_policy=capture_policy,
-            capture_load_policy=capture_load_policy)
+            capture_load_policy=capture_load_policy,
+            source_recording=getattr(source, 'is_recording', False))
         if resources['memory_bytes'] > guard.cap_bytes:
             # The numbers, not just the verdict: a row that dies here is
             # otherwise diagnosable only by unpickling a completed row's
@@ -5632,6 +5665,13 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
                 + json.dumps(memory_admission_detail(
                     plan_bytes=resources['memory_bytes'],
                     cap_bytes=guard.cap_bytes), sort_keys=True))
+        if 'source_retained_page_bytes' in resources:
+            # Clean page cache, outside the plan (PQ #1896). Past the slack the
+            # kernel reclaims retained pages and their ranges are read again,
+            # so this line says whether the source can be read once.
+            print(json.dumps({'capture_source_retained_pages': {
+                'retained_bytes': resources['source_retained_page_bytes'],
+                'slack_bytes': guard.cap_bytes - resources['memory_bytes']}}), flush=True)
         additional = max(sum(value for key, value in phase.items() if key not in
             ('nonbody_source_bytes', 'declared_headroom_bytes'))
             for phase in resources['phases'].values())
@@ -5652,9 +5692,8 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
                 source=projection['producer']['source'], measured={m.qname for m in live},
                 resource_check=None if guard is None else guard.check,
                 release_source_pages=guard is not None,
-                # A quantum's every source read goes through the prep roster's owner.
-                **({} if quantum is None else
-                   {'source_authentication': quantum.source_authentication}))
+                # Every source read of a capture goes through its recording owner.
+                **({} if source is None else {'source_authentication': source}))
         # The source identity check is complete. The collector creates its own
         # live views; this caller must not pin old packed storage through return.
         del live
@@ -5757,9 +5796,16 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
         **_campaign_calibration_parameters(args), fit_tokens_min=lo)
     if writer is not None:
         census_max_abs(census, maxima)
-        receipt = writer.finish(model_load_contract=contract)
+        # The files the forward never read (MTP sidecars, tokenizer assets)
+        # are hashed now; every other digest was recorded by its read.
+        source_receipt = source.authenticate_complete_source()
+        receipt = writer.finish(model_load_contract=contract,
+                                source_files=source.recorded_source_files())
         _write_capture_load_execution(args, writer, guard=guard,
                                       resources=resources if guard is not None else None)
+        from .cost_stage_checkpoint import atomic_write_bytes
+        atomic_write_bytes(Path(args.cache_dir)/'capture-source-authentication.json',
+                           indent2_json_file_bytes(source_receipt))
         print(f"[campaign] complete streamed calibration capture: {receipt}", flush=True)
     else:
         payload = calibration_census(counts, maxima, args=args, groups=scope_groups,
@@ -6141,6 +6187,7 @@ def _main(argv, *, source_scope) -> int:
         ap.error("--campaign-identity-bytes cannot be negative")
     if args.campaign_identity_threads is not None and args.campaign_identity_threads < 1:
         ap.error("--campaign-identity-threads must be positive")
+    _require_automatic_capture_recording(args)
     if args.capture_chain in ("prep", "join"):
         # Neither runs a forward, so neither loads the model.
         return _run_capture_chain_bookends(args, saved_calibration)
@@ -6228,14 +6275,32 @@ def _main(argv, *, source_scope) -> int:
             source_authentication.adopt_identity_proof_or_hash(
                 args.source_identity_cache, args.source_identity_cache_sha256)
 
-    if args.capture_chain == "quantum":
-        # A capture chain quantum reads its source through the prep's
-        # hash-bound roster: each file it consumes is hashed once through a
-        # held descriptor, and nothing it does not read is hashed (PQ #1885).
-        from .capture_layer_chain import authenticate_quantum_source
-        source_authentication = source_scope.enter_context(authenticate_quantum_source(
-            args.capture_calibration_out, census_path=args.calibration_census, model=args.model,
-            release_read_pages=args.streaming_capture_policy == 'shared-inputs-bounded-v1'))
+    capture_guard = None
+    if args.streaming and args.capture_calibration_out:
+        # A streamed capture reads its source once (PQ #1896): the runner
+        # reads through a recording owner that hashes each file at its first
+        # payload read, through the held descriptor the tensors are then read
+        # through, and keeps its pages for them. A bounded capture's guard
+        # exists before the runner so those hashes check it, and the owner
+        # drops each file's pages after its last consumer.
+        bounded = args.streaming_capture_policy == 'shared-inputs-bounded-v1'
+        if bounded and device == 'cuda':
+            from .memory_management import CaptureMemoryGuard
+            capture_guard = CaptureMemoryGuard(device)
+        page_policy = dict(resource_check=None if capture_guard is None else capture_guard.check,
+                           release_read_pages=bounded)
+        if args.capture_chain == "quantum":
+            # A chain quantum's owner is bound to the prep's seal and stat
+            # record; nothing it does not read is hashed (PQ #1885).
+            from .capture_layer_chain import authenticate_quantum_source
+            source_authentication = source_scope.enter_context(authenticate_quantum_source(
+                args.capture_calibration_out, census_path=args.calibration_census,
+                model=args.model, **page_policy))
+        else:
+            from . import tessera_calibration_cache as calibration_store
+            source_authentication = source_scope.enter_context(
+                calibration_store.record_capture_source(
+                    args.calibration_census, model=args.model, **page_policy))
 
     # The source proof is adopted before this point. The producer's immutable
     # package seal can run under skeleton/tokenizer/calibration preparation
@@ -6480,7 +6545,7 @@ def _main(argv, *, source_scope) -> int:
                 scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
                 context_by_unit=context_by_unit, attention_implementation=attention_implementation,
                 capture_runtime=capture_runtime, structure_by_unit=structure_by_unit,
-                pinned_roster=pinned_roster)
+                pinned_roster=pinned_roster, capture_guard=capture_guard)
         finally:
             runner.shutdown()
     if selected_source:

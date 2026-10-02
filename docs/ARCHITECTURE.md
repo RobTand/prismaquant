@@ -1,5 +1,38 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2013, Refs #2010, #2008): automatic streamed
+capture recording now refuses at the existing source-owner admission seam
+before model/config/tokenizer reads, recording or publication. Both capture
+policies and monolithic/prep/quantum/join campaign routes require the same
+qualification; direct campaign bookends retain the guard. No currently
+supported provider establishes an independently authenticated complete original
+generation, immutable decoder material and admitted lifetimes. Stat tuples,
+producer/census digest declarations, read-only mounts and PB lifetime pins do
+not qualify that provider. There is no override or fabricated positive route.
+Explicit descriptor-owner operations and selected capture reuse retain their
+existing contracts; neither gains an immutable-source qualification claim.
+The recovered recording, write-time output digest and independent downstream
+verification mechanisms remain available for those explicit operations.
+This bounded fail-closed slice is not end-to-end immutable capture, residency,
+GPU, numerical, serving, pin, format or export-wire qualification. Wider parents
+#1896/#1887 and source/provider acceptance in #2010/#2008 remain open.
+
+Re-stamped 2026-10-02 (PQ #2008, Refs #1896, #1887): recovery preserves
+current-main domain-qualified capture-chain definitions and compatibility
+aliases, source descriptor recording, producer/stat fences, and write-time
+output digests. Source pages are reported clean cache, not charged resident
+memory. No full-source cold-pass guarantee or globally single-pass chain is
+established: quanta reread shared head/boundary shards, and kernel reclamation
+can force tensor rereads. The #1885 prep/GPU wording below records its initial
+implementation, superseded by prep v2 and the original narrow GPU receipts;
+those receipts are not rebased-source GPU qualification. Existing parallel
+fallback hashing (#1889) remains. Numerical, serving, pins and export wire are
+unchanged. Stat fences detect metadata-observable mutation, not arbitrary
+same-signature byte mutation: #2010 records two same-signature admissions in
+a bounded ZFS diagnostic, with no end-to-end corrupted artifact demonstrated.
+That original integrity requirement remains unmet; the exit-only regression
+now constructs deterministic drift, not a stronger production guarantee.
+See [recovery acceptance census](measurements/pr1924-recovery-2026-10-02.md).
 Re-stamped 2026-10-02 (PQ #1986, Refs #1588), integrated on
 `sol/pq1986-integrated-20261002` from current main and the preserved component commits. The opt-in campaign namespace preparation API extends the
 existing dispatcher, without a new scheduler or CLI: a complete hash-keyed
@@ -194,6 +227,49 @@ takes `--priority` (default -10, unchanged), so a capture chain that feeds a
 gate can run in the campaign band, as `dispatch_tessera_campaign --priority`
 already allows. Rows sealed without it are byte-identical. Gate:
 `tests/test_dispatch_capture_chain.py`.
+
+Re-stamped 2026-10-01 (Refs #1896, #1887): a streamed calibration capture
+records each owner's source digests at first use and does not reread newly
+written output entries at seal. The monolith and every chain
+quantum read the source through a recording `CaptureSourceAuthentication`
+(`record_capture_source`). The first payload read of a file hashes all of it
+through the held descriptor the tensors are then read through and records the
+digest. The hash keeps the file's pages for those reads, so while the pages
+stay in memory the bytes come off storage once. A census that declares
+producer digests is compared at that first use, and a mismatch refuses before
+the first tensor. Under the
+bounded capture policy the owner drops a file's pages after the last layer that
+reads it (`StreamingContext.release_source_pages_before`). Files the forward
+never reads (MTP or vision shards, tokenizer assets) are hashed once at the seal
+(`authenticate_complete_source`). The identity splits in two.
+`capture_identity` through a recording owner returns the traversal identity,
+which binds no `source_files`; it keys the journal. The seal binds the recorded
+digests (`bind_capture_source`), so the sealed manifest identity has its old
+shape, and every downstream reader still verifies against it unchanged. The
+chain prep now hashes nothing (prep schema v2; a v1 prep refuses). The join
+unions the digests the quanta recorded, refuses two quanta that recorded
+different digests for one file, and hashes only what no quantum read. On the
+output side, `CaptureWriter` and `publish_capture` hash each entry while it is
+written (`SerializedEntryDigest`). The seal holds each entry to the stat
+fingerprint taken then and reads nothing back; the manifest digest is of the
+bytes written. The retained pages are clean page cache. With
+`source_recording=True`, `streamed_calibration_resources` reports their peak
+as `source_retained_page_bytes` (`retained_source_page_bytes`) beside the plan.
+It does not add the peak to `memory_bytes`: the guard's committed reading omits
+clean pages, and the kernel reclaims them before it refuses an allocation.
+When the peak exceeds the slack under the cap, the kernel reclaims pages and
+their ranges are read twice. The capture prints both numbers
+(`capture_source_retained_pages`). GLM-5.3-Flash-BF16 has shards that
+interleave layers; one shard is read by layers 4 and 40. For the attention
+capture (cap 111.7 GB, plan 98.4 GB), the bounded peak at two cache slots is
+69.7 GB against 13.3 GB of slack. That capture therefore re-reads the
+interleaved ranges it cannot hold, on top of one hash pass over the 643 GB
+source. Not changed: the stat fence, `resource_check`, the
+manifest schema, formats, defaults, runtime pins and serving gates. A capture
+journalled before this change will not resume, because its journal is keyed on
+the old identity; that refusal is fail-closed. Gates:
+`tests/test_capture_single_pass_source_1896.py` plus the chain, calibration
+cache and verified-load suites.
 
 Re-stamped 2026-10-01 (PQ #1885): the streamed calibration capture can run
 as a chain of retryable layer-range rows instead of one forward
@@ -5797,6 +5873,13 @@ re-hash through the same `_fence_hashes` engine stream (PQ #1531). Every re-hash
 resolves before the block exits, so the manifest is never built
 over an unproven wire. The v1 selected cache never calls the rebind and is
 unchanged.
+
+As of: 2026-10-01 · `claude/pq-1896-single-pass-source`.
+Stamps follow, newest first, each recording its own branch and date.
+
+Re-stamped (2026-10-01, `claude/pq-1896-single-pass-source`) for **the
+streamed capture source recording and output digests** (Refs #1896, #1887);
+see the stamp at the top of this document.
 
 As of: 2026-10-01 · `claude/pq-1918-chain-priority`.
 Stamps follow, newest first, each recording its own branch and date.
@@ -30053,22 +30136,27 @@ each row; all three kinds require `--streaming` and
 `--capture-calibration-out`.
 
 **Prep** (`--capture-chain prep --capture-chain-ranges 0:a,a:b,...
---capture-chain-boundary-storage JSON`). Loads no model. It refuses ranges
-that overlap or leave a gap, and refuses if a prep record already exists. It
-computes the capture identity once (`capture_identity`, which hashes every
-source file), with the source files' stat fingerprints taken before and after
-the hash and required to be equal. It binds a published generation of the v2
-`layer_major` boundary storage and seals `chain/prep.json`: the identity, the
-ranges, the batch count, the storage policy, the generation's session and the
-fingerprints.
+--capture-chain-boundary-storage JSON`). Loads no model and reads no source
+payload (PQ #1896). It refuses ranges that overlap or leave a gap, and refuses
+if a prep record already exists. It computes the traversal identity
+(`capture_identity` through a recording owner, which binds no source digests),
+with the source files' stat fingerprints taken before and after and required
+to be equal. It binds a published generation of the v2 `layer_major` boundary
+storage and seals `chain/prep.json` (schema `prep.v2`; a v1 prep refuses): the
+identity, the ranges, the batch count, the storage policy, the generation's
+session and the fingerprints.
 
 **Quantum** (`--capture-chain quantum --capture-layer-range a:b`). The row
-builds its streamed model with a `CaptureSourceAuthentication` owner bound to
-the prep's identity and the prep record's digest (`authenticate_quantum_source`).
-Each shard the quantum reads is hashed once, through the held descriptor,
-against the prep's roster digest; shards it only inspects are not hashed, and
-the small metadata files are. A quantum therefore hashes the head shards, its
-own layers' shards and the metadata files, never the whole source.
+builds its streamed model with a recording `CaptureSourceAuthentication`
+owner bound to the prep record's digest and its stat fingerprints
+(`authenticate_quantum_source`). Each file the quantum reads is hashed once,
+by its first payload read, through the held descriptor the tensors are then
+read through, and the digest is recorded; a census producer digest is
+compared there. Files it only inspects are not hashed. A quantum therefore
+hashes the head shards, its own layers' shards and the metadata files it
+reads, never the whole source. Shards the chain reads more than once are the
+head shards (every quantum) and a shard that straddles a range boundary (both
+neighbours); each such read is that quantum's one read, not a second pass.
 `ChainQuantum` refuses to run if:
 
 - the prep's ranges do not tile the loaded source's layers;
@@ -30089,12 +30177,13 @@ layers `[a, b)`:
 - The exact (per-batch) boundary storage path refuses a frontier.
 
 The unchanged capture visitor journals the range's units through
-`CaptureWriter`. `CaptureWriter.verify_entries` re-reads each entry once
-(sha256 and tensor validation) and records its stat fingerprint. The quantum
-then writes boundary `b` (none for the last range) and a sealed fragment:
-the boundary records, the verified unit records, the range's selected
-initialization witness and the source authentication receipt. Last, it marks
-its owner `complete`.
+`CaptureWriter`, which hashes each entry as it writes it and records its stat
+fingerprint then; `CaptureWriter.verify_entries` returns those records and
+reads nothing (PQ #1896). The quantum then writes boundary `b` (none for the
+last range) and a sealed fragment: the boundary records, the unit records,
+the range's selected initialization witness and the recording receipt
+(`prismaquant.capture_source_recording.v1`) of the digests it read. Last, it
+marks its owner `complete`.
 
 **Join** (`--capture-chain join`). Loads no model. It checks, in order:
 
@@ -30108,14 +30197,20 @@ its owner `complete`.
    contract; quanta that disagree about a head record refuse) equal the
    census's model load contract.
 7. The verified units cover the identity's units exactly once.
+8. The quanta's recorded source digests agree: two quanta that recorded
+   different digests for one file refuse (`recorded_source_digests`).
 
-`CaptureWriter.finish(verified=)` then publishes the manifest. Each entry is
-held to the fingerprint its quantum recorded instead of being read again;
+A recording owner bound to the prep then adopts those digests for the objects
+the prep stat (`adopt_recorded_digests`) and hashes only the files no quantum
+read (`authenticate_complete_source`). `CaptureWriter.finish(verified=,
+source_files=)` publishes the manifest with the complete recorded roster bound
+into its identity. Each entry is held to the fingerprint its writer took
+instead of being read again;
 the `mount` rule of `stat_fingerprint_reuse` admits a different NFS client
 device. A changed entry refuses. After the manifest is published, the join
 unlinks the interior boundaries' entry files by exact path inside the
-generation, and writes `chain/join.json`. The generation directory and its
-owner records are left in place. The join writes no capture-load execution
+generation, and writes `chain/join.json` with the join's source receipt.
+The generation directory and its owner records are left in place. The join writes no capture-load execution
 record, because it loads nothing.
 
 **Dispatch** (`tools/dispatch_capture_chain.py`). A quantum commits no
