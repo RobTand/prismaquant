@@ -18,6 +18,10 @@ def expanded(monkeypatch):
 
     def expand(shape, **kwargs):
         families = tuple(f.name for f in kwargs.get("families", menu.menu_families()))
+        if kwargs.get("require_unquantized_activations", False):
+            from prismaquant.format_registry import get_format
+            families = tuple(f for f in families
+                             if not get_format(f + "_R896").act_quant_changes_input)
         calls.append(families)
         return [SimpleNamespace(family=f, route_status="unattested") for f in families]
 
@@ -58,19 +62,39 @@ def test_absent_profile_preserves_existing_menu(expanded):
     assert [r.family for r in rows[KV]] == list(FAMILIES)
 
 
+def test_actual_lane_menu_interprets_generic_precision_through_registry(monkeypatch):
+    from prismaquant import format_registry as registry
+    from prismaquant.tessera_formats import get_tessera_family
+
+    families = tuple(map(get_tessera_family, FAMILIES))
+    kwargs = dict(mode="research", families=families, step_q256=256)
+    ordinary = menu.expand_tessera_menu((32, 256), **kwargs)
+    constrained = menu.expand_tessera_menu((32, 256),
+        require_unquantized_activations=True, **kwargs)
+    assert {r.family for r in ordinary} == set(FAMILIES)
+    assert {r.family for r in constrained} == {"TESSERA_BF16_K1"}
+    assert all(not registry.act_bits_quantize_input(r.admission.act_bits) for r in constrained)
+    # The existing registry owner decides the precision meaning. The lane
+    # does not maintain a family-name/bit-threshold table alongside it.
+    monkeypatch.setattr(registry, "act_bits_quantize_input", lambda bits: False)
+    admitted = menu.expand_tessera_menu((32, 256),
+        require_unquantized_activations=True, **kwargs)
+    assert [r.format_name for r in admitted] == [r.format_name for r in ordinary]
+
+
 @pytest.mark.parametrize("name", [KV, "model.layers.3.self_attn.kv_b_proj",
     "language_model.model.layers.3.self_attn.kv_b_proj",
     "model.layers.45.self_attn.kv_b_proj.weight", "self_attn.kv_b_proj"])
 def test_unit_policy_recognizes_checkpoint_live_and_served_spellings(name):
     profile = Glm5NextProfile()
-    assert profile.tessera_pricing_families(name) == ("TESSERA_BF16_K1",)
+    assert profile.linear_requires_unquantized_activations(name) is True
     assert profile.is_pinned_name(name)
 
 
 @pytest.mark.parametrize("name", [Q, "model.layers.3.mlp.kv_b_proj",
     "model.layers.3.self_attn.kv_b_proj_extra", "lm_head"])
 def test_unit_policy_does_not_constrain_other_linears(name):
-    assert Glm5NextProfile().tessera_pricing_families(name) is None
+    assert Glm5NextProfile().linear_requires_unquantized_activations(name) is False
 
 
 @pytest.mark.parametrize("family", FAMILIES)
@@ -82,7 +106,7 @@ def test_seed_obeys_profile_arithmetic_without_global_restriction(family):
     if family == "TESSERA_BF16_K1":
         campaign.require_seed_family_scope(KV, state, **kwargs)
     else:
-        with pytest.raises(RuntimeError, match="unit family restriction"):
+        with pytest.raises(RuntimeError, match="unit activation precision"):
             campaign.require_seed_family_scope(KV, state, **kwargs)
 
 

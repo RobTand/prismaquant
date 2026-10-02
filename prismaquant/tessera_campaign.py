@@ -258,26 +258,23 @@ def parse_family_restriction(value):
     return result
 
 
-def _unit_family_names(name, restriction, structure_by_unit, profile):
-    """Intersect declared structural scope with the profile's unit arithmetic."""
-    families = None if restriction is None else tuple(restriction[structure_by_unit[name]])
-    unit_families = None if profile is None else profile.tessera_pricing_families(name)
-    if unit_families is not None:
-        families = (tuple(unit_families) if families is None else
-                    tuple(family for family in families if family in unit_families))
-    return families
+def _unit_family_names(name, restriction, structure_by_unit):
+    """The declared structural family scope, absent when unrestricted."""
+    return None if restriction is None else tuple(restriction[structure_by_unit[name]])
 
 
 def require_seed_family_scope(name, state, *, family_restriction, structure_by_unit,
                               rate_band=None, profile=None):
     """Refuse incompatible active seed anchors before their wires are linked."""
     from .tessera_formats import parse_tessera_format_name
+    from . import format_registry as fr
     policy = parse_family_restriction(family_restriction)
     structure = (structure_by_unit or {}).get(name)
     if policy is not None and structure not in ("dense", "routed_moe"):
         raise RuntimeError(f"{name}: family restriction requires authoritative structure")
-    families = _unit_family_names(name, policy, structure_by_unit, profile)
-    if families is None:
+    families = _unit_family_names(name, policy, structure_by_unit)
+    unquantized = profile is not None and profile.linear_requires_unquantized_activations(name)
+    if families is None and not unquantized:
         return
     if not isinstance(state, Mapping) or not isinstance(state.get("anchors"), list):
         raise RuntimeError(f"{name}: family restriction received an invalid seed state")
@@ -289,8 +286,10 @@ def require_seed_family_scope(name, state, *, family_restriction, structure_by_u
         if (row.get("qname") != name or row.get("family") != family.name
                 or type(row.get("body_rate_q256")) is not int or row["body_rate_q256"] != rate):
             raise RuntimeError(f"{name}: family restriction seed format/identity disagree")
-        if family.name not in families:
+        if families is not None and family.name not in families:
             raise RuntimeError(f"{name}: seed {row['format_name']} violates unit family restriction")
+        if unquantized and fr.get_format(row["format_name"]).act_quant_changes_input:
+            raise RuntimeError(f"{name}: seed {row['format_name']} violates unit activation precision")
         if rate_band is not None and not rate_band[0] <= rate <= rate_band[1]:
             raise RuntimeError(f"{name}: seed {row['format_name']} is outside restricted rate band {rate_band}")
 
@@ -3809,8 +3808,9 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
     shape; their structural class comes from owned topology, never shape or
     name. Without a restriction, a missing context remains unbound. An explicit
     family restriction requires exact structure coverage and adds the allowed
-    family tuple to the cache key. A profile's per-unit activation arithmetic
-    further intersects those families; an empty intersection stays empty. Units
+    family tuple to the cache key. A profile's generic per-unit identity-input
+    requirement is interpreted by the lane's existing menu through the format
+    registry and included in that key. An empty intersection stays empty. Units
     repeat shapes ~1500:1 on a production MoE, so expanding per Linear repeats
     the same answer thousands of times; keying by shape and context expands once per
     distinct answer instead.  Exact rather than approximate: same arguments,
@@ -3836,8 +3836,9 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
             structure = structure_by_unit[name]
             if context is not None and context.structure != structure:
                 raise ValueError(f"{name}: family restriction structure conflicts with serving context")
-        families = _unit_family_names(name, restriction, structure_by_unit, profile)
-        key = (shape, None if context is None else context.key(), families)
+        families = _unit_family_names(name, restriction, structure_by_unit)
+        unquantized = profile is not None and profile.linear_requires_unquantized_activations(name)
+        key = (shape, None if context is None else context.key(), families, unquantized)
         if key not in by_shape_and_context:
             by_shape_and_context[key] = expand_tessera_menu(
                 shape, mode=mode, tp_degree=tp_degree,
@@ -3845,6 +3846,7 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
                 **({"serving_context": context} if context is not None else {}),
                 **({"families": tuple(get_tessera_family(n) for n in families)}
                    if families is not None else {}),
+                **({"require_unquantized_activations": True} if unquantized else {}),
             )
         menus[name] = by_shape_and_context[key]
     return menus
