@@ -186,15 +186,15 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
             finally:
                 if view is not None:
                     view.release()
+        if tier == "ram":
+            resolver.record_ram_read(path, len(raw))
+        else:
+            resolver.record_stage_read(path, len(raw))
+        return raw if sealed else bytes(raw)
     except BaseException:
         if sealed and raw is not None:
             raw.close()
         raise
-    if tier == "ram":
-        resolver.record_ram_read(path, len(raw))
-    else:
-        resolver.record_stage_read(path, len(raw))
-    return raw if sealed else bytes(raw)
 
 
 def read_staged_sealed_file(path: Path, expected_sha256: str, expected_bytes: int, *, label: str):
