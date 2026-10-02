@@ -145,5 +145,3 @@ def test_forked_expert_consumer_routes_each_window_and_keeps_token_mean(monkeypa
     assert units[qname]["NVFP4"] == expected
     assert costs[qname + ".weight"]["NVFP4"]["predicted_dloss"] == expected
     assert events.count(("install", 0)) == events.count(("unload", 0)) == 1
-
-
