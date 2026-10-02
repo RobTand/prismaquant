@@ -2387,7 +2387,8 @@ class _BoundCheckpointUnitIdentity:
             weights={self._name: source_weight},
             menus={self._name: [SimpleNamespace(format_name=fmt) for fmt in formats]},
             calibration_source=calibration_source, static_scales=static_scales,
-            projected_units={} if projected_unit is None else {self._name: projected_unit})
+            projected_units={} if projected_unit is None else {self._name: projected_unit},
+            check_scoring_metadata=False)
         self._settings = self._calibration_settings()
         # H-free rosters retain no H receipt. The run-level identity uses its
         # ordinary direct H receipt for those units, keeping every retained H
@@ -2937,7 +2938,7 @@ def _verify_wire_records_on_threads(pending, wire_dir, *, threads):
 
 def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
                                 static_scales, projected_units=None, bound_unit=None,
-                                structure=None):
+                                structure=None, check_scoring_metadata: bool = True):
     """The resumed row's inputs, as this run's producer would stamp them.
 
     A unit in ``projected_units`` (``{qname: producer unit record}``) is a
@@ -2983,7 +2984,8 @@ def _checkpoint_anchor_identity(anchor, *, weights, menus, calibration_source,
                   and rung_accepts_hessian(anchor.format_name, wire) else None)
     if bool(anchor.hessian_applied) != (activation is not None):
         raise RuntimeError("checkpoint anchor Hessian applicability disagrees with the producer")
-    _require_resumable_anchor(anchor, static_scales)
+    _require_resumable_anchor(anchor, static_scales,
+                             check_scoring_metadata=check_scoring_metadata)
     api = _checkpoint_identity_api()
     projected = (projected_units or {}).get(anchor.qname)
     if bound_unit is not None:
@@ -5536,7 +5538,8 @@ def _tessera_route_memo():
     return lazily_sized_cache(recipe_cache_bound)(_tessera_route)
 
 
-def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
+def _require_resumable_anchor(anchor: CampaignAnchor, static_scales, *,
+                              check_scoring_metadata: bool = True) -> None:
     """Refuse a resumed anchor priced under a different activation contract.
 
     This is the per-row half of the resume identity rule, shared by pre-link
@@ -5580,6 +5583,11 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
             "must have been scored under this run's own static scales, or "
             "the table mixes two activation calibrations under one identity."
         )
+    # The closed-roster identity template is built before scoring from input
+    # descriptors. It has no measured contract/observation to validate. Only
+    # that caller opts out; actual published and reused rows use the default.
+    if check_scoring_metadata is False:
+        return
     # The same declaration _finish_anchor stamps on a fresh measured row.
     # Producer wire/input integrity does not authenticate scoring metadata.
     expected_contract = str(spec.act_dtype_name or "a16")
