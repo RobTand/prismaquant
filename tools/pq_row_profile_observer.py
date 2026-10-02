@@ -8,7 +8,7 @@ workload. Output never enters a wire, cost row or anchor identity.
 import argparse
 from tools.pq_profile_digest import file_sha256hex
 from tools.pq_profile_artifact import publish_profile
-from prismaquant.io_spans import PeriodicSampler
+from tools.pq_profile_source import profile_source_owner
 import json
 import math
 import os
@@ -20,6 +20,9 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+
+# The host observer needs the existing stdlib sampler, not production init.
+PeriodicSampler = profile_source_owner('io_spans').PeriodicSampler
 
 p = argparse.ArgumentParser()
 p.add_argument('--out', required=True)

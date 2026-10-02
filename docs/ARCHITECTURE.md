@@ -72,7 +72,7 @@ chain. Sealed records, handoff JSON bytes/schema, kernels, numerical behavior,
 export wire, pins, pipeline defaults and serving gates are unchanged. CPU
 fixtures are not GPU/model admission.
 
-Re-stamped 2026-10-01 (PQ #1942): admitted row profiling separates
+Re-stamped 2026-10-02 (PQ #1942): admitted row profiling separates
 profile generation/publication from host telemetry. PB's deliberate
 `NoNewPrivileges=1` is preserved: the observer does not invoke sudo or attach
 a privileged profiler. A same-UID py-spy parent runs inside the workload's
@@ -87,6 +87,12 @@ atomic publication and row/observer failure gates remain mandatory. The
 existing PB row deadline bounds the process tree; no profiler duration cutoff
 signals a quantization row. This changes opt-in instrumentation only, not
 runtime/encoder source, numerical flags, formats, caches, pins or ship gates.
+The host observer loads the authoritative stdlib-only `io_spans.PeriodicSampler`
+through the same source-owner loader as its digest bridge, without executing
+production package initialization or importing Torch/container dependencies.
+Sampler lifetime, native identity and sticky observer timeout refusal are unchanged;
+`tests/test_profile_observer_bootstrap_1942.py` executes the actual observer import
+chain in a fresh no-site interpreter. No production package namespace is replaced.
 CPU tests and native same-UID profiling do not establish a GPU A/B result.
 See `docs/campaign_row_profiling.md` for the admitted dependency contract.
 
