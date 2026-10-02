@@ -165,8 +165,8 @@ short convolution would have run on uninitialised weights.
 
 Open, deliberately unimplemented (report, don't hack)
 -----------------------------------------------------
-1. ``vllm_architecture_class()`` returns None (DSv4/hy_v3 precedent) and
-   ``fused_groups`` is empty. See the spec's ``open_todos.fused_groups``.
+1. ``vllm_architecture_class()`` returns None (DSv4/hy_v3 precedent).
+   Fused groups are declared in the spec and loaded by ``ModelProfile``.
 2. ``kv_b_proj`` is BF16 in the source while ``q_a``/``q_b``/``kv_a`` are
    FP8 — flagged in the memo as a serving-decision question, not decided
    here.
