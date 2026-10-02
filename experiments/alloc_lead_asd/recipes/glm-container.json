@@ -26,7 +26,7 @@
       },
       {
         "source": "/home/rob/tmp",
-        "target": "/scratch",
+        "target": "/home/rob/tmp",
         "readonly": false
       }
     ]
@@ -43,6 +43,9 @@
     "HF_HOME": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp/huggingface",
     "XDG_CACHE_HOME": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp/xdg",
     "TMPDIR": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp",
-    "PRISMAQUANT_TMPDIR": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp"
+    "PRISMAQUANT_TMPDIR": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp",
+    "PRISMABUILD_PRODUCED_SPOOL_ROOT": "/home/rob/tmp/pq1962-tiny-produced-spool",
+    "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": "16777216",
+    "PRISMAQUANT_DEV_MODE": "1"
   }
 }

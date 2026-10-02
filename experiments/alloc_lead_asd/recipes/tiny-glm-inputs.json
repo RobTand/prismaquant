@@ -1,0 +1,48 @@
+{
+  "schema": "prismaquant.prismabuild.data_manifest.v1",
+  "mount_prefix": "/mnt/shared",
+  "annotations": {
+    "scope": "issue1962-tiny-glm-causal-control",
+    "allowed_tiers": "ram,ssd",
+    "phases": [
+      {
+        "name": "startup",
+        "bytes": 856222,
+        "cumulative_bytes": 856222
+      }
+    ]
+  },
+  "produced_by": {
+    "tool": "issue1962-tiny-glm-control",
+    "size_source": "qualified-output-stat",
+    "source_commit": "c2aebf1892d57433c9cc147e515450624b787879"
+  },
+  "entry_count": 4,
+  "total_bytes": 856222,
+  "entries": [
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/config.json",
+      "offset": 0,
+      "bytes": 3774,
+      "sha256": "4514d45331af117e12c53da3c10f481c1d4030660671f91fb9d91e251ea88d56"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/source.json",
+      "offset": 0,
+      "bytes": 17432,
+      "sha256": "df2b3d0509a6fa3de6bff33e0030deec67f29560c90769696c1929e2089c0df0"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/model.safetensors",
+      "offset": 0,
+      "bytes": 833904,
+      "sha256": "333d34e4a1f75a6be9608bf0f014c35d5d240304bf201f985fd7f23983a8d65e"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/tokens.safetensors",
+      "offset": 0,
+      "bytes": 1112,
+      "sha256": "049cff02ab92a3a1086d9a848f5ab24a42d81adc683deb993729a419ceef7f28"
+    }
+  ]
+}
