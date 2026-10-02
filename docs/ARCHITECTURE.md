@@ -139,6 +139,20 @@ formats, numerical methods, pins, caches and production defaults are unchanged.
 CPU fixture choices supply no multimodal quality, wire, runtime or performance
 qualification. The representative GPU/serving acceptance remains in #1921.
 
+Re-stamped 2026-10-02 (Refs #1271, MTP storage admission slice): storage
+metadata admission is separate from rung eligibility. The GLM MTP payload
+requires exact positive integer serialized wire bytes and parameter counts
+before eligibility filtering, and an exact nonnegative integer byte sub-budget
+before objective validation or selection. The existing generic MTP group menu
+validates each member's positive parameter count and nonnegative integer
+resident bytes before summing them; a negative member cannot hide inside a
+positive total. Both boundaries reuse `schemas.Contract.integer`, preserving
+the current nonnegative generic-residency contract and refusing bool, float
+or string coercions. Valid integer payloads, numerical objectives, group
+selection, format/serving admission, kernels, pins and defaults are unchanged.
+This qualifies malformed-metadata refusal in CPU fixtures; current original
+prices and matched served MTP acceptance remain separate #1271 requirements.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
