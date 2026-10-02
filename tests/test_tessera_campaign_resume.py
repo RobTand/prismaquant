@@ -100,6 +100,13 @@ def _fresh_priced_campaign(monkeypatch, tmp_path, *, hessian=False):
     return fixture, payload
 
 
+@pytest.fixture
+def priced_campaign(monkeypatch, tmp_path):
+    """Separate completed pricing setup from each resume consumer."""
+    return lambda *, hessian=False: _fresh_priced_campaign(
+        monkeypatch, tmp_path, hessian=hessian)
+
+
 @pytest.mark.parametrize("initial,rounds,budget,rates,expected", [
     (1, 2, 3, [1024, 1280, 1536], [1024, 1280, 1536]),
     (2, 2, 3, [1024, 1280, 1536], [1024, 1280, 1536]),
@@ -143,11 +150,11 @@ def _forbid_reencode(monkeypatch, campaign):
     monkeypatch.setattr(campaign, "_measure_anchor", forbidden)
 
 
-def test_main_resumes_identical_cost_and_wire_without_reencoding(monkeypatch, tmp_path):
+def test_main_resumes_identical_cost_and_wire_without_reencoding(
+        monkeypatch, tmp_path, priced_campaign):
     from prismaquant.cost_stage_checkpoint import MANIFEST_SCHEMA
 
-    (campaign, checkpoint, argv, _model, _inputs), initial = _fresh_priced_campaign(
-        monkeypatch, tmp_path)
+    (campaign, checkpoint, argv, _model, _inputs), initial = priced_campaign()
     manifest = json.loads(checkpoint.read_text())
     assert manifest["schema"] == MANIFEST_SCHEMA
     original_manifest = checkpoint.read_bytes()
@@ -164,9 +171,9 @@ def test_main_resumes_identical_cost_and_wire_without_reencoding(monkeypatch, tm
     assert wire.read_bytes() == original_wire
 
 
-def test_main_refuses_changed_hessian_values_under_same_draw(monkeypatch, tmp_path):
-    (campaign, checkpoint, argv, _model, inputs), _payload = _fresh_priced_campaign(
-        monkeypatch, tmp_path, hessian=True)
+def test_main_refuses_changed_hessian_values_under_same_draw(
+        monkeypatch, tmp_path, priced_campaign):
+    (campaign, checkpoint, argv, _model, inputs), _payload = priced_campaign(hessian=True)
     original_manifest = checkpoint.read_bytes()
     _forbid_reencode(monkeypatch, campaign)
     inputs["hessian"][0, 0] += 1
@@ -179,9 +186,9 @@ def test_main_refuses_changed_hessian_values_under_same_draw(monkeypatch, tmp_pa
     "weight", "scoring_rows", "input_scale", "scale_policy", "corpus", "tokens",
     "hessian_mode", "menu", "recipe", "encoder_source", "prismaquant_source", "scope",
 ])
-def test_main_refuses_changed_encoding_or_scoring_inputs(monkeypatch, tmp_path, changed):
-    (campaign, checkpoint, argv, model, inputs), _payload = _fresh_priced_campaign(
-        monkeypatch, tmp_path)
+def test_main_refuses_changed_encoding_or_scoring_inputs(
+        monkeypatch, tmp_path, changed, priced_campaign):
+    (campaign, checkpoint, argv, model, inputs), _payload = priced_campaign()
     original_manifest = checkpoint.read_bytes()
     _forbid_reencode(monkeypatch, campaign)
     if changed == "weight":
@@ -277,9 +284,9 @@ def test_refused_resume_leaves_the_surviving_tables_export_inputs(monkeypatch, t
 
 
 @pytest.mark.parametrize("damage", ["missing", "bytes", "symlink"])
-def test_main_refuses_missing_or_changed_priced_wire(monkeypatch, tmp_path, damage):
-    (campaign, checkpoint, argv, _model, _inputs), _payload = _fresh_priced_campaign(
-        monkeypatch, tmp_path)
+def test_main_refuses_missing_or_changed_priced_wire(
+        monkeypatch, tmp_path, damage, priced_campaign):
+    (campaign, checkpoint, argv, _model, _inputs), _payload = priced_campaign()
     _forbid_reencode(monkeypatch, campaign)
     original_manifest = checkpoint.read_bytes()
     wire = next((tmp_path / "cache" / "wire").glob("*.tessera"))
@@ -299,9 +306,9 @@ def test_main_refuses_missing_or_changed_priced_wire(monkeypatch, tmp_path, dama
 
 
 @pytest.mark.parametrize('changed', [False, True])
-def test_seed_refuses_changed_scoring_rows_before_linking_wire(monkeypatch, tmp_path, changed):
-    (campaign, checkpoint, argv, _model, inputs), _payload = _fresh_priced_campaign(
-        monkeypatch, tmp_path, hessian=True)
+def test_seed_refuses_changed_scoring_rows_before_linking_wire(
+        monkeypatch, tmp_path, changed, priced_campaign):
+    (campaign, checkpoint, argv, _model, inputs), _payload = priced_campaign(hessian=True)
     original_manifest = checkpoint.read_bytes()
     _forbid_reencode(monkeypatch, campaign)
     # The encoder still sees identical W, H, draw and static scale. Only the
