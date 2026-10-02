@@ -2529,12 +2529,13 @@ def seed_source_identity_cache(config, root):
 
 #: The prepared-record bindings that name DIGESTS of things a dev iteration
 #: legitimately changes: which plan the prepare ran under, and which producer
-#: package made it. In dev mode (the default since PQ #1147) these are
-#: records -- ``seal_check`` prints them and the run continues -- while every
-#: other prepared field (the model identity, calibration, roster, backend,
-#: reader) stays a wall even in dev mode: a stale record naming a different
-#: measurement is stale whatever the mode.
-_DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256")
+#: package made it, plus the projection backend's numerical qualification.
+#: In dev mode these are records: ``seal_check`` prints the difference and
+#: reuses the existing preparation without rewriting its completion or cache.
+#: Model identity, calibration, roster and reader remain walls in both modes.
+#: A changed projection backend requires deliberate fresh measurement when it
+#: changes numerics; recording this seal never certifies an old measurement.
+_DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256", "projection_backend")
 
 
 def _prepared_digest_recorded(key, stored, expected):
@@ -2554,6 +2555,12 @@ def _prepared_digest_recorded(key, stored, expected):
                           refusal=lambda: ValueError(f"prepared {key}: identity mismatch"))
 
 
+def require_prepared_binding(key, stored, expected, *, where=None):
+    """Apply the prepared-record policy at completion and cache intake alike."""
+    if not _prepared_digest_recorded(key, stored, expected):
+        _same(stored, expected, where or f"prepared {key}")
+
+
 def require_prepared_digests(completion, *, plan_sha256, implementation_sha256):
     """Compare a prepared completion's plan and implementation digests.
 
@@ -2564,8 +2571,7 @@ def require_prepared_digests(completion, *, plan_sha256, implementation_sha256):
     """
     for key, value in (("plan_sha256", plan_sha256),
                        ("implementation_sha256", implementation_sha256)):
-        if not _prepared_digest_recorded(key, completion.get(key), value):
-            _same(completion.get(key), value, f"prepared {key}")
+        require_prepared_binding(key, completion.get(key), value)
 
 
 def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
@@ -2598,8 +2604,7 @@ def check_prepared_completion(completion, *, plan_sha256, implementation_sha256,
                        ("implementation_sha256", implementation_sha256),
                        ("reader_identity", reader_identity),
                        ("projection_backend", projection_backend)):
-        if not _prepared_digest_recorded(key, completion.get(key), value):
-            _same(completion.get(key), value, f"prepared {key}")
+        require_prepared_binding(key, completion.get(key), value)
     return completion
 
 
@@ -3024,15 +3029,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                                ("render_origins", render_census["render_origins"]),
                                ("render_comparisons", render_census["render_comparisons"]),
                                ("projection_backend", projection_backend.identity)):
-                if not _prepared_digest_recorded(key, completion.get(key), value):
-                    _same(completion.get(key), value, f"prepared {key}")
+                require_prepared_binding(key, completion.get(key), value)
             _same(completion["formats_by_qname"], {n: list(v) for n, v in data.formats_by_qname.items()},
                   "prepared exact candidate roster")
             cache = pickle.loads(_bound(completion["production_cache"], "qualified PWC").read_bytes())
             _require(isinstance(cache, ProductionWeightCache), "prepared cache is not ProductionWeightCache")
             _same(cache.metadata["inputs"], data.inputs, "prepared source bindings")
             _same(cache.metadata.get("reader_identity"), reader_identity, "prepared reader identity")
-            _same(cache.metadata.get("projection_backend"), projection_backend.identity, "prepared backend identity")
+            require_prepared_binding("projection_backend", cache.metadata.get("projection_backend"),
+                                     projection_backend.identity, where="prepared backend identity")
             _same(set(cache.metadata["verified_cells"]), set(data.cells), "prepared verified cell coverage")
             _same(cache.weights, {pair: cell["render"] for pair, cell in data.cells.items()}, "prepared original render paths")
             for key in ("render_origins", "render_comparisons"):
