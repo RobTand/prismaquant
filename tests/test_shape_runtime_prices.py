@@ -584,8 +584,24 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
     request_doc = {"producer_identity": producer_b}
     request_b = _obs_write(root / "request.json", request_doc)
     runtime_b = _obs_write(root / "runtime.json", runtime)
-    evidence = {"runtime": runtime_b, "producer": producer_b, "contract": contract_b, "wire": wire_b,
-                "samples": samples_b, "routes": routes_b}
+    import gzip
+    with (root / "trace.json.gz").open("wb") as handle:
+        handle.write(gzip.compress(b'{"traceEvents":[{"cat":"kernel","name":"fixture","dur":1.0}]}'))
+    trace_b = _obs_write(root / "trace.json.gz", (root / "trace.json.gz").read_bytes(), raw=True)
+    evidence = {
+        "runtime": runtime_b, "producer": producer_b, "contract": contract_b, "wire": wire_b,
+        "preparation": _obs_write(root / "preparation.json",
+                                  {"builder": "tessera.serving.lane.build_tessera_method",
+                                   "wire_sha256": wire_b["sha256"], "roles": [],
+                                   "shape": scope["shape"], "tp_rank": 0, "tp_degree": 1,
+                                   "grid": "E4M3", "native_packed_bytes": 1}),
+        "samples": samples_b, "routes": routes_b, "trace": trace_b,
+        "telemetry": _obs_write(root / "telemetry.json",
+                                {"interval_unix": [10.0, 11.0], "fast_power_samples": [[10.5, 40.0]],
+                                 "netdata": {"sparky": {}, "sparklina": {}}}),
+        "native_binary": _obs_write(root / "fused.so", b"\x7fELF fixture", raw=True),
+        "runtime_origins": _obs_write(root / "origins.json", {"package_root": runtime["package_root"]}),
+    }
     q1, _mid, q3 = statistics.quantiles([float(v) for v in samples], n=4, method="inclusive")
     timing = {"method": "cuda_events", "n": len(samples), "median_ms": float(statistics.median(samples)),
               "p25_ms": float(q1), "p75_ms": float(q3), "iqr_ms": float(q3 - q1),
