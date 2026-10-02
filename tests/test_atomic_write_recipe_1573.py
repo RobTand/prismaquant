@@ -111,3 +111,41 @@ def test_two_writers_do_not_share_a_staging_file(tmp_path, monkeypatch, other_pi
     theirs = csc.unique_temp_suffix()
     assert mine != theirs
     assert mine.startswith(".tmp") and theirs.startswith(".tmp")
+
+
+def test_nofollow_publication_keeps_stage_link_cleanup_on_admitted_parent(tmp_path, monkeypatch):
+    parent = tmp_path / "owner"
+    parent.mkdir()
+    retained = tmp_path / "retained-owner"
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    target = parent / "artifact.json"
+    link = csc.os.link
+    fsync = csc.os.fsync
+    syncs = []
+
+    def swap_parent_at_link(source, destination, **kwargs):
+        assert kwargs["src_dir_fd"] == kwargs["dst_dir_fd"]
+        parent.rename(retained)
+        parent.symlink_to(foreign, target_is_directory=True)
+        return link(source, destination, **kwargs)
+
+    def record_fsync(fd):
+        syncs.append(fd)
+        return fsync(fd)
+
+    monkeypatch.setattr(csc.os, "link", swap_parent_at_link)
+    monkeypatch.setattr(csc.os, "fsync", record_fsync)
+    assert csc.publish_new_bytes(target, b"owned bytes", nofollow=True)
+    assert list(foreign.iterdir()) == []
+    assert (retained / "artifact.json").read_bytes() == b"owned bytes"
+    assert len(syncs) == 2, "file then admitted directory durability"
+    assert [path.name for path in retained.iterdir()] == ["artifact.json"]
+
+
+def test_nofollow_publication_existing_destination_remains_unchanged(tmp_path):
+    target = tmp_path / "owner" / "artifact.json"
+    assert csc.publish_new_bytes(target, b"original", nofollow=True)
+    assert not csc.publish_new_bytes(target, b"replacement", nofollow=True)
+    assert target.read_bytes() == b"original"
+    assert [path.name for path in target.parent.iterdir()] == ["artifact.json"]

@@ -14,6 +14,7 @@ import os
 import pickle
 from pathlib import Path
 import socket
+import uuid
 
 # The canonical JSON encoding moved to ``digests`` (PQ #1301); these names stay
 # importable from here, where ~100 call sites import them.
@@ -81,7 +82,28 @@ def atomic_write_bytes(path: Path, payload: bytes) -> None:
         os.close(directory_fd)
 
 
-def publish_new_bytes(path: Path, payload: bytes) -> bool:
+def _publication_parent_nofollow(parent: Path) -> int:
+    """Create/open the publication parent without following any component."""
+    if not parent.is_absolute():
+        raise ValueError("no-follow publication needs an absolute destination")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    fd = os.open("/", flags)
+    try:
+        for component in parent.parts[1:]:
+            try:
+                os.mkdir(component, dir_fd=fd)
+            except FileExistsError:
+                pass
+            next_fd = os.open(component, flags, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def publish_new_bytes(path: Path, payload: bytes, *, nofollow: bool = False) -> bool:
     """Publish ``payload`` at ``path`` as a NEW file; never replace one already there.
 
     ``os.link`` is the atomic no-clobber publication on one filesystem: the
@@ -92,36 +114,77 @@ def publish_new_bytes(path: Path, payload: bytes) -> bool:
     which is the wrong shape there.  The campaign writers and
     ``export_output_safety.transactional_export_file`` make the same argument.
 
+    With ``nofollow=True``, every parent is opened relative to its admitted
+    directory descriptor with ``O_NOFOLLOW``. Staging, publication, cleanup and
+    directory fsync all use that same descriptor, so a renamed/replaced parent
+    cannot redirect a write. The default keeps the existing path behavior.
+
     Returns ``True`` when this call created the file and ``False`` when one was
     already there.  ``False`` is neither success nor failure: it means somebody
     else's bytes are at ``path``, and the caller owns the question of whether
     they are the bytes it wanted.  A caller that reads ``False`` as success is
     trusting the name -- the defect this shape exists to make visible.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists() or path.is_symlink():
-        return False
-    temporary = path.with_name(path.name + unique_temp_suffix())
+    directory_fd = None
+    temporary = None
+    owns_temporary = False
     try:
-        with temporary.open("wb") as handle:
+        if nofollow:
+            directory_fd = _publication_parent_nofollow(path.parent)
+            target = path.name
+            try:
+                os.stat(target, dir_fd=directory_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                return False
+            # Separate stages are needed even for concurrent threads in one PID.
+            temporary = target + unique_temp_suffix() + uuid.uuid4().hex
+            stage_fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                               0o666, dir_fd=directory_fd)
+            owns_temporary = True
+            try:
+                handle = os.fdopen(stage_fd, "wb")
+            except BaseException:
+                os.close(stage_fd)
+                raise
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() or path.is_symlink():
+                return False
+            target = path
+            temporary = path.with_name(path.name + unique_temp_suffix())
+            owns_temporary = True
+            handle = temporary.open("wb")
+        with handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
         try:
-            os.link(temporary, path)
+            if directory_fd is None:
+                os.link(temporary, target)
+            else:
+                os.link(temporary, target, src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd, follow_symlinks=False)
         except FileExistsError:
             return False
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        if directory_fd is None:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+        os.fsync(directory_fd)
         return True
     finally:
         try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+            if owns_temporary:
+                try:
+                    if nofollow:
+                        os.unlink(temporary, dir_fd=directory_fd)
+                    else:
+                        temporary.unlink()
+                except FileNotFoundError:
+                    pass
+        finally:
+            if directory_fd is not None:
+                os.close(directory_fd)
 
 
 #: Record fields that name one row's own seals; a merged record drops them.
