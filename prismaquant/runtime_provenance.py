@@ -55,7 +55,12 @@ class ArtifactReader:
     root: Path
 
     def bytes(self, reference, where):
-        _object(reference, ("path", "sha256"), where)
+        # An owner may bind an exact byte length as well as the digest (the
+        # shape-time observation does): a length is a weaker check on its own
+        # but kills a truncated or padded artifact the digest already refuses,
+        # and a reference that carries one is held to it rather than ignored.
+        _object(reference, ("path", "sha256") if "bytes" not in reference
+                else ("path", "bytes", "sha256"), where)
         path = Path(_string(reference["path"], where + " path"))
         if not path.is_absolute():
             path = self.root / path
@@ -63,6 +68,9 @@ class ArtifactReader:
             raw = path.read_bytes()
         except OSError as exc:
             raise RuntimePriceError(f"{where}: cannot read artifact {path}: {exc}") from exc
+        if "bytes" in reference:
+            _equal(len(raw), _integer(reference["bytes"], where + " bytes", 1),
+                   where + " artifact byte length")
         _equal(bytes_sha256hex(raw), _sha(reference["sha256"], where),
                where + " artifact SHA-256")
         return path, raw
