@@ -14,12 +14,12 @@
     "temp_max_bytes": 67108864
   },
   "working_demands": {
-    "stage/ram": {
+    "ram:dl380g10": {
       "minimum_gib": 1,
       "window_gib": 2
     }
   },
   "permitted_tiers": [
-    "stage/ram"
+    "ram:dl380g10"
   ]
 }
