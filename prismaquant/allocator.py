@@ -591,14 +591,20 @@ def _format_cli_choices() -> tuple[str, ...]:
 _VISUAL_PREFIX_RE = re.compile(r"^(?:model\.)?visual\.")
 
 
-def _is_visual_linear(name: str) -> bool:
-    """True when `name` refers to a Linear inside the visual encoder.
+def _is_visual_linear(name: str, profile=None) -> bool:
+    """Classify a visual Linear by the profile's declared root namespaces.
 
-    Matches both the raw HF checkpoint form (`model.visual.blocks.*`) and
-    the post-remap form (`visual.blocks.*`) so the override behaves the
-    same regardless of which side of `profile.live_to_recipe_name` the
-    allocator's stats dictionary landed on.
+    Keep the existing source/recipe `model.` alias. Callers without declared
+    roots retain the historical visual namespace control; a declared family
+    cannot acquire unrelated body/audio namespaces through a loose prefix.
     """
+    roots = profile.visual_root_prefixes() if profile is not None else ()
+    if roots:
+        return any(
+            name.startswith(root + ".")
+            or (root.startswith("model.") and name.startswith(root[6:] + "."))
+            for root in roots
+        )
     return bool(_VISUAL_PREFIX_RE.match(name))
 
 
@@ -611,6 +617,7 @@ def _prepare_visual_allocations(
     visual_format: str,
     fixed_format_assignment: dict[str, str],
     fixed_stats: dict,
+    profile=None,
 ) -> tuple[dict, dict, dict[str, list[Candidate]]]:
     """Keep complete measured visual units in DP; own uniform fallback only.
 
@@ -619,8 +626,8 @@ def _prepare_visual_allocations(
     costs or legal candidates cannot silently turn into a uniform assignment.
     Without visual costs, text-only probes retain the source-precision control.
     """
-    visual_names = sorted(n for n in stats if _is_visual_linear(n))
-    visual_cost_names = {n for n in costs if _is_visual_linear(n)}
+    visual_names = sorted(n for n in stats if _is_visual_linear(n, profile))
+    visual_cost_names = {n for n in costs if _is_visual_linear(n, profile)}
     if sensitivity == "fisher" and visual_cost_names:
         missing = sorted(
             name for name in set(visual_names) | visual_cost_names
@@ -683,6 +690,7 @@ def _mark_weight_only_nvfp4_stats(
 def apply_visual_format_override(
     assignment: dict[str, str],
     visual_format: str,
+    *, profile=None,
 ) -> dict[str, str]:
     """Force every visual-encoder Linear in `assignment` to `visual_format`.
 
@@ -698,7 +706,7 @@ def apply_visual_format_override(
     """
     out = dict(assignment)
     for name in list(out.keys()):
-        if _is_visual_linear(name):
+        if _is_visual_linear(name, profile):
             out[name] = visual_format
     return out
 
@@ -1021,6 +1029,7 @@ def _build_bit_attribution(
     format_specs: dict[str, "fr.FormatSpec"],
     *,
     visual_decision_names: frozenset[str] = frozenset(),
+    profile=None,
 ) -> tuple[list[dict], list[dict], dict]:
     """Build (buckets, per_linear_rows, body_totals) for final DP decisions.
 
@@ -1040,7 +1049,7 @@ def _build_bit_attribution(
 
     for name, fmt in assignment_expanded.items():
         if _is_mtp_linear(name) or (
-            _is_visual_linear(name) and name not in visual_decision_names
+            _is_visual_linear(name, profile) and name not in visual_decision_names
         ):
             continue
         entry = stats_entry_for(name)
@@ -1159,6 +1168,7 @@ def _write_bit_attribution_reports(
     stats_entry_for,
     format_specs: dict[str, "fr.FormatSpec"],
     visual_decision_names: frozenset[str] = frozenset(),
+    profile=None,
 ) -> None:
     """Write the bit-attribution JSON / CSV and print a compact per-role rollup.
 
@@ -1171,6 +1181,7 @@ def _write_bit_attribution_reports(
         stats_entry_for,
         format_specs,
         visual_decision_names=visual_decision_names,
+        profile=profile,
     )
 
     if totals["body_quantizable_params"]:
@@ -1251,6 +1262,7 @@ def discover_visual_linear_stats_from_source(
     model_path: str,
     *,
     strict: bool = False,
+    profile=None,
 ) -> dict[str, dict[str, object]]:
     """Scan source safetensors for visual-Linear names and exact shapes.
 
@@ -1281,7 +1293,7 @@ def discover_visual_linear_stats_from_source(
         for key, shard in wm.items():
             if not key.endswith(".weight"):
                 continue
-            if not _is_visual_linear(key):
+            if not _is_visual_linear(key, profile):
                 continue
             by_shard[shard].append(key)
         try:
@@ -1335,7 +1347,7 @@ def discover_visual_linear_stats_from_source(
                 for k in sf.keys():
                     if not k.endswith(".weight"):
                         continue
-                    if not _is_visual_linear(k):
+                    if not _is_visual_linear(k, profile):
                         continue
                     try:
                         tensor_slice = sf.get_slice(k)
@@ -1403,9 +1415,9 @@ def discover_visual_linear_stats_from_source(
     return dict(sorted(out.items()))
 
 
-def discover_visual_linears_from_source(model_path: str) -> list[str]:
+def discover_visual_linears_from_source(model_path: str, *, profile=None) -> list[str]:
     """Backwards-compatible name-only view of source visual Linears."""
-    return list(discover_visual_linear_stats_from_source(model_path))
+    return list(discover_visual_linear_stats_from_source(model_path, profile=profile))
 
 
 def validate_source_visual_passthrough_contract(
@@ -3364,7 +3376,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 flush=True,
             )
 
-    visual_names = sorted(n for n in stats if _is_visual_linear(n))
+    visual_names = sorted(n for n in stats if _is_visual_linear(n, model_profile))
     stats, costs, candidates = _prepare_visual_allocations(
         stats,
         costs,
@@ -3373,6 +3385,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         visual_format=visual_format_canonical,
         fixed_format_assignment=fixed_format_assignment,
         fixed_stats=fixed_stats,
+        profile=model_profile,
     )
     visual_decision_names = frozenset(name for name in visual_names if name in candidates)
 
@@ -3386,6 +3399,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     source_visual_stats = (
         discover_visual_linear_stats_from_source(
             probe_model_path,
+            profile=model_profile,
             strict=bool(
                 args.target_disk_gb is not None
                 or visual_format_canonical != "BF16"
@@ -3632,7 +3646,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             "linears_by_kind": dict(Counter(
                 "lm_head" if name in fixed_lm_head_names
                 else "mtp" if _is_mtp_linear(name)
-                else "visual" if _is_visual_linear(name)
+                else "visual" if _is_visual_linear(name, model_profile)
                 else "other"
                 for name in fixed_format_assignment
             )),
@@ -4209,8 +4223,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         def _visual_fisher_available(stats_d: dict, costs_d: dict) -> bool:
             """True when both the probe and cost pickles carry real visual
             entries — the signal a multimodal calibration pass ran."""
-            any_visual_stats = any(_is_visual_linear(n) for n in stats_d)
-            any_visual_costs = any(_is_visual_linear(n) for n in costs_d)
+            any_visual_stats = any(_is_visual_linear(n, model_profile) for n in stats_d)
+            any_visual_costs = any(_is_visual_linear(n, model_profile) for n in costs_d)
             return any_visual_stats and any_visual_costs
 
         if visual_decision_names:
@@ -4296,7 +4310,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 if kind is None:
                     # Visual and MTP assignments are stamped as auxiliary formats
                     # outside the language-model source manifest by design.
-                    if _is_visual_linear(name) or _is_mtp_linear(name):
+                    if _is_visual_linear(name, model_profile) or _is_mtp_linear(name):
                         continue
                     kind = "unknown"
                 if not _passthrough_source_ok(fmt, kind):
@@ -4324,7 +4338,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             name: fmt
             for name, fmt in assignment_expanded.items()
             if (
-                (not _is_visual_linear(name) or name in visual_decision_names)
+                (not _is_visual_linear(name, model_profile) or name in visual_decision_names)
                 and not _is_mtp_linear(name)
                 and name not in fixed_lm_head_names
             )
@@ -4574,6 +4588,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats_entry_for=_stats_entry_for_assignment_name,
             format_specs=format_specs,
             visual_decision_names=visual_decision_names,
+            profile=model_profile,
         )
 
 

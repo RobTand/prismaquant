@@ -1,5 +1,22 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1921, allocator visual namespace slice): the
+existing visual allocation predicate reads the detected profile's declared
+`visual_root_prefixes` and retains the existing source/recipe `model.` alias.
+Source-header census, measured-row partition, explicit uniform control,
+fixed-entry metadata and final bit attribution share that predicate. Gemma4's
+`model.vision_tower` and `model.embed_vision` therefore receive the same complete
+measured-population and exact-source-shape checks as the visual-root families.
+Missing measured rows or mismatched source shapes refuse before selection;
+complete measured rows keep independent legal choices. The explicit uniform
+control remains auxiliary. Callers without declared roots retain the historical
+visual namespace. Audio/body names and role tags such as `vis_*`/`merger_*`
+do not invent module roots. This changes CPU roster/accounting plumbing only;
+source-header rank/non-Linear exclusions and independent export/serving gates,
+formats, numerical methods, pins, caches and production defaults are unchanged.
+CPU fixture choices supply no multimodal quality, wire, runtime or performance
+qualification. The representative GPU/serving acceptance remains in #1921.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
