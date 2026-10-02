@@ -1,7 +1,7 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-01 (PQ #1986, Refs #1588). As of: 2026-10-01 ·
-`sol/pq-stageb-9`. The opt-in campaign namespace preparation API extends the
+Re-stamped 2026-10-02 (PQ #1986, Refs #1588), integrated on
+`sol/pq1986-integrated-20261002` from current main and the preserved component commits. The opt-in campaign namespace preparation API extends the
 existing dispatcher, without a new scheduler or CLI: a complete hash-keyed
 reconciliation roster explicitly selects unfinished requests and independently
 supplied evidence/readset/dependency expectations bind each digest-keyed row.
@@ -15,6 +15,14 @@ requires a writable identity-mapped persistent mount. Path-valued input referenc
 must be canonical before overlap checks, without reading their artifacts. After
 ownership publication/admission, descriptor-anchored no-follow directory creation
 establishes writable TMPDIR/TMP/TEMP destinations; preparation remains write-free.
+Every mount source and target passes the shared canonical absolute-path grammar
+before containment or writable coverage comparisons, including refusal of leading
+`//`. Opt-in guarded import selection conservatively refuses earlier mounted
+source modules, sourceless bytecode/package initializers and native-looking shared
+objects before Docker inspection; source-package precedence and legacy unguarded
+selection remain unchanged. This declared-path admission does not freeze host
+source/model bytes: a read-only bind mount is not immutable-generation evidence.
+Dynamic import hooks and container ABI resolution remain outside this CPU proof.
 No contract means unchanged legacy behavior. This
 metadata-only CPU slice does not verify completion evidence or input bytes,
 rederive resource demand, prove legacy/current runtime compatibility, adopt
