@@ -381,18 +381,14 @@ def make_contexts(plan, units, specs_obj):
 def load_partial(path, identity):
     if not os.path.exists(path):
         return None
-    saved = torch.load(path)
-    if saved.get("identity") != identity:
-        log(f"ignoring {path}: identity differs")
-        return None
-    log(f"resuming from {path} at row {saved['done']}")
-    return saved
+    raise SystemExit("partial resume is unsupported: this artifact has no immutable "
+                     "loaded-model/run binding; preserve it and use an unused output stem")
 
 
 def refuse_unbound_pricing_reuse(path):
     if path:
         raise SystemExit("cached pricing reuse is unsupported: this artifact has no immutable "
-                         "loaded-model/run binding; use the existing identity-bound partial resume")
+                         "loaded-model/run binding; preserve it and use an unused output stem")
 
 
 # ----------------------------------------------------------------------------- profile
