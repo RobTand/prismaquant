@@ -1,0 +1,107 @@
+{
+  "test_journal_manifest_old_bytes_and_refusals[identity0]#0": {
+    "returned": "('7ca3b3f7536b6009b0c8db4de93a485edbf88fb76b3277762124897c4c7c351c', b'{\\n  \"identity\": {\\n    \"emoji\": \"\\xf0\\x9f\\x98\\x80\",\\n    \"\\xc3\\xa9\": [\\n      1,\\n      -0.0,\\n      true,\\n      null\\n    ]\\n  },\\n  \"identity_sha256\": \"7ca3b3f7536b6009b0c8db4de93a485edbf88fb76b3277762124897c4c7c351c\",\\n  \"schema\": \"prismaquant.cost_stage_checkpoint.manifest.v1\",\\n  \"stage\": \"pr\\xc3\\xa9pare\",\\n  \"units\": [\\n    {\\n      \"file\": \"units/cac687e0ab56db06be9bf9f67aaabc0d6536cc571483ca1d281fa8aa37862c26.pkl\",\\n      \"qname\": \"unit-\\xc3\\xa9\"\\n    },\\n    {\\n      \"file\": \"units/3b6f2756f3e9ec291646b9f91d027310e712ad447000ab5ff1fa6c50e23d069d.pkl\",\\n      \"qname\": \"unit.z\"\\n    }\\n  ]\\n}', {})"
+  },
+  "test_journal_manifest_old_bytes_and_refusals[identity1]#0": {
+    "returned": "('e1ee368033cc3ee9c8c6692643539f78a9a443fc121110f7f0eaede91840449d', b'{\\n  \"identity\": {\\n    \"10\": \"ten\",\\n    \"9\": \"nine\"\\n  },\\n  \"identity_sha256\": \"e1ee368033cc3ee9c8c6692643539f78a9a443fc121110f7f0eaede91840449d\",\\n  \"schema\": \"prismaquant.cost_stage_checkpoint.manifest.v1\",\\n  \"stage\": \"pr\\xc3\\xa9pare\",\\n  \"units\": [\\n    {\\n      \"file\": \"units/cac687e0ab56db06be9bf9f67aaabc0d6536cc571483ca1d281fa8aa37862c26.pkl\",\\n      \"qname\": \"unit-\\xc3\\xa9\"\\n    },\\n    {\\n      \"file\": \"units/3b6f2756f3e9ec291646b9f91d027310e712ad447000ab5ff1fa6c50e23d069d.pkl\",\\n      \"qname\": \"unit.z\"\\n    }\\n  ]\\n}', {})"
+  },
+  "test_journal_manifest_old_bytes_and_refusals[identity2]#0": {
+    "cause": [
+      "builtins.ValueError",
+      "Out of range float values are not JSON compliant: nan"
+    ],
+    "raised": "builtins.ValueError",
+    "text": "pr\u00e9pare identity is not canonical JSON data"
+  },
+  "test_journal_manifest_old_bytes_and_refusals[identity3]#0": {
+    "cause": [
+      "builtins.UnicodeEncodeError",
+      "'utf-8' codec can't encode character '\\ud800' in position 14: surrogates not allowed"
+    ],
+    "raised": "builtins.ValueError",
+    "text": "pr\u00e9pare identity is not canonical JSON data"
+  },
+  "test_migration_pin_dedup_old_outcomes[pins0]#0": {
+    "returned": "[{'proof_bundle_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'old_pins': {'\u00e9': [1, -0.0, True, None]}, 'new_pins': {'z': 1, 'a': 2}, 'keep': 'first'}]"
+  },
+  "test_migration_pin_dedup_old_outcomes[pins1]#0": {
+    "returned": "[{'proof_bundle_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'old_pins': {10: 'ten', 9: 'nine'}, 'new_pins': {'z': 1, 'a': 2}, 'keep': 'first'}]"
+  },
+  "test_migration_pin_dedup_old_outcomes[pins2]#0": {
+    "returned": "[{'proof_bundle_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'old_pins': {'value': nan}, 'new_pins': {'z': 1, 'a': 2}, 'keep': 'first'}]"
+  },
+  "test_migration_pin_dedup_old_outcomes[pins3]#0": {
+    "returned": "[{'proof_bundle_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'old_pins': {'value': '\\ud800'}, 'new_pins': {'z': 1, 'a': 2}, 'keep': 'first'}]"
+  },
+  "test_migration_pin_dedup_old_outcomes[pins4]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "'<' not supported between instances of 'str' and 'int'"
+  },
+  "test_migration_pin_dedup_old_outcomes[pins5]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "Object of type set is not JSON serializable"
+  },
+  "test_selected_bound_old_bytes_and_refusal[]#0": {
+    "returned": "b''"
+  },
+  "test_selected_bound_old_bytes_and_refusal[]#1": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "input-\u00e9 SHA-256 differs from the selected receipt"
+  },
+  "test_selected_bound_old_bytes_and_refusal[]#2": {
+    "cause": null,
+    "raised": "builtins.FileNotFoundError",
+    "text": "[Errno 2] No such file or directory: '<tmp>/missing'"
+  },
+  "test_selected_bound_old_bytes_and_refusal[a\\r\\n\\x00\\xff]#0": {
+    "returned": "b'a\\r\\n\\x00\\xff'"
+  },
+  "test_selected_bound_old_bytes_and_refusal[a\\r\\n\\x00\\xff]#1": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "input-\u00e9 SHA-256 differs from the selected receipt"
+  },
+  "test_selected_bound_old_bytes_and_refusal[a\\r\\n\\x00\\xff]#2": {
+    "cause": null,
+    "raised": "builtins.FileNotFoundError",
+    "text": "[Errno 2] No such file or directory: '<tmp>/missing'"
+  },
+  "test_selected_bound_old_bytes_and_refusal[caf\\xc3\\xa9\\xe2\\x80\\xa8]#0": {
+    "returned": "b'caf\\xc3\\xa9\\xe2\\x80\\xa8'"
+  },
+  "test_selected_bound_old_bytes_and_refusal[caf\\xc3\\xa9\\xe2\\x80\\xa8]#1": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "input-\u00e9 SHA-256 differs from the selected receipt"
+  },
+  "test_selected_bound_old_bytes_and_refusal[caf\\xc3\\xa9\\xe2\\x80\\xa8]#2": {
+    "cause": null,
+    "raised": "builtins.FileNotFoundError",
+    "text": "[Errno 2] No such file or directory: '<tmp>/missing'"
+  },
+  "test_selected_publication_old_bytes_and_refusals[None-False]#0": {
+    "returned": "(0, b'{\\n  \"geometry\": [\\n    1,\\n    -0.0,\\n    true,\\n    null\\n  ],\\n  \"source\": {\\n    \"label\": \"caf\\\\u00e9\"\\n  },\\n  \"units\": {\\n    \"unit-\\\\u00e9\": {}\\n  },\\n  \"value\": null\\n}\\n', None, '{\"assignment_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"catalog_extension\": null, \"child_manifest\": null, \"encoder_source_proof_mode\": \"fixture\", \"export_qualified\": false, \"handoff_sha256\": \"<handoff-sha256>\", \"manifest\": \"<tmp>/wire/selected.json\", \"manifest_sha256\": \"8a412854f1b7e7079750469922ff4427da9c7f2bdf1f4d512b1d2261c15a7dcb\", \"plan_sha256\": null, \"producer_packages_sha256\": null, \"research_proposal_sha256\": null, \"schema\": \"prismaquant.tessera_selected_cache_handoff.v1\", \"serving_qualified\": false, \"status\": \"research_wires_only\", \"units\": 1, \"warnings\": [\"\\\\u00e9\"]}\\n')"
+  },
+  "test_selected_publication_old_bytes_and_refusals[None-True]#0": {
+    "returned": "(0, b'{\\n  \"geometry\": [\\n    1,\\n    -0.0,\\n    true,\\n    null\\n  ],\\n  \"source\": {\\n    \"label\": \"caf\\\\u00e9\"\\n  },\\n  \"units\": {\\n    \"unit-\\\\u00e9\": {}\\n  },\\n  \"value\": null\\n}\\n', b'{\\n  \"paths\": [\\n    \"<tmp>/wire/selected.json\",\\n    \"/inputs/a\",\\n    \"/inputs/z-\\\\u00e9\"\\n  ],\\n  \"schema\": \"prismaquant.selected_cache_read_paths.v1\"\\n}\\n', '{\"assignment_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"catalog_extension\": {\"path\": \"<tmp>/catalog-extension.json\", \"sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\"}, \"child_manifest\": null, \"encoder_source_proof_mode\": \"fixture\", \"export_qualified\": false, \"handoff_sha256\": \"<handoff-sha256>\", \"manifest\": \"<tmp>/wire/selected.json\", \"manifest_sha256\": \"8a412854f1b7e7079750469922ff4427da9c7f2bdf1f4d512b1d2261c15a7dcb\", \"plan_sha256\": null, \"producer_packages_sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\", \"research_proposal_sha256\": null, \"schema\": \"prismaquant.tessera_selected_cache_handoff.v1\", \"serving_qualified\": false, \"status\": \"research_wires_only\", \"units\": 1, \"warnings\": [\"\\\\u00e9\"]}\\n')"
+  },
+  "test_selected_publication_old_bytes_and_refusals[\\ud800-False]#0": {
+    "returned": "(0, b'{\\n  \"geometry\": [\\n    1,\\n    -0.0,\\n    true,\\n    null\\n  ],\\n  \"source\": {\\n    \"label\": \"caf\\\\u00e9\"\\n  },\\n  \"units\": {\\n    \"unit-\\\\u00e9\": {}\\n  },\\n  \"value\": \"\\\\ud800\"\\n}\\n', None, '{\"assignment_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"catalog_extension\": null, \"child_manifest\": null, \"encoder_source_proof_mode\": \"fixture\", \"export_qualified\": false, \"handoff_sha256\": \"<handoff-sha256>\", \"manifest\": \"<tmp>/wire/selected.json\", \"manifest_sha256\": \"be7b018a63e767535f787650df0c47a97e098820a3ba46a346660521de87d3a9\", \"plan_sha256\": null, \"producer_packages_sha256\": null, \"research_proposal_sha256\": null, \"schema\": \"prismaquant.tessera_selected_cache_handoff.v1\", \"serving_qualified\": false, \"status\": \"research_wires_only\", \"units\": 1, \"warnings\": [\"\\\\u00e9\"]}\\n')"
+  },
+  "test_selected_publication_old_bytes_and_refusals[\\ud800-True]#0": {
+    "returned": "(0, b'{\\n  \"geometry\": [\\n    1,\\n    -0.0,\\n    true,\\n    null\\n  ],\\n  \"source\": {\\n    \"label\": \"caf\\\\u00e9\"\\n  },\\n  \"units\": {\\n    \"unit-\\\\u00e9\": {}\\n  },\\n  \"value\": \"\\\\ud800\"\\n}\\n', b'{\\n  \"paths\": [\\n    \"<tmp>/wire/selected.json\",\\n    \"/inputs/a\",\\n    \"/inputs/z-\\\\u00e9\"\\n  ],\\n  \"schema\": \"prismaquant.selected_cache_read_paths.v1\"\\n}\\n', '{\"assignment_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"catalog_extension\": {\"path\": \"<tmp>/catalog-extension.json\", \"sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\"}, \"child_manifest\": null, \"encoder_source_proof_mode\": \"fixture\", \"export_qualified\": false, \"handoff_sha256\": \"<handoff-sha256>\", \"manifest\": \"<tmp>/wire/selected.json\", \"manifest_sha256\": \"be7b018a63e767535f787650df0c47a97e098820a3ba46a346660521de87d3a9\", \"plan_sha256\": null, \"producer_packages_sha256\": \"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\", \"research_proposal_sha256\": null, \"schema\": \"prismaquant.tessera_selected_cache_handoff.v1\", \"serving_qualified\": false, \"status\": \"research_wires_only\", \"units\": 1, \"warnings\": [\"\\\\u00e9\"]}\\n')"
+  },
+  "test_selected_publication_old_bytes_and_refusals[nan-False]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "Out of range float values are not JSON compliant: nan"
+  },
+  "test_selected_publication_old_bytes_and_refusals[nan-True]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "Out of range float values are not JSON compliant: nan"
+  }
+}
