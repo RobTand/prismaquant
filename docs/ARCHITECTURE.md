@@ -12,6 +12,19 @@ maps. Active and already configured contexts refuse another transition.
 Snapshot-only forward installation, nonbody materialization and complete
 initialization attestation remain forbidden. This selection capability supplies
 no source-provider, GPU-lifetime or numerical qualification by itself.
+Re-stamped 2026-10-02 (`sol/pq-1934-recovery-20261002`, Refs #1931, #1935):
+packed activation derivation stable-sorts slot-major routed pairs once and
+reads all expert counts with one host sync. Per-expert row order, duplicate
+routes, original subsampling seeds, empty dtypes and each down-input Linear's
+arithmetic remain unchanged. Projected-unit qualification compares eligible
+CUDA views against privately pinned source copies on the same device and
+reads the ordered verdicts once per device. Source authentication, projected
+unit selection and mismatch diagnostics retain their existing contracts;
+source pages may retire after the private host copy completes. The caching
+host allocator owns async-copy lifetime. Unsupported comparison dtypes retain
+the host comparison. This changes neither quantization, format/serving gates
+nor pipeline defaults. Bounded GPU performance qualification is recorded
+separately; these local mechanisms do not establish a full-campaign speedup.
 
 Re-stamped 2026-10-02 (Refs PQ #2010, #2008): the existing capture source
 owner has an internal CPU whole-file original-material path. Independently

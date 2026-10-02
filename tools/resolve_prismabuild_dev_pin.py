@@ -11,8 +11,13 @@ ran the whole suite and failed 289 tests one by one at
 from __future__ import annotations
 
 from pathlib import Path
+import runpy
 
-from resolve_tessera_dev_pin import resolve_literal_pin
+# Resolve the existing parser by its adjacent source file. Safe-path and
+# isolated script execution intentionally omit this directory from sys.path.
+resolve_literal_pin = runpy.run_path(
+    str(Path(__file__).resolve().with_name("resolve_tessera_dev_pin.py"))
+)["resolve_literal_pin"]
 
 PIN_NAME = "PB_READER_LEASE_PIN_COMMIT"
 PIN_SOURCE = Path(__file__).resolve().parents[1] / "prismaquant" / "staged_lease.py"

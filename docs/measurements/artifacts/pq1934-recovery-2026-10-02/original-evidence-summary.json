@@ -1,0 +1,1814 @@
+{
+  "schema": "prismaquant.pq1934_recovery_evidence.v1",
+  "action_key": "03e1be8230f3a9492531f059d05468bc52cdd27a9a1920b33c0d083844558427",
+  "terminal": {
+    "action_returncode": null,
+    "action_signal": null,
+    "attempts": 1,
+    "claimed_by": "sparklina:1014162:e3e2596e",
+    "claimed_host": "sparklina",
+    "claimed_unix": 1790933923.7111673,
+    "elapsed_s": 709.1214330196381,
+    "finished_host": "sparklina",
+    "finished_unix": 1790934634.7917821,
+    "reason": null,
+    "receipt_published": null,
+    "returncode": 0,
+    "status": "executed"
+  },
+  "receipt": {
+    "action_manifest_sha256": "8f0ca01071308583e284f19b1758cd0abd5d8569d21156da6063a899614df936",
+    "path": "/mnt/shared/prismabuild-fleet/cas/actions/v3/03/03e1be8230f3a9492531f059d05468bc52cdd27a9a1920b33c0d083844558427.json",
+    "present": true,
+    "receipt_sha256": "82197c4d33c9e65e231ae2112015874995f6353a0f18070df05dd1c07930f780",
+    "result": {
+      "bytes": 5050,
+      "sha256": "84c0afb40916141e0a61494688a399417b460b68a6f10e672eb28232245d124e"
+    }
+  },
+  "claim": {
+    "sha256": "a6162693f3d6cfd4d4e02a55ff0cb0bdfabc08f38cee1279b6806a4a2b02b09b",
+    "checks_passed": true
+  },
+  "source": {
+    "commit": "be6006351242135e5ca9c823139eed4e2c60abf5",
+    "input": {
+      "bytes": 40123901,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "f4d58c324ff6195f0b41014ed449af3bb9901dadcb72b7ef935dbc0232aa24ae"
+    },
+    "parent": "3b206fd560370e903633d1806579b3ea2470f182",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  },
+  "binding_sha256": "5dbc59865157d36636219d4d56a677eb72b50449f0f95f70e377712658609600",
+  "data_manifest_sha256": "c1df018f8d99f7ec020eb5b615d87c203fe3994013149b580b710c9a9bb5e0e5",
+  "gpu_uuid": "b1eceeea-fec7-371e-2cf3-cd10f2e7b705",
+  "affinity": [
+    5,
+    6,
+    7,
+    8
+  ],
+  "native_threads": 1,
+  "torch": "2.13.0+cu130",
+  "cuda": "13.0",
+  "gain_fraction": {
+    "derive": 0.23091458470311443,
+    "hook": 0.0429155331013088,
+    "check": 0.6436201395603213
+  },
+  "hotpath_screen_passed": true,
+  "energy": {
+    "status": "HOLD",
+    "reason": "Clock alignment unqualified; no work-per-joule claim"
+  },
+  "clock_alignment": {
+    "status": "HOLD",
+    "cross_host_alignment_qualified": false,
+    "reason": "Known cross-host offset and variable SSH clock-probe bounds; raw series retained without clock correction"
+  },
+  "equality": [
+    {
+      "capture_down": false,
+      "max_rows": null,
+      "equal": true,
+      "zero_row_experts": 72
+    },
+    {
+      "capture_down": false,
+      "max_rows": 16,
+      "equal": true,
+      "zero_row_experts": 72
+    },
+    {
+      "capture_down": true,
+      "max_rows": null,
+      "equal": true,
+      "zero_row_experts": 72
+    },
+    {
+      "capture_down": true,
+      "max_rows": 16,
+      "equal": true,
+      "zero_row_experts": 72
+    }
+  ],
+  "mismatch_refusals": [
+    "Tessera campaign's live expert view disagrees byte-for-byte with the producer's source tensor for model.language_model.layers.20.mlp.experts.0.down_proj.weight (live (4096, 2048) torch.bfloat16 vs source model.language_model.layers.20.mlp.experts.0.down_proj.weight (4096, 2048) torch.bfloat16); the exporter would encode bytes this table did not price. Refusing (PrismaQuant #183).",
+    "Tessera campaign's live expert view disagrees byte-for-byte with the producer's source tensor for model.language_model.layers.20.mlp.experts.0.down_proj.weight (live (4096, 2048) torch.bfloat16 vs source model.language_model.layers.20.mlp.experts.0.down_proj.weight (4096, 2048) torch.bfloat16); the exporter would encode bytes this table did not price. Refusing (PrismaQuant #183)."
+  ],
+  "sync_counts": {
+    "derive": {
+      "before": 288,
+      "after": 1
+    },
+    "check": {
+      "before": 864,
+      "after": 1
+    }
+  },
+  "warmup": {
+    "calls": 512,
+    "minimum_nonzero_routed_rows": 1,
+    "active_units": 648,
+    "stable_prefix": true
+  },
+  "hessian_bytes": 18119393280,
+  "prefix_owners": 432,
+  "sealed_buffers_closed": true,
+  "hook_control_cleanup": "ordinary bounded-stop unwind; no capture artifact",
+  "raw_observer": {
+    "status": "complete",
+    "errors": [],
+    "netdata": {
+      "hosts": [
+        "sparky",
+        "sparklina"
+      ],
+      "interval_seconds": 5,
+      "byte_cap": 3221225472,
+      "bytes_written": 3142998,
+      "samples": 140,
+      "samples_scope": "rounds attempted",
+      "sample_failures": {
+        "sparky": null,
+        "sparklina": null
+      }
+    },
+    "python_sampler": {
+      "scope": "main_thread_only",
+      "interval_seconds": 1,
+      "byte_cap": 536870912,
+      "bytes_written": 802490,
+      "samples": 698
+    }
+  },
+  "resource_profile": {
+    "box_window": {
+      "cpu": {
+        "busy_percent_mean": 9.816824775736332,
+        "busy_percent_peak": 28.0345334,
+        "psi_some_avg10_max": 1.28,
+        "psi_some_avg10_samples": 712,
+        "psi_some_avg10_update_every_s": 1,
+        "samples": 713,
+        "source": "netdata",
+        "time_group": "average",
+        "update_every_s": 1
+      },
+      "end_unix": 1790934634.5788221,
+      "gpu": {
+        "power_peak_fraction_of_reference": 0.4379,
+        "power_reference_scope": "declared_fallback",
+        "power_reference_source": "declared fleet capacity fact (PrismaBuild #806): the fleet owner's observed GB10 GPU ceiling, 100 W (2026-09-21). A floor only: Netdata nvidia_smi.gpu_power_draw maxima over 2026-08-28..2026-09-21 were sparky 114 W and sparklina 106 W, and a measured peak above the floor replaces it",
+        "power_reference_w": 100.0,
+        "power_w_mean": 30.082385643912783,
+        "power_w_peak": 43.79,
+        "samples": 1421,
+        "source": "pqteld",
+        "temperature_c_peak": 73.0,
+        "utilization_percent_mean": 60.30401125967629,
+        "utilization_percent_peak": 96.0,
+        "utilization_samples": 1421,
+        "uvm_residual_bytes_peak": 39666421760,
+        "uvm_residual_samples": 1421
+      },
+      "host": "sparklina",
+      "memory": {
+        "psi_io_full_avg10_max": 26.38,
+        "psi_mem_full_avg10_max": 5.43,
+        "samples": 1421,
+        "source": "pqteld",
+        "unified_available_bytes_min": 63709007872,
+        "unified_total_bytes": 130593968128,
+        "unified_used_bytes_peak": 66884960256
+      },
+      "schema": "prismabuild.box_window.v1",
+      "source": "netdata+pqteld",
+      "start_unix": 1790933923.7111673
+    },
+    "finished_unix": 1790934634.5788221,
+    "host": "sparklina",
+    "process_io": {
+      "processes_live": 0,
+      "processes_observed": 13,
+      "processes_unreadable": 0,
+      "rchar": 22092104935,
+      "read_bytes": 21686837248,
+      "source": "proc_io",
+      "syscr": 180184,
+      "syscw": 22420,
+      "wchar": 355048513,
+      "write_bytes": 356347904
+    },
+    "reaped_children": {
+      "involuntary_context_switches": 39,
+      "max_rss_bytes": null,
+      "max_rss_watermark_bytes": 196030464,
+      "scope": "this parent's launched child and the descendants it reaped",
+      "source": "getrusage_children",
+      "system_seconds": 0.0221309999999999,
+      "user_seconds": 0.07946800000000032,
+      "voluntary_context_switches": 36
+    },
+    "schema": "prismabuild.resource_profile.v1",
+    "scope": {
+      "cpu_seconds": 710.825972,
+      "cpu_system_seconds": 186.562225,
+      "cpu_user_seconds": 524.263747,
+      "memory_current_bytes": 9658851328,
+      "memory_peak_bytes": 45432827904,
+      "source": "cgroup"
+    },
+    "start_source": "claimed_unix",
+    "start_unix": 1790933923.7111673,
+    "wall_seconds": 710.867654800415
+  },
+  "residency": {
+    "map_sha256": "6753c9b1501514b4ecaaa93b9ef21cc1d847e75b17ddd776ad74ab833e3e2a4c",
+    "manifest_sha256": "c1df018f8d99f7ec020eb5b615d87c203fe3994013149b580b710c9a9bb5e0e5",
+    "tier_id": "prismabuild-stage:dl380g10",
+    "hits": 7,
+    "misses": 0,
+    "fallback_count": 0,
+    "bytes_from_stage": 21538724467,
+    "bytes_from_ram": 0,
+    "bytes_from_pool": 0,
+    "serving_tiers": [
+      {
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/config.json",
+        "serving_tier": "stage",
+        "lease_id": "5da443465d0b4b199eaadbda239ddf75",
+        "tier_id": "prismabuild-stage:dl380g10",
+        "pin_id": "5da443465d0b4b199eaadbda239ddf75",
+        "range_ref": "0:/mnt/shared/models/GLM-5.3-Flash-BF16/config.json"
+      },
+      {
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00029-of-00120.safetensors",
+        "serving_tier": "stage",
+        "lease_id": "2079992b71c20bb0a5391835836d36a2",
+        "tier_id": "prismabuild-stage:dl380g10",
+        "pin_id": "2079992b71c20bb0a5391835836d36a2",
+        "range_ref": "0:/mnt/shared/models/GLM-5.3-Flash-BF16/model-00029-of-00120.safetensors"
+      },
+      {
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00030-of-00120.safetensors",
+        "serving_tier": "stage",
+        "lease_id": "0105131d7f9b8ab1ff6c89b8cf046827",
+        "tier_id": "prismabuild-stage:dl380g10",
+        "pin_id": "0105131d7f9b8ab1ff6c89b8cf046827",
+        "range_ref": "0:/mnt/shared/models/GLM-5.3-Flash-BF16/model-00030-of-00120.safetensors"
+      },
+      {
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00031-of-00120.safetensors",
+        "serving_tier": "stage",
+        "lease_id": "e2659384c5204445cd0f471b046363bc",
+        "tier_id": "prismabuild-stage:dl380g10",
+        "pin_id": "e2659384c5204445cd0f471b046363bc",
+        "range_ref": "0:/mnt/shared/models/GLM-5.3-Flash-BF16/model-00031-of-00120.safetensors"
+      },
+      {
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/model-00032-of-00120.safetensors",
+        "serving_tier": "stage",
+        "lease_id": "37d6c05481b9389dfbceec8fea152d22",
+        "tier_id": "prismabuild-stage:dl380g10",
+        "pin_id": "37d6c05481b9389dfbceec8fea152d22",
+        "range_ref": "0:/mnt/shared/models/GLM-5.3-Flash-BF16/model-00032-of-00120.safetensors"
+      },
+      {
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/inputs/model__language_model__layers__20__mlp__shared_experts__gate_proj.pt",
+        "serving_tier": "stage",
+        "lease_id": "e84bd98e43a6423f03d535ae5aee65ea",
+        "tier_id": "prismabuild-stage:dl380g10",
+        "pin_id": "e84bd98e43a6423f03d535ae5aee65ea",
+        "range_ref": "0:/mnt/shared/tessera-measurements/glm-canonical-census-20260908/workspace/calibration-cache/inputs/model__language_model__layers__20__mlp__shared_experts__gate_proj.pt"
+      },
+      {
+        "path": "/mnt/shared/models/GLM-5.3-Flash-BF16/config.json",
+        "serving_tier": "stage",
+        "lease_id": "5da443465d0b4b199eaadbda239ddf75",
+        "tier_id": "prismabuild-stage:dl380g10",
+        "pin_id": "5da443465d0b4b199eaadbda239ddf75",
+        "range_ref": "0:/mnt/shared/models/GLM-5.3-Flash-BF16/config.json"
+      }
+    ]
+  },
+  "phases": [
+    {
+      "phase": "derive-0-before",
+      "calls": 572,
+      "elapsed_seconds": 30.031082372996025,
+      "wall_seconds_mean": 0.05249954770098138,
+      "wall_seconds_median": 0.05238372602616437,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-0-before.trace.json",
+        "sha256": "2fed6b3292acbc2fe858f941f6e43f9503c85d28b8b95b424cca344ded988f24",
+        "runtime_calls": {
+          "cudaLaunchKernel": 2719,
+          "cudaDeviceGetAttribute": 164,
+          "cudaLaunchKernelExC": 1,
+          "cudaFuncGetAttributes": 1,
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": 1,
+          "cudaMemcpyAsync": 289,
+          "cudaPeekAtLastError": 1728,
+          "cudaStreamSynchronize": 288,
+          "cudaMemsetAsync": 29,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "cudaStreamSynchronize",
+            "count": 288,
+            "self_cpu_seconds": 0.027490408999999938
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 2719,
+            "self_cpu_seconds": 0.009406196999999913
+          },
+          {
+            "op": "aten::nonzero",
+            "count": 288,
+            "self_cpu_seconds": 0.003938684000000087
+          },
+          {
+            "op": "aten::clamp",
+            "count": 432,
+            "self_cpu_seconds": 0.0020243020000000472
+          },
+          {
+            "op": "aten::index",
+            "count": 432,
+            "self_cpu_seconds": 0.0018276440000000716
+          },
+          {
+            "op": "aten::mm",
+            "count": 217,
+            "self_cpu_seconds": 0.001491743999999985
+          },
+          {
+            "op": "aten::mul",
+            "count": 217,
+            "self_cpu_seconds": 0.0009319830000000072
+          },
+          {
+            "op": "Activity Buffer Request",
+            "count": 1,
+            "self_cpu_seconds": 0.0008653109999999999
+          },
+          {
+            "op": "cudaMemcpyAsync",
+            "count": 289,
+            "self_cpu_seconds": 0.0008544129999999976
+          },
+          {
+            "op": "aten::empty",
+            "count": 506,
+            "self_cpu_seconds": 0.0007565120000000118
+          },
+          {
+            "op": "aten::silu",
+            "count": 216,
+            "self_cpu_seconds": 0.0007498879999999826
+          },
+          {
+            "op": "aten::select",
+            "count": 1080,
+            "self_cpu_seconds": 0.000637392000000036
+          }
+        ],
+        "kernel_events": 2903,
+        "kernel_activity_seconds_sum": 0.04469112,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_derive-0-before",
+        "cgroup_current_bytes": 45014663168,
+        "cgroup_committed_bytes": 23257751552,
+        "cgroup_clean_file_bytes": 21756911616,
+        "cuda_reserved_bytes": 14722007040,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 59736670208,
+        "committed_cgroup_plus_cuda_reserved_bytes": 37979758592,
+        "host_mem_available_bytes": 85813161984,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 59736670208,
+      "power_samples": 112,
+      "power_errors": [],
+      "power_w_mean": 34.91633928571429
+    },
+    {
+      "phase": "derive-1-after",
+      "calls": 727,
+      "elapsed_seconds": 30.018768000998534,
+      "wall_seconds_mean": 0.0412897916719352,
+      "wall_seconds_median": 0.04122636100510135,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-1-after.trace.json",
+        "sha256": "16d5d4cd89e37dec3274ae607bdc71058c235e3074777db07f4798b93d4f9d6d",
+        "runtime_calls": {
+          "cudaLaunchKernel": 934,
+          "cudaDeviceGetAttribute": 164,
+          "cudaLaunchKernelExC": 1,
+          "cudaFuncGetAttributes": 1,
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": 1,
+          "cudaMemcpyAsync": 5,
+          "cudaStreamIsCapturing": 1,
+          "cudaStreamSynchronize": 1,
+          "cudaMemsetAsync": 29,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "cudaDeviceSynchronize",
+            "count": 2,
+            "self_cpu_seconds": 0.02795975
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 934,
+            "self_cpu_seconds": 0.0034818879999999773
+          },
+          {
+            "op": "aten::clamp",
+            "count": 433,
+            "self_cpu_seconds": 0.0016536910000000224
+          },
+          {
+            "op": "aten::mm",
+            "count": 217,
+            "self_cpu_seconds": 0.001316110999999994
+          },
+          {
+            "op": "aten::mul",
+            "count": 217,
+            "self_cpu_seconds": 0.0007306879999999931
+          },
+          {
+            "op": "aten::silu",
+            "count": 216,
+            "self_cpu_seconds": 0.0006029439999999959
+          },
+          {
+            "op": "cuLaunchKernel",
+            "count": 160,
+            "self_cpu_seconds": 0.000558223999999999
+          },
+          {
+            "op": "aten::split_with_sizes",
+            "count": 2,
+            "self_cpu_seconds": 0.0002826239999999984
+          },
+          {
+            "op": "aten::split",
+            "count": 216,
+            "self_cpu_seconds": 0.0002531029999999996
+          },
+          {
+            "op": "aten::slice",
+            "count": 432,
+            "self_cpu_seconds": 0.0002501759999999663
+          },
+          {
+            "op": "aten::empty",
+            "count": 221,
+            "self_cpu_seconds": 0.00024888000000000297
+          },
+          {
+            "op": "aten::as_strided",
+            "count": 1451,
+            "self_cpu_seconds": 0.00024132800000002674
+          }
+        ],
+        "kernel_events": 1118,
+        "kernel_activity_seconds_sum": 0.041214457,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_derive-1-after",
+        "cgroup_current_bytes": 45139640320,
+        "cgroup_committed_bytes": 23371259904,
+        "cgroup_clean_file_bytes": 21768380416,
+        "cuda_reserved_bytes": 14722007040,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 59861647360,
+        "committed_cgroup_plus_cuda_reserved_bytes": 38093266944,
+        "host_mem_available_bytes": 85604716544,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 59861979136,
+      "power_samples": 110,
+      "power_errors": [],
+      "power_w_mean": 39.55081818181818
+    },
+    {
+      "phase": "derive-2-after",
+      "calls": 717,
+      "elapsed_seconds": 30.00084822496865,
+      "wall_seconds_mean": 0.04184058544240928,
+      "wall_seconds_median": 0.041436360974330455,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-2-after.trace.json",
+        "sha256": "5f8fa46a0e6d70f77767ef8abe2f994fd0e24e6e1b50af8626cab8ed713a90c4",
+        "runtime_calls": {
+          "cudaLaunchKernel": 934,
+          "cudaDeviceGetAttribute": 164,
+          "cudaLaunchKernelExC": 1,
+          "cudaFuncGetAttributes": 1,
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": 1,
+          "cudaMemcpyAsync": 5,
+          "cudaStreamIsCapturing": 1,
+          "cudaStreamSynchronize": 1,
+          "cudaMemsetAsync": 29,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "cudaDeviceSynchronize",
+            "count": 2,
+            "self_cpu_seconds": 0.029865123999999996
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 934,
+            "self_cpu_seconds": 0.003571469000000001
+          },
+          {
+            "op": "aten::clamp",
+            "count": 433,
+            "self_cpu_seconds": 0.0016792609999999658
+          },
+          {
+            "op": "aten::mm",
+            "count": 217,
+            "self_cpu_seconds": 0.001291215999999994
+          },
+          {
+            "op": "aten::mul",
+            "count": 217,
+            "self_cpu_seconds": 0.000773870999999993
+          },
+          {
+            "op": "aten::silu",
+            "count": 216,
+            "self_cpu_seconds": 0.0006489590000000105
+          },
+          {
+            "op": "cuLaunchKernel",
+            "count": 160,
+            "self_cpu_seconds": 0.0006109120000000039
+          },
+          {
+            "op": "aten::split_with_sizes",
+            "count": 2,
+            "self_cpu_seconds": 0.00032636799999999946
+          },
+          {
+            "op": "aten::as_strided",
+            "count": 1451,
+            "self_cpu_seconds": 0.00026619200000002044
+          },
+          {
+            "op": "aten::split",
+            "count": 216,
+            "self_cpu_seconds": 0.00025619200000000453
+          },
+          {
+            "op": "aten::empty",
+            "count": 221,
+            "self_cpu_seconds": 0.0002506880000000068
+          },
+          {
+            "op": "aten::slice",
+            "count": 432,
+            "self_cpu_seconds": 0.0002483199999999747
+          }
+        ],
+        "kernel_events": 1118,
+        "kernel_activity_seconds_sum": 0.043293054000000004,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_derive-2-after",
+        "cgroup_current_bytes": 45165338624,
+        "cgroup_committed_bytes": 23392837632,
+        "cgroup_clean_file_bytes": 21772500992,
+        "cuda_reserved_bytes": 14722007040,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 59887345664,
+        "committed_cgroup_plus_cuda_reserved_bytes": 38114844672,
+        "host_mem_available_bytes": 85363904512,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 59893731328,
+      "power_samples": 110,
+      "power_errors": [],
+      "power_w_mean": 40.611636363636364
+    },
+    {
+      "phase": "derive-3-before",
+      "calls": 540,
+      "elapsed_seconds": 30.02015110303182,
+      "wall_seconds_mean": 0.05559036723031938,
+      "wall_seconds_median": 0.055494322994491085,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-3-before.trace.json",
+        "sha256": "686eb6fd33a45fecf9f10f9c0179d5f1929cbe9ad3a3793ca4068c5a620e2cbd",
+        "runtime_calls": {
+          "cudaLaunchKernel": 2719,
+          "cudaDeviceGetAttribute": 164,
+          "cudaLaunchKernelExC": 1,
+          "cudaFuncGetAttributes": 1,
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": 1,
+          "cudaMemcpyAsync": 289,
+          "cudaPeekAtLastError": 1728,
+          "cudaStreamSynchronize": 288,
+          "cudaMemsetAsync": 29,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "cudaStreamSynchronize",
+            "count": 288,
+            "self_cpu_seconds": 0.028761144000000054
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 2719,
+            "self_cpu_seconds": 0.009232529999999897
+          },
+          {
+            "op": "aten::nonzero",
+            "count": 288,
+            "self_cpu_seconds": 0.004211338000000082
+          },
+          {
+            "op": "aten::index",
+            "count": 432,
+            "self_cpu_seconds": 0.0018715990000000577
+          },
+          {
+            "op": "aten::clamp",
+            "count": 432,
+            "self_cpu_seconds": 0.0018572950000000357
+          },
+          {
+            "op": "aten::mm",
+            "count": 217,
+            "self_cpu_seconds": 0.0014617260000000364
+          },
+          {
+            "op": "cudaMemcpyAsync",
+            "count": 289,
+            "self_cpu_seconds": 0.0008904309999999672
+          },
+          {
+            "op": "aten::mul",
+            "count": 217,
+            "self_cpu_seconds": 0.0008069440000000599
+          },
+          {
+            "op": "aten::empty",
+            "count": 506,
+            "self_cpu_seconds": 0.0007286069999999941
+          },
+          {
+            "op": "aten::silu",
+            "count": 216,
+            "self_cpu_seconds": 0.0006807350000000111
+          },
+          {
+            "op": "aten::select",
+            "count": 1080,
+            "self_cpu_seconds": 0.0006339980000000062
+          },
+          {
+            "op": "aten::copy_",
+            "count": 292,
+            "self_cpu_seconds": 0.0005867039999999354
+          }
+        ],
+        "kernel_events": 2903,
+        "kernel_activity_seconds_sum": 0.045349068,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_derive-3-before",
+        "cgroup_current_bytes": 45168844800,
+        "cgroup_committed_bytes": 23392215040,
+        "cgroup_clean_file_bytes": 21776629760,
+        "cuda_reserved_bytes": 14722007040,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 59890851840,
+        "committed_cgroup_plus_cuda_reserved_bytes": 38114222080,
+        "host_mem_available_bytes": 85647421440,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 59893731328,
+      "power_samples": 112,
+      "power_errors": [],
+      "power_w_mean": 36.231785714285714
+    },
+    {
+      "phase": "check-0-before",
+      "calls": 6,
+      "elapsed_seconds": 35.673934847989585,
+      "wall_seconds_mean": 5.944110257327945,
+      "wall_seconds_median": 5.9434957730118185,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-0-before.trace.json",
+        "sha256": "fe09984fcf08d579bb0b323ddd9b05bcf388bd71e34c416ac1f3733ed2acc7bb",
+        "runtime_calls": {
+          "cudaStreamIsCapturing": 864,
+          "cudaMemcpyAsync": 864,
+          "cudaStreamSynchronize": 864,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "aten::equal",
+            "count": 864,
+            "self_cpu_seconds": 4.242754408000001
+          },
+          {
+            "op": "cudaMemcpyAsync",
+            "count": 864,
+            "self_cpu_seconds": 0.8453010270000054
+          },
+          {
+            "op": "aten::empty_strided",
+            "count": 864,
+            "self_cpu_seconds": 0.03136177099999208
+          },
+          {
+            "op": "aten::copy_",
+            "count": 864,
+            "self_cpu_seconds": 0.015144844999972727
+          },
+          {
+            "op": "aten::view",
+            "count": 1728,
+            "self_cpu_seconds": 0.005493021999996217
+          },
+          {
+            "op": "aten::_to_copy",
+            "count": 864,
+            "self_cpu_seconds": 0.004558846000017238
+          },
+          {
+            "op": "aten::select",
+            "count": 864,
+            "self_cpu_seconds": 0.004514332000010827
+          },
+          {
+            "op": "aten::set_",
+            "count": 1728,
+            "self_cpu_seconds": 0.0044311809999998866
+          },
+          {
+            "op": "aten::_local_scalar_dense",
+            "count": 864,
+            "self_cpu_seconds": 0.0037086990000011386
+          },
+          {
+            "op": "cudaStreamSynchronize",
+            "count": 864,
+            "self_cpu_seconds": 0.003605773000018535
+          },
+          {
+            "op": "aten::to",
+            "count": 1728,
+            "self_cpu_seconds": 0.0019335809999911644
+          },
+          {
+            "op": "aten::empty",
+            "count": 1728,
+            "self_cpu_seconds": 0.0018435990000066
+          }
+        ],
+        "kernel_events": 0,
+        "kernel_activity_seconds_sum": 0.0,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_check-0-before",
+        "cgroup_current_bytes": 45187129344,
+        "cgroup_committed_bytes": 23399337984,
+        "cgroup_clean_file_bytes": 21787791360,
+        "cuda_reserved_bytes": 14722007040,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 59909136384,
+        "committed_cgroup_plus_cuda_reserved_bytes": 38121345024,
+        "host_mem_available_bytes": 85621702656,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 59909136384,
+      "power_samples": 136,
+      "power_errors": [],
+      "power_w_mean": 13.51529411764706
+    },
+    {
+      "phase": "check-1-after",
+      "calls": 15,
+      "elapsed_seconds": 31.679226453998126,
+      "wall_seconds_mean": 2.1119097647373564,
+      "wall_seconds_median": 2.1111872250330634,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-1-after.trace.json",
+        "sha256": "2ecd52aa004d2447eda4ce99a7fa13f935462791ab68bcf199efcd17334de0aa",
+        "runtime_calls": {
+          "cudaEventQuery": 864,
+          "cudaStreamIsCapturing": 1729,
+          "cudaMemcpyAsync": 865,
+          "cudaLaunchKernel": 1735,
+          "cudaMemsetAsync": 864,
+          "cudaEventRecordWithFlags": 864,
+          "cudaStreamSynchronize": 1,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "aten::copy_",
+            "count": 1729,
+            "self_cpu_seconds": 1.0438549849999943
+          },
+          {
+            "op": "cudaMemcpyAsync",
+            "count": 865,
+            "self_cpu_seconds": 0.029589602000005783
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 1735,
+            "self_cpu_seconds": 0.02437902699999809
+          },
+          {
+            "op": "aten::any",
+            "count": 864,
+            "self_cpu_seconds": 0.023181690000002378
+          },
+          {
+            "op": "aten::empty_strided",
+            "count": 1729,
+            "self_cpu_seconds": 0.018615365000003062
+          },
+          {
+            "op": "aten::ne",
+            "count": 864,
+            "self_cpu_seconds": 0.013487928999999626
+          },
+          {
+            "op": "cudaMemsetAsync",
+            "count": 864,
+            "self_cpu_seconds": 0.007081064999999733
+          },
+          {
+            "op": "aten::view",
+            "count": 1728,
+            "self_cpu_seconds": 0.00630987999999494
+          },
+          {
+            "op": "aten::_to_copy",
+            "count": 865,
+            "self_cpu_seconds": 0.005186668999992446
+          },
+          {
+            "op": "aten::set_",
+            "count": 1728,
+            "self_cpu_seconds": 0.0046789910000032305
+          },
+          {
+            "op": "aten::select",
+            "count": 864,
+            "self_cpu_seconds": 0.004566298000000432
+          },
+          {
+            "op": "aten::_local_scalar_dense",
+            "count": 864,
+            "self_cpu_seconds": 0.004349148999998784
+          }
+        ],
+        "kernel_events": 1735,
+        "kernel_activity_seconds_sum": 0.156004395,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_check-1-after",
+        "cgroup_current_bytes": 45217402880,
+        "cgroup_committed_bytes": 23422459904,
+        "cgroup_clean_file_bytes": 21794942976,
+        "cuda_reserved_bytes": 14722007040,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 59939409920,
+        "committed_cgroup_plus_cuda_reserved_bytes": 38144466944,
+        "host_mem_available_bytes": 85603000320,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 59939409920,
+      "power_samples": 120,
+      "power_errors": [],
+      "power_w_mean": 15.737
+    },
+    {
+      "phase": "check-2-after",
+      "calls": 15,
+      "elapsed_seconds": 31.7208469749894,
+      "wall_seconds_mean": 2.114691048460857,
+      "wall_seconds_median": 2.123053068993613,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-2-after.trace.json",
+        "sha256": "effbf81062dcbbb26f245cba54d497d98b53e2cac20f578906c2e37e5be91254",
+        "runtime_calls": {
+          "cudaEventQuery": 864,
+          "cudaStreamIsCapturing": 1729,
+          "cudaMemcpyAsync": 865,
+          "cudaLaunchKernel": 1735,
+          "cudaMemsetAsync": 864,
+          "cudaEventRecordWithFlags": 864,
+          "cudaStreamSynchronize": 1,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "aten::copy_",
+            "count": 1729,
+            "self_cpu_seconds": 1.0144031009999934
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 1735,
+            "self_cpu_seconds": 0.02442714400000552
+          },
+          {
+            "op": "aten::any",
+            "count": 864,
+            "self_cpu_seconds": 0.023558714999997572
+          },
+          {
+            "op": "cudaMemcpyAsync",
+            "count": 865,
+            "self_cpu_seconds": 0.01803247999999999
+          },
+          {
+            "op": "aten::empty_strided",
+            "count": 1729,
+            "self_cpu_seconds": 0.01802657499999585
+          },
+          {
+            "op": "aten::ne",
+            "count": 864,
+            "self_cpu_seconds": 0.012461076999999439
+          },
+          {
+            "op": "cudaMemsetAsync",
+            "count": 864,
+            "self_cpu_seconds": 0.006811481000000594
+          },
+          {
+            "op": "aten::view",
+            "count": 1728,
+            "self_cpu_seconds": 0.005720959000002927
+          },
+          {
+            "op": "aten::_to_copy",
+            "count": 865,
+            "self_cpu_seconds": 0.0051222980000041355
+          },
+          {
+            "op": "aten::as_strided",
+            "count": 2592,
+            "self_cpu_seconds": 0.0048514829999967745
+          },
+          {
+            "op": "aten::select",
+            "count": 864,
+            "self_cpu_seconds": 0.0044820320000037535
+          },
+          {
+            "op": "aten::set_",
+            "count": 1728,
+            "self_cpu_seconds": 0.004341047999994911
+          }
+        ],
+        "kernel_events": 1735,
+        "kernel_activity_seconds_sum": 0.15590647800000001,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_check-2-after",
+        "cgroup_current_bytes": 45279154176,
+        "cgroup_committed_bytes": 23470997504,
+        "cgroup_clean_file_bytes": 21808156672,
+        "cuda_reserved_bytes": 14722007040,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 60001161216,
+        "committed_cgroup_plus_cuda_reserved_bytes": 38193004544,
+        "host_mem_available_bytes": 85484359680,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 60001161216,
+      "power_samples": 120,
+      "power_errors": [],
+      "power_w_mean": 15.560166666666667
+    },
+    {
+      "phase": "check-3-before",
+      "calls": 6,
+      "elapsed_seconds": 35.49468695395626,
+      "wall_seconds_mean": 5.915709228497387,
+      "wall_seconds_median": 5.912656930013327,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-3-before.trace.json",
+        "sha256": "c4a68d845e11fce527ee84d0e1caeacae73969907356f73309c7dc4f0a803924",
+        "runtime_calls": {
+          "cudaStreamIsCapturing": 864,
+          "cudaMemcpyAsync": 864,
+          "cudaStreamSynchronize": 864,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "aten::equal",
+            "count": 864,
+            "self_cpu_seconds": 4.244664482
+          },
+          {
+            "op": "cudaMemcpyAsync",
+            "count": 864,
+            "self_cpu_seconds": 0.8187066400000064
+          },
+          {
+            "op": "aten::empty_strided",
+            "count": 864,
+            "self_cpu_seconds": 0.03056143200000401
+          },
+          {
+            "op": "aten::copy_",
+            "count": 864,
+            "self_cpu_seconds": 0.015844066999984138
+          },
+          {
+            "op": "aten::view",
+            "count": 1728,
+            "self_cpu_seconds": 0.0055651329999867665
+          },
+          {
+            "op": "aten::_to_copy",
+            "count": 864,
+            "self_cpu_seconds": 0.004777085999991053
+          },
+          {
+            "op": "aten::set_",
+            "count": 1728,
+            "self_cpu_seconds": 0.004556591000003368
+          },
+          {
+            "op": "aten::select",
+            "count": 864,
+            "self_cpu_seconds": 0.004512430000004758
+          },
+          {
+            "op": "cudaStreamSynchronize",
+            "count": 864,
+            "self_cpu_seconds": 0.003846795000007245
+          },
+          {
+            "op": "aten::_local_scalar_dense",
+            "count": 864,
+            "self_cpu_seconds": 0.0036577409999860606
+          },
+          {
+            "op": "aten::to",
+            "count": 1728,
+            "self_cpu_seconds": 0.0019809600000174703
+          },
+          {
+            "op": "aten::empty",
+            "count": 1728,
+            "self_cpu_seconds": 0.0018732779999856793
+          }
+        ],
+        "kernel_events": 0,
+        "kernel_activity_seconds_sum": 0.0,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_check-3-before",
+        "cgroup_current_bytes": 45330681856,
+        "cgroup_committed_bytes": 23509237760,
+        "cgroup_clean_file_bytes": 21821444096,
+        "cuda_reserved_bytes": 14722007040,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 60052688896,
+        "committed_cgroup_plus_cuda_reserved_bytes": 38231244800,
+        "host_mem_available_bytes": 85518479360,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 60052688896,
+      "power_samples": 135,
+      "power_errors": [],
+      "power_w_mean": 12.880592592592594
+    },
+    {
+      "phase": "hook-0-before",
+      "calls": 79,
+      "elapsed_seconds": 30.010679513041396,
+      "wall_seconds_mean": 0.37987443231358603,
+      "wall_seconds_median": 0.37979719100985676,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-0-before.trace.json",
+        "sha256": "2dbdacdeef01c88b90145410567da2318fa025d2df4a782b66c6dc158c3e3b43",
+        "runtime_calls": {
+          "cudaLaunchKernel": 5379,
+          "cudaDeviceGetAttribute": 528,
+          "cudaLaunchKernelExC": 1,
+          "cudaFuncGetAttributes": 1,
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": 1,
+          "cudaMemcpyAsync": 289,
+          "cudaPeekAtLastError": 1728,
+          "cudaStreamSynchronize": 288,
+          "cudaMemsetAsync": 102,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "Command Buffer Full",
+            "count": 496,
+            "self_cpu_seconds": 0.17983123999999986
+          },
+          {
+            "op": "cudaDeviceSynchronize",
+            "count": 2,
+            "self_cpu_seconds": 0.10628586800000002
+          },
+          {
+            "op": "cudaStreamSynchronize",
+            "count": 288,
+            "self_cpu_seconds": 0.02741779900000001
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 5379,
+            "self_cpu_seconds": 0.01943316099999948
+          },
+          {
+            "op": "aten::nonzero",
+            "count": 288,
+            "self_cpu_seconds": 0.004553915999999945
+          },
+          {
+            "op": "aten::mm",
+            "count": 649,
+            "self_cpu_seconds": 0.004350201999999361
+          },
+          {
+            "op": "aten::copy_",
+            "count": 1156,
+            "self_cpu_seconds": 0.0023660309999995106
+          },
+          {
+            "op": "aten::amax",
+            "count": 432,
+            "self_cpu_seconds": 0.0020231350000008024
+          },
+          {
+            "op": "aten::clamp",
+            "count": 432,
+            "self_cpu_seconds": 0.002016078000000154
+          },
+          {
+            "op": "aten::index",
+            "count": 432,
+            "self_cpu_seconds": 0.001952078999999872
+          },
+          {
+            "op": "aten::abs",
+            "count": 864,
+            "self_cpu_seconds": 0.0016217899999998698
+          },
+          {
+            "op": "cuLaunchKernel",
+            "count": 524,
+            "self_cpu_seconds": 0.0015711980000002255
+          }
+        ],
+        "kernel_events": 5927,
+        "kernel_activity_seconds_sum": 0.36830537,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_hook-0-before",
+        "cgroup_current_bytes": 33267073024,
+        "cgroup_committed_bytes": 23476015104,
+        "cgroup_clean_file_bytes": 9791057920,
+        "cuda_reserved_bytes": 35584475136,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 68851548160,
+        "committed_cgroup_plus_cuda_reserved_bytes": 59060490240,
+        "host_mem_available_bytes": 64437329920,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 68851548160,
+      "power_samples": 108,
+      "power_errors": [],
+      "power_w_mean": 42.62888888888889,
+      "prefix_stable": true,
+      "prefix_rows_before": 221184,
+      "prefix_rows_after": 221184
+    },
+    {
+      "phase": "hook-1-after",
+      "calls": 83,
+      "elapsed_seconds": 30.19768738298444,
+      "wall_seconds_mean": 0.3638180008660217,
+      "wall_seconds_median": 0.3637596539920196,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-1-after.trace.json",
+        "sha256": "140bacdf3041f6404c44136d22e169e7f24f853e6b626429cac72c4ceaff1db3",
+        "runtime_calls": {
+          "cudaLaunchKernel": 3594,
+          "cudaDeviceGetAttribute": 528,
+          "cudaLaunchKernelExC": 1,
+          "cudaFuncGetAttributes": 1,
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": 1,
+          "cudaMemcpyAsync": 5,
+          "cudaStreamIsCapturing": 1,
+          "cudaStreamSynchronize": 1,
+          "cudaMemsetAsync": 102,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "Command Buffer Full",
+            "count": 644,
+            "self_cpu_seconds": 0.20564850799999995
+          },
+          {
+            "op": "cudaDeviceSynchronize",
+            "count": 2,
+            "self_cpu_seconds": 0.10545053999999998
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 3594,
+            "self_cpu_seconds": 0.014727714000000981
+          },
+          {
+            "op": "aten::mm",
+            "count": 649,
+            "self_cpu_seconds": 0.004319786999999997
+          },
+          {
+            "op": "cuLaunchKernel",
+            "count": 524,
+            "self_cpu_seconds": 0.0020444629999998866
+          },
+          {
+            "op": "aten::amax",
+            "count": 432,
+            "self_cpu_seconds": 0.001992815000000217
+          },
+          {
+            "op": "aten::clamp",
+            "count": 433,
+            "self_cpu_seconds": 0.0017824150000000218
+          },
+          {
+            "op": "aten::copy_",
+            "count": 874,
+            "self_cpu_seconds": 0.0017711019999991548
+          },
+          {
+            "op": "aten::abs",
+            "count": 864,
+            "self_cpu_seconds": 0.0015674049999991257
+          },
+          {
+            "op": "aten::empty_strided",
+            "count": 871,
+            "self_cpu_seconds": 0.001554032000000101
+          },
+          {
+            "op": "aten::fmax",
+            "count": 432,
+            "self_cpu_seconds": 0.0013493270000001503
+          },
+          {
+            "op": "aten::_to_copy",
+            "count": 869,
+            "self_cpu_seconds": 0.0011614380000001172
+          }
+        ],
+        "kernel_events": 4142,
+        "kernel_activity_seconds_sum": 0.364907702,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_hook-1-after",
+        "cgroup_current_bytes": 33333080064,
+        "cgroup_committed_bytes": 23521619968,
+        "cgroup_clean_file_bytes": 9811460096,
+        "cuda_reserved_bytes": 35651584000,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 68984664064,
+        "committed_cgroup_plus_cuda_reserved_bytes": 59173203968,
+        "host_mem_available_bytes": 64222887936,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 68984664064,
+      "power_samples": 108,
+      "power_errors": [],
+      "power_w_mean": 43.413888888888884,
+      "prefix_stable": true,
+      "prefix_rows_before": 221184,
+      "prefix_rows_after": 221184
+    },
+    {
+      "phase": "hook-2-after",
+      "calls": 83,
+      "elapsed_seconds": 30.204726512019988,
+      "wall_seconds_mean": 0.36390428647121237,
+      "wall_seconds_median": 0.36371563898865134,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-2-after.trace.json",
+        "sha256": "a5be93013d5b2deac5cded01bd6997fd742b4298ff18149c56e01917d595efd2",
+        "runtime_calls": {
+          "cudaLaunchKernel": 3594,
+          "cudaDeviceGetAttribute": 528,
+          "cudaLaunchKernelExC": 1,
+          "cudaFuncGetAttributes": 1,
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": 1,
+          "cudaMemcpyAsync": 5,
+          "cudaStreamIsCapturing": 1,
+          "cudaStreamSynchronize": 1,
+          "cudaMemsetAsync": 102,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "Command Buffer Full",
+            "count": 645,
+            "self_cpu_seconds": 0.20594924400000023
+          },
+          {
+            "op": "cudaDeviceSynchronize",
+            "count": 2,
+            "self_cpu_seconds": 0.10548921199999997
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 3594,
+            "self_cpu_seconds": 0.014594070999999662
+          },
+          {
+            "op": "aten::mm",
+            "count": 649,
+            "self_cpu_seconds": 0.004250008999999973
+          },
+          {
+            "op": "cuLaunchKernel",
+            "count": 524,
+            "self_cpu_seconds": 0.002052317999999843
+          },
+          {
+            "op": "aten::amax",
+            "count": 432,
+            "self_cpu_seconds": 0.0019891980000003315
+          },
+          {
+            "op": "aten::clamp",
+            "count": 433,
+            "self_cpu_seconds": 0.0017824139999999987
+          },
+          {
+            "op": "aten::copy_",
+            "count": 874,
+            "self_cpu_seconds": 0.0017690059999998595
+          },
+          {
+            "op": "aten::empty_strided",
+            "count": 871,
+            "self_cpu_seconds": 0.0015428610000001223
+          },
+          {
+            "op": "aten::abs",
+            "count": 864,
+            "self_cpu_seconds": 0.0015410399999996299
+          },
+          {
+            "op": "aten::fmax",
+            "count": 432,
+            "self_cpu_seconds": 0.0013308160000003518
+          },
+          {
+            "op": "aten::_to_copy",
+            "count": 869,
+            "self_cpu_seconds": 0.0011333579999997995
+          }
+        ],
+        "kernel_events": 4142,
+        "kernel_activity_seconds_sum": 0.364308241,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_hook-2-after",
+        "cgroup_current_bytes": 33404440576,
+        "cgroup_committed_bytes": 23579734016,
+        "cgroup_clean_file_bytes": 9824706560,
+        "cuda_reserved_bytes": 35651584000,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 69056024576,
+        "committed_cgroup_plus_cuda_reserved_bytes": 59231318016,
+        "host_mem_available_bytes": 64172658688,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 69056401408,
+      "power_samples": 108,
+      "power_errors": [],
+      "power_w_mean": 43.406666666666666,
+      "prefix_stable": true,
+      "prefix_rows_before": 221184,
+      "prefix_rows_after": 221184
+    },
+    {
+      "phase": "hook-3-before",
+      "calls": 79,
+      "elapsed_seconds": 30.058307370985858,
+      "wall_seconds_mean": 0.3804788202006087,
+      "wall_seconds_median": 0.3804458620143123,
+      "profile": {
+        "trace": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-3-before.trace.json",
+        "sha256": "779e7c3b3581bc444e1b2562d1c6871d8d30bd30ee39465b2b58a79a74a56262",
+        "runtime_calls": {
+          "cudaLaunchKernel": 5379,
+          "cudaDeviceGetAttribute": 528,
+          "cudaLaunchKernelExC": 1,
+          "cudaFuncGetAttributes": 1,
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": 1,
+          "cudaMemcpyAsync": 289,
+          "cudaPeekAtLastError": 1728,
+          "cudaStreamSynchronize": 288,
+          "cudaMemsetAsync": 102,
+          "cudaDeviceSynchronize": 2
+        },
+        "top_self_cpu": [
+          {
+            "op": "Command Buffer Full",
+            "count": 491,
+            "self_cpu_seconds": 0.17786290600000024
+          },
+          {
+            "op": "cudaDeviceSynchronize",
+            "count": 2,
+            "self_cpu_seconds": 0.105631548
+          },
+          {
+            "op": "cudaStreamSynchronize",
+            "count": 288,
+            "self_cpu_seconds": 0.027593008999999977
+          },
+          {
+            "op": "cudaLaunchKernel",
+            "count": 5379,
+            "self_cpu_seconds": 0.020962559999999495
+          },
+          {
+            "op": "aten::nonzero",
+            "count": 288,
+            "self_cpu_seconds": 0.004486234999999977
+          },
+          {
+            "op": "aten::mm",
+            "count": 649,
+            "self_cpu_seconds": 0.004412668000000078
+          },
+          {
+            "op": "aten::copy_",
+            "count": 1156,
+            "self_cpu_seconds": 0.002435723999999924
+          },
+          {
+            "op": "aten::clamp",
+            "count": 432,
+            "self_cpu_seconds": 0.0020016319999999668
+          },
+          {
+            "op": "aten::amax",
+            "count": 432,
+            "self_cpu_seconds": 0.0019948629999998156
+          },
+          {
+            "op": "aten::index",
+            "count": 432,
+            "self_cpu_seconds": 0.0019047040000000426
+          },
+          {
+            "op": "cuLaunchKernel",
+            "count": 524,
+            "self_cpu_seconds": 0.001825353999999792
+          },
+          {
+            "op": "aten::abs",
+            "count": 864,
+            "self_cpu_seconds": 0.0016366070000004328
+          }
+        ],
+        "kernel_events": 5927,
+        "kernel_activity_seconds_sum": 0.369134287,
+        "kernel_sum_is_elapsed_gpu_wall": false
+      },
+      "guard": {
+        "label": "after_hook-3-before",
+        "cgroup_current_bytes": 33418461184,
+        "cgroup_committed_bytes": 23580475392,
+        "cgroup_clean_file_bytes": 9837985792,
+        "cuda_reserved_bytes": 35651584000,
+        "conservative_cgroup_plus_cuda_reserved_bytes": 69070045184,
+        "committed_cgroup_plus_cuda_reserved_bytes": 59232059392,
+        "host_mem_available_bytes": 64111329280,
+        "cap_bytes": 96636764160,
+        "cpu_cap_bytes": 96636764160,
+        "future_allocation_bytes": 0,
+        "future_device_allocation_bytes": 0,
+        "refusal_threshold_bytes": 94489280512,
+        "enforced": "cgroup-plus-cuda-reserved"
+      },
+      "peak_conservative_bytes": 69070045184,
+      "power_samples": 108,
+      "power_errors": [],
+      "power_w_mean": 42.79453703703704,
+      "prefix_stable": true,
+      "prefix_rows_before": 221184,
+      "prefix_rows_after": 221184
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-1-after.json",
+      "bytes": 36108,
+      "sha256": "8ce491329bd840f36939acc004d7ae2a92b74056772e8d0bb1d7c5a50873cdd8"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/partial.json",
+      "bytes": 1808259,
+      "sha256": "bf9b94e3e880571d72496e41b4902333958b24de54f829259a804623439fed3e"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-1-after.json",
+      "bytes": 19593,
+      "sha256": "d16baedab35acc6c482584ab7ba837ec253a95359e508e6fdfc9b1424f82279e"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-1-after.netdata-raw.json",
+      "bytes": 88309,
+      "sha256": "c4039b9988c04839e31e1ec247245d5bb8d3be582ab63b687d289381c42a69b2"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-0-before.trace.json",
+      "bytes": 6719712,
+      "sha256": "fe09984fcf08d579bb0b323ddd9b05bcf388bd71e34c416ac1f3733ed2acc7bb"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-3-before.trace.json",
+      "bytes": 10722796,
+      "sha256": "686eb6fd33a45fecf9f10f9c0179d5f1929cbe9ad3a3793ca4068c5a620e2cbd"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-3-before.json",
+      "bytes": 223074,
+      "sha256": "0b5158c68e4538acaa8a1d42d067e056733beef395910f92953ebaf50a7b827b"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-0-before.trace.json",
+      "bytes": 19361038,
+      "sha256": "2dbdacdeef01c88b90145410567da2318fa025d2df4a782b66c6dc158c3e3b43"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-1-after.trace.json",
+      "bytes": 12518770,
+      "sha256": "140bacdf3041f6404c44136d22e169e7f24f853e6b626429cac72c4ceaff1db3"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-2-after.trace.json",
+      "bytes": 12518835,
+      "sha256": "a5be93013d5b2deac5cded01bd6997fd742b4298ff18149c56e01917d595efd2"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/result.json",
+      "bytes": 1814155,
+      "sha256": "2593b2e3894a3a9d20e30c5e12ac514ba16f602fc90af7c9fa22cc3e2f023400"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-3-before.json",
+      "bytes": 31818,
+      "sha256": "8e27f176bcd084a25ba7a13a8d117940c15a9c1cc1d15802846f23af8fdeff03"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-2-after.netdata-raw.json",
+      "bytes": 88137,
+      "sha256": "2796860f5a2cbb14921d2bd997f11e92d5f9e27d4476d0a65ff0851f129ed070"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-2-after.json",
+      "bytes": 223053,
+      "sha256": "a767033a9a1236342758366f7f94aa2ef0168f104b54c434f052cfe25a489f87"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-0-before.json",
+      "bytes": 21072,
+      "sha256": "16780a91adf8ff22fd67c06acd84dea5cff2716a774b18599515d916f1e8c249"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-warmup.json",
+      "bytes": 101302,
+      "sha256": "b1e5f8a740b332cff7876805bf7e658f0c9570ec5da3bfff4c09e9fb5db77415"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-0-before.netdata-raw.json",
+      "bytes": 88321,
+      "sha256": "ba72116ac0eea96666388c65d503daa3de2818231e8f1176cba8f3b6809826a1"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-1-after.netdata-raw.json",
+      "bytes": 89990,
+      "sha256": "024bc389be1c33a9e5647869bb60abeb742bd634b4b6d7d1135518c92a4745fe"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-1-after.netdata-raw.json",
+      "bytes": 88261,
+      "sha256": "90547d4a784543793ba4e38a757f1e9c91d5c10553bc31f87dedefa853bb0e61"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-3-before.netdata-raw.json",
+      "bytes": 87863,
+      "sha256": "d8b7e1698d50b8b7f9cb541eac6f9bb8e3d7faf5e6be5f6ba816223c2d305b93"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-3-before.json",
+      "bytes": 21212,
+      "sha256": "01baa8b6658a0d34c8f0e1d9cc57e877e9a2f7919e2e14b927b6fa1818ff0108"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-2-after.json",
+      "bytes": 19664,
+      "sha256": "9adada149595d8188e162255935922cbfb16d59934cf14d192da928848ad97ea"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-0-before.json",
+      "bytes": 32388,
+      "sha256": "e0dbb13f0d2a686160849597e91fa26fbe77f9fb927495a96fdb355fbd5218da"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-0-before.netdata-raw.json",
+      "bytes": 92706,
+      "sha256": "3220f1249c4ae4f70afe9d0e5c280c76a7ea20d4170a14fdcf75e003e0b20abf"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-2-after.json",
+      "bytes": 35960,
+      "sha256": "17092d4a43b6de2b36d06e62cf7e83fd290cadc7c664361195f97765f1ac6827"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/startup.json",
+      "bytes": 495813,
+      "sha256": "ce918b3b57ace04505eea981d522781cd066f7b84ed3fe797cb01d96c39288d4"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-1-after.trace.json",
+      "bytes": 3790226,
+      "sha256": "16d5d4cd89e37dec3274ae607bdc71058c235e3074777db07f4798b93d4f9d6d"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-0-before.trace.json",
+      "bytes": 10648399,
+      "sha256": "2fed6b3292acbc2fe858f941f6e43f9503c85d28b8b95b424cca344ded988f24"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-1-after.json",
+      "bytes": 222895,
+      "sha256": "d93b61fcc18fb5564ecdd67035c3c7e2ed82962fa9171ac3424a25bc0e0cfb1d"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-3-before.trace.json",
+      "bytes": 6742145,
+      "sha256": "c4a68d845e11fce527ee84d0e1caeacae73969907356f73309c7dc4f0a803924"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-3-before.trace.json",
+      "bytes": 19360729,
+      "sha256": "779e7c3b3581bc444e1b2562d1c6871d8d30bd30ee39465b2b58a79a74a56262"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-3-before.netdata-raw.json",
+      "bytes": 92971,
+      "sha256": "cb88cf520069cd2fea8480352e2821b0d22e34590e037dc0980db5d8715bb21d"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-2-after.netdata-raw.json",
+      "bytes": 89061,
+      "sha256": "65d177c6d77588a27573914925fb2a69e9ac59f5317d2f954fbfaa664d9cafff"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-2-after.trace.json",
+      "bytes": 12872619,
+      "sha256": "effbf81062dcbbb26f245cba54d497d98b53e2cac20f578906c2e37e5be91254"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-2-after.netdata-raw.json",
+      "bytes": 88726,
+      "sha256": "b5a7b5c2c2866eb4dac17e2af164ae78161617cd3e671ce122292b825f26699c"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/check-1-after.trace.json",
+      "bytes": 12861381,
+      "sha256": "2ecd52aa004d2447eda4ce99a7fa13f935462791ab68bcf199efcd17334de0aa"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-3-before.netdata-raw.json",
+      "bytes": 88426,
+      "sha256": "84ae9b612124c3f86f618403ef78b7b630bd2dfcc642d9aaf6cced7c202f5336"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/hook-0-before.json",
+      "bytes": 222664,
+      "sha256": "5bc6bc202b079976aed47ca0c4b2da9b5d8ee8b75061dd74d8eb8d7bf0ea65fa"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-0-before.netdata-raw.json",
+      "bytes": 88118,
+      "sha256": "bfbbfe897c1cc799eeb613318b7e1160ab4fdbd29ee7625bf7546e206a2d11c6"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/derive-2-after.trace.json",
+      "bytes": 3795235,
+      "sha256": "5f8fa46a0e6d70f77767ef8abe2f994fd0e24e6e1b50af8626cab8ed713a90c4"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/system-observer/progress.json",
+      "bytes": 1037,
+      "sha256": "7669ca3cc59a3b261001c7e3e363b6c9c7e9910008f52fe0a9b51eb0e912ae7a"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/system-observer/python_sampler.jsonl",
+      "bytes": 802490,
+      "sha256": "93558fb732e36a23102bf753b231fc6ed33392db99f5eaa1a979633b659e2691"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/system-observer/result.json",
+      "bytes": 1037,
+      "sha256": "7669ca3cc59a3b261001c7e3e363b6c9c7e9910008f52fe0a9b51eb0e912ae7a"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1934-recovery-20261002/original-l20-3b206fd56/system-observer/netdata.jsonl",
+      "bytes": 3142998,
+      "sha256": "b8738722af4a05a696b7b6414cce25aead8ecdfb3aa58125b9677c560cc2ccc2"
+    }
+  ]
+}
