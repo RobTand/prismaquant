@@ -86,6 +86,30 @@ chain. Sealed records, handoff JSON bytes/schema, kernels, numerical behavior,
 export wire, pins, pipeline defaults and serving gates are unchanged. CPU
 fixtures are not GPU/model admission.
 
+Re-stamped 2026-10-02 (PQ #1942): admitted row profiling separates
+profile generation/publication from host telemetry. PB's deliberate
+`NoNewPrivileges=1` is preserved: the observer does not invoke sudo or attach
+a privileged profiler. A same-UID py-spy parent runs inside the workload's
+existing container and namespace, retaining the original Python argv as its
+child. Its completion record binds the actual workload PID in the profiler's
+own namespace; valid frame references and nonempty samples for that PID are
+required before publication. Status-worker-only traces cannot qualify a row.
+A nonzero workload exit survives py-spy shutdown errors and observer rejection;
+profiler and observer outcomes are recorded independently. Publication requires
+both a successful workload and a successful profiler. Both-box Netdata readiness,
+atomic publication and row/observer failure gates remain mandatory. The
+existing PB row deadline bounds the process tree; no profiler duration cutoff
+signals a quantization row. This changes opt-in instrumentation only, not
+runtime/encoder source, numerical flags, formats, caches, pins or ship gates.
+The host observer loads the authoritative stdlib-only `io_spans.PeriodicSampler`
+through the same source-owner loader as its digest bridge, without executing
+production package initialization or importing Torch/container dependencies.
+Sampler lifetime, native identity and sticky observer timeout refusal are unchanged;
+`tests/test_profile_observer_bootstrap_1942.py` executes the actual observer import
+chain in a fresh no-site interpreter. No production package namespace is replaced.
+CPU tests and native same-UID profiling do not establish a GPU A/B result.
+See `docs/campaign_row_profiling.md` for the admitted dependency contract.
+
 Re-stamped 2026-10-01 (PQ #1936, Refs #1921): allocation first separates
 visual policy from orchestration. A complete measured visual Fisher/cost
 population retains its legal visual and merger candidates in the existing
