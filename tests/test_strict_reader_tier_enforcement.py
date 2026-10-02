@@ -2308,43 +2308,74 @@ def test_a_waiting_layer_read_holds_no_gather_worker(tmp_path, monkeypatch):
     monkeypatch.setenv(STAGED_RANGE_WAIT_ENV, "30")
     monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '2')
 
+    from prismaquant import residency_shard_reader
+
+    # Stop at the real poll loop, not at an assumed two-second head start.
+    # Only this reader's clock is controlled; the finite Event deadlines
+    # below are harness guards for a deadlocked/broken implementation.
+    polling = threading.Event()
+    release = threading.Event()
+
+    class _PollClock:
+        now = 100.0
+
+        def __getattr__(self, name):
+            return getattr(time, name)
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            polling.set()
+            assert release.wait(120), "the cold poll was never released"
+            self.now = 130.0
+
+    clock = _PollClock()
+    monkeypatch.setattr(residency_shard_reader, 'time', clock)
+    monkeypatch.setattr(layer_streaming, 'time', clock)
     submissions = []
     real_pool = ThreadPoolExecutor(max_workers=2,
                                    thread_name_prefix='gather-under-test')
 
     class _Counting:
         def submit(self, fn, *args, **kwargs):
-            submissions.append(getattr(fn, '__name__', str(fn)))
+            submissions.append(args[0])
             return real_pool.submit(fn, *args, **kwargs)
 
     monkeypatch.setattr(layer_streaming, '_layer_read_pool',
                         lambda threads: _Counting())
 
     results = []
+    errors = []
 
     def cold_reader():
-        with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
-            _read_wide_layer(cold, cold_names)
-        results.append(True)
+        try:
+            with pytest.raises(TierPolicyRefused, match="readset-not-staged"):
+                _read_wide_layer(cold, cold_names)
+            results.append(True)
+        except BaseException as exc:
+            errors.append(exc)
 
     waiter = threading.Thread(target=cold_reader, name='cold-layer')
     waiter.start()
     try:
-        time.sleep(2.0)
-        began = time.monotonic()
+        assert polling.wait(120), "the cold layer never reached its poll"
+        assert submissions == [], "a cold read occupied a gather worker"
         served = _read_wide_layer(ready, ready_names)
-        elapsed = time.monotonic() - began
+        assert waiter.is_alive(), "the cold read ended before being released"
+        assert not release.is_set()
+        assert len(submissions) == 2 and all(
+            shard == str(ready) for shard in submissions), submissions
     finally:
+        release.set()
         waiter.join(timeout=120)
-        real_pool.shutdown(wait=False)
+        real_pool.shutdown(wait=True)
 
+    assert not waiter.is_alive(), "the cold read outlived its released deadline"
+    assert errors == [], errors
     assert results == [True]
-    # The fanout branch really ran: without this a serial-path regression
-    # would leave the assertion below passing for the wrong reason.
-    assert len(submissions) >= 2, submissions
-    assert elapsed < 10.0, (
-        f"a staged layer read took {elapsed:.1f}s while a cold one waited "
-        "its 30s bound: the wait is holding a gather worker")
+    assert resolver.report()['range_waits_refused'] == 1
+    assert clock.now == 130.0  # the real poll exhausted the unchanged 30s bound
 
     from safetensors import safe_open
     with safe_open(str(ready), framework='pt') as reference:
