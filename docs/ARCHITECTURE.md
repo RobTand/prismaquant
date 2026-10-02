@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #2010, bootstrap separation): text-only
+configuration transformations now live in the existing staging owner's
+`text_only_stage_config` domain helper. It accepts the already selected profile,
+returns an independent derived config or the existing no-staging decision,
+and performs no file IO. Filesystem staging keeps its source/profile selection,
+dead-override refusal, symlink policy, write spelling and paths. This separates
+the rules needed by a future authenticated bootstrap without adding such a
+provider, changing automatic capture eligibility or touching Fisher arithmetic.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
