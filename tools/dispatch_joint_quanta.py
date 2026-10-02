@@ -931,6 +931,19 @@ def _executable_prepared_input(record: dict, *,
         raise ExecutableBindingUnsupported(
             f"quantum {quantum_id!r} bound replay mode {replay_mode!r} is not "
             "the sealed manifest's: refusing")
+    from prismaquant.joint_layer_quanta import normalize_checkpoint_incoming_mode
+    try:
+        incoming_mode = normalize_checkpoint_incoming_mode(block.get("checkpoint_incoming_mode"))
+    except ValueError as exc:
+        raise ExecutableBindingUnsupported(str(exc)) from exc
+    if incoming_mode != (manifest_doc.get("annotations") or {}).get("checkpoint_incoming_mode"):
+        raise ExecutableBindingUnsupported("checkpoint incoming mode differs from sealed manifest: refusing")
+    if incoming_mode is not None:
+        from prismaquant.joint_layer_quanta import check_checkpoint_incoming_readset
+        try:
+            check_checkpoint_incoming_readset(record, manifest_doc, _read_bound_slice(record))
+        except (ValueError, KeyError, TypeError, DispatchRefused) as exc:
+            raise ExecutableBindingUnsupported(f"checkpoint incoming readset: {exc}") from exc
     by_name = {phase.get("name"): phase for phase in phases
                if isinstance(phase, dict)}
     order = [phase.get("name") for phase in phases
@@ -1402,20 +1415,23 @@ _REPLAY_PHASE = re.compile(r"replay-(\d{2,})-p(\d+)")
 def phase_work_entries(name: str, fact: Mapping, annotations: Mapping):
     """The entries a phase's pass counts its work by, from its read-plan facts.
 
-    A phase's entry count, less the incoming plane entries a band-serial
-    spill readset moved into it (``annotations.band_serial.streamed_incoming``,
-    PQ #1143): those add read bytes to ``spill-pP``, not capture groups.
+    A phase's entry count, less incoming plane entries moved into it by
+    ``band_serial.streamed_incoming`` or ``checkpoint_incoming.streamed_incoming``:
+    those add read bytes, rather than capture groups or chain batches.
     ``None`` when the plan does not count the phase's entries.
     """
     entries = fact.get("entries") if isinstance(fact, Mapping) else None
-    band = annotations.get("band_serial") if isinstance(annotations, Mapping) else None
-    streamed = band.get("streamed_incoming") if isinstance(band, Mapping) else None
-    moved = streamed.get(name) if isinstance(streamed, Mapping) else None
-    if type(entries) is not int or moved is None:
+    if type(entries) is not int:
         return entries
-    if type(moved) is not int or not 0 <= moved <= entries:
-        return None
-    return entries - moved
+    moved = 0
+    for key in ("band_serial", "checkpoint_incoming"):
+        owner = annotations.get(key) if isinstance(annotations, Mapping) else None
+        streamed = owner.get("streamed_incoming") if isinstance(owner, Mapping) else None
+        count = streamed.get(name, 0) if isinstance(streamed, Mapping) else 0
+        if type(count) is not int or not 0 <= count <= entries:
+            return None
+        moved += count
+    return entries - moved if moved <= entries else None
 
 
 def compute_phase_work(name: str, *, replay_mode: str, entries,

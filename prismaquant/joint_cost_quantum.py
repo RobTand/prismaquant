@@ -1607,6 +1607,28 @@ def quantum_adjoint_space(record, adjoint_slice, output_root):
     return space
 
 
+def _authenticate_checkpoint_incoming_readset(record, adjoint_slice, execution):
+    """Bind production streaming to the current PB claim and strict readers.
+
+    Input authority is checked here; ordinary exact readers retain ownership
+    of residency, open lifetimes, and per-payload digest verification.
+    """
+    from .joint_layer_quanta import check_checkpoint_incoming_readset
+    from .residency_map import ENV_VAR as residency_map_env
+    from .staged_lease import ReadsetUnbound, load_sealed_manifest
+    from .staged_tier_policy import active_policy
+    if active_policy() is None or not os.environ.get(residency_map_env):
+        raise QuantumIdentityRefused("checkpoint incoming staged mode requires strict residency context")
+    try:
+        block = record["executable_readset"]
+        manifest = load_sealed_manifest(block["manifest_sha256"])
+        if manifest["annotations"].get("n_probes") != execution["n_probes"]:
+            raise ValueError("checkpoint incoming launch has a foreign probe count")
+        check_checkpoint_incoming_readset(record, manifest, adjoint_slice)
+    except (ReadsetUnbound, ValueError, KeyError, TypeError) as exc:
+        raise QuantumIdentityRefused(f"checkpoint incoming staged readset: {exc}") from exc
+
+
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, adjoint_slice, execution, output_root,
@@ -1677,23 +1699,41 @@ def run_layer_quantum_core(
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
-    incoming_mode = execution.get("checkpoint_incoming_mode")
+    from .joint_layer_quanta import (
+        CHECKPOINT_INCOMING_STAGED,
+        normalize_checkpoint_incoming_mode,
+    )
+    sealed_block = record.get("executable_readset")
+    try:
+        sealed_incoming_mode = normalize_checkpoint_incoming_mode(
+            sealed_block.get("checkpoint_incoming_mode")
+            if isinstance(sealed_block, dict) else None)
+    except ValueError as exc:
+        raise QuantumIdentityRefused(str(exc)) from exc
+    incoming_mode = execution.get("checkpoint_incoming_mode", sealed_incoming_mode)
     checkpoint_streaming = incoming_mode is not None
     if checkpoint_streaming:
         from .residency_map import ENV_VAR as residency_map_env
         from .staged_tier_policy import active_policy
-        if type(incoming_mode) is not str or incoming_mode != "stream_once_research":
+        if incoming_mode == CHECKPOINT_INCOMING_STAGED:
+            if incoming_mode != sealed_incoming_mode:
+                raise QuantumIdentityRefused("checkpoint incoming mode is not explicitly sealed")
+            _authenticate_checkpoint_incoming_readset(record, adjoint_slice, execution)
+        elif type(incoming_mode) is str and incoming_mode == "stream_once_research":
+            if torch.device(runner.device).type != "cpu":
+                raise QuantumIdentityRefused("checkpoint incoming research is CPU-only")
+            if (record.get("executable_readset") is not None
+                    or os.environ.get(residency_map_env) or active_policy() is not None
+                    or any(execution.get(key) is not None for key in (
+                        "staged_manifest", "staged_manifest_sha256", "data_manifest_sha256"))):
+                raise QuantumIdentityRefused(
+                    "checkpoint incoming research refuses executable/staged read bindings")
+        else:
             raise QuantumIdentityRefused("checkpoint incoming research selection is invalid")
-        if torch.device(runner.device).type != "cpu":
-            raise QuantumIdentityRefused("checkpoint incoming research is CPU-only")
-        if (record.get("executable_readset") is not None
-                or os.environ.get(residency_map_env) or active_policy() is not None
-                or any(execution.get(key) is not None for key in (
-                    "staged_manifest", "staged_manifest_sha256", "data_manifest_sha256"))):
-            raise QuantumIdentityRefused(
-                "checkpoint incoming research refuses executable/staged read bindings")
         if adjoint_handoff is not None or handoff_emitter is not None:
-            raise QuantumIdentityRefused("checkpoint incoming research refuses band-serial handoff")
+            raise QuantumIdentityRefused("checkpoint incoming streaming refuses band-serial handoff")
+    if sealed_incoming_mode is not None and incoming_mode != sealed_incoming_mode:
+        raise QuantumIdentityRefused("checkpoint incoming launch conflicts with sealed mode")
 
     checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
     checkpoint_jobs = publication_job_limit(
@@ -1785,19 +1825,24 @@ def run_layer_quantum_core(
     pass_profile = pass_profile_request()
     if checkpoint_streaming:
         from .joint_adjoint_slices import checkpoint_is_referenced
-        if (chain_regime["batch_size"] != 1 or chain_regime["probe_fusion"]
-                or replay_regime != DEFAULT_REPLAY_REGIME):
+        research = incoming_mode == "stream_once_research"
+        if ((research or record["adjoint"]["chain_layers"])
+                and (chain_regime["batch_size"] != 1 or chain_regime["probe_fusion"]
+                     or replay_regime != DEFAULT_REPLAY_REGIME)):
             raise QuantumIdentityRefused(
-                "checkpoint incoming research refuses nondefault batching/fusion")
-        if workspace_profile is not None or pass_profile is not None:
-            raise QuantumIdentityRefused("checkpoint incoming research refuses capture/shadow profiles")
+                "checkpoint incoming streaming refuses nondefault batching/fusion")
+        if (workspace_profile is not None
+                or (pass_profile is not None and (
+                    research or pass_profile.capture_probes
+                    or pass_profile.windowed_probe is not None))):
+            raise QuantumIdentityRefused("checkpoint incoming streaming refuses capture/shadow profiles")
         if record["adjoint"]["chain_layers"]:
             if not checkpoint_is_referenced(adjoint_slice["checkpoint"]):
                 raise QuantumIdentityRefused(
-                    "checkpoint incoming research first chain requires referenced owner entries")
+                    "checkpoint incoming streaming first chain requires referenced owner entries")
         elif stage_b_spill_config() is None:
             raise QuantumIdentityRefused(
-                "checkpoint incoming research chain-empty consumer requires one-pass spill")
+                "checkpoint incoming streaming chain-empty consumer requires one-pass spill")
     # PQ #1011: an executable read plan is sealed for one replay mode, and a
     # launch in the other mode would stage reads this quantum never makes.
     sealed_spill = False
@@ -2252,7 +2297,7 @@ def run_layer_quantum_core(
         if chain_layers:
             if checkpoint_incoming.session != storage.session:
                 raise QuantumIdentityRefused(
-                    "checkpoint incoming research first chain has a foreign owner session")
+                    "checkpoint incoming streaming first chain has a foreign owner session")
             checkpoint_chain_entries = checkpoint_incoming.references()
         else:
             # Reuse the final-pass incoming seam, including all-complete resume.
@@ -2332,7 +2377,9 @@ def run_layer_quantum_core(
                 "max_resident_bytes": int(storage.config["max_resident_bytes"]),
                 "probes": []}
             if checkpoint_streaming:
-                counters.handoff_incoming["source"] = "checkpoint_research"
+                counters.handoff_incoming["source"] = ("checkpoint_staged"
+                                                        if incoming_mode == CHECKPOINT_INCOMING_STAGED
+                                                        else "checkpoint_research")
         if spill is not None and capture_batch > 1:
             # Before the chain: a batched capture merges samples, so every
             # sample's pass state must be empty (no profile shared state, no
