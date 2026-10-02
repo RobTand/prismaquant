@@ -1,0 +1,26 @@
+{
+  "container_admission_reference": "content:sha256:83db39fdf6962babcb7f300c85a854b50ff1592481a9eec6873329e382f101d0",
+  "container": {
+    "image": "prismaquant-qwen38-producer:20260827-tf516-hf128",
+    "content_sha256": "eb8592abd71390231b49aba119e36f02ad91ea867b06df1c67af3833004d07bd",
+    "mounts": [
+      {"source": "/mnt/shared", "target": "/mnt/shared", "readonly": true},
+      {"source": "/mnt/shared/prismabuild-fleet/pb-queue", "target": "/mnt/shared/prismabuild-fleet/pb-queue", "readonly": false},
+      {"source": "/ram/prewarm", "target": "/ram/prewarm", "readonly": true},
+      {"source": "/mnt/shared/tessera-measurements/pq1962-sol-20261002", "target": "/output", "readonly": false}
+    ]
+  },
+  "cpu_memory_gb": 8,
+  "env": {
+    "PYTHONPATH": "/workspace",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+    "HF_HOME": "/output/tmp/huggingface",
+    "XDG_CACHE_HOME": "/output/tmp/xdg",
+    "TMPDIR": "/output/tmp"
+  }
+}
