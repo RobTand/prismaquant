@@ -97,3 +97,35 @@ the same pinned interpreter and `-m py_compile` on the ten paths in that plan.
 No `--tag` accompanies `--anywhere`; the interpreter-path requirement selects
 an eligible worker. The original contradictory flag attempt refused before
 publication and was corrected without changing a sealed request.
+
+## Astra review correction: original entry counts
+
+The original entry refused `None` counts but still accepted prefetch `auto`/empty
+strings and other coercible values, reaching bootstrap before hardware-dependent
+worker parsing. Original slot and worker counts now share
+`schemas.Contract.integer(minimum=1)` before bootstrap: only exact positive
+integers within its existing signed-integer bound are accepted. Booleans, integer
+subclasses, strings, floats and nonpositive counts refuse before new source
+material/model work. Legacy entry parsing remains unchanged.
+
+Causal action `8b88914f957b651b2f5107630c7adc3527fd436a5bd2d426390bae5cb1d1fd76`
+records 24 failed refusal cases and 15 deselected baseline cases. Auto/empty and
+other accepted/coerced inputs reached the bootstrap spy; already-invalid inputs
+failed the requested original-entry contract/diagnostic. This is not a claim that
+all 24 predecessor inputs had been accepted.
+
+Fixed source/test head `626f1454401` passes the targeted bootstrap file: **42
+collected, 42 passed, no skips**, action
+`4d7628c8d9cdfefea9190da2548ccef174a9167df90d61ea61a2809ad68ed87a`.
+This includes the prior 15 integration cases, 24 before-bootstrap refusal cases
+and three real legacy entries proving auto/empty worker and integer-subclass
+behavior is retained. The changed streaming module and test file compile with
+exit 0, action `db989a33066c0c401ed849751bfd8c013c515983b72e3647e7d405cc3a98696f`.
+The earlier 129-test CPU baseline is reused; it was not repeated or relabelled
+as a fresh run of this head. `BOOTSTRAP-REVIEW-CPU-BASELINE.json` preserves that
+packet, while the current `BOOTSTRAP-REVIEW.json` adds these targeted outcomes
+and enumerates every prior-snapshot difference. Native interpreter/resources
+above are unchanged; only the targeted bootstrap file was submitted through PB.
+Reports are `original-bootstrap-entry-guard-{red,green}.json` and
+`original-bootstrap-entry-guard-compile.log`. The appended evidence is the only
+post-validation difference from the corrected compile snapshot.
