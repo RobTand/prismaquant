@@ -1846,6 +1846,19 @@ def load_streaming_auto_config(source_model: str, staged_model: str, *,
         buffer.close()
 
 
+def _streaming_auto_model_options(config):
+    """The input execution policy for the stock streaming auto-class route."""
+    from .staged_tier_policy import active_policy
+
+    if active_policy() is None:
+        return {"trust_remote_code": True}
+    auto_map = getattr(config, "auto_map", None) or {}
+    if "AutoModelForCausalLM" in auto_map:
+        raise RuntimeError(
+            "undeclared dynamic AutoModelForCausalLM execution is unsupported")
+    return {"trust_remote_code": False}
+
+
 def build_streaming_skeleton(config, *, multimodal: bool,
                              log_prefix: str = "[streaming]",
                              attn_implementation: str | None = None):
@@ -1856,11 +1869,13 @@ def build_streaming_skeleton(config, *, multimodal: bool,
         config, multimodal=multimodal, log_prefix=log_prefix)
     attention_kwargs = ({"attn_implementation": attn_implementation}
                         if attn_implementation is not None else {})
+    auto_options = (_streaming_auto_model_options(config)
+                    if model_cls is AutoModelForCausalLM else {})
     with _mask_cuda_queries_during_meta_init(log_prefix):
         with init_empty_weights():
             if model_cls is AutoModelForCausalLM:
                 return AutoModelForCausalLM.from_config(
-                    config, trust_remote_code=True, **attention_kwargs)
+                    config, **auto_options, **attention_kwargs)
             return model_cls._from_config(config, **attention_kwargs)
 
 

@@ -153,6 +153,17 @@ selection, format/serving admission, kernels, pins and defaults are unchanged.
 This qualifies malformed-metadata refusal in CPU fixtures; current original
 prices and matched served MTP acceptance remain separate #1271 requirements.
 
+Re-stamped 2026-10-02 (Refs #1100, staged model bootstrap): the shared
+streaming skeleton owner resolves auto-class input execution policy separately
+from construction. Under active staged-input policy, an AutoModelForCausalLM
+route declared by `auto_map` refuses before CUDA masking, meta construction or
+dynamic module acquisition. Native auto-class construction passes
+`trust_remote_code=False`; explicit stock architecture construction and inactive
+library behavior retain their existing routes. This adds no executable-source
+staging or original-source qualification. Broader worker header coverage and
+real-model/GPU acceptance remain in #1100; no format, serving gate, pin or
+production default changes.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
