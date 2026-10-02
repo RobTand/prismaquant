@@ -2527,6 +2527,11 @@ class _RollPipeline:
     qualification are required before production integration.
     """
 
+    # Failed DMA ownership, never a reusable cache. A retained research
+    # owner closes CUDA roll work in this process until its own abandon
+    # proves completion on the exact streams that submitted its copies.
+    _retained_copy_owners = set()
+
     def __init__(self, roll, *, device, roll_may_keep=True, on_durable=None,
                  reuse_host_buffers=False):
         if type(reuse_host_buffers) is not bool:
@@ -2537,6 +2542,8 @@ class _RollPipeline:
         self._on_durable = on_durable
         self._device = torch.device(device)
         self._cuda = self._device.type == "cuda"
+        if self._cuda and self._retained_copy_owners:
+            raise RuntimeError("an unfenced research chain roll owner still holds CUDA banks")
         self._keep = bool(roll_may_keep)
         self._waiting = None
         # Constructor-only research mode (PQ #2097/#1250). Two banks cover
@@ -2545,6 +2552,7 @@ class _RollPipeline:
         # Rows remain individually compact, as the exact entry writer needs.
         self._reuse_host_buffers = reuse_host_buffers
         self._host_banks = [None, None]
+        self._host_bank_streams = [None, None]
         self._next_host_bank = 0
         self._host_layout = None
         self._delivering = False
@@ -2553,8 +2561,19 @@ class _RollPipeline:
         if self._reuse_host_buffers and self._delivering:
             raise RuntimeError("reusable chain roll callbacks may not reenter the pipeline")
 
+    def _require_copy_ready(self):
+        if self._cuda and self._retained_copy_owners:
+            raise RuntimeError("an unfenced research chain roll owner still holds CUDA banks")
+
+    @property
+    def held_host_bytes(self):
+        """Actual bank bytes retained, including an unproven failed copy."""
+        return sum(row.numel() * row.element_size()
+                   for bank in self._host_banks if bank is not None for row in bank)
+
     def submit(self, gradient, indices, probe_index):
         self._require_not_delivering()
+        self._require_copy_ready()
         step = self._copy_out(gradient.detach(), list(indices), int(probe_index))
         waiting, self._waiting = self._waiting, step
         if waiting is not None:
@@ -2562,19 +2581,42 @@ class _RollPipeline:
 
     def drain(self):
         self._require_not_delivering()
-        waiting, self._waiting = self._waiting, None
+        self._require_copy_ready()
+        waiting = self._waiting
         if waiting is not None:
             self._deliver(waiting)
+        self._waiting = None
 
     def abandon(self):
         """Drop the waiting rows unrolled, once their copy has landed."""
         self._require_not_delivering()
-        waiting, self._waiting = self._waiting, None
-        if waiting is not None and waiting[0] is not None:
-            waiting[0].synchronize()
+        waiting = self._waiting
+        if self in self._retained_copy_owners:
+            # Events may be unusable. Fence every actual submitting stream,
+            # including the previous step, before releasing ANY bank/credit.
+            # A failed stream fence leaves the owner strongly retained even
+            # if the caller drops its exception and traceback.
+            if not any(stream is not None for stream in self._host_bank_streams):
+                raise RuntimeError("unfenced chain roll has no original copy stream proof")
+            seen = set()
+            for stream in self._host_bank_streams:
+                if stream is not None and id(stream) not in seen:
+                    stream.synchronize()
+                    seen.add(id(stream))
+        elif (waiting is not None and waiting[0] is not None
+              and (len(waiting) != 5 or self._host_bank_streams[waiting[4]] is not None)):
+            try:
+                waiting[0].synchronize()
+            except BaseException:
+                if self._reuse_host_buffers:
+                    self._retained_copy_owners.add(self)
+                raise
+        self._waiting = None
         self._host_banks = [None, None]
+        self._host_bank_streams = [None, None]
         self._host_layout = None
         self._next_host_bank = 0
+        self._retained_copy_owners.discard(self)
 
     def _reusable_rows(self, gradient, indices):
         count = len(indices)
@@ -2605,6 +2647,15 @@ class _RollPipeline:
             return None, rows, indices, probe_index
         rows = (self._reusable_rows(gradient, indices)
                 if self._reuse_host_buffers else [])
+        bank = 1 - self._next_host_bank if self._reuse_host_buffers else None
+        stream = (torch.cuda.current_stream(self._device)
+                  if self._reuse_host_buffers else None)
+        if bank is not None:
+            if not callable(getattr(stream, "synchronize", None)):
+                raise RuntimeError("reusable chain roll has no original copy stream fence")
+            # Capture before the first asynchronous copy. A later current
+            # stream, a failed event, or allocator bookkeeping is no proof.
+            self._host_bank_streams[bank] = stream
         try:
             for row in range(len(indices)):
                 source = gradient if len(indices) == 1 else gradient[row:row + 1]
@@ -2613,23 +2664,27 @@ class _RollPipeline:
                 host.copy_(source, non_blocking=True)
                 if not self._reuse_host_buffers:
                     rows.append(host)
+            copied = torch.cuda.Event()
+            copied.record(stream if bank is not None else
+                          torch.cuda.current_stream(self._device))
         except BaseException as failure:
             if self._reuse_host_buffers:
                 # A partial group has no queued delivery step. Fence the
                 # copies already submitted before abandon releases its bank.
                 try:
                     partial = torch.cuda.Event()
-                    partial.record(torch.cuda.current_stream(self._device))
+                    partial.record(stream)
                     partial.synchronize()
+                    self._host_bank_streams[bank] = None
                 except BaseException as cleanup:
+                    self._retained_copy_owners.add(self)
                     failure.add_note(f"partial chain roll copy cleanup failed: {cleanup!r}")
             raise
         # The device gradient may be freed before its copy lands: the CUDA
         # caching allocator reuses its block only in this stream's order,
         # after the queued copy. The pinned rows are held until delivery.
-        copied = torch.cuda.Event()
-        copied.record(torch.cuda.current_stream(self._device))
-        return copied, rows, indices, probe_index
+        step = (copied, rows, indices, probe_index)
+        return step if bank is None else (*step, bank)
 
     def _deliver(self, step):
         self._delivering = True
@@ -2639,9 +2694,16 @@ class _RollPipeline:
             self._delivering = False
 
     def _deliver_rows(self, step):
-        copied, rows, indices, probe_index = step
+        copied, rows, indices, probe_index = step[:4]
         if copied is not None:
-            copied.synchronize()
+            try:
+                copied.synchronize()
+            except BaseException:
+                if self._reuse_host_buffers:
+                    self._retained_copy_owners.add(self)
+                raise
+        if len(step) == 5:
+            self._host_bank_streams[step[4]] = None
         for position, index in enumerate(indices):
             row = rows[position]
             if copied is not None and self._keep:

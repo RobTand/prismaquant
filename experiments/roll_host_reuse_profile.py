@@ -50,7 +50,8 @@ def arm(out, *, reuse, iteration):
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(torch, "empty", empty)
         patch.setattr(torch.cuda, "Event", CpuEvent)
-        patch.setattr(torch.cuda, "current_stream", lambda device: None)
+        cpu_stream = CpuEvent()
+        patch.setattr(torch.cuda, "current_stream", lambda device: cpu_stream)
         with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU],
                                     profile_memory=True) as trace:
             profiler.enable()

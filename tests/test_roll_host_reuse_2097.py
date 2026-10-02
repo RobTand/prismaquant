@@ -25,7 +25,7 @@ def cuda_copy(monkeypatch):
         if id(target) in owned and non_blocking:
             assert id(target) not in busy, "buffer reused before its copy landed"
             busy.add(id(target))
-            pending.append((target, source))
+            pending.append((target, source, torch.cuda.current_stream("cuda")))
             return target
         return copy(target, source, non_blocking=non_blocking)
 
@@ -37,20 +37,55 @@ def cuda_copy(monkeypatch):
 
         def record(self, stream):
             assert stream == "compute"
-            self.copies, pending[:] = pending[:], []
+            self.copies = [item for item in pending if item[2] is stream]
+            pending[:] = [item for item in pending if item[2] is not stream]
 
         def synchronize(self):
             self.waits += 1
-            for target, source in self.copies:
+            for target, source, _stream in self.copies:
                 copy(target, source)
                 busy.remove(id(target))
             self.copies = []
 
+    class Stream:
+        blocked = False
+        fences = 0
+
+        def __eq__(self, value):
+            return value == "compute" if isinstance(value, str) else self is value
+
+        def synchronize(self):
+            self.fences += 1
+            if self.blocked:
+                raise RuntimeError("original copy stream still blocked")
+            # A real stream fence proves completion even when event record
+            # or synchronization failed. Do not call those broken methods.
+            for event in events:
+                for target, source, owner in event.copies:
+                    if owner is self:
+                        copy(target, source)
+                        busy.remove(id(target))
+                event.copies = [item for item in event.copies if item[2] is not self]
+            for target, source, owner in pending:
+                if owner is self:
+                    copy(target, source)
+                    busy.remove(id(target))
+            pending[:] = [item for item in pending if item[2] is not self]
+
+    stream = Stream()
+
+    class State:
+        def __iter__(self):
+            return iter((allocations, events, busy))
+
+    state = State()
+    state.stream = stream
+
     monkeypatch.setattr(torch, "empty", empty)
     monkeypatch.setattr(torch.Tensor, "copy_", copy_)
     monkeypatch.setattr(torch.cuda, "Event", Event)
-    monkeypatch.setattr(torch.cuda, "current_stream", lambda device: "compute")
-    return allocations, events, busy
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda device: stream)
+    return state
 
 
 def _gradient(step, count=2, *, width=8, dtype=torch.float32):
@@ -254,3 +289,164 @@ def test_durable_callback_cannot_overwrite_undelivered_rows(cuda_copy):
         pipeline.submit(_gradient(1), [2, 3], 0)
     pipeline.abandon()
     assert delivered == [0] and not busy
+
+
+@pytest.mark.parametrize("failure", ["create", "record", "sync"])
+def test_unfenced_partial_copy_keeps_banks_until_original_stream_fences(
+        cuda_copy, monkeypatch, failure):
+    import gc
+    import weakref
+
+    allocations, events, busy = cuda_copy
+    original_event = torch.cuda.Event
+    original_copy = torch.Tensor.copy_
+    calls = [0]
+    rolled = []
+    pipeline = _RollPipeline(lambda *args: rolled.append(args), device="cuda",
+                             roll_may_keep=False, reuse_host_buffers=True)
+    pipeline.submit(_gradient(0), [0, 1], 0)
+    previous = pipeline._waiting
+
+    def failed_copy(target, source, non_blocking=False):
+        calls[0] += 1
+        if calls[0] == 2:
+            raise RuntimeError("copy failed")
+        return original_copy(target, source, non_blocking=non_blocking)
+
+    def failed_fence():
+        if failure == "create":
+            raise RuntimeError("event creation failed")
+        event = original_event()
+        def fail(*args):
+            raise RuntimeError("event fence failed")
+        if failure == "record":
+            event.record = fail
+        else:
+            event.synchronize = fail
+        return event
+
+    monkeypatch.setattr(torch.Tensor, "copy_", failed_copy)
+    monkeypatch.setattr(torch.cuda, "Event", failed_fence)
+    with pytest.raises(RuntimeError, match="copy failed") as primary:
+        pipeline.submit(_gradient(1), [2, 3], 0)
+    assert primary.value.__notes__
+    del primary
+    cuda_copy.stream.blocked = True
+    # Cleanup must not use a newly current stream. Its success proves
+    # nothing about the stream that actually submitted these copies.
+    decoy = type(cuda_copy.stream)()
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda device: decoy)
+    with pytest.raises(RuntimeError, match="original copy stream still blocked"):
+        pipeline.abandon()
+    assert any(bank is not None for bank in pipeline._host_banks)
+    assert pipeline._waiting is previous
+    assert pipeline.held_host_bytes == sum(t.numel() * t.element_size() for t in allocations)
+    assert not rolled and decoy.fences == 0
+    with pytest.raises(RuntimeError, match="unfenced"):
+        pipeline.submit(_gradient(2), [4, 5], 0)
+    with pytest.raises(RuntimeError, match="unfenced"):
+        _RollPipeline(lambda *args: None, device="cuda")
+    weak = weakref.ref(pipeline)
+    del pipeline, previous
+    gc.collect()
+    assert weak() is not None, "failed owner must survive lost traceback/caller"
+    cuda_copy.stream.blocked = False
+    weak().abandon()
+    assert not busy and decoy.fences == 0
+    assert weak() is None or weak().held_host_bytes == 0
+    _RollPipeline(lambda *args: None, device="cuda")
+
+
+@pytest.mark.parametrize("failure", ["create", "record"])
+def test_completed_copy_with_failed_event_is_retained_until_stream_fences(
+        cuda_copy, monkeypatch, failure):
+    allocations, _events, busy = cuda_copy
+    original_event = torch.cuda.Event
+
+    def event():
+        if failure == "create":
+            raise RuntimeError("event creation failed")
+        got = original_event()
+        def refuse(stream):
+            raise RuntimeError("event record failed")
+        got.record = refuse
+        return got
+
+    monkeypatch.setattr(torch.cuda, "Event", event)
+    pipeline = _RollPipeline(lambda *args: None, device="cuda", roll_may_keep=False,
+                             reuse_host_buffers=True)
+    with pytest.raises(RuntimeError, match="event"):
+        pipeline.submit(_gradient(0), [0, 1], 0)
+    cuda_copy.stream.blocked = True
+    with pytest.raises(RuntimeError, match="original copy stream"):
+        pipeline.abandon()
+    assert pipeline.held_host_bytes == sum(t.numel() * t.element_size() for t in allocations)
+    cuda_copy.stream.blocked = False
+    pipeline.abandon()
+    assert not busy and pipeline.held_host_bytes == 0
+
+
+@pytest.mark.parametrize("operation", ["drain", "abandon"])
+def test_previous_steps_failed_event_keeps_credit_until_original_stream_fences(
+        cuda_copy, monkeypatch, operation):
+    _allocations, events, busy = cuda_copy
+    rolled = []
+    pipeline = _RollPipeline(lambda *args: rolled.append(args), device="cuda",
+                             roll_may_keep=False, reuse_host_buffers=True)
+    pipeline.submit(_gradient(0), [0, 1], 0)
+    previous = pipeline._waiting
+    def failed_event():
+        raise RuntimeError("previous event failed")
+    events[0].synchronize = failed_event
+    with pytest.raises(RuntimeError, match="previous event failed"):
+        getattr(pipeline, operation)()
+    assert pipeline._waiting is previous
+    cuda_copy.stream.blocked = True
+    with pytest.raises(RuntimeError, match="original copy stream"):
+        pipeline.abandon()
+    assert pipeline.held_host_bytes > 0 and not rolled
+    cuda_copy.stream.blocked = False
+    pipeline.abandon()
+    assert not busy and pipeline.held_host_bytes == 0 and not rolled
+
+
+def test_both_banks_keep_credit_until_both_original_streams_complete(cuda_copy, monkeypatch):
+    allocations, _events, busy = cuda_copy
+    old_copy, old_event = torch.Tensor.copy_, torch.cuda.Event
+    pipeline = _RollPipeline(lambda *args: None, device="cuda", roll_may_keep=False,
+                             reuse_host_buffers=True)
+    pipeline.submit(_gradient(0), [0, 1], 0)
+    second = type(cuda_copy.stream)()
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda device: second)
+    calls = [0]
+    def failed_copy(target, source, non_blocking=False):
+        calls[0] += 1
+        if calls[0] == 2:
+            raise RuntimeError("copy failed")
+        return old_copy(target, source, non_blocking=non_blocking)
+    def broken_event():
+        raise RuntimeError("event failed")
+    monkeypatch.setattr(torch.Tensor, "copy_", failed_copy)
+    monkeypatch.setattr(torch.cuda, "Event", broken_event)
+    with pytest.raises(RuntimeError, match="copy failed"):
+        pipeline.submit(_gradient(1), [2, 3], 0)
+    second.blocked = True
+    with pytest.raises(RuntimeError, match="original copy stream"):
+        pipeline.abandon()
+    assert cuda_copy.stream.fences == 1 and second.fences == 1
+    assert busy and pipeline.held_host_bytes == sum(t.numel() * t.element_size() for t in allocations)
+    second.blocked = False
+    pipeline.abandon()
+    assert not busy and pipeline.held_host_bytes == 0
+
+
+def test_missing_stream_fence_refuses_before_any_copy(cuda_copy, monkeypatch):
+    _allocations, events, busy = cuda_copy
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda device: None)
+    pipeline = _RollPipeline(lambda *args: None, device="cuda", roll_may_keep=False,
+                             reuse_host_buffers=True)
+    with pytest.raises(RuntimeError, match="original copy stream fence"):
+        pipeline.submit(_gradient(0), [0, 1], 0)
+    assert not events and not busy
+    pipeline.abandon()
+    assert pipeline.held_host_bytes == 0
