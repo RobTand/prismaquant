@@ -15,7 +15,6 @@ the submitting PB action already declared. Without them, no phase is reported.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -27,17 +26,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.footprint import whole_artifact_budget_from_assignment_payload
 from prismaquant.schemas import strict_json_loads
+from prismaquant.digests import (
+    bytes_sha256hex, indent2_json_file_bytes,
+    DIRECT_ASCII_INDENT2_LAX, DIRECT_ASCII_SPACED_LAX,
+)
 from prismaquant.layer_config import (
     canonicalize_assignment, layer_config_metadata, validate_layer_config_payload)
 from prismaquant.tessera_export_lane import (read_cached_unit_bundle,
                                              selected_cached_units_manifest)
-from prismaquant.tessera_joint_aura import load_measured_anchor_input
+from prismaquant.tessera_joint_aura import (load_measured_anchor_input,
+                                          _head_walk_worker_count)
 from tessera.cached_unit import CACHE_SCHEMA
 
 
 def _bound(path: str, digest: str, label: str) -> bytes:
     raw = Path(path).read_bytes()
-    if hashlib.sha256(raw).hexdigest() != digest:
+    if bytes_sha256hex(raw) != digest:
         raise ValueError(f"{label} SHA-256 differs from the selected receipt")
     return raw
 
@@ -147,6 +151,8 @@ def main(argv=None) -> int:
     parser.add_argument("--assignment-sha256", required=True,
                         help="the assignment's owner digest (its stamped selection_assignment_sha256), not the file bytes")
     parser.add_argument("--out", required=True)
+    parser.add_argument("--head-walk-workers", type=int, default=None,
+                        help="explicit bounded head I/O concurrency (1-16), independent of PB's CPU reservation")
     parser.add_argument("--head-checkpoint", default=None,
                         help="opt-in existing head-walk journal; declare this path as writable PB output")
     parser.add_argument("--head-resume", action="store_true",
@@ -170,6 +176,8 @@ def main(argv=None) -> int:
                         help="explicit sampled-pilot research proposal for validation export")
     parser.add_argument("--research-proposal-sha256", default=None)
     args = parser.parse_args(argv)
+    if args.head_walk_workers is not None:
+        _head_walk_worker_count(args.head_walk_workers)
     if args.head_resume and not args.head_checkpoint:
         raise ValueError("head resume requires --head-checkpoint")
     if (args.head_progress_phase is None) != (args.head_progress_allowance_s is None):
@@ -235,6 +243,7 @@ def main(argv=None) -> int:
                                       historical_encoder_reuse=reuse,
                                       progress_phase=args.head_progress_phase,
                                       progress_allowance_s=args.head_progress_allowance_s,
+                                      head_walk_workers=args.head_walk_workers,
                                       head_checkpoint=args.head_checkpoint,
                                       head_resume=args.head_resume)
     manifest = selected_cached_units_manifest(
@@ -247,21 +256,21 @@ def main(argv=None) -> int:
         raise ValueError("selected manifest must be a new file in the original wire directory")
     bundle = read_cached_unit_bundle(
         manifest, directory, set(manifest["units"]), manifest["source"])
-    raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    raw = indent2_json_file_bytes(manifest)
     paths_raw = None
     if args.read_paths_out:
         if not extension:
             raise ValueError("read-paths output requires a rooted selected manifest")
         from prismaquant.joint_catalog_extension import selected_cache_read_paths
         paths = sorted({str(out.resolve()), *selected_cache_read_paths(manifest)})
-        paths_raw = (json.dumps({"schema": "prismaquant.selected_cache_read_paths.v1", "paths": paths},
-                                sort_keys=True, indent=2) + "\n").encode()
+        paths_raw = (DIRECT_ASCII_INDENT2_LAX.text(
+            {"schema": "prismaquant.selected_cache_read_paths.v1", "paths": paths}) + "\n").encode()
     _atomic_write_new_bytes(out, raw)
     if paths_raw is not None:
         _atomic_write_new_bytes(Path(args.read_paths_out), paths_raw)
-    print(json.dumps({"schema": "prismaquant.tessera_selected_cache_handoff.v1",
+    print(DIRECT_ASCII_SPACED_LAX.text({"schema": "prismaquant.tessera_selected_cache_handoff.v1",
                       "status": "research_wires_only", "manifest": str(out.resolve()),
-                      "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                      "manifest_sha256": bytes_sha256hex(raw),
                       "assignment_sha256": args.assignment_sha256,
                       "handoff_sha256": args.handoff_sha256,
                       "plan_sha256": args.plan_sha256,
@@ -272,7 +281,7 @@ def main(argv=None) -> int:
                       "units": len(manifest["units"]),
                       "encoder_source_proof_mode": bundle.encoder_source_proof_mode,
                       "warnings": bundle.warnings,
-                      "export_qualified": False, "serving_qualified": False}, sort_keys=True))
+                      "export_qualified": False, "serving_qualified": False}))
     return 0
 
 
