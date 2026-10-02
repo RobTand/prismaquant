@@ -3,7 +3,11 @@
 The streamed capture hashed every source file before its forward, then read
 the same bytes again for the tensors; a capture chain's prep did the same.
 The writer then re-read every entry it had just written to hash it, and the
-seal read them a third time. These tests hold the single-pass contract:
+seal read them a third time. These tests hold the explicit legacy recording/write-digest mechanism.
+The end-to-end fixture bypasses automatic admission only to exercise that
+preserved mechanism; it is not positive immutable-provider qualification.
+Automatic campaigns are separately refused by
+``test_automatic_capture_source_qualification.py``. The mechanism checks:
 
 * the source is hashed by the read that consumes it, through the descriptor
   the tensors are read through, before the first tensor reaches the capture;
@@ -534,6 +538,9 @@ def _reads_each_source_file_once(tmp_path, monkeypatch, policy, *, device):
     rest (the vision tower, the tokenizer assets) once at the seal.
     """
     from prismaquant import tessera_campaign as campaign
+    # Controlled legacy-mechanism fixture, not a qualified immutable provider.
+    # The independent automatic-admission matrix exercises the real refusal.
+    monkeypatch.setattr(cc, 'require_automatic_capture_source_recording', lambda: None)
     source, shards = _glm_source(tmp_path, monkeypatch, device=device)
     tokens = [torch.arange(257).remainder(126).add(2).reshape(1, -1),
               torch.arange(257).flip(0).remainder(126).add(2).reshape(1, -1)]

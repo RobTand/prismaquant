@@ -1,5 +1,22 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2013, Refs #2010, #2008): automatic streamed
+capture recording now refuses at the existing source-owner admission seam
+before model/config/tokenizer reads, recording or publication. Both capture
+policies and monolithic/prep/quantum/join campaign routes require the same
+qualification; direct campaign bookends retain the guard. No currently
+supported provider establishes an independently authenticated complete original
+generation, immutable decoder material and admitted lifetimes. Stat tuples,
+producer/census digest declarations, read-only mounts and PB lifetime pins do
+not qualify that provider. There is no override or fabricated positive route.
+Explicit descriptor-owner operations and selected capture reuse retain their
+existing contracts; neither gains an immutable-source qualification claim.
+The recovered recording, write-time output digest and independent downstream
+verification mechanisms remain available for those explicit operations.
+This bounded fail-closed slice is not end-to-end immutable capture, residency,
+GPU, numerical, serving, pin, format or export-wire qualification. Wider parents
+#1896/#1887 and source/provider acceptance in #2010/#2008 remain open.
+
 Re-stamped 2026-10-02 (PQ #2008, Refs #1896, #1887): recovery preserves
 current-main domain-qualified capture-chain definitions and compatibility
 aliases, source descriptor recording, producer/stat fences, and write-time

@@ -169,6 +169,10 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     from prismaquant import cost_streaming
     from prismaquant import tessera_calibration_cache as cache
     from prismaquant import tessera_campaign as campaign
+    # Controlled legacy-mechanism fixture, not a qualified immutable provider.
+    # The independent automatic-admission matrix exercises the real refusal.
+    from prismaquant import tessera_calibration_cache as qualification_store
+    monkeypatch.setattr(qualification_store, 'require_automatic_capture_source_recording', lambda: None)
     from test_glm5_next_streamed_forward_parity import _build_model
     pinned = '/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97'
     producer = Path(os.environ.get('TESSERA_REPO') or pinned)

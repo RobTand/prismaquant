@@ -344,8 +344,11 @@ class CaptureSourceAuthentication:
     content. Ordinary source files must remain stable through their read leases.
     Construct through ``authenticate_selected_capture_source``.
 
-    **Recording mode** (:meth:`recording`, PQ #1896) is a streamed canonical
-    capture's owner. No sealed roster exists to compare against, so the first
+    **Explicit recording mode** (:meth:`recording`, PQ #1896) retains the
+    descriptor/producer/stat contract; it does not qualify immutable source
+    material. Automatic campaigns refuse until an enforced original-generation
+    provider is qualified (Refs #2010). No sealed roster exists to compare
+    against, so the first
     payload read of a file hashes all of it through the held descriptor and
     records the digest; a census that declares producer digests is compared
     there, and a mismatch refuses before the first tensor. The hash leaves the
@@ -1713,18 +1716,27 @@ def authenticate_selected_capture_source(census_path, capture_path, *, expected_
 
 
 def require_automatic_capture_source_recording():
-    """The existing source owner owns automatic capture recording admission.
+    """Refuse automatic recording until an enforced source provider is qualified.
 
-    Separated from explicit descriptor-owner construction so caller policy
-    cannot turn an observed digest or lifetime/stat fence into qualification.
+    No currently supported source/delivery route proves an independently
+    authenticated complete original generation with immutable decoder bytes
+    and admitted lifetimes. Producer/census digests, stat fences, read-only
+    mounts and PB lifetime pins cannot supply that missing qualification.
+    Explicit descriptor-owner construction retains its existing contract;
+    it is not positive immutable-source qualification. There is no override.
     """
-    return None
+    raise RuntimeError(
+        'automatic capture recording requires a qualified immutable source; '
+        'no enforced original-generation/delivery provider is qualified '
+        '(Refs #2010, #2008)')
 
 
 def record_capture_source(census_path, *, model, binding_sha256=None, fingerprints=None,
                           resource_check=None, release_read_pages=False):
-    """The recording source owner of a streamed capture of ``census_path`` (PQ #1896).
+    """Construct an explicit recording owner with the existing descriptor contract.
 
+    This operation does not qualify immutable original-source delivery.
+    Automatic campaigns separately require enforced source qualification.
     The streamed runner reads ``model`` through this owner, so every file the
     capture consumes is hashed once, through the held descriptor its tensors
     are read through, before its first tensor reaches the capture. The census
