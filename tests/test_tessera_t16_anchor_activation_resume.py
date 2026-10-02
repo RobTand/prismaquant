@@ -44,6 +44,7 @@ def test_t16_produced_wire_does_not_admit_incompatible_activation_metadata(
 
     root, digests, initial_costs = completed_t16_campaign
     assert _priced_file_digests(root) == digests
+
     shutil.copytree(root, tmp_path, dirs_exist_ok=True)
     campaign, checkpoint, argv, _model, _inputs = t16_campaign_fixture(monkeypatch, tmp_path)
     manifest = json.loads(checkpoint.read_text())
@@ -82,3 +83,16 @@ def test_t16_produced_wire_does_not_admit_incompatible_activation_metadata(
         if seed:
             assert not list((new_cache / "wire").glob("*.tessera"))
     assert _priced_file_digests(root) == digests
+
+
+def test_quantizing_route_may_observe_unchanged_actual_rows(monkeypatch, tmp_path):
+    campaign, _checkpoint, argv, _model, inputs = _main_fixture(monkeypatch, tmp_path, priced=True)
+    inputs["rows"].zero_()
+    assert campaign.main(argv) == 0
+    payload = pickle.loads((tmp_path / "cost.pkl").read_bytes())
+    row = payload["costs"][UNIT]["TESSERA_E4M3_K1_R1024"]
+    assert row["activation_quantized"] is False
+    _forbid_reencode(monkeypatch, campaign)
+    argv[argv.index("--out") + 1] = str(tmp_path / "unchanged-a8.pkl")
+    assert campaign.main(argv) == 0
+    assert pickle.loads((tmp_path / "unchanged-a8.pkl").read_bytes())["costs"] == payload["costs"]

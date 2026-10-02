@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2109, Refs #1842): the existing campaign anchor
+resume guard checks the recorded activation contract against the same format
+declaration used by fresh pricing. Its activation-change observation must be
+a Boolean, and an identity-activation format cannot report changed input.
+Quantizing formats may report unchanged actual rows. Current-menu seed rows
+pass the same guard before wire linking; inactive unservable evidence retains
+its existing disposition. Static-scale checks and arithmetic, wire/source/H
+integrity, menus, pins and native/export/serving admission remain independent
+and unchanged. This CPU metadata check establishes no original-source capture,
+H measurement, device qualification or served attention acceptance.
+
 Re-stamped 2026-10-02 (PQ #2096, Refs #1842, B32 lane-boundary repair): core
 profiles declare the generic per-Linear activation precision fact
 (`ModelProfile.linear_requires_unquantized_activations`). The existing Tessera

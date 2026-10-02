@@ -5539,10 +5539,10 @@ def _tessera_route_memo():
 def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
     """Refuse a resumed anchor priced under a different activation contract.
 
-    The per-row half of the resume identity rule; its one caller is
-    :func:`_checkpoint_anchor_identity`, and the run-level half (this run's
+    The per-row half of the resume identity rule, shared by pre-link seed
+    admission and :func:`_checkpoint_anchor_identity`. The run-level half (this run's
     static scales and policy, bound into the journal identity) is
-    :func:`_campaign_checkpoint_identity`.  Resume merges checkpoint rows into
+    :func:`_campaign_checkpoint_identity`) binds the journal. Resume merges checkpoint rows into
     this run's table, and the table's rows must be one currency.  A W4A4
     anchor with no ``input_global_scale`` was measured under the pre-#194
     dynamic FP32-scale quantiser; one with a *different* scale was measured
@@ -5551,7 +5551,10 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
     served A side, and merging one silently is the exact mixed-table failure
     the Hessian identity guard exists to catch on its own axis.
     """
-    if not _format_executes_static_activation_contract(anchor.format_name):
+    from . import format_registry as fr
+
+    spec = fr.get_format(anchor.format_name)
+    if spec.static_activation_contract is None:
         if anchor.input_global_scale is not None:
             raise ActivationScaleContractError(
                 f"checkpoint anchor {anchor.qname} {anchor.format_name} "
@@ -5559,8 +5562,7 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
                 "but its route keeps the serving format's dynamic activation "
                 "quantiser: no producer of this campaign stamps a static scale "
                 "on that route, so the row is not one of this run's prices.")
-        return
-    if anchor.input_global_scale is None:
+    elif anchor.input_global_scale is None:
         raise ActivationScaleContractError(
             f"checkpoint anchor {anchor.qname} {anchor.format_name} carries "
             "no input_global_scale: it was priced under the pre-served-"
@@ -5568,8 +5570,9 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
             "a served-contract table. Delete the checkpoint (or pass a fresh "
             "--checkpoint) to re-measure these anchors."
         )
-    expected = static_scales.get(anchor.qname)
-    if expected is None or float(anchor.input_global_scale) != float(expected):
+    elif (static_scales.get(anchor.qname) is None or
+          float(anchor.input_global_scale) != float(static_scales[anchor.qname])):
+        expected = static_scales.get(anchor.qname)
         raise ActivationScaleContractError(
             f"checkpoint anchor {anchor.qname} {anchor.format_name} was "
             f"priced at input_global_scale={anchor.input_global_scale!r} but "
@@ -5577,6 +5580,20 @@ def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
             "must have been scored under this run's own static scales, or "
             "the table mixes two activation calibrations under one identity."
         )
+    # The same declaration _finish_anchor stamps on a fresh measured row.
+    # Producer wire/input integrity does not authenticate scoring metadata.
+    expected_contract = str(spec.act_dtype_name or "a16")
+    if anchor.activation_contract != expected_contract:
+        raise ActivationScaleContractError(
+            f"checkpoint anchor {anchor.qname} {anchor.format_name} activation contract "
+            f"{anchor.activation_contract!r} differs from the format's {expected_contract!r}")
+    # This flag records whether the actual scoring rows changed, not whether
+    # the format can quantize. Exact input values may survive an A8/A4 route.
+    if (type(anchor.activation_quantized) is not bool or
+            (anchor.activation_quantized and not spec.act_quant_changes_input)):
+        raise ActivationScaleContractError(
+            f"checkpoint anchor {anchor.qname} {anchor.format_name} activation observation "
+            f"{anchor.activation_quantized!r} is incompatible with its format")
 
 
 def _save_hessian_capture_with_page_release(payload, path, *, resource_check=None):
@@ -7439,6 +7456,10 @@ def _main(argv, *, source_scope, waits) -> int:
         require_seed_family_scope(name, state, family_restriction=args.family_restriction,
                                   structure_by_unit=structure_by_unit,
                                   rate_band=restricted_rate_band, profile=profile)
+        on_menu = {entry.format_name for entry in menus[name]}
+        for row in state["anchors"]:
+            if row["format_name"] in on_menu:
+                _require_resumable_anchor(CampaignAnchor(**row), static_scales)
 
     def adopt_state(name: str, state, *, where: str, deferred=None, entry=None) -> None:
         """Verify one unit's stored anchors against this run and take them.
