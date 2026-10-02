@@ -3,8 +3,9 @@
 Normative spec: ``docs/design/mtp_rung_selection.md`` (Robert, 2026-07-20). A draft can
 NEVER change outputs (rejection sampling reproduces the target distribution
 exactly), so this selector optimises **throughput only** — there is no quality
-gate on the draft. The reference integration is
-``scripts/build_hy3_mtp_cb_inputs.py --rung-select auto``.
+gate on the draft. The current GLM integration is
+``glm_mtp_selection.select_mtp_rungs``, reached by the allocator's
+``--mtp-joint-cost`` and ``--mtp-byte-budget`` inputs.
 
 Objective (per spec-decode cycle, ``k`` speculative tokens; doc §1):
 
