@@ -67,6 +67,14 @@ delivery exception and refuse a successful delivery whose observation failed.
 This refactor preserves Stage A's source-only coverage and adds no numerical,
 format, serving, memory-admission or pipeline-default change.
 
+Re-stamped 2026-10-02 (PQ #2053, Refs #2010): every JSON read through the internal
+original-material owner uses its existing strict bootstrap decoder. Config and
+complete checkpoint index share the same held, admitted, kernel-sealed byte
+path and refuse duplicate keys or nonfinite JSON constants before interpretation.
+Legacy descriptor/recording JSON reads retain their existing semantics.
+Automatic capture admission stays closed. This bounded integrity correction
+adds no source generation, provider eligibility, GPU or capture qualification.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
