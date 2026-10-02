@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2109, Refs #1842): the existing campaign anchor
+resume guard checks the recorded activation contract against the same format
+declaration used by fresh pricing. Its activation-change observation must be
+a Boolean, and an identity-activation format cannot report changed input.
+Quantizing formats may report unchanged actual rows. Current-menu seed rows
+pass the same guard before wire linking; inactive unservable evidence retains
+its existing disposition. The bound input-identity template is built before
+scoring and validates its input/scale fields without inventing an activation
+observation; actual rows still use the full guard before producer identity
+derivation, including through a bound holder. Static-scale checks and arithmetic, wire/source/H
+integrity, menus, pins and native/export/serving admission remain independent
+and unchanged. This CPU metadata check establishes no original-source capture,
+H measurement, device qualification or served attention acceptance.
+
 Re-stamped 2026-10-02 (PQ #2106, Refs #1293, selected-result consumer):
 fan-out pilot admission uses the reviewed SDK4 public selected-action result
 reader and standard-capture binder. Explicit publication/attempt selectors
