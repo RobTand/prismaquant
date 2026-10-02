@@ -209,6 +209,8 @@ def test_export_lane_declaration_is_native_only(profile):
     assert profile.preferred_export_lane() == "compressed-tensors"
 
 
+# Registration owns an import namespace, not just the restored error ledger.
+@pytest.mark.own_process
 def test_rope_axis_mapping_matches_the_vendored_definition(profile):
     """The profile must ANSWER from the model, not restate its rule.
 
