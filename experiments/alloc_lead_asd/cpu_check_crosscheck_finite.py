@@ -55,7 +55,7 @@ class FiniteCrosscheck(unittest.TestCase):
                 result = args[11]['A_all']
                 result['kl'].fill_(banked_arm['kl_v2'])
                 result['q'].fill_(banked_arm['q_v2'])
-                result['s_real'].copy_(torch.tensor(banked_arm['s_real_v2']).reshape(2, 1))
+                result['s_real'].copy_(torch.tensor(banked_arm['s_real_v2'], dtype=torch.float64).reshape(2, 1))
                 if fault in ('kl_nan', 'q_nan', 'probe_nan'):
                     result[dict(kl_nan='kl', q_nan='q', probe_nan='s_real')[fault]].fill_(float('nan'))
 
