@@ -208,3 +208,27 @@ No failed action was relabeled as qualification or mutated to extend it.
 Retain the bounded source/test worktrees and these evidence namespaces.
 The previous recovery branch, original outputs and 44-artifact manifest are
 unchanged. Root owns final acceptance, native issue closure and merge.
+
+## Final bounded delivery — 2026-10-02
+
+Astra independently accepted the bounded CHECK latency/ownership claim.
+PR #2041 closes native child #2091, “Qualify opt-in bounded parallel
+projected-check preparation.” Parent #2039 remains open for reducing aggregate
+CPU copy work: the measured aggregate increased, despite lower check latency.
+The experimental option remains off; broader provider, default and energy
+qualification is not inferred.
+
+The final architecture/documentation check at public source
+`acb8a35c92807ebf9cd711e129e646ae317b45a0` passed **19/19**, no skips or missing
+outcomes, through PB action
+`24a505cc53ba062aabf156cfcfef49c167dea398da4493a0116d593b3772ae7a`.
+CPU mode: Python3.14.4/Torch2.11.0+cpu, one CPU/native thread,4GiB, no GPU.
+Fourteen Torch JIT deprecation warnings were recorded. Published full-request
+CAS lookup and actual payload hashing passed; claim
+`08fba572853a933d247b07eb640d39227311aecf10a311b79cb6c4465dcec1c2`,
+payload `131f3734ec806892b189f3e34866cc2b67e189c6ffdd28fa242bd289ec9a1b25`.
+[The receipt summary](artifacts/pq2039-preparation-2026-10-02/doc-check.json)
+records its exact source snapshot and collection reconciliation. This appended
+delivery record and receipt metadata leave the validated architecture and
+measured production/test modules unchanged. No additional measurement ran.
+Root owns final integration and merge.
