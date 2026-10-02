@@ -99,8 +99,26 @@ until all model/cache/caller aliases are gone; `shutdown()` joins readers but
 does not dispose of an externally retained model or cache. The enclosing action
 still owns decoded metadata, model tensors and conversion/packing scratch
 accounting. Original context/head/layer/direct dequant GPU routes refuse before
-material acquisition or CUDA work. Existing legacy CUDA completion fences remain
-unchanged and have not been qualified for this original path.
+material acquisition or CUDA work. The existing legacy reader completion fence
+is now shared bookkeeping: the dormant original layer/head/direct-scale paths
+retain native source aliases plus converted/stacked host staging until their
+current copy stream records and synchronizes an event. The original fence is
+independent of the legacy source-page flag, and original decoders remain CPU
+`framework="pt"` even when the direct-CUDA-load environment flag is set. Failed
+record/synchronization keeps the true host owners in the failed frame and does
+not credit their material as released. Launched readers drain on cancellation
+or failure; cancelled original output refuses installation. Original head
+copies all complete before the first installation, so a later copy failure
+cannot expose a partially installed head.
+
+These dormant paths retain the original CPU-only device predicate. The CPU
+controls enter the actual source memfd/decoder/StorageWeakRef paths with explicit
+CPU CUDA spies. `tests/test_original_source_copy_completion_cuda.py` supplies
+real CUDA source-alias/event controls, but remains unrun: its CPU collection
+reports 32 skips, which prove no GPU behavior. A future explicitly reviewed PB
+action may temporarily override only a fixture owner's device predicate; the
+test-only environment is never read by production code. That fixture action
+cannot qualify actual original GLM primals/cotangents or a complete provider.
 
 This scope is the internal CPU context. The higher-level Stage A API now has an
 explicit dev-only [selected-row diagnostic seam](stage_a_selected_row_diagnostic.md)

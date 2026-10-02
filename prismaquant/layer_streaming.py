@@ -879,8 +879,17 @@ def _apply_fp8_dequant_inplace(
     buckets — which is what the prefetch thread's CPU cost scales on,
     since each kernel launch has fixed Python + CUDA dispatch overhead.
     """
-    if getattr(source_authentication, 'is_qualified_original_material', False):
+    original = getattr(source_authentication, 'is_qualified_original_material', False)
+    if original:
         source_authentication.require_material_device(device)
+    with _SourceCopyCompletion(device, enabled=original) as copies:
+        return _apply_source_scale_values(
+            out, fp8_scale_inv_map, device, source_authentication=source_authentication,
+            copies=copies)
+
+
+def _apply_source_scale_values(out, fp8_scale_inv_map, device, *, source_authentication, copies):
+    """Existing block/packed scale arithmetic inside the caller's completion scope."""
     if not fp8_scale_inv_map:
         return 0
     # Collect (name, scale_key) per shard so we can open each shard
@@ -901,6 +910,11 @@ def _apply_fp8_dequant_inplace(
         with _source_safe_open(shard, framework="pt", source_authentication=source_authentication) as f:
             for model_name, scale_key in reads:
                 loaded_scales[model_name] = f.get_tensor(scale_key)
+                copies.retain(loaded_scales[model_name])
+    # Head callers can still hold native CPU weights here; retaining only the
+    # stacked copy would retire their whole serialized charge prematurely.
+    for value in out.values():
+        copies.retain(value)
 
     # Step 2: Group matched weights by (out_dim, in_dim) shape. We only
     # batch along exact-block-multiple shapes; odd-shaped tensors (rare)
@@ -954,12 +968,12 @@ def _apply_fp8_dequant_inplace(
         # Stack weights: (E, out, in) bf16 on the execution device.
         # Native FP8 source tensors stay compressed until this point so
         # CPU-side reads and H2D/UMA traffic remain 1 byte/element.
-        w_stack = torch.stack([out[n] for n in names], dim=0).to(
-            device=device, dtype=torch.bfloat16)
+        w_stack = copies.copy(torch.stack([out[n] for n in names], dim=0),
+                              dtype=torch.bfloat16)
         # Stack scales: (E, out_blocks, in_blocks) bf16 on device
-        s_stack = torch.stack(
+        s_stack = copies.copy(torch.stack(
             [loaded_scales[n] for n in names], dim=0
-        ).to(device=device, dtype=torch.bfloat16)
+        ), dtype=torch.bfloat16)
         # Reshape to block-tile form:
         #   w: (E, out_blocks, block_r, in_blocks, block_c)
         #   s: (E, out_blocks, 1, in_blocks, 1)
@@ -1008,16 +1022,15 @@ def _apply_fp8_dequant_inplace(
             for i0 in range(0, len(names), _MXFP4_DECODE_CHUNK):
                 chunk = names[i0:i0 + _MXFP4_DECODE_CHUNK]
                 E = len(chunk)
-                wp = torch.stack([out[n] for n in chunk], dim=0).to(
-                    device=device).view(torch.uint8)
+                wp = copies.copy(torch.stack([out[n] for n in chunk], dim=0)).view(torch.uint8)
                 # int32 gather indices: the index *values* are byte codes
                 # (0..255), so int32 is exact here and halves the index
                 # transient vs long (8 -> 4 B per packed byte).
                 deq = pair_lut[wp.to(torch.int32)].reshape(
                     E, rows, logical_in // 32, 32)
-                sb = torch.stack(
+                sb = copies.copy(torch.stack(
                     [loaded_scales[n] for n in chunk], dim=0
-                ).to(device=device).view(torch.uint8)
+                )).view(torch.uint8)
                 scale = torch.exp2((sb.to(torch.float32) - 127.0))
                 # E8M0 0xFF is NaN per the OCP MX v1.0 spec, not 2^128:
                 # exp2(128) yields +inf, which turned a 0xFF block into a
@@ -1038,7 +1051,7 @@ def _apply_fp8_dequant_inplace(
     # Step 4: Fallback path for any shapes we didn't batch.
     for name in fallback:
         w = out[name]
-        scale_fp = loaded_scales[name].to(device=device)
+        scale_fp = copies.copy(loaded_scales[name])
         out[name] = _dequant_fp8_block_weight(
             w, scale_fp, block=(block_r, block_c), name=name)
         dequanted += 1
@@ -1095,33 +1108,44 @@ def _materialize(model: nn.Module, prefixes: list[str],
     cast to bf16. See `_dequant_fp8_block_weight`.
 
     Returns count of tensors loaded."""
-    if getattr(source_authentication, 'is_qualified_original_material', False):
+    original = getattr(source_authentication, 'is_qualified_original_material', False)
+    if original:
         source_authentication.require_material_device(device)
     buffer_dtypes = _model_tensor_dtypes(model, dtype)
     # The one selection every declared readset is built from (PQ #1095).
     by_shard = select_source_tensors(model_to_shard, model_to_ckpt, prefixes)
     # Collect loaded tensors first so we can batch the scale-read pass.
     out: dict[str, torch.Tensor] = {}
-    open_kwargs = _safe_open_kwargs(device)
-    for shard, pairs in by_shard.items():
-        try:
-            f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
-        except (TypeError, RuntimeError):
-            # Older safetensors / unsupported device combos: drop the
-            # device kwarg and fall back to the host-stage path.
-            f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
-        with f_ctx as f:
-            for model_name, ckpt_name in pairs:
-                t = f.get_tensor(ckpt_name)
-                _require_fp8_scale(model_name, t, fp8_scale_inv_map)
-                if (t.is_floating_point()
-                        and not _is_fp8_scaled_tensor(
-                            model_name, fp8_scale_inv_map)):
-                    t = t.to(buffer_dtypes.get(model_name, dtype))
-                out[model_name] = t
-    if fp8_scale_inv_map:
-        _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device,
-            **({'source_authentication': source_authentication} if source_authentication is not None else {}))
+    open_kwargs = {"framework": "pt"} if original else _safe_open_kwargs(device)
+    with _SourceCopyCompletion(device, enabled=original) as copies:
+        for shard, pairs in by_shard.items():
+            if original:
+                f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
+            else:
+                try:
+                    f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
+                except (TypeError, RuntimeError):
+                    f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
+            with f_ctx as f:
+                for model_name, ckpt_name in pairs:
+                    t = f.get_tensor(ckpt_name)
+                    copies.retain(t)
+                    _require_fp8_scale(model_name, t, fp8_scale_inv_map)
+                    if (t.is_floating_point()
+                            and not _is_fp8_scaled_tensor(
+                                model_name, fp8_scale_inv_map)):
+                        t = t.to(buffer_dtypes.get(model_name, dtype))
+                    copies.retain(t)
+                    out[model_name] = t
+        if fp8_scale_inv_map:
+            _apply_fp8_dequant_inplace(out, fp8_scale_inv_map, device,
+                **({'source_authentication': source_authentication} if source_authentication is not None else {}))
+        if original and device.type == 'cuda':
+            # Complete every original host transfer before the first head
+            # slot installs. A later copy failure exposes no partial head.
+            for model_name, value in out.items():
+                if value.device != device:
+                    out[model_name] = copies.copy(value, non_blocking=True)
     loaded = 0
     for model_name, t in out.items():
         install_dtype = t.dtype if t.is_floating_point() else None
@@ -1878,6 +1902,16 @@ class _SourceCopyCompletion:
     def observed(self, tensor):
         self.cuda_copied |= tensor.device.type == 'cuda'
 
+    def copy(self, tensor, **kwargs):
+        self.retain(tensor)
+        if self.enabled and tensor.device.type == 'cpu':
+            # An exception from the copy API does not prove nothing was
+            # enqueued; the owning stream must drain in that case too.
+            self.cuda_copied = True
+        result = tensor.to(self.device, **kwargs)
+        self.observed(result)
+        return result
+
     def __enter__(self):
         return self
 
@@ -1931,15 +1965,16 @@ def _read_layer_to_device(prefix: str,
     """
     if cancel is not None and cancel.is_set():
         raise CancelledError("layer read cancelled before its staged wait")
-    if getattr(source_authentication, 'is_qualified_original_material', False):
+    original = getattr(source_authentication, 'is_qualified_original_material', False)
+    if original:
         source_authentication.require_material_device(device)
     # The one selection every declared readset is built from (PQ #1095).
     by_shard = select_source_tensors(model_to_shard, model_to_ckpt, (prefix,))
     out: dict[str, torch.Tensor] = {}
-    open_kwargs = _safe_open_kwargs(device)
+    open_kwargs = {"framework": "pt"} if original else _safe_open_kwargs(device)
     direct = "device" in open_kwargs
     release_pages = (os.environ.get('PRISMAQUANT_RELEASE_SOURCE_PAGES') == '1'
-                     and device.type == 'cuda')
+                     and device.type == 'cuda' and not original)
     source_stats = {shard: (os.stat(shard) if source_authentication is None else
         source_authentication.file_stat(shard)) for shard in by_shard} if release_pages else {}
     def _read_chunk(shard: str,
@@ -1947,15 +1982,19 @@ def _read_layer_to_device(prefix: str,
         local: dict[str, torch.Tensor] = {}
         if not pairs:
             return local
-        try:
+        if original:
             f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
-            used_direct = direct
-        except (TypeError, RuntimeError):
-            f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
             used_direct = False
+        else:
+            try:
+                f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
+                used_direct = direct
+            except (TypeError, RuntimeError):
+                f_ctx = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
+                used_direct = False
         # This existing read chunk owns its mmap-backed/converted staging
         # through one stream event, rather than retaining it for the layer.
-        with _SourceCopyCompletion(device, enabled=release_pages) as copies:
+        with _SourceCopyCompletion(device, enabled=release_pages or original) as copies:
             with f_ctx as f:
                 for model_name, ckpt_name in pairs:
                     t = f.get_tensor(ckpt_name)
@@ -1967,9 +2006,12 @@ def _read_layer_to_device(prefix: str,
                                 model_name, fp8_scale_inv_map)):
                         t = t.to((buffer_dtypes or {}).get(model_name, dtype))
                     if not used_direct:
-                        copies.retain(t)
-                        t = t.to(device, non_blocking=True)
-                        copies.observed(t)
+                        if original:
+                            t = copies.copy(t, non_blocking=True)
+                        else:
+                            copies.retain(t)
+                            t = t.to(device, non_blocking=True)
+                            copies.observed(t)
                     if not t.is_contiguous():
                         t = t.contiguous()
                     local[model_name] = t
@@ -2011,6 +2053,10 @@ def _read_layer_to_device(prefix: str,
     else:
         for shard, pairs in by_shard.items():
             out.update(_read_chunk(shard, pairs))
+    if original and cancel is not None and cancel.is_set():
+        # Every launched reader above has drained its own copy stream. No
+        # cancelled original gather is returned for installation.
+        raise CancelledError("original layer read cancelled after reader completion")
     if len(out) != total_tensors:
         missing = total_tensors - len(out)
         raise RuntimeError(

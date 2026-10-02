@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original copy completion): the
+existing layer reader's copy-stream completion bookkeeping retains native
+original source aliases and converted/stacked host staging through a successful
+event record and synchronization. The dormant original layer/head/direct-scale
+paths use that same bookkeeping independently of the legacy source-page flag;
+head copies complete before installation and cancelled readers drain before
+refusing output. Failed completion proofs retain true owners and serialized
+material credit. Original CUDA and automatic-capture gates remain closed.
+CPU spies and an unrun real-CUDA harness establish no original GPU, GLM g6,
+complete-provider, performance or serving qualification.
+See [original material contract](design/capture_original_material.md).
+
 Re-stamped 2026-10-02 (Refs PQ #2010/#2008, selected-row diagnostic seam):
 the existing Stage A core can capture one explicitly bound global calibration
 row, generate one fresh tail and roll to a named boundary while preserving the
