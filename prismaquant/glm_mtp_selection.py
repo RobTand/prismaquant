@@ -28,9 +28,12 @@ import pickle
 from pathlib import Path
 from typing import Mapping
 
+from .schemas import Contract
+
 SCHEMA = "prismaquant.glm_mtp_cost.v1"
 RECORD_SCHEMA = "prismaquant.glm_mtp_selection.v1"
 _BF16 = "BF16"
+_STORAGE = Contract(ValueError, "MTP storage: ")
 
 
 def load_mtp_cost(path) -> dict:
@@ -257,8 +260,13 @@ def _mtp_probe(payload) -> tuple[str, dict]:
 
 
 def _unit_storage(payload, unit):
-    """Read one unit's storage metadata separately from rung eligibility."""
-    return payload["wire_bytes"].get(unit, {}), payload["params"][unit]
+    """Admit exact storage counts before eligibility can hide a malformed row."""
+    wire = {
+        rung: _STORAGE.integer(value, where=f"wire_bytes[{unit}][{rung}]", minimum=1)
+        for rung, value in payload["wire_bytes"].get(unit, {}).items()
+    }
+    params = _STORAGE.integer(payload["params"][unit], where=f"params[{unit}]", minimum=1)
+    return wire, params
 
 
 def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
@@ -284,9 +292,9 @@ def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
             if eligible is not None and not eligible(unit, rung):
                 unattested.setdefault(rung, []).append(unit)
                 continue
-            rows[unit][rung] = (float(row["predicted_dloss"]), int(wire[rung]))
+            rows[unit][rung] = (float(row["predicted_dloss"]), wire[rung])
         if payload["source_dtype"][unit] == "bfloat16":
-            rows[unit][_BF16] = (0.0, 2 * int(params))
+            rows[unit][_BF16] = (0.0, 2 * params)
     return rows, {rung: sorted(units) for rung, units in sorted(unattested.items())}
 
 
@@ -366,6 +374,7 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     payload = dict(payload)
     if payload.get("schema") != SCHEMA:
         raise ValueError(f"MTP cost payload must be {SCHEMA}")
+    byte_budget = _STORAGE.integer(byte_budget, where="byte_budget", minimum=0)
     probe_sha256, probe = _mtp_probe(payload)
     rows, unattested = _unit_rows(payload, eligible)
     groups = {name: tuple(members) for name, members in payload["groups"].items()}
@@ -404,7 +413,7 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
     serve = canon.ServeConstants(t_ms=float(constants["t_ms"]), d0_ms=float(constants["d0_ms"]),
                                  c_ms_per_bit=float(constants["c_ms_per_bit"]))
     points = [canon.AcceptancePoint(**point) for point in acceptance_points]
-    result = canon.select_rung(menu, serve, points, mem_budget_bytes=int(byte_budget), k=k,
+    result = canon.select_rung(menu, serve, points, mem_budget_bytes=byte_budget, k=k,
                                h_source="joint_aura_mtp_head_self_kl")
     chosen = dict(part.split("=", 1) for part in result.rung.name.split("|"))
     assignment = {unit: chosen[group] for group, members in groups.items() for unit in members}
@@ -433,7 +442,7 @@ def select_mtp_rungs(payload: Mapping, *, byte_budget: int, constants: Mapping,
         "objective": probe["objective"]["objective"],
         "mtp_layer": int(payload["mtp_layer"]),
         "probe_identity_sha256": probe_sha256,
-        "byte_budget": int(byte_budget),
+        "byte_budget": byte_budget,
         "rung": result.rung.name,
         "rung_by_group": chosen,
         "resident_bytes": int(result.rung.resident_bytes),
