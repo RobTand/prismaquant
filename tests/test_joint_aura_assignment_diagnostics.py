@@ -22,6 +22,22 @@ SCOPE = "probe_sampling_conditional_on_fixed_calibration"
 OBJECTIVES = ("additive", "joint_quadratic")
 
 
+def test_raw_signed_summary_keeps_additive_and_joint_currencies_separate():
+    columns = [[1.0, 2.0], [-1.0, -2.0]]
+    additive = joint.signed_probe_quadratic_summary(columns)
+    quadratic = joint.signed_probe_quadratic_summary(columns, objective='joint_quadratic')
+    assert additive == {'mean': 2.5, 'standard_error': 1.5, 'per_probe': [1.0, 4.0]}
+    assert quadratic == {'mean': 0.0, 'standard_error': 0.0, 'per_probe': [0.0, 0.0]}
+    assert not any('identity' in key or 'currency' in key for key in additive)
+
+
+@pytest.mark.parametrize('columns', [[], [[1.0]], [[1.0, 2.0], [1.0]],
+                                    [[1.0, float('nan')]], [[1.0, float('inf')]]])
+def test_raw_signed_summary_refuses_incomplete_or_nonfinite_columns(columns):
+    with pytest.raises(ValueError):
+        joint.signed_probe_quadratic_summary(columns)
+
+
 def _row(name, signed, *, fmt="FP8_E4M3"):
     # The allocator currency fixture runs a model to build rows. These scalar
     # oracles instead use the same complete row builder and identity contract.
