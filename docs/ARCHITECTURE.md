@@ -757,9 +757,9 @@ with exact SDK version 4. The existing sealed-root resolver, test-only
 Git/RECORD-qualified installed injection, and same-package import checks
 remain authoritative; SDK1/2/3 and unknown versions refuse, with no shim.
 SDK4 adds the public selected-action result reader and standard-capture
-command binder. Historical produced-output fixtures keep their recorded
-source bundles and pin schemas; fixture history does not choose the current
-client. The reviewed SDK4 source bundle is
+command binder. Connected produced-output fixtures share the existing source-pin
+file with the complete SDK4 file union. Historical SDK3 bundles and receipts
+remain preserved; their results are not transferred to this source. The reviewed SDK4 source bundle is
 `/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk4-20261002/dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
 The separately provisioned DL380 CPU interpreter is
 `/home/rob/venvs/pq-pbdc4803da-tessera-b40c93cb/bin/python`, a non-editable

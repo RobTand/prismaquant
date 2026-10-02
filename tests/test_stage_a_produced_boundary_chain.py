@@ -41,7 +41,7 @@ runtime generation carries is a dated observation in the pin record, not a
 claim this file makes, because a fixture that asserts a live-fleet fact
 goes stale the moment the fleet moves. It is
 pinned by file digest against an IMMUTABLE bundle
-(``stagea_produced_pb_pin.json``) cut from the owning lane's committed
+(``pb_runtime_generation_pin.json``) cut from the owning lane's committed
 tree, never against that lane's live worktree, and these tests skip loudly
 rather than implying support that does not exist.
 
@@ -81,7 +81,7 @@ if str(REPO) not in sys.path:
 
 TIER = "prismabuild-stage:dl380g10"
 KIND = "stage_gib"
-PIN_PATH = Path(__file__).resolve().parent / "stagea_produced_pb_pin.json"
+PIN_PATH = Path(__file__).resolve().parent / "pb_runtime_generation_pin.json"
 #: The ONE pin of the published PrismaBuild generation the write-only
 #: produced-output suites run against (PQ #1084): Stage B preparation
 #: (#1070), Stage A retirement (#1073) and the band-serial handoff (#1075)
