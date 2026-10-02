@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #2094, Tessera #856): shape-time conversion
+requires an explicit PB action/publication/attempt selector for each checker
+completion. The public SDK4 result reader and standard capture binder join
+the owned observation output to an independently reviewed checker config
+containing the exact snapshot selection (commit, parent, schema, subdirectory,
+refs and input), working directories, command and environment. Converted rows
+reference that proof; reload performs the same join and compares context,
+key, lane, warmups and samples. Bare panels and observations refuse. The
+checker config carries no automatic source approval. This CPU handoff keeps
+the immutable serving pin and the existing lane admission gate; it does not
+qualify a new price population, TP world, serving SLO or GPU measurement.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
@@ -284,8 +296,9 @@ declared baseline replay scope must agree. Real loss/time claims retain valid
 integer/float equivalence through the existing numeric validators.
 The choice uses sorted-unit binary64 loss/time sums, not
 full-gamut or full-model scalability, corrected quality, placement or served
-latency qualification. The Tessera #688 receipt converter remains a refusing
-stub; no prices, formats, pin, producer or production defaults change.
+latency qualification. Bare Tessera #688 panels still refuse; observation
+conversion requires a selected reviewed PB checker completion. No formats,
+serving pin or production defaults change.
 Re-stamped 2026-10-02 (PQ #2032, Refs #1962): the existing snapshot-only
 StreamingContext accepts exact declared body source tensor keys under an
 explicit layer allowlist, including non-Linear parameters and buffers needed

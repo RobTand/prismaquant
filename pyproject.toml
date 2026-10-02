@@ -74,4 +74,5 @@ prismaquant = [
     "serving_profile_specs/*.json",
     "serve_dispatch_tables/*.json",
     "lane_specs/*.json",
+    "tessera_runtime/shape_time_checker_config.json",
 ]

@@ -19,6 +19,7 @@ import json
 import random
 import statistics
 from importlib.resources import as_file
+from pathlib import Path
 
 import pytest
 
@@ -206,7 +207,7 @@ def test_load_verifies_every_receipt_digest(tmp_path):
     path.write_text(json.dumps(doc))
     assert srp.load_shape_table(path).identity()["n_rows"] == 1
     receipt.write_bytes(b"{} ")
-    with pytest.raises(srp.ShapeRuntimeError, match="SHA-256 mismatch"):
+    with pytest.raises(srp.ShapeRuntimeError, match="SHA-256"):
         srp.load_shape_table(path)
 
 
@@ -544,10 +545,47 @@ OBS_REPLAY_TOOL = "b" * 64
 OBS_ROUTE = "TESSERA_FP8"
 OBS_FAMILY = "TESSERA_E4M3_K1"
 OBS_LANE = ("tessera::fused_window_dense", "native_fused_window_dense")
+_CHECKER_RESULTS = {}
+
+
+@pytest.fixture(autouse=True)
+def checker_sdk_fixture(tmp_path, monkeypatch):
+    """Domain fixtures model the public SDK; actual PB acceptance is separate."""
+    from prismaquant import staged_lease
+    _CHECKER_RESULTS.clear()
+    config = tmp_path / "checker-config.json"
+    _obs_write(config, {"schema": srp.CHECKER_CONFIG_SCHEMA, "checkers": []})
+    monkeypatch.setattr(srp, "CHECKER_CONFIG_PATH", config)
+
+    class FixtureSDK:
+        PoolQueue = staticmethod(lambda: None)
+
+        @staticmethod
+        def read_verified_action_result(queue, action_key, **selector):
+            result = copy.deepcopy(_CHECKER_RESULTS[action_key])
+            if (selector["attempt"] != result["attempt"]
+                    or selector["published_unix"] != result["published_unix"]):
+                raise ValueError("wrong explicit selector")
+            return result
+
+        @staticmethod
+        def bind_standard_capture_command(request):
+            expected = ["fixture-capture", *request["params"]["command"]]
+            if request["task"]["argv"] != expected:
+                raise ValueError("unbound wrapper")
+            return expected
+
+    monkeypatch.setattr(staged_lease, "client_sdk", lambda: FixtureSDK)
+
+
+def _consume_observations(observations, **kwargs):
+    return srp.consume_shape_time_observation(
+        observations, checker_receipts=[path.parent / "checker-receipt.json" for path in observations],
+        **kwargs)
 
 
 def _obs_write(path, value, raw=False):
-    path.write_bytes(value if raw else srp.canonical_strict(value).encode())
+    path.write_bytes(value if raw else srp.canonical_strict(value).encode() + b"\n")
     import hashlib
     body = path.read_bytes()
     return {"path": str(path), "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
@@ -639,18 +677,36 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
                                 "reading": "one 2-D M-by-K operator apply; PQ may key this row at "
                                            "batch_size=1 for M prompt rows; not end-to-end serving evidence"},
         "energy_status": "hold"}
+    emitted = copy.deepcopy(observation)
     if mutate is not None:
         mutate(observation)
     obs_b = _obs_write(root / "observation.json", observation)
+    key = hashlib.sha256(str(root).encode()).hexdigest()
+    source = {"id": "pbrun.checkout-snapshot", "bytes": 123, "sha256": "9" * 64}
+    snapshot = {"schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+                "input": source, "commit": "1" * 40, "parent": "2" * 40,
+                "subdirectory": ".", "refs": {}}
+    command = ["fixture-checker", str(root / "panel.json"), "--observation-out", obs_b["path"]]
+    environment = {"variables": {"CUDA_VISIBLE_DEVICES": ""}}
+    _CHECKER_RESULTS[key] = {
+        "action_key": key, "published_unix": 10.0, "attempt": 1,
+        "inputs": [source], "payload": json.dumps(emitted, sort_keys=True).encode() + b"\n",
+        "request": {"params": {"command": command, "checkout_snapshot": snapshot, "cwd": "."},
+                    "environment": environment,
+                    "task": {"argv": ["fixture-capture", *command], "working_directory": "."}}}
+    config = json.loads(srp.CHECKER_CONFIG_PATH.read_bytes())
+    config["checkers"].append({"snapshot": snapshot, "command": command, "cwd": ".",
+                               "working_directory": ".",
+                               "environment": environment, "observation_output": obs_b["path"]})
+    _obs_write(srp.CHECKER_CONFIG_PATH, config)
+    _obs_write(root / "checker-receipt.json", {
+        "schema": srp.CHECKER_RECEIPT_SCHEMA, "observation": obs_b,
+        "selector": {"action_key": key, "published_unix": 10.0, "attempt": 1}})
     return obs_b
 
 
 def _obs_scope(**overrides):
-    # ``eligibility`` in this module is the pinned table under the fixture's own
-    # digests (SHA/COMMIT); admission compares the scope's contract digest to
-    # that table's, so the expected scope carries the fixture's committed pair
-    # while the observation itself keeps its own independently bound b40 bytes.
-    base = {"contract_sha256": SHA, "tessera_commit": COMMIT,
+    base = {"contract_sha256": OBS_CONTRACT, "tessera_commit": OBS_COMMIT,
             "runtime_image_digest": OBS_IMAGE, "tensor_parallel": 1, "platform": "sm_121",
             "residency": "resident", "execution_mode": "eager"}
     base.update(overrides)
@@ -659,7 +715,7 @@ def _obs_scope(**overrides):
 
 def test_observation_converts_to_one_proposal_row(tmp_path):
     observation_fixture(tmp_path)
-    table = srp.consume_shape_time_observation([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
     assert table.context.tensor_parallel == 1 and table.context.regimes == (512,)
     assert len(table.rows) == 1 and table.rate_pools == ()
     row = table.rows[0]
@@ -675,12 +731,14 @@ def test_observation_converts_to_one_proposal_row(tmp_path):
 def test_observation_itself_refuses_a_tp2_scope(tmp_path):
     observation_fixture(tmp_path, tp_degree=2)
     with pytest.raises(srp.ShapeRuntimeError):
-        srp.consume_shape_time_observation([tmp_path / "obs" / "observation.json"], table_id="tp2")
+        _consume_observations([tmp_path / "obs" / "observation.json"], table_id="tp2")
 
 
 def test_observation_is_admitted_against_pq_pinned_scope(tmp_path, eligibility):
+    from dataclasses import replace
+    eligibility = replace(eligibility, contract_sha256=OBS_CONTRACT, runtime_commit=OBS_COMMIT)
     observation_fixture(tmp_path)
-    table = srp.consume_shape_time_observation(
+    table = _consume_observations(
         [tmp_path / "obs" / "observation.json"], table_id="pilot",
         expected_scope=_obs_scope(), eligibility=eligibility)
     assert table.admitted
@@ -693,7 +751,7 @@ def test_observation_is_admitted_against_pq_pinned_scope(tmp_path, eligibility):
 def test_a_tp2_expected_scope_refuses_the_tp1_observation(tmp_path, eligibility):
     observation_fixture(tmp_path)
     with pytest.raises(srp.ShapeRuntimeError):
-        srp.consume_shape_time_observation(
+        _consume_observations(
             [tmp_path / "obs" / "observation.json"], table_id="pilot",
             expected_scope=_obs_scope(tensor_parallel=2), eligibility=eligibility)
 
@@ -703,7 +761,7 @@ def test_an_unbacked_kernel_lane_refuses_pq_admission(tmp_path, eligibility):
         doc["kernel_lane"] = ["tessera::window_gemm_dense", "native_window_gemm"]
     observation_fixture(tmp_path, mutate=swap_lane)
     with pytest.raises(srp.ShapeRuntimeError):
-        srp.consume_shape_time_observation(
+        _consume_observations(
             [tmp_path / "obs" / "observation.json"], table_id="pilot",
             expected_scope=_obs_scope(), eligibility=eligibility)
 
@@ -716,7 +774,7 @@ def test_observation_refuses_a_non_event_or_loop_timing_method(tmp_path, field, 
         doc["sampling"][key] = value
     observation_fixture(tmp_path, mutate=corrupt)
     with pytest.raises(srp.ShapeRuntimeError):
-        srp.consume_shape_time_observation([tmp_path / "obs" / "observation.json"], table_id="x")
+        _consume_observations([tmp_path / "obs" / "observation.json"], table_id="x")
 
 
 @pytest.mark.parametrize("mutation", ["samples", "summary", "lane", "family", "duplicate", "token"])
@@ -740,20 +798,21 @@ def test_observation_refuses_tampered_or_unbound_fields(tmp_path, mutation):
     obs = [tmp_path / "obs" / "observation.json"]
     if mutation == "duplicate":
         observation_fixture(tmp_path)
-        srp.consume_shape_time_observation(obs, table_id="one")
+        _consume_observations(obs, table_id="one")
         # Two observations with the same shape key refuse.
         with pytest.raises(srp.ShapeRuntimeError, match="duplicate shape key"):
-            srp.consume_shape_time_observation(obs * 2, table_id="two")
+            _consume_observations(obs * 2, table_id="two")
         return
     observation_fixture(tmp_path, mutate=corrupt)
     with pytest.raises(srp.ShapeRuntimeError):
-        srp.consume_shape_time_observation(obs, table_id="x")
+        _consume_observations(obs, table_id="x")
 
 
 def test_convert_writes_out_atomically_and_refuses_on_a_bad_observation(tmp_path):
     observation_fixture(tmp_path)
     out = tmp_path / "table.json"
     rc = srp.main(["convert", "--out", str(out), "--table-id", "pilot",
+                   "--checker-receipts", str(tmp_path / "obs" / "checker-receipt.json"),
                    "--observations", str(tmp_path / "obs" / "observation.json")])
     assert rc == 0 and out.exists()
     loaded = srp.load_shape_table(out)
@@ -764,6 +823,7 @@ def test_convert_writes_out_atomically_and_refuses_on_a_bad_observation(tmp_path
     (broken / "observation.json").write_bytes(b"{not json")
     out2 = tmp_path / "should-not-exist.json"
     assert srp.main(["convert", "--out", str(out2), "--table-id", "bad",
+                     "--checker-receipts", str(tmp_path / "obs" / "checker-receipt.json"),
                      "--observations", str(broken / "observation.json")]) == 2
     assert not out2.exists()
 
@@ -772,9 +832,123 @@ def test_load_refuses_a_row_whose_samples_were_edited_with_a_valid_receipt(tmp_p
     observation_fixture(tmp_path)
     table_path = tmp_path / "table.json"
     srp.main(["convert", "--out", str(table_path), "--table-id", "pilot",
+              "--checker-receipts", str(tmp_path / "obs" / "checker-receipt.json"),
               "--observations", str(tmp_path / "obs" / "observation.json")])
     document = json.loads(table_path.read_text())
     document["rows"][0]["measurement"]["samples_ms"] = [10.0, 20.0, 30.0, 40.0]
     table_path.write_text(srp.canonical_strict(document))
     with pytest.raises(srp.ShapeRuntimeError, match="differ from the receipt's raw samples"):
         srp.load_shape_table(table_path)
+
+
+def test_load_refuses_a_forged_panel_with_matching_hashes_and_no_checker(tmp_path):
+    observation_fixture(tmp_path)
+    observation = json.loads((tmp_path / "obs" / "observation.json").read_bytes())
+    row = _row("dense", "256x256", OBS_FAMILY, 896, 512,
+               dict(zip(("symbol", "decoder"), OBS_LANE)), (1.0, 2.0, 3.0, 4.0))
+    row["measurement"].update(receipt_path=observation["panel"]["path"],
+                              receipt_sha256=observation["panel"]["sha256"],
+                              warmup_iterations=5)
+    document = _doc([row], regimes=(512,), runtime_image_digest=OBS_IMAGE,
+                    tessera_commit=OBS_COMMIT, contract_sha256=OBS_CONTRACT,
+                    tensor_parallel=1)
+    path = tmp_path / "forged-table.json"
+    _obs_write(path, document)
+    with pytest.raises(srp.ShapeRuntimeError, match="checker"):
+        srp.load_shape_table(path)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "selector", "source", "commit", "subdirectory", "refs",
+                                      "cwd", "working_directory", "command", "environment", "wrapper"])
+def test_observation_requires_the_selected_reviewed_checker_at_convert_and_load(tmp_path, mutation):
+    observation_fixture(tmp_path)
+    observation = tmp_path / "obs" / "observation.json"
+    table = _consume_observations([observation], table_id="pilot")
+    table_path = tmp_path / "table.json"
+    srp.write_shape_table(table, table_path)
+    result = next(iter(_CHECKER_RESULTS.values()))
+    if mutation == "missing":
+        _CHECKER_RESULTS.clear()
+    elif mutation == "selector":
+        result["attempt"] = 2
+    elif mutation == "source":
+        result["request"]["params"]["checkout_snapshot"]["input"]["sha256"] = "8" * 64
+    elif mutation == "commit":
+        result["request"]["params"]["checkout_snapshot"]["commit"] = "3" * 40
+    elif mutation == "subdirectory":
+        result["request"]["params"]["checkout_snapshot"]["subdirectory"] = "archive"
+    elif mutation == "refs":
+        result["request"]["params"]["checkout_snapshot"]["refs"] = {"other": "3" * 40}
+    elif mutation == "cwd":
+        result["request"]["params"]["cwd"] = "archive"
+    elif mutation == "working_directory":
+        result["request"]["task"]["working_directory"] = "archive"
+    elif mutation == "command":
+        result["request"]["params"]["command"][0] = "forged-checker"
+        result["request"]["task"]["argv"][1] = "forged-checker"
+    elif mutation == "environment":
+        result["request"]["environment"]["variables"]["CUDA_VISIBLE_DEVICES"] = "0"
+    else:
+        result["request"]["task"]["argv"][0] = "unbound"
+    with pytest.raises(srp.ShapeRuntimeError):
+        _consume_observations([observation], table_id="forged")
+    with pytest.raises(srp.ShapeRuntimeError):
+        srp.load_shape_table(table_path)
+
+
+def test_convert_refuses_forged_observation_without_a_real_checker(tmp_path):
+    observation_fixture(tmp_path)
+    _CHECKER_RESULTS.clear()
+    out = tmp_path / "out.json"
+    assert srp.main(["convert", "--out", str(out), "--table-id", "forged",
+                     "--observations", str(tmp_path / "obs" / "observation.json"),
+                     "--checker-receipts", str(tmp_path / "obs" / "checker-receipt.json")]) == 2
+    assert not out.exists()
+
+
+def test_checker_result_requires_exact_output_and_a_bounded_observation(tmp_path, monkeypatch):
+    binding = observation_fixture(tmp_path)
+    path = tmp_path / "obs" / "observation.json"
+    result = next(iter(_CHECKER_RESULTS.values()))
+    result["payload"] *= 2
+    with pytest.raises(srp.ShapeRuntimeError, match="owned output"):
+        _consume_observations([path], table_id="duplicate-output")
+    monkeypatch.setattr(srp, "CHECKER_RESULT_MAX_BYTES", binding["bytes"] - 1)
+    with pytest.raises(srp.ShapeRuntimeError, match="byte cap"):
+        _consume_observations([path], table_id="oversized")
+
+
+@pytest.mark.parametrize("field", ["key", "lane", "context"])
+def test_load_compares_the_table_to_the_checker_projection(tmp_path, field):
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    doc = table.as_dict()
+    if field == "key":
+        doc["rows"][0]["family"] = "TESSERA_E2M1_K2"
+    elif field == "lane":
+        doc["rows"][0]["kernel_lane"]["decoder"] = "other"
+    else:
+        doc["context"]["tensor_parallel"] = 2
+    path = tmp_path / "tampered-table.json"
+    _obs_write(path, doc)
+    with pytest.raises(srp.ShapeRuntimeError, match="checker observation"):
+        srp.load_shape_table(path)
+
+
+def test_relative_checker_receipt_does_not_skip_the_row_comparison(tmp_path):
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    doc = table.as_dict()
+    doc["rows"][0]["measurement"]["receipt_path"] = "obs/checker-receipt.json"
+    doc["rows"][0]["family"] = "TESSERA_E2M1_K2"
+    path = tmp_path / "relative-proof-table.json"
+    _obs_write(path, doc)
+    with pytest.raises(srp.ShapeRuntimeError, match="checker observation"):
+        srp.load_shape_table(path)
+
+
+def test_relative_observation_and_checker_paths_convert(tmp_path, monkeypatch):
+    observation_fixture(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    table = _consume_observations([Path("obs/observation.json")], table_id="relative")
+    assert len(table.rows) == 1

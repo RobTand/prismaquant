@@ -54,7 +54,7 @@ def _mapping(value, where):
 class ArtifactReader:
     root: Path
 
-    def bytes(self, reference, where):
+    def bytes(self, reference, where, *, max_bytes=None):
         # An owner may bind an exact byte length as well as the digest (the
         # shape-time observation does): a length is a weaker check on its own
         # but kills a truncated or padded artifact the digest already refuses,
@@ -64,10 +64,20 @@ class ArtifactReader:
         path = Path(_string(reference["path"], where + " path"))
         if not path.is_absolute():
             path = self.root / path
+        if max_bytes is not None:
+            max_bytes = _integer(max_bytes, where + " byte cap", 1)
+            if "bytes" in reference and _integer(reference["bytes"], where + " bytes", 1) > max_bytes:
+                raise RuntimePriceError(f"{where}: declared artifact exceeds its byte cap")
         try:
-            raw = path.read_bytes()
+            if max_bytes is None:
+                raw = path.read_bytes()
+            else:
+                with path.open("rb") as handle:
+                    raw = handle.read(max_bytes + 1)
         except OSError as exc:
             raise RuntimePriceError(f"{where}: cannot read artifact {path}: {exc}") from exc
+        if max_bytes is not None and len(raw) > max_bytes:
+            raise RuntimePriceError(f"{where}: artifact exceeds its byte cap")
         if "bytes" in reference:
             _equal(len(raw), _integer(reference["bytes"], where + " bytes", 1),
                    where + " artifact byte length")
