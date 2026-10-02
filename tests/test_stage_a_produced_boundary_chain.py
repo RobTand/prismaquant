@@ -63,6 +63,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import signal
 import socket
 import subprocess
 import sys
@@ -630,6 +631,8 @@ class _Fleet:
         self._watcher = None
         self.returncode = None
         self.died = False
+        self._death_lock = threading.Lock()
+        self._cleanup_killed_pid = None
 
     def _spawn(self, mode: str, label: str):
         self._logs.mkdir(parents=True, exist_ok=True)
@@ -643,10 +646,17 @@ class _Fleet:
 
     def _watch(self):
         rc = self._proc.wait()
-        self.returncode = rc
-        if self._stopping.is_set() and rc == 0:
-            return
-        self.died = True
+        # Serialize attribution with cleanup's poll/kill. Merely requesting
+        # stop does not excuse a nonzero exit: only OUR explicit SIGKILL to
+        # this still-live fleet is expected. An earlier observed failure,
+        # including SIGKILL, remains a failure even during context cleanup.
+        with self._death_lock:
+            self.returncode = rc
+            cleanup_kill = (self._cleanup_killed_pid == self._proc.pid
+                            and rc == -signal.SIGKILL)
+            if self._stopping.is_set() and (rc == 0 or cleanup_kill):
+                return
+            self.died = True
         self._responder = self._spawn(f"dead:{self._proc.pid}:{rc}", "dead")
 
     def __enter__(self):
@@ -669,7 +679,11 @@ class _Fleet:
         try:
             proc.wait(timeout=60)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            with self._death_lock:
+                if proc.poll() is None:
+                    proc.kill()
+                    if proc is self._proc and self._stopping.is_set():
+                        self._cleanup_killed_pid = proc.pid
             proc.wait()
 
     def __exit__(self, exc_type, exc, tb):
@@ -686,7 +700,10 @@ class _Fleet:
         if not self.died:
             return False
         death = (f"the fixture fleet (pid {self._proc.pid}) exited rc "
-                 f"{self.returncode} before its context asked it to stop; "
+                 f"{self.returncode} unexpectedly; "
+                 f"cleanup requested: {self._stopping.is_set()}; "
+                 f"cleanup SIGKILL requested for fleet: "
+                 f"{self._cleanup_killed_pid == self._proc.pid}; "
                  f"stderr tail: {read('fleet', 'err')[-1500:]!r}")
         if exc is not None:
             # The read's own failure stands -- it is what the test asserts --
