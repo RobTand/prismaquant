@@ -1,5 +1,20 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #1663): Tessera campaign launches publish
+`<out-stem>.waits.json` separately from prices, checkpoint and capture identities.
+The existing verified `RowStream` observes only pending reader deliveries through
+the shared IO telemetry owner, including refused deliveries before admission.
+Its `row_stream_exposed_wait` block declares `row-stream-load-only` coverage.
+The launch records its own pre-work power samples and measured idle ceiling;
+CPU runs start no GPU sampler, and missing samples/baselines remain unsampled.
+Success and failure both publish a status-bearing observation after source
+cleanup; telemetry errors cannot replace a primary workload failure.
+Whole-row `exposed_wait.instrumented` remains false because construction,
+checkpoint and publication waits are not fully covered. Stage A still records
+source-prefetch-only waits. This is an observability slice, not completion of
+#1663's fanout coverage gate or a performance, energy, numerical, residency,
+format or serving qualification. Pricing bytes and defaults are unchanged.
+
 Re-stamped 2026-10-02 (Refs PQ #1663): pending-delivery wait observation
 is owned by `io_spans.observed_future_result`. The streamed source owner
 delegates to it while retaining retry, verification and residency ownership.

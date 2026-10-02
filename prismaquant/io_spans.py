@@ -39,10 +39,14 @@ every ``every_entries`` entries or ``every_s`` seconds while a long read
 runs. It reports nothing to PrismaBuild. Reads into a disposable scratch are
 not durable work, and PB #480 counts only durable work as progress.
 
-**Instrumentation never raises into the workload.** A counter that cannot
+**Span instrumentation never raises into the workload.** A counter that cannot
 be read is recorded as ``None`` with the reason, and a failure to build or
 print a record is printed and dropped. A workload exception passes through
 the span unchanged. The span records it as the outcome.
+
+Pending-delivery observers have a stricter contract: a failed observation
+refuses an otherwise successful delivery, and annotates an existing delivery
+failure without replacing it.
 
 **Telemetry readers and the sampler thread.** This module is the one home
 of the process and host readers (``/proc/self/io``, ``/proc/meminfo``,
