@@ -9,6 +9,20 @@ restoration remain caller-owned. Lane replay also delegates the expression, pres
 row-count refusals and per-row position mean followed by row sum. CPU
 compatibility evidence does not qualify GPU arithmetic or served quality.
 
+Re-stamped 2026-10-02 (PQ #2096, Refs #1842): the shared Tessera campaign
+menu intersects structural family restrictions with the profile's per-Linear
+activation arithmetic (`ModelProfile.tessera_pricing_families`). GLM's
+absorbed MLA `kv_b_proj` offers TESSERA_BF16_K1 (T-16) only after a scoped
+roster lifts its existing pin; other attention units retain their ordinary
+menus. Shape/context/family caching distinguishes the effective unit policy,
+and an empty intersection remains empty. Streamed capture, partition planning
+and encoding use the same policy. Incompatible active seed rows refuse before
+wire linking, including when no global family restriction was supplied.
+BF16 source fallback, all profile pins and independent original-source,
+byte/kernel/runtime, export and serving gates remain unchanged. This CPU
+policy does not establish attention H capture, native wire qualification,
+per-unit AURA costs or served quality; those remain #1842 acceptance work.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
@@ -7055,6 +7069,19 @@ body identities do not change. The GLM attention roster keeps the DSA indexer
 pinned: `Glm5NextTextIndexer.forward` is `@torch.no_grad` and only selects
 top-k indices, so it has no AURA cotangent. Gate:
 `tests/test_tessera_campaign_pinned_roster.py`.
+
+**Unit activation arithmetic (PQ #2096).** A lifted pin is still constrained
+by the operation being priced. The profile's `tessera_pricing_families(qname)`
+optionally narrows each unit's family menu. GLM's absorbed MLA `kv_b_proj`
+keeps BF16 activations, so its Tessera menu contains only TESSERA_BF16_K1;
+the source BF16 fallback is unchanged. The shared campaign expansion intersects
+that policy with any structural family restriction before shape/context/family
+caching, and preserves empty intersections. Streamed capture and both encoding
+planning paths pass their profile. The same intersection checks stored active
+anchors before seed wire linking and on resume. It does not lift other pins,
+declare the DSA indexer priceable, or establish a native reader or kernel.
+Gate: `tests/test_glm_attention_unit_menus.py` and
+`tests/test_tessera_campaign_family_restriction.py`.
 
 Re-stamped (2026-09-25, `claude/dedup-gridbook-move-1304`) for **moving the
 live helpers out of the retired codebook lane's modules** (PQ #1304, P2, part

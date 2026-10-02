@@ -681,6 +681,14 @@ class ModelProfile(ABC):
         that no such carve-out exists."""
         return False
 
+    def tessera_pricing_families(self, qname: str) -> tuple[str, ...] | None:
+        """Optional per-Linear family limit from its activation arithmetic.
+
+        This narrows a pricing menu; it grants no serving or export admission
+        and does not lift a profile pin. None preserves the ordinary menu.
+        """
+        return None
+
     def source_tensor_name(self, model_qname: str) -> str:
         """Rewrite an in-memory HF module qname (from `named_parameters`)
         to the name that should land on disk in the exported

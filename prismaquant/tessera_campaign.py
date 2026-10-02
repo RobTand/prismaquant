@@ -258,16 +258,27 @@ def parse_family_restriction(value):
     return result
 
 
+def _unit_family_names(name, restriction, structure_by_unit, profile):
+    """Intersect declared structural scope with the profile's unit arithmetic."""
+    families = None if restriction is None else tuple(restriction[structure_by_unit[name]])
+    unit_families = None if profile is None else profile.tessera_pricing_families(name)
+    if unit_families is not None:
+        families = (tuple(unit_families) if families is None else
+                    tuple(family for family in families if family in unit_families))
+    return families
+
+
 def require_seed_family_scope(name, state, *, family_restriction, structure_by_unit,
-                              rate_band=None):
+                              rate_band=None, profile=None):
     """Refuse incompatible active seed anchors before their wires are linked."""
-    if family_restriction is None:
-        return
     from .tessera_formats import parse_tessera_format_name
     policy = parse_family_restriction(family_restriction)
     structure = (structure_by_unit or {}).get(name)
-    if structure not in ("dense", "routed_moe"):
+    if policy is not None and structure not in ("dense", "routed_moe"):
         raise RuntimeError(f"{name}: family restriction requires authoritative structure")
+    families = _unit_family_names(name, policy, structure_by_unit, profile)
+    if families is None:
+        return
     if not isinstance(state, Mapping) or not isinstance(state.get("anchors"), list):
         raise RuntimeError(f"{name}: family restriction received an invalid seed state")
     for row in state["anchors"]:
@@ -278,8 +289,8 @@ def require_seed_family_scope(name, state, *, family_restriction, structure_by_u
         if (row.get("qname") != name or row.get("family") != family.name
                 or type(row.get("body_rate_q256")) is not int or row["body_rate_q256"] != rate):
             raise RuntimeError(f"{name}: family restriction seed format/identity disagree")
-        if family.name not in policy[structure]:
-            raise RuntimeError(f"{name}: seed {row['format_name']} violates {structure} family restriction")
+        if family.name not in families:
+            raise RuntimeError(f"{name}: seed {row['format_name']} violates unit family restriction")
         if rate_band is not None and not rate_band[0] <= rate <= rate_band[1]:
             raise RuntimeError(f"{name}: seed {row['format_name']} is outside restricted rate band {rate_band}")
 
@@ -3788,6 +3799,7 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
                              parallel_kind,
                              context_by_unit: "Mapping[str, ServingContext] | None" = None,
                              family_restriction=None, structure_by_unit=None,
+                             profile=None,
                              ) -> dict[str, list]:
     """One Tessera menu per distinct shape and explicit serving context.
 
@@ -3797,7 +3809,8 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
     shape; their structural class comes from owned topology, never shape or
     name. Without a restriction, a missing context remains unbound. An explicit
     family restriction requires exact structure coverage and adds the allowed
-    family tuple to the cache key. Units
+    family tuple to the cache key. A profile's per-unit activation arithmetic
+    further intersects those families; an empty intersection stays empty. Units
     repeat shapes ~1500:1 on a production MoE, so expanding per Linear repeats
     the same answer thousands of times; keying by shape and context expands once per
     distinct answer instead.  Exact rather than approximate: same arguments,
@@ -3819,12 +3832,11 @@ def expand_menus_for_targets(weights, targets, *, mode, tp_degree,
     for name in targets:
         shape = tuple(weights[name].shape)
         context = None if context_by_unit is None else context_by_unit.get(name)
-        families = None
         if restriction is not None:
             structure = structure_by_unit[name]
             if context is not None and context.structure != structure:
                 raise ValueError(f"{name}: family restriction structure conflicts with serving context")
-            families = tuple(restriction[structure])
+        families = _unit_family_names(name, restriction, structure_by_unit, profile)
         key = (shape, None if context is None else context.key(), families)
         if key not in by_shape_and_context:
             by_shape_and_context[key] = expand_tessera_menu(
@@ -5878,7 +5890,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
     menus = expand_menus_for_targets(weights, targets, mode=mode, tp_degree=args.tp_degree,
         parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
         family_restriction=getattr(args, "family_restriction", None),
-        structure_by_unit=structure_by_unit)
+        structure_by_unit=structure_by_unit, profile=profile)
     report_empty_menus(menus, mode=mode)
     projection = None
     if population.declared:
@@ -7098,7 +7110,8 @@ def _main(argv, *, source_scope, waits) -> int:
         full_partition_menus = expand_menus_for_targets(
             menu_weights, partition_menu_targets, mode=mode, tp_degree=args.tp_degree,
             parallel_kind=PARALLEL_NONE, context_by_unit=context_by_unit,
-            family_restriction=args.family_restriction, structure_by_unit=structure_by_unit)
+            family_restriction=args.family_restriction, structure_by_unit=structure_by_unit,
+            profile=profile)
         menus = {name: full_partition_menus[name] for name in targets}
         partition_encode_structure = {name: "routed_moe" for name in partition_menu_targets}
         # Consumers and identity receipts describe only this row's priced units.
@@ -7114,6 +7127,7 @@ def _main(argv, *, source_scope, waits) -> int:
             context_by_unit=context_by_unit,
             family_restriction=args.family_restriction,
             structure_by_unit=structure_by_unit,
+            profile=profile,
         )
     # PrismaQuant #291 (filed here first as #288). A narrowing menu mode --
     # ``attested`` without a dev pin, ``readable`` against a contract that
@@ -7422,7 +7436,7 @@ def _main(argv, *, source_scope, waits) -> int:
     def validate_seed_scope(name, state):
         require_seed_family_scope(name, state, family_restriction=args.family_restriction,
                                   structure_by_unit=structure_by_unit,
-                                  rate_band=restricted_rate_band)
+                                  rate_band=restricted_rate_band, profile=profile)
 
     def adopt_state(name: str, state, *, where: str, deferred=None, entry=None) -> None:
         """Verify one unit's stored anchors against this run and take them.
@@ -7617,7 +7631,7 @@ def _main(argv, *, source_scope, waits) -> int:
             admits=lambda name, fmt: any(
                 entry.format_name == fmt for entry in menus.get(name, ())),
             identity_sha256=identity_sha256, expected_identity=checkpoint_identity,
-            validate_state=validate_seed_scope if args.family_restriction is not None else None)
+            validate_state=validate_seed_scope)
         for name in seed_provenance["units"]:
             dirty_checkpoint_units.add(name)
 
