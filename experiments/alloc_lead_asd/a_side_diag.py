@@ -98,13 +98,8 @@ def atomic_json_dump(obj, path):
 
 def load_tokens(path, key, n):
     if not os.path.exists(path):
-        import importlib.util
-        here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prep_inputs.py")
-        spec = importlib.util.spec_from_file_location("alloc_lead_prep_inputs", here)
-        prep = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(prep)
-        log(f"tokenizing inputs into {path}")
-        prep.main(path)
+        raise FileNotFoundError(f"calibration token artifact does not exist: {path}; "
+                                "provide the prepared immutable input artifact")
     with safe_open(path, "pt") as handle:
         ids = handle.get_tensor(key)
     if n > ids.shape[0]:
