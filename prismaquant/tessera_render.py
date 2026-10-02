@@ -638,19 +638,25 @@ def _plan(family: TesseraFamily, body_rate_q256: int, n_columns: int, recipe):
     return grid, rates, forests, channel_sigma
 
 
-def _render_wire_recipe(family, rung, *, recipe=None, structure=None):
+def _render_wire_recipe(
+        family, rung, *, recipe=None, structure=None, refuse_unattested=True):
     """One recipe for a render, its plan-time facts and its shape price.
 
     Explicit recipes describe existing or experimental bytes and remain
     authoritative. Otherwise the existing producer resolver owns the served
     wire and its refusal; an absent structure retains its research default.
+    Only a descriptive spec query resolves an unattested wire without raising,
+    so it can report producer_eligible=False. Planning and rendering retain
+    the strict default.
     """
     if structure is not None:
         from .lane_eligibility import STRUCTURES
 
         if not isinstance(structure, str) or structure not in STRUCTURES:
             raise ValueError(f"structure {structure!r} is not one of {sorted(STRUCTURES)}")
-    return (tessera_served_wire_recipe(family, rung, structure=structure)
+    return (tessera_served_wire_recipe(
+                family, rung, structure=structure,
+                refuse_unattested=refuse_unattested)
             if recipe is None else recipe)
 
 
@@ -894,6 +900,8 @@ def synthesize_tessera_spec(
     for rendering and pricing as well as scoping producer eligibility. An
     absent context preserves the research recipe. Under v5 the attested menu
     requires a context; research keeps its existing unattested policy.
+    A valid but unattested scoped rung returns a descriptive spec with the
+    eligibility gate's False answer; planning a served encode still refuses.
 
     Every recipe charges something **per unit** -- a CHANNEL row field, a
     WINDOW table, a TCQ forest -- so no Tessera rung has a bits-per-parameter
@@ -919,7 +927,8 @@ def synthesize_tessera_spec(
     family, rung = parsed
     wire = _render_wire_recipe(
         family, rung, recipe=recipe,
-        structure=None if serving_context is None else serving_context.structure)
+        structure=None if serving_context is None else serving_context.structure,
+        refuse_unattested=False)
     plane = scale_plane_name(wire.scale_plane)
 
     # The price is a function, not a rate -- on every Tessera wire, since
