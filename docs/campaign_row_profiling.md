@@ -23,6 +23,15 @@ cutoff that could terminate a live row.
 
 ## Explicit dependencies and outputs
 
+Host startup needs only the standard library. `tools.pq_profile_source` loads
+only the existing digest and IO-span source owners from the same snapshot;
+it does not execute `prismaquant.__init__` or install a replacement package
+namespace. The observer uses the authoritative `io_spans.PeriodicSampler`,
+including its native identity and joined shutdown, rather than a copied sampler.
+Torch and compressed-tensors remain workload-container dependencies, not host
+observer readiness prerequisites. A fresh `-S` interpreter executes the actual
+observer import chain in `tests/test_profile_observer_bootstrap_1942.py`.
+
 Pass `--profiler-executable` as a pinned executable available at the same path
 on the admitted host and in the existing container. Declare it in the action's
 read set. Do not depend on an unrelated image's or host's ambient py-spy version.
