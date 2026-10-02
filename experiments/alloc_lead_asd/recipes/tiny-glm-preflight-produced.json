@@ -1,8 +1,8 @@
 {
   "schema": "prismaquant.prismabuild.produced_output_template.v1",
   "version": 1,
-  "template_id": "pq1962-tiny-glm-preflight1",
-  "output_prefix": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-preflight1",
+  "template_id": "pq1962-tiny-glm-preflight2",
+  "output_prefix": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-preflight2",
   "slots": {
     "boundary_entries": {
       "class": "payload"

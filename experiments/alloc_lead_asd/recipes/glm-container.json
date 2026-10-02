@@ -28,6 +28,11 @@
         "source": "/home/rob/tmp",
         "target": "/home/rob/tmp",
         "readonly": false
+      },
+      {
+        "source": "/mnt/shared/prismabuild-fleet/cas",
+        "target": "/mnt/shared/prismabuild-fleet/cas",
+        "readonly": false
       }
     ]
   },
