@@ -26,8 +26,6 @@
   "hashlib:prismaquant/dsv4_campaign_completion.py::_manifest_scope",
   "hashlib:prismaquant/dsv4_campaign_completion.py::_sha256_bytes",
   "hashlib:prismaquant/dsv4_campaign_completion.py::canonical_sha256",
-  "hashlib:prismaquant/expert_empirical_cost.py::_expert_checkpoint_identity",
-  "hashlib:prismaquant/expert_empirical_cost.py::main",
   "hashlib:prismaquant/export_gguf.py::export_gguf",
   "hashlib:prismaquant/export_native_compressed.py::_export_resume_fingerprint",
   "hashlib:prismaquant/export_native_compressed.py::_write_shipcard._hash",

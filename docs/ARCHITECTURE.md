@@ -23,6 +23,14 @@ byte/kernel/runtime, export and serving gates remain unchanged. This CPU
 policy does not establish attention H capture, native wire qualification,
 per-unit AURA costs or served quality; those remain #1842 acceptance work.
 
+Re-stamped 2026-10-02 (PQ #2102, Refs #1301, branch
+`sol/pq-expert-calibration-digests-20261002`, base `693a38f3ae34`): empirical
+expert checkpoint and CLI calibration digests share only the final exact-byte
+SHA-256 constructor through `digests.bytes_sha256hex`. Their distinct
+checkpoint detach/CPU/contiguous/uint8 view and CLI CPU/NumPy C-order extraction
+remain local, including native refusals. Identity fields, byte recipes and
+widths, checkpoint policy and provenance serialization retain their contracts.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
