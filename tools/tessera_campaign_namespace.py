@@ -203,6 +203,13 @@ def namespace_destinations(request: dict, binding: dict) -> list[tuple[Path, boo
         (Path(request["env"][name]), True) for name in WRITABLE_ENV]
 
 
+def namespace_mounts(spec: dict) -> list[tuple[Path, bool]]:
+    """One mount view for namespace containment and writable identity coverage."""
+    return [(Path(mount["target"]),
+             mount["source"] == mount["target"] and not mount.get("readonly", False))
+            for mount in spec["container"].get("mounts", [])]
+
+
 def validate_namespace_request(row: dict, *, executed_commit: str | None = None) -> dict:
     """Reproduce immutable ownership and request bytes, without admitting inputs."""
     _, spec, _ = namespace_request_parts(row)
@@ -253,16 +260,15 @@ def validate_namespace_request(row: dict, *, executed_commit: str | None = None)
             input_path = namespace_absolute_path(value)
             if input_path.is_relative_to(Path(binding["root"])):
                 raise RuntimeError("namespace input overlaps owned outputs")
-    for mount in spec["container"].get("mounts", []):
-        target = Path(mount["target"])
+    mounts = namespace_mounts(spec)
+    for target, writable_identity in mounts:
         if target.is_relative_to(Path(binding["root"])):
             raise RuntimeError("namespace output is hidden by a declared mount")
-        if directory.is_relative_to(target) and (mount.get("readonly") or mount["source"] != mount["target"]):
+        if directory.is_relative_to(target) and not writable_identity:
             raise RuntimeError("namespace needs writable identity-mapped output mounts")
     for destination, _ in namespace_destinations(request, binding):
-        if not any(destination.is_relative_to(Path(mount["target"]))
-                   and mount["source"] == mount["target"] and not mount.get("readonly", False)
-                   for mount in spec["container"].get("mounts", [])):
+        if not any(destination.is_relative_to(target) and writable_identity
+                   for target, writable_identity in mounts):
             raise RuntimeError("namespace destination lacks a writable identity-mapped mount")
     return binding
 
