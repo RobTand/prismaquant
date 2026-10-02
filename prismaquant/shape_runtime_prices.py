@@ -82,7 +82,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 import re
+import statistics
 import sys
 from dataclasses import dataclass, field, replace
 from statistics import median
@@ -100,6 +103,7 @@ from .measured_runtime_prices import (
     MOE_MEMBER_ROLE_AXES, OperatorMeasurement, RuntimePriceError, RuntimeResources,
     _integer, _json, _object, _string, bootstrap_sum, rank_local_member_shapes,
 )
+from .runtime_provenance import ArtifactReader
 
 SCHEMA = "prismaquant.shape_runtime_prices.v1"
 ADMISSION_SCHEMA = "prismaquant.shape_runtime_admission.v1"
@@ -403,7 +407,7 @@ def _parse_shape_table(payload: Mapping, source_path: str) -> ShapeRuntimeTable:
         rows[key] = ShapeRow(key, KernelLane.from_dict(item["kernel_lane"], where + ".kernel_lane"),
                              measurement)
     regimes_seen = {key.m for key in rows}
-    if regimes_seen != set(context.regimes):
+    if not regimes_seen <= set(context.regimes):
         raise ShapeRuntimeError(
             f"context declares regimes {list(context.regimes)} but rows carry {sorted(regimes_seen)}")
     if not isinstance(body["rate_pools"], list):
@@ -442,7 +446,15 @@ def _parse_shape_table(payload: Mapping, source_path: str) -> ShapeRuntimeTable:
 
 
 def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
-    """Parse the file and verify every row's receipt bytes against its digest."""
+    """Parse the file and re-bind every row to the authenticated raw samples.
+
+    A receipt is not merely re-hashed: for a row whose receipt is a published
+    shape-time panel, the panel is read back and the row's key, lane, method,
+    warmup count and raw samples must equal the evidence the panel carries. A
+    row whose samples were edited while its receipt was left valid is refused
+    here, not accepted on the digest alone. A receipt that is not such a panel
+    (a legacy/other artifact) keeps the digest-only check.
+    """
     table = parse_shape_table(_json(path), source_path=str(path))
     for receipt, expected in sorted({(row.measurement.receipt_path, row.measurement.receipt_sha256)
                                      for row in table.rows}):
@@ -455,7 +467,54 @@ def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
             raise ShapeRuntimeError(f"cannot read shape-time receipt {receipt_path}: {exc}") from exc
         if actual != expected:
             raise ShapeRuntimeError(f"shape-time receipt SHA-256 mismatch: {receipt_path}")
+        _rebind_shape_row_to_receipt(table, receipt_path)
     return table
+
+
+def _rebind_shape_row_to_receipt(table: ShapeRuntimeTable, receipt_path: Path) -> None:
+    """Compare each row reading this receipt against its authenticated samples."""
+    try:
+        raw = receipt_path.read_bytes()
+    except OSError as exc:
+        raise ShapeRuntimeError(f"cannot read shape-time receipt {receipt_path}: {exc}") from exc
+    try:
+        panel = json.loads(raw, object_pairs_hook=_strict_pairs, parse_constant=_strict_nonfinite)
+    except (ValueError, UnicodeError) as exc:
+        raise ShapeRuntimeError(f"shape-time receipt {receipt_path}: invalid JSON: {exc}") from exc
+    if not isinstance(panel, Mapping) or panel.get("schema") != SHAPE_TIME_PANEL_SCHEMA:
+        return
+    panel_rows = panel.get("rows")
+    if not isinstance(panel_rows, list) or len(panel_rows) != 1:
+        raise ShapeRuntimeError(
+            f"shape-time receipt {receipt_path}: a panel bound to a row must carry exactly one row")
+    evidence = panel.get("evidence")
+    if not isinstance(evidence, Mapping) or "samples" not in evidence:
+        raise ShapeRuntimeError(f"shape-time receipt {receipt_path}: no bound raw samples")
+    reader = ArtifactReader(receipt_path.parent)
+    samples = _read_json_bound(reader, evidence["samples"], "shape-time receipt samples")
+    raw_samples = [_observation_number(v, "receipt samples_ms") for v in samples.get("samples_ms", [])]
+    routes = None
+    if "routes" in evidence:
+        routes = _read_json_bound(reader, evidence["routes"], "shape-time receipt routes")
+    for row in table.rows:
+        if str(Path(row.measurement.receipt_path).resolve()) != str(receipt_path):
+            continue
+        if tuple(row.measurement.samples_ms) != tuple(raw_samples):
+            raise ShapeRuntimeError(
+                f"shape row {row.key.label()}: samples differ from the receipt's raw samples")
+        if row.measurement.warmup_iterations != samples.get("warmup_iterations"):
+            raise ShapeRuntimeError(
+                f"shape row {row.key.label()}: warmup count differs from the receipt")
+        if routes is not None:
+            records = routes.get("records")
+            if not isinstance(records, list) or len(records) != len(row.measurement.samples_ms):
+                raise ShapeRuntimeError(
+                    f"shape row {row.key.label()}: route records differ from its samples")
+            pairs = {(record.get("symbol"), record.get("decoder")) for record in records
+                     if isinstance(record, Mapping)}
+            if pairs != {(row.kernel_lane.symbol, row.kernel_lane.decoder)}:
+                raise ShapeRuntimeError(
+                    f"shape row {row.key.label()}: kernel lane differs from the receipt's routes")
 
 
 # --------------------------------------------------------------------------- #
@@ -802,39 +861,465 @@ def build_shape_runtime_resources(table: ShapeRuntimeTable, candidates: Mapping[
 
 
 # --------------------------------------------------------------------------- #
-# Tessera receipt consumer (stub until RobTand/tessera#688 publishes a schema)
+# Tessera observation consumer (tessera.shape_time_observation.v1)
 # --------------------------------------------------------------------------- #
+#
+# The producer publishes ONE versioned, input-bound handoff per validated
+# panel (``tessera.shape_time_observation.v1``, RobTand/tessera#856, from the
+# existing ``tools/tessera_shape_time_panel.py check`` path). PQ reads that
+# observation, never the panel bytes: it does not import or vendor
+# ``tessera.serving``, does not deserialize the producer's private validation
+# token, and does not restate a second semantic validator. Everything the
+# producer already proved is re-bound here by hash and length, and everything
+# that is a PQ admission decision (pinned contract, lane, context) is made by
+# PQ's own ``admit_shape_table`` against the pinned ``EligibilityTable``.
 
 SHAPE_TIME_PANEL_SCHEMA = "tessera.shape_time_panel.v1"
+SHAPE_TIME_OBSERVATION_SCHEMA = "tessera.shape_time_observation.v1"
+_OBSERVATION_CLAIMS = {"time_claim": TIME_CLAIM, "certifies_placement": False,
+                       "served_p95": "not_claimed"}
+_FLAT_SHA = re.compile(r"[0-9a-f]{64}")
+_FLAT_COMMIT = re.compile(r"[0-9a-f]{40}")
+_OBSERVATION_TOP = ("schema", "status", "claims", "gpu_executed", "panel",
+                    "expected_panel_sha256", "request", "expected_runtime", "contract",
+                    "evidence", "preflight", "producer", "replay", "invocation", "scope",
+                    "scope_id", "cell_id", "kernel_lane", "structure", "rank_local_shape",
+                    "family", "payload", "timing", "sampling", "operator_projection",
+                    "energy_status")
+_OBSERVATION_RUNTIME = ("image", "tessera_commit", "serving_source_sha256", "contract_sha256",
+                        "platform", "torch", "vllm", "serve_flags", "execution_mode",
+                        "residency", "tp_rank", "tp_degree", "package_root")
+_OBSERVATION_EVIDENCE = ("runtime", "producer", "contract", "wire", "preparation", "samples",
+                         "routes", "trace", "telemetry", "native_binary", "runtime_origins")
+_OBSERVATION_SCOPE = ("route", "grid", "q256", "structure", "mode", "execution_mode",
+                      "regime", "tp_degree", "requested_platform", "shape")
+_OBSERVATION_SAMPLING = ("method", "sample_unit", "warmup_iterations", "n", "samples_ms",
+                         "interval_unix")
+_OBSERVATION_PROJECTION = ("batch_size", "rows", "reading")
+_OBSERVATION_REPLAY = ("source_tree_sha256", "source_tree_members", "tool_source_sha256", "tool")
+_OBSERVATION_BINDING = ("path", "bytes", "sha256")
 
 
-def consume_shape_time_panel(receipts: Sequence[Path], *, table_id: str) -> dict:
-    """STUB: convert ``tessera.shape_time_panel.v1`` receipts into a v1 table.
+def _observation_sha(value, where) -> str:
+    if not isinstance(value, str) or not _FLAT_SHA.fullmatch(value):
+        raise ShapeRuntimeError(f"{where}: requires a lowercase SHA-256")
+    return value
 
-    Tessera has not published this receipt's schema (RobTand/tessera#688 is
-    open, PQ #1583 follow-up). Guessing its fields would make this module the
-    second author of Tessera's receipt, so it refuses instead. When #688 lands
-    this becomes the converter, on ``native_receipt_table``'s pattern.
+
+def _observation_number(value, where, *, positive=True) -> float:
+    if type(value) not in (int, float) or not math.isfinite(value) or (positive and value <= 0):
+        raise ShapeRuntimeError(
+            f"{where}: requires a finite {'positive ' if positive else ''}number")
+    return float(value)
+
+
+def _observation_sha_in(value, candidates, where) -> None:
+    if value not in candidates:
+        raise ShapeRuntimeError(f"{where}: {value!r} names no bound artifact")
+
+
+def _observation_lane(value, where) -> KernelLane:
+    pair = _object(value, ("symbol", "decoder"), where)
+    return KernelLane.from_dict(pair, where)
+
+
+def _observation_context(payload: Mapping, where: str) -> ShapeRuntimeContext:
+    runtime = _object(payload, _OBSERVATION_RUNTIME, where)
+    serve_flags = runtime["serve_flags"]
+    if (not isinstance(serve_flags, dict)
+            or any(not isinstance(k, str) or not isinstance(v, str) for k, v in serve_flags.items())):
+        raise ShapeRuntimeError(f"{where}.serve_flags: requires observed string values")
+    if serve_flags.get("TESSERA_SERVE_MODE") != runtime["residency"]:
+        raise ShapeRuntimeError(f"{where}: residency disagrees with the observed serve mode")
+    if runtime["execution_mode"] != "eager" or runtime["residency"] != "resident":
+        raise ShapeRuntimeError(f"{where}: the observation slice is eager/resident only")
+    if type(runtime["tp_degree"]) is not int or type(runtime["tp_rank"]) is not int \
+            or runtime["tp_rank"] != 0:
+        raise ShapeRuntimeError(f"{where}: the observation names an explicit TP rank 0 world")
+    tp_degree = _integer(runtime["tp_degree"], "observation.tp_degree", 1)
+    return ShapeRuntimeContext(
+        runtime_image_digest=runtime["image"],
+        tessera_commit=runtime["tessera_commit"],
+        contract_sha256=runtime["contract_sha256"],
+        tensor_parallel=tp_degree,
+        platform=runtime["platform"],
+        execution_mode=runtime["execution_mode"],
+        residency=runtime["residency"],
+        batch_size=1,
+        regimes=_observation_regimes(payload),
+    )
+
+
+def _observation_regimes(_payload: Mapping) -> tuple[int, ...]:
+    """The observation slice times one M; the decode regime is PQ's own reading.
+
+    The producer times one operator apply and does not publish a decode row, so
+    the consumer does not invent one. A table may still carry the decode regime
+    because :meth:`ShapeRuntimeTable.lookup` returns ``None`` for a key no row
+    measures -- an absent price is a gap, not a fabricated number.
     """
-    raise ShapeRuntimeError(
-        f"{SHAPE_TIME_PANEL_SCHEMA} has no published schema yet (RobTand/tessera#688); "
-        "the receipt->table converter is a stub until it does (PQ #1583)")
+    return (1,)
+
+def _read_json_bound(reader: ArtifactReader, binding, where: str) -> Mapping:
+    return reader.json(binding, where)[1]
+
+
+def read_shape_time_observation(path: str | Path) -> tuple[Mapping, tuple[Path, bytes]]:
+    """Read one observation, verifying every concrete artifact it names.
+
+    Returns the strict JSON document and the observation's own ``(path, raw)``
+    bytes. Every panel/request/runtime/contract/evidence/preflight reference is
+    read through the existing :class:`ArtifactReader`: hash mismatch, wrong byte
+    length, a missing file or a duplicate JSON key all refuse here, before any
+    PQ admission decision is taken.
+    """
+    root = Path(path)
+    reader = ArtifactReader(root.parent)
+    try:
+        _, raw = reader.bytes({"path": str(root), "sha256": file_sha256hex(root)}, "observation")
+    except (OSError, RuntimePriceError) as exc:
+        raise ShapeRuntimeError(f"shape-time observation: cannot read {root}: {exc}") from exc
+    try:
+        value = json.loads(raw, object_pairs_hook=_strict_pairs, parse_constant=_strict_nonfinite)
+    except (ValueError, UnicodeError) as exc:
+        raise ShapeRuntimeError(f"shape-time observation: invalid JSON {root}: {exc}") from exc
+    if not isinstance(value, Mapping):
+        raise ShapeRuntimeError("shape-time observation: expected a JSON object")
+    return value, (root, raw)
+
+
+def _strict_pairs(items):
+    body: dict = {}
+    for key, item in items:
+        if key in body:
+            raise ShapeRuntimeError(f"shape-time observation: duplicate JSON key {key!r}")
+        body[key] = item
+    return body
+
+
+def _strict_nonfinite(token):
+    raise ShapeRuntimeError(f"shape-time observation: nonfinite JSON constant {token}")
+
+
+def _observation_binding(reader: ArtifactReader, reference, where: str) -> tuple[Path, bytes]:
+    return reader.bytes(reference, where)
+
+
+def _verify_observation(observation: Mapping) -> dict:
+    """Check the observation against its own bound bytes; return its projection.
+
+    This is the PQ consumer side of the handoff. It re-binds every artifact the
+    observation names and cross-checks its internal consistency, then reports
+    the context, key, lane, measurement and receipt the table row is built
+    from. It does not restate the producer's semantic validation: that is the
+    observation's claim, carried by the bound panel/evidence/preflight bytes.
+    Admission remains :func:`admit_shape_table`'s job.
+    """
+    top = _object(observation, _OBSERVATION_TOP, "shape-time observation")
+    if top["schema"] != SHAPE_TIME_OBSERVATION_SCHEMA:
+        raise ShapeRuntimeError(
+            f"shape-time observation schema must be {SHAPE_TIME_OBSERVATION_SCHEMA}, "
+            f"not {top['schema']!r}")
+    if top["status"] != "validated":
+        raise ShapeRuntimeError("shape-time observation status must be 'validated'")
+    if top["gpu_executed"] is not False:
+        raise ShapeRuntimeError("shape-time observation must record a CUDA-disabled replay")
+    if dict(top["claims"]) != _OBSERVATION_CLAIMS:
+        raise ShapeRuntimeError(f"shape-time observation claims must be exactly {_OBSERVATION_CLAIMS}")
+    reader = ArtifactReader(Path())
+    panel_path, _panel_raw = reader.bytes(top["panel"], "observation.panel")
+    _observation_sha(top["expected_panel_sha256"], "observation.expected_panel_sha256")
+    panel = _read_json_bound(reader, top["panel"], "observation.panel")
+    _equal_strict(panel.get("schema"), SHAPE_TIME_PANEL_SCHEMA, "observation.panel schema")
+    if panel.get("status") != "measured":
+        raise ShapeRuntimeError("observation.panel must be a measured shape-time panel")
+    request = _read_json_bound(reader, top["request"], "observation.request")
+    expected_runtime = _read_json_bound(reader, top["expected_runtime"], "observation.expected_runtime")
+    _read_json_bound(reader, top["contract"], "observation.contract")
+    evidence = _object(top["evidence"], _OBSERVATION_EVIDENCE, "observation.evidence")
+    bound: dict[str, tuple[Path, bytes]] = {}
+    for name in _OBSERVATION_EVIDENCE:
+        bound[name] = reader.bytes(evidence[name], f"observation.evidence.{name}")
+    preflight = _object(top["preflight"], ("result", "phase"), "observation.preflight")
+    reader.bytes(preflight["result"], "observation.preflight.result")
+    reader.bytes(preflight["phase"], "observation.preflight.phase")
+    if evidence["contract"] != panel.get("evidence", {}).get("contract"):
+        raise ShapeRuntimeError("observation contract binding differs from its panel")
+    if evidence != panel.get("evidence"):
+        raise ShapeRuntimeError("observation evidence bindings differ from its panel")
+    if preflight != panel.get("preflight"):
+        raise ShapeRuntimeError("observation preflight bindings differ from its panel")
+    if panel.get("runtime") != expected_runtime:
+        raise ShapeRuntimeError("observation expected runtime differs from the panel runtime")
+    context = _observation_context(expected_runtime, "observation.expected_runtime")
+    observed = _observation_context(panel["runtime"], "observation.panel.runtime")
+    if context != observed:
+        raise ShapeRuntimeError("observation runtime context differs from the panel runtime")
+    claims = panel.get("claims", top["claims"])
+    if dict(claims) != _OBSERVATION_CLAIMS:
+        raise ShapeRuntimeError("observation panel claims differ from the observation claims")
+    if top["energy_status"] != "hold":
+        raise ShapeRuntimeError("observation energy must remain HOLD in this slice")
+    if panel.get("energy", {}).get("status") != "hold":
+        raise ShapeRuntimeError("observation panel energy must remain HOLD in this slice")
+    plan = panel.get("plan")
+    if not isinstance(plan, Mapping) or plan.get("gpu_executed") is not False:
+        raise ShapeRuntimeError("observation panel requires an unmeasured CPU census plan")
+    plan_rows = plan.get("rows")
+    if not isinstance(plan_rows, list) or len(plan_rows) != 1:
+        raise ShapeRuntimeError("the observation slice carries exactly one plan row")
+    plan_scope = _object(plan_rows[0].get("scope"), _OBSERVATION_SCOPE, "observation.panel.plan.scope")
+    if plan_scope != top["scope"]:
+        raise ShapeRuntimeError("observation scope differs from its panel plan")
+    if top["scope_id"] != plan_rows[0].get("id"):
+        raise ShapeRuntimeError("observation scope_id differs from its panel plan")
+    shape = _object(top["scope"]["shape"], ("M", "N", "K"), "observation.scope.shape")
+    m = _integer(shape["M"], "observation scope M", 1)
+    n = _integer(shape["N"], "observation scope N", 1)
+    k = _integer(shape["K"], "observation scope K", 1)
+    structure = _string(top["structure"], "observation.structure")
+    rank_local = validate_shape(structure, _string(top["rank_local_shape"], "observation.rank_local_shape"),
+                                "observation.rank_local_shape")
+    if structure == STRUCTURE_DENSE and rank_local != f"{n}x{k}":
+        raise ShapeRuntimeError(
+            f"observation rank_local_shape {rank_local!r} differs from its NxK {n}x{k}")
+    if top["scope"]["structure"] != structure or top["scope"]["regime"] != regime_for_m(m):
+        raise ShapeRuntimeError("observation structure/regime disagrees with its scope")
+    if top["scope"]["tp_degree"] != context.tensor_parallel or top["scope"]["tp_degree"] != 1:
+        raise ShapeRuntimeError("observation scope is not the TP1 world it declares")
+    if top["scope"]["requested_platform"] != context.platform:
+        raise ShapeRuntimeError("observation platform disagrees with its scope")
+    family = _string(top["family"], "observation.family")
+    payload = _object(top["payload"], ("route", "grid", "q256", "rows", "columns"), "observation.payload")
+    if payload["route"] != top["scope"]["route"] or payload["grid"] != top["scope"]["grid"]:
+        raise ShapeRuntimeError("observation payload route/grid differs from its scope")
+    if payload["rows"] != n or payload["columns"] != k or payload["q256"] != top["scope"]["q256"]:
+        raise ShapeRuntimeError("observation payload geometry differs from its scope")
+    rate = _integer(top["scope"]["q256"], "observation scope q256", 1)
+    lane = _observation_lane(top["kernel_lane"], "observation.kernel_lane")
+    samples = _object(top["sampling"], _OBSERVATION_SAMPLING, "observation.sampling")
+    if samples["method"] != "cuda_events" or samples["sample_unit"] != "single_apply":
+        raise ShapeRuntimeError("observation must time one CUDA-event single apply")
+    values = samples["samples_ms"]
+    if not isinstance(values, list) or len(values) < 3:
+        raise ShapeRuntimeError("observation requires at least three repeated CUDA-event samples")
+    finite = tuple(_observation_number(v, "observation.samples_ms") for v in values)
+    if samples["n"] != len(finite):
+        raise ShapeRuntimeError("observation sampling count differs from its raw samples")
+    warmup = _integer(samples["warmup_iterations"], "observation.warmup_iterations")
+    interval = samples["interval_unix"]
+    if (not isinstance(interval, list) or len(interval) != 2
+            or _observation_number(interval[1], "observation.interval end")
+            <= _observation_number(interval[0], "observation.interval start", positive=False)):
+        raise ShapeRuntimeError("observation sampling interval is invalid")
+    summary = _object(top["timing"], ("method", "n", "median_ms", "p25_ms", "p75_ms", "iqr_ms",
+                                      "quartiles"), "observation.timing")
+    if summary["method"] != "cuda_events" or _integer(summary["n"], "observation.timing.n") != len(finite):
+        raise ShapeRuntimeError("observation timing summary count/method differs from its samples")
+    derived = _timing_summary(finite)
+    for name in ("median_ms", "p25_ms", "p75_ms", "iqr_ms", "quartiles"):
+        if canonical_strict(summary[name]) != canonical_strict(derived[name]):
+            raise ShapeRuntimeError(f"observation timing {name} differs from its raw samples")
+    raw_samples = _read_json_bound(reader, evidence["samples"], "observation.evidence.samples")
+    if raw_samples.get("samples_ms") != list(samples["samples_ms"]):
+        raise ShapeRuntimeError("observation samples differ from its bound raw sample bytes")
+    if raw_samples.get("warmup_iterations") != warmup:
+        raise ShapeRuntimeError("observation warmup count differs from its bound raw sample bytes")
+    if raw_samples.get("interval_unix") != list(interval):
+        raise ShapeRuntimeError("observation sample interval differs from its bound raw sample bytes")
+    routes = _read_json_bound(reader, evidence["routes"], "observation.evidence.routes")
+    records = routes.get("records")
+    if not isinstance(records, list) or len(records) != len(finite):
+        raise ShapeRuntimeError("observation requires one fresh route record per timed sample")
+    pairs = {(record.get("symbol"), record.get("decoder")) for record in records
+             if isinstance(record, Mapping)}
+    if pairs != {(lane.symbol, lane.decoder)}:
+        raise ShapeRuntimeError("observation lane differs from its raw route records")
+    projection = _object(top["operator_projection"], _OBSERVATION_PROJECTION,
+                         "observation.operator_projection")
+    if projection["batch_size"] != 1 or projection["rows"] != m:
+        raise ShapeRuntimeError(
+            "observation operator projection must read one M-row operator at batch_size=1")
+    producer = _object(top["producer"], _OBSERVATION_BINDING, "observation.producer")
+    _observation_sha(producer["sha256"], "observation.producer.sha256")
+    _read_json_bound(reader, producer, "observation.producer")
+    if request.get("producer_identity") != producer:
+        raise ShapeRuntimeError("observation producer differs from its bound request")
+    replay = _object(top["replay"], _OBSERVATION_REPLAY, "observation.replay")
+    _observation_sha(replay["source_tree_sha256"], "observation.replay.source_tree_sha256")
+    _observation_sha(replay["tool_source_sha256"], "observation.replay.tool_source_sha256")
+    _integer(replay["source_tree_members"], "observation.replay.source_tree_members", 1)
+    _object(replay["tool"], _OBSERVATION_BINDING, "observation.replay.tool")
+    reader.bytes(replay["tool"], "observation.replay.tool")
+    if replay["tool_source_sha256"] == producer.get("tool_source_sha256"):
+        raise ShapeRuntimeError(
+            "observation replay-validator and original producer identity must be distinct")
+    invocation = _object(top["invocation"], ("command", "phase", "returncode"), "observation.invocation")
+    if invocation["phase"] != "runtime-preflight" or invocation["returncode"] != 0:
+        raise ShapeRuntimeError("observation must be issued after a successful CPU preflight")
+    command = invocation["command"]
+    if not isinstance(command, list) or any(not isinstance(v, str) for v in command):
+        raise ShapeRuntimeError("observation invocation command must be an explicit argv")
+    for required in ("CUDA_VISIBLE_DEVICES=", "--preflight", "--job-sha256"):
+        if required not in command:
+            raise ShapeRuntimeError(f"observation invocation lost the owned CPU marker {required!r}")
+    return {"panel_path": panel_path, "panel": panel, "request": request,
+            "expected_runtime": expected_runtime, "context": context, "m": m, "structure": structure,
+            "rank_local_shape": rank_local, "family": family, "rate_q256": rate, "lane": lane,
+            "samples_ms": finite, "warmup_iterations": warmup, "summary": summary,
+            "cell_id": _string(top["cell_id"], "observation.cell_id"),
+            "producer": producer, "replay": replay, "invocation": invocation,
+            "panel_binding": top["panel"], "request_binding": top["request"],
+            "contract_binding": top["contract"], "evidence": dict(evidence), "preflight": dict(preflight)}
+
+
+def _equal_strict(actual, expected, where: str) -> None:
+    if actual != expected:
+        raise ShapeRuntimeError(f"{where}: {actual!r} != {expected!r}")
+
+
+def canonical_strict(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _timing_summary(samples: Sequence[float]) -> dict:
+    values = [float(v) for v in samples]
+    q1, _mid, q3 = statistics.quantiles(values, n=4, method="inclusive")
+    return {"method": "cuda_events", "n": len(values), "median_ms": float(median(values)),
+            "p25_ms": float(q1), "p75_ms": float(q3), "iqr_ms": float(q3 - q1),
+            "quartiles": "statistics.quantiles.inclusive"}
+
+
+def consume_shape_time_observation(observations: Sequence[Path], *, table_id: str,
+                                   expected_scope: "ShapeTableScope | None" = None,
+                                   eligibility: EligibilityTable | None = None) -> ShapeRuntimeTable:
+    """Convert validated observations into an admitted proposal table.
+
+    Every observation is bound to its exact bytes through
+    :func:`read_shape_time_observation`; then its projection is turned into the
+    existing :class:`ShapeRuntimeContext`/:class:`ShapeKey`/
+    :class:`KernelLane`/:class:`OperatorMeasurement`; then the table is parsed
+    and, when an expected scope and eligibility table are supplied, admitted by
+    the unchanged :func:`admit_shape_table`.
+
+    A malformed, incomplete or unsupported observation refuses the WHOLE
+    conversion: nothing is skipped and no output is written. One observation
+    with one row produces one table row; no menu completeness is claimed.
+    """
+    if not observations:
+        raise ShapeRuntimeError("shape-time conversion requires at least one observation")
+    projections: list[dict] = []
+    for index, path in enumerate(observations):
+        observation, _raw = read_shape_time_observation(path)
+        projection = _verify_observation(observation)
+        if any(projection["context"] == previous["context"]
+               and projection["rank_local_shape"] == previous["rank_local_shape"]
+               and projection["family"] == previous["family"]
+               and projection["rate_q256"] == previous["rate_q256"]
+               and projection["m"] == previous["m"]
+               for previous in projections):
+            raise ShapeRuntimeError(
+                f"observation {index}: duplicate shape key {projection['rank_local_shape']} "
+                f"{projection['family']} R{projection['rate_q256']} M{projection['m']}")
+        projections.append(projection)
+    contexts = {tuple(projection["context"].as_dict().items()) for projection in projections}
+    if len(contexts) != 1:
+        raise ShapeRuntimeError("every observation in one conversion must share one runtime context")
+    context = projections[0]["context"]
+    rows = []
+    for projection in projections:
+        measurement = OperatorMeasurement(
+            method="cuda_events", samples_ms=projection["samples_ms"],
+            warmup_iterations=projection["warmup_iterations"],
+            receipt_path=str(projection["panel_path"].resolve()),
+            receipt_sha256=projection["panel_binding"]["sha256"])
+        key = ShapeKey(projection["structure"], projection["rank_local_shape"],
+                       projection["family"], projection["rate_q256"], projection["m"])
+        rows.append(ShapeRow(key, projection["lane"], measurement))
+    document = {"schema": SCHEMA, "table_id": table_id, "status": "proposal_data",
+                "composition": "sequential_operator_sum", "claims": dict(CLAIMS),
+                "context": context.as_dict(),
+                "rows": [row.as_dict() for row in sorted(rows, key=lambda r: r.key)],
+                "rate_pools": []}
+    table = parse_shape_table(document)
+    if expected_scope is not None:
+        if eligibility is None:
+            raise ShapeRuntimeError(
+                "admission requires PQ's pinned EligibilityTable; none was supplied")
+        table = admit_shape_table(table, scope=expected_scope, eligibility=eligibility)
+    return table
+
+
+def write_shape_table(table: ShapeRuntimeTable, out: str | Path) -> tuple[Path, str]:
+    """Publish the table to ``--out`` durably; a crash leaves old or new bytes."""
+    path = Path(out)
+    payload = canonical_strict(table.as_dict()).encode("utf-8") + b"\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".tmp{os.getpid()}")
+    with temporary.open("wb") as handle:
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+    return path, file_sha256hex(path)
+
+
+def _load_shape_table_scope(path: Path) -> ShapeTableScope:
+    body = _object(_json(path), tuple(ShapeTableScope.__dataclass_fields__), "expected scope")
+    return ShapeTableScope(**{name: body[name] for name in ShapeTableScope.__dataclass_fields__})
+
+
+def _convert_eligibility(scope: "ShapeTableScope | None") -> "EligibilityTable | None":
+    """Load PQ's OWN pinned eligibility table for the scope, or abstain.
+
+    The pinned-runtime gate is the allocator's own live owner
+    (``tessera_lane.allocation_shape_price_scope``); a missing or uninstalled
+    pinned runtime refuses rather than admitting on the observation's word.
+    With no expected scope there is nothing to admit against, and the
+    converted table is returned unadmitted.
+    """
+    if scope is None:
+        return None
+    from .tessera_lane import allocation_shape_price_scope
+    from .tessera_serving_scope import ServingTarget
+    target = ServingTarget(platform=scope.platform, runtime_image=scope.runtime_image_digest,
+                           execution_mode=scope.execution_mode, residency=scope.residency)
+    live_scope, eligibility, _formats = allocation_shape_price_scope(
+        target, tensor_parallel=scope.tensor_parallel)
+    if live_scope != scope:
+        raise ShapeRuntimeError(
+            f"expected scope {scope} differs from the pinned runtime's own scope {live_scope}")
+    return eligibility
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """``convert`` exits 2 until #688; ``check`` parses a table and exits 0 or 2."""
+    """``convert`` turns validated observations into a table; ``check`` re-reads one."""
     parser = argparse.ArgumentParser(prog="python -m prismaquant.shape_runtime_prices")
     sub = parser.add_subparsers(dest="command", required=True)
-    convert = sub.add_parser("convert", help="receipts -> table (stub until tessera#688)")
+    convert = sub.add_parser("convert", help="tessera.shape_time_observation.v1 -> table")
     convert.add_argument("--out", type=Path, required=True)
     convert.add_argument("--table-id", required=True)
-    convert.add_argument("--receipts", type=Path, nargs="+", required=True)
-    check = sub.add_parser("check", help="parse a table and verify its receipt digests")
+    convert.add_argument("--observations", type=Path, nargs="+", required=True,
+                         help="one or more tessera.shape_time_observation.v1 documents")
+    convert.add_argument("--expected-scope", type=Path,
+                         help="JSON file the table context must equal (PQ's pinned b40 scope)")
+    check = sub.add_parser("check", help="parse a table and verify its receipt digests/samples")
     check.add_argument("table", type=Path)
     args = parser.parse_args(argv)
     try:
         if args.command == "convert":
-            consume_shape_time_panel(args.receipts, table_id=args.table_id)
+            scope = _load_shape_table_scope(args.expected_scope) if args.expected_scope else None
+            table = consume_shape_time_observation(args.observations, table_id=args.table_id,
+                                                   expected_scope=scope,
+                                                   eligibility=_convert_eligibility(scope))
+            path, digest = write_shape_table(table, args.out)
+            print(json.dumps({**table.identity(), "source_path": str(path),
+                              "out_sha256": digest}, sort_keys=True), flush=True)
             return 0
         table = load_shape_table(args.table)
         print(json.dumps(table.identity()), flush=True)

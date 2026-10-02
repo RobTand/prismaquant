@@ -21133,9 +21133,24 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
   once per draw and weights it by its reader count. It uses
   `bootstrap_sum(multiplicities=...)`, and `None` keeps every earlier draw
   bit-identical.
-- **Receipt converter.** The converter for Tessera's
-  `tessera.shape_time_panel.v1` receipt is a named stub (`convert` exits 2)
-  until tessera#688 publishes that schema.
+- **Observation converter.** PQ consumes the versioned, input-bound handoff
+  Tessera publishes from its own validated check (`tessera.shape_time_observation.v1`,
+  RobTand/tessera#856), never the panel bytes and never `tessera.serving`.
+  `consume_shape_time_observation` reads each observation through the existing
+  `ArtifactReader` (path + SHA-256 + exact byte length), re-binds the panel,
+  request, expected runtime, contract, evidence, preflight, original producer
+  and a distinct replay-validator identity, checks the raw samples/count/lane
+  against the observation's own timing summary and route records, derives the
+  existing `ShapeRuntimeContext`/`ShapeKey`/`KernelLane`/`OperatorMeasurement`,
+  and then runs the unchanged `admit_shape_table` against PQ's own pinned
+  `EligibilityTable` when `--expected-scope` is given. It restates no Tessera
+  validator and deserializes no private token. A malformed, incomplete or
+  unsupported observation refuses the conversion as a whole; `convert` writes
+  `--out` atomically only after every check passes. `load_shape_table`
+  re-binds each row to the referenced panel's raw samples and lane, so a table
+  edited under a still-valid receipt digest is refused. A TP1 observation
+  admits only a TP1 scope; no decoded-M row is invented, so `lookup` at M=1 is
+  a gap, never a fabricated decode price.
 
 CPU gates: `tests/test_shape_runtime_prices.py`.
 
