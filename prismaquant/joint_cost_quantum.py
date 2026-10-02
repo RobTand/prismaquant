@@ -4113,6 +4113,12 @@ def run_layer_quantum(
     return result
 
 
+def quantum_completion_record(result: Mapping) -> dict:
+    """The producer's single completion record carried by PB stdout."""
+    return {key: result[key] for key in (
+        "quantum_id", "passed", "status", "units_done", "units_total")}
+
+
 def progress_grace_stamps(raw: str | None) -> list | None:
     """The dispatcher's grace stamps (load and compute phases), as recorded.
 
@@ -4276,8 +4282,7 @@ def main(argv=None) -> int:
                 "cumulative").print_stats(100)
             (Path(record["output_space"]["root"]) / "profile.txt").write_text(
                 text.getvalue())
-    print(json.dumps({key: result[key] for key in (
-        "quantum_id", "passed", "status", "units_done", "units_total")}))
+    print(json.dumps(quantum_completion_record(result)))
     if result["status"] != "complete":
         return EXIT_GAPPED
     return EXIT_OK
