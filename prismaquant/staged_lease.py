@@ -1268,6 +1268,7 @@ class LeaseWindow:
         self._entered = False
         self._exited = False
         self._fds: dict[int, str] = {}
+        self._fds_lock = threading.Lock()
         self._released = False
 
     def _require_owner(self, operation: str) -> None:
@@ -1438,30 +1439,36 @@ class LeaseWindow:
             # Open-time refusal (stale ref, changed bytes, unknown key) or
             # PB-internal failure: fail clear either way, never guess.
             raise _refuse(f"lease-open-refused: {exc}", kind="integrity") from None
-        self._fds[int(fd)] = str(key)
+        # close(2) can recycle the number before its closer returns. Keep
+        # registration ordered after that closer removes its own entry.
+        # SDK opening and payload reads stay outside this ownership lock.
+        with self._fds_lock:
+            self._fds[int(fd)] = str(key)
         return int(fd), dict(serving)
 
     def close_fd(self, fd: int) -> None:
         """Close one held descriptor. Release-before-close is forbidden:
         the ref is released only in :meth:`__exit__`, after every fd."""
         self._require_owner("close_fd")
-        if int(fd) in self._fds:
-            try:
-                os.close(int(fd))
-            finally:
-                del self._fds[int(fd)]
+        with self._fds_lock:
+            if int(fd) in self._fds:
+                try:
+                    os.close(int(fd))
+                finally:
+                    del self._fds[int(fd)]
 
     def close_fds(self) -> None:
         """Close every held descriptor, first failure raised last."""
         self._require_owner("close_fds")
         failure = None
-        for fd in sorted(self._fds):
-            try:
-                os.close(fd)
-            except OSError as exc:
-                if failure is None:
-                    failure = exc
-        self._fds.clear()
+        with self._fds_lock:
+            for fd in sorted(self._fds):
+                try:
+                    os.close(fd)
+                except OSError as exc:
+                    if failure is None:
+                        failure = exc
+            self._fds.clear()
         if failure is not None:
             raise failure
 
