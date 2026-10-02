@@ -49,7 +49,7 @@ class FiniteCrosscheck(unittest.TestCase):
                 return dict(kl=torch.ones(1), q=torch.ones(1), s_real=torch.ones(2, 1))
 
             def arms(*args, **kwargs):
-                result = args[12]['A_all']
+                result = args[11]['A_all']
                 for name in ('kl', 'q', 's_real'):
                     result[name].fill_(1)
                 if fault in ('kl_nan', 'q_nan', 'probe_nan'):
