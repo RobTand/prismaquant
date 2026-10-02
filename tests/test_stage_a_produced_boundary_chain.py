@@ -773,6 +773,7 @@ def test_fixture_fleet_preserves_a_failure_observed_before_cleanup(
     responders = []
     monkeypatch.setattr(fleet, "_spawn",
                         lambda mode, label: responders.append((mode, label)))
+    real_wait = proc.wait
     try:
         if returncode == -9:
             proc.kill()
@@ -781,8 +782,6 @@ def test_fixture_fleet_preserves_a_failure_observed_before_cleanup(
         assert proc.wait(timeout=120) == returncode
         # Even if the cleanup wait reports timeout after this exit, no
         # signal to a live process is left for cleanup to take credit for.
-        real_wait = proc.wait
-
         def expired_cleanup_wait(timeout=None):
             if timeout == 60:
                 raise subprocess.TimeoutExpired(proc.args, timeout)
@@ -798,7 +797,6 @@ def test_fixture_fleet_preserves_a_failure_observed_before_cleanup(
     finally:
         if proc.poll() is None:
             proc.kill()
-        real_wait = getattr(proc, "wait")
         real_wait(timeout=120)
         if not proc.stdin.closed:
             proc.stdin.close()
