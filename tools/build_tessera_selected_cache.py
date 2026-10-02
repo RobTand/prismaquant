@@ -31,7 +31,8 @@ from prismaquant.layer_config import (
     canonicalize_assignment, layer_config_metadata, validate_layer_config_payload)
 from prismaquant.tessera_export_lane import (read_cached_unit_bundle,
                                              selected_cached_units_manifest)
-from prismaquant.tessera_joint_aura import load_measured_anchor_input
+from prismaquant.tessera_joint_aura import (load_measured_anchor_input,
+                                          _head_walk_worker_count)
 from tessera.cached_unit import CACHE_SCHEMA
 
 
@@ -147,6 +148,8 @@ def main(argv=None) -> int:
     parser.add_argument("--assignment-sha256", required=True,
                         help="the assignment's owner digest (its stamped selection_assignment_sha256), not the file bytes")
     parser.add_argument("--out", required=True)
+    parser.add_argument("--head-walk-workers", type=int, default=None,
+                        help="explicit bounded head I/O concurrency (1-16), independent of PB's CPU reservation")
     parser.add_argument("--head-checkpoint", default=None,
                         help="opt-in existing head-walk journal; declare this path as writable PB output")
     parser.add_argument("--head-resume", action="store_true",
@@ -170,6 +173,8 @@ def main(argv=None) -> int:
                         help="explicit sampled-pilot research proposal for validation export")
     parser.add_argument("--research-proposal-sha256", default=None)
     args = parser.parse_args(argv)
+    if args.head_walk_workers is not None:
+        _head_walk_worker_count(args.head_walk_workers)
     if args.head_resume and not args.head_checkpoint:
         raise ValueError("head resume requires --head-checkpoint")
     if (args.head_progress_phase is None) != (args.head_progress_allowance_s is None):
@@ -235,6 +240,7 @@ def main(argv=None) -> int:
                                       historical_encoder_reuse=reuse,
                                       progress_phase=args.head_progress_phase,
                                       progress_allowance_s=args.head_progress_allowance_s,
+                                      head_walk_workers=args.head_walk_workers,
                                       head_checkpoint=args.head_checkpoint,
                                       head_resume=args.head_resume)
     manifest = selected_cached_units_manifest(
