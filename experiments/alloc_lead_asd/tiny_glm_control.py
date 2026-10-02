@@ -332,6 +332,7 @@ def main():
     parser.add_argument('--manifest-sha256', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--reuse-fp32-direct', action='store_true')
+    parser.add_argument('--reuse-direct', action='store_true')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
     parser.add_argument('--only-dtype', choices=('float32', 'bfloat16'))
     args = parser.parse_args()
@@ -378,11 +379,12 @@ def main():
             label = str(dtype).split('.')[-1]
             model, runner, modules = model_and_runner(config, state, dtype, device)
             with profiled(args.output / label, device):
-                if dtype == torch.float32 and args.reuse_fp32_direct:
+                reuse_direct = args.reuse_direct or (dtype == torch.float32 and args.reuse_fp32_direct)
+                if reuse_direct:
                     prior = json.loads(raw['inputs.ready.json'])
                     assert prior['source_identity_sha256'] == source['model_identity']['content_sha256']
                     assert prior['tokens_sha256'] == source['tokens_sha256']
-                    direct_result = torch.load(io.BytesIO(raw['float32.direct.pt']), map_location='cpu', weights_only=True)
+                    direct_result = torch.load(io.BytesIO(raw[f'{label}.direct.pt']), map_location='cpu', weights_only=True)
                     assert {r['unit'] for r in direct_result['rows']} == set(modules)
                 else:
                     direct_result = direct(model, modules, ids.to(device))
@@ -405,9 +407,11 @@ def main():
                 'capture_components': {f'{n}/p{p}': v for (n, p), v in capture_components.items()},
                 'operator_components': operator_components, 'spill': spill,
                 'capture_receipt': captured['receipt']}
-            if dtype == torch.float32 and args.reuse_fp32_direct:
-                results['legs'][label]['direct_reuse'] = {'action': '51bb661a16323d1e59c84197dec752db71e6026baf05be08bdc89be33bcce4a2',
-                    'source': 'fa16aac5cfe', 'scope': 'banked direct graph completed before capture refusal; same unchanged direct function/source/inputs/arithmetic'}
+            if reuse_direct:
+                results['legs'][label]['direct_reuse'] = {
+                    'action': ('51bb661a16323d1e59c84197dec752db71e6026baf05be08bdc89be33bcce4a2'
+                               if dtype == torch.float32 else '7668acbf4020878f30ae2c0cd1beef59778542c35d3bc3bbf0107f45f6e52a7f'),
+                    'scope': 'banked direct graph completed before capture refusal; same unchanged direct function/source/inputs/arithmetic'}
             (args.output / 'result.partial.json').write_text(json.dumps(results, indent=2) + '\n')
             commit(index + 2, 'control')
             del model, runner, direct_result, captured, tensors
