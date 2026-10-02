@@ -96,3 +96,10 @@ and the control's own gold record. This command can ingest the resulting
 `uniform_control.json` record without rewriting it. A4/A8 arm labels or
 pairwise KL do not establish matched bytes; a missing measurement stays
 missing. Neither this adapter nor the lane declaration creates an override.
+
+When the candidate carries the new fidelity, calibration-contract digest or
+teacher evidence, the existing uniform comparison requires the control to
+carry the exact same corresponding fields. Missing, different or nonfinite
+context refuses; structured comparison distinguishes booleans from numbers.
+Legacy flat candidates without these optional fields keep their original
+comparison. `corpus_sha256` is never relabeled as a combined contract digest.

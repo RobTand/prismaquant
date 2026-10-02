@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1589, root-approved comparison strengthening):
+the existing uniform-control contract loop additionally compares a new
+candidate's `measurement_fidelity`, `calibration_contract_sha256` and
+`teacher_evidence`. The control must carry each present candidate field at
+exact strict-JSON equality; absence, nonfinite values and typed differences
+refuse. Legacy candidates without these optional fields retain their original
+comparison. No corpus hash is repurposed and no new validator, format, pin,
+default or control override is introduced.
+
 Re-stamped 2026-10-02 (Refs #1589): the existing sealed-panel TR3 scorer can
 optionally publish `--gold-record-out` after a new complete measured panel.
 It records its actual all-position, full-vocabulary FP64 method, authenticated
