@@ -19,6 +19,8 @@ import uuid
 # The canonical JSON encoding moved to ``digests`` (PQ #1301); these names stay
 # importable from here, where ~100 call sites import them.
 from .digests import (  # noqa: F401 -- re-exported: one spelling
+    DIRECT_ASCII_SPACED_LAX,
+    DIRECT_UTF8_INDENT2_STRICT,
     canonical_json,
     canonical_json_bytes,
     canonical_json_sha256,
@@ -221,8 +223,8 @@ def merge_identity_migrations(per_source: Mapping[str, object], *,
         present = True
         for record in records:
             key = (record.get("proof_bundle_sha256"),
-                   json.dumps(record.get("old_pins"), sort_keys=True),
-                   json.dumps(record.get("new_pins"), sort_keys=True))
+                   DIRECT_ASCII_SPACED_LAX.text(record.get("old_pins")),
+                   DIRECT_ASCII_SPACED_LAX.text(record.get("new_pins")))
             if key in seen:
                 continue
             seen.add(key)
@@ -508,13 +510,7 @@ def prepare_journal(
         }
         atomic_write_bytes(
             manifest_path,
-            json.dumps(
-                manifest,
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8"),
+            DIRECT_UTF8_INDENT2_STRICT.encoded(manifest),
         )
 
     expected_paths = {unit_path(root, qname): str(qname) for qname in qnames}
