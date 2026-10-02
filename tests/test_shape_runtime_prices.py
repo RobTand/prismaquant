@@ -606,10 +606,16 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
     timing = {"method": "cuda_events", "n": len(samples), "median_ms": float(statistics.median(samples)),
               "p25_ms": float(q1), "p75_ms": float(q3), "iqr_ms": float(q3 - q1),
               "quartiles": "statistics.quantiles.inclusive"}
+    preflight = {"result": _obs_write(root / "preflight-result.json",
+                                      {"schema": "tessera.installed_contract_preflight.v1"}),
+                 "phase": _obs_write(root / "preflight-phase.json",
+                                     {"phase": "runtime-preflight", "returncode": 0,
+                                      "command": ["env", "CUDA_VISIBLE_DEVICES=", "worker",
+                                                  "--job-sha256", "e" * 64, "--preflight"]})}
     panel = {"schema": "tessera.shape_time_panel.v1", "status": "measured", "claims": dict(srp.CLAIMS),
              "runtime": runtime, "plan": {"gpu_executed": False, "rows": [{"id": "ffa460d8" * 8, "scope": scope}]},
              "rows": [{"scope_id": "ffa460d8" * 8, "cell_id": "dense-e4m3-sm121-batch-resident"}],
-             "evidence": evidence, "preflight": {}, "energy": {"status": "hold"}}
+             "evidence": evidence, "preflight": preflight, "energy": {"status": "hold"}}
     panel_b = _obs_write(root / "panel.json", panel)
     replay_b = _obs_write(root / "replay-tool.json", {"tool": "replay"})
     command = ["env", "CUDA_VISIBLE_DEVICES=", "python", "--job-sha256", "e" * 64, "--preflight"]
@@ -618,7 +624,7 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
         "claims": dict(srp.CLAIMS), "gpu_executed": False, "panel": panel_b,
         "expected_panel_sha256": panel_b["sha256"], "request": request_b,
         "expected_runtime": runtime_b, "contract": contract_b, "evidence": evidence,
-        "preflight": panel["preflight"], "producer": producer_b,
+        "preflight": preflight, "producer": producer_b,
         "replay": {"source_tree_sha256": "f" * 64, "source_tree_members": 1,
                    "tool_source_sha256": OBS_REPLAY_TOOL, "tool": replay_b},
         "invocation": {"command": command, "phase": "runtime-preflight", "returncode": 0},
