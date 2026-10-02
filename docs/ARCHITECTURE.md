@@ -1,5 +1,42 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original identity intake): when the
+existing qualified original owner is explicitly selected, the existing model
+and source-checkpoint identity mechanisms consume its independently bound
+publisher descriptors and authenticated config/complete-index facts. Model
+resolution and the complete live/checkpoint shard roster must agree; missing
+proof, incomplete scopes and legacy stat-cache inputs refuse. Existing v1
+identity schemas and value meaning remain intact. Expected whole-file identity
+does not establish actual delivery: Stage A retains the owner's held-decoder/
+readset receipt separately. No logical-pool stat/index reopening or redundant
+bulk identity hash occurs on this path. Original CUDA/automatic admission and
+actual full-source GLM fresh-g6 acceptance remain separate closed gates.
+
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original copy completion): the
+existing layer reader's copy-stream completion bookkeeping retains native
+original source aliases and converted/stacked host staging through a successful
+event record and synchronization. The dormant original layer/head/direct-scale
+paths use that same bookkeeping independently of the legacy source-page flag;
+head copies complete before installation and cancelled readers drain before
+refusing output. Failed completion proofs retain true owners and serialized
+material credit. Original CUDA and automatic-capture gates remain closed.
+CPU spies and an unrun real-CUDA harness establish no original GPU, GLM g6,
+complete-provider, performance or serving qualification.
+See [original material contract](design/capture_original_material.md).
+
+Re-stamped 2026-10-02 (Refs PQ #2010/#2008, selected-row diagnostic seam):
+the existing Stage A core can capture one explicitly bound global calibration
+row, generate one fresh tail and roll to a named boundary while preserving the
+full draw's tensor identity, global-row noise and token normalization. Diagnostic
+roots/receipts are distinct and cannot feed Stage B or resume as a campaign.
+The higher-level API accepts the existing qualified original-material owner,
+selects its profile through owned metadata and threads that same owner into
+the existing runner. The unchanged original CUDA gate refuses before device or
+source/profile work; the CLI supplies geometry and constructs no authority.
+CPU selector/plumbing controls do not qualify original CUDA lifetimes, a complete
+provider, historical GLM primal/cotangent agreement, corrected prices or serving.
+See [selected-row diagnostic contract](design/stage_a_selected_row_diagnostic.md).
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier

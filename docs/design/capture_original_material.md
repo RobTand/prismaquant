@@ -74,6 +74,25 @@ implicit/chain consumers remain refused. GLM publisher authority stays
 or accepted by this internal path. Full consumer coverage, immutable delivery
 provenance across the chain and complete GPU/admission lifetimes remain open.
 
+For explicitly selected original owners, `original_checkpoint_descriptor`
+exposes expected whole-file coordinates from the independently bound publisher/
+readset parser and config/complete-index facts authenticated from owned sealed
+buffers during construction. It reuses immutable metadata facts under the
+existing owner lock and charges metadata decoding through the same resource
+check. Missing publication/readset/auxiliary proof or an incomplete roster
+refuses. It does not open/stat mutable pool paths or license future deliveries:
+every later decoder still independently authenticates its own held whole file.
+
+The existing `build_streamed_model_identity` and explicitly owned
+`build_source_checkpoint_identity` consume those descriptors using their existing
+v1 schemas. Streamed identity additionally checks stock resolved config through
+the shared semantic-config rules and exact profile-derived live/checkpoint/shard
+maps against the complete authenticated index. Incomplete body scopes and legacy
+stat identity/digest-cache inputs refuse. Expected file identity is not an
+actual-read receipt or complete-provider proof. Stage A bypasses legacy identity
+cache seeding and records `original_source_material` separately from the model
+and chain identity, with the original admission gates still closed.
+
 The internal `load_original_streaming_bootstrap` and existing
 `_build_streaming_context` now consume owned strict config/index metadata,
 profile selection and the shared pure `text_only_stage_config` rules. The stock
@@ -99,11 +118,33 @@ until all model/cache/caller aliases are gone; `shutdown()` joins readers but
 does not dispose of an externally retained model or cache. The enclosing action
 still owns decoded metadata, model tensors and conversion/packing scratch
 accounting. Original context/head/layer/direct dequant GPU routes refuse before
-material acquisition or CUDA work. Existing legacy CUDA completion fences remain
-unchanged and have not been qualified for this original path.
+material acquisition or CUDA work. The existing legacy reader completion fence
+is now shared bookkeeping: the dormant original layer/head/direct-scale paths
+retain native source aliases plus converted/stacked host staging until their
+current copy stream records and synchronizes an event. The original fence is
+independent of the legacy source-page flag, and original decoders remain CPU
+`framework="pt"` even when the direct-CUDA-load environment flag is set. Failed
+record/synchronization keeps the true host owners in the failed frame and does
+not credit their material as released. Launched readers drain on cancellation
+or failure; cancelled original output refuses installation. Original head
+copies all complete before the first installation, so a later copy failure
+cannot expose a partially installed head.
 
-This scope is the internal CPU context. Higher-level runner/profile/calibration
-input propagation, exact source-generation adoption, tokenizer consumers,
+These dormant paths retain the original CPU-only device predicate. The CPU
+controls enter the actual source memfd/decoder/StorageWeakRef paths with explicit
+CPU CUDA spies. `tests/test_original_source_copy_completion_cuda.py` supplies
+real CUDA source-alias/event controls, but remains unrun: its CPU collection
+reports 32 skips, which prove no GPU behavior. A future explicitly reviewed PB
+action may temporarily override only a fixture owner's device predicate; the
+test-only environment is never read by production code. That fixture action
+cannot qualify actual original GLM primals/cotangents or a complete provider.
+
+This scope is the internal CPU context. The higher-level Stage A API now has an
+explicit dev-only [selected-row diagnostic seam](stage_a_selected_row_diagnostic.md)
+that accepts this existing owner and preserves the original CUDA refusal before
+backend/profile/device work. Its positive plumbing test substitutes CPU device
+seams; it is not original CUDA or full-source capture qualification. Higher-level
+production runner/calibration qualification, exact source-generation adoption, tokenizer consumers,
 complete original capture and numerical qualification remain separate gates.
 The cache estimator still reads whole admitted shards for headers; it can
 reacquire released header-only material when tensors are later demanded. No
