@@ -40,7 +40,7 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
     local = threading.local()
     observed = dict(copies=0, pending_events=0, completed_events=0, decoder_reads=0,
                     credit_before_sync=[], credit_after_sync=[], pending_stream_on_failure=False,
-                    source_dtype=None)
+                    source_dtype=None, delayed_copies_pending_on_return=0)
     cancel = threading.Event()
     primary = None
     profiler = None
@@ -78,10 +78,13 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
 
         def transfer(value, target=None, *args, **kwargs):
             requested = kwargs.get('device', target)
+            delay_finished = None
             if isinstance(requested, torch.device) and requested.type == 'cuda' and value.device.type == 'cpu':
                 # Delay BEFORE the real copy to expose pending source lifetime.
                 # This is a causal interval control, not a throughput workload.
                 torch.cuda._sleep(500_000_000)
+                delay_finished = real_event()
+                delay_finished.record(torch.cuda.current_stream(device))
                 observed['copies'] += 1
                 if case == 'cancel':
                     cancel.set()
@@ -89,6 +92,11 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
                 result = real_to(value, target, *args, **kwargs)
             else:
                 result = real_to(value, **kwargs)
+            if delay_finished is not None and not delay_finished.query():
+                # The H2D copy follows this still-pending real event on the
+                # same stream. An event pending only after a synchronous copy
+                # is insufficient evidence for the source lifetime interval.
+                observed['delayed_copies_pending_on_return'] += 1
             if case == 'copy-failure' and observed['copies'] == 2:
                 raise RuntimeError('qualification failure after real copy enqueue')
             return result
@@ -177,6 +185,8 @@ def test_actual_original_copy_stream_ownership(material, monkeypatch, tmp_path, 
                                torch.arange(32).reshape(4, 8).to(torch.bfloat16))
             weights = None
         assert observed['copies'] > 0
+        assert observed['delayed_copies_pending_on_return'] > 0, (
+            'no H2D copy returned behind a still-pending real stream dependency')
         if case in ('event-record-failure', 'event-sync-failure'):
             assert observed['pending_stream_on_failure']
             assert observed['completed_events'] == 0
