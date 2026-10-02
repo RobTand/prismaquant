@@ -9,15 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-import posixpath
+import re
 
-from .schemas import strict_json_loads
+from .schemas import Contract, strict_json_loads
 from .stage_inputs import read_bound, require_source_identity
 
 
-def _require(ok, message):
-    if not ok:
-        raise RuntimeError(f'original generation: {message}')
+_contract = Contract(RuntimeError, 'original generation: ')
+_require = _contract.require
+_GIT_HEX = re.compile(r'[0-9a-f]{40}\Z')
 
 
 def _hex(value, length):
@@ -62,6 +62,7 @@ def original_generation_coordinates(*, publisher_input, publisher_id, publisher_
     for row in siblings:
         _require(isinstance(row, dict), 'invalid publisher coordinate')
         name, size = row.get('rfilename'), row.get('size')
+        _contract.string(name, where='publisher coordinate')
         _require(isinstance(name, str) and name not in ('', '.', '..') and
                  Path(name).name == name and '/' not in name and '\\' not in name and
                  name not in native and type(size) is int and size > 0,
@@ -80,9 +81,7 @@ def original_generation_coordinates(*, publisher_input, publisher_id, publisher_
     coordinates = {}
     for name, row in native.items():
         path = source_paths[name]
-        _require(isinstance(path, str) and path.startswith('/') and
-                 not path.startswith('//') and path == posixpath.normpath(path),
-                 f'{name}: canonical physical mapping required')
+        _contract.absolute_posix_path(path, where=f'{name}: physical mapping')
         entry = entries.get((path, 0))
         _require(entry is not None and entry['bytes'] == row['size'] and
                  _hex(entry['sha256'], 64), f'{name}: complete whole-file readset binding required')
