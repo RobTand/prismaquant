@@ -60,6 +60,12 @@ served, fixed-teacher gates in ``docs/design/joint_aura_runtime_allocation.md``
 still decide what ships. No knee is reported: the measured operating-point
 frontier is log-linear with no interior optimum, so any single "best" point
 would be a heuristic, and CLAUDE.md demotes kneedle to a diagnostic.
+
+PACT shape-table mode defaults to its existing weighted hull. Explicit
+``--pact-selection-mode constrained`` instead uses the existing finite runtime
+frontier to minimize declared loss under bytes and a complete comparison
+assignment's time, derived from the same admitted table/context/M/TP. It may
+select a non-hull assignment. Neither lane qualifies served latency or quality.
 """
 from __future__ import annotations
 
@@ -83,6 +89,8 @@ REPLAY_SCHEMA = "prismaquant.prefill_frontier.replay.v1"
 #: The PACT hull document (PQ #1584): the exact lower convex hull of
 #: (operator-sum time, predicted Δloss), not an SLO grid.
 PACT_SCHEMA = "prismaquant.pact_frontier.v1"
+CONSTRAINED_GENERATOR = "exact_runtime_frontier_constrained"
+CONSTRAINED_NUMERIC_SEMANTICS = "exact integer bytes; sorted-unit binary64 loss/time sums"
 
 
 class PrefillFrontierError(ValueError):
@@ -663,6 +671,31 @@ def is_pact_argv(allocator_argv: Sequence[str]) -> bool:
                for arg in allocator_argv)
 
 
+def _pact_provenance(ctx, allocator_argv, assignments_dir, draws, seed) -> dict:
+    """The shared input/context identity of either PACT solver and its replay."""
+    from .aura_cost import _git_commit
+
+    return {
+        "git_commit": _git_commit(), "table_identity": dict(ctx.table_identity),
+        "scope": dict(ctx.scope), "regime_m": int(ctx.regime_m),
+        "tensor_parallel": int(ctx.tensor_parallel),
+        "cost_path": str(ctx.cost_path), "cost_sha256": file_sha256hex(Path(ctx.cost_path)),
+        "probe_path": str(ctx.probe_path), "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
+        "allocator_cwd": str(Path.cwd()), "target_bits": float(ctx.target_bits),
+        "bootstrap": {"draws": int(draws), "seed": int(seed),
+                      "confidence": BOOTSTRAP_CONFIDENCE,
+                      "function": "prismaquant.measured_runtime_prices.bootstrap_sum",
+                      "resamples": ("each distinct shape row's own samples, once per draw, "
+                                    "weighted by how many units read it"),
+                      "applied_as_a_threshold": ("only through pact_selection: the "
+                                                 "endpoint interval overlap is the "
+                                                 "materiality verdict and the top-two "
+                                                 "half-widths set min_separation")},
+        "allocator_argv": list(allocator_argv), "assignments_dir": str(assignments_dir),
+        "n_units": int(ctx.n_units),
+    }
+
+
 def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
              bootstrap_draws: int = BOOTSTRAP_DRAWS,
              bootstrap_seed: int = BOOTSTRAP_SEED) -> dict:
@@ -675,7 +708,6 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
     it. Nothing is selected here: every PACT selection rule maximises an affine
     function of (time, Δloss), so it picks among these vertices.
     """
-    from .aura_cost import _git_commit
     from .pact_hull import CANDIDATE_GENERATOR
     from .shape_runtime_prices import TIME_CLAIM
 
@@ -783,28 +815,62 @@ def run_hull(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
         "probe_count": len(hull.probes),
         "vertices": vertices,
         "hull": hull.as_dict(),
-        "provenance": {
-            "git_commit": _git_commit(),
-            "table_identity": dict(ctx.table_identity),
-            "scope": dict(ctx.scope),
-            "regime_m": int(ctx.regime_m), "tensor_parallel": int(ctx.tensor_parallel),
-            "cost_path": str(ctx.cost_path), "cost_sha256": file_sha256hex(Path(ctx.cost_path)),
-            "probe_path": str(ctx.probe_path), "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
-            "allocator_cwd": str(Path.cwd()),
-            "target_bits": float(ctx.target_bits),
-            "bootstrap": {"draws": int(bootstrap_draws), "seed": int(bootstrap_seed),
-                          "confidence": BOOTSTRAP_CONFIDENCE,
-                          "function": "prismaquant.measured_runtime_prices.bootstrap_sum",
-                          "resamples": ("each distinct shape row's own samples, once per draw, "
-                                        "weighted by how many units read it"),
-                          "applied_as_a_threshold": ("only through pact_selection: the "
-                                                     "endpoint interval overlap is the "
-                                                     "materiality verdict and the top-two "
-                                                     "half-widths set min_separation")},
-            "allocator_argv": list(allocator_argv),
-            "assignments_dir": str(assignments_dir),
-            "n_units": int(ctx.n_units),
-        },
+        "provenance": _pact_provenance(ctx, allocator_argv, assignments_dir,
+                                       bootstrap_draws, bootstrap_seed),
+    }
+
+
+def run_constrained(ctx, *, assignments_dir: Path, allocator_argv: Sequence[str],
+                    bootstrap_draws: int, bootstrap_seed: int) -> dict:
+    """Publish the minimum-loss feasible choice over admitted time-priced options."""
+    from .shape_runtime_prices import TIME_CLAIM
+
+    built = ctx.build_constrained()
+    solution, record = built["solution"], built["record"]
+    assignment = dict(record["assignment"])
+    digest = identity_sha256(assignment)
+    path, published = _publish_assignment(
+        assignments_dir, assignment=assignment, digest=digest,
+        provenance_stub={"table_id": ctx.table_identity["table_id"],
+                         "table_sha256": ctx.table_identity["sha256"]})
+    point = {"point": 0, "feasible": True, "assignment_sha256": digest,
+             "assignment_path": str(path), "assignment_file_provenance": published,
+             "predicted_dloss": solution.predicted_dloss,
+             "operator_sum_ms": solution.prefill_ms,
+             "operator_sum_ms_bootstrap": ctx.pricing.operator_sum_bootstrap(
+                 solution.assignment, draws=bootstrap_draws, seed=bootstrap_seed),
+             "within_time_ceiling": (None if ctx.time_ceiling_ms is None
+                                     else solution.prefill_ms <= ctx.time_ceiling_ms),
+             "candidate_bytes": solution.memory_bytes,
+             **{key: record[key] for key in ("achieved_bits", "payload_bytes",
+                                             "whole_artifact_upper_bound_bytes") if key in record}}
+    provenance = _pact_provenance(ctx, allocator_argv, assignments_dir,
+                                  bootstrap_draws, bootstrap_seed)
+    provenance["bootstrap"]["applied_as_a_threshold"] = "none; intervals describe the proposal"
+    constraints = {"max_memory_bytes": int(ctx.max_memory_bytes),
+                   "max_prefill_ms": built["baseline"]["derived_operator_sum_ms"],
+                   "max_states": int(ctx.max_states), "max_transitions": int(ctx.max_transitions)}
+    return {
+        "schema": PACT_SCHEMA, "candidate_generator": CONSTRAINED_GENERATOR,
+        "selection_mode": "constrained", "selected_assignment_sha256": digest,
+        "time_claim": TIME_CLAIM, "research_only": True,
+        "certifies_placement": False, "certifies_p95": False,
+        "selection_scope": ("minimum-loss discrete assignment over the current admitted "
+                            "time-priced candidates under declared bytes/time"),
+        "numeric_semantics": CONSTRAINED_NUMERIC_SEMANTICS,
+        "baseline": built["baseline"], "constraints": constraints,
+        "regime_m": int(ctx.regime_m), "tensor_parallel": int(ctx.tensor_parallel),
+        "time_ceiling_ms": ctx.time_ceiling_ms, "time_ceiling_role": "report bound only",
+        "max_memory_bytes": int(ctx.max_memory_bytes),
+        "max_states": int(ctx.max_states), "max_transitions": int(ctx.max_transitions),
+        "whole_artifact_budget": ctx.whole_artifact_budget,
+        "table_identity": dict(ctx.table_identity), "scope": dict(ctx.scope),
+        "remainder": {"fixed_members": len(ctx.fixed_members),
+                      "fixed_members_sample": list(ctx.fixed_members[:16]),
+                      "reading": "only current independent DP serving units are time-priced"},
+        "gap_report": ctx.pricing.gap_report(), "search_diagnostics": built["diagnostics"],
+        "search_seconds": built["seconds"], "search_peak_rss_kib": built["peak_rss_kib"],
+        "points": [point], "provenance": provenance,
     }
 
 
@@ -813,8 +879,60 @@ def _as_json(value):
     return json.loads(json.dumps(value))
 
 
+def load_pact_baseline(path: Path, expected_sha256: str, *, table_identity: dict,
+                       scope: dict, regime_m: int, tensor_parallel: int,
+                       serving_scope: dict) -> tuple[dict, dict]:
+    """Consume one bound existing assignment using the layer-config reader core.
+
+    A plain shorthand is a comparison assignment under this run's explicit
+    context, never a served/native timing claim. Any context declared by a
+    richer existing config must agree. Time is derived later from the same
+    admitted resources as the candidates, not from this file's numbers.
+    """
+    from .layer_config import canonicalize_assignment, layer_config_metadata
+    from .runtime_provenance import _equal
+    from .schemas import validate_layer_config_payload
+
+    raw = path.read_bytes()
+    actual_sha256 = bytes_sha256hex(raw)
+    if actual_sha256 != expected_sha256:
+        raise PrefillFrontierError("PACT baseline file SHA-256 mismatch")
+    payload = json.loads(raw)
+    validate_layer_config_payload(payload, str(path))
+    assignment = canonicalize_assignment(payload)
+    names = [str(name).removesuffix(".weight") for name in payload if name != LAYER_CONFIG_META_KEY]
+    if len(names) != len(set(names)):
+        raise PrefillFrontierError("PACT baseline has duplicate canonical assignment names")
+    meta = layer_config_metadata(payload)
+    declared_serving = meta.get("tessera_serving_scope")
+    if "tessera_serving_scope" in meta:
+        _equal(declared_serving, _as_json(serving_scope), "PACT baseline declared serving scope")
+    replay = meta.get("prefill_frontier_replay")
+    if "prefill_frontier_replay" in meta:
+        if not isinstance(replay, dict):
+            raise PrefillFrontierError("PACT baseline replay must be an object")
+        for key, value in (("table_identity", table_identity), ("scope", scope), ("regime_m", regime_m),
+                           ("tensor_parallel", tensor_parallel)):
+            if key in replay:
+                _equal(replay[key], _as_json(value), f"PACT baseline declared replay {key}")
+    if meta.get("schema") == ASSIGNMENT_SCHEMA:
+        for key, value in (("table_id", table_identity["table_id"]),
+                           ("table_sha256", table_identity["sha256"])):
+            if meta.get(key) != value:
+                raise PrefillFrontierError(f"PACT baseline declared {key} differs")
+        if meta.get("assignment_sha256") != identity_sha256(assignment):
+            raise PrefillFrontierError("PACT baseline declared assignment digest differs")
+    return assignment, {
+        "assignment_path": str(path), "file_sha256": actual_sha256,
+        "assignment_sha256": identity_sha256(assignment),
+        "table_identity": _as_json(table_identity), "scope": _as_json(scope),
+        "regime_m": int(regime_m), "tensor_parallel": int(tensor_parallel),
+        "standing": "comparison_assignment_input; no served or native baseline timing claim",
+    }
+
+
 def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
-    """Re-run the ONE probe that found a hull vertex and write it through the allocator.
+    """Re-run a recorded hull probe or constrained solve through the allocator.
 
     The hull is not rebuilt: the vertex's recorded probe weights are handed back
     to the same exact solver over the same priced inputs, and the answer must be
@@ -826,8 +944,30 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
     """
     if document.get("research_only") is not True or document.get("certifies_placement") is not False:
         raise PrefillFrontierError("replay requires a research-only, non-placement-certified PACT hull")
+    from .pact_hull import CANDIDATE_GENERATOR
+    from .allocator_solver import _runtime_float, _runtime_int
+    from .runtime_provenance import _equal
+    generator = document.get("candidate_generator")
+    if generator not in (CANDIDATE_GENERATOR, CONSTRAINED_GENERATOR):
+        raise PrefillFrontierError("replay refuses an unknown PACT candidate generator")
+    constrained = generator == CONSTRAINED_GENERATOR
     provenance = document["provenance"]
-    found = [v for v in document["vertices"]
+    if constrained:
+        if (document.get("selection_mode") != "constrained"
+                or document.get("numeric_semantics") != CONSTRAINED_NUMERIC_SEMANTICS
+                or document.get("certifies_p95") is not False
+                or document.get("time_claim") != "operator_sum_proposal"
+                or document.get("pact_selection") is not None):
+            raise PrefillFrontierError("constrained replay requires its closed proposal semantics")
+        points = document.get("points")
+        if (not isinstance(points, list) or len(points) != 1
+                or not isinstance(points[0], dict)):
+            raise PrefillFrontierError("constrained replay requires exactly its selected point")
+        if _runtime_int(points[0].get("point"), "PACT replay point") != 0:
+            raise PrefillFrontierError("constrained replay requires exactly its selected point")
+    if constrained and digest != document.get("selected_assignment_sha256"):
+        raise PrefillFrontierError("constrained replay requires its selected assignment")
+    found = [v for v in document["points" if constrained else "vertices"]
              if v.get("assignment_sha256") == digest and v.get("feasible") is True]
     if not found:
         raise PrefillFrontierError(f"no feasible hull vertex for assignment {digest}")
@@ -855,12 +995,24 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
         nonlocal emitted
         if not isinstance(ctx, allocator.PactHullSweep):
             raise PrefillFrontierError("a PACT hull replay reached a non-PACT allocator run")
+        if (ctx.selection_mode == "constrained") != constrained:
+            raise PrefillFrontierError("replay selection mode differs from the recorded generator")
+        _runtime_float(provenance["target_bits"], "PACT replay target_bits")
         for key, actual in (("table_identity", ctx.table_identity), ("scope", ctx.scope),
                             ("regime_m", ctx.regime_m), ("tensor_parallel", ctx.tensor_parallel),
                             ("target_bits", ctx.target_bits), ("cost_path", ctx.cost_path),
                             ("probe_path", ctx.probe_path)):
-            if provenance[key] != _as_json(actual):
-                raise PrefillFrontierError(f"replay {key} differs from the hull provenance")
+            _equal(provenance[key], _as_json(actual), f"replay {key} differs from the hull provenance")
+        if constrained:
+            if document.get("time_ceiling_ms") is not None:
+                _runtime_float(document["time_ceiling_ms"], "PACT replay time_ceiling_ms")
+            for key, actual in (("table_identity", ctx.table_identity), ("scope", ctx.scope),
+                                ("regime_m", ctx.regime_m), ("tensor_parallel", ctx.tensor_parallel),
+                                ("time_ceiling_ms", ctx.time_ceiling_ms),
+                                ("max_memory_bytes", ctx.max_memory_bytes),
+                                ("max_states", ctx.max_states), ("max_transitions", ctx.max_transitions),
+                                ("whole_artifact_budget", ctx.whole_artifact_budget)):
+                _equal(document.get(key), _as_json(actual), f"constrained replay {key} differs")
         stamp = {
             "schema": REPLAY_SCHEMA,
             "frontier_sha256": bytes_sha256hex(raw),
@@ -868,20 +1020,30 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
             "candidate_generator": document["candidate_generator"],
             "time_claim": document["time_claim"],
             "regime_m": int(ctx.regime_m), "tensor_parallel": int(ctx.tensor_parallel),
-            "vertex": vertex["vertex"],
-            "probe_weights": list(vertex["finding_probe"]["weights"]),
             "operator_sum_ms": vertex["operator_sum_ms"],
             "target_bits": float(ctx.target_bits),
             "table_identity": _as_json(ctx.table_identity),
             "cost_sha256": file_sha256hex(Path(ctx.cost_path)),
             "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
             "probe_bound_by_sweep": True,
+            "point_claims": {key: vertex[key] for key in (
+                "predicted_dloss", "operator_sum_ms", "candidate_bytes", "achieved_bits",
+                "payload_bytes", "whole_artifact_upper_bound_bytes") if vertex.get(key) is not None},
         }
         selection = document.get("pact_selection")
         if selection is not None:
             stamp["pact_selection_sha256"] = selection["identity_sha256"]
             stamp["pact_selection"] = selection
-        ctx.emit_replay(vertex["finding_probe"]["weights"], expected, stamp)
+        if constrained:
+            selection_input = {"baseline": document["baseline"],
+                               "constraints": document["constraints"]}
+            stamp.update(selection_input, point=vertex["point"],
+                         numeric_semantics=document["numeric_semantics"])
+        else:
+            selection_input = vertex["finding_probe"]["weights"]
+            stamp.update(vertex=_runtime_int(vertex["vertex"], "PACT replay vertex"),
+                         probe_weights=list(selection_input))
+        ctx.emit_replay(selection_input, expected, stamp)
         emitted = True
 
     allocator.main([*allocator_argv, "--layer-config", str(output)], measured_runtime_sweep=emit)
@@ -913,7 +1075,9 @@ def build_parser() -> argparse.ArgumentParser:
                      "--measured-runtime-fixed-scope shape-only among those arguments; the "
                      "curve then prices no fixed charge and no device budget, and says so. "
                      "With --pact-shape-table among the allocator arguments it instead writes "
-                     "the exact PACT hull (prismaquant.pact_frontier.v1) and takes no grid."),
+                     "a prismaquant.pact_frontier.v1 document with no grid: the exact "
+                     "PACT hull by default, or one constrained selection with explicit "
+                     "--pact-selection-mode constrained and a bound baseline assignment."),
         epilog=("Example: python -m prismaquant.prefill_frontier --output frontier.json "
                 "--slo-grid auto -- --probe probe.pkl --costs joint.pkl --formats F1,F2 "
                 "--target-bits 4.75 --measured-runtime-table runtime.json "
@@ -1041,12 +1205,11 @@ def replay_main(argv: Sequence[str]) -> int:
 
 def hull_document(ap: argparse.ArgumentParser, args, allocator_argv: list[str],
                   assignments_dir: Path) -> dict:
-    """The PACT hull: one allocator load, one exact hull, one document."""
+    """One PACT allocator load and document for the declared selection mode."""
     if args.slo_ms is not None or args.slo_grid is not None:
-        ap.error("--slo-ms/--slo-grid are an SLO grid; a PACT hull (--pact-shape-table) has "
-                 "no grid, and its vertices are every pick an affine selection rule can make")
+        ap.error("--slo-ms/--slo-grid are an SLO grid; PACT (--pact-shape-table) has no grid")
     if args.loss_noise_floor != 0.0:
-        ap.error("--loss-noise-floor applies to the SLO grid's nondominance, not to a hull")
+        ap.error("--loss-noise-floor applies to the SLO grid's nondominance, not to PACT")
     from . import allocator
     document: dict | None = None
 
@@ -1054,9 +1217,9 @@ def hull_document(ap: argparse.ArgumentParser, args, allocator_argv: list[str],
         nonlocal document
         if not isinstance(ctx, allocator.PactHullSweep):
             raise SystemExit("[pact-hull] the allocator did not enter PACT mode")
-        document = run_hull(ctx, assignments_dir=assignments_dir, allocator_argv=allocator_argv,
-                            bootstrap_draws=args.bootstrap_draws,
-                            bootstrap_seed=args.bootstrap_seed)
+        run = run_constrained if ctx.selection_mode == "constrained" else run_hull
+        document = run(ctx, assignments_dir=assignments_dir, allocator_argv=allocator_argv,
+                       bootstrap_draws=args.bootstrap_draws, bootstrap_seed=args.bootstrap_seed)
 
     allocator.main(list(allocator_argv), measured_runtime_sweep=hull)
     if document is None:
@@ -1116,6 +1279,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     atomic_write_bytes(
         output, (json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8"))
     if pact:
+        if document["candidate_generator"] == CONSTRAINED_GENERATOR:
+            print(f"[pact-constrained] selected {document['selected_assignment_sha256']} "
+                  f"within {document['constraints']['max_prefill_ms']:.6g} operator ms "
+                  f"-> {output}", flush=True)
+            return 0
         print(f"[pact-hull] {document['n_vertices']} vertices from {document['probe_count']} "
               f"exact probes in {document['hull_seconds']:.1f} s at M={document['regime_m']} "
               f"TP{document['tensor_parallel']} -> {output}", flush=True)
