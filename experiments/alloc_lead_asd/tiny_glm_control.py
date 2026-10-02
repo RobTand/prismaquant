@@ -57,8 +57,25 @@ def dependency_identity():
 
 
 def commit(units, phase):
-    from prismaquant.prismabuild_progress import report_progress
+    from prismaquant.prismabuild_progress import commit as report_progress
     report_progress(units, phase, 'durable_tiny_glm_control')
+
+
+@contextlib.contextmanager
+def profiled(path, device):
+    activities = [torch.profiler.ProfilerActivity.CPU]
+    if device.type == 'cuda':
+        activities.append(torch.profiler.ProfilerActivity.CUDA)
+    profile = torch.profiler.profile(activities=activities)
+    try:
+        with profile:
+            yield
+    finally:
+        trace = Path(str(path) + '.trace.json')
+        profile.export_chrome_trace(str(trace))
+        with trace.open('rb') as handle, gzip.open(str(trace) + '.gz', 'wb') as zipped:
+            zipped.write(handle.read())
+        trace.unlink()
 
 
 def difference(a, b):
@@ -314,8 +331,11 @@ def main():
     parser.add_argument('--manifest-sha256', required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--reuse-fp32-direct', action='store_true')
+    parser.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
+    parser.add_argument('--only-dtype', choices=('float32', 'bfloat16'))
     args = parser.parse_args()
     args.output.mkdir(exist_ok=False)
+    device = torch.device(args.device)
     torch.set_num_threads(1)
     torch.set_float32_matmul_precision('highest')
     torch.backends.cuda.matmul.allow_tf32 = False
@@ -343,12 +363,19 @@ def main():
     commit(1, 'startup')
     results = {'source': source, 'scoped_dependency': dependency_identity(), 'legs': {},
                'scope': 'synthetic tiny GLM; no original GLM tensor reads'}
+    if device.type == 'cpu':
+        from transformers.models.glm5_next import modeling_glm5_next as modeling
+        for name in ('causal_conv1d_fn', 'causal_conv1d_update'):
+            function = getattr(modeling, name)
+            if hasattr(function, '__wrapped__'):
+                setattr(modeling, name, function.__wrapped__)
+        results['substitutions'] = ['CPU preflight only: library Torch short-convolution implementations']
     try:
-        for index, dtype in enumerate((torch.float32, torch.bfloat16)):
+        dtypes = [getattr(torch, args.only_dtype)] if args.only_dtype else (torch.float32, torch.bfloat16)
+        for index, dtype in enumerate(dtypes):
             label = str(dtype).split('.')[-1]
-            model, runner, modules = model_and_runner(config, state, dtype, torch.device('cuda'))
-            profile = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA])
-            with profile:
+            model, runner, modules = model_and_runner(config, state, dtype, device)
+            with profiled(args.output / label, device):
                 if dtype == torch.float32 and args.reuse_fp32_direct:
                     prior = json.loads(raw['inputs.ready.json'])
                     assert prior['source_identity_sha256'] == source['model_identity']['content_sha256']
@@ -356,7 +383,7 @@ def main():
                     direct_result = torch.load(io.BytesIO(raw['float32.direct.pt']), map_location='cpu', weights_only=True)
                     assert {r['unit'] for r in direct_result['rows']} == set(modules)
                 else:
-                    direct_result = direct(model, modules, ids.cuda())
+                    direct_result = direct(model, modules, ids.to(device))
                 torch.save(direct_result, args.output / f'{label}.direct.pt')
                 captured = capture(runner, model, modules, ids, source['model_identity'], args.output / label, publication)
                 cotangent_differences = {f'L{layer}/p{p}': difference(direct_result['gradients'][layer, p],
@@ -364,18 +391,13 @@ def main():
                     for layer in range(2) for p in range(2)}
                 direct_components = components(direct_result['rows'], modules)
                 capture_components = components(captured['rows'], modules)
-                operator_components = statistics(captured['rows'], modules, torch.device('cuda'))
-                spill = (spill_control(captured['rows'], modules, torch.device('cuda'),
+                operator_components = statistics(captured['rows'], modules, device)
+                spill = (spill_control(captured['rows'], modules, device,
                     Path(os.environ['PRISMAQUANT_STAGE_B_SPILL_ROOT']) / f'action-{os.getpid()}')
                     if dtype == torch.bfloat16 else {'scope': 'FP32 not admitted by production spill operand dtype contract'})
-            profile.export_chrome_trace(str(args.output / f'{label}.trace.json'))
-            with open(args.output / f'{label}.trace.json', 'rb') as handle:
-                with gzip.open(args.output / f'{label}.trace.json.gz', 'wb') as zipped:
-                    zipped.write(handle.read())
-            (args.output / f'{label}.trace.json').unlink()
             tensors = {'direct': direct_result, 'capture': captured}
             torch.save(tensors, args.output / f'{label}.pt')
-            results['legs'][label] = {'runtime': runtime_identity(model),
+            results['legs'][label] = {'runtime': runtime_identity(model) if device.type == 'cuda' else {'device': 'cpu', 'torch': torch.__version__},
                 'cotangent_differences': cotangent_differences,
                 'direct_components': {f'{n}/p{p}': v for (n, p), v in direct_components.items()},
                 'capture_components': {f'{n}/p{p}': v for (n, p), v in capture_components.items()},
@@ -390,7 +412,7 @@ def main():
             torch.cuda.empty_cache()
         results['complete'] = True
         (args.output / 'result.json').write_text(json.dumps(results, indent=2) + '\n')
-        commit(4, 'publish')
+        commit(2 + len(dtypes), 'publish')
         print('PASS: tiny GLM direct and production capture legs complete; inspect numerical differences')
     finally:
         results['publication_release'] = publication.release()
