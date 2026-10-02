@@ -5539,10 +5539,10 @@ def _tessera_route_memo():
 def _require_resumable_anchor(anchor: CampaignAnchor, static_scales) -> None:
     """Refuse a resumed anchor priced under a different activation contract.
 
-    The per-row half of the resume identity rule, shared by pre-link seed
-    admission and :func:`_checkpoint_anchor_identity`. The run-level half (this run's
-    static scales and policy, bound into the journal identity) is
-    :func:`_campaign_checkpoint_identity`) binds the journal. Resume merges checkpoint rows into
+    This is the per-row half of the resume identity rule, shared by pre-link
+    seed admission and :func:`_checkpoint_anchor_identity`. The run-level
+    half, :func:`_campaign_checkpoint_identity`, binds this run's static scales
+    and policy into the journal. Resume merges checkpoint rows into
     this run's table, and the table's rows must be one currency.  A W4A4
     anchor with no ``input_global_scale`` was measured under the pre-#194
     dynamic FP32-scale quantiser; one with a *different* scale was measured
