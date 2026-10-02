@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
+ownership removal through the existing LeaseWindow. A descriptor number
+reused by another reader cannot lose its tracking entry during an earlier
+close. The SDK open and payload reads remain outside that ownership lock;
+readers still join before window exit closes descriptors and releases the
+exact residency ref. Forked operations refuse before taking the lock.
+
 Re-stamped 2026-10-02 (PR #2046, Refs #1504): a context-scoped Tessera
 format query resolves the producer's wire for its descriptor and price, then
 reports the existing producer-eligibility gate's answer. A valid unattested
