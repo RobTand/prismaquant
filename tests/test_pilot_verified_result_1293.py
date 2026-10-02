@@ -35,7 +35,7 @@ def _selected_fixture(tmp_path, monkeypatch, sdk, args, canned, fault):
         def git(*argv):
             return subprocess.run(["git", "-C", str(root), *argv], check=True,
                                   capture_output=True, text=True).stdout.strip()
-        git("init", "-q")
+        git("init", "-q", "-b", "master")
         git("-c", "user.name=CPU fixture", "-c", "user.email=fixture@example.invalid",
             "add", "fixture.py")
         git("-c", "user.name=CPU fixture", "-c", "user.email=fixture@example.invalid",
@@ -67,7 +67,10 @@ def _selected_fixture(tmp_path, monkeypatch, sdk, args, canned, fault):
             path = Path(args[index + 1])
             contract = json.loads(path.read_bytes())
             contract["snapshot"] = reviewed
-            contract["snapshot_commit"] = approved_commit
+            contract["snapshot_selection"] = {
+                "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+                "input": reviewed, "subdirectory": ".", "commit": approved_commit,
+                "parent": approved_parent, "refs": {}}
             wire = json.dumps(contract, sort_keys=True).encode()
             path.write_bytes(wire)
             extra += [word, str(path), hashlib.sha256(wire).hexdigest()]
@@ -96,8 +99,9 @@ def _selected_fixture(tmp_path, monkeypatch, sdk, args, canned, fault):
             "inputs": [descriptor], "code_closure": core.build_code_closure(checkout, ["fixture.py"]),
             "params": {"command": command, "cwd": ".", "checkout_snapshot": {
                 "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
-                "input": descriptor, "subdirectory": ".",
-                "commit": commit, "parent": parent, "refs": {}}},
+                "input": descriptor, "subdirectory": "other" if fault == "subdirectory" else ".",
+                "commit": commit, "parent": parent,
+                "refs": {"master": approved_commit} if fault == "refs" else {}}},
             "environment": {"variables": {"PATH": "/usr/bin:/bin"}, "toolchain": {}},
             "execution_scope": {"portability": "portable", "platform_key": None, "host_class": None}})
         assert core.validate_action(action) == action
@@ -147,7 +151,7 @@ def _selected_fixture(tmp_path, monkeypatch, sdk, args, canned, fault):
     return extra, PrivateGateway(), resealed
 
 
-@pytest.mark.parametrize("fault", [None, "source", "source_commit", "entry", "plan", "environment", "wrapper", "legacy", "attempt"])
+@pytest.mark.parametrize("fault", [None, "source", "source_commit", "subdirectory", "refs", "entry", "plan", "environment", "wrapper", "legacy", "attempt"])
 def test_real_selected_result_admits_only_the_reviewed_source_and_invocation(
         tmp_path, campaign, records_dir, monkeypatch, installed_client_sdk, fault):
     receipt = _ready(tmp_path, campaign, records_dir)

@@ -4,8 +4,9 @@ PQ #2106 completes the bounded consumer portion of #1293. The dispatcher now
 binds counter bytes to an explicitly selected PB execution's verified CAS
 result and sealed request. The capture binder proves the standard wrapper;
 PQ inspects the authenticated payload command, original quantum record and
-independently reviewed source contract. The contract binds both snapshot
-input descriptor and selected Git commit, plus entry, image and environments.
+independently reviewed source contract. The contract binds the snapshot
+input descriptor and complete selection (schema, commit, parent, subdirectory,
+refs and input), plus entry, image and environments.
 The same bundle can contain older commits, so descriptor equality alone is
 insufficient. Cross-output namespace equivalence and the stamped override
 remain covered. The normative contract and finite measurement protocol are
@@ -37,7 +38,7 @@ unauthorized local smoke in SDK4-CHECKPOINT.json is excluded.
 | `sdk4-consumer-causal-red.json` / `204ba21fd3b6` | 6 failed, 2 passed, 22 deselected | Draft admitted foreign entry/plan/prepared/adjoint/regime; real binder path incorrectly compared wrapper to command |
 | `sdk4-source-causal-control.json` / `f896f1c44540` | 1 failed, 7 passed | Removing only the reviewed source-descriptor comparison admits the resealed foreign-source control; pre-selected-commit contract variant |
 | `sdk4-commit-causal-control.json` / `363b52ac4d00` | 1 failed, 8 passed | Removing only the selected Git-commit comparison admits an older tree from the same reviewed bundle |
-| `sdk4-consumer-green-reviewed.json` | 111 passed, 111 collected/ran, 0 skipped | Final delivered Python bytes: dispatcher 37, counter reference 20, real selected-result controls 9, quantum runtime 38, duplication 7 |
+| `sdk4-consumer-green-reviewed.json` | 111 passed, 111 collected/ran, 0 skipped | Pre-full-selection candidate Python bytes: dispatcher 37, counter reference 20, real selected-result controls 9, quantum runtime 38, duplication 7 |
 
 The real controls use private CPU Git bundles, actual sealed requests, CAS
 input/result receipts and PoolQueue publish/claim/finish records, read through
@@ -47,7 +48,7 @@ The matching control admits. GPU numerical/power/wait measurements and the
 fixture source-review relation are controlled doubles; they are not a genuine
 joint GPU pilot or approval of a production source contract.
 
-Final green actions, all rc 0:
+Pre-full-selection green actions, all rc 0:
 
 - `51da58dd0459c40b1fb67f59a7bc8e7048399ae377718504f01440d7bd886839` — dispatcher 37.
 - `ff99ee206357070ad3be226d65e184dc159c17cdf1eb24b859928e1a2913a9af` — counter reference 20.
@@ -63,7 +64,7 @@ new primitive digest sites; these were replaced with the existing byte-digest
 owner, and final duplication 7 passed. Supporting runs retain their own source
 identities rather than being relabelled as the final consumer source.
 
-Final five-module compile action
+Pre-full-selection five-module compile action
 `3bbe2e7c01610aa06de8ea618922b9afcb4d50b5b74cd37180d0403bfc3b0f91`
 returned 0, receipt
 `c3c14b693bcc4735492e4c88bfd0f7129b2b55ed785ffc9e015ea2e35d86851f`.
@@ -74,9 +75,11 @@ Reports and logs are under `/home/rob/tmp/astra-resume-20261002/pq_spill/`.
 `sdk4-receipts/*-action.json` holds complete typed PB action observations;
 `sdk4-source-evidence.json` binds them to raw source bundle SHA/length, selected
 Git commit, package/file digests, exact terminal status, receipt/result bytes
-and attempt-log hashes/lengths. Every final green and compile source matches
+and attempt-log hashes/lengths. The final admission and compile source matches
 the delivered quantum, pilot, staged-lease, dispatcher and experiment Python
-files. Their full durable package digest is
+files. The final full durable package digest is
+`cc961090340184dd58533f4f84c0825720030fba214a637cd6516248305f027f`.
+The preceding 111-case candidate package was
 `694b30b349cb2cf5e652a2d25453b302fdd5c8fefaa1d0abbcb9d022870d668c`.
 The evidence records also retain earlier variants and failed controls.
 
@@ -104,3 +107,36 @@ acceptance remain open gates. Current-source original-model GPU input/lifetime
 qualification, exact input/image/resource seals and root resource GO are
 required before the finite protocol can be launched. Historical unbound
 receipts remain negatives and cannot be retro-stamped.
+
+
+## Full snapshot-selection follow-up
+
+Root's final contract freezes the complete authenticated
+`params.checkout_snapshot`, including schema, commit, parent, subdirectory,
+refs and input. It is compared as one exact expected record; PQ adds no Git
+validator. This supersedes the descriptor-plus-commit contract variant above.
+
+`sdk4-full-selection-green.json`: 48 collected/ran/passed, zero skips,
+dispatcher 37 plus real selected-result controls 11. Actions are
+`392901db1ec82eac42d6392e8e260431ef124e5d67b6cb54a803d4fbb5c812b1`
+and `2e44e03c61516ced25dcff3cab1635cd1b806918a35414e3db58e4f72c7f185c`.
+The fixture then made its private Git branch name explicit and passed all 11
+again in `sdk4-selected-fixture-final.json`, action
+`cec8bcc6646407c8175c470ce6e9023927f403ca31336bf15eb285926144ea59`.
+The matching result admits; wrong source, older commit, subdirectory, refs,
+entry, plan, environment, wrapper, legacy result and attempt refuse.
+
+Removing only complete-selection equality gives two failures (older commit
+and refs) and nine passes, action
+`9f3c9067f7179ee8ea0d764fa591d8f8e4b3dc3eb40ba46f287398888816d4b3`.
+The unsupported subdirectory remains refused by the invocation contract.
+This is a deliberate failed mutation control, not a qualified execution.
+
+Final five-module compile action
+`3a58a106651d166c8c04790bdc5ecd7ec34d7dc1a9641be988a395064c25a2dc`
+returned 0, receipt
+`2b3e5a1e9454564f8b53d74e97c8f8e39d80c50aafa8fdf2d0e4ca9a184e0403`.
+Architecture/docs checks passed 19 cases again in `sdk4-docs-final.json`.
+The source ledger retains all 24 action observations and source variants;
+current-file comparisons were refreshed after this follow-up. The final
+source-package hash and compile/admission byte matches are recorded above.

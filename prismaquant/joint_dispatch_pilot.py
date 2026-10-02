@@ -150,7 +150,7 @@ def validate_pilot_source_contract(value, *, implementation_sha256) -> dict:
     PB authenticates the matching declared input descriptor; this domain
     contract supplies the source and environment the reviewer accepted.
     """
-    fields = {"schema", "snapshot", "snapshot_commit", "implementation_sha256", "launcher_argv",
+    fields = {"schema", "snapshot", "snapshot_selection", "implementation_sha256", "launcher_argv",
               "quantum_argv", "container_spec", "outer_environment"}
     if not isinstance(value, dict) or set(value) != fields or value["schema"] != PILOT_SOURCE_SCHEMA:
         raise PilotRefused("pilot source contract is missing, malformed or unsupported")
@@ -162,9 +162,11 @@ def validate_pilot_source_contract(value, *, implementation_sha256) -> dict:
             or type(descriptor["bytes"]) is not int or descriptor["bytes"] <= 0):
         raise PilotRefused("pilot source contract needs an exact snapshot input descriptor")
     _pilot_binding_digest(descriptor["sha256"], "accepted snapshot digest")
-    if (not isinstance(value["snapshot_commit"], str)
-            or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["snapshot_commit"]) is None):
-        raise PilotRefused("pilot source contract needs the exact selected snapshot commit")
+    selection = value["snapshot_selection"]
+    if (not isinstance(selection, dict) or selection.get("input") != descriptor
+            or not isinstance(selection.get("commit"), str)
+            or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", selection["commit"]) is None):
+        raise PilotRefused("pilot source contract needs the exact snapshot selection")
     if value["launcher_argv"] != PILOT_LAUNCHER or value["quantum_argv"] != PILOT_ENTRY:
         raise PilotRefused("pilot source contract names an unsupported launcher or quantum entry")
     spec, environment = value["container_spec"], value["outer_environment"]

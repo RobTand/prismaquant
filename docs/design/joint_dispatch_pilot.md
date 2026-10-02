@@ -15,7 +15,7 @@ candidate completion and counters. Its exact field set is:
 | --- | --- |
 | `schema` | `prismaquant.joint_dispatch_pilot.source.v1` |
 | `snapshot` | Exact `{id: "pbrun.checkout-snapshot", sha256, bytes}` PB input descriptor |
-| `snapshot_commit` | Exact selected Git commit inside the accepted bundle; ancestry cannot select other code |
+| `snapshot_selection` | Exact full authenticated `params.checkout_snapshot`: schema, commit, parent, subdirectory, refs and input |
 | `implementation_sha256` | Reviewed relation between that snapshot and the complete durable PrismaQuant package digest |
 | `launcher_argv` | `["python3", "-m", "tools.tessera_campaign_container"]` |
 | `quantum_argv` | `["python3", "-m", "prismaquant.joint_cost_quantum"]` |
@@ -27,16 +27,22 @@ the snapshot bytes and the intended code, before accepting the contract.
 Neither a counter's implementation digest nor a candidate's descriptor can
 create that relation. The contract digest supplied to the CLI binds that
 review input. Contracts are deduplicated by the caller; zero or multiple
-matching contracts refuse. A source change needs a newly reviewed descriptor.
+matching contracts refuse. A source or selection change needs a newly reviewed contract.
 This is source qualification, independent of worker-generation deployment.
 
 The existing pinned SDK4 client reads the exact selected generation/attempt's
-verified result and sealed request. The SDK's capture binder proves the
+verified result and sealed request. A coordinator using the scoped SDK4
+interpreter must also configure the existing sealed-root resolver to the
+reviewed SDK4 qualification tree (`PRISMABUILD_READER_HELPER_ROOT`, or the
+existing explicit helper-root API). Package installation alone is not that
+production resolver configuration. Inside an admitted workload the worker's
+protected helper root remains its actual deployed generation; this client
+qualification does not override or upgrade that worker's reader context. The SDK's capture binder proves the
 standard wrapper recipe; it returns wrapper argv, so PQ then inspects the
 request's authenticated `params.command`. The supported command runs the
 existing campaign-container adapter and the existing quantum entry. The
 quantum's own parser validates the payload flags, with duplicate options
-refused. The full outer environment, full container spec and source input must
+refused. The full outer environment, full container spec, source input and snapshot selection must
 match the independent contract.
 
 The producer uses the shared `stage_inputs.read_bound` owner once for the

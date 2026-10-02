@@ -3683,7 +3683,7 @@ def _accepted_pilot_source(request, invocation, contracts):
              if k not in {"PRISMABUILD_CONTAINER_OWNER", "PRISMABUILD_CONTAINER_MARKER"}}
     matching = [(contract, reference) for contract, reference in contracts
                 if contract["snapshot"] == descriptor
-                and contract["snapshot_commit"] == snapshot.get("commit")
+                and contract["snapshot_selection"] == dict(snapshot)
                 and contract["outer_environment"] == outer
                 and contract["container_spec"] == invocation["spec"]]
     if len(matching) != 1:

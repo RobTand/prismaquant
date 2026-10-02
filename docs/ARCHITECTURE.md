@@ -4,7 +4,8 @@ Re-stamped 2026-10-02 (PQ #2106, Refs #1293, selected-result consumer):
 fan-out pilot admission uses the reviewed SDK4 public selected-action result
 reader and standard-capture binder. Explicit publication/attempt selectors
 and an independently digest-bound versioned source contract bind the exact
-PB snapshot input and selected commit, reviewed package relation, known entries,
+PB snapshot input and complete selection (commit/parent/subdirectory/refs),
+reviewed package relation, known container/quantum entries,
 image and complete environments. Candidate counters cannot introduce an
 accepted source. The producer inlines the original bounded quantum wire from
 its shared owned read; the consumer authenticates those bytes and committed
