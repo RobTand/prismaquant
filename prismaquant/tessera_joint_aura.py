@@ -2555,6 +2555,12 @@ def _prepared_digest_recorded(key, stored, expected):
                           refusal=lambda: ValueError(f"prepared {key}: identity mismatch"))
 
 
+def require_prepared_binding(key, stored, expected, *, where=None):
+    """Apply the prepared-record policy at completion and cache intake alike."""
+    if not _prepared_digest_recorded(key, stored, expected):
+        _same(stored, expected, where or f"prepared {key}")
+
+
 def require_prepared_digests(completion, *, plan_sha256, implementation_sha256):
     """Compare a prepared completion's plan and implementation digests.
 
@@ -2565,8 +2571,7 @@ def require_prepared_digests(completion, *, plan_sha256, implementation_sha256):
     """
     for key, value in (("plan_sha256", plan_sha256),
                        ("implementation_sha256", implementation_sha256)):
-        if not _prepared_digest_recorded(key, completion.get(key), value):
-            _same(completion.get(key), value, f"prepared {key}")
+        require_prepared_binding(key, completion.get(key), value)
 
 
 def _preflight_run_prepared(prepared, *, plan_sha256, implementation_sha256,
@@ -2599,8 +2604,7 @@ def check_prepared_completion(completion, *, plan_sha256, implementation_sha256,
                        ("implementation_sha256", implementation_sha256),
                        ("reader_identity", reader_identity),
                        ("projection_backend", projection_backend)):
-        if not _prepared_digest_recorded(key, completion.get(key), value):
-            _same(completion.get(key), value, f"prepared {key}")
+        require_prepared_binding(key, completion.get(key), value)
     return completion
 
 
@@ -3023,15 +3027,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                                ("render_origins", render_census["render_origins"]),
                                ("render_comparisons", render_census["render_comparisons"]),
                                ("projection_backend", projection_backend.identity)):
-                if not _prepared_digest_recorded(key, completion.get(key), value):
-                    _same(completion.get(key), value, f"prepared {key}")
+                require_prepared_binding(key, completion.get(key), value)
             _same(completion["formats_by_qname"], {n: list(v) for n, v in data.formats_by_qname.items()},
                   "prepared exact candidate roster")
             cache = pickle.loads(_bound(completion["production_cache"], "qualified PWC").read_bytes())
             _require(isinstance(cache, ProductionWeightCache), "prepared cache is not ProductionWeightCache")
             _same(cache.metadata["inputs"], data.inputs, "prepared source bindings")
             _same(cache.metadata.get("reader_identity"), reader_identity, "prepared reader identity")
-            _same(cache.metadata.get("projection_backend"), projection_backend.identity, "prepared backend identity")
+            require_prepared_binding("projection_backend", cache.metadata.get("projection_backend"),
+                                     projection_backend.identity, where="prepared backend identity")
             _same(set(cache.metadata["verified_cells"]), set(data.cells), "prepared verified cell coverage")
             _same(cache.weights, {pair: cell["render"] for pair, cell in data.cells.items()}, "prepared original render paths")
             for key in ("render_origins", "render_comparisons"):
