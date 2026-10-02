@@ -161,7 +161,8 @@ def model_and_runner(config, state, dtype, device):
         include_routed_experts=True, profile=runner.profile)
     modules.update({member.qname: member for member in
                     profile_declared_packed_expert_projections(model, runner.profile)})
-    modules = {name: module for name, module in modules.items() if '.mlp.' in name}
+    modules = {name: module for name, module in modules.items()
+               if name.startswith('model.language_model.layers.') and '.mlp.' in name}
     return model, runner, modules
 
 
@@ -337,6 +338,7 @@ def main():
     args.output.mkdir(exist_ok=False)
     device = torch.device('cuda', torch.cuda.current_device()) if args.device == 'cuda' else torch.device('cpu')
     torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
     torch.set_float32_matmul_precision('highest')
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
