@@ -1830,12 +1830,15 @@ class PactHullSweep:
     after the same exact checks a measured solve applies (promotion identity,
     exact payload bpp <= target). ``emit_replay(weights, assignment,
     provenance)`` re-runs the ONE probe that found a vertex and writes it
-    through the allocator's only layer-config writer. Nothing here certifies
+    through the allocator's only layer-config writer. Explicit constrained
+    mode supplies ``build_constrained()`` and replays its finite runtime solve
+    under both caps; its baseline may be an unsupported hull choice.
+    Nothing here certifies
     time or placement: every time is an operator-sum proposal at one regime M.
     """
 
     build_hull: Callable[[], dict]
-    emit_replay: Callable[[Sequence[float], dict, dict], None]
+    emit_replay: Callable[[Sequence[float] | dict, dict, dict], None]
     #: ``shape_runtime_prices.ShapePricing``: bootstrap, gap report, identity.
     pricing: object
     table_identity: dict
@@ -1844,8 +1847,8 @@ class PactHullSweep:
     tensor_parallel: int
     time_ceiling_ms: float | None
     max_memory_bytes: int
-    #: The exact probe's bounds (``--pact-max-states`` / ``--pact-max-transitions``);
-    #: a replay re-runs its probe under the same ones.
+    #: Both modes' bounds (``--pact-max-states`` / ``--pact-max-transitions``);
+    #: replay re-runs the selected solver under the same ones.
     max_states: int
     max_transitions: int
     #: ``None`` when the budget is ``--target-bits``; with ``--target-disk-gb``
@@ -1860,6 +1863,9 @@ class PactHullSweep:
     target_bits: float
     cost_path: str
     probe_path: str
+    #: Optional explicitly constrained solve; the legacy hull remains the default.
+    build_constrained: Callable[[], dict] | None = None
+    selection_mode: str = "hull"
 
 
 def require_no_research_exact_member_scalar(cost_data: dict) -> None:
@@ -2272,13 +2278,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "it. It requires the prefill frontier sweep and no "
                          "--serve-device-budget-bytes, and it certifies no "
                          "placement.")
-    # ---- PACT: the shape-time price table and its exact hull (PQ #1584) ----
+    # ---- PACT: one shape-time owner, opt-in constrained solve (PQ #2030) ----
     ap.add_argument("--pact-shape-table", default=None,
                     help="Research-only shape-time price table "
                          "(prismaquant.shape_runtime_prices.v1). Prices every option "
                          "by its served operator's rank-local shape at one regime M "
                          "and hands the exact lower convex hull of (operator-sum "
-                         "time, predicted Δloss) to the prefill_frontier caller. "
+                         "time, predicted Δloss), or the opt-in constrained choice, "
+                         "to the prefill_frontier caller. "
                          "Available only through prismaquant.prefill_frontier; a "
                          "single solve refuses it.")
     ap.add_argument("--pact-regime", type=int, default=None,
@@ -2291,27 +2298,42 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                          "the table must equal and sets each routed member's "
                          "rank-local cut.")
     ap.add_argument("--pact-time-ceiling-ms", type=float, default=None,
-                    help="A REPORT bound on operator-sum time: hull vertices above "
-                         "it are flagged, never removed. The constrained set's own "
-                         "boundary vertex is not generated.")
+                    help="A REPORT bound on operator-sum time: proposals above it are "
+                         "flagged, never removed. The default hull does not generate a "
+                         "constrained boundary; opt-in constrained mode uses its baseline's "
+                         "derived time bound instead.")
+    ap.add_argument("--pact-selection-mode", choices=("hull", "constrained"), default="hull",
+                    help="'hull' preserves the research hull; opt-in 'constrained' minimizes "
+                         "declared surrogate loss under bytes and the matched baseline's "
+                         "operator-sum time through the existing finite runtime frontier.")
+    ap.add_argument("--pact-baseline-assignment", default=None,
+                    help="Complete layer-config or canonical assignment used as the comparison "
+                         "baseline in constrained mode; never required to be a hull vertex.")
+    ap.add_argument("--pact-baseline-sha256", default=None,
+                    help="SHA-256 of the exact baseline file bytes consumed. Its time bound "
+                         "is recomputed using this run's same admitted shape resources.")
     ap.add_argument("--pact-max-states", type=int, default=None,
-                    help="The exact hull probe's max_states bound (default: the "
-                         "solver's own, pact_hull.DEFAULT_MAX_STATES). A probe over "
-                         "it is refused, never truncated.")
+                    help="The selected solver's max_states bound (default: "
+                         "pact_hull.DEFAULT_MAX_STATES). A search over it is refused, "
+                         "never truncated.")
     ap.add_argument("--pact-max-transitions", type=int, default=None,
-                    help="The exact hull probe's max_transitions bound (default: "
-                         "the solver's own, pact_hull.DEFAULT_MAX_TRANSITIONS).")
+                    help="The selected solver's max_transitions bound (default: "
+                         "pact_hull.DEFAULT_MAX_TRANSITIONS).")
     args = ap.parse_args(argv)
 
     pact_flags = (("--pact-regime", args.pact_regime),
                   ("--pact-tensor-parallel", args.pact_tensor_parallel),
                   ("--pact-time-ceiling-ms", args.pact_time_ceiling_ms),
                   ("--pact-max-states", args.pact_max_states),
-                  ("--pact-max-transitions", args.pact_max_transitions))
+                  ("--pact-max-transitions", args.pact_max_transitions),
+                  ("--pact-baseline-assignment", args.pact_baseline_assignment),
+                  ("--pact-baseline-sha256", args.pact_baseline_sha256))
     if args.pact_shape_table is None:
         for flag, value in pact_flags:
             if value is not None:
                 ap.error(f"{flag} requires --pact-shape-table")
+        if args.pact_selection_mode != "hull":
+            ap.error("--pact-selection-mode constrained requires --pact-shape-table")
     else:
         if measured_runtime_sweep is None:
             ap.error("--pact-shape-table is available only to prismaquant.prefill_frontier, "
@@ -2322,7 +2344,16 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                      "the regime M is the workload's, not the allocator's)")
         if args.pact_tensor_parallel is None or args.pact_tensor_parallel < 1:
             ap.error("--pact-shape-table requires a positive --pact-tensor-parallel (no "
-                     "default: the table is admitted only at the world it was measured at)")
+                         "default: the table is admitted only at the world it was measured at)")
+        if args.pact_selection_mode == "constrained":
+            if args.pact_baseline_assignment is None or args.pact_baseline_sha256 is None:
+                ap.error("--pact-selection-mode constrained requires --pact-baseline-assignment "
+                         "and --pact-baseline-sha256")
+            from .digests import is_sha256hex
+            if not is_sha256hex(args.pact_baseline_sha256):
+                ap.error("--pact-baseline-sha256 must be a lowercase SHA-256")
+        elif args.pact_baseline_assignment is not None or args.pact_baseline_sha256 is not None:
+            ap.error("baseline inputs require --pact-selection-mode constrained")
         for flag, value in (("--pact-max-states", args.pact_max_states),
                             ("--pact-max-transitions", args.pact_max_transitions)):
             if value is not None and value < 1:
@@ -4810,6 +4841,70 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                        "max_transitions": int(args.pact_max_transitions
                                               or DEFAULT_MAX_TRANSITIONS)}
 
+        def _pact_baseline() -> tuple[dict, dict]:
+            """Resolve the complete comparison assignment to unique priced DP choices."""
+            from .prefill_frontier import load_pact_baseline
+
+            expanded, binding = load_pact_baseline(
+                Path(args.pact_baseline_assignment), args.pact_baseline_sha256,
+                table_identity=dict(pact_pricing.table_identity), scope=dict(vars(pact_scope)),
+                regime_m=args.pact_regime, tensor_parallel=args.pact_tensor_parallel,
+                serving_scope=lane.allocation_scope_meta(
+                    tessera_serving_target, tessera_context_by_unit)["tessera_serving_scope"])
+            roster = set(fixed_format_assignment)
+            for members in pact_option_members.values():
+                roster.update(members)
+            if set(expanded) != roster:
+                raise ValueError("PACT baseline canonical roster differs from current complete assignment")
+            if any(expanded[name] != fmt for name, fmt in fixed_format_assignment.items()):
+                raise ValueError("PACT baseline fixed members differ from current assignment")
+            assignment = {}
+            for unit, options in sorted(pact_candidates.items()):
+                matching = [candidate.fmt for candidate in options
+                            if all(expanded[name] == fmt for name, fmt
+                                   in pact_option_members[(unit, candidate.fmt)].items())]
+                if len(matching) != 1:
+                    raise ValueError(f"PACT baseline {unit}: requires one uniquely priced serving choice, "
+                                     f"found {len(matching)}")
+                assignment[unit] = matching[0]
+            if _expand_assignment_for_seed_json(assignment) != expanded:
+                raise ValueError("PACT baseline serving expansion changes its assignment")
+            # Match the existing runtime solver's sorted binary64 fold exactly.
+            time_ms = 0.0
+            for unit, fmt in assignment.items():
+                time_ms += float(pact_pricing.resources[(unit, fmt)].prefill_ms)
+            if not math.isfinite(time_ms):
+                raise ValueError("PACT baseline operator sum overflowed")
+            binding["derived_operator_sum_ms"] = time_ms
+            return assignment, binding
+
+        def _pact_build_constrained() -> dict:
+            """The existing finite discrete solver under both declared constraints."""
+            import resource
+            from .allocator_solver import solve_runtime_frontier
+
+            _, baseline = _pact_baseline()
+            diagnostics = {}
+            rss_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            start = _time.perf_counter()
+            try:
+                frontier = solve_runtime_frontier(
+                    pact_candidates, pact_pricing.resources, max_memory_bytes=pact_budget,
+                    max_prefill_ms=baseline["derived_operator_sum_ms"],
+                    diagnostics=diagnostics, **pact_limits)
+            except RuntimeFrontierLimitError as exc:
+                raise ValueError(f"PACT constrained search refused: {exc}") from None
+            if not frontier:
+                raise ValueError("PACT constrained search has no feasible assignment")
+            chosen = frontier[0]
+            record = _pact_vertex_record(chosen.assignment)
+            if not record["feasible"]:
+                raise ValueError(f"PACT constrained assignment refused: {record['reason']}")
+            return {"solution": chosen, "record": record, "baseline": baseline,
+                    "diagnostics": diagnostics, "seconds": _time.perf_counter() - start,
+                    "peak_rss_kib": {"before_search": rss_before,
+                                     "after_search": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}}
+
         def _pact_build_hull() -> dict:
             import resource
             rss_before_kib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -4835,8 +4930,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             """One exact assignment check/accountant and layer-config replay writer."""
             record = _pact_vertex_record(assign)
             if not record["feasible"] or record["assignment"] != expected_assignment:
-                raise ValueError("PACT replay: the recorded probe re-derives a different "
-                                 "assignment than the hull vertex")
+                raise ValueError("PACT replay: the recorded solve re-derives a different "
+                                 "or infeasible assignment")
             if dloss is None:
                 dloss = math.fsum(float(pact_options[(unit, fmt)].predicted_dloss)
                                   for unit, fmt in assign.items())
@@ -4856,6 +4951,25 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         def _pact_emit_replay(weights, expected_assignment, provenance) -> None:
             if lane.allocation_selection_request_path(args):
                 raise ValueError("PACT replay requires materialized wires, not a selection request")
+            if args.pact_selection_mode == "constrained":
+                built = _pact_build_constrained()
+                constraints = {"max_memory_bytes": pact_budget,
+                               "max_prefill_ms": built["baseline"]["derived_operator_sum_ms"],
+                               **pact_limits}
+                if weights != {"baseline": built["baseline"], "constraints": constraints}:
+                    raise ValueError("PACT constrained replay baseline or constraints differ")
+                solution, record = built["solution"], built["record"]
+                actual_claims = {"predicted_dloss": solution.predicted_dloss,
+                                 "operator_sum_ms": solution.prefill_ms,
+                                 "candidate_bytes": solution.memory_bytes,
+                                 **{key: record[key] for key in (
+                                     "achieved_bits", "payload_bytes", "whole_artifact_upper_bound_bytes")
+                                    if key in record}}
+                if provenance.get("point_claims") != actual_claims:
+                    raise ValueError("PACT constrained replay point claims differ from the recorded solve")
+                _pact_write_replay(built["solution"].assignment, expected_assignment, provenance,
+                                   dloss=built["solution"].predicted_dloss)
+                return
             try:
                 assign = probe_assignment(pact_candidates, pact_time_ms, weights,
                                           max_memory_bytes=pact_budget, **pact_limits)
@@ -4880,6 +4994,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             target_bits=float(args.target_bits),
             cost_path=str(args.costs),
             probe_path=str(args.probe),
+            build_constrained=_pact_build_constrained if args.pact_selection_mode == "constrained" else None,
+            selection_mode=args.pact_selection_mode,
         ))
         return
 

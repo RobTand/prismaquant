@@ -38,7 +38,7 @@ TIMES = {SLOW: 10.0, MID: 5.0, FAST: 4.0}
 M = 2048
 
 
-def _fixture(tmp_path, monkeypatch):
+def _fixture(tmp_path, monkeypatch, *, units=None):
     from conftest import down_convert_lane_table
     from test_allocator_measured_runtime_cli import _main_fixture
     from test_allocator_tessera_priced_inputs import SCALE, _campaign_outputs, _stamp_rows
@@ -105,10 +105,12 @@ def _fixture(tmp_path, monkeypatch):
     table_path = tmp_path / "shape_table.json"
     table_path.write_text(json.dumps(table))
 
-    capture, scales, digest = _campaign_outputs(tmp_path)
-    _, argv = _main_fixture(tmp_path, units=(DENSE,), menu=MENU, target_bits="16",
+    chosen_units = tuple(units or (DENSE,))
+    capture, scales, digest = (_campaign_outputs(tmp_path) if units is None
+                              else _campaign_outputs(tmp_path, units=chosen_units))
+    _, argv = _main_fixture(tmp_path, units=chosen_units, menu=MENU, target_bits="16",
                            shape=(256, 256), stats_extra={"router_path": None, "expert_id": None},
-                           activation_max_abs={DENSE: 448.0 * 6.0 / 37.5})
+                           activation_max_abs={unit: 448.0 * 6.0 / 37.5 for unit in chosen_units})
     argv = argv[1:argv.index("--measured-runtime-table")]
     model = tmp_path / "model"
     model.mkdir()
@@ -118,9 +120,12 @@ def _fixture(tmp_path, monkeypatch):
              *_cli_scope(), "--pact-shape-table", str(table_path), "--pact-regime", str(M),
              "--pact-tensor-parallel", "1"]
     for fmt in MENU:
-        _stamp_rows(argv, fmt=fmt, capture_sha256=digest, scale=SCALE)
+        if units is None:
+            _stamp_rows(argv, fmt=fmt, capture_sha256=digest, scale=SCALE)
+        else:
+            _stamp_rows(argv, fmt=fmt, capture_sha256=digest, scale=SCALE, units=chosen_units)
     return SimpleNamespace(argv=argv, dense=DENSE, capture=capture, scales=scales,
-                           table_path=table_path)
+                           table_path=table_path, units=chosen_units)
 
 
 def _hull(tmp_path, argv, *own):
@@ -262,14 +267,13 @@ def test_pact_refuses_budgets_it_cannot_price(tmp_path, monkeypatch, capsys, ext
     assert diagnostic in capsys.readouterr().err + str(refused.value.code)
 
 
-def test_a_whole_artifact_card_binds_the_hull_and_stamps_the_replay(tmp_path, monkeypatch):
-    """``--target-disk-gb`` is an on-disk cap (footprint.py), not a device budget."""
+def _whole_artifact_card(tmp_path, case):
+    """The shared tiny header/card fixture, including fixed and member-name bytes."""
     import struct
 
     from prismaquant import footprint
     from prismaquant import format_registry as fr
 
-    case = _fixture(tmp_path, monkeypatch)
     tensors = {f"{case.dense}.weight": ("BF16", (256, 256)), "model.norm.weight": ("BF16", (64,))}
     header, offset = {}, 0
     for name, (dtype, shape) in tensors.items():
@@ -297,6 +301,17 @@ def test_a_whole_artifact_card_binds_the_hull_and_stamps_the_replay(tmp_path, mo
     card = math.floor(float(disk_gb) * footprint.GB)
     assert (floor + names + unit[MID] + reserve <= card
             < floor + names + unit[SLOW] + reserve)
+    return SimpleNamespace(floor=floor, names=names, unit=unit, reserve=reserve,
+                           disk_gb=disk_gb, card=card)
+
+
+def test_a_whole_artifact_card_binds_the_hull_and_stamps_the_replay(tmp_path, monkeypatch):
+    """``--target-disk-gb`` is an on-disk cap (footprint.py), not a device budget."""
+    case = _fixture(tmp_path, monkeypatch)
+    card_case = _whole_artifact_card(tmp_path, case)
+    floor, names, unit, reserve, disk_gb, card = (
+        card_case.floor, card_case.names, card_case.unit, card_case.reserve,
+        card_case.disk_gb, card_case.card)
     frontier, doc = _hull(tmp_path, [*case.argv, "--target-disk-gb", disk_gb,
                                      "--artifact-overhead-reserve-bytes", str(reserve)],
                           "--bootstrap-draws", "50")

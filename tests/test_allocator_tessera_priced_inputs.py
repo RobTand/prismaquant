@@ -38,7 +38,7 @@ POLICY = "legacy_6_over_calibration_amax.v1"
 UNITS = (DENSE, EXPERT, SHARED)
 
 
-def _campaign_outputs(tmp_path, *, hessians=None, scale=SCALE):
+def _campaign_outputs(tmp_path, *, hessians=None, scale=SCALE, units=UNITS):
     """What the campaign leaves beside its --cache-dir: the two files and the
     digest it stamps on every row."""
     from prismaquant.tessera_campaign import write_export_inputs
@@ -47,14 +47,14 @@ def _campaign_outputs(tmp_path, *, hessians=None, scale=SCALE):
     cache.mkdir(exist_ok=True)
     return write_export_inputs(
         cache,
-        hessians=hessians or {name: torch.eye(4) for name in UNITS},
-        hessian_rows={name: 4 for name in UNITS},
+        hessians=hessians or {name: torch.eye(4) for name in units},
+        hessian_rows={name: 4 for name in units},
         hessian_identity=dict(TRIPLE),
-        static_scales={name: scale for name in UNITS},
+        static_scales={name: scale for name in units},
         static_scale_policy="legacy_6_over_calibration_amax.v1")
 
 
-def _stamp_rows(argv, *, fmt, capture_sha256, scale):
+def _stamp_rows(argv, *, fmt, capture_sha256, scale, units=UNITS):
     """Give the fixture cost table what the campaign's rows carry."""
     costs_path = Path(argv[argv.index("--costs") + 1])
     payload = pickle.loads(costs_path.read_bytes())
@@ -63,7 +63,7 @@ def _stamp_rows(argv, *, fmt, capture_sha256, scale):
     # the file's label to it (#624).
     payload.setdefault("provenance", {})["activation_static_scales"] = {
         "policy": POLICY,
-        "units": {name: scale for name in UNITS} if scale is not None else {},
+        "units": {name: scale for name in units} if scale is not None else {},
     }
     for rows in payload["costs"].values():
         rows[fmt]["hessian_identity"] = {

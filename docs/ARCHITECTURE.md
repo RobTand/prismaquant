@@ -1,5 +1,24 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
+`--pact-selection-mode constrained`; `hull` remains the default and
+`--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
+and the SHA-256 of its consumed file bytes bind the baseline. The existing
+layer-config parser, canonical roster/fixed members and unique admitted resource
+mapping must agree, including any declared table/context/M/TP metadata. Baseline
+time is derived from the same current prices as candidates, never a historical
+TTFT or native receipt. The existing finite `solve_runtime_frontier` enforces
+integer byte and derived operator-sum time caps inside search; no hull pruning,
+affine surrogate weights, bound inflation or partial frontier publication occurs.
+The new generator `exact_runtime_frontier_constrained` extends the existing
+PACT document/replay owner and shares whole-artifact accounting and the sole
+layer-config writer. Replay re-derives its binding, bounds, selected assignment
+and numeric claims before writing. This is a minimum-loss choice over current
+admitted time-priced candidates with sorted-unit binary64 loss/time sums, not
+full-gamut or full-model scalability, corrected quality, placement or served
+latency qualification. The Tessera #688 receipt converter remains a refusing
+stub; no prices, formats, pin, producer or production defaults change.
+
 Re-stamped 2026-10-02 (Refs PQ #2010, #2008): the existing capture source
 owner has an internal CPU whole-file original-material path. Independently
 bound reviewed publisher and PB readset control inputs define a closed roster
@@ -20895,7 +20914,8 @@ document.
 Limits:
 
 - `--pact-time-ceiling-ms` is a report bound. It flags vertices above the
-  ceiling and does not generate the constrained set's own boundary vertex.
+  ceiling and does not generate the constrained set's own boundary vertex
+  in the default hull mode. It also remains report-only in constrained mode.
 - `select_development_point`'s top-two min_separation test sees hull
   vertices, not every point of the exact frontier. The selection record
   states this as `frontier_scope: lower_convex_hull_vertices`; a caller that
@@ -20904,6 +20924,49 @@ Limits:
   `prefill_frontier replay` keeps its legacy stamp.
 - The record's `high_prefill` rule is a proposal that awaits the owner's
   decision (see "PACT selection record").
+
+**PACT constrained selection (2026-10-02, PQ #2030).** Explicit
+`--pact-selection-mode constrained` uses `solve_runtime_frontier` over the same
+independent serving-unit candidates and admitted `RuntimeResources`. Both the
+candidate byte cap and the comparison baseline's derived time cap apply inside
+every fold. It retains unsupported discrete options: a fixture with
+(time, loss) = (12, 0), (8, 4), (4, 5) selects the middle option at an 8 ms
+cap although the weighted hull contains only the endpoints.
+
+- **Baseline input.** `--pact-baseline-assignment` accepts an existing complete
+  layer-config (including its normal format dictionaries) or canonical
+  shorthand; `--pact-baseline-sha256` authenticates the exact same bytes parsed.
+  Canonical assignment aliases may not collide. The roster must exactly equal
+  current expanded members, fixed formats must agree, and each independent
+  unit must map to exactly one admitted time-priced option. Declared serving
+  scope and replay table/M/TP metadata must agree with the current context;
+  an existing frontier assignment stub additionally binds its table and
+  canonical assignment digest. The baseline need not be a hull vertex and
+  need not fit the candidate byte cap. Its time is the sorted-unit binary64
+  sum of the same admitted resource prices used by search. A shorthand is a
+  comparison input, never proof of a native or served A8S timing.
+- **Output and replay.** The existing `prismaquant.pact_frontier.v1` document
+  records `candidate_generator: exact_runtime_frontier_constrained`, one
+  selected `points` entry, `selected_assignment_sha256`, baseline file and
+  canonical assignment digests, table/context/M/TP, both caps and finite search
+  bounds/diagnostics. It records exact integer bytes and sorted-unit binary64
+  loss/time semantics, with no epsilon. Bootstrap intervals describe the
+  proposal and do not set its bound. It invents no hull `finding_probe`, affine
+  weights or three-pick materiality record. Closed replay re-runs the same
+  constrained solve, checks all bindings and re-derived numeric claims, then
+  uses the shared exact assignment check/accountant and layer-config writer.
+  Whole-artifact overhead and fixed payload are accounted exactly as in the
+  default hull lane, and replay retains the exporter budget stamp.
+- **Finite and limited.** Defaults stay 100,000 states and 8,000,000 transitions.
+  Crossing either refuses; infeasibility and missing/ambiguous baseline prices
+  publish no selected assignment. It certifies neither missing menu options
+  nor operators outside the table, fixed prefill, device placement, TTFT/p95,
+  real KL or full-model solver tractability. `research_only` remains true and
+  `certifies_placement`/`certifies_p95` false. Source, census, quality, full-menu
+  timing and Tessera #688 schema admission remain independent prerequisites.
+
+CPU controls: `tests/test_pact_constrained.py`, the existing PACT replay tests
+and `tests/test_allocator_runtime_frontier.py`.
 
 **PACT selection record (2026-09-28, PQ #1585).**
 `prismaquant/pact_selection.py` turns one frontier per regime M into three
