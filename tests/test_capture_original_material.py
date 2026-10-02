@@ -306,3 +306,31 @@ def test_concurrent_overlapping_windows_share_material_until_both_release(materi
     assert not thread.is_alive() and errors == []
     assert owner.material_live_bytes == 0
     owner.close()
+
+
+@pytest.mark.parametrize('cancel', [False, True])
+def test_accounting_failure_closes_sealed_material_without_delivery(material, monkeypatch, cancel):
+    from prismaquant import io_engine
+    from prismaquant.residency_map import residency_resolver
+
+    m = material
+    owner = _owner(m)
+    buffers = []
+    original = io_engine.SealedBuffer.__init__
+    def allocated(buffer, size):
+        original(buffer, size)
+        buffers.append(buffer)
+    monkeypatch.setattr(io_engine.SealedBuffer, '__init__', allocated)
+    def accounting(*args):
+        if cancel:
+            raise KeyboardInterrupt('accounting cancellation')
+        raise RuntimeError('accounting failure')
+    monkeypatch.setattr(residency_resolver(), 'record_stage_read', accounting)
+    with pytest.raises(KeyboardInterrupt if cancel else RuntimeError, match='accounting'):
+        with owner.material_window([m['root'] / 'one.safetensors']):
+            pytest.fail('accounting failure returned accepted material')
+    assert len(buffers) == 1
+    with pytest.raises(RuntimeError, match='closed'):
+        _ = buffers[0].path
+    assert owner.material_live_bytes == 0
+    owner.close()
