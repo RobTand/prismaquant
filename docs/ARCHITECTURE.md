@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 / Refs #1250):
+the existing `_RollPipeline` has a constructor-only, default-off research
+mode for two reusable banks of compact CUDA host rows. Only a consumer that
+cannot retain rows is admitted; the first group bounds layout and bank size,
+and subsequent larger or incompatible layouts refuse before copying.
+Public callers, sealed execution inputs and production admission are unchanged.
+CPU simulated-event checks qualify control flow and exact serialized entry
+bytes; CUDA lifetime, admission integration and representative before/after
+in-process plus both-Spark Netdata evidence remain required by #1250.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
@@ -29201,6 +29211,20 @@ of a backward is not that point, since the row rolls one backward later.
 
 Measured claims about the regime's speed and energy live in the PR and the
 PQ #997 record, not here; this section states only the contract.
+
+**Research host reuse (#2097, parent #1250).** Explicit constructor-only
+`reuse_host_buffers=True` requires `roll_may_keep=False`. Two banks cover
+the new copy and the previous backward's rows; every bank owns compact
+individual row storages, reused only after its event fence and roll return.
+The first group's row shape, dtype and count bound both banks. Smaller tail
+groups reuse the prefix; incompatible geometry refuses before allocating or
+copying another group. Window drains fence delivery and retain the banks;
+abandonment fences the pending copy before releasing them. A callback may
+borrow a row only during its invocation and may not reenter the pipeline.
+A partial copy failure fences already-submitted copies before abandonment;
+cleanup failures annotate the original exception. Default/public callers retain the
+existing allocating path. This mode is not wired into Stage A or Stage B
+execution and supplies no GPU speed, energy or peak-residency claim.
 
 ### Stage A checkpoints written as the chain rolls (#1002)
 

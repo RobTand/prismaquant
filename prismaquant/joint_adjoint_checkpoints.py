@@ -2516,32 +2516,86 @@ class _RollPipeline:
 
     ``on_durable(batch_index, probe_index)``, when given, is called after
     ``roll`` returns for each row, and never for a row whose ``roll`` raised.
+
+    Constructor-only ``reuse_host_buffers=True`` is a research prerequisite
+    for PQ #1250. A non-retaining CUDA consumer borrows individually compact
+    rows from two held banks. The first group bounds each bank's row count,
+    shape and dtype; smaller tail groups fit, incompatible layouts refuse
+    before copying. A row is valid only during its roll callback. Banks
+    survive window drains and are released at abandonment or pipeline exit.
+    Public roll callers leave this off. Device, admission and performance
+    qualification are required before production integration.
     """
 
-    def __init__(self, roll, *, device, roll_may_keep=True, on_durable=None):
+    def __init__(self, roll, *, device, roll_may_keep=True, on_durable=None,
+                 reuse_host_buffers=False):
+        if type(reuse_host_buffers) is not bool:
+            raise ValueError("chain roll reuse_host_buffers must be a bool")
+        if reuse_host_buffers and roll_may_keep:
+            raise ValueError("reusable chain roll rows require a consumer that cannot keep them")
         self._roll = roll
         self._on_durable = on_durable
         self._device = torch.device(device)
         self._cuda = self._device.type == "cuda"
         self._keep = bool(roll_may_keep)
         self._waiting = None
+        # Constructor-only research mode (PQ #2097/#1250). Two banks cover
+        # submit's new copy and the previous backward's delivery. A bank is
+        # reused only two submits later, after its event and roll returned.
+        # Rows remain individually compact, as the exact entry writer needs.
+        self._reuse_host_buffers = reuse_host_buffers
+        self._host_banks = [None, None]
+        self._next_host_bank = 0
+        self._host_layout = None
+        self._delivering = False
+
+    def _require_not_delivering(self):
+        if self._reuse_host_buffers and self._delivering:
+            raise RuntimeError("reusable chain roll callbacks may not reenter the pipeline")
 
     def submit(self, gradient, indices, probe_index):
+        self._require_not_delivering()
         step = self._copy_out(gradient.detach(), list(indices), int(probe_index))
         waiting, self._waiting = self._waiting, step
         if waiting is not None:
             self._deliver(waiting)
 
     def drain(self):
+        self._require_not_delivering()
         waiting, self._waiting = self._waiting, None
         if waiting is not None:
             self._deliver(waiting)
 
     def abandon(self):
         """Drop the waiting rows unrolled, once their copy has landed."""
+        self._require_not_delivering()
         waiting, self._waiting = self._waiting, None
         if waiting is not None and waiting[0] is not None:
             waiting[0].synchronize()
+        self._host_banks = [None, None]
+        self._host_layout = None
+        self._next_host_bank = 0
+
+    def _reusable_rows(self, gradient, indices):
+        count = len(indices)
+        if count < 1 or (count > 1 and gradient.shape[0] != count):
+            raise RuntimeError("reusable chain roll layout disagrees with its indices")
+        shape = tuple(gradient.shape if count == 1 else gradient[:1].shape)
+        layout = (shape, gradient.dtype, count)
+        if self._host_layout is None:
+            self._host_layout = layout
+        elif (layout[:2] != self._host_layout[:2]
+              or count > self._host_layout[2]):
+            raise RuntimeError("reusable chain roll layout exceeds its first group")
+        bank = self._next_host_bank
+        if self._host_banks[bank] is None:
+            self._host_banks[bank] = [
+                torch.empty(shape, dtype=gradient.dtype, pin_memory=True)
+                for _ in range(self._host_layout[2])]
+        self._next_host_bank = 1 - bank
+        # Delivery clears its step's list; the bank must retain a separate
+        # list of row owners, never that mutable delivery list.
+        return self._host_banks[bank][:count]
 
     def _copy_out(self, gradient, indices, probe_index):
         if not self._cuda:
@@ -2549,12 +2603,27 @@ class _RollPipeline:
             rows = ([cpu] if len(indices) == 1
                     else [cpu[row:row + 1] for row in range(len(indices))])
             return None, rows, indices, probe_index
-        rows = []
-        for row in range(len(indices)):
-            source = gradient if len(indices) == 1 else gradient[row:row + 1]
-            host = torch.empty(source.shape, dtype=source.dtype, pin_memory=True)
-            host.copy_(source, non_blocking=True)
-            rows.append(host)
+        rows = (self._reusable_rows(gradient, indices)
+                if self._reuse_host_buffers else [])
+        try:
+            for row in range(len(indices)):
+                source = gradient if len(indices) == 1 else gradient[row:row + 1]
+                host = (rows[row] if self._reuse_host_buffers else
+                        torch.empty(source.shape, dtype=source.dtype, pin_memory=True))
+                host.copy_(source, non_blocking=True)
+                if not self._reuse_host_buffers:
+                    rows.append(host)
+        except BaseException as failure:
+            if self._reuse_host_buffers:
+                # A partial group has no queued delivery step. Fence the
+                # copies already submitted before abandon releases its bank.
+                try:
+                    partial = torch.cuda.Event()
+                    partial.record(torch.cuda.current_stream(self._device))
+                    partial.synchronize()
+                except BaseException as cleanup:
+                    failure.add_note(f"partial chain roll copy cleanup failed: {cleanup!r}")
+            raise
         # The device gradient may be freed before its copy lands: the CUDA
         # caching allocator reuses its block only in this stream's order,
         # after the queued copy. The pinned rows are held until delivery.
@@ -2563,6 +2632,13 @@ class _RollPipeline:
         return copied, rows, indices, probe_index
 
     def _deliver(self, step):
+        self._delivering = True
+        try:
+            self._deliver_rows(step)
+        finally:
+            self._delivering = False
+
+    def _deliver_rows(self, step):
         copied, rows, indices, probe_index = step
         if copied is not None:
             copied.synchronize()
