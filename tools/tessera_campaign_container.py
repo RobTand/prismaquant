@@ -925,9 +925,14 @@ def import_search_roots(spec: dict, *, cwd: str, safe_path: bool) -> list:
     return roots
 
 
+def _source_package(root: Path) -> bool:
+    """The supported source-package candidate at one mounted search entry."""
+    return (root / "prismaquant" / "__init__.py").is_file()
+
+
 def _package_root(roots: list) -> "tuple[str, Path] | None":
     for entry, root in roots:
-        if (root / "prismaquant" / "__init__.py").is_file():
+        if _source_package(root):
             return entry, root
     return None
 
@@ -975,7 +980,7 @@ def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str | None, Path, bool
         if not target.is_absolute() or target == workspace or workspace in target.parents:
             continue
         root = host_path(entry, cwd=cwd, mounts=mounts)
-        if root is not None and (root / "prismaquant" / "__init__.py").is_file():
+        if root is not None and _source_package(root):
             return entry, root, False
     return None, Path(cwd), True
 
