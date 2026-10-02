@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import pickle
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -31,11 +32,51 @@ from prismaquant import glm_mtp  # noqa: E402
 from tests.test_glm5_next_streamed_forward_parity import _torch_only_causal_conv1d  # noqa: E402,F401
 from tests.test_glm_mtp_capture import (  # noqa: E402,F401
     BACKBONE, CALIBRATION_TEXT, LAST, MAX_ROWS, N_SEQUENCES, PREFIX, PROFILE, SEQ_LEN,
-    _calibration_rows, _mtp_routed, _runner, _sha, _write_boundaries, mtp_source,
+    _calibration_rows, _mtp_routed, _producer, _runner, _sha, _write_boundaries,
+    mtp_source as _fresh_mtp_source,
 )
 
 SHARED_DOWN = f"{PREFIX}mlp.shared_experts.down_proj"
 STACK = f"{PREFIX}mlp.experts"
+
+
+@pytest.fixture(scope="module")
+def _narrow_source_capture():
+    """One identical BF16 source/capture; pricing owns a separate source.
+
+    Built on first use, after the function-scoped CPU and provenance fixtures
+    are active. Only completed setup is retained, never a runner or an open
+    authentication owner. The module lifetime provides change invalidation;
+    no bytes or identities survive into another pytest invocation.
+    """
+    return SimpleNamespace(env=None, published=None)
+
+
+@pytest.fixture
+def mtp_source(request, tmp_path, tmp_path_factory, monkeypatch, _narrow_source_capture):
+    param = request.param
+    if isinstance(param, dict) and param.get("independent", False):
+        yield _fresh_mtp_source.__wrapped__(request, tmp_path, monkeypatch)
+        return
+
+    assert param is torch.bfloat16, "only the three identical BF16 controls share setup"
+    shared = _narrow_source_capture
+    if shared.env is None:
+        shared.env = _fresh_mtp_source.__wrapped__(
+            request, tmp_path_factory.mktemp("mtp-scoped-source"), monkeypatch)
+    else:
+        import prismaquant.model_profiles.glm5_next as glm5_profile
+
+        _producer(monkeypatch)
+        monkeypatch.setattr(glm5_profile, "_MTP_LAYER_RE",
+                            re.compile(r"^model\.language_model\.layers\.2\."))
+    monkeypatch.setenv("PRISMAQUANT_TMPDIR", str(tmp_path / "staging"))
+    # Reuse is confined to immutable source bytes. A consumer modifying the
+    # shared checkpoint fails at its own teardown, before the next consumer.
+    before = {path.name: _sha(path) for path in shared.env.source.iterdir() if path.is_file()}
+    yield shared.env
+    after = {path.name: _sha(path) for path in shared.env.source.iterdir() if path.is_file()}
+    assert after == before, "a scoped consumer changed the shared MTP checkpoint"
 
 
 def _published_mtp_capture(env, monkeypatch):
@@ -111,8 +152,20 @@ def _loaded_mtp_weights(env, dtype):
     return weights
 
 
+@pytest.fixture
+def published_mtp_capture(mtp_source, monkeypatch, _narrow_source_capture):
+    """The source's real CLI capture, separate from each consumer's runner."""
+    shared = _narrow_source_capture
+    if mtp_source is shared.env:
+        if shared.published is None:
+            shared.published = _published_mtp_capture(mtp_source, monkeypatch)
+        return shared.published
+    return _published_mtp_capture(mtp_source, monkeypatch)
+
+
 @pytest.mark.parametrize("mtp_source", [torch.bfloat16], indirect=True)
-def test_scoped_source_snapshots_the_mtp_layer_through_the_body_loader(mtp_source, monkeypatch):
+def test_scoped_source_snapshots_the_mtp_layer_through_the_body_loader(
+        mtp_source, published_mtp_capture):
     """The ``mtp`` scope reads layer 45's selected tensors with the body's
     loader, under their checkpoint names, and nothing else."""
     from prismaquant import tessera_calibration_cache as cc
@@ -120,7 +173,7 @@ def test_scoped_source_snapshots_the_mtp_layer_through_the_body_loader(mtp_sourc
     from prismaquant.cost_streaming import build_streamed_causal_lm
 
     env = mtp_source
-    published = _published_mtp_capture(env, monkeypatch)
+    published = published_mtp_capture
     last = int(env.text_config.n_routed_experts) - 1
     units = [SHARED_DOWN, f"{STACK}.1.gate_proj", f"{STACK}.{last}.down_proj"]
     census = published.census
@@ -179,7 +232,7 @@ WHOLE_SCOPE_RUNNER_USES = {"device", "model", "prefetch_lookahead", "visit_layer
 
 
 @pytest.mark.parametrize("mtp_source", [torch.bfloat16], indirect=True)
-def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, monkeypatch):
+def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, published_mtp_capture):
     """``SelectedSource`` names what selected-source consumers may use: the
     body runner and the scoped runner both satisfy it, and every other
     ``runner.`` use in the campaign belongs to the whole-scope forward."""
@@ -201,7 +254,7 @@ def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, monkeypat
         assert body.source_layers == tuple(range(body.num_layers))
     finally:
         body.shutdown()
-    published = _published_mtp_capture(env, monkeypatch)
+    published = published_mtp_capture
     owner = cc.authenticate_selected_capture_source(
         published.census_path, published.capture["path"],
         expected_sha256=published.capture["sha256"], model=str(env.source),
@@ -227,15 +280,22 @@ def test_both_runners_satisfy_the_selected_source_protocol(mtp_source, monkeypat
     assert used - WHOLE_SCOPE_RUNNER_USES <= set(SELECTED_SOURCE_MEMBERS), used
 
 
-@pytest.mark.parametrize("mtp_source", [{"dtype": torch.bfloat16, "wide": True}], indirect=True)
-def test_campaign_row_prices_mtp_units_from_the_mtp_capture(mtp_source, monkeypatch, tmp_path):
+@pytest.mark.parametrize("mtp_source", [{"dtype": torch.bfloat16, "independent": True}], indirect=True)
+def test_campaign_row_prices_mtp_units_from_the_mtp_capture(
+        mtp_source, published_mtp_capture, monkeypatch, tmp_path):
     """A ``--source-scope mtp`` row prices the shared expert and the routed
     stack from the MTP capture; its recomputed capture identity is the
     manifest's, and it reads no body layer."""
     from prismaquant import tessera_campaign as campaign
 
     env = mtp_source
-    published = _published_mtp_capture(env, monkeypatch)
+    # The producer's CHANNEL plane and exact whole-unit quota admit partial
+    # superblocks. R1024 really encodes both (32, 64) and (64, 32), so the
+    # existing tiny source prices the same shared unit and all twelve routed
+    # projections without a second, artificially widened model domain.
+    assert env.text_config.n_routed_experts == 4
+    assert env.text_config.num_experts_per_tok == 2
+    published = published_mtp_capture
     census = published.census
     groups = [f"u:{SHARED_DOWN}", f"s:{STACK}"]
     selection = tmp_path / "units.json"
@@ -281,7 +341,8 @@ def test_campaign_row_prices_mtp_units_from_the_mtp_capture(mtp_source, monkeypa
 
 
 @pytest.mark.parametrize("mtp_source", [torch.bfloat16], indirect=True)
-def test_scoped_source_installs_the_mtp_layer_without_a_body_forward(mtp_source, monkeypatch):
+def test_scoped_source_installs_the_mtp_layer_without_a_body_forward(
+        mtp_source, published_mtp_capture):
     """Preparation (PQ #1338) installs the scope's layer to verify renders
     against their live source weights; the scope still runs no body forward
     and reads no layer outside itself."""
@@ -290,7 +351,7 @@ def test_scoped_source_installs_the_mtp_layer_without_a_body_forward(mtp_source,
     from prismaquant.cost_streaming import build_streamed_causal_lm
 
     env = mtp_source
-    published = _published_mtp_capture(env, monkeypatch)
+    published = published_mtp_capture
     last = int(env.text_config.n_routed_experts) - 1
     units = [SHARED_DOWN, f"{STACK}.1.gate_proj", f"{STACK}.{last}.down_proj"]
     owner = cc.authenticate_selected_capture_source(

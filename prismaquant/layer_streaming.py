@@ -104,6 +104,11 @@ def _source_safe_open(path, *, source_authentication=None, **kwargs):
     ``safe_open`` itself and both branches below are what they have always
     been -- the redirect is a different reader, never a different call.
     """
+    if source_authentication is not None and getattr(
+            source_authentication, 'is_qualified_original_material', False):
+        # A whole-file qualified owner serves the same sealed object for its
+        # header and tensor payload; a range adapter must not redirect either.
+        return source_authentication.safe_open(safe_open, path, **kwargs)
     opener = staged_shard_opener(path, safe_open)
     if source_authentication is None:
         return opener(path, **kwargs)

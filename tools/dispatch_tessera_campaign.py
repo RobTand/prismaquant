@@ -111,7 +111,51 @@ else:
         validate_container,
     )
 
+from tools.tessera_campaign_namespace import (
+    establish_namespace_temporaries, namespace_path, namespace_publication_record,
+    prepare_namespace_requests,
+    validate_namespace_request,
+)
+
 PBCAMPAIGN = Path("/mnt/shared/prismabuild-fleet/repo/tools/pbcampaign.py")
+
+
+def publish_namespace_requests(rows: list[dict]) -> None:
+    """No-clobber metadata publication; only identical ownership may resume.
+
+    Preparation is separate from publication. This never submits rows or opens
+    model inputs. A crash before ownership publication leaves ambiguous state
+    that refuses, rather than inventing recovery or adopting unknown files.
+    """
+    from prismaquant.cost_stage_checkpoint import canonical_json_bytes, publish_new_bytes
+
+    record = namespace_publication_record(rows)
+    root = namespace_path(record["root"])
+    files = [(root / "namespace.json", record)]
+    directories = [root]
+    for row in rows:
+        binding = validate_namespace_request(row)
+        directory = root / binding["request_key"]
+        directories.append(directory)
+        files.extend(((directory / "binding.json", binding), (directory / "request.json", row)))
+    payloads = [(path, canonical_json_bytes(value, where="namespace publication")) for path, value in files]
+    # Refuse conflicts BEFORE publishing any part of this request set.
+    for directory in directories:
+        if directory.exists():
+            witness = directory / ("namespace.json" if directory == root else "binding.json")
+            namespace_path(str(witness), directory=False)
+            if not witness.is_file():
+                raise RuntimeError("namespace is occupied without published ownership")
+    for path, payload in payloads:
+        namespace_path(str(path), directory=False)
+        if path.exists() and path.read_bytes() != payload:
+            raise RuntimeError("namespace existing publication bytes differ")
+    for path, payload in payloads:
+        if not publish_new_bytes(path, payload, nofollow=True) and path.read_bytes() != payload:
+            raise RuntimeError("namespace concurrent publication bytes differ")
+    for row in rows:
+        establish_namespace_temporaries(row)
+
 
 #: What ``plan`` writes beside the manifest, so ``merge`` reads the row layout
 #: from the plan rather than from the directory listing it happens to find.
@@ -665,7 +709,11 @@ def _streamed_resource_plan(spec, census, members, *, selected_source=False):
                if '--capture-load-policy' in argv else {}))
     return streamed_calibration_resources(spec['model'], **options,
         nsamples=argument('--nsamples', 8), seqlen=argument('--seqlen', 512),
-        capture_policy=argument('--streaming-capture-policy', 'legacy', str))
+        capture_policy=argument('--streaming-capture-policy', 'legacy', str),
+        # A streamed capture reads its source through a recording owner; the
+        # plan reports the owner's retained clean pages beside, not in, its
+        # memory demand (PQ #1896).
+        source_recording='--capture-calibration-out' in argv)
 
 
 def campaign_argv_argument(argv, name, default=None, convert=str):

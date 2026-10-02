@@ -172,6 +172,10 @@ def test_a_test_that_never_reached_its_call_phase_is_not_a_pass(tmp_path):
 #: ran out the bound on a loaded sparklina, so the bound leaves wide room.
 BOUND_S = 30
 
+#: Registration and import isolation are asserted from the sample's report.
+#: Its setup allowance is independent of the intentional hanging sample's bound.
+REGISTRATION_BOUND_S = 120
+
 #: Each per-test bound a session can run under: the module that must be
 #: importable, the parent session's arguments and environment, and the words
 #: its failure must carry.
@@ -273,11 +277,11 @@ def test_the_bound_loads_from_the_environment_without_importing_prismabuild(
     _prismabuild_installed()
     files = ("sample_bound_loaded.py",) + (("sample_shared.py",) if shared else ())
     proc, output, _outcomes, out = _session(
-        tmp_path, *files, environ={BOUND_ENV: str(BOUND_S)})
+        tmp_path, *files, environ={BOUND_ENV: str(REGISTRATION_BOUND_S)})
     assert proc.returncode == 0, output
     report = _bound_report(out)
     assert report["registered"] is True, report
-    assert report["bound_s"] == float(BOUND_S), report
+    assert report["bound_s"] == float(REGISTRATION_BOUND_S), report
     assert report["prismabuild_imported"] is False, report
     # Alone, the module runs in process; shared, in its own child.
     assert (report["pid"] == proc.pid) is (not shared), report

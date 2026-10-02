@@ -1,0 +1,68 @@
+{
+  "schema": "prismaquant.prismabuild.data_manifest.v1",
+  "mount_prefix": "/mnt/shared",
+  "annotations": {
+    "scope": "issue1962-tiny-glm-causal-control",
+    "allowed_tiers": "ram,ssd",
+    "phases": [
+      {
+        "name": "startup",
+        "bytes": 6091966,
+        "cumulative_bytes": 6091966
+      }
+    ],
+    "direct_reuse_action": "51bb661a16323d1e59c84197dec752db71e6026baf05be08bdc89be33bcce4a2",
+    "bf16_direct_reuse_action": "7668acbf4020878f30ae2c0cd1beef59778542c35d3bc3bbf0107f45f6e52a7f"
+  },
+  "produced_by": {
+    "tool": "issue1962-tiny-glm-control",
+    "size_source": "qualified-output-stat",
+    "source_commit": "c2aebf1892d57433c9cc147e515450624b787879"
+  },
+  "entry_count": 7,
+  "total_bytes": 6091966,
+  "entries": [
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/config.json",
+      "offset": 0,
+      "bytes": 3774,
+      "sha256": "4514d45331af117e12c53da3c10f481c1d4030660671f91fb9d91e251ea88d56"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/source.json",
+      "offset": 0,
+      "bytes": 17432,
+      "sha256": "df2b3d0509a6fa3de6bff33e0030deec67f29560c90769696c1929e2089c0df0"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/model.safetensors",
+      "offset": 0,
+      "bytes": 833904,
+      "sha256": "333d34e4a1f75a6be9608bf0f014c35d5d240304bf201f985fd7f23983a8d65e"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-inputs1/tokens.safetensors",
+      "offset": 0,
+      "bytes": 1112,
+      "sha256": "049cff02ab92a3a1086d9a848f5ab24a42d81adc683deb993729a419ceef7f28"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control2/inputs.ready.json",
+      "offset": 0,
+      "bytes": 3531,
+      "sha256": "125dad360acb6939e20752e3aad5ef83f38a47ef6bffda50eb2afe78986523f9"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control2/float32.direct.pt",
+      "offset": 0,
+      "bytes": 3197532,
+      "sha256": "a6f3297575c24af0c56cf222f753d3f0239810c155dba6f52ee256a08c87c415"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control4/bfloat16.direct.pt",
+      "offset": 0,
+      "bytes": 2034681,
+      "sha256": "77461c8a59b150abb06722524a4366225ce9bfe26496265ccd0e9e0debb0b377"
+    }
+  ]
+}

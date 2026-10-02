@@ -6,8 +6,10 @@ calls, workload launch or row signal. The owner joins this observer after the
 workload. Output never enters a wire, cost row or anchor identity.
 """
 import argparse
-from prismaquant.io_spans import PeriodicSampler
-from tools.pq_profile_digest import bytes_sha256hex, file_sha256hex
+from tools.pq_profile_digest import file_sha256hex
+from tools.pq_profile_artifact import publish_profile
+from tools.pq_admitted_profile import PROFILE_LOCAL_ROOT
+from tools.pq_profile_source import profile_source_owner
 import json
 import math
 import os
@@ -20,14 +22,19 @@ import time
 import urllib.parse
 import urllib.request
 
+# The host observer needs the existing stdlib sampler, not production init.
+PeriodicSampler = profile_source_owner('io_spans').PeriodicSampler
+
 p = argparse.ArgumentParser()
 p.add_argument('--out', required=True)
 p.add_argument('--target-out', required=True)
 p.add_argument('--wait-s', type=int, default=14400)
 p.add_argument('--row-s', type=int, default=43200)
-p.add_argument('--profile-s', type=int, default=420)
 p.add_argument('--profile-local', required=True,
-               help='New host-local campaign directory for privileged py-spy output')
+               help='New host-local campaign metadata directory (no privileged writes)')
+p.add_argument('--profiler-executable', default='py-spy')
+p.add_argument('--child-profile', required=True,
+               help='Same-UID child profile inside the owned observation directory')
 a = p.parse_args()
 local_host = socket.gethostname().split('.')[0]
 if local_host not in ('sparky', 'sparklina'):
@@ -35,12 +42,14 @@ if local_host not in ('sparky', 'sparklina'):
 out = Path(a.out)
 out.mkdir(parents=True, exist_ok=False)
 profile_dir = Path(a.profile_local).resolve()
-local_root = Path('/home/rob/tmp/claude-campaign-20260926/tmp/row-startup/profiles').resolve()
+local_root = PROFILE_LOCAL_ROOT.resolve()
 if not profile_dir.is_relative_to(local_root) or profile_dir == local_root:
     raise ValueError('profile-local must be a new directory below the host-local campaign profiles root')
 profile_dir.mkdir(parents=True, exist_ok=False)
 profile_name = 'boundary-' + local_host + '.speedscope'
-local_profile = profile_dir / profile_name
+local_profile = Path(a.child_profile).resolve()
+if local_profile.parent != out.resolve() or local_profile.exists():
+    raise ValueError('child-profile must be a new file in the owned observation directory')
 lock = threading.Lock()
 collection_ready = threading.Event()
 telemetry_errors = []
@@ -54,39 +63,6 @@ def event(name, **data):
 def command(args, timeout=10):
     return subprocess.run(args, check=True, capture_output=True, text=True,
                           timeout=timeout).stdout
-
-
-def profiler_command(pid, seconds, destination):
-    # The sudo process cannot write the rob-owned NFS directory (UID0 is
-    # denied there). Only the unprivileged observer publishes to that mount.
-    return ['sudo', '-n', 'py-spy', 'record', '--idle', '--threads', '--subprocesses',
-            '--rate', '50', '--duration', str(seconds), '--format', 'speedscope',
-            '--pid', str(pid), '-o', str(destination)]
-
-
-def publish_profile(source, destination):
-    payload = Path(source).read_bytes()
-    data = json.loads(payload)
-    if not isinstance(data, dict) or data.get('$schema') != 'https://www.speedscope.app/file-format-schema.json':
-        raise RuntimeError('py-spy output is not a speedscope profile')
-    shared = data.get('shared')
-    if not isinstance(shared, dict) or not isinstance(shared.get('frames'), list):
-        raise RuntimeError('py-spy output has no shared frame table')
-    profiles = data.get('profiles')
-    if not isinstance(profiles, list) or not profiles or not any(
-            isinstance(profile, dict) and profile.get('samples') for profile in profiles):
-        raise RuntimeError('py-spy output has no sampled profiles')
-    destination = Path(destination)
-    if destination.exists():
-        raise FileExistsError('refusing to replace a published profile')
-    partial = destination.with_name(destination.name + '.copying')
-    with partial.open('xb') as handle:
-        handle.write(payload)
-    partial.replace(destination)
-    digest = bytes_sha256hex(payload)
-    if file_sha256hex(destination) != digest:
-        raise RuntimeError('published py-spy bytes differ from host-local output')
-    return {'sha256': digest, 'bytes': len(payload), 'profiles': len(profiles)}
 
 
 def netdata(host, endpoint):
@@ -120,10 +96,13 @@ for host in ('sparklina', 'sparky'):
 # Include the declared collector cadence, including a short final interval.
 # Netdata's GPU power chart updates every ten seconds on these hosts.
 window_padding = 2 * max(chart_intervals)
-# A read-only access check before ready prevents wasting an approved GPU row
-# on an unwritable profiler destination; it does not launch a workload.
-command(['sudo', '-n', 'test', '-w', str(profile_dir)])
-version = command(['sudo', '-n', 'py-spy', '--version'])
+# PB deliberately sets NoNewPrivileges. Neither preflight nor profiling may
+# elevate. The real profiler parents its same-UID target inside the container.
+write_check = out / '.profile-write-check'
+with write_check.open('x') as handle:
+    handle.write('same-uid')
+write_check.unlink()
+version = command([a.profiler_executable, '--version'])
 first_power = command(['nvidia-smi', '--query-gpu=power.draw',
                        '--format=csv,noheader,nounits'])
 float(first_power.strip())
@@ -239,10 +218,6 @@ event('ready', pyspy_version=version.strip(), initial_power_w=float(first_power)
 (out / 'ready.pending').replace(out / 'ready.json')
 pid = None
 target_exited = False
-spy = None
-spylog = None
-profile_handled = False
-profile_error = None
 deadline = time.monotonic() + a.wait_s
 next_sample = time.monotonic()
 try:
@@ -261,11 +236,8 @@ try:
                     if sampler_tid is None:
                         raise RuntimeError('required Netdata sampler has no native identity')
                     os.sched_setaffinity(sampler_tid, affinity)
-                    spylog = (out / 'pyspy.log').open('w')
-                    spy = subprocess.Popen(profiler_command(pid, a.profile_s, local_profile),
-                        stdout=spylog, stderr=subprocess.STDOUT)
                     deadline = time.monotonic() + a.row_s + 120
-                    event('row_found', pid=pid, affinity=affinity, profiler_pid=spy.pid)
+                    event('row_found', pid=pid, affinity=affinity, profile_backend='same_uid_child')
                     (out / 'target.json').write_text(json.dumps({'pid': pid,
                         'epoch': time.time(), 'affinity': affinity}))
                 elif (out / 'workload_done').exists():
@@ -281,20 +253,6 @@ try:
                 break
             if pid is not None and now > deadline:
                 raise TimeoutError('row exceeded observer row-s; row was NOT signalled')
-            if spy is not None and not profile_handled and spy.poll() is not None:
-                profile_handled = True
-                rc = spy.returncode
-                event('pyspy_exited', returncode=rc)
-                try:
-                    if rc != 0:
-                        raise RuntimeError('py-spy failed; profile evidence is incomplete')
-                    receipt = publish_profile(local_profile, out / profile_name)
-                    event('profile_published', **receipt)
-                except Exception as error:
-                    profile_error = str(error)
-                    event('profile_error', error=profile_error)
-                # Keep recording power/Netdata through row exit, even on a
-                # profiler failure. Never signal the row or change its argv.
             if now >= next_sample:
                 epoch = time.time()
                 try:
@@ -310,7 +268,7 @@ try:
                     try:
                         record = {'epoch': epoch, 'pid': pid,
                             'stat': Path('/proc', str(pid), 'stat').read_text(),
-                            'io': command(['sudo', '-n', 'cat', f'/proc/{pid}/io'])}
+                            'io': Path('/proc', str(pid), 'io').read_text()}
                         proc.write(json.dumps(record) + '\n')
                     except Exception as error:
                         telemetry_errors.append(str(error))
@@ -319,22 +277,11 @@ try:
             time.sleep(0.1)
 finally:
     finish_netdata()
-    if spy is not None:
-        # Own profiler only. Never signal or terminate the quantization row.
-        rc = spy.wait(timeout=a.profile_s + 30)
-        if not profile_handled:
-            event('pyspy_exited', returncode=rc)
-            try:
-                if rc != 0:
-                    raise RuntimeError('py-spy failed; profile evidence is incomplete')
-                receipt = publish_profile(local_profile, out / profile_name)
-                event('profile_published', **receipt)
-            except Exception as error:
-                profile_error = str(error)
-                event('profile_error', error=profile_error)
-        spylog.close()
-        if profile_error is not None:
-            raise RuntimeError(profile_error)
     if nd.is_alive() or telemetry_errors:
         raise RuntimeError('required telemetry incomplete or collector did not finish: ' + repr(telemetry_errors))
+    marker = out / 'workload_done'
+    if not marker.is_file() or int(marker.read_text()) != 0:
+        raise RuntimeError('profile workload did not complete successfully')
+    receipt = publish_profile(local_profile, out / profile_name)
+    event('profile_published', **receipt)
     event('observer_done')

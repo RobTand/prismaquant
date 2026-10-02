@@ -12,11 +12,15 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import re
-import stat
 import subprocess
 
 from tools.container_runtime_identity import (
     image_content_sha256, prismaquant_source_sha256)
+from tools.tessera_campaign_namespace import (
+    establish_namespace_temporaries, namespace_adapter_request,
+    refuse_path_symlinks as _refuse_scratch_symlinks,
+    validate_namespace_request,
+)
 
 
 # These are PrismaBuild's action environment contract, deliberately kept in
@@ -583,22 +587,6 @@ CONTAINER_CACHE_SCRATCH_ENV = (
     "PRISMAQUANT_CONTAINER_CACHE_ROOT", "PRISMAQUANT_CONTAINER_CACHE_MAX_BYTES")
 
 
-def _refuse_scratch_symlinks(value: str) -> None:
-    """Inspect existing ancestors without creating or resolving scratch."""
-    path = Path(value)
-    for ancestor in (*reversed(path.parents), path):
-        try:
-            info = ancestor.lstat()
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            raise RuntimeError(f"cannot inspect scratch path {ancestor}") from exc
-        if stat.S_ISLNK(info.st_mode):
-            raise RuntimeError(f"scratch path contains a symlink: {ancestor}")
-        if not stat.S_ISDIR(info.st_mode):
-            raise RuntimeError(f"scratch path is not a directory: {ancestor}")
-
-
 def container_cache_scratch_environment(spec: dict, environ) -> dict:
     """Validate an explicitly priced compilation-cache root, not its lifetime."""
     names = CONTAINER_CACHE_SCRATCH_ENV
@@ -937,11 +925,68 @@ def import_search_roots(spec: dict, *, cwd: str, safe_path: bool) -> list:
     return roots
 
 
-def _package_root(roots: list) -> "tuple[str, Path] | None":
+def _source_package(root: Path) -> bool:
+    """The supported source-package candidate at one mounted search entry."""
+    return (root / "prismaquant" / "__init__.py").is_file()
+
+
+def _native_import_candidates(directory: Path, stem: str) -> list[Path]:
+    if not directory.is_dir():
+        return []
+    return sorted(path for path in directory.iterdir()
+                  if path.name == stem + ".so"
+                  or (path.name.startswith(stem + ".") and path.name.endswith(".so")))
+
+
+def _refuse_import_shadow(root: Path) -> None:
+    """Conservative opt-in candidates, never an interpreter/ABI simulation.
+
+    A source package wins over same-entry source/sourceless modules. Native
+    package initializers may supersede its __init__.py; any native-looking
+    initializer is ambiguous without the container's suffix authority.
+    """
+    try:
+        package = root / "prismaquant"
+        native_initializers = _native_import_candidates(package, "__init__")
+        candidates = [(path, "ambiguous native initializer")
+                      for path in native_initializers]
+        if not _source_package(root):
+            candidates += [(package / "__init__.pyc", "sourceless package shadow"),
+                           (root / "prismaquant.py", "source module shadow"),
+                           (root / "prismaquant.pyc", "sourceless module shadow")]
+            candidates += [(path, "ambiguous native module shadow")
+                           for path in _native_import_candidates(root, "prismaquant")]
+        for path, reason in candidates:
+            if path.is_file():
+                raise RuntimeError(f"namespace guarded imports {reason}: {path}")
+    except OSError as exc:
+        raise RuntimeError(f"namespace guarded imports cannot inspect root: {root}") from exc
+
+
+def _package_root(roots: list, *, refuse_shadows: bool = False) -> tuple[str, Path] | None:
     for entry, root in roots:
-        if (root / "prismaquant" / "__init__.py").is_file():
+        if refuse_shadows:
+            _refuse_import_shadow(root)
+        if _source_package(root):
             return entry, root
     return None
+
+
+def guarded_import_root(spec: dict, *, cwd: str,
+                        require_checkout: bool = False) -> tuple[str, Path] | None:
+    """Replay safe-path imports; opt-in ownership requires known checkout resolution."""
+    roots = import_search_roots(spec, cwd=cwd, safe_path=True)
+    guarded = _package_root(roots, refuse_shadows=require_checkout)
+    if require_checkout:
+        if guarded is None or guarded[1].resolve() != Path(cwd).resolve():
+            raise RuntimeError("namespace guarded imports do not resolve to the executed checkout")
+        known_entries = {entry for entry, _ in roots}
+        for entry in spec.get("env", {}).get("PYTHONPATH", "").split(":"):
+            if entry not in known_entries:
+                raise RuntimeError("namespace guarded imports have an unknown earlier root")
+            if entry == guarded[0]:
+                break
+    return guarded
 
 
 def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str | None, Path, bool]":
@@ -970,7 +1015,7 @@ def pinned_source_root(spec: dict, *, cwd: str) -> "tuple[str | None, Path, bool
         if not target.is_absolute() or target == workspace or workspace in target.parents:
             continue
         root = host_path(entry, cwd=cwd, mounts=mounts)
-        if root is not None and (root / "prismaquant" / "__init__.py").is_file():
+        if root is not None and _source_package(root):
             return entry, root, False
     return None, Path(cwd), True
 
@@ -1013,7 +1058,7 @@ def verify_pinned_import(spec: dict, *, cwd: str) -> dict:
     and the row's stamped digest is what catches that after the fact.
     """
 
-    guarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=True))
+    guarded = guarded_import_root(spec, cwd=cwd)
     unguarded = _package_root(import_search_roots(spec, cwd=cwd, safe_path=False))
     shadow_sha = (None if unguarded is None
                   else prismaquant_source_sha256(unguarded[1] / "prismaquant"))
@@ -1170,6 +1215,32 @@ def inspect_or_load(container):
     return rows
 
 
+def validate_namespace_launch(spec: dict, command: list[str], *, cwd: str, environ) -> str | None:
+    """Opt-in ownership refusal before Docker inspection or campaign entry."""
+    if "namespace_binding" not in spec:
+        if "namespace_profile" in spec:
+            raise RuntimeError("namespace profile requires bound published ownership")
+        return None
+    row = namespace_adapter_request(spec, command, environ)
+    commit = checkout_commit(cwd)
+    if commit is None:
+        raise RuntimeError("namespace requires a committed executed checkout")
+    validate_namespace_request(row, executed_commit=commit)
+    # The legacy helper checks package bytes only. Namespace ownership is over
+    # the full source, including this adapter and the preparation contract.
+    try:
+        changed = subprocess.run(["git", "-C", cwd, "status", "--porcelain",
+                                  "--untracked-files=normal"],
+                                 capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("namespace cannot inspect executed source") from exc
+    if changed.returncode != 0 or changed.stdout.strip():
+        raise RuntimeError("namespace full executed source differs from its commit")
+    guarded_import_root(spec, cwd=cwd, require_checkout=True)
+    establish_namespace_temporaries(row)
+    return commit
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", required=True)
@@ -1190,6 +1261,7 @@ def main(argv=None) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a container command is required")
+    namespace_commit = validate_namespace_launch(spec, command, cwd=str(Path.cwd()), environ=os.environ)
     requested = spec["container"]["image"]
     inspected = inspect_or_load(spec['container'])
     if not isinstance(inspected, list) or len(inspected) != 1 or not isinstance(inspected[0], dict):
@@ -1204,7 +1276,7 @@ def main(argv=None) -> int:
                            f"expected {declared}, observed {content_digest}")
     with_gpu, gpu_reason = gpu_attachment(spec, cpu_only=args.cpu_only, environ=os.environ)
     imports = verify_pinned_import(spec, cwd=str(Path.cwd()))
-    commit = checkout_commit(str(Path.cwd()))
+    commit = namespace_commit if namespace_commit is not None else checkout_commit(str(Path.cwd()))
     print(json.dumps({"schema": "prismaquant.tessera_campaign_container.v1",
                       "requested_image": requested, "image_id": image_id,
                       "image_content_sha256": content_digest,

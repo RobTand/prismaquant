@@ -16,6 +16,15 @@ from prismaquant.cost_streaming import build_streamed_causal_lm
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 
 
+@pytest.fixture
+def _cpu_glm_kernels(monkeypatch):
+    # Import inside the fixture: importing this autouse fixture at module scope
+    # would also replace the real kernels in the CUDA controls below.
+    from test_glm5_next_streamed_forward_parity import _torch_only_causal_conv1d
+
+    _torch_only_causal_conv1d.__wrapped__(monkeypatch)
+
+
 def _runner(source, offload):
     return build_streamed_causal_lm(str(source), device=torch.device("cpu"),
         dtype=torch.bfloat16, offload_folder=str(offload), profile=Glm5NextProfile(),
@@ -50,7 +59,8 @@ def _visit(runner, tokens, targets, *, start=None, stop_layer=None):
     return captured, final, visited
 
 
-def test_glm_chained_visits_equal_the_monolith_and_their_witnesses_merge(glm_checkpoint, tmp_path):
+def test_glm_chained_visits_equal_the_monolith_and_their_witnesses_merge(
+        glm_checkpoint, tmp_path, _cpu_glm_kernels):
     """Two quanta over the real GLM forward equal one traversal, and so do their witnesses."""
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
     from prismaquant.streaming_model import merge_selected_initialization_witnesses
@@ -159,7 +169,7 @@ def _assert_same_capture(expected_root, actual_root, *, what):
 
 
 def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device):
-    """Prep, quanta and join publish the monolith's capture; each quantum hashes only what it reads.
+    """Prep, quanta and join publish the monolith's capture; each file is hashed by its reader.
 
     The campaign places its model on CUDA whenever CUDA is available, so the
     CPU case hides it and the CUDA case records the device of every boundary
@@ -169,6 +179,10 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     from prismaquant import cost_streaming
     from prismaquant import tessera_calibration_cache as cache
     from prismaquant import tessera_campaign as campaign
+    # Controlled legacy-mechanism fixture, not a qualified immutable provider.
+    # The independent automatic-admission matrix exercises the real refusal.
+    from prismaquant import tessera_calibration_cache as qualification_store
+    monkeypatch.setattr(qualification_store, 'require_automatic_capture_source_recording', lambda: None)
     from test_glm5_next_streamed_forward_parity import _build_model
     pinned = '/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97'
     producer = Path(os.environ.get('TESSERA_REPO') or pinned)
@@ -249,23 +263,26 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
         '--capture-chain', 'prep', '--capture-chain-ranges', ranges,
         '--capture-chain-boundary-storage', json.dumps(storage)]) == 0
     roster = {path.name for path in cache.capture_source_files(source)}
-    assert sorted(hashed) == sorted(roster)  # the prep hashes the whole source once
-    metadata = {name for name in roster if not name.endswith('.safetensors')}
+    assert hashed == []  # the prep reads no payload (PQ #1896)
     pairs = chain.parse_layer_ranges(ranges)
     prep = chain.read_prep(root)
+    read_by_quanta = set()
     for start, stop in pairs:
         hashed.clear()
         assert campaign.main([*chained, '--cache-dir', str(tmp_path / f'quantum-{start}-cache'),
             '--capture-chain', 'quantum', '--capture-layer-range', f'{start}:{stop}']) == 0
         consumed = {"model-head.safetensors",
                     *(f"model-layer-{layer:03d}.safetensors" for layer in range(start, stop))}
+        # Each file the quantum reads is hashed once, by that read; nothing else is.
         assert {name for name in hashed if name.endswith('.safetensors')} == consumed
-        assert set(hashed) == consumed | metadata and len(hashed) == len(set(hashed))
+        assert set(hashed) <= roster and len(hashed) == len(set(hashed))
         fragment = json.loads(chain.fragment_path(root, start, stop).read_text())
         receipt = fragment["source_authentication"]
-        assert {row["name"] for row in receipt["verified_files"]} == consumed | metadata
+        assert receipt["schema"] == cache.RECORDING_RECEIPT_SCHEMA
+        assert {row["name"] for row in receipt["verified_files"]} == set(hashed)
         assert receipt["payload_bytes_hashed"] == sum(
             (source / name).stat().st_size for name in consumed)
+        read_by_quanta |= set(hashed)
         if start:
             # The quantum left the boundary it started from in place.
             before = json.loads(chain.fragment_path(root, *pairs[pairs.index((start, stop)) - 1])
@@ -279,7 +296,9 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     hashed.clear()
     assert campaign.main([*chained, '--cache-dir', str(tmp_path / 'join-cache'),
                           '--capture-chain', 'join']) == 0
-    assert hashed == []  # the join hashes no source file
+    # The join hashes only what no quantum read (the vision tower here), once.
+    assert sorted(hashed) == sorted(roster - read_by_quanta)
+    assert "model-visual.safetensors" in hashed
     record = json.loads(chain.join_path(root).read_text())
     assert record["retired_boundary_entries"] == passed
     entries = list((Path(storage["directory"]) / prep["session"]["generation"] / "entries").iterdir())
@@ -293,7 +312,8 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     ("legacy", "0:1,1:2,2:3"),
     ("shared-inputs-bounded-v1", "0:1,1:2,2:3"),
 ])
-def test_glm_capture_chain_equals_the_monolith_entry_for_entry(tmp_path, monkeypatch, policy, ranges):
+def test_glm_capture_chain_equals_the_monolith_entry_for_entry(
+        tmp_path, monkeypatch, policy, ranges, _cpu_glm_kernels):
     """The chain on CPU, including on a box that has CUDA."""
     _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, device="cpu")
 

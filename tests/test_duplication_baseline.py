@@ -19,11 +19,20 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import MappingProxyType
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import duplication_inventory as inventory  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def root_inventory():
+    """One read-only root report; synthetic tests scan only their tmp roots."""
+    return MappingProxyType(inventory.scan())
 
 
 def _baseline():
@@ -53,8 +62,8 @@ def test_scanner_finds_a_renamed_copy_and_ignores_same_file_pairs(tmp_path):
     assert live["same_name_helpers"] == {"_sha": ["prismaquant/a.py", "tools/b.py"]}
 
 
-def test_near_duplicate_pairs_only_shrink():
-    live = {tuple(p) for p in inventory.scan()["near_duplicates"]}
+def test_near_duplicate_pairs_only_shrink(root_inventory):
+    live = {tuple(p) for p in root_inventory["near_duplicates"]}
     base = {tuple(p) for p in _baseline()["near_duplicates"]}
     assert not live - base, (
         f"new near-duplicate functions {sorted(live - base)}: reuse the existing "
@@ -64,8 +73,8 @@ def test_near_duplicate_pairs_only_shrink():
         "tools/duplication_inventory.py --write-baseline")
 
 
-def test_same_name_helpers_only_shrink():
-    live = inventory.scan()["same_name_helpers"]
+def test_same_name_helpers_only_shrink(root_inventory):
+    live = root_inventory["same_name_helpers"]
     base = _baseline()["same_name_helpers"]
     grown = {n: sorted(set(m) - set(base.get(n, ()))) for n, m in live.items()
              if set(m) - set(base.get(n, ()))}
@@ -93,9 +102,9 @@ def test_must_differ_pairs_are_live_and_give_a_reason():
         assert len(row["reason"].split()) >= 8, f"{pair} needs a real reason"
 
 
-def test_primitive_digest_sites_only_shrink():
+def test_primitive_digest_sites_only_shrink(root_inventory):
     """Raw digest sites outside the owners may only disappear (#1508)."""
-    live = set(inventory.scan()["primitive_digest_sites"])
+    live = set(root_inventory["primitive_digest_sites"])
     base = set(_baseline()["primitive_digest_sites"])
     assert not live - base, (
         f"new primitive digest sites outside {sorted(inventory.DIGEST_OWNERS)}: "

@@ -37,19 +37,24 @@ def _release_process_state_this_file_installs():
     Two files were seen failing behind it, in the order pbtest happened to
     group them.
 
-    The same applies to the ``tools/`` entry this file puts on ``sys.path``
-    and the module it imports from there: both outlive the test that added
-    them. Teardown only -- a setup-time reset would hide the leak this
-    file's last test asserts against.
+    The ``tools/`` path is restored by monkeypatch. A dispatcher already
+    imported by another test keeps its exact module identity: its retained
+    argv callables still refer to that module's globals. Remove the dispatcher
+    only when this test installed it. Teardown only -- a setup-time reset
+    would hide the leak this file's last test asserts against.
     """
 
     import sys
 
-    yield
+    prior_dispatch = sys.modules.get("dispatch_joint_quanta")
+    yield prior_dispatch
     from prismaquant.staged_tier_policy import (
         deactivate_staged_tier_policy_for_tests)
     deactivate_staged_tier_policy_for_tests()
-    sys.modules.pop("dispatch_joint_quanta", None)
+    if prior_dispatch is None:
+        sys.modules.pop("dispatch_joint_quanta", None)
+    else:
+        sys.modules["dispatch_joint_quanta"] = prior_dispatch
 
 
 def _config(sealed: int = PLAN_SEALED) -> dict:
@@ -541,7 +546,8 @@ def test_parse_refuses_unicode_digits_named():
         _parse_artifact_budget_bytes("½", where="test")
 
 
-def test_this_file_leaves_no_process_global_state_behind():
+def test_this_file_leaves_no_process_global_state_behind(
+        _release_process_state_this_file_installs):
     """FAILING-BEFORE (PQ #889): the leak, asserted where it is made.
 
     Deliberately the last test in the file and deliberately order
@@ -563,4 +569,8 @@ def test_this_file_leaves_no_process_global_state_behind():
     assert active_policy() is None, (
         "the staged-tier policy an in-process CLI run installed is still "
         "active: every bulk read in the next file refuses", active_policy())
-    assert "dispatch_joint_quanta" not in sys.modules
+    prior_dispatch = _release_process_state_this_file_installs
+    if prior_dispatch is None:
+        assert "dispatch_joint_quanta" not in sys.modules
+    else:
+        assert sys.modules.get("dispatch_joint_quanta") is prior_dispatch

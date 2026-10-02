@@ -52,6 +52,11 @@ GROUP_CEILING_BYTES = GROUP_SIZE * ((1 << 14) + 65536)
 PAYLOAD_MAX_BYTES = GROUP_CEILING_BYTES * (
     TOP * N_BATCHES // GROUP_SIZE + 2 * N_PROBES * N_BATCHES // GROUP_SIZE)
 
+#: Finite integration-harness allowance for real queue movers and settlement.
+#: This chain asserts staging calls and exact output bytes, not elapsed time.
+#: The separate failure/live-export tests retain their deliberately small bounds.
+CHAIN_HARNESS_TIMEOUT_S = 900.0
+
 
 class LandingExport(spool_tests.ControlledExport):
     """Acknowledges an export the first time it is polled.
@@ -204,18 +209,21 @@ def test_a_chain_on_one_host_stages_none_of_its_own_cotangent_groups(
     before #1110; both produce the in-memory chain's exact bytes.
     """
 
-    local = _spool_owner(tmp_path / "local-run")
+    local = _spool_owner(tmp_path / "local-run",
+                         staging_timeout_s=CHAIN_HARNESS_TIMEOUT_S)
     storage, publication, q, env, pb_repo, _backend = local
     closing(storage)
     counts = _count_staging_requests(publication)
     with chain._fleet(q, tmp_path / "local-run"):
         chain._strict(monkeypatch, env, pb_repo, q)
         local_final, _ = _run_chain(storage)
-        assert storage.drain_produced_stager(60.0)
+        assert storage.drain_produced_stager(CHAIN_HARNESS_TIMEOUT_S), (
+            "local chain stager did not drain within the harness allowance")
         storage.settle_local_output()
         storage.settle_produced_releases()
         # The last plane's prewrite releases run on the stager.
-        assert storage.drain_produced_stager(60.0)
+        assert storage.drain_produced_stager(CHAIN_HARNESS_TIMEOUT_S), (
+            "local prewrite releases did not drain within the harness allowance")
     assert counts.get("cotangent", {}) == {}, (
         "an own cotangent group read on its own box was staged through "
         "PrismaBuild", counts)
@@ -225,7 +233,8 @@ def test_a_chain_on_one_host_stages_none_of_its_own_cotangent_groups(
     assert storage.telemetry["produced_groups_prewrite_released"] >= (
         TOP * N_PROBES * N_BATCHES // GROUP_SIZE)
 
-    staged = _spool_owner(tmp_path / "staged-run")
+    staged = _spool_owner(tmp_path / "staged-run",
+                          staging_timeout_s=CHAIN_HARNESS_TIMEOUT_S)
     s_storage, s_publication, s_q, s_env, s_pb_repo, _s_backend = staged
     closing(s_storage)
     # The path every read took before #1110: no entry is read locally, so
@@ -237,7 +246,8 @@ def test_a_chain_on_one_host_stages_none_of_its_own_cotangent_groups(
     with chain._fleet(s_q, tmp_path / "staged-run"):
         chain._strict(monkeypatch, s_env, s_pb_repo, s_q)
         staged_final, _ = _run_chain(s_storage)
-        assert s_storage.drain_produced_stager(60.0)
+        assert s_storage.drain_produced_stager(CHAIN_HARNESS_TIMEOUT_S), (
+            "staged chain stager did not drain within the harness allowance")
         s_storage.settle_local_output()
         s_storage.settle_produced_releases()
     assert s_counts["cotangent"]["publish"] > 0, s_counts

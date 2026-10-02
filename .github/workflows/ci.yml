@@ -1,4 +1,4 @@
-# PrismaQuant CI — run the test suite on every push and pull request.
+# PrismaQuant CI — full hosted suite on main/manual; PR smoke plus PB gate.
 #
 # WHY THIS EXISTS: five substantial pull requests (#13-#17) sat open for eleven
 # days with nothing to run them, while `main` itself carried three failing
@@ -52,15 +52,20 @@ permissions:
   contents: read
 
 jobs:
+  # Every main tree and manual dispatch retains the complete Python 3.12 CPU
+  # suite. PRs retain the import/CLI smoke and allowlist checks below; their
+  # pre-merge full suite is the required composed PrismaBuild pb-tests check.
   tests:
+    if: github.event_name != 'pull_request'
     name: tests (py${{ matrix.python }}, cpu)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        # 3.12 only. The reference box runs 3.12 and nothing else is
-        # exercised anywhere; requires-python is >=3.12 to match. Dropped 3.11
+        # The hosted job covers the Python 3.12 floor. The current PB queue
+        # environment uses Python 3.14.4, so its full-suite gate is distinct
+        # coverage; main/manual runs retain the full hosted 3.12 suite. Dropped 3.11
         # on 2026-08-29 (Rob: "I don't care if we don't support python 3.11").
         # NOTE: 3.11 was not failing on an interpreter incompatibility -- it
         # stood in for heap/allocation order. The dsa_only NaN it exposed was a

@@ -932,3 +932,17 @@ def pytest_collectreport(report):
     """In a child session, hand a failed or skipped collection to the parent."""
     if not report.passed:
         _append_own_process_record(report)
+
+
+@pytest.fixture
+def legacy_capture_mechanism(monkeypatch):
+    """Exercise explicit legacy capture mechanics, without provider qualification.
+
+    Only positive mechanism tests request this fixture. Production automatic
+    admission remains covered without it by the independent refusal matrix.
+    This controlled fixture does not establish immutable original material.
+    """
+    from prismaquant import tessera_calibration_cache as capture
+
+    monkeypatch.setattr(capture, "require_automatic_capture_source_recording",
+                        lambda: None)

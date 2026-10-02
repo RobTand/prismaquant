@@ -1,0 +1,42 @@
+{
+  "schema": "prismaquant.prismabuild.data_manifest.v1",
+  "mount_prefix": "/mnt/shared",
+  "annotations": {
+    "scope": "issue1962-bounded-dense-screen",
+    "allowed_tiers": "ram,ssd",
+    "phases": [{"name": "startup", "bytes": 1505923749, "cumulative_bytes": 1505923749}]
+  },
+  "produced_by": {
+    "tool": "issue1962-bounded-dense-screen",
+    "size_source": "stat",
+    "source_commit": "d2d6fc9a8f"
+  },
+  "entry_count": 4,
+  "total_bytes": 1505923749,
+  "entries": [
+    {
+      "path": "/mnt/shared/models/qwen3-small-alloc-lead/Qwen3-0.6B/model.safetensors",
+      "offset": 0,
+      "bytes": 1503300328,
+      "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"
+    },
+    {
+      "path": "/mnt/shared/models/qwen3-small-alloc-lead/Qwen3-0.6B/config.json",
+      "offset": 0,
+      "bytes": 726,
+      "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd"
+    },
+    {
+      "path": "/mnt/shared/models/qwen3-small-alloc-lead/Qwen3-0.6B/generation_config.json",
+      "offset": 0,
+      "bytes": 239,
+      "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/alloc-lead-asd/inputs_qwen3.safetensors",
+      "offset": 0,
+      "bytes": 2622456,
+      "sha256": "74ddf32461f4c041d3743db280aa0df5a7de69937a5dc92208623a1173bdbd68"
+    }
+  ]
+}
