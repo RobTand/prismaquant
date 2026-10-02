@@ -1,4 +1,4 @@
-# Issue1962 surrogate diagnostic
+# Issue #1962 surrogate diagnostic
 
 This research diagnostic compares the existing signed joint-AURA arithmetic
 with realized activation and RTN weight perturbations on a dense Qwen3 model,
@@ -176,8 +176,8 @@ are contextual evidence, with no timing or throughput acceptance.
 
 The existing two-layer GLM5-Next fixture supplies KDA, DSA/MLA, mHC, one
 dense MLP and a four-expert/top-two routed MLP with shared experts. This is
-a seeded synthetic model, hidden size64, vocabulary128, four sequences of
-length32, two Rademacher probes7000..7001 and global token count128.
+a seeded synthetic model, hidden size 64, vocabulary 128, four sequences of
+length 32, two Rademacher probes 7000..7001 and global token count 128.
 It uses the exact corrected derivative image/modeling binding already
 recorded in the original GLM L05 source. Source execution is eager attention,
 grouped_mm experts, highest FP32 matmul precision, TF32 off and BF16 reduced
@@ -193,22 +193,22 @@ configuration, source identity and derivative callable binding. The CPU
 source qualification passed PB `38523ef3ba8976e03ad07a9ab5c17a2a078b8622e995e1402aa537aa40dbdfb1`.
 
 `tiny_glm_control.py` compares a direct full graph with the existing
-`run_adjoint_capture_core`: boundary microbatch1, layer-roll batch4 and probe
+`run_adjoint_capture_core`: boundary microbatch 1, layer-roll batch 4 and probe
 fusion enabled. The existing packed observer and gradient selector retain
 explicit `(sequence,position,routing-slot)` coordinates for each activation
 error/cotangent pair. `JointOperatorStatisticsLease` contracts those same
 captured operands. BF16 additionally feeds them through the existing
-`StageBReplaySpill` recording/replay seam with operator_gemm/chunk_rows65536.
+`StageBReplaySpill` recording/replay seam with operator_gemm with chunk_rows 65536.
 This is not the full layer-quantum capture driver. FP32 cannot enter that
-spill's production16-bit operand contract; it uses the statistics owner
+spill's production 16-bit operand contract; it uses the statistics owner
 directly. Model weights are fully resident in this tiny fixture and the
 source-provider callback asserts their device residency; this does not
 qualify production source loading or prefetch.
 
 The full FP32 entrypoint passed CPU PB
 `f24f5c738f4cc0c48b4cbe033d5f6f8029dfd15f43c06227a265db4f46e9b2bd`
-(exit0, cleanup complete). Its library Torch short-convolution substitution
-is CPU-preflight-only. On CPU all four boundary cotangents and all36 signed
+(exit 0, cleanup complete). Its library Torch short-convolution substitution
+is CPU-preflight-only. On CPU all four boundary cotangents and all 36 signed
 unit/probe components were exact. The GPU profiler identifies actual
 `aten::conv1d`, `aten::_grouped_mm` and `GroupedMmBackward0` events; this
 control makes no fused-KDA kernel or full-size projector qualification claim.
@@ -218,11 +218,11 @@ control makes no fused-KDA kernel or full-size projector qualification claim.
 | Boundary cotangent maximum relative RMS difference | 1.31e-7 | exact |
 | Direct vs captured signed A components, max abs/RMS | 3.17e-7 | exact |
 | Fixed-g output dot vs operator contraction, max abs/RMS | 6.95e-7 | 3.61e-7 |
-| Captured operator vs spill replay signed A | outside16-bit spill contract | exact |
+| Captured operator vs spill replay signed A | outside 16-bit spill contract | exact |
 
-All36 unit/probe records have identical direct/captured coordinate order,
-with exactly256 routed `(sequence,position,slot)` pairs per probe/role and
-all128 dense/shared rows per unit. FP32 x and dx match exactly; its per-unit
+All 36 unit/probe records have identical direct/captured coordinate order,
+with exactly 256 routed `(sequence,position,slot)` pairs per probe/role and
+all 128 dense/shared rows per unit. FP32 x and dx match exactly; its per-unit
 g differs at the small cotangent scale above. All BF16 x, dx and g are
 bitwise identical. Swapping two nonidentical spill input rows while retaining
 the original metadata/checksum refuses with `Stage B spill checksum mismatch`.
@@ -234,31 +234,31 @@ FP32 results are banked under `tiny-glm-control4`: action
 source parent `c1abf626f6b74816bd3a900878eeeeb1b5903981`.
 The completed FP32 leg reused its direct graph from action `51bb661a...`;
 that graph had been saved before a source-residency refusal. The containing
-pair subsequently exited1 when BF16 reused the same immutable produced-output
+pair subsequently exited 1 when BF16 reused the same immutable produced-output
 group IDs. Its FP32 result remains attributable; the wrapper is not a pair pass.
 BF16's completed direct graph was saved before that refusal, then reused
 through authenticated staged inputs by the BF16-only completion.
 
 BF16 completion is `tiny-glm-control6`, action
 `5ddafd588f8b6e470f84ab46a89385549bbb96e39e5a8853bcc56042ae217241`,
-source parent `04ea01bc7c60106915e6071ef430c0e46a8c3db4`, exit0 and cleanup
+source parent `04ea01bc7c60106915e6071ef430c0e46a8c3db4`, exit 0 and cleanup
 complete. CAS receipt
 `939a0e473dbf858948913139034d579b027d57dc155a865dd436f43e5ccf581d`,
 payload `dc177936b20d457fb87f06414259535306f8d1a2fb65a32a37e878da8b5b98b1`
-was read and hash-verified. Both GPU quanta used CPU4/native1, aggregate
-memory16GiB with GPU demand16GiB as a shared-memory subset, portable exclusive
-ordinary admission, a900s hard cap and semantic startup/control/publish phases.
-BF16's seven source/banked-result inputs served6,091,966 bytes through pinned
+was read and hash-verified. Both GPU quanta used CPU 4/native 1, aggregate
+memory 16 GiB with GPU demand 16 GiB as a shared-memory subset, portable exclusive
+ordinary admission, a 900 s hard cap and semantic startup/control/publish phases.
+BF16's seven source/banked-result inputs served 6,091,966 bytes through pinned
 SSD staging, with zero pool bytes, misses or fallbacks. Stage A's produced
 boundaries/cotangents used its existing owned local spool; the diagnostic did
 not add a cache or dispatcher.
 
 CPU output audit `f6ff5bae49c617969b4b4c5fbfab7a4323d2354f73640db21b34edaa34f27dac`
-verified the numerical/coordinate statements above, exit0 and cleanup complete,
+verified the numerical/coordinate statements above, exit 0 and cleanup complete,
 CAS receipt `dea90287d73311c1a09fc26db3829671c395e926175afe663f55e04395f93443`.
 Its machine-readable result is `tiny-glm-audit.json`. Each completed leg has
 its Torch trace. Both-Spark raw Netdata windows aligned to claim/finish with
-120s margins are in `netdata-tiny-glm-{fp32,bf16}-aligned`. CPU load is ambient;
+120 s margins are in `netdata-tiny-glm-{fp32,bf16}-aligned`. CPU load is ambient;
 there is no timing, throughput or useful-work-per-joule acceptance claim.
 
 Setup refusals were retained rather than recertified: missing import/dependency,
@@ -268,51 +268,53 @@ the reused produced-output identity. Action `b38b3a41...` then refused a malform
 manifest digest before staged reads/model execution; its empty result directory
 is retained as startup evidence. CPU full-entrypoint qualification preceded
 the successful text-only GPU chain. The known-good derivative image was not rebuilt;
-missing xxhash3.7.0 uses the locked ARM64 wheel SHA256
+missing xxhash 3.7.0 uses the locked ARM64 wheel SHA256
 `f3e7b689c3bce16699efcf736066f5c6cc4472c3840fe4b22bd8279daf4abdac`
 in a scoped dependency directory whose files are verified before use.
 
 This is a negative H10 mechanism screen at the tiny fixture dimensions. It
 does not establish original GLM L05 boundary, cotangent, rendered assignment,
-full-size projection, or per-sequence calibration correctness. Issue1962 and
+full-size projection, or per-sequence calibration correctness. Issue #1962 and
 the full GLM validation gate remain open.
 
 ## Historical GLM comparison contract
 
 `cpu_glm_provenance.py` audited existing L05 cost/adjoint/handoff metadata in
 PB `8db7e41d2dd1b3011faa18cf862130877e4653aa817b3c38defefb8200113e3b`.
-All867 format rows share one K4/global-row probe identity:512x512 calibration,
-all512 output-logit positions, global token count262144, seeds7000..7003,
-temperature1. Boundary5 and cotangent6 coordinates cover512 sequences and
-512x4 probes exactly. Metadata consistency does not independently validate
-the retained tensor pairings. L05 additive A is0.0026182497805902175;
-expert240 down alone contributes0.0021725103132911663.
+All 867 format rows share one K4/global-row probe identity: 512×512 calibration,
+all 512 output-logit positions, global token count 262144, seeds 7000..7003,
+temperature 1. Boundary 5 and cotangent 6 coordinates cover 512 sequences and
+512×4 probes exactly. Metadata consistency does not independently validate
+the retained tensor pairings. L05 additive A is 0.0026182497805902175;
+expert 240 down alone contributes 0.0021725103132911663.
 
 CPU audit `c43848557fab7e0ffab3cf5692665299da797aff32c6e91215171b515010a4a3`
-reconstructed the banked g3cal first511-position comparison and authenticated
+reconstructed the banked g3cal first 511-position comparison and authenticated
 its calibration tokens, window hashes, source identities and self-teacher
 bindings (exit0, cleanup complete; CAS receipt
 `63fe105b44605287bc7935d985fe8346a15b958c050a4d1b116383c3d9a455c9`).
-That pass concatenated four source512-token rows per2048-token window.
-Its historical0..510 band has the original source prefix only for rows
-`0,4,8,...,96`:25 rows, not all100 rows in the joined windows. The remaining
-75 rows have foreign preceding context. On the first511 band, saved finite
-decoded-weight arms give WA−W0.00410335096±0.00266368979 (paired-window SE).
-The whole512-row surrogate A aggregate is0.01443150679; its within-unit
-weight/cross correction predicts WA−W0.01466578715. These are different
+That pass concatenated four source 512-token rows per 2048-token window.
+Its historical 0..510 band has the original source prefix only for rows
+`0,4,8,...,96`: 25 rows, not all 100 rows in the joined windows. The remaining
+75 rows have foreign preceding context. On the first 511 band, saved finite
+decoded-weight arms give WA−W 0.00410335096 ± 0.00266368979 (paired-window SE).
+The whole 512-row surrogate A aggregate is 0.01443150679; its within-unit
+weight/cross correction predicts WA−W 0.01466578715. These are different
 calibration/position scopes and different loss objects: the A quadratic at
 the clean source is not standalone finite WA−W on rendered weights, and the
 allocator's additive-unit sum omits cross-unit network terms.
 
 The saved cost row has only draw-summed signed per-probe components. The
 inspected historical replay directory contains only `L05.dry-inputs.json`,
-not measured per-sequence/token pricing. The exact25-row prediction cannot
+not measured per-sequence/token pricing. The exact 25-row prediction cannot
 be recovered algebraically from those sums, and their calibration variance
-cannot be bounded from this evidence. Removing activation position511 would
+cannot be bounded from this evidence. Removing activation position 511 would
 not remove that output position's Fisher contribution to earlier activations.
-Because distribution KL uses no next-token target, an alternative first512
-logit band0..511 can match the surrogate's all-logit position scope, subject
-to independent source-prefix/causality qualification. Position511 must not be
+Because distribution KL uses no next-token target, an alternative first 512
+logit band 0..511 can match the surrogate's all-logit position scope, subject
+to independent source-prefix/causality qualification. Position 511 must not be
 discarded merely because the next observed token belongs to a joined row.
-That alternative still needs a25-row projection decomposition; tiny controls
+That alternative still needs a 25-row projection decomposition; tiny controls
 and metadata do not establish the actual factor-seven cause.
+
+The first 512-logit prefix audit passed PB `a994f9927e8e2124dc09c9fa25f788081b48fbd7c2e8fd9a0abbb4da532ced6e`, exit 0 and cleanup complete. Its saved first 512-position WA−W is 0.00411478698 ± 0.00265704925; the matched-row price remains unavailable. Machine-readable output is `glm-comparison-alllogits-audit.json`. Final compile of the research directory and incidental staged-reader docstring passed PB `e3ba1ddf8529ae76759357efa5afc8cff907ef4bf297232fdabff73a36159104`, source parent `0a11e08d818`, exit 0 and cleanup complete.
