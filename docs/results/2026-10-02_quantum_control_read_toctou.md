@@ -35,7 +35,7 @@ record and consume the record bytes once; the now-changed file must refuse the
 old digest.
 
 - RED (source fix stashed, test present): `5e379184aefc` first exposed a test
-  authoring bug; after fixing it, `832a8ab4`-style run returned the substituted
+  authoring bug; the corrected RED `aa51d2f7a912` returned the substituted
   record, identity `832a8ab4...` instead of the original `926d2a72...`.
 - GREEN: `6638efdf3626` -- 38 passed.
 - Regression set `7e8547e429a9` (launch contract), `db0140909449` (boundary
@@ -43,8 +43,8 @@ old digest.
   extension), `9a85f2835f10` (load-plan readset), `1a1386d3cb21`
   (redeclared-plan coverage): 139 passed. Combined 177 passed, 0 skipped,
   0 failed.
-- Compile: `17e48c209325` `py_compile` on the two touched modules and the test
-  module, rc 0.
+- Compile: `17e48c209325` `py_compile` on the one changed production module,
+  the existing (unchanged) owner `stage_inputs.py`, and the test module, rc 0.
 
 Environment: qualified CPU interpreter
 `/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python`
