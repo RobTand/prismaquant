@@ -2328,7 +2328,7 @@ def test_a_waiting_layer_read_holds_no_gather_worker(tmp_path, monkeypatch):
         def sleep(self, seconds):
             polling.set()
             assert release.wait(120), "the cold poll was never released"
-            self.now = 130.0
+            self.now += 30.0
 
     clock = _PollClock()
     monkeypatch.setattr(residency_shard_reader, 'time', clock)
