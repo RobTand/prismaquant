@@ -174,30 +174,69 @@ def _prepare(binding, stack, guard):
     return moe, inputs, bound, live, dict(tensors=files), decoder
 
 
-class _Consumer:
-    """Census arithmetic control with one separate accumulator per expert/kind.
+class _HookControlComplete(Exception):
+    """End the bounded hook control before complete-capture output handoff."""
 
-    Mirrors the existing shared gate/up capture policy after its prefix buffers
-    are full. This is reported as a local hook control, never production replay.
+
+def _production_hook_phases(moe, inputs, binding, functions, record, telemetry, guard, output, seconds):
+    """Measure the actual installed collector, consume_packed and accumulate.
+
+    The control supplies one existing captured input directly to the installed
+    pre-hook. It does not perform another model forward or publish a capture.
+    A deliberate bounded stop uses the collector's ordinary failure cleanup
+    after the steady phases; a complete calibration artifact is out of scope.
     """
-    def __init__(self):
-        self.state = {}
-
-    def __call__(self, derived):
-        for kind in ('gate_up', 'down'):
-            for e, x in enumerate(derived[kind]):
-                flat = x.detach().reshape(-1, x.shape[-1])
-                if not flat.shape[0]:
-                    continue
-                key = (kind, e)
-                previous, hessian = self.state.get(key, (None, None))
-                batch_max = flat.abs().amax().float()
-                if previous is None:
-                    previous = torch.zeros((), dtype=torch.float32, device=flat.device)
-                f32 = flat.to(torch.float32)
-                gram = f32.t() @ f32
-                self.state[key] = (torch.fmax(previous, batch_max),
-                    gram if hessian is None else hessian.add_(gram))
+    from prismaquant.model_profiles import detect_profile
+    from prismaquant.staged_whole_file import read_staged_whole_file
+    config = json.loads(read_staged_whole_file(Path(binding['config']['path']),
+        binding['config']['sha256'], label='hook-config'))
+    profile = detect_profile(binding['model'], config=config)
+    model = torch.nn.Module()
+    model.model = torch.nn.Module()
+    model.model.language_model = torch.nn.Module()
+    model.model.language_model.layers = torch.nn.ModuleList([
+        torch.nn.Module() for _ in range(binding['layer'] + 1)])
+    model.model.language_model.layers[binding['layer']].mlp = moe
+    prefix = f"model.language_model.layers.{binding['layer']}.mlp.experts"
+    targets = {f'{prefix}.{e}.{projection}' for e in range(288)
+        for projection in ('gate_proj','up_proj','down_proj')}
+    original = mqc.derive_per_expert_activations
+    arm = ['before']
+    references = dict(before=_references()[0]._reference_derive, after=original)
+    def selected(*args, **kwargs):
+        return references[arm[0]](*args, **kwargs)
+    def batches():
+        registered = list(moe.experts._forward_pre_hooks.values())
+        if len(registered) != 1:
+            raise RuntimeError('production collector did not install exactly one expected hook')
+        hook = registered[0]
+        record['production_hook'] = dict(module=hook.__module__,
+            file=hook.__code__.co_filename,line=hook.__code__.co_firstlineno,
+            selected_units=len(targets),max_rows=512,shared_packed_inputs=True)
+        for i, name in enumerate(('before','after','after','before')):
+            arm[0] = name
+            record['phases'].append(_phase(f'hook-{i}-{name}',
+                lambda:hook(moe.experts,(inputs,)), seconds,telemetry,guard,output))
+            _write(output/'partial.json',record)
+            # The iterator executes while the ordinary production hook scope
+            # is installed. No-op forward avoids a second source-model draw.
+            yield torch.zeros((1,1),dtype=torch.long)
+        raise _HookControlComplete()
+    mqc.derive_per_expert_activations = selected
+    try:
+        try:
+            campaign._collect_activations(model, targets, batches(), 512, 'cuda',
+                want_hessian=True,profile=profile,shared_packed_inputs=True,
+                forward_batch=lambda _:None,on_forwards_complete=lambda:None)
+        except _HookControlComplete:
+            record['hook_control_cleanup'] = 'ordinary bounded-stop unwind; no capture artifact'
+        else:
+            raise RuntimeError('hook control did not end at the declared boundary')
+    finally:
+        mqc.derive_per_expert_activations = original
+    if moe.experts._forward_pre_hooks:
+        raise RuntimeError('production collector left a hook installed')
+    gc.collect(); torch.cuda.empty_cache()
 
 
 class _Power:
@@ -357,8 +396,6 @@ def main():
                         raise RuntimeError('routed outputs changed')
             calls = dict(before=lambda: routing._reference_derive(moe.experts, inputs, moe),
                          after=lambda: mqc.derive_per_expert_activations(moe.experts, inputs, moe))
-            consumer = _Consumer()
-            hooks = {name:(lambda fn=fn: consumer(fn())) for name,fn in calls.items()}
             checks = {name:(lambda fn=fn: fn(bound, weights=live, model_path=binding['model'],
                 source=source, source_authentication=decoder)) for name,fn in dict(
                     before=checking._reference_checked_units, after=campaign._checked_projected_units).items()}
@@ -379,17 +416,15 @@ def main():
             record['mismatch_refusals'] = messages
             record['sync_sites'] = {kind:{name:routing.sync_sites(fn) for name,fn in functions.items()}
                 for kind,functions in dict(derive=calls,check=checks).items()}
-            for kind,functions in dict(derive=calls,hook=hooks,check=checks).items():
+            for kind,functions in dict(derive=calls,check=checks).items():
                 for i,arm in enumerate(('before','after','after','before')):
                     record['phases'].append(_phase(f'{kind}-{i}-{arm}', functions[arm],
                         args.seconds, telemetry, guard, args.out))
                     _write(args.out/'partial.json',record)
-                if kind == 'hook':
-                    record['consumer_states'] = len(consumer.state)
-                    consumer.state.clear(); gc.collect(); torch.cuda.empty_cache()
+            _production_hook_phases(moe,inputs,binding,calls,record,telemetry,guard,args.out,args.seconds)
             # Every async CPU-buffer consumer completes before any sealed FD closes.
             torch.cuda.synchronize()
-            del checks,hooks,calls,live,bound,source,decoder,moe,inputs
+            del checks,calls,live,bound,source,decoder,moe,inputs
             gc.collect()
             record['residency'] = residency_resolver().report()
         record['sealed_buffers_closed'] = True
