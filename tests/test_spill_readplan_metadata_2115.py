@@ -142,3 +142,30 @@ def test_declared_capture_cap_refuses_before_another_input_or_write(tmp_path, mo
         with pytest.raises(RuntimeError, match="geometry"):
             session._record("a", x, x)
         assert len(window.entries["a"]) == entries and len(window.records) == records
+
+
+def test_reclaimed_chunks_reread_frozen_metadata_and_preserve_operands(tmp_path, monkeypatch):
+    original = spill.StageBReplaySpill
+    monkeypatch.setattr(spill, "StageBReplaySpill", partial(original, packed_read_plan=True))
+    with _captured(tmp_path, monkeypatch, probes=3) as session:
+        held = session.replay_chunk_bytes
+        session.bind_replay_budget(io_engine.FixedBudget(buffer_bytes=held, headroom=3 * held))
+        stream = session._open_replay_stream()
+        with stream._cond:
+            assert stream._cond.wait_for(lambda: stream.counters["entries_read"] == 3, timeout=10)
+        assert session.reclaim_replay(held) >= held
+        observed = []
+        class Lease:
+            from torch import nn
+            modules = {"a": nn.Linear(8, 8, bias=False)}
+            def _observe_invocation(self, name, weight, x, gradient):
+                observed.append((x.clone(), gradient.clone()))
+        for probe in range(3):
+            session.replay(0, probe, Lease())
+        for index, (x, gradient) in enumerate(observed):
+            probe, invocation = divmod(index, 2)
+            assert torch.equal(x, (torch.arange(32).reshape(4, 8) + invocation * 64).to(torch.bfloat16))
+            assert torch.equal(gradient, torch.full_like(x, probe + invocation + 1))
+        assert stream.counters["rereads"] >= 1
+        session.close_replay_stream()
+        assert session._replay_stream is None
