@@ -29,16 +29,13 @@ Callers that catch ``StagedReadRefused`` for pool fallback must let
 ``TierPolicyRefused`` propagate (or convert it explicitly, never into a
 pool read).
 
-Lease posture, stated accurately: this module enforces tier *choice* today
-— which staged tier a bulk open may come from — with no lease API
-involved. What awaits the PB reader-lease SDK is lifetime *pinning*
-(acquire/hold/release across prefetch and mappings, eviction guards).
-Strict lifetime is not claimed complete: until the SDK is wired, the
-posture is tier refusal plus owned-buffer discipline (async chunk futures
-joined before fd close/release on every path including
-cancellation/error, CPU/GPU copies outliving fd close only after the
-owned buffer is fully read, memory charge on the normal action budget),
-and every serving-tier record carries an explicit null lease.
+This module enforces tier *choice*: which staged tier a bulk open may use.
+Supported staged readers pair that policy with :mod:`staged_lease`, which
+acquires, opens and releases lifetime-pinned windows through PrismaBuild's
+client SDK. Async reads join before descriptor close and lease release;
+CPU/GPU data outlives a window only in an owned buffer charged to the action.
+The successful open's serving record supplies its pin identity. Activating
+this policy alone does not add lifetime ownership to an arbitrary reader.
 """
 from __future__ import annotations
 
