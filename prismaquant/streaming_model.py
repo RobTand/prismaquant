@@ -803,12 +803,48 @@ class StreamingContext:
     def configure_selected_snapshot(self, names, profile):
         """Narrow this source-only context before the existing cache loads it."""
         from .layer_streaming import selected_weight_source_keys
+        return self._configure_selected_source_keys(
+            lambda: selected_weight_source_keys(names, profile, self.weight_ckpt),
+            allowed_layers=None)
+
+    def configure_selected_source_tensors(self, keys, *, layers):
+        """Select exact declared body tensor keys for an isolated source replay.
+
+        Non-Linear source state is included explicitly. This is the same
+        one-time snapshot transition; it cannot materialize nonbody state,
+        install a forward layer or attest a complete initialization.
+        """
+        keys = tuple(keys)
+        return self._configure_selected_source_keys(lambda: keys,
+                                                     allowed_layers=tuple(layers))
+
+    def _configure_selected_source_keys(self, selection, *, allowed_layers):
+        """Authenticate and estimate the complete selection before committing."""
         if not getattr(self, 'source_snapshot_only', False):
             raise RuntimeError('selected snapshot requires a source-only context')
         with self._inflight_lock:
             if getattr(self, '_snapshot_source_keys', None) is not None or self._inflight:
                 raise RuntimeError('selected snapshot source is already configured or active')
-            keys = selected_weight_source_keys(names, profile, self.weight_ckpt)
+            keys = tuple(selection())
+            if (not keys or any(not isinstance(key, str) or not key for key in keys)
+                    or len(keys) != len(set(keys))):
+                raise ValueError('selected source tensor keys must be unique and nonempty')
+            source_layers = set(getattr(self, 'source_layers', range(self.num_layers)))
+            if allowed_layers is not None:
+                if (not allowed_layers or any(type(layer) is not int for layer in allowed_layers)
+                        or len(allowed_layers) != len(set(allowed_layers))
+                        or not set(allowed_layers) <= source_layers):
+                    raise ValueError('selected source layer allowlist is invalid')
+                source_layers = set(allowed_layers)
+            for key in keys:
+                if key not in self.weight_ckpt or key not in self.weight_shard:
+                    raise RuntimeError(f'selected source tensor key is undeclared: {key}')
+                suffix = key.removeprefix(self.layers_prefix)
+                layer, dot, rest = suffix.partition('.')
+                if (suffix == key or not dot or not rest or not layer.isdigit()
+                        or int(layer) not in source_layers):
+                    raise RuntimeError(f'selected source tensor is outside the body layer allowlist: {key}')
+            keys = tuple(sorted(keys))
             # Build the complete transition before committing any source state.
             # Header/authentication failure leaves the original maps reusable.
             shards = {key: self.weight_shard[key] for key in keys}

@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2032, Refs #1962): the existing snapshot-only
+StreamingContext accepts exact declared body source tensor keys under an
+explicit layer allowlist, including non-Linear parameters and buffers needed
+by an isolated source replay. The existing selected-Linear names still resolve
+through selected_weight_source_keys and delegate to the same one-time atomic
+selection owner. Empty, duplicate, unknown, nonbody and foreign-layer keys
+refuse before source header reads. Authentication and cache-size estimation
+complete before either source map changes; a failure preserves the original
+maps. Active and already configured contexts refuse another transition.
+Snapshot-only forward installation, nonbody materialization and complete
+initialization attestation remain forbidden. This selection capability supplies
+no source-provider, GPU-lifetime or numerical qualification by itself.
 Re-stamped 2026-10-02 (`sol/pq-1934-recovery-20261002`, Refs #1931, #1935):
 packed activation derivation stable-sorts slot-major routed pairs once and
 reads all expert counts with one host sync. Per-expert row order, duplicate
