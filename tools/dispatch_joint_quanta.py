@@ -3143,6 +3143,50 @@ class Gateway:
             raise RuntimeError(f"pbrun printed no JSON line: {proc.stdout[-500:]}") from exc
         return {"action_key": answer["action_key"], "status": answer.get("status", "")}
 
+    def read_verified_result(self, selector):
+        """The exact generation's verified result, through the public SDK4.
+
+        ``selector`` is a :class:`PilotSelector`; a missing SDK surface or a
+        refused/absent/ambiguous result raises :class:`PilotRefused`, never a
+        fallback to the caller's counters or a live path (PQ #1293).
+        """
+        from prismaquant.joint_dispatch_pilot import PilotRefused
+        from prismaquant.staged_lease import client_sdk
+
+        try:
+            sdk = client_sdk()
+        except Exception as exc:  # LeaseRefused subclass; a named availability gap
+            raise PilotRefused(
+                f"the PB SDK4 verified-result reader is unavailable: {exc}") from exc
+        if not hasattr(sdk, "read_verified_action_result") or not hasattr(
+                sdk, "bind_standard_capture_command"):
+            raise PilotRefused(
+                "the pinned PrismaBuild SDK has no verified-action-result "
+                "reader (SDK_VERSION=%r): legacy unbound results refuse"
+                % getattr(sdk, "SDK_VERSION", None))
+        try:
+            queue = sdk.PoolQueue()
+            return sdk.read_verified_action_result(
+                queue, selector.action_key,
+                published_unix=selector.published_unix, attempt=selector.attempt,
+                max_result_bytes=selector.max_result_bytes,
+                max_evidence_bytes=selector.max_evidence_bytes)
+        except Exception as exc:  # ActionResultError and friends
+            raise PilotRefused(
+                f"pilot PB result {selector.action_key[:12]} "
+                f"pub={selector.published_unix} attempt={selector.attempt} "
+                f"refused: {exc}") from exc
+
+    def bind_capture_command(self, request):
+        from prismaquant.joint_dispatch_pilot import PilotRefused
+        from prismaquant.staged_lease import client_sdk
+
+        try:
+            client_sdk().bind_standard_capture_command(request)
+        except Exception as exc:
+            raise PilotRefused(
+                f"pilot sealed request is not the standard capture recipe: {exc}") from exc
+
     def is_terminal_executed(self, action_key: str) -> bool:
         """Whether PB has finished this action's work, as ``pbwait`` says.
 
@@ -3173,6 +3217,26 @@ class FakeGateway(Gateway):
         self._terminal: set[str] = set()
         self._auto_terminal = terminal
         self._counter = 0
+        self.results: dict[tuple, dict] = {}
+        self.result_reads: list = []
+
+    def publish_result(self, selector, result: dict) -> None:
+        """Make ``selector`` answerable with a canned verified result."""
+        self.results[(selector.action_key, selector.published_unix,
+                      selector.attempt)] = result
+
+    def read_verified_result(self, selector) -> dict:
+        from prismaquant.joint_dispatch_pilot import PilotRefused
+
+        self.result_reads.append(selector)
+        key = (selector.action_key, selector.published_unix, selector.attempt)
+        if key not in self.results:
+            raise PilotRefused(
+                f"no verified result published for {selector!r}")
+        return self.results[key]
+
+    def bind_capture_command(self, request):
+        """The SDK proof boundary is a test double in this fake gateway."""
 
     def mark_terminal(self, action_key: str) -> None:
         self._terminal.add(action_key)
@@ -3294,11 +3358,77 @@ def _pilot_code_sha256() -> str:
     return _production_cache_source_sha256()
 
 
+#: Explicit pilot result bounds. The reader refuses before a decode that would
+#: allocate beyond them; the record and counters blobs are small JSON documents.
+PILOT_RESULT_MAX_BYTES = 8 * 1024 * 1024
+PILOT_EVIDENCE_MAX_BYTES = 8 * 1024 * 1024
+
+
+class PilotSelector:
+    """One exact PB action generation a pilot's counter bytes must answer for.
+
+    ``--pilot-selector ACTION_KEY PUBLISHED_UNIX ATTEMPT`` names the action,
+    its publication time and its attempt. It is repeatable and bound to the
+    counters by the pilot's ``action_key``; no current/canonical ending is
+    inferred. The selector is what makes the counters answerable to an
+    immutable result rather than to a live path (PQ #1293).
+    """
+
+    __slots__ = ("action_key", "published_unix", "attempt",
+                 "max_result_bytes", "max_evidence_bytes")
+
+    def __init__(self, action_key, published_unix, attempt, *, result_cap=None,
+                 evidence_cap=None):
+        self.action_key = str(action_key)
+        self.published_unix = float(published_unix)
+        self.attempt = int(attempt)
+        self.max_result_bytes = int(
+            PILOT_RESULT_MAX_BYTES if result_cap is None else result_cap)
+        self.max_evidence_bytes = int(
+            PILOT_EVIDENCE_MAX_BYTES if evidence_cap is None else evidence_cap)
+
+    def __repr__(self):
+        return (f"PilotSelector({self.action_key[:12]!r}, "
+                f"{self.published_unix!r}, {self.attempt!r})")
+
+
+def parse_pilot_selector(raw: Sequence[str]) -> PilotSelector:
+    """One ``--pilot-selector`` triple, validated as an exact selection."""
+    from prismaquant.digests import is_sha256hex
+    from prismaquant.joint_dispatch_pilot import PilotRefused
+
+    action_key, published, attempt = raw
+    if not is_sha256hex(action_key):
+        raise PilotRefused(
+            f"pilot selector action key is not a full lowercase SHA-256: "
+            f"{action_key!r}")
+    try:
+        published_unix = float(published)
+    except (TypeError, ValueError) as exc:
+        raise PilotRefused(
+            f"pilot selector publication time is not a finite number: "
+            f"{published!r}") from exc
+    if not math.isfinite(published_unix) or published_unix <= 0:
+        raise PilotRefused(
+            f"pilot selector publication time is not positive and finite: "
+            f"{published!r}")
+    try:
+        number = int(attempt)
+    except (TypeError, ValueError) as exc:
+        raise PilotRefused(
+            f"pilot selector attempt is not a positive integer: {attempt!r}") from exc
+    if number <= 0 or str(number) != str(attempt).strip():
+        raise PilotRefused(
+            f"pilot selector attempt is not a positive integer: {attempt!r}")
+    return PilotSelector(action_key, published_unix, number)
+
+
 def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
     """Stamp every row before the first submission; a refusal publishes none."""
     from prismaquant.digests import bytes_sha256hex, is_sha256hex
     from prismaquant.joint_dispatch_pilot import (
-        PILOT_SCHEMA, PilotRefused, pilot_binding, validate_pilot)
+        PILOT_SCHEMA, PilotRefused, pilot_binding, validate_pilot,
+        validate_pilot_source_contract)
     from prismaquant.joint_replay_regime import replay_regime_from_environment
 
     quanta = [row for row in rows if row["kind"] == "quantum"]
@@ -3319,18 +3449,48 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
     documents = []
     for path, digest in args.pilot_counters:
         try:
-            raw = Path(path).read_bytes()
+            raw = _bounded_pilot_bytes(Path(path), PILOT_RESULT_MAX_BYTES)
             if not is_sha256hex(digest) or bytes_sha256hex(raw) != digest:
                 raise ValueError("counter document SHA-256 does not match")
-            document = json.loads(raw)
-            if not isinstance(document, dict):
-                raise ValueError("counters are not a JSON object")
+            document = _pilot_json(raw)
+            if not isinstance(document, dict) or not isinstance(document.get("pilot"), dict):
+                raise ValueError("counters and their pilot must be JSON objects")
+            if not is_sha256hex(document["pilot"].get("action_key")):
+                raise ValueError("pilot counter action key is not a full SHA-256")
         except (OSError, ValueError) as exc:
             raise DispatchRefused(f"pilot counters {path}: {exc}") from exc
-        documents.append((document, {"path": str(path), "sha256": digest}))
+        documents.append((document, {"path": str(path), "sha256": digest,
+                                     "bytes": len(raw)}))
+    selectors = {}
+    for raw_selector in args.pilot_selector:
+        try:
+            selector = parse_pilot_selector(raw_selector)
+        except PilotRefused as exc:
+            raise DispatchRefused(f"pilot selector: {exc}") from exc
+        if selector.action_key in selectors:
+            raise DispatchRefused(
+                f"pilot selector names {selector.action_key[:12]} twice; an "
+                "explicit selector must be unique")
+        selectors[selector.action_key] = selector
+    named_keys = {document.get("pilot", {}).get("action_key") for document, _ in documents}
+    if set(selectors) != named_keys:
+        raise DispatchRefused("pilot selectors must name exactly the supplied counter actions; an unbound counter document cannot certify a row")
     implementation = _pilot_code_sha256()
+    contracts = []
+    for path, digest in args.pilot_source_contract:
+        try:
+            raw = _bounded_pilot_bytes(Path(path), PILOT_EVIDENCE_MAX_BYTES)
+            if bytes_sha256hex(raw) != digest:
+                raise PilotRefused("pilot source contract digest mismatch")
+            contract = validate_pilot_source_contract(
+                _pilot_json(raw), implementation_sha256=implementation)
+            contracts.append((contract, {"path": str(path), "sha256": digest, "bytes": len(raw)}))
+        except (OSError, ValueError, TypeError) as exc:
+            raise DispatchRefused(f"pilot source contract {path}: {exc}") from exc
+    if not contracts:
+        raise DispatchRefused("pilot admission requires an independently reviewed --pilot-source-contract PATH SHA256")
     by_id = {record["quantum_id"]: record for _, record in records}
-    origins = {}
+    verified = {}
     for row in quanta:
         argv = row["argv"]
         spec = json.loads(argv[argv.index("--spec") + 1])
@@ -3349,18 +3509,227 @@ def _admit_dispatch_pilots(args, rows, records, gateway) -> None:
                 "code/plan/replay-regime/row-shape receipt, "
                 f"found {len(matching)}")
         counters, reference = matching[0]
+        key = counters.get("pilot", {}).get("action_key")
+        selector = selectors.get(key)
+        if selector is None:
+            raise DispatchRefused(
+                f"pilot for {row['quantum_id']}: counters name PB action "
+                f"{str(key)[:12]}, for which --pilot-selector ACTION_KEY "
+                "PUBLISHED_UNIX ATTEMPT was not supplied; an unbound counter "
+                "document cannot certify the row")
+        if key not in verified:
+            try:
+                verified[key] = _verify_pilot_result(
+                    gateway, selector, counters, reference, contracts=contracts)
+            except PilotRefused as exc:
+                raise DispatchRefused(
+                    f"pilot for {row['quantum_id']}: {exc}") from exc
+        evidence, authenticated_record, invocation = verified[key]
         try:
-            admission = validate_pilot(counters, expected)
+            proposed = _parse_pilot_invocation(argv[argv.index("--") + 1:])
+            if _pilot_semantic_arguments(invocation) != _pilot_semantic_arguments(proposed):
+                raise PilotRefused("pilot sealed invocation differs from the proposed row")
+            actual_binding = pilot_binding(
+                authenticated_record, implementation_sha256=implementation,
+                execution_plan_sha256=invocation["--plan-sha256"],
+                replay_regime=replay_regime_from_environment(invocation["spec"].get("env") or {}),
+                cotangent_source="handoff" if invocation["args"].adjoint_handoff is not None else "chain",
+                emits_handoff=invocation["args"].emit_adjoint_handoff)
+            if actual_binding != expected:
+                raise PilotRefused("pilot authenticated record, code, plan, replay regime or row shape differs from the proposed row")
+            admission = validate_pilot(counters, actual_binding)
         except PilotRefused as exc:
             raise DispatchRefused(f"{row['quantum_id']}: {exc}") from exc
-        key = admission["action_key"]
-        if key not in origins:
-            origins[key] = gateway.is_terminal_executed(key)
-        if not origins[key]:
-            raise DispatchRefused(f"pilot for {row['quantum_id']}: PB origin {key} "
-                                  "is not successfully terminal")
         row["pilot_admission"] = {**admission, "document": reference,
+                                  "result": evidence,
                                   "fanout": len(quanta)}
+
+
+def _pilot_json(raw):
+    from prismaquant.joint_dispatch_pilot import PilotRefused
+    from prismaquant.schemas import strict_json_loads
+
+    return strict_json_loads(
+        raw, duplicate=lambda key: PilotRefused(f"duplicate pilot JSON key {key!r}"),
+        constant=lambda value: PilotRefused(f"nonfinite pilot JSON value {value!r}"))
+
+
+def _bounded_pilot_bytes(path: Path, cap: int) -> bytes:
+    from prismaquant.joint_dispatch_pilot import PilotRefused
+
+    with path.open("rb") as handle:
+        raw = handle.read(cap + 1)
+    if len(raw) > cap:
+        raise PilotRefused(f"pilot document {path} exceeds its byte cap")
+    return raw
+
+
+def _verify_pilot_result(gateway, selector, counters, reference, *, contracts):
+    """Authenticate a selected result, then bind independent source approval."""
+    from prismaquant.joint_dispatch_pilot import PilotRefused, validate_pilot_completion
+
+    result = gateway.read_verified_result(selector)
+    if (not isinstance(result, Mapping)
+            or result.get("schema") != "prismabuild.verified_action_result.v1"
+            or result.get("action_key") != selector.action_key
+            or type(result.get("attempt")) is not int or result["attempt"] != selector.attempt
+            or type(result.get("published_unix")) not in (int, float)
+            or result["published_unix"] != selector.published_unix):
+        raise PilotRefused("pilot PB result differs from the explicit execution selector")
+    request = result.get("request")
+    if not isinstance(request, Mapping):
+        raise PilotRefused("pilot PB result carries no validated sealed request")
+    invocation = _sealed_quantum_command(result, gateway=gateway)
+    source, source_ref = _accepted_pilot_source(request, invocation, contracts)
+    payload = result.get("payload")
+    if not isinstance(payload, bytes) or len(payload) > PILOT_RESULT_MAX_BYTES:
+        raise PilotRefused("pilot PB result carries no bounded owned result payload")
+    completion = _single_completion(payload)
+    evidence = validate_pilot_completion(
+        completion, counters=counters,
+        counters_sha256=reference["sha256"], counters_bytes=reference["bytes"],
+        quantum_record_sha256=invocation["--quantum-sha256"])
+    record = _owned_record_from_completion(completion, evidence)
+    if counters.get("identity_sha256") != record.get("identity_sha256"):
+        raise PilotRefused("pilot counters name another quantum record identity")
+    try:
+        from prismaquant.joint_layer_quanta import check_quantum_for_campaign
+        check_quantum_for_campaign(record, {
+            **record["campaign"],
+            "adjoint_slice_sha256": invocation["--adjoint-slice-sha256"]})
+    except (KeyError, ValueError, TypeError) as exc:
+        raise PilotRefused(f"pilot authenticated quantum record refuses: {exc}") from exc
+    return ({
+        "action_key": selector.action_key,
+        "published_unix": selector.published_unix,
+        "attempt": selector.attempt,
+        "generation": result.get("generation"),
+        "worker_id": result.get("worker_id"),
+        "host": result.get("host"),
+        "receipt_sha256": (result.get("receipt") or {}).get("receipt_sha256"),
+        "quantum_sha256": invocation["--quantum-sha256"],
+        "quantum_bytes": len(evidence["quantum_record"]),
+        "record_identity_sha256": record["identity_sha256"],
+        "source_contract": source_ref,
+        "source_snapshot": source["snapshot"],
+    }, record, invocation)
+
+
+def _sealed_quantum_command(result, *, gateway=None) -> dict:
+    """Prove the wrapper with the SDK, then read its authenticated command."""
+    request = result["request"]
+    (Gateway() if gateway is None else gateway).bind_capture_command(request)
+    return _parse_pilot_invocation(request.get("params", {}).get("command"))
+
+
+def _parse_pilot_invocation(command) -> dict:
+    from prismaquant.joint_dispatch_pilot import PILOT_ENTRY, PILOT_LAUNCHER, PilotRefused
+    from prismaquant.joint_cost_quantum import build_parser
+    from prismaquant.digests import is_sha256hex
+
+    if (not isinstance(command, list) or len(command) < 9
+            or any(not isinstance(word, str) for word in command)
+            or command[:3] != PILOT_LAUNCHER or command[3] != "--spec"
+            or command[5] != "--" or command[6:9] != PILOT_ENTRY):
+        raise PilotRefused("pilot sealed command is not the supported containerized quantum entry")
+    options = command[9:]
+    flags = [word for word in options if word.startswith("--")]
+    if len(flags) != len(set(flags)):
+        raise PilotRefused("pilot sealed quantum command repeats an option")
+    try:
+        args = build_parser().parse_args(options)
+        spec = _pilot_json(command[4])
+    except (SystemExit, ValueError, TypeError) as exc:
+        raise PilotRefused("pilot sealed quantum command or spec is malformed") from exc
+    if (not isinstance(spec, dict) or not isinstance(spec.get("env", {}), dict)
+            or args.device != "cuda"):
+        raise PilotRefused("pilot sealed command has an unsupported spec or device")
+    values = {"--" + key.replace("_", "-"): value for key, value in vars(args).items()}
+    for flag in ("--quantum-sha256", "--plan-sha256", "--prepared-sha256",
+                 "--adjoint-slice-sha256", "--data-manifest-sha256"):
+        if not is_sha256hex(values[flag]):
+            raise PilotRefused(f"pilot sealed {flag} is not a full SHA-256")
+    return {**values, "args": args, "spec": spec}
+
+
+def _pilot_semantic_arguments(invocation) -> dict:
+    # A byte-identical input may be staged under another path, and the pilot
+    # may publish under another output namespace. Those paths are provenance.
+    paths = {"quantum", "plan", "prepared", "adjoint_slice", "adjoint_handoff", "output_root", "quantum_sha256"}
+    return {"spec": invocation["spec"],
+            **{key: value for key, value in vars(invocation["args"]).items() if key not in paths}}
+
+
+def _accepted_pilot_source(request, invocation, contracts):
+    from prismaquant.joint_dispatch_pilot import PilotRefused
+
+    params = request.get("params", {})
+    snapshot = params.get("checkout_snapshot", {})
+    descriptor = snapshot.get("input") if isinstance(snapshot, Mapping) else None
+    if (not isinstance(snapshot, Mapping)
+            or snapshot.get("schema") != "prismaquant.prismabuild.pbrun_checkout_snapshot.v2"
+            or snapshot.get("subdirectory") != "." or params.get("cwd") != "."
+            or request.get("task", {}).get("working_directory") != "."):
+        raise PilotRefused("pilot sealed request has no supported checkout snapshot invocation")
+    inputs = request.get("inputs", [])
+    if not isinstance(inputs, list) or inputs.count(descriptor) != 1:
+        raise PilotRefused("pilot source snapshot is not exactly one declared PB input")
+    variables = request.get("environment", {}).get("variables", {})
+    if not isinstance(variables, Mapping):
+        raise PilotRefused("pilot sealed request carries no explicit environment")
+    # These two PB-created containment fields are execution-specific. They do
+    # not select a Python interpreter, import root or workload environment.
+    outer = {k: v for k, v in variables.items()
+             if k not in {"PRISMABUILD_CONTAINER_OWNER", "PRISMABUILD_CONTAINER_MARKER"}}
+    matching = [(contract, reference) for contract, reference in contracts
+                if contract["snapshot"] == descriptor
+                and contract["snapshot_selection"] == dict(snapshot)
+                and contract["outer_environment"] == outer
+                and contract["container_spec"] == invocation["spec"]]
+    if len(matching) != 1:
+        raise PilotRefused("pilot source snapshot, interpreter or environment has no unique independently reviewed contract")
+    return matching[0]
+
+
+def _single_completion(payload: bytes) -> dict:
+    """The one unambiguous completion announcement in an owned payload.
+
+    A captured stdout may carry log lines; exactly one JSON object naming the
+    quantum completion schema is accepted. Zero or more than one refuses.
+    """
+    from prismaquant.joint_dispatch_pilot import (
+        QUANTUM_COMPLETION_SCHEMA, PilotRefused)
+
+    found = []
+    for line in bytes(payload).splitlines():
+        text = line.strip()
+        if not text.startswith(b"{"):
+            continue
+        try:
+            parsed = _pilot_json(text)
+        except ValueError:
+            continue
+        if isinstance(parsed, dict) and parsed.get("schema") == QUANTUM_COMPLETION_SCHEMA:
+            found.append(parsed)
+    if len(found) != 1:
+        raise PilotRefused(
+            f"pilot PB result payload carries {len(found)} quantum completion "
+            "announcements; exactly one is required")
+    return found[0]
+
+
+def _owned_record_from_completion(completion, evidence) -> dict:
+    from prismaquant.joint_dispatch_pilot import PilotRefused
+
+    raw = evidence["quantum_record"]
+    try:
+        record = _pilot_json(raw)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise PilotRefused(
+            f"pilot completion quantum record is not JSON: {exc}") from exc
+    if not isinstance(record, dict) or record.get("quantum_id") != completion.get("quantum_id"):
+        raise PilotRefused("pilot completion quantum record names another quantum")
+    return record
 
 
 def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
@@ -3459,6 +3828,17 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
                         help="producer counters certifying this code, replay "
                              "regime and row shape (repeatable); mandatory "
                              "before publishing more than one quantum")
+    parser.add_argument("--pilot-selector", action="append", nargs=3, default=[],
+                        metavar=("ACTION_KEY", "PUBLISHED_UNIX", "ATTEMPT"),
+                        help="the exact PB action generation each "
+                             "--pilot-counters document must answer for "
+                             "(repeatable); the counters' own action_key binds "
+                             "them to one selector, and a missing, ambiguous or "
+                             "duplicate selector refuses (PQ #1293)")
+    parser.add_argument("--pilot-source-contract", action="append", nargs=2, default=[],
+                        metavar=("PATH", "SHA256"),
+                        help="independently reviewed versioned source and invocation contract; "
+                             "must bind the exact PB snapshot input and expected environments")
     parser.add_argument("--force-unverified-pilot", action="store_true",
                         help="explicitly bypass pilot admission; stamp the "
                              "override in dry-run output and dispatch state")
