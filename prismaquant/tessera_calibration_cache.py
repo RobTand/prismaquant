@@ -469,6 +469,12 @@ class CaptureSourceAuthentication:
     def is_qualified_original_material(self):
         return self._original is not None
 
+    def require_material_device(self, device):
+        """Internal original decoder/load integration is CPU-only for now."""
+        import torch
+        if self._original is not None and torch.device(device).type != 'cpu':
+            raise RuntimeError('original material GPU loads/transfers are not qualified')
+
     def _reap_original_material(self):
         """Called only under the owner lock; native storage aliases retain credit."""
         if self._original is None:

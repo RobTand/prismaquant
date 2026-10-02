@@ -149,6 +149,10 @@ class Qwen3_5Profile(ModelProfile):
             return "Qwen3_5MoeForCausalLM"
         return "Qwen3_5MoeForConditionalGeneration"
 
+    def _declare_checkpoint_index(self, index: dict) -> None:
+        super()._declare_checkpoint_index(index)
+        self._qwen_checkpoint_source_layout = None
+
     def _checkpoint_source_layout(self) -> str:
         """Resolve direct-vs-wrapper source keys from the real index when set.
 
@@ -165,21 +169,23 @@ class Qwen3_5Profile(ModelProfile):
             return cached
 
         root = self._declared_model_path
-        if root is None:
+        payload = self._declared_checkpoint_index
+        if root is None and payload is None:
             return serving_layout
-        index_path = root / "model.safetensors.index.json"
-        if not index_path.is_file():
-            # Small single-file checkpoints may legitimately have no index.
-            # Their exact entrypoint remains the available declaration.
-            return serving_layout
-        try:
-            import json
+        index_path = root / "model.safetensors.index.json" if root is not None else '<declared checkpoint index>'
+        if payload is None:
+            if not index_path.is_file():
+                # Small single-file checkpoints may legitimately have no index.
+                # Their exact entrypoint remains the available declaration.
+                return serving_layout
+            try:
+                import json
 
-            payload = json.loads(index_path.read_text())
-        except (OSError, ValueError) as exc:
-            raise RuntimeError(
-                f"cannot inspect Qwen MoE source namespace in {index_path}: {exc}"
-            ) from exc
+                payload = json.loads(index_path.read_text())
+            except (OSError, ValueError) as exc:
+                raise RuntimeError(
+                    f"cannot inspect Qwen MoE source namespace in {index_path}: {exc}"
+                ) from exc
         weight_map = payload.get("weight_map")
         if not isinstance(weight_map, dict) or not weight_map:
             raise RuntimeError(

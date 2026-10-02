@@ -139,32 +139,16 @@ def _read_text_stage_config(path: Path) -> dict:
     return json.loads(read_source_metadata_text(path, label="text-only bootstrap config"))
 
 
-def _stage_text_only_impl(
-    model_path: str,
-    *,
-    staging_root: str | Path | None,
-) -> str:
-    src = Path(model_path)
-    cfg_path = src / "config.json"
-    if not cfg_path.exists():
-        return str(src)
-    cfg = _read_text_stage_config(cfg_path)
+def text_only_stage_config(config: dict, *, profile) -> dict | None:
+    """Derive existing text-only staging rules without IO or input mutation.
 
-    # Profile-driven: ask the registered ModelProfile which config keys
-    # to strip and whether to promote `text_config.model_type`.
-    from .model_profiles import DeadVendoredOverrideError, detect_profile
-    try:
-        profile = detect_profile(str(src))
-    except DeadVendoredOverrideError:
-        # The hardcoded default strip-key list below is for a checkpoint no
-        # profile claims. On a dead override it stages the model with a
-        # different config than the profile declares -- and every probe
-        # statistic (sensitivity_probe) or cached activation row
-        # (perturbed_x_cache) gathered afterwards describes that wrong
-        # staging (#202).
-        raise
-    except Exception:
-        profile = None
+    None preserves the source configuration; a dictionary is exactly what the
+    filesystem staging writer previously emitted. Profile selection stays with
+    the caller, including its existing dead-override refusal.
+    """
+    import copy
+
+    cfg = copy.deepcopy(config)
     strip_keys = (list(profile.stage_text_only_strip_keys())
                   if profile is not None
                   else ["vision_config", "audio_config", "speech_config",
@@ -185,7 +169,7 @@ def _stage_text_only_impl(
                ("vision_config", "text_config", "audio_config", "speech_config")) \
             and not any(k in cfg for k in strip_keys) \
             and not needs_num_experts_alias:
-        return str(src)
+        return None
     promote_inner_mt = (profile.stage_text_only_promote_inner_model_type()
                         if profile is not None else False)
 
@@ -228,6 +212,40 @@ def _stage_text_only_impl(
         cfg["architectures"] = [
             a.replace("ForConditionalGeneration", "ForCausalLM") for a in archs
         ]
+
+    return cfg
+
+
+def _stage_text_only_impl(
+    model_path: str,
+    *,
+    staging_root: str | Path | None,
+) -> str:
+    src = Path(model_path)
+    cfg_path = src / "config.json"
+    if not cfg_path.exists():
+        return str(src)
+    cfg = _read_text_stage_config(cfg_path)
+
+    # Profile-driven: ask the registered ModelProfile which config keys
+    # to strip and whether to promote `text_config.model_type`.
+    from .model_profiles import DeadVendoredOverrideError, detect_profile
+    try:
+        profile = detect_profile(str(src))
+    except DeadVendoredOverrideError:
+        # The hardcoded default strip-key list below is for a checkpoint no
+        # profile claims. On a dead override it stages the model with a
+        # different config than the profile declares -- and every probe
+        # statistic (sensitivity_probe) or cached activation row
+        # (perturbed_x_cache) gathered afterwards describes that wrong
+        # staging (#202).
+        raise
+    except Exception:
+        profile = None
+    rewritten = text_only_stage_config(cfg, profile=profile)
+    if rewritten is None:
+        return str(src)
+    cfg = rewritten
 
     if staging_root is None:
         staged = _mk_stage_dir("prismaquant_stage_")
