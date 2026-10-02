@@ -6135,7 +6135,7 @@ def _publish_capture_load_execution(args, *, capture, execution, resources, guar
 
 
 def main(argv: "Sequence[str] | None" = None) -> int:
-    from contextlib import contextmanager, ExitStack
+    from contextlib import ExitStack
     with ExitStack() as source_scope:
         return _main(argv, source_scope=source_scope)
 
