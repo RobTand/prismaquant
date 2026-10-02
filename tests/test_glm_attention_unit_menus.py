@@ -56,3 +56,63 @@ def test_absent_profile_preserves_existing_menu(expanded):
     rows = campaign.expand_menus_for_targets({KV: SimpleNamespace(shape=(512, 256))}, [KV],
         mode="readable", tp_degree=1, parallel_kind="none")
     assert [r.family for r in rows[KV]] == list(FAMILIES)
+
+
+@pytest.mark.parametrize("name", [KV, "model.layers.3.self_attn.kv_b_proj",
+    "language_model.model.layers.3.self_attn.kv_b_proj",
+    "model.layers.45.self_attn.kv_b_proj.weight", "self_attn.kv_b_proj"])
+def test_unit_policy_recognizes_checkpoint_live_and_served_spellings(name):
+    profile = Glm5NextProfile()
+    assert profile.tessera_pricing_families(name) == ("TESSERA_BF16_K1",)
+    assert profile.is_pinned_name(name)
+
+
+@pytest.mark.parametrize("name", [Q, "model.layers.3.mlp.kv_b_proj",
+    "model.layers.3.self_attn.kv_b_proj_extra", "lm_head"])
+def test_unit_policy_does_not_constrain_other_linears(name):
+    assert Glm5NextProfile().tessera_pricing_families(name) is None
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_seed_obeys_profile_arithmetic_without_global_restriction(family):
+    fmt = f"{family}_R896"
+    state = {"anchors": [{"qname": KV, "family": family,
+        "format_name": fmt, "body_rate_q256": 896}], "wire_records": {fmt: {}}}
+    kwargs = dict(family_restriction=None, structure_by_unit=None, profile=Glm5NextProfile())
+    if family == "TESSERA_BF16_K1":
+        campaign.require_seed_family_scope(KV, state, **kwargs)
+    else:
+        with pytest.raises(RuntimeError, match="unit family restriction"):
+            campaign.require_seed_family_scope(KV, state, **kwargs)
+
+
+def test_streamed_capture_uses_the_profile_unit_menu(expanded, monkeypatch):
+    import torch
+    layer = torch.nn.Module()
+    layer.self_attn = torch.nn.Module()
+    layer.self_attn.kv_b_proj = torch.nn.Linear(256, 512, device="meta", bias=False)
+    model = torch.nn.Module()
+    model.model = torch.nn.Module()
+    model.model.language_model = torch.nn.Module()
+    model.model.language_model.layers = torch.nn.ModuleList([layer])
+    name = KV.replace("layers.3", "layers.0")
+    runner = SimpleNamespace(model=model, layer_index_for_qname=lambda name: 0)
+    profile = Glm5NextProfile()
+    expand = campaign.expand_menus_for_targets
+
+    class MenuPlanned(Exception):
+        pass
+
+    def stop_after_menu(weights, targets, **kwargs):
+        rows = expand(weights, targets, **kwargs)
+        assert [r.family for r in rows[name]] == ["TESSERA_BF16_K1"]
+        raise MenuPlanned
+
+    monkeypatch.setattr(campaign, "expand_menus_for_targets", stop_after_menu)
+    with pytest.raises(MenuPlanned):
+        campaign._run_streamed_calibration(SimpleNamespace(tp_degree=1), runner, profile,
+            mode="readable", population=campaign.ExpertPopulation(members=(), declared={},
+                packed_in_scope={}, omitted_outside_layer_stride={}),
+            dense_targets=[name], expert_targets=[], scope_groups={name: [name]},
+            tokens=[], corpus_text="", census=None, context_by_unit=None,
+            attention_implementation="eager", capture_runtime={})
