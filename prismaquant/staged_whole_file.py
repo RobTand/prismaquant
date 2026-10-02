@@ -108,7 +108,7 @@ def read_staged_whole_file(path: Path, expected_sha256: str, *,
     return read_staged_entry(resolver, path, staged, label=label)
 
 
-def read_staged_entry(resolver, path: Path, staged: dict, *, label: str) -> bytes:
+def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=False):
     """The whole of one resolved map entry, read under a lifetime-pinned window.
 
     ``staged`` is the resolver's answer for ``path``: a whole-file entry
@@ -125,55 +125,97 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str) -> byte
     if type(size) is not int or isinstance(size, bool) or size <= 0:
         raise refuse_pool_bulk_read(where, "readset-not-staged")
     window, key = acquire_entry_window(resolver, path, staged)
-    with window:
-        try:
-            fd, serving = window.open(key)
-        except LeaseRefused as refusal:
-            resolver.record_fallback(path, str(refusal))
-            raise
-        tier = window.serving_tier or "stage"
-        resolver.record_serving_tier(
-            path, tier, pin_id=str(serving.get("pin_id") or ""),
-            range_ref=str(serving.get("range_ref") or ""))
-        # Sealed bounds before allocation: the held descriptor's size must
-        # match the staged entry's, or no buffer is built.
-        first = os.fstat(fd)
-        if first.st_size != size:
-            raise LeaseRefused(f"{label}-changed-under-pin",
-                               kind="integrity")
-        # One owned buffer, filled in place: the caller's digest hashes
-        # these same bytes and the tensor below decodes from them, so one
-        # staged read serves verification and decode alike.
-        raw = bytearray(size)
-        view = memoryview(raw)
-        try:
-            remaining = size
-            offset = 0
-            while remaining > 0:
-                try:
-                    moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
-                except OSError as exc:
-                    raise LeaseRefused(
-                        f"{label}-unreadable: {exc.strerror}",
-                        kind="availability") from None
-                if moved <= 0:
-                    break
-                offset += moved
-                remaining -= moved
-            if remaining:
-                raise LeaseRefused(f"{label}-truncated", kind="integrity")
-            if os.pread(fd, 1, size):
-                raise LeaseRefused(f"{label}-grew-during-read",
-                                   kind="integrity")
-            last = os.fstat(fd)
-            if (last.st_ino, last.st_size, last.st_mtime_ns) != (
-                    first.st_ino, first.st_size, first.st_mtime_ns):
+    raw = None
+    try:
+        with window:
+            try:
+                fd, serving = window.open(key)
+            except LeaseRefused as refusal:
+                resolver.record_fallback(path, str(refusal))
+                raise
+            tier = window.serving_tier or "stage"
+            resolver.record_serving_tier(
+                path, tier, pin_id=str(serving.get("pin_id") or ""),
+                range_ref=str(serving.get("range_ref") or ""))
+            # Sealed bounds before allocation: the held descriptor's size must
+            # match the staged entry's, or no buffer is built.
+            first = os.fstat(fd)
+            if first.st_size != size:
                 raise LeaseRefused(f"{label}-changed-under-pin",
                                    kind="integrity")
-        finally:
-            view.release()
+            # One owned buffer, filled in place: the caller's digest hashes
+            # these same bytes and the tensor below decodes from them, so one
+            # staged read serves verification and decode alike.
+            from .io_engine import SealedBuffer
+            raw = SealedBuffer(size) if sealed else bytearray(size)
+            view = None if sealed else memoryview(raw)
+            try:
+                remaining = size
+                offset = 0
+                if sealed:
+                    remaining = 0 if raw.fill(fd) else size
+                else:
+                    while remaining > 0:
+                        try:
+                            moved = os.preadv(fd, [view[offset:offset + remaining]], offset)
+                        except OSError as exc:
+                            raise LeaseRefused(
+                                f"{label}-unreadable: {exc.strerror}",
+                                kind="availability") from None
+                        if moved <= 0:
+                            break
+                        offset += moved
+                        remaining -= moved
+                if remaining:
+                    raise LeaseRefused(f"{label}-truncated", kind="integrity")
+                if os.pread(fd, 1, size):
+                    raise LeaseRefused(f"{label}-grew-during-read", kind="integrity")
+                last = os.fstat(fd)
+                if (last.st_ino, last.st_size, last.st_mtime_ns) != (
+                        first.st_ino, first.st_size, first.st_mtime_ns):
+                    raise LeaseRefused(f"{label}-changed-under-pin", kind="integrity")
+                if sealed:
+                    digest = raw.seal()
+                    raw.require_sealed()
+                    if digest != staged.get("sha256"):
+                        raise LeaseRefused(f"{label}-digest-mismatch", kind="integrity")
+            except BaseException:
+                if sealed:
+                    raw.close()
+                raise
+            finally:
+                if view is not None:
+                    view.release()
+    except BaseException:
+        if sealed and raw is not None:
+            raw.close()
+        raise
     if tier == "ram":
         resolver.record_ram_read(path, len(raw))
     else:
         resolver.record_stage_read(path, len(raw))
-    return bytes(raw)
+    return raw if sealed else bytes(raw)
+
+
+def read_staged_sealed_file(path: Path, expected_sha256: str, expected_bytes: int, *, label: str):
+    """Return owned immutable whole-file material, pinned through acquisition.
+
+    Always requires the independently bound PB entry, even with no global tier
+    policy. The caller reserves and retains the memfd until its last consumer.
+    No pool fallback, partial range, or lease assertion qualifies these bytes.
+    """
+    from .residency_map import residency_resolver
+    from .staged_lease import LeaseRefused
+    from .staged_tier_policy import refuse_pool_bulk_read
+
+    resolver = residency_resolver()
+    staged = None if resolver is None else resolver.staged_read(
+        path, expected_sha256=expected_sha256)
+    if staged is None:
+        raise refuse_pool_bulk_read(str(path), "original-material-not-staged")
+    if (type(expected_bytes) is not int or expected_bytes <= 0 or
+            staged.get("bytes") != expected_bytes or staged.get("offset", 0) != 0 or
+            staged.get("sha256") != expected_sha256):
+        raise LeaseRefused(f"{label}-whole-file-binding-mismatch", kind="integrity")
+    raw = read_staged_entry(resolver, path, staged, label=label, sealed=True)
+    return raw

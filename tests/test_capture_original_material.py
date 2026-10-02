@@ -231,13 +231,30 @@ def test_slice_lifetime_and_finite_peak_reservations(material):
 
 
 @pytest.mark.parametrize('route', ['outside-window', 'range-factory', 'gpu', 'dynamic-config'])
-def test_unsupported_routes_remain_closed(material, route):
+def test_unsupported_routes_remain_closed(material, monkeypatch, route):
     m = material
     if route == 'dynamic-config':
         raw = b'{"auto_map":{"AutoConfig":"custom.Config"}}'
         Path(m['paths']['config.json']).write_bytes(raw)
-        # Existing authority stays original: edited bootstrap cannot qualify.
-        with pytest.raises((RuntimeError, ValueError)):
+        # Fully authenticate a publisher-native dynamic config, then refuse
+        # its unsupported bootstrap route rather than executing custom code.
+        digest = _sha(raw)
+        for row in m['publisher']['siblings']:
+            if row['rfilename'] == 'config.json':
+                row['size'] = len(raw)
+                row['blobId'] = hashlib.sha1(b'blob ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+        for row in m['readset']['entries']:
+            if row['path'] == m['paths']['config.json']:
+                row.update(bytes=len(raw), sha256=digest)
+        m['readset']['total_bytes'] = sum(row['bytes'] for row in m['readset']['entries'])
+        m['producer']['config_sha256'] = digest
+        m['options']['publisher_input'] = _bound(m['tmp'] / 'dynamic-publisher.json', m['publisher'])
+        m['options']['readset_input'] = _bound(m['tmp'] / 'dynamic-readset.json', m['readset'])
+        stage_root = m['tmp'] / 'dynamic-stage'
+        stage_root.mkdir()
+        _stage_manifest(stage_root, monkeypatch, m['readset'])
+        bind_residency_manifest(MANIFEST)
+        with pytest.raises(RuntimeError, match='unsupported dynamic'):
             _owner(m)
         return
     with _owner(m) as owner:
