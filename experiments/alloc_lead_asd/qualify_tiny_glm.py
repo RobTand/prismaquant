@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -20,7 +21,16 @@ from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA, validate_
 from prismaquant.glm_source_derivative import bind_source_derivative
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
-from tests.test_glm5_next_streamed_forward_parity import _build_tiny_model
+
+
+def fixture_module():
+    # Load the named repository fixture directly: unrelated installed packages
+    # also use the top-level name "tests" in the producer image.
+    path = Path(__file__).resolve().parents[2] / 'tests/test_glm5_next_streamed_forward_parity.py'
+    spec = importlib.util.spec_from_file_location('pq_tiny_glm_fixture', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 DERIVATIVE = {
@@ -38,7 +48,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     torch.set_num_threads(1)
-    model = _build_tiny_model()
+    model = fixture_module()._build_tiny_model()
     model.config._attn_implementation = 'eager'
     model.config.text_config._attn_implementation = 'eager'
     model.config._experts_implementation = 'grouped_mm'
