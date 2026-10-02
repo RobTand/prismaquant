@@ -112,6 +112,26 @@ def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):
     return path, selection
 
 
+def _two_dynamic_rungs(menus):
+    """Two common rates from one real dynamic-activation family."""
+    from prismaquant import format_registry as fr
+    from prismaquant.tessera_formats import parse_tessera_format_name
+
+    shared = set.intersection(*[{row.format_name for row in rows}
+                                for rows in menus.values()])
+    by_family: dict = {}
+    for name in sorted(shared):
+        if fr.get_format(name).static_activation_contract is not None:
+            # A static rung needs a calibrated scale; this fixture carries
+            # the inputs the dynamic routes need.
+            continue
+        family, rung = parse_tessera_format_name(name)
+        by_family.setdefault(family.name, []).append((int(rung), name))
+    assert by_family, 'the fixture must admit a dynamic activation family'
+    widest = max(sorted(by_family), key=lambda key: len(by_family[key]))
+    return [name for _, name in sorted(by_family[widest])[:2]]
+
+
 def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
         glm_checkpoint, tmp_path, monkeypatch, legacy_capture_mechanism):
     """The stack row completes, and every completed anchor is released.
@@ -165,26 +185,10 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
     original_menus = campaign.expand_menus_for_targets
 
     def two_rungs(weights, targets, **kwargs):
-        from prismaquant import format_registry as fr
-        from prismaquant.tessera_formats import parse_tessera_format_name
-
         menus = original_menus(weights, targets, **kwargs)
         assert set(menus) == set(priced), 'the selection must narrow the scope'
         if not chosen:
-            shared = set.intersection(*[{row.format_name for row in rows}
-                                        for rows in menus.values()])
-            by_family: dict = {}
-            for name in sorted(shared):
-                if fr.get_format(name).static_activation_contract is not None:
-                    # A static contract rung needs a calibrated input scale to
-                    # be priced honestly; the dynamic families need nothing
-                    # this fixture does not already have.
-                    continue
-                family, rung = parse_tessera_format_name(name)
-                by_family.setdefault(family.name, []).append((int(rung), name))
-            assert by_family, 'the fixture must admit a dynamic activation family'
-            widest = max(sorted(by_family), key=lambda key: len(by_family[key]))
-            chosen['formats'] = [name for _, name in sorted(by_family[widest])[:2]]
+            chosen['formats'] = _two_dynamic_rungs(menus)
         keep = set(chosen['formats'])
         narrowed = {name: [row for row in rows if row.format_name in keep]
                     for name, rows in menus.items()}
