@@ -44,6 +44,7 @@ import json
 import os
 import random
 import time
+from contextlib import contextmanager
 
 import torch
 import torch.nn as nn
@@ -61,6 +62,20 @@ SPECS = (A8, A8N, W4)
 COMPONENT = {A8: "activation", A8N: "activation", W4: "weight"}
 IMPL = "a_side_diag.v2.seqmajor"
 DEVICE = "cuda"          # tests set "cpu"
+
+
+@contextmanager
+def backward_policy(deterministic=False):
+    """Opt-in research backward policy; preserve the primal and prior flags."""
+    enabled = torch.are_deterministic_algorithms_enabled()
+    warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+    try:
+        if deterministic:
+            torch.use_deterministic_algorithms(True, warn_only=False)
+        yield
+    finally:
+        if deterministic:
+            torch.use_deterministic_algorithms(enabled, warn_only=warn_only)
 
 
 def log(msg):
@@ -179,7 +194,8 @@ def measure_v1(model, ids, n_global, seeds, scope, temperature, context, with_pr
     return {"kl": kl, "q": q, "s_real": s_real}
 
 
-def price_v1(model, units, names, ids, seeds, specs_obj, n_global, scope, temperature):
+def price_v1(model, units, names, ids, seeds, specs_obj, n_global, scope, temperature,
+             *, deterministic_backward=False):
     """The production lease over every (probe, sequence): comps[spec, unit, probe, seq]."""
     n_seqs = ids.shape[0]
     deltas = {}
@@ -200,7 +216,8 @@ def price_v1(model, units, names, ids, seeds, specs_obj, n_global, scope, temper
                 probe = fisher_probe_scalar(logits, seed=seed, token_scope=scope,
                                             temperature=temperature, distribution="rademacher",
                                             token_count_override=n_global, global_row_offset=i)
-                probe.backward()
+                with backward_policy(deterministic_backward):
+                    probe.backward()
                 del logits, probe
                 result = lease.finish_probe()
                 for si, spec in enumerate(SPECS):
@@ -237,7 +254,7 @@ class Capture:
 
 
 def price_sequence(model, units, names, ids_row, row, seeds, specs_obj, n_global, scope,
-                   temperature, comps, dens):
+                   temperature, comps, dens, *, deterministic_backward=False):
     """Pass 1 for one sequence: comps[spec, unit, probe, row] and the per-position
     diagonal densities dens[spec, unit, t] += c_{p,u,t}^2 (summed over probes)."""
     with Capture(units) as cap:
@@ -264,7 +281,8 @@ def price_sequence(model, units, names, ids_row, row, seeds, specs_obj, n_global
         probe = fisher_probe_scalar(logits, seed=seed, token_scope=scope, temperature=temperature,
                                     distribution="rademacher", token_count_override=n_global,
                                     global_row_offset=row)
-        grads = torch.autograd.grad(probe, ys, retain_graph=k < len(seeds) - 1)
+        with backward_policy(deterministic_backward):
+            grads = torch.autograd.grad(probe, ys, retain_graph=k < len(seeds) - 1)
         with torch.no_grad():
             for ui, g in enumerate(grads):
                 g2 = g.reshape(-1, g.shape[-1]).float()
@@ -408,12 +426,13 @@ def profile_and_crosscheck(args, model, units, names, ids, seeds, specs_obj, n_g
 
     v1 = timed(f"v1 lease pricing, 1 seq x {len(k2)} probes",
                lambda: price_v1(model, units, names, row, k2, specs_obj, n_global, scope,
-                                temperature))
+                                temperature, deterministic_backward=getattr(args, "deterministic_backward", False)))
     comps_v2 = torch.zeros(len(SPECS), len(names), len(seeds), 1, dtype=torch.float64)
     dens = torch.zeros(len(SPECS), len(names), ids.shape[1], dtype=torch.float64)
     timed(f"v2 pricing, 1 seq x {len(seeds)} probes",
           lambda: price_sequence(model, units, names, row.to(DEVICE), 0, seeds, specs_obj, n_global,
-                                 scope, temperature, comps_v2, dens))
+                                 scope, temperature, comps_v2, dens,
+                                 deterministic_backward=getattr(args, "deterministic_backward", False)))
     report["v1_s_per_probe_seq"] = report[f"v1 lease pricing, 1 seq x {len(k2)} probes"]["wall_s"] / len(k2)
     report["v2_s_per_probe_seq"] = report[f"v2 pricing, 1 seq x {len(seeds)} probes"]["wall_s"] / len(seeds)
     diffs = {}
@@ -475,6 +494,8 @@ def main():
                     help="reuse a STEM.pricing.pt from an earlier run on the same tokens/probes")
     ap.add_argument("--profile", action="store_true",
                     help="v1 vs v2 on sequence 0 under torch.profiler, with cross-checks")
+    ap.add_argument("--deterministic-backward", action="store_true",
+                    help="research only: strict deterministic algorithms scoped to pricing backward")
     ap.add_argument("--smoke-first", action="store_true",
                     help="run a 2-sequence, 2-probe pass end to end before the real one")
     ap.add_argument("--output", required=True, help="stem; writes STEM.json and STEM.pt")
@@ -520,6 +541,9 @@ def run(args, model, *, ids=None, progress_callback=None):
     ids_sha = hashlib.sha256(ids.numpy().tobytes()).hexdigest()
     identity = {"impl": IMPL, "model": args.model, "dtype": args.dtype, "text": args.text,
                 "ids_sha256": ids_sha, "seeds": seeds, "units": names}
+    deterministic = bool(getattr(args, "deterministic_backward", False))
+    if deterministic:
+        identity["backward_policy"] = "torch_strict_deterministic_scoped"
     t0 = time.time()
     profile_report = None
     if args.profile:
@@ -528,7 +552,8 @@ def run(args, model, *, ids=None, progress_callback=None):
     if args.pricing_from:
         saved = torch.load(args.pricing_from)
         if (saved["units"] != names or saved["seeds"] != seeds or saved["ids_sha256"] != ids_sha
-                or list(saved["specs"]) != list(SPECS)):
+                or list(saved["specs"]) != list(SPECS)
+                or bool(saved.get("args", {}).get("deterministic_backward", False)) != deterministic):
             raise SystemExit(f"{args.pricing_from} was priced on other units/probes/tokens")
         comps = saved["comps"].double()
         dens = saved.get("dens")
@@ -544,7 +569,8 @@ def run(args, model, *, ids=None, progress_callback=None):
             progress_callback("pricing", start)
         for i in range(start, n_seqs):
             price_sequence(model, units, names, ids[i:i + 1].to(DEVICE), i, seeds, specs_obj,
-                           n_global, scope, temperature, comps, dens)
+                           n_global, scope, temperature, comps, dens,
+                           deterministic_backward=deterministic)
             if (i + 1) % 8 == 0 or i == n_seqs - 1:
                 atomic_torch_save({"identity": identity, "done": i + 1, "comps": comps,
                                    "dens": dens}, args.output + ".pricing.partial.pt")

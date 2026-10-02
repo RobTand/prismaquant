@@ -128,6 +128,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
     parser.add_argument("--data-manifest-sha256", required=True)
+    parser.add_argument("--only-dtype", choices=("float32", "bfloat16"))
+    parser.add_argument("--deterministic-backward", action="store_true")
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(exist_ok=False)
@@ -149,12 +151,16 @@ def main():
         "container_content_sha256": os.environ.get("PRISMAQUANT_CONTAINER_CONTENT_SHA256"),
         "legs": {}, "started_unix": time.time(),
     }
+    dtypes = [args.only_dtype] if args.only_dtype else ["float32", "bfloat16"]
+    identity["requested_dtypes"] = dtypes
+    identity["completion_scope"] = "requested_dtype_legs"
+    identity["deterministic_backward"] = args.deterministic_backward
     if tuple(ids.shape) != (4, 512):
         raise RuntimeError("input prefix geometry mismatch")
     identity["input_prefix_sha256"] = hashlib.sha256(ids.numpy().tobytes()).hexdigest()
     diag.atomic_json_dump(identity, str(output / "inputs.ready.json"))
     report_progress(1, "startup", "source_input_identity")
-    for leg_index, dtype in enumerate(("float32", "bfloat16")):
+    for leg_index, dtype in enumerate(dtypes):
         def progress(phase, count):
             base = 1 + leg_index * 8 + (4 if phase == "arms" else 0)
             report_progress(base + count, f"{phase}_{dtype}", "durable_sequence_blocks")
@@ -179,7 +185,7 @@ def main():
         job = argparse.Namespace(model=str(model_path), inputs=str(input_path), text="fit_s42",
             n_seqs=4, n_probes=8, seed_base=7000, dtype=dtype, n_single=0,
             layer_arms=False, dz_dtype="float32", pricing_from=None, profile=True,
-            smoke_first=False, output=stem)
+            smoke_first=False, output=stem, deterministic_backward=args.deterministic_backward)
         diag.run(job, model, ids=ids, progress_callback=progress)
         meta = json.loads(Path(stem + ".json").read_text())
         if (meta.get("complete") is not True or meta["ids_sha256"] != identity["input_prefix_sha256"]
@@ -196,12 +202,12 @@ def main():
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
         diag.atomic_json_dump(identity, str(output / "pair.partial.json"))
-    if identity["legs"]["float32"]["units"] != identity["legs"]["bfloat16"]["units"]:
+    if len(dtypes) == 2 and identity["legs"]["float32"]["units"] != identity["legs"]["bfloat16"]["units"]:
         raise RuntimeError("dtype pair unit roster mismatch")
     identity["finished_unix"] = time.time()
     identity["complete"] = True
     diag.atomic_json_dump(identity, str(output / "pair.json"))
-    report_progress(18, "publish", "complete_pair")
+    report_progress(2 + len(dtypes) * 8, "publish", "requested_dtype_legs")
     files = sorted(p for p in output.iterdir() if p.is_file())
     print(json.dumps({"complete": True, "result": str(output / "pair.json"),
                       "files": [{"name": p.name, "size": p.stat().st_size,
