@@ -292,6 +292,9 @@ def refuse_seed_space(space) -> None:
     A seed is a measurement that borrows another run's checkpoint; its
     checkpoints never feed Stage B.
     """
+    from .stage_a_selected_row_diagnostic import diagnostic_marker_path
+    if diagnostic_marker_path(space).exists():
+        raise BandRefused("a selected-row diagnostic is a measurement and feeds no band")
     held = [path for path in (seed_marker_path(space), seed_receipt_path(space))
             if path.exists()]
     if held:
@@ -499,6 +502,8 @@ def stage_a_argv(command) -> dict:
     if len(starts) != 1:
         raise BandRefused("the sealed request runs no single Stage A entry point")
     tail = list(command[starts[0] + 2:])
+    if "--selected-row-diagnostic" in tail:
+        raise BandRefused("a selected-row diagnostic request feeds no band")
     if "--chain-seed" in tail:
         raise BandRefused("the sealed request is a Stage A seed run: a seed is a "
                           "measurement, not a campaign run, and feeds no band")
