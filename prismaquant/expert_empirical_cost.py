@@ -30,7 +30,6 @@ AURA pass never sees) from the baseline incremental cost.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import pickle
 import re
@@ -46,6 +45,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from . import io_spans
+from .digests import bytes_sha256hex
 from prismaquant import format_registry as fr
 from prismaquant.tensor_digests import tensor_value_stamp as _tensor_value_stamp
 from prismaquant.routed_experts import (
@@ -830,9 +830,9 @@ def _expert_checkpoint_identity(
         "calibration": {
             "shape": [int(dim) for dim in calib.shape],
             "dtype": str(calib.dtype),
-            "sha256": hashlib.sha256(
+            "sha256": bytes_sha256hex(
                 calib.view(torch.uint8).numpy().tobytes()
-            ).hexdigest(),
+            ),
             "calib_hash": calibration_data_hash(calib_ids),
         },
         "formats": [str(fmt) for fmt in formats],
@@ -1839,8 +1839,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "n_calib_samples": int(calib.shape[0]),
         "calib_seqlen": int(calib.shape[1]),
         "calib_seed": args.calib_seed,
-        "calib_sha256": hashlib.sha256(
-            calib.cpu().numpy().tobytes()).hexdigest(),
+        "calib_sha256": bytes_sha256hex(calib.cpu().numpy().tobytes()),
         "expert_units": len(unit_kls),
         "unit_kls": unit_kls,
         "formats_measured": [
