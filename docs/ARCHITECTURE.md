@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2087, Refs #1301): the census-cache builder uses
+the existing `bytes_sha256hex` owner for bound input bytes, atomically
+published output bytes and its post-binding layer-config fence. Reads,
+publication-before-digest ordering, first-writer refusal messages and JSON
+spellings retain their existing contracts. Three primitive scopes leave the
+shrink-only baseline. No source reread, identity migration, default, format,
+export/serving gate or performance qualification follows.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
