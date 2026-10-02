@@ -1038,7 +1038,7 @@ def _verify_observation(observation: Mapping) -> dict:
     reader.bytes(top["contract"], "observation.contract")
     evidence = _object(top["evidence"], _OBSERVATION_EVIDENCE, "observation.evidence")
     bound: dict[str, tuple[Path, bytes]] = {}
-    for name in _OBSERVATION_EVIDENCE:
+    for name in evidence:
         bound[name] = reader.bytes(evidence[name], f"observation.evidence.{name}")
     preflight = _object(top["preflight"], ("result", "phase"), "observation.preflight")
     reader.bytes(preflight["result"], "observation.preflight.result")
