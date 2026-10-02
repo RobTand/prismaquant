@@ -25,7 +25,7 @@ import time
 from types import SimpleNamespace
 
 from .cost_stage_checkpoint import (
-    MANIFEST_SCHEMA, _load_unit, atomic_write_bytes, canonical_json_sha256,
+    MANIFEST_SCHEMA, MAX_UNIT_IO_WORKERS, _load_unit, atomic_write_bytes, canonical_json_sha256,
     canonical_json_sha256_normalized,
     prepare_journal, unit_path, write_unit,
     _drive_ordered_units as _drive_ordered_walk,
@@ -126,13 +126,11 @@ def is_head_walk_read(path, read_set) -> bool:
                                 for directory in directories)
 
 
-# The walk's worker pool is the CPU set PrismaBuild assigned this container
-# (``os.sched_getaffinity``: PB applies its allocation with taskset before
-# exec and the container inherits it) -- never a guessed core. The cap keeps
-# a whole-box reservation from minting a thread per unit; the env knob
-# lowers it or forces the serial path for an A/B measurement.
+# Threads inherit the PB-assigned CPU mask. Explicit I/O concurrency can
+# exceed its core count without reserving or using another core; keep the
+# existing bounded width and affinity-derived default pending storage evidence.
 HEAD_WALK_WORKERS_ENV = "PRISMAQUANT_HEAD_WALK_WORKERS"
-HEAD_WALK_MAX_WORKERS = 16
+HEAD_WALK_MAX_WORKERS = MAX_UNIT_IO_WORKERS
 # Units are banked on a time cadence rather than one fsynced envelope per
 # unit: a crash loses at most one interval of verified work, and the cadence
 # matches the progress contract's own clock (#741).
@@ -602,35 +600,33 @@ class _ProgressCadence:
 
 
 def _head_walk_worker_count(requested=None, environ=None):
-    """Resolve the head walk's worker count from PrismaBuild's own placement.
+    """Resolve bounded I/O concurrency without changing PB's CPU placement.
 
-    The default is the CPU set PB assigned this container, capped so a
-    whole-box reservation cannot mint a thread per unit. An explicit request
-    wins, the env knob is the operator's A/B lever, and neither may exceed
-    the assignment: cores PB did not assign are never guessed
-    (``file_hash_workers`` refuses the same way one screen up).
+    Explicit input wins over the environment. Both are bounded independently
+    of the assigned core count: waiting threads retain the action's CPU mask.
+    The absent-input default remains affinity-derived until a storage profile
+    establishes a replacement. CPU-bound file hashing keeps its own cap.
     """
     environ = os.environ if environ is None else environ
+    if requested is not None:
+        _require(type(requested) is int and 0 < requested <= HEAD_WALK_MAX_WORKERS,
+                 f"head walk workers must be an integer in 1:{HEAD_WALK_MAX_WORKERS}")
+        return requested
+    raw = environ.get(HEAD_WALK_WORKERS_ENV)
+    if raw is not None and raw != "":
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError(f"{HEAD_WALK_WORKERS_ENV}={raw!r} is not a worker count") from exc
+        _require(0 < value <= HEAD_WALK_MAX_WORKERS,
+                 f"{HEAD_WALK_WORKERS_ENV}={raw!r} is not a worker count in "
+                 f"1:{HEAD_WALK_MAX_WORKERS}")
+        return value
     try:
         assigned = len(os.sched_getaffinity(0))
     except (AttributeError, OSError):
         assigned = 1
-    ceiling = max(1, assigned)
-    if requested is not None:
-        _require(type(requested) is int and 0 < requested <= ceiling,
-                 f"head walk workers {requested} exceed the PB-assigned CPU affinity ({ceiling})")
-        return requested
-    raw = environ.get(HEAD_WALK_WORKERS_ENV)
-    if raw is None or raw == "":
-        return min(ceiling, HEAD_WALK_MAX_WORKERS)
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{HEAD_WALK_WORKERS_ENV}={raw!r} is not a worker count") from exc
-    _require(0 < value <= ceiling,
-             f"{HEAD_WALK_WORKERS_ENV}={raw!r} is not a worker count within "
-             f"the PB-assigned CPU affinity ({ceiling})")
-    return value
+    return min(max(1, assigned), HEAD_WALK_MAX_WORKERS)
 
 
 def _open_head_journal(root, *, resume, identity, qnames, workers=1):
@@ -648,7 +644,7 @@ def _open_head_journal(root, *, resume, identity, qnames, workers=1):
     root = Path(root)
     try:
         return prepare_journal(root, stage=HEAD_WALK_STAGE, resume=resume,
-                               identity=identity, qnames=qnames, unit_workers=workers)
+                               identity=identity, qnames=qnames, unit_io_workers=workers)
     except RuntimeError as exc:
         if not resume:
             raise
@@ -662,7 +658,7 @@ def _open_head_journal(root, *, resume, identity, qnames, workers=1):
         print(f"tessera_joint_aura: discarding head-walk checkpoint ({exc}); "
               "restarting the walk from the roster's start", flush=True)
         return prepare_journal(root, stage=HEAD_WALK_STAGE, resume=True,
-                               identity=identity, qnames=qnames, unit_workers=workers)
+                               identity=identity, qnames=qnames, unit_io_workers=workers)
 
 
 def parse_unit_scope(spec, count=None):
@@ -928,9 +924,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     an interruption loses at most one interval of verified work.
 
     ``head_walk_workers`` is the walk's worker count. The default is the CPU
-    set PrismaBuild assigned this container (``os.sched_getaffinity``), the
-    env knob ``PRISMAQUANT_HEAD_WALK_WORKERS`` lowers it or forces the
-    serial path with ``1``, and no value may exceed the assignment. However
+    set PrismaBuild assigned this container (``os.sched_getaffinity``), capped
+    at 16. Explicit input or ``PRISMAQUANT_HEAD_WALK_WORKERS`` can select 1-16
+    I/O threads independently of that core count; every thread retains the
+    assigned CPU mask. No storage-derived default is claimed. However
     many workers run, commitment -- banking, reporting, cell insertion --
     stays in the roster's one deterministic order, so parallel and serial
     walks produce identical downstream state and identical durable
@@ -2357,6 +2354,8 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
         _require(Path(execution['boundary_storage']['directory']).resolve().is_relative_to(
                  Path(config['output_root']).resolve()),
                  'diagnostic joint boundaries must be owned by pilot output root')
+    if config.get("head_walk_workers") is not None:
+        _head_walk_worker_count(config["head_walk_workers"])
     _require(type(config.get("file_hash_workers", 1)) is int and config.get("file_hash_workers", 1) > 0,
              "positive file_hash_workers required")
     for name, minimum in (("n_calib_samples", 1), ("calib_seqlen", 1),
@@ -2883,6 +2882,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             # the directory.
             head_checkpoint=root / "head-walk",
             head_resume=resume,
+            **({} if config.get("head_walk_workers") is None else
+               {"head_walk_workers": config["head_walk_workers"]}),
             **({} if file_hash_workers == 1 else {"file_hash_workers": file_hash_workers}),
             **({} if config.get("historical_encoder_reuse") is None else
                {"historical_encoder_reuse": config["historical_encoder_reuse"]}),
