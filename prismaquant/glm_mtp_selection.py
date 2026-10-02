@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import pickle
 from pathlib import Path
 from typing import Mapping
@@ -238,12 +239,21 @@ def _mtp_probe(payload) -> tuple[str, dict]:
         # source model once while continuing to validate every row/operator.
         prepare_joint_aura_identities(payload)
         for unit, by_rung in payload["costs"].items():
+            if not by_rung:
+                raise ValueError(f"MTP unit {unit}: no priced source operator evidence")
+            params = _STORAGE.integer(payload["params"][unit], where=f"params[{unit}]", minimum=1)
             for rung, row in by_rung.items():
                 if not validate_joint_aura_entry(row):
                     raise ValueError(f"MTP row {unit} @ {rung} is not a joint-AURA entry")
                 operator = row["joint_operator_identity"]
                 if operator["qname"] != unit or operator["format"] != rung:
                     raise ValueError(f"MTP row {unit} @ {rung} names {operator['qname']} @ {operator['format']}")
+                source_shape = operator["source_weight"]["shape"]
+                source_params = math.prod(source_shape)
+                if params != source_params:
+                    raise ValueError(
+                        f"MTP params[{unit}]={params} differ from source shape "
+                        f"{source_shape} ({source_params}) for {rung}")
                 objective = row["probe_identity"].get("objective")
                 if (not isinstance(objective, Mapping) or objective.get("schema") != MTP_OBJECTIVE_SCHEMA
                         or objective.get("objective") != MTP_OBJECTIVE):
