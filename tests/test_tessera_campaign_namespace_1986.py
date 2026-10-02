@@ -708,3 +708,31 @@ def test_review_adapter_rechecks_self_consistent_old_contract_gaps(tmp_path, vio
     with pytest.raises(RuntimeError, match="mount|canonical"):
         namespace.namespace_adapter_request(spec, request["argv"][6:], request["env"])
     assert not (tmp_path / "new").exists()
+
+
+@pytest.mark.parametrize("location", ["root", "row"])
+def test_publication_parent_symlink_race_cannot_write_foreign_metadata(tmp_path, monkeypatch, location):
+    from prismaquant import cost_stage_checkpoint as checkpoint
+
+    rows = prepared(tmp_path)
+    binding = namespace.validate_namespace_request(rows[0])
+    root = tmp_path / "new"
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    swapped = False
+    publish = checkpoint.publish_new_bytes
+
+    def swap_parent_after_preflight(path, payload, **kwargs):
+        nonlocal swapped
+        parent = root if location == "root" else root / binding["request_key"]
+        if path.parent == parent and not swapped:
+            assert not parent.exists()
+            parent.symlink_to(foreign, target_is_directory=True)
+            swapped = True
+        return publish(path, payload, **kwargs)
+
+    monkeypatch.setattr(checkpoint, "publish_new_bytes", swap_parent_after_preflight)
+    with pytest.raises((RuntimeError, OSError)):
+        dispatch.publish_namespace_requests(rows)
+    assert swapped, "the publication boundary was exercised"
+    assert list(foreign.iterdir()) == [], "publication wrote through the raced parent symlink"
