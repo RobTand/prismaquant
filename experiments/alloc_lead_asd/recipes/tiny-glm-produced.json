@@ -1,8 +1,8 @@
 {
   "schema": "prismaquant.prismabuild.produced_output_template.v1",
   "version": 1,
-  "template_id": "pq1962-tiny-glm-control1",
-  "output_prefix": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control1",
+  "template_id": "pq1962-tiny-glm-control2",
+  "output_prefix": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tiny-glm-control2",
   "slots": {
     "boundary_entries": {
       "class": "payload"
@@ -16,7 +16,7 @@
   "working_demands": {
     "ram:dl380g10": {
       "minimum_gib": 1,
-      "window_gib": 2
+      "window_gib": 3
     }
   },
   "permitted_tiers": [

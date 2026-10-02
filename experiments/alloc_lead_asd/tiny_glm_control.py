@@ -126,6 +126,7 @@ def model_and_runner(config, state, dtype, device):
     bind_source_derivative(model, Glm5NextProfile(), DERIVATIVE)
     runner = fixture._streamed_runner(model)
     runner.context.device, runner.context.dtype = device, dtype
+    runner.device, runner.dtype = device, dtype
     runner.context.settle_prefetch_layers = lambda layers: None
     runner.context.settle_prefetched_layers = lambda layers, **kwargs: None
     runner.context.source_residency_snapshot = lambda layers, **kwargs: {'owners': [],
@@ -341,6 +342,7 @@ def main():
             profile = torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA])
             with profile:
                 direct_result = direct(model, modules, ids.cuda())
+                torch.save(direct_result, args.output / f'{label}.direct.pt')
                 captured = capture(runner, model, modules, ids, source['model_identity'], args.output / label, publication)
                 cotangent_differences = {f'L{layer}/p{p}': difference(direct_result['gradients'][layer, p],
                     torch.cat([captured['rolled'][layer, batch, p] for batch in range(4)]))
