@@ -44,6 +44,17 @@ def sha(value):
     return hashlib.sha256(value).hexdigest()
 
 
+def dependency_identity():
+    import xxhash
+    root = Path('/mnt/shared/tessera-measurements/pq1962-sol-20261002/deps-xxhash37')
+    record = json.loads((root / 'qualification.json').read_text())
+    assert record['wheel_sha256'] == 'f3e7b689c3bce16699efcf736066f5c6cc4472c3840fe4b22bd8279daf4abdac'
+    for name, expected in record['files'].items():
+        assert sha((root / name).read_bytes()) == expected, f'scoped dependency changed: {name}'
+    assert Path(xxhash.__file__).resolve().parent == root / 'xxhash'
+    return record
+
+
 def commit(units, phase):
     import runpy
     helper = os.environ.get('PRISMABUILD_ACTION_PROGRESS_HELPER')
@@ -321,7 +332,8 @@ def main():
         'tokens_sha256': source['tokens_sha256'],
     }, indent=2) + '\n')
     commit(1, 'startup')
-    results = {'source': source, 'legs': {}, 'scope': 'synthetic tiny GLM; no original GLM tensor reads'}
+    results = {'source': source, 'scoped_dependency': dependency_identity(), 'legs': {},
+               'scope': 'synthetic tiny GLM; no original GLM tensor reads'}
     try:
         for index, dtype in enumerate((torch.float32, torch.bfloat16)):
             label = str(dtype).split('.')[-1]

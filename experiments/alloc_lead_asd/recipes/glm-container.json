@@ -33,7 +33,7 @@
   },
   "cpu_memory_gb": 8,
   "env": {
-    "PYTHONPATH": "/workspace:/workspace/tests",
+    "PYTHONPATH": "/workspace:/workspace/tests:/mnt/shared/tessera-measurements/pq1962-sol-20261002/deps-xxhash37",
     "OMP_NUM_THREADS": "1",
     "MKL_NUM_THREADS": "1",
     "OPENBLAS_NUM_THREADS": "1",
@@ -48,6 +48,7 @@
     "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": "16777216",
     "PRISMAQUANT_DEV_MODE": "1",
     "PRISMAQUANT_STAGE_B_SPILL_ROOT": "/home/rob/tmp/pq1962-tiny-spill",
-    "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES": "16777216"
+    "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES": "16777216",
+    "PYTHONDONTWRITEBYTECODE": "1"
   }
 }
