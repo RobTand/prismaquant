@@ -97,3 +97,34 @@ the same pinned interpreter and `-m py_compile` on the ten paths in that plan.
 No `--tag` accompanies `--anywhere`; the interpreter-path requirement selects
 an eligible worker. The original contradictory flag attempt refused before
 publication and was corrected without changing a sealed request.
+
+## Follow-up direct FP8 metadata ownership — PQ #2086
+
+The internal context already supplies its owned config. A direct FP8-map caller
+that supplied or inferred a profile but omitted config could nevertheless choose
+the logical pool's block/MXFP4 declarations. The local map config is now acquired
+through the existing owned JSON/window seam when absent; explicit already-owned
+config and legacy routes retain their behavior. No GPU or format gate changes.
+
+The real PB-bound CPU fixture declares original block `[2,4]` while its mutable
+logical pool declares `[128,128]`. Both direct-profile variants returned the wrong
+pool block before the fix: action
+`8c8532f0a7cf87130b961001a7b873e0c8914145e3e0ca52f95fd83fb224319d`,
+two failures. Fixed source/test head
+`cd7a320c877dfe9ac60974c3996c734888e94eac` passes **88 collected/run tests,
+all passed, no skips** across eight PB files. The focused regression action is
+`6877264354d71ac65f3a1fe095b6f02f8e082122f3a3f4f5b073a13b4f61a1a2`;
+the adjacent FP8, strict staged reads, tiny original context, selected-source,
+architecture/staleness and IO controls also pass. Two files compile with exit 0,
+action `6f81dac07368917af3bd6b40614bff057d2d1ee3254772893bb221fac440ad64`.
+
+The pinned CPU environment and native thread limits above are unchanged. Test
+command uses `pbtest.py --checkout .../wt-fp8-original --max-clients 8` with the
+same interpreter/memory/priority/time bounds; compile uses `pbrun.py --anywhere`
+with the same CPU/memory/native thread bounds on `prismaquant/layer_streaming.py`
+and `tests/test_original_fp8_map_config_2010.py`. The coordinator evidence root
+above contains `original-fp8-map-{red,green}.json`,
+`original-fp8-map-compile.log` and `FP8-MAP-REVIEW.json`. The shared read-only
+auditor's `--fp8-map` mode binds canonical receipts, terminal cleanup and actual
+source/test blobs to final delivery HEAD; this appended evidence is its sole
+post-validation source delta. No new original payload or GPU run was performed.
