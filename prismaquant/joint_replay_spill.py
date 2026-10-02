@@ -791,7 +791,7 @@ class _Window:
     what a per-operator GEMM over the Linear's rows reads.
     """
 
-    def __init__(self, names):
+    def __init__(self, names, *, records=None):
         self.names = tuple(names)
         # owner -> input entries in first-use order
         self.entries: dict[str, list[_Entry]] = {}
@@ -801,7 +801,7 @@ class _Window:
         # Linear -> the input stream all of its records read
         self.x_source: dict[str, str] = {}
         # (name, owner, entry, g_logical, g_bytes, g_layout) in firing order
-        self.records: list[tuple] = []
+        self.records = [] if records is None else records
         self.g_logical: dict[str, int] = {}
         self.g_runs: dict[tuple[str, int], list[tuple[int, int, int]]] = {}
         self.g_starts: dict[tuple[str, int], list[int]] = {}
