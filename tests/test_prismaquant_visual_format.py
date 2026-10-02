@@ -10,10 +10,9 @@ The override lives in three places the body never touches:
      passthrough-loaded visual `.weight` tensors through
      `_quantize_2d` when the recipe assigns non-BF16.
 
-Phase 2 (proper multimodal Fisher) will replace (1)+(2) with a real
-per-Linear sensitivity-driven decision; (3) stays as-is because it
-already dispatches on the recipe's format assignment regardless of
-how that assignment was produced.
+Complete measured multimodal Fisher rows use per-Linear allocator decisions.
+These tests cover the explicit uniform/text-only control and source census;
+the exporter dispatches on the resulting recipe's format assignment.
 """
 from __future__ import annotations
 

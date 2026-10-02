@@ -2127,13 +2127,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--visual-sensitivity",
                     choices=["fisher", "uniform"],
                     default="fisher",
-                    help="How visual-encoder Linears are assigned. Visual "
-                         "Linears are auxiliary to the language-model budget: "
-                         "they are stamped with --visual-format and excluded "
-                         "from default bpp/Δloss accounting. 'fisher' keeps "
-                         "measured visual cost rows available for audit "
-                         "metadata when present; 'uniform' uses only the "
-                         "Phase 1 source-scan override.")
+                    help="How visual-encoder Linears are assigned. 'fisher' "
+                         "keeps complete measured visual/merger rows as "
+                         "per-Linear allocator decisions, including their "
+                         "bpp and Δloss. Missing measured rows refuse. "
+                         "Without visual costs, or with 'uniform', "
+                         "--visual-format supplies fixed auxiliary entries "
+                         "from the source census.")
     ap.add_argument("--mtp-format",
                     choices=_format_cli_choices(),
                     default="BF16",
