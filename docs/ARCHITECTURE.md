@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #1293, producer provenance prerequisite):
+the existing quantum output publisher records the exact SHA-256 and byte
+length of its committed counters in results.json. Its existing final stdout
+completion is a typed `prismaquant.joint_layer_quantum.completion.v1` object
+carrying the same counters reference and completed unit counts. PB's immutable
+result can therefore bind the counter bytes instead of a terminal action key
+alone. The shared pilot-domain reference validator refuses changed bytes,
+foreign quantum IDs, inconsistent/noncomplete units and malformed references;
+its caller must supply a completion from the chosen execution's authenticated
+CAS result. This publisher/validator prerequisite does not itself wire that
+public PB result reader or authenticate a sealed invocation/source closure.
+Those consumer bindings and the genuine GPU pilot remain open under #1293.
+Counter encoding, arithmetic, pipeline defaults and serving gates are unchanged.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment

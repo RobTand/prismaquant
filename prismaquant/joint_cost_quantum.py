@@ -3616,9 +3616,13 @@ def publish_quantum_outputs(record, *, payload, result, counters,
     result["units_total"] = units_total
     result["passed"] = status == "complete"
     counters = {**counters, "outcome": {"status": status}}
-    atomic_write_bytes(
-        Path(record["output_space"]["counters"]),
-        (json.dumps(counters, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
+    counters_path = Path(record["output_space"]["counters"])
+    counters_bytes = (
+        json.dumps(counters, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    atomic_write_bytes(counters_path, counters_bytes)
+    result["counters"] = {"path": str(counters_path),
+                          "sha256": hashlib.sha256(counters_bytes).hexdigest(),
+                          "bytes": len(counters_bytes)}
     atomic_write_bytes(
         Path(record["output_space"]["results"]),
         (json.dumps(result, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
@@ -4115,8 +4119,11 @@ def run_layer_quantum(
 
 def quantum_completion_record(result: Mapping) -> dict:
     """The producer's single completion record carried by PB stdout."""
-    return {key: result[key] for key in (
-        "quantum_id", "passed", "status", "units_done", "units_total")}
+    from .joint_dispatch_pilot import QUANTUM_COMPLETION_SCHEMA
+
+    return {"schema": QUANTUM_COMPLETION_SCHEMA,
+            **{key: result[key] for key in (
+                "quantum_id", "passed", "status", "units_done", "units_total", "counters")}}
 
 
 def progress_grace_stamps(raw: str | None) -> list | None:

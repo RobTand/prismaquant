@@ -13,10 +13,53 @@ from .io_spans import EXPOSED_WAIT_SCHEMA, GB10_POWER_ENVELOPE_W, derive_wait_bo
 from .joint_replay_regime import normalize_replay_regime
 
 PILOT_SCHEMA = "prismaquant.joint_dispatch_pilot.v1"
+QUANTUM_COMPLETION_SCHEMA = "prismaquant.joint_layer_quantum.completion.v1"
 
 
 class PilotRefused(ValueError):
     """The counters cannot certify the proposed row."""
+
+
+def validate_pilot_completion(completion: Mapping, *, counters: Mapping,
+                              counters_sha256: str, counters_bytes: int) -> dict:
+    """Match supplied counters to an authenticated PB producer completion.
+
+    The caller must obtain ``completion`` from the successful action's
+    verified CAS result. A caller-supplied completion or terminal key alone
+    does not establish this provenance. Paths are retained as provenance;
+    the byte digest permits an exact copy of the counters to be consumed.
+    """
+    try:
+        if not isinstance(completion, Mapping) or completion.get("schema") != QUANTUM_COMPLETION_SCHEMA:
+            raise PilotRefused("pilot PB result has no quantum completion reference")
+        if (completion.get("quantum_id") != counters.get("quantum_id")
+                or not isinstance(counters.get("quantum_id"), str)
+                or not counters["quantum_id"]):
+            raise PilotRefused("pilot PB result belongs to another quantum")
+        units = counters.get("units")
+        if (not isinstance(units, list) or len(units) != 2
+                or any(type(unit) is not int for unit in units)
+                or units[0] != units[1] or units[1] <= 0
+                or completion.get("status") != "complete"
+                or completion.get("passed") is not True
+                or type(completion.get("units_done")) is not int
+                or type(completion.get("units_total")) is not int
+                or [completion["units_done"], completion["units_total"]] != units):
+            raise PilotRefused("pilot PB completion and counters disagree on completed units")
+        reference = completion["counters"]
+        if (not isinstance(reference, Mapping)
+                or set(reference) != {"path", "sha256", "bytes"}
+                or not isinstance(reference["path"], str) or not reference["path"]
+                or type(reference["bytes"]) is not int or reference["bytes"] <= 0
+                or type(counters_bytes) is not int or counters_bytes <= 0):
+            raise PilotRefused("pilot PB counters reference is malformed")
+        _pilot_binding_digest(counters_sha256, "supplied counters digest")
+        _pilot_binding_digest(reference["sha256"], "producer counters digest")
+        if (reference["sha256"] != counters_sha256 or reference["bytes"] != counters_bytes):
+            raise PilotRefused("pilot counters bytes differ from the PB producer result")
+        return dict(reference)
+    except (KeyError, TypeError, AttributeError) as error:
+        raise PilotRefused("pilot PB completion reference is incomplete or malformed") from error
 
 
 def _pilot_binding_digest(value, where):
