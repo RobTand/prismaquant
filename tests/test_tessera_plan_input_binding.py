@@ -1,6 +1,7 @@
 """Execute the real Tessera driver arm without encoding or serving work."""
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -140,40 +141,48 @@ python3() {
     return _execute_plan_driver(preamble + helper + block, env=env)
 
 
-@pytest.fixture
-def delayed_driver_start(monkeypatch):
-    """Reproduce startup beyond the observed 30-second batch deadline."""
+#: The admitted batch's cold start exceeded the older 30-second harness
+#: deadline before its Python helpers finished (#1963), which is why the
+#: deadline was raised to a larger, still finite allowance.
+OBSERVED_COLD_START_S = 30
+
+
+def test_driver_harness_deadline_absorbs_the_observed_cold_start(monkeypatch, tmp_path):
+    """The plan-driver deadline must stay finite and above the cold start.
+
+    A cold start past the older 30-second deadline false-failed the admitted
+    batch, so the harness must allow more without becoming unbounded. Four
+    delayed-startup cases reproduced that start with a real ``sleep 31`` each
+    -- 31 wall-seconds apiece, 124 s of this file's own wall under serial
+    execution -- and only re-asserted binding outcomes the real driver cases
+    below already assert for themselves. Reading the deadline the driver
+    actually applies keeps the same guarantee: a ``None`` or infinite deadline
+    is refused at the harness boundary before the subprocess starts, and the
+    old 30-second budget is caught by the remaining-budget assertion below
+    after the (fast, real) driver run, without spending the wall time.
+    """
+    requested = {}
     real_run = subprocess.run
 
-    def run_after_delay(argv, **kwargs):
-        assert argv[:2] == ["bash", "-c"]
-        return real_run([*argv[:2], "sleep 31\n" + argv[2]], **kwargs)
+    def capture_deadline(argv, **kwargs):
+        deadline = kwargs.get("timeout")
+        requested["timeout"] = deadline
+        # Check at the boundary, before delegating: an unbounded or infinite
+        # deadline must be refused by this assertion, not by the OS later.
+        assert deadline is not None, "the plan-driver harness must keep a finite deadline"
+        assert math.isfinite(deadline), (
+            "the plan-driver harness must keep a finite deadline, "
+            f"got {deadline!r}")
+        return real_run(argv, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", run_after_delay)
-
-
-@pytest.mark.parametrize("options,expected_code,required_output", [
-    ({"changed": True}, 2, "ASSIGNMENT_DIGEST"),
-    ({"manifest": "missing"}, 2, "allocation"),
-    ({"manifest": "other-stage"}, 2, "allocation"),
-    ({"mode": "compiled"}, 0, "Serve:"),
-], ids=["old-allocation", "missing", "other-stage", "compiled"])
-def test_delayed_start_keeps_real_driver_binding_checks(
-        tmp_path, delayed_driver_start, options, expected_code, required_output):
-    result = _run(tmp_path, **options)
-    output = result.stdout + result.stderr
-    assert result.returncode == expected_code, output
-    assert required_output.lower() in output.lower()
-    if expected_code == 2:
-        assert "TEST_EXPORT_REACHED" not in result.stdout
-    else:
-        command = next(line.split("Serve:", 1)[1].strip()
-                       for line in result.stdout.splitlines() if "Serve:" in line)
-        tokens = shlex.split(command)
-        assert f"IMAGE={IMAGE}" in tokens
-        assert "TESSERA_LANE_EAGER=0" in tokens
-        assert f"TS={tmp_path / 'producer tree'}" in tokens
-        assert str(tmp_path / "work with spaces/exported") in tokens
+    monkeypatch.setattr(subprocess, "run", capture_deadline)
+    result = _run(tmp_path, changed=True)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "ASSIGNMENT_DIGEST" in result.stdout + result.stderr
+    assert requested["timeout"] > OBSERVED_COLD_START_S, (
+        "the older 30-second deadline false-failed the admitted batch's cold "
+        f"start; the harness must exceed {OBSERVED_COLD_START_S} seconds, "
+        f"got {requested['timeout']!r}")
 
 
 def test_actual_driver_refuses_old_plan_after_allocation_bytes_change(tmp_path):
