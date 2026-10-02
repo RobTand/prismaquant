@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 drain correction):
+`_RollPipeline.drain` detaches its pending delivery before callbacks, as the
+original path did. If roll or durable callbacks fail after committing a
+prefix, subsequent drain/abandon cannot deliver consumed rows or report
+that prefix again. Unproven research DMA remains independently owned by
+the retained banks and exact stream ledger; detaching delivery releases
+no bank or credit before its submitting stream is proven complete.
+
 Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 failure ownership):
 a failed reusable `_RollPipeline` copy retains its actual banks and host-byte
 credit with the exact streams that submitted them. Event creation, recording
@@ -29248,6 +29256,9 @@ all bank references and credit, even if exceptions/tracebacks are dropped.
 No background poll or guessed completion exists. A poisoned context stays
 retained until process containment or exit; production/default callers do
 not enter this state unless an explicit research owner was used first.
+Draining detaches the delivery step before invoking roll/durable callbacks.
+A failed callback's committed prefix is never retried by another drain;
+failed DMA still retains its banks/stream proof until original-owner cleanup.
 
 ### Stage A checkpoints written as the chain rolls (#1002)
 

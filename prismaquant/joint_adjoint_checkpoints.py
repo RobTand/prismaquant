@@ -2582,10 +2582,12 @@ class _RollPipeline:
     def drain(self):
         self._require_not_delivering()
         self._require_copy_ready()
-        waiting = self._waiting
+        # A failed callback may have committed a prefix and consumed rows.
+        # Never queue that step for delivery again. Unfenced DMA ownership
+        # is retained independently by the banks and captured stream ledger.
+        waiting, self._waiting = self._waiting, None
         if waiting is not None:
             self._deliver(waiting)
-        self._waiting = None
 
     def abandon(self):
         """Drop the waiting rows unrolled, once their copy has landed."""

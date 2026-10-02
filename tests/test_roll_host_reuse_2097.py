@@ -400,7 +400,7 @@ def test_previous_steps_failed_event_keeps_credit_until_original_stream_fences(
     events[0].synchronize = failed_event
     with pytest.raises(RuntimeError, match="previous event failed"):
         getattr(pipeline, operation)()
-    assert pipeline._waiting is previous
+    assert pipeline._waiting is (None if operation == "drain" else previous)
     cuda_copy.stream.blocked = True
     with pytest.raises(RuntimeError, match="original copy stream"):
         pipeline.abandon()
@@ -449,4 +449,35 @@ def test_missing_stream_fence_refuses_before_any_copy(cuda_copy, monkeypatch):
         pipeline.submit(_gradient(0), [0, 1], 0)
     assert not events and not busy
     pipeline.abandon()
+    assert pipeline.held_host_bytes == 0
+
+
+@pytest.mark.parametrize("reuse", [False, True])
+@pytest.mark.parametrize("callback", ["roll", "durable"])
+def test_failed_drain_never_redelivers_a_durable_prefix_or_none_rows(cuda_copy, reuse, callback):
+    _allocations, _events, busy = cuda_copy
+    rolled, durable = [], []
+
+    def roll(row, batch, probe):
+        assert isinstance(row, torch.Tensor), "drain redelivered a consumed None row"
+        rolled.append(batch)
+        if callback == "roll" and batch == 1:
+            raise RuntimeError("second row callback failed")
+
+    def on_durable(batch, probe):
+        durable.append(batch)
+        if callback == "durable" and batch == 1:
+            raise RuntimeError("second row callback failed")
+
+    pipeline = _RollPipeline(roll, device="cuda", roll_may_keep=False,
+                             reuse_host_buffers=reuse, on_durable=on_durable)
+    pipeline.submit(_gradient(0, 3), [0, 1, 2], 0)
+    with pytest.raises(RuntimeError, match="second row callback failed"):
+        pipeline.drain()
+    expected = [0] if callback == "roll" else [0, 1]
+    assert rolled == [0, 1] and durable == expected
+    pipeline.drain()
+    pipeline.abandon()
+    pipeline.drain()
+    assert rolled == [0, 1] and durable == expected and not busy
     assert pipeline.held_host_bytes == 0
