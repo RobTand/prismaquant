@@ -96,3 +96,128 @@ def test_preparation_reaches_second_copy_before_first_can_finish(monkeypatch, cp
     values = [torch.full((2,3),i,dtype=torch.bfloat16) for i in range(2)]
     assert list(run_check(monkeypatch,values)) == ['u0','u1']
     assert set(started) == {0,1}
+
+
+def test_reverse_preparation_completion_preserves_first_mismatch(monkeypatch, cpu_transport):
+    second = threading.Event()
+    values = [torch.full((2,3),i,dtype=torch.bfloat16) for i in range(2)]
+    def read(name, unit, **kwargs):
+        index = int(name[1:])
+        if index == 0:
+            assert second.wait(2)
+        else:
+            second.set()
+        changed = values[index].clone()
+        changed[0,0] += 1
+        return changed, lambda:None
+    with pytest.raises(RuntimeError) as caught:
+        run_check(monkeypatch, values, read=read)
+    message = str(caught.value)
+    assert message.index('u0 (live') < message.index('u1 (live')
+
+
+def _foreground(callback):
+    done = threading.Event()
+    result = []
+    def execute():
+        try:
+            result.append(callback())
+        except BaseException as error:
+            result.append(error)
+        finally:
+            done.set()
+    thread = threading.Thread(target=execute)
+    thread.start()
+    return thread, done, result
+
+
+def test_four_credits_retain_pins_until_completion_before_fifth_read(monkeypatch, cpu_transport):
+    import weakref
+    pins, reads = [], []
+    allow_new = threading.Event()
+    fourth = threading.Event()
+    original_empty, original_event = torch.empty_like, torch.cuda.Event
+    def empty(value, **kwargs):
+        tensor = original_empty(value, **kwargs)
+        pins.append(weakref.ref(tensor))
+        return tensor
+    class DelayedEvent(original_event):
+        def __init__(self):
+            super().__init__()
+            if not allow_new.is_set():
+                self.done.clear()
+        def record(self, stream):
+            if len(cpu_transport.events) == 4:
+                fourth.set()
+    monkeypatch.setattr(torch, 'empty_like', empty)
+    monkeypatch.setattr(torch.cuda, 'Event', DelayedEvent)
+    values = [torch.full((2,3),i,dtype=torch.bfloat16) for i in range(8)]
+    def read(name, unit, **kwargs):
+        reads.append(name)
+        return values[int(name[1:])].clone(), lambda:None
+    reserves = []
+    def guard(label, **kwargs):
+        if kwargs:
+            reserves.append(kwargs)
+    thread, done, result = _foreground(lambda:run_check(monkeypatch,values,read=read,guard=guard))
+    try:
+        assert fourth.wait(3)
+        assert len(reads) == 4
+        assert sum(ref().numel()*ref().element_size() for ref in pins if ref() is not None) == 48
+        assert not done.is_set()
+        assert reserves == [dict(reserve_bytes=120)]  # 48 CPU + 72 device bytes
+    finally:
+        allow_new.set()
+        for event in cpu_transport.events:
+            event.done.set()
+        thread.join(4)
+    assert done.is_set()
+    assert isinstance(result[0],dict), repr(result[0])
+    assert len(reads) == 8
+
+
+def test_partial_cuda_failure_joins_cpu_reader_before_device_fence(monkeypatch, cpu_transport):
+    second_started, finish_second = threading.Event(), threading.Event()
+    original_copy = torch.Tensor.copy_
+    def copy(target, source, *args, **kwargs):
+        if int(source[0,0]) == 1:
+            second_started.set()
+            assert finish_second.wait(3)
+        return original_copy(target,source,*args,**kwargs)
+    monkeypatch.setattr(torch.Tensor,'copy_',copy)
+    def fail_after_enqueue(live, staged):
+        assert second_started.wait(2)
+        raise RuntimeError('injected comparison failure after H2D enqueue')
+    monkeypatch.setattr(campaign,'_device_differs',fail_after_enqueue)
+    values=[torch.full((2,3),i,dtype=torch.bfloat16) for i in range(2)]
+    thread,done,result=_foreground(lambda:run_check(monkeypatch,values))
+    try:
+        assert second_started.wait(2)
+        assert not done.wait(.1)
+        assert not cpu_transport.synchronized
+    finally:
+        finish_second.set();thread.join(4)
+    assert done.is_set()
+    assert isinstance(result[0],RuntimeError)
+    assert 'after H2D enqueue' in str(result[0])
+    assert cpu_transport.synchronized == [torch.device('cuda:0')]
+
+
+def test_undersized_private_cap_refuses_before_source_read(monkeypatch, cpu_transport):
+    def read(*args,**kwargs):
+        pytest.fail('source read occurred before cap refusal')
+    values=[torch.zeros((2,3),dtype=torch.bfloat16)]
+    with pytest.raises(RuntimeError,match='exceeds.*byte cap'):
+        run_check(monkeypatch,values,read=read,max_bytes=11)
+
+
+def test_shared_pool_consumer_cannot_resize_existing_executor(monkeypatch):
+    first=layer_streaming._layer_read_pool(1)
+    try:
+        with pytest.raises(RuntimeError,match='cannot be resized'):
+            layer_streaming._layer_read_pool(2,allow_resize=False)
+        assert layer_streaming._LAYER_READ_POOL is first
+    finally:
+        first.shutdown(wait=True)
+        monkeypatch.setattr(layer_streaming,'_LAYER_READ_POOL',None)
+        monkeypatch.setattr(layer_streaming,'_LAYER_READ_POOL_THREADS',0)

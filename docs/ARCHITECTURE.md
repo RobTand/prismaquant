@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #2039): projected-unit checking has an internal,
+explicitly opt-in private-preparation window. It retains every source read,
+private CPU copy and device comparison; the default remains serial preparation.
+The window uses the existing shared layer-read pool at two configured workers,
+refuses to resize a live pool, and owns at most four credits under a finite
+private-byte cap and prospective CPU/device reservations. The source owner
+continues to charge whole immutable deliveries and their native aliases;
+subviews do not reduce that charge. Ordered main-thread CUDA comparisons retain
+private buffers until completion; failure/cancellation drains readers and fences
+submitted CUDA work before releasing owners. This is not a new cache, source
+provider or automatic GPU admission. Real GPU qualification and timing remain
+pending independent review; no speed, saturation or energy claim is made.
+
+
 Re-stamped 2026-10-02 (`sol/pq-1934-recovery-20261002`, Refs #1931, #1935):
 packed activation derivation stable-sorts slot-major routed pairs once and
 reads all expert counts with one host sync. Per-expert row order, duplicate
