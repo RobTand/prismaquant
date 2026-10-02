@@ -365,10 +365,11 @@ def test_quantum_record_is_authenticated_from_one_owned_read(identity_files, mon
         adjoint_sha256=identity_files["adjoint"][1],
         output_root=identity_files["output_root"])
 
-    verified, _slice = verify_quantum_identity(**kwargs)
+    verified, _slice, _record_bytes = verify_quantum_identity(**kwargs)
     assert verified["identity_sha256"] == original["identity_sha256"]
     assert "names" not in verified["windows"][0]
     assert len(consumed) == 1
+    assert _record_bytes == original_bytes
 
     # The live file has changed; the old digest must now refuse.
     monkeypatch.setattr(Path, "read_bytes", real_read_bytes)
@@ -404,7 +405,7 @@ def test_dev_mode_runs_a_record_under_a_re_declared_plan(identity_files, monkeyp
         output_root=identity_files["output_root"])
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     capsys.readouterr()
-    verified, _slice = verify_quantum_identity(**kwargs)
+    verified, _slice, _record_bytes = verify_quantum_identity(**kwargs)
     assert verified == json.loads(json.dumps(record))
     assert "[DEV-MODE] seal quantum record plan differs" in capsys.readouterr().out
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")

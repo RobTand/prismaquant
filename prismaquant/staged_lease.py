@@ -76,14 +76,21 @@ from .staged_tier_policy import TierPolicyRefused
 #: starts. PQ #1302 retired it as callerless; PQ #1929 restored it, sharing
 #: ``resolve_tessera_dev_pin.resolve_literal_pin``, after a stale interpreter
 #: ran the whole suite red instead of being refused.
-PB_READER_LEASE_PIN_COMMIT = "95a59051d48cda82eea7927f31870c6c862d7174"
+#: PQ #1293 re-pins to merged PB #1453 at dc4803 so the consumer can read a
+#: selected action generation's verified result through the public SDK4
+#: surface. The reader-lease names are unchanged; the version moves together
+#: below. Live fleet deployment remains separate and is never inferred.
+PB_READER_LEASE_PIN_COMMIT = "dc4803daaf09b6426083d2d36bd2a2da3d6832fe"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
 #: The PrismaBuild client SDK version this package is written against
 #: (``prismabuild.client.SDK_VERSION``, PB #1402 / PQ #1888). A tree that serves another
 #: version refuses as unsupported: the SDK's contract is pinned by version, so
 #: a mismatch is a different contract, never a subset to probe.
-PB_CLIENT_SDK_VERSION = 3
+#: SDK4 (PB #1453) adds the public ``read_verified_action_result`` and
+#: ``bind_standard_capture_command`` surface PQ #1293 consumes; SDK3 or
+#: anything else still refuses.
+PB_CLIENT_SDK_VERSION = 4
 
 #: The one PrismaBuild module PrismaQuant imports.
 _CLIENT_MODULE = "prismabuild.client"
@@ -693,6 +700,16 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
     if not isinstance(entries, list):
         raise ReadsetUnbound("sealed manifest declares no entries")
     return payload
+
+
+def load_sealed_manifest(bound_manifest_sha256: str) -> dict:
+    """Owned manifest metadata, authenticated and decoded by the PB owner.
+
+    For consumers that must bind annotations to immutable phase membership.
+    This establishes input authority only; existing staged readers still
+    acquire and verify every payload range through their normal leases.
+    """
+    return _load_sealed_payload(bound_manifest_sha256)
 
 
 def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int, int]]]:

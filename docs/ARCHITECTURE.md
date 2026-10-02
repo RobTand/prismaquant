@@ -1,5 +1,61 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #2118, Refs #1366, sealed checkpoint incoming):
+post-capture executable regeneration accepts the explicit
+`--checkpoint-incoming-mode stream_once_staged` selection. Absent selection
+preserves existing manifest bytes, phase topology and execution defaults.
+Checkpoint metadata/shared state stays in `checkpoint-load`; original cotangents
+move to bounded first-chain consumption order or chain-empty per-probe spill
+phases. The dispatcher excludes moved input entries from compute units and
+checks their membership against the hash-bound Stage A slice. The runtime derives
+selection from the immutable record, refuses conflicting execution settings,
+and authenticates mode/row/slice/probe/phase membership through the existing
+protected PB claim/CAS/public-SDK owner under strict residency policy. Exact-reader
+leases, digest checks, resource gates, destination planes and numerical/resume
+contracts remain with their existing owners. Research mode remains CPU-only.
+Staged first-chain batching/fusion and nondefault replay, capture/shadow profiles
+and handoffs refuse; chain-empty staged capture preserves its sealed grouped
+regime, and render-only profiling remains available. CPU context doubles qualify
+bitwise operands, final planes and costs/journals including partial and complete
+resume; they do not qualify staged lifetimes or GPU performance. No default,
+pin, serving gate or deployed runtime changes. The original GLM layer-7 two-arm
+GPU protocol remains a root-authorized gate under #1366; see
+[the sealed checkpoint contract and finite protocol](design/checkpoint_streaming_1366.md).
+
+Re-stamped 2026-10-02 (PQ #2106, Refs #1293, selected-result consumer):
+fan-out pilot admission uses the reviewed SDK4 public selected-action result
+reader and standard-capture binder. Explicit publication/attempt selectors
+and an independently digest-bound versioned source contract bind the exact
+PB snapshot input and complete selection (commit/parent/subdirectory/refs),
+reviewed package relation, known container/quantum entries,
+image and complete environments. Candidate counters cannot introduce an
+accepted source. The producer inlines the original bounded quantum wire from
+its shared owned read; the consumer authenticates those bytes and committed
+counters against the selected completion, validates record/adjoint identities,
+and derives actual plan/regime/shape/cotangent admission before publication.
+Equivalent byte-bound inputs and output namespaces retain their existing
+admission semantics. Legacy, foreign, substituted and ambiguous evidence
+refuses; the explicit unverified override remains stamped. The 1 MiB record
+cap precedes parsing/encoding/decoding; 8 MiB documents bound result/counter
+reads, with JSON overhead additional. This is CPU consumer/source qualification;
+worker activation and the genuine #1293 GPU pilot remain independent gates.
+No numerical, cache, pipeline-default, wire or serving change is introduced.
+See [pilot source contract and finite measurement protocol](design/joint_dispatch_pilot.md).
+
+Re-stamped 2026-10-02 (Refs PQ #1293, producer provenance prerequisite):
+the existing quantum output publisher records the exact SHA-256 and byte
+length of its committed counters in results.json. Its existing final stdout
+completion is a typed `prismaquant.joint_layer_quantum.completion.v1` object
+carrying the same counters reference and completed unit counts. PB's immutable
+result can therefore bind the counter bytes instead of a terminal action key
+alone. The shared pilot-domain reference validator refuses changed bytes,
+foreign quantum IDs, inconsistent/noncomplete units and malformed references;
+its caller must supply a completion from the chosen execution's authenticated
+CAS result. This publisher/validator prerequisite does not itself wire that
+public PB result reader or authenticate a sealed invocation/source closure.
+Those consumer bindings and the genuine GPU pilot remain open under #1293.
+Counter encoding, arithmetic, pipeline defaults and serving gates are unchanged.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
@@ -737,20 +793,22 @@ remote-code execution, cold shard hashing or the broader worker header audit.
 No new cache, format, numerical method, export wire, runtime pin, pipeline
 default or serving gate; CPU regressions are not model/GPU qualification.
 
-Re-stamped 2026-10-01 (PQ #1888): the reviewed PrismaBuild reader and
-client SDK pin is `95a59051d48cda82eea7927f31870c6c862d7174` (PB #1402),
-with exact SDK version 3. The existing sealed-root resolver, test-only
+Re-stamped 2026-10-02 (Refs PQ #1293, PB #1453): the reviewed PrismaBuild
+reader and client SDK pin is `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`,
+with exact SDK version 4. The existing sealed-root resolver, test-only
 Git/RECORD-qualified installed injection, and same-package import checks
-remain authoritative; SDK1/2 and unknown versions refuse, with no shim.
-Produced-output fixtures use SDK3 source bundles through their existing
-pin schemas. Their pinned files match the staged
-`5aca8ee9323c-1790835144-b584825fe9d4` generation; staging/source equivalence
-is not runtime activation. Activation belongs to pb-sched at a row boundary
-after this PQ pin merges, independently of CPU reader/SDK receipts.
-No Tessera pin, numerical kernel, export wire, pipeline default or measured
-speed result changes. The paired DL380 CPU interpreter is
-`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python`; old interpreters
-remain untouched. Commands and verification are in PR #1900.
+remain authoritative; SDK1/2/3 and unknown versions refuse, with no shim.
+SDK4 adds the public selected-action result reader and standard-capture
+command binder. Connected produced-output fixtures share the existing source-pin
+file with the complete SDK4 file union. Historical SDK3 bundles and receipts
+remain preserved; their results are not transferred to this source. The reviewed SDK4 source bundle is
+`/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk4-20261002/dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
+The separately provisioned DL380 CPU interpreter is
+`/home/rob/venvs/pq-pbdc4803da-tessera-b40c93cb/bin/python`, a non-editable
+Git install of that PB commit and the unchanged Tessera b40c93cb pin.
+SDK installation and source review do not establish fleet runtime activation;
+the published worker generation remains independent. This dependency move
+makes no numerical, wire, pipeline-default, serving or speed claim.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
