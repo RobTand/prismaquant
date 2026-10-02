@@ -25,6 +25,17 @@ ProbeDistribution = Literal["gaussian", "rademacher"]
 ROW_PROBE_LAYOUT = "prismaquant.kl_fisher.global_row.v1"
 
 
+def forward_kl_per_token(student_log_probs: torch.Tensor,
+                         teacher_log_probs: torch.Tensor) -> torch.Tensor:
+    """Forward KL summed over vocabulary, retaining each token's value.
+
+    Callers own log-softmax precision, temperature, token selection and final
+    normalization. Preserve their dtypes and the existing broadcast arithmetic.
+    """
+    teacher_probs = teacher_log_probs.exp()
+    return (teacher_probs * (teacher_log_probs - student_log_probs)).sum(dim=-1)
+
+
 def select_token_scope(logits: torch.Tensor, token_scope: str) -> torch.Tensor:
     """Select the token positions used by a KL/Fisher metric."""
     if logits.dim() < 2:

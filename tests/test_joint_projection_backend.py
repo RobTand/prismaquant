@@ -183,6 +183,8 @@ def test_plan_admits_reference_default_but_refuses_unknown_backend(tmp_path):
 
 @pytest.mark.parametrize('legacy_schema', [True, False])
 def test_cost_refuses_legacy_or_backend_changed_preparation_before_cache_adoption(tmp_path, monkeypatch, legacy_schema):
+    # This remains a certified refusal; dev mode records a backend seal.
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     from prismaquant import tessera_joint_aura as bridge, calibration_data, cost_streaming, gpu_guard
     from prismaquant import model_profiles, aura_cost, joint_aura
     monkeypatch.setattr(gpu_guard, 'require_cuda_hot_path', lambda *_: None)

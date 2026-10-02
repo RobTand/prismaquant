@@ -21,10 +21,10 @@ redefine compact profiles or merge normalized strict JSON with direct lax JSON.
 
 ## Current direct-profile inventory (PQ #1988, Refs #1301)
 
-The shared owner now declares seven direct JSON profiles: `DIRECT_UTF8_STRICT`,
+The shared owner now declares eight direct JSON profiles: `DIRECT_UTF8_STRICT`,
 `DIRECT_UTF8_LAX`, `DIRECT_ASCII_STRICT`, `DIRECT_ASCII_LAX`,
-`DIRECT_ASCII_LAX_DEFAULT_STR`, `DIRECT_ASCII_SPACED_LAX` and
-`DIRECT_ASCII_INDENT2_LAX`. `DIRECT_UTF8_LAX` adds compact sorted Unicode JSON,
+`DIRECT_ASCII_LAX_DEFAULT_STR`, `DIRECT_ASCII_SPACED_LAX`,
+`DIRECT_ASCII_INDENT2_LAX` and `DIRECT_UTF8_INDENT2_STRICT`. `DIRECT_UTF8_LAX` adds compact sorted Unicode JSON,
 permissive nonfinite tokens, no fallback serializer and strict UTF-8 encoding.
 It is direct encoding, not canonical JSON round-trip normalization.
 
@@ -83,3 +83,39 @@ local, GPU, performance or numerical qualification. Existing source type
 findings and controller-only pytest environment mismatch are not repaired by
 casts, stubs, suppressions or global configuration changes. No runtime pin,
 default, stage graph, wire bytes or pinned input changes are part of this slice.
+
+
+## Preparation publication encodings (Refs #1301, 2026-10-02)
+
+The journal writer additionally names `DIRECT_UTF8_INDENT2_STRICT`: sorted
+keys, two-space indentation, literal Unicode, strict nonfinite refusal, no
+fallback serializer and no final LF. It preserves the former direct writer
+rather than normalizing the object again. Its immutable manifest wire is
+load-bearing on journal resume and in upstream manifest SHA bindings.
+
+The selected-cache writer has three distinct output encodings: the manifest
+uses `indent2_json_file_bytes` (ASCII escapes, strict, final LF), read-path
+publication uses `DIRECT_ASCII_INDENT2_LAX` plus LF, and stdout uses
+`DIRECT_ASCII_SPACED_LAX` plus print's LF. The manifest SHA and acquired input
+SHA both use `bytes_sha256hex` on the same already-owned bytes. Input bindings,
+manifest publication and hashes are load-bearing. The stdout report mirrors
+those bindings; it is preserved as an externally consumed interface. The
+read-path document's exact bytes can become a submitted/stored input identity.
+
+Migration dedup keys use `DIRECT_ASCII_SPACED_LAX.text` for both old/new pins.
+The first source-name-ordered record still wins; nonfinite tokens remain
+accepted, mixed key sorting and unsupported values raise their old errors,
+and no input is reconstructed or canonicalized differently. The dedup outcome
+is load-bearing in the merged checkpoint provenance.
+
+`tests/test_digest_prepare_io_1301.py` freezes 25 actual old-production outcomes
+from PB RED `2f65986b6b36be629cb1512a1eb5f0cd15c961257fb408bb08303fbbe9fd40fa`
+(base `8811ad5f1e9586ce0de9f5db7f64d1c8589f70d2`; source snapshot
+`4147891c92511ae6e1902efe7b4a8cd4f0c80132`). Nineteen byte/refusal tests passed;
+four intended owner-routing seams failed. Temporary path text is normalized
+by the existing GoldenTable. The selected-cache control pickle includes that
+temporary path, so its derived handoff digest is verified independently then
+masked as `<handoff-sha256>` in stdout goldens; manifest bytes and SHA stay
+unmasked. The old tape's same field receives the same mask. No golden is
+recorded from replaced production code. The ratchet removes exactly five
+primitive scopes, 508 to 503; no new scope is admitted.

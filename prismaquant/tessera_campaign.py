@@ -5966,11 +5966,14 @@ def _publish_capture_load_execution(args, *, capture, execution, resources, guar
 
 def main(argv: "Sequence[str] | None" = None) -> int:
     from contextlib import ExitStack
-    with ExitStack() as source_scope:
-        return _main(argv, source_scope=source_scope)
+    from .tessera_row_stream import RowWaitTelemetry
+    with RowWaitTelemetry() as waits, ExitStack() as source_scope:
+        result = _main(argv, source_scope=source_scope, waits=waits)
+        waits.returncode = result
+        return result
 
 
-def _main(argv, *, source_scope) -> int:
+def _main(argv, *, source_scope, waits) -> int:
     import torch
 
     from . import format_registry as fr
@@ -6315,6 +6318,7 @@ def _main(argv, *, source_scope) -> int:
             "H-aware encoder branch is merged."
         )
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    waits.start(args.out, device)
     if (args.streaming_capture_policy == "shared-inputs-bounded-v1" or selected_source) and device == "cuda":
         from .autoscale import require_bounded_capture_environment
         require_bounded_capture_environment(os.environ)
@@ -6357,6 +6361,8 @@ def _main(argv, *, source_scope) -> int:
 
     source_authentication = None
     selected_guard = None
+    waits.row_head = ROW_HEAD_STREAM if streaming_head else ROW_HEAD_LOAD_ALL
+    waits.before_gpu_work()
     if selected_source:
         from . import tessera_calibration_cache as calibration_store
         if device == 'cuda':
@@ -7137,6 +7143,7 @@ def _main(argv, *, source_scope) -> int:
             threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
             memo_capacity=selected_resources['encoder_memo_capacity'],
             resource_check=None if selected_guard is None else selected_guard.check,
+            wait_sink=waits.ledger.sink,
             factor_scratch_bytes=(selected_resources['phases']['resident_anchors']
                                   ['factorization_scratch_bytes']))
         source_scope.callback(row_stream.close)
