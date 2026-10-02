@@ -239,6 +239,8 @@ def _mtp_probe(payload) -> tuple[str, dict]:
         # source model once while continuing to validate every row/operator.
         prepare_joint_aura_identities(payload)
         for unit, by_rung in payload["costs"].items():
+            if not by_rung:
+                raise ValueError(f"MTP unit {unit}: no priced source operator evidence")
             params = _STORAGE.integer(payload["params"][unit], where=f"params[{unit}]", minimum=1)
             for rung, row in by_rung.items():
                 if not validate_joint_aura_entry(row):

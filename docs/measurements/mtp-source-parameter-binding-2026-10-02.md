@@ -102,3 +102,68 @@ numerical-quality, serving-throughput or energy qualification. Source count
 binding changes no objective currency, priced wire, menu, runtime pin, kernel,
 serving gate or default. The #1271 original/current MTP prices and matched
 served acceptance against BF16 MTP and the rival remain open.
+
+## Review correction: empty per-unit source evidence
+
+AstraPQ review found a gap in the first source-count commit: an empty
+`costs[unit]` and `wire_bytes[unit]` map skipped its per-rung shape checks.
+Another unit's priced row satisfied the global probe check, and `_unit_rows`
+could still add BF16 for the empty unit using an unbound count. The first
+qualification above covers populated rung maps and does not establish refusal
+of this empty-source case.
+
+Against PR #2084's initial head
+`7e67e4d9d6959d8fe845937175fe1bdcf5c6168a`, PB RED action
+`01edea90ee2534a85e247de33a99ac9c126ec74339425c7e0c55583b56747269`
+ran four new routed/shared empty-map cases at counts one and 8192: all four
+failed with DID NOT RAISE, zero skips or collection errors, exit 1. Seven
+other cases were explicitly deselected for this causal RED. Its failed
+terminal/log and `mtp-empty-source-red.xml` remain retained.
+
+The same `_mtp_probe` owner now refuses an empty per-unit priced-rung map
+before source-count comparison or BF16 passthrough. This is independent of
+runtime eligibility: populated priced rows that are all ineligible still
+bind the source and permit valid BF16 fallback. The follow-up commit updates
+the architecture contract and adds that positive control without weakening
+existing empty-declaration, empty-intersection or group-menu refusal tests.
+
+Fresh GREEN fanout: nine shards, 82 collected/executed/passed, zero skips and
+missing collection, all exits 0. Its 11 source-count tests include the previous
+six, the same four RED cases and the all-ineligible BF16 control. The other
+cases cover GLM selection, priced wires, declared menus, bound-cost/output
+records and architecture/staleness/duplication. The earlier 127-pass run is
+retained as history; it is not added to 82 as if those were distinct cases.
+Unchanged canonical/type/card controls from that run were not rerun.
+
+Source-count action
+`6638f85c5138a6d1522a2e1f1c43fe5a6858dcd593292e8e96b11a5183a31cc3`
+passed all 11 cases; CAS result
+`924030cb2f9de5d0fb83b9bddf11ffbd8f0ee138870ca4a21be71de38c3f17e7`,
+5,491 bytes; receipt
+`c39887201e87c04da8d12e586cfb9879217233e4df2df57e5f6f01032c5f10d2`.
+Compile `6641e378bafd1f4b8d2c0826e612a8c3ce4c500bc4eacbba41bc0ceffc5035d2`
+passed two modules; result
+`1963ce89223ce6a47d3437d18373863d9bf92b2cc0d187d14799f59056f694c6`,
+1,103 bytes; receipt
+`eacefe81e5ea98d1ff8cce9e54a5a3eb82b91097688ad5e3839099d334f6290e`.
+
+All ten GREEN terminal records/CAS receipts were read back in a complete,
+non-timeout query. Actual CAS hashes/lengths matched; nine outcome markers
+reconciled 82 collected IDs and 82 reports, no skips. Independent bare-Git
+readback of compile bundle
+`c201b0d130e26ce501f813e4beb3b03397c6753b6c264df31bcba948e97f602f`,
+snapshot `c98f2e133800b54206718e3df030111260cb6ddd` over the initial PR head,
+matched these final sources:
+
+| Compiled/contract source | SHA-256 |
+| --- | --- |
+| `prismaquant/glm_mtp_selection.py` | `a10b21e2aedce4047e5762a3e2085ceb1c04723e7966901eb95e102d0cd25e13` |
+| `tests/test_mtp_source_param_count_1271.py` | `3033d9a7a63819e7cdd89fc2c9a04fe2abf354049d920f3b5516035c9d6a3eab` |
+| Same-commit `docs/ARCHITECTURE.md` | `34e46892f327c3fbac7bb41f282a2a49370b1dbac0546ff0696c869a7c826adf` |
+
+Execution reused the named current pinned CPU interpreter, qualified published
+5b6b97 runtime, per-action resource/native-thread bounds and test/compile
+deadlines above. All work was admitted on dl380g10. Bounded evidence includes
+`mtp-empty-source-regressions.json`, `mtp-empty-source-compiled`, and the lane's
+`mtp-empty-source-receipts.json` / `mtp-empty-source-cas-readback.json`.
+The scientific/serving scope limits and open #1271 requirements remain intact.

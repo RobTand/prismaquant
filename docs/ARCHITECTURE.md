@@ -3,7 +3,10 @@
 Re-stamped 2026-10-02 (Refs #1271, MTP source parameter binding): the shared
 MTP probe-identity admission compares each unit's exact positive integer
 parameter count with the product of its validated joint-AURA source-weight
-shape for every priced rung. Selection and bound-cost record validation both
+shape for every priced rung. Each unit must have a priced source operator;
+an empty per-unit rung map refuses before BF16 passthrough can borrow another
+unit's global probe identity. Priced rows that are all runtime-ineligible still
+provide source evidence and retain valid BF16 fallback. Selection and bound-cost record validation both
 use this owner before rung eligibility, so metadata cannot manufacture a BF16
 budget fit or change bits-per-parameter independently of the priced source.
 The producer's existing weight-numel counts agree with this contract. This

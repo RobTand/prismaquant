@@ -37,3 +37,23 @@ def test_ineligible_second_rung_cannot_hide_a_different_source_count():
     with pytest.raises(ValueError, match="params.*source.*shape"):
         select_mtp_rungs(payload, byte_budget=10**12, constants=CONSTANTS,
                          eligible=lambda _unit, rung: rung != R832)
+
+
+@pytest.mark.parametrize("unit", [ROUTED[0], SHARED[0]])
+@pytest.mark.parametrize("count", [1, PARAMS])
+def test_empty_unit_rungs_cannot_inherit_another_units_source_identity(unit, count):
+    payload = _payload()
+    payload["costs"][unit] = {}
+    payload["wire_bytes"][unit] = {}
+    payload["params"][unit] = count
+    with pytest.raises(ValueError, match="MTP unit .*no priced source"):
+        select_mtp_rungs(payload, byte_budget=10**12, constants=CONSTANTS)
+
+
+def test_priced_but_ineligible_rungs_still_bind_a_valid_bf16_fallback():
+    payload = _payload()
+    expected = 2 * PARAMS * len(payload["params"])
+    result = select_mtp_rungs(payload, byte_budget=expected, constants=CONSTANTS,
+                              eligible=lambda _unit, _rung: False)
+    assert set(result["assignment"].values()) == {"BF16"}
+    assert result["resident_bytes"] == expected
