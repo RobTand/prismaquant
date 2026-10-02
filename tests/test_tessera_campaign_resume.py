@@ -1,6 +1,8 @@
 """A resumed cost must belong to this run's actual encoding inputs."""
+import hashlib
 import json
 import pickle
+import shutil
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -94,10 +96,77 @@ def _fresh_priced_campaign(monkeypatch, tmp_path, *, hessian=False):
     if hessian:
         argv[argv.index("--hessian") + 1] = "require"
     assert campaign.main(argv) == 0
+    return fixture, _priced_cost_payload(tmp_path)
+
+
+def _priced_cost_payload(tmp_path):
+    """Check the actual measured table before a consumer receives it."""
     with (tmp_path / "cost.pkl").open("rb") as handle:
         payload = pickle.load(handle)
     assert payload["costs"][UNIT]["TESSERA_E4M3_K1_R1024"]["output_mse_measured"]
-    return fixture, payload
+    return payload
+
+
+def _priced_file_digests(root):
+    """The completed producer's exact file bytes, without path relocation."""
+    return {path.relative_to(root): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in root.rglob("*") if path.is_file()}
+
+
+@pytest.fixture(scope="module")
+def _completed_priced_campaigns(tmp_path_factory):
+    """Two real baselines, invalidated with this pytest module's lifetime.
+
+    Build lazily inside a consumer's normal CPU/provenance fixture context.
+    Retain only completed files and their byte digests; model/input tensors,
+    monkeypatches and open owners never survive setup. Refinement cases still
+    call the real campaign independently.
+    """
+    completed = {}
+
+    def baseline(hessian):
+        if hessian not in completed:
+            root = tmp_path_factory.mktemp(f"priced-campaign-{int(hessian)}")
+            with pytest.MonkeyPatch.context() as patch:
+                _fresh_priced_campaign(patch, root, hessian=hessian)
+            completed[hessian] = root, _priced_file_digests(root)
+        return completed[hessian]
+
+    return baseline
+
+
+@pytest.fixture
+def priced_campaign(monkeypatch, tmp_path, _completed_priced_campaigns):
+    """Each mutation owns fresh inputs and private copies of actual bytes.
+
+    Run identities omit cache/output locations; unit receipts name files by
+    basename. Copy the whole completed tree unchanged, including journal unit
+    envelopes and export inputs, so every original resume/seed/byte gate still
+    verifies the same real producer output under the consumer's own paths.
+    """
+    used = []
+
+    def prepare(*, hessian=False):
+        root, digests = _completed_priced_campaigns(hessian)
+        assert _priced_file_digests(root) == digests, "the priced baseline was mutated"
+        shutil.copytree(root, tmp_path, dirs_exist_ok=True)
+        assert _priced_file_digests(tmp_path) == digests
+        for relative in digests:
+            original = (root / relative).stat()
+            private = (tmp_path / relative).stat()
+            assert (original.st_dev, original.st_ino) != (private.st_dev, private.st_ino), (
+                "resume mutations must own private file inodes", relative)
+        used.append((root, digests))
+        # _main_fixture creates every model/input tensor anew with the same
+        # explicit seeds. Mutating W, X, H or tokens cannot reach another case.
+        fixture = _main_fixture(monkeypatch, tmp_path, priced=True)
+        if hessian:
+            fixture[2][fixture[2].index("--hessian") + 1] = "require"
+        return fixture, _priced_cost_payload(tmp_path)
+
+    yield prepare
+    for root, digests in used:
+        assert _priced_file_digests(root) == digests, "a resume consumer mutated the baseline"
 
 
 @pytest.mark.parametrize("initial,rounds,budget,rates,expected", [
@@ -143,11 +212,11 @@ def _forbid_reencode(monkeypatch, campaign):
     monkeypatch.setattr(campaign, "_measure_anchor", forbidden)
 
 
-def test_main_resumes_identical_cost_and_wire_without_reencoding(monkeypatch, tmp_path):
+def test_main_resumes_identical_cost_and_wire_without_reencoding(
+        monkeypatch, tmp_path, priced_campaign):
     from prismaquant.cost_stage_checkpoint import MANIFEST_SCHEMA
 
-    (campaign, checkpoint, argv, _model, _inputs), initial = _fresh_priced_campaign(
-        monkeypatch, tmp_path)
+    (campaign, checkpoint, argv, _model, _inputs), initial = priced_campaign()
     manifest = json.loads(checkpoint.read_text())
     assert manifest["schema"] == MANIFEST_SCHEMA
     original_manifest = checkpoint.read_bytes()
@@ -164,9 +233,9 @@ def test_main_resumes_identical_cost_and_wire_without_reencoding(monkeypatch, tm
     assert wire.read_bytes() == original_wire
 
 
-def test_main_refuses_changed_hessian_values_under_same_draw(monkeypatch, tmp_path):
-    (campaign, checkpoint, argv, _model, inputs), _payload = _fresh_priced_campaign(
-        monkeypatch, tmp_path, hessian=True)
+def test_main_refuses_changed_hessian_values_under_same_draw(
+        monkeypatch, tmp_path, priced_campaign):
+    (campaign, checkpoint, argv, _model, inputs), _payload = priced_campaign(hessian=True)
     original_manifest = checkpoint.read_bytes()
     _forbid_reencode(monkeypatch, campaign)
     inputs["hessian"][0, 0] += 1
@@ -179,9 +248,9 @@ def test_main_refuses_changed_hessian_values_under_same_draw(monkeypatch, tmp_pa
     "weight", "scoring_rows", "input_scale", "scale_policy", "corpus", "tokens",
     "hessian_mode", "menu", "recipe", "encoder_source", "prismaquant_source", "scope",
 ])
-def test_main_refuses_changed_encoding_or_scoring_inputs(monkeypatch, tmp_path, changed):
-    (campaign, checkpoint, argv, model, inputs), _payload = _fresh_priced_campaign(
-        monkeypatch, tmp_path)
+def test_main_refuses_changed_encoding_or_scoring_inputs(
+        monkeypatch, tmp_path, changed, priced_campaign):
+    (campaign, checkpoint, argv, model, inputs), _payload = priced_campaign()
     original_manifest = checkpoint.read_bytes()
     _forbid_reencode(monkeypatch, campaign)
     if changed == "weight":
@@ -277,9 +346,9 @@ def test_refused_resume_leaves_the_surviving_tables_export_inputs(monkeypatch, t
 
 
 @pytest.mark.parametrize("damage", ["missing", "bytes", "symlink"])
-def test_main_refuses_missing_or_changed_priced_wire(monkeypatch, tmp_path, damage):
-    (campaign, checkpoint, argv, _model, _inputs), _payload = _fresh_priced_campaign(
-        monkeypatch, tmp_path)
+def test_main_refuses_missing_or_changed_priced_wire(
+        monkeypatch, tmp_path, damage, priced_campaign):
+    (campaign, checkpoint, argv, _model, _inputs), _payload = priced_campaign()
     _forbid_reencode(monkeypatch, campaign)
     original_manifest = checkpoint.read_bytes()
     wire = next((tmp_path / "cache" / "wire").glob("*.tessera"))
@@ -299,9 +368,9 @@ def test_main_refuses_missing_or_changed_priced_wire(monkeypatch, tmp_path, dama
 
 
 @pytest.mark.parametrize('changed', [False, True])
-def test_seed_refuses_changed_scoring_rows_before_linking_wire(monkeypatch, tmp_path, changed):
-    (campaign, checkpoint, argv, _model, inputs), _payload = _fresh_priced_campaign(
-        monkeypatch, tmp_path, hessian=True)
+def test_seed_refuses_changed_scoring_rows_before_linking_wire(
+        monkeypatch, tmp_path, changed, priced_campaign):
+    (campaign, checkpoint, argv, _model, inputs), _payload = priced_campaign(hessian=True)
     original_manifest = checkpoint.read_bytes()
     _forbid_reencode(monkeypatch, campaign)
     # The encoder still sees identical W, H, draw and static scale. Only the
