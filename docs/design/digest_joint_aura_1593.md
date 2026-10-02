@@ -29,7 +29,7 @@ qualification seals recorded before the change still verify.
 | `_qualification_cells_sha256` row (L1752–1760) | `json.dumps(row, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')` | `DIRECT_UTF8_STRICT.encoded` |
 | `execute` sampling session (L2744) | `hashlib.sha256(session_bytes).hexdigest()` | `bytes_sha256hex` |
 
-## Deliberately left in place (1 site, still ratcheted)
+## Original remaining site (historical #1593 scope)
 
 - **The length-framed qualification seal `_qualification_cells_sha256`
   (L1749).** `hashlib.sha256(QUALIFICATION_CELLS_SCHEMA.encode() + b"\n")`
@@ -44,3 +44,26 @@ qualification seals recorded before the change still verify.
 `tools/duplication_inventory.py`: gated sites 688 → 677 (11 removed, none
 added; the only new owner code lives in `prismaquant/digests.py`, which the
 ratchet already owns). No new near-duplicate or same-name groups.
+
+
+## Length-frame owner completion (Refs #1301, #2059, 2026-10-02)
+
+The remaining qualification constructor now delegates to the explicit
+`digests.length_framed_bytes_sha256` profile: exact caller-supplied prefix,
+caller-ordered raw frames, unsigned eight-byte big-endian length per frame,
+with no trailer, normalization or sorting. The qualification caller retains
+`QUALIFICATION_CELLS_SCHEMA + LF`, sorted cells and `DIRECT_UTF8_STRICT` row
+bytes. Its generator keeps a single row live and no second full-roster copy.
+
+The existing source-tree v2 owner uses the same byte-frame primitive with
+its distinct `SOURCE_TREE_V2 + NUL` prefix and alternating byte-sorted name
+and content frames. Domain tags and schemas do not change; source v1 retains
+its exact legacy recipe. This is shared framing code, not a collapse of the
+two load-bearing identities or an artifact/pin migration.
+
+The existing #1593 immutable row/full-seal goldens and #1762 independent
+source v1/v2 framing oracles are reused without rerecording. New routing and
+lazy-consumption/error tests pin both callers to the owner. This slice removes
+one raw scope from the branch's 508-site primitive baseline (508 to 507); the
+separate pending preparation-JSON slice removes five other scopes. The parent
+census remains open. No performance or GPU qualification is claimed.

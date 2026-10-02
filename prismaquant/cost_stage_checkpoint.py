@@ -19,6 +19,8 @@ import uuid
 # The canonical JSON encoding moved to ``digests`` (PQ #1301); these names stay
 # importable from here, where ~100 call sites import them.
 from .digests import (  # noqa: F401 -- re-exported: one spelling
+    DIRECT_ASCII_SPACED_LAX,
+    DIRECT_UTF8_INDENT2_STRICT,
     canonical_json,
     canonical_json_bytes,
     canonical_json_sha256,
@@ -29,6 +31,7 @@ from .digests import bytes_sha256hex, text_sha256hex
 
 MANIFEST_SCHEMA = "prismaquant.cost_stage_checkpoint.manifest.v1"
 UNIT_SCHEMA = "prismaquant.cost_stage_checkpoint.unit.v1"
+MAX_UNIT_IO_WORKERS = 16
 
 
 _TEMP_SUFFIX: "tuple[int, str] | None" = None
@@ -220,8 +223,8 @@ def merge_identity_migrations(per_source: Mapping[str, object], *,
         present = True
         for record in records:
             key = (record.get("proof_bundle_sha256"),
-                   json.dumps(record.get("old_pins"), sort_keys=True),
-                   json.dumps(record.get("new_pins"), sort_keys=True))
+                   DIRECT_ASCII_SPACED_LAX.text(record.get("old_pins")),
+                   DIRECT_ASCII_SPACED_LAX.text(record.get("new_pins")))
             if key in seen:
                 continue
             seen.add(key)
@@ -395,6 +398,7 @@ def prepare_journal(
     qnames: Sequence[str],
     manifest_path: str | Path | None = None,
     unit_workers: int = 1,
+    unit_io_workers: int | None = None,
 ) -> tuple[Path, str, dict[str, dict[str, object]]]:
     """Create/validate a journal and return all exact completed unit states.
 
@@ -404,7 +408,9 @@ def prepare_journal(
     ``unit_workers`` optionally overlaps independent envelope reads within
     the assigned CPU affinity. The existing bounded ordered driver preserves
     roster order and joins reads before a corrupt journal can be set aside.
-    Other callers remain serial by default.
+    ``unit_io_workers`` instead selects 1-16 I/O threads independently of that
+    core count; every thread inherits the same assigned CPU mask. Combining
+    the two worker policies refuses. Other callers remain serial by default.
     """
     if type(unit_workers) is not int or unit_workers < 1:
         raise ValueError("journal unit_workers must be a positive integer")
@@ -414,6 +420,13 @@ def prepare_journal(
         assigned = 1
     if unit_workers > max(1, assigned):
         raise ValueError("journal unit_workers exceed the PB-assigned CPU affinity")
+    workers = unit_workers
+    if unit_io_workers is not None:
+        if unit_workers != 1:
+            raise ValueError("journal unit_workers and unit_io_workers cannot be combined")
+        if type(unit_io_workers) is not int or not 0 < unit_io_workers <= MAX_UNIT_IO_WORKERS:
+            raise ValueError(f"journal unit_io_workers must be an integer in 1:{MAX_UNIT_IO_WORKERS}")
+        workers = unit_io_workers
     root = Path(checkpoint_dir)
     if root.exists() and not root.is_dir():
         raise RuntimeError(f"{stage} checkpoint path is not a directory: {root}")
@@ -497,13 +510,7 @@ def prepare_journal(
         }
         atomic_write_bytes(
             manifest_path,
-            json.dumps(
-                manifest,
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8"),
+            DIRECT_UTF8_INDENT2_STRICT.encoded(manifest),
         )
 
     expected_paths = {unit_path(root, qname): str(qname) for qname in qnames}
@@ -530,5 +537,5 @@ def prepare_journal(
         if state is not None:
             completed[expected_paths[path]] = state
 
-    _drive_ordered_units(expected_paths, read_unit, retain_unit, workers=unit_workers)
+    _drive_ordered_units(expected_paths, read_unit, retain_unit, workers=workers)
     return root, identity_sha256, completed

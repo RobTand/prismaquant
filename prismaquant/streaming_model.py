@@ -1293,26 +1293,11 @@ class StreamingContext:
 
     def _prefetch_result(self, layer, future):
         """Take one delivery result; retry ownership stays in ``_await_prefetch``."""
-        sink = getattr(self, '_source_wait_sink', None)
-        if sink is None or future.done():
-            return future.result()
-        started = time.time()
-        failure = None
-        try:
-            return future.result()
-        except BaseException as error:
-            failure = error
-            raise
-        finally:
-            finished = time.time()
-            try:
-                sink('source-prefetch', started, finished,
-                     {'layer': int(layer), 'wait_s': max(0.0, finished - started)})
-            except BaseException as error:
-                if failure is None:
-                    # An observer's failure is not a loader availability cause.
-                    raise RuntimeError('source wait observer failed') from error
-                failure.add_note(f'source wait observer failed: {type(error).__name__}: {error}')
+        from .io_spans import observed_future_result
+        return observed_future_result(
+            future, sink=getattr(self, '_source_wait_sink', None),
+            kind='source-prefetch', info={'layer': int(layer)}, clock=time.time,
+            observer='source wait observer')
 
     def _await_prefetch(self, layer, future, *, retry_availability):
         """Await delivery, retaining its owner even when speculation is replaced.
