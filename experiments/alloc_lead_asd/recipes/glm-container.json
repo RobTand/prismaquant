@@ -46,6 +46,8 @@
     "PRISMAQUANT_TMPDIR": "/mnt/shared/tessera-measurements/pq1962-sol-20261002/tmp",
     "PRISMABUILD_PRODUCED_SPOOL_ROOT": "/home/rob/tmp/pq1962-tiny-produced-spool",
     "PRISMABUILD_PRODUCED_SPOOL_MAX_BYTES": "16777216",
-    "PRISMAQUANT_DEV_MODE": "1"
+    "PRISMAQUANT_DEV_MODE": "1",
+    "PRISMAQUANT_STAGE_B_SPILL_ROOT": "/home/rob/tmp/pq1962-tiny-spill",
+    "PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES": "16777216"
   }
 }

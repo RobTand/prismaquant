@@ -331,7 +331,7 @@ def main():
                 capture_components = components(captured['rows'], modules)
                 operator_components = statistics(captured['rows'], modules, torch.device('cuda'))
                 spill = (spill_control(captured['rows'], modules, torch.device('cuda'),
-                    Path('/home/rob/tmp') / f'pq1962-tiny-spill-{os.getpid()}')
+                    Path(os.environ['PRISMAQUANT_STAGE_B_SPILL_ROOT']) / f'action-{os.getpid()}')
                     if dtype == torch.bfloat16 else {'scope': 'FP32 not admitted by production spill operand dtype contract'})
             profile.export_chrome_trace(str(args.output / f'{label}.trace.json'))
             with open(args.output / f'{label}.trace.json', 'rb') as handle:
