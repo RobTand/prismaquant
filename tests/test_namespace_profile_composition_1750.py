@@ -274,3 +274,19 @@ def test_broad_writable_identity_mount_can_cover_owned_metadata(tmp_path):
     row["argv"][4] = json.dumps(spec)
     replace_fixture_request(kwargs, row)
     namespace.validate_namespace_request(dispatch.prepare_namespace_requests(**kwargs)[0])
+
+
+@pytest.mark.parametrize("schema", ["known", "unknown"])
+def test_declared_profile_without_namespace_binding_refuses_before_docker(tmp_path, monkeypatch, schema):
+    checkout, _, row = real_source_row(tmp_path)
+    spec = json.loads(row["argv"][4])
+    del spec["namespace_binding"]
+    if schema == "unknown": spec["namespace_profile"]["schema"] += ".unsupported"
+    monkeypatch.chdir(checkout)
+    class DockerReached(Exception):
+        pass
+    def inspect(*args):
+        raise DockerReached("unbound instrumentation reached Docker")
+    monkeypatch.setattr(adapter, "inspect_or_load", inspect)
+    with pytest.raises(RuntimeError, match="namespace"):
+        adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
