@@ -24,6 +24,7 @@ import threading
 import time
 from collections import defaultdict
 from concurrent.futures import CancelledError, ThreadPoolExecutor, wait as wait_futures
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -108,20 +109,45 @@ def _source_safe_open(path, *, source_authentication=None, **kwargs):
             source_authentication, 'is_qualified_original_material', False):
         # A whole-file qualified owner serves the same sealed object for its
         # header and tensor payload; a range adapter must not redirect either.
-        return source_authentication.safe_open(safe_open, path, **kwargs)
+        source_authentication.require_material_device(kwargs.get('device', 'cpu'))
+        return _original_source_reader(source_authentication, path, kwargs)
     opener = staged_shard_opener(path, safe_open)
     if source_authentication is None:
         return opener(path, **kwargs)
     return source_authentication.safe_open(opener, path, **kwargs)
 
 
+@contextmanager
+def _original_source_reader(owner, path, kwargs):
+    """The existing source reader within its admitted whole-file window."""
+    with owner.material_window([path]):
+        with owner.safe_open(safe_open, path, **kwargs) as reader:
+            yield reader
+
+
 def _source_json(path, source_authentication=None):
     if source_authentication is not None:
+        if getattr(source_authentication, 'is_qualified_original_material', False):
+            with source_authentication.material_window([path]):
+                return source_authentication.read_json(path)
         return source_authentication.read_json(path)
     from .staged_whole_file import read_source_metadata_text
 
     return json.loads(read_source_metadata_text(
         Path(path), label="streamed source JSON"))
+
+
+def _source_profile(model_path, source_authentication=None, *, config=None):
+    """Select a profile from owned original metadata or the existing path."""
+    from .model_profiles import detect_profile
+    if getattr(source_authentication, 'is_qualified_original_material', False):
+        if config is None:
+            config = _source_json(os.path.join(model_path, 'config.json'), source_authentication)
+        profile = detect_profile(model_path, config=config)
+        profile._declare_checkpoint_index(_source_json(
+            os.path.join(model_path, 'model.safetensors.index.json'), source_authentication))
+        return profile
+    return detect_profile(model_path)
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +191,7 @@ def _safe_open_kwargs(device: torch.device) -> dict:
 
 def _build_weight_map(model_path: str, *,
                       multimodal: bool = False, source_authentication=None,
-                      live_name=None,
+                      live_name=None, profile=None,
                       ) -> tuple[dict[str, str], dict[str, str]]:
     """Return ({model_key: shard_path}, {model_key: checkpoint_key}).
 
@@ -195,11 +221,11 @@ def _build_weight_map(model_path: str, *,
     # legacy `_rename_text_only` / `_rename_multimodal` behavior;
     # architecture-specific profiles (e.g. DeepseekV4Profile) override
     # to handle their own naming conventions.
-    from .model_profiles import detect_profile
-    profile = detect_profile(model_path)
+    if profile is None:
+        profile = _source_profile(model_path, source_authentication)
 
     index_file = os.path.join(model_path, "model.safetensors.index.json")
-    if os.path.exists(index_file):
+    if getattr(source_authentication, 'is_qualified_original_material', False) or os.path.exists(index_file):
         raw = _source_json(index_file, source_authentication)["weight_map"]
     else:
         single = os.path.join(model_path, "model.safetensors")
@@ -507,8 +533,9 @@ def _build_fp8_scale_inv_map(model_path: str, *,
     # without overrides return None and we fall through to the legacy
     # `.weight_scale_inv`-suffix scan.
     if profile is None:
-        from .model_profiles import detect_profile
-        profile = detect_profile(model_path)
+        profile = _source_profile(model_path, source_authentication, config=config)
+    if raw_weight_map is None and getattr(source_authentication, 'is_qualified_original_material', False):
+        raw_weight_map = _source_json(os.path.join(model_path, 'model.safetensors.index.json'), source_authentication)['weight_map']
     fp8_scale_pairs = getattr(profile, "fp8_scale_pairs", None)
     if not callable(fp8_scale_pairs):
         explicit = None
@@ -850,6 +877,8 @@ def _apply_fp8_dequant_inplace(
     buckets — which is what the prefetch thread's CPU cost scales on,
     since each kernel launch has fixed Python + CUDA dispatch overhead.
     """
+    if getattr(source_authentication, 'is_qualified_original_material', False):
+        source_authentication.require_material_device(device)
     if not fp8_scale_inv_map:
         return 0
     # Collect (name, scale_key) per shard so we can open each shard
@@ -1064,6 +1093,8 @@ def _materialize(model: nn.Module, prefixes: list[str],
     cast to bf16. See `_dequant_fp8_block_weight`.
 
     Returns count of tensors loaded."""
+    if getattr(source_authentication, 'is_qualified_original_material', False):
+        source_authentication.require_material_device(device)
     buffer_dtypes = _model_tensor_dtypes(model, dtype)
     # The one selection every declared readset is built from (PQ #1095).
     by_shard = select_source_tensors(model_to_shard, model_to_ckpt, prefixes)
@@ -1864,6 +1895,8 @@ def _read_layer_to_device(prefix: str,
     """
     if cancel is not None and cancel.is_set():
         raise CancelledError("layer read cancelled before its staged wait")
+    if getattr(source_authentication, 'is_qualified_original_material', False):
+        source_authentication.require_material_device(device)
     # The one selection every declared readset is built from (PQ #1095).
     by_shard = select_source_tensors(model_to_shard, model_to_ckpt, (prefix,))
     out: dict[str, torch.Tensor] = {}

@@ -73,6 +73,38 @@ Ready deliveries record no wait; observer failures preserve an existing
 delivery exception and refuse a successful delivery whose observation failed.
 This refactor preserves Stage A's source-only coverage and adds no numerical,
 format, serving, memory-admission or pipeline-default change.
+Re-stamped 2026-10-02 (PQ #2074, Refs #2010, internal CPU streaming integration):
+the existing source JSON, layer/head and cache-header reader seams enter finite
+whole-file material windows for the qualified original owner. Its private
+bootstrap resolves the profile from strict owned config/index metadata, applies
+the existing pure text-only rules and uses the existing stock AutoConfig adapter
+over a privately sealed derived config. Explicit cache headroom, slots and
+prefetch workers are required. Slots and worker counts use the shared exact-int
+contract with minimum one before bootstrap; booleans, integer subclasses,
+strings (including `auto` and empty), nonintegers, zero and negatives refuse.
+Legacy entry parsing retains its behavior. Filesystem staging, implicit autoscaling, dynamic
+configuration, visual inputs and additional source scopes are refused. Skeleton
+construction mode never authorizes visual input materialization. Native CPU
+storage aliases retain the owner's serialized-memory charge after each reader
+and window exit. Original device load/dequant routes refuse before material or
+CUDA work. The existing automatic capture gate remains closed. This internal
+context slice does not qualify the higher-level calibration/runner pipeline,
+GPU lifetime, full-source capture or performance. Header estimation still uses
+whole-shard admitted reads and can reacquire a shard after a header-only window;
+production single-pass/resident-prefetch qualification remains open.
+The profile's existing private metadata intake can carry an owned complete
+index, so Qwen MoE namespace resolution consumes that evidence without reopening
+the mutable logical pool index. Its legacy path census and namespace refusals
+remain unchanged.
+
+Re-stamped 2026-10-02 (Refs PQ #2010, bootstrap separation): text-only
+configuration transformations now live in the existing staging owner's
+`text_only_stage_config` domain helper. It accepts the already selected profile,
+returns an independent derived config or the existing no-staging decision,
+and performs no file IO. Filesystem staging keeps its source/profile selection,
+dead-override refusal, symlink policy, write spelling and paths. This separates
+the rules used by authenticated bootstrap without changing automatic capture
+eligibility or touching Fisher arithmetic.
 
 Re-stamped 2026-10-02 (PQ #2053, Refs #2010): every JSON read through the internal
 original-material owner uses its existing strict bootstrap decoder. Config and
