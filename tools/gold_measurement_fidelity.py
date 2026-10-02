@@ -33,6 +33,24 @@ from typing import Any
 FIDELITY_SCHEMA = "prismaquant.gold_measurement_fidelity/1"
 
 
+def tr3_kl_fidelity(*, vocab_size: int, n_windows: int, seqlen: int) -> dict[str, Any]:
+    """The TR3 raw-logits hook scores every column at each causal position."""
+    for name, value in (("vocab_size", vocab_size), ("n_windows", n_windows),
+                        ("seqlen", seqlen)):
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if seqlen < 2:
+        raise ValueError("seqlen must contain a causal prediction position")
+    return {"schema": FIDELITY_SCHEMA,
+            "instrument": "experiments/measure_glm_tr3_vllm.py",
+            "positions": "all_prompt_positions", "vocabulary": "full",
+            "top_k": None, "tail_bucket": False, "vocab_size": vocab_size,
+            "normalization_dtype": "float64", "accumulation_dtype": "float64",
+            "n_windows": n_windows, "seqlen": seqlen,
+            "n_positions": n_windows * (seqlen - 1),
+            "comparable_with": "the same sealed panel, teacher and full-vocabulary FP64 instrument"}
+
+
 def full_kl_fidelity(
     *,
     score_positions: str,
