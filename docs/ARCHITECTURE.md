@@ -1,5 +1,26 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-01 (PQ #1986, Refs #1588). As of: 2026-10-01 ·
+`sol/pq-stageb-9`. The opt-in campaign namespace preparation API extends the
+existing dispatcher, without a new scheduler or CLI: a complete hash-keyed
+reconciliation roster explicitly selects unfinished requests and independently
+supplied evidence/readset/dependency expectations bind each digest-keyed row.
+Reviewed baseline and executed full commits remain distinct. Owned output and
+cache/temp destinations are deterministic; shared no-clobber publication admits
+only identical ownership/request bytes on resume. The container adapter checks
+publication, command/environment, paths and the committed full executed source
+before Docker inspection. Guarded import resolution must reach that actual
+checkout, not a defaulted or image-only root. Every owned output/cache/temp path
+requires a writable identity-mapped persistent mount. Path-valued input references
+must be canonical before overlap checks, without reading their artifacts. After
+ownership publication/admission, descriptor-anchored no-follow directory creation
+establishes writable TMPDIR/TMP/TEMP destinations; preparation remains write-free.
+No contract means unchanged legacy behavior. This
+metadata-only CPU slice does not verify completion evidence or input bytes,
+rederive resource demand, prove legacy/current runtime compatibility, adopt
+seeds, submit rows, or qualify prices/serving/GPU recovery. Existing campaign
+seed, checkpoint and journal gates, caches, pins, formats and ship gates remain
+unchanged. Gate: `tests/test_tessera_campaign_namespace_1986.py`.
 Re-stamped 2026-10-01 (Refs PQ #1171, forward preparation slice): newly
 built Stage A forward group manifests carry the same complete head/forward
 read set and round metadata. Group execution samples remain in the existing
