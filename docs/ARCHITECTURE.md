@@ -26,6 +26,40 @@ old w03/s35 chat-template declarations still conflict with its publisher bytes
 and must refuse until an explicitly reviewed new producer binding exists.
 See [internal original-material contract](design/capture_original_material.md).
 
+Re-stamped 2026-10-02 (Refs #1750, optional namespace/profile composition):
+the existing container specification can carry a closed versioned
+`prismaquant.tessera_namespace_profile.v1` declaration. The actual canonical
+same-UID child wrapper is prepared before roster/reconciliation binding,
+namespace hashing and metadata publication. Its full argv remains in the
+request identity; admission never unwraps a changed request or waives a digest.
+The existing namespace destination owner retargets observation/trace/status
+writes below the digest-keyed row, and retargets host-local profile metadata to
+the request-key child of the existing local profile root. The normalized local
+destination contains `{namespace-row}` before hashing, avoiding circular identity.
+Both destinations require explicit writable identity-mount coverage; no mount,
+placement capability or read-set membership is invented. The local metadata
+directory is host-only in use; declaring its identity mount keeps the existing
+namespace ownership checks uniform, not a container requirement of the profiler.
+Profiler path/SHA is a typed input declaration, not byte authentication or proof
+of PB/input qualification. Host observer paths, executable and row bound must
+match the sealed declaration before any process starts; the bound wrapper runs
+unchanged and target lookup addresses the original campaign payload's output.
+Unknown/altered instrumentation, changed post-binding argv and unsafe/colliding
+outputs refuse. Direct unprofiled namespaces, unbound legacy profiling, native
+child/status/sample qualification, source/import/publication gates and runtime
+defaults remain unchanged. This is CPU composition admission, not a GPU profile,
+container availability, immutable-source, measurement window or #1750 speed claim.
+
+Re-stamped 2026-10-02 (Refs #2015, #1929, CI coverage): the full hosted
+Python 3.12 CPU suite runs on every main push and manual dispatch. PRs retain
+the existing pinned-Tessera import/allocator CLI smoke and shrink-only
+allowlists, with the full composed candidate covered by the required
+PrismaBuild `pb-tests` check. The current PB environment uses Python 3.14.4;
+it does not replace full coverage of the Python 3.12 floor on main/manual
+runs. Full-suite commands, cgroup coverage and main-run concurrency are
+unchanged. This changes CI triggers, with no production/default/pin/wire or
+serving-gate change and no measured whole-suite speed claim.
+
 Re-stamped 2026-10-02 (PQ #2013, Refs #2010, #2008): automatic streamed
 capture recording now refuses at the existing source-owner admission seam
 before model/config/tokenizer reads, recording or publication. Both capture
@@ -26967,8 +27001,12 @@ source check carries one named, passing exception: DeepSeek still returns
 rather than uniform-format. Direct profile coverage asserts the spec stays
 empty so a native-lane assumption cannot silently constrain the Gridbook
 allocation.
-And there is CI to run it — `.github/workflows/ci.yml` (#18, `1cc7b90`) executes the suite on
-every push and PR, on Python 3.12 with CPU torch. Before PrismaQuant is
+And there is CI to run it — `.github/workflows/ci.yml` executes the full suite
+on main pushes and manual dispatches, on Python 3.12 with CPU torch. PRs keep
+the hosted import/CLI smoke and allowlist checks; the required PrismaBuild
+`pb-tests` check covers the full composed pre-merge candidate (Refs #2015,
+#1929). Its current Python 3.14.4 environment is distinct from the hosted
+3.12 floor. Before PrismaQuant is
 installed, both jobs use the stdlib-only `tools/resolve_tessera_dev_pin.py` to
 derive the exact Tessera checkout from `TESSERA_DEV_PIN_COMMIT`, stop
 without publishing a ref if that resolution fails, and install that checkout
@@ -28220,7 +28258,7 @@ unplumbed).
 | ~~D8~~ | **CLOSED 2026-07-30 (re-vet R24).** `_production_cache_prefetch_assignment` gained a `require` mode mirroring `production_weight_cache.prefetch_assignment(require=…)`, exposed as `--production-cache-prefetch {require,warn}`; `run-pipeline.sh` passes `require` on the native lane (matching `VALIDATED_SOURCE_PREFETCH=require`), and the CB/GGUF lanes read no production cache at all. A total miss is now a named failure instead of a silent NVMe-bound export. | `export_native_compressed._production_cache_prefetch_assignment` | ~~MED~~ | closed |
 | ~~D9~~ | **CLOSED 2026-07-30 (re-vet R24).** The guard is at `main()` entry (not import time) in all seven — `incremental_probe`, `incremental_measure_quant_cost`, `aura_cost`, `production_render_cost`, `export_nvfp4_cb[_streaming]`, `export_gguf`, `select_validated_frontier` — verified against every CPU-only test import first, and a parametrized test pins all twelve callers so a refactor cannot drop one. | `gpu_guard.py` | ~~MED~~ | closed |
 | ~~D10~~ | **CLOSED 2026-07-30 (re-vet R5).** `pipeline.py` now has one real job — settings-hash authority (§3.4) — and the bookkeeping is honest: the two owner names that existed nowhere in the tree are deleted, `streaming_model_weights` names `layer_streaming.LayerCache`, and a test asserts every approved owner has a class behind it. `QuantWeightCache` went to the archive wall with L3, so it is no longer an unmodelled holder. The *spec* half stays explicitly descriptive (§3.6); modelling the ten executed-but-unmodelled stages was refused as fiction-surface. | §3.6; `pipeline.py` | ~~MED~~ | closed |
-| D11 | **MOSTLY FIXED 2026-07-30.** `model_profiles/validate.py`'s 8 conformance checks had zero callers and there were no workflow files in the tree. Both halves closed: `.github/workflows/ci.yml` (#18, `1cc7b90`) runs the suite on every push and PR (Python 3.12, CPU torch), and `tests/test_model_profile_conformance.py` drives the CPU-safe checks (1, 6, 8 + four structural invariants) over every registered profile, with 2/3/4 behind `integration` and 6/7 behind `slow`, and known gaps encoded as ratchets rather than bare xfails. **Residual (2026-07-30, R12): the check-5 half is now covered** — `test_has_mtp_implies_a_buildable_mtp_module` asserts `build_mtp_module` is a real override (and `mtp_source_prefix()` non-empty) whenever `has_mtp()`, which is the declarative part of the check that would catch L2/D2; check 5 proper still materialises a decoder layer and stays out of CI. Remaining: nothing invokes the validator as a `run-pipeline.sh` preflight for the actual `MODEL_PATH`. | `.github/workflows/ci.yml`; `tests/test_model_profile_conformance.py:9-31,223-249` | LOW (was MED) | Add a preflight invocation for `MODEL_PATH`. |
+| D11 | **MOSTLY FIXED 2026-07-30.** `model_profiles/validate.py`'s 8 conformance checks had zero callers and there were no workflow files in the tree. Both halves closed: `.github/workflows/ci.yml` runs the full suite on main/manual (Python 3.12, CPU torch), PR import/CLI smoke and allowlist checks remain, and the required PrismaBuild `pb-tests` gate covers the full composed PR candidate (Refs #2015, #1929; current PB Python 3.14.4), and `tests/test_model_profile_conformance.py` drives the CPU-safe checks (1, 6, 8 + four structural invariants) over every registered profile, with 2/3/4 behind `integration` and 6/7 behind `slow`, and known gaps encoded as ratchets rather than bare xfails. **Residual (2026-07-30, R12): the check-5 half is now covered** — `test_has_mtp_implies_a_buildable_mtp_module` asserts `build_mtp_module` is a real override (and `mtp_source_prefix()` non-empty) whenever `has_mtp()`, which is the declarative part of the check that would catch L2/D2; check 5 proper still materialises a decoder layer and stays out of CI. Remaining: nothing invokes the validator as a `run-pipeline.sh` preflight for the actual `MODEL_PATH`. | `.github/workflows/ci.yml`; `tests/test_model_profile_conformance.py:9-31,223-249` | LOW (was MED) | Add a preflight invocation for `MODEL_PATH`. |
 | ~~D12~~ | **CLOSED 2026-07-30 (re-vet R1).** `TARGET_DISK_GB` is plumbed through `run-pipeline.sh`: it overrides `TARGET_BITS`, narrows the Pareto sweep to the byte-feasible bracket, flips `SELECTION_MODE` to `validated-surrogate` and the frontier pick to `budget` = min measured KL among the rows that fit. Kneedle stays the default without a card and stays a diagnostic. See §4.6. | §4.6; `select_validated_frontier --mode budget` | ~~MED~~ | closed |
 | D13 | **FIXED 2026-07-30 (R22 + R27).** The two hardcoded MiniMax arch tests now route through `profile.bypass_hf_fp8_module_rewrite()` and `profile.packed_expert_module_class_names()`; `specs/minimax_m2.json` exists and declares all eight of that profile's overrides; `deepseek_v4.json` declares `default_serving_profile: vllm_packed_moe`. Core-stack arch literals in control flow: **0**. Residual (not debt, sequencing): the MiniMax Python overrides stay until the equivalence gate `tests/test_minimax_m2_spec.py` has held for a release. | §8.4, §8.5 L4 | closed | — |
 | ~~D14~~ | **CLOSED 2026-08-01.** Runtime documentation now lives with the sole canonical Gridbook package. PrismaQuant documents only its producer/export contract and points to the pinned package's machine-readable runtime contract; the former in-tree README was deleted with the vendored runtime. | external Gridbook `README.md`; `prismaquant/gridbook_runtime/gridbook_runtime_pin.json` | ~~MED~~ | closed |

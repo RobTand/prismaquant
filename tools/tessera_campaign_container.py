@@ -1218,6 +1218,8 @@ def inspect_or_load(container):
 def validate_namespace_launch(spec: dict, command: list[str], *, cwd: str, environ) -> str | None:
     """Opt-in ownership refusal before Docker inspection or campaign entry."""
     if "namespace_binding" not in spec:
+        if "namespace_profile" in spec:
+            raise RuntimeError("namespace profile requires bound published ownership")
         return None
     row = namespace_adapter_request(spec, command, environ)
     commit = checkout_commit(cwd)
