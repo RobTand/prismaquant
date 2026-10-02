@@ -4926,7 +4926,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                         "after_hull": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss},
                     "vertices": [_pact_vertex_record(v.assignment) for v in hull.vertices]}
 
-        def _pact_write_replay(assign, expected_assignment, provenance, *, dloss=None) -> None:
+        def _pact_write_replay(assign, expected_assignment, provenance, *,
+                               dloss=None, prefill_ms=None) -> None:
             """One exact assignment check/accountant and layer-config replay writer."""
             record = _pact_vertex_record(assign)
             if not record["feasible"] or record["assignment"] != expected_assignment:
@@ -4935,6 +4936,16 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             if dloss is None:
                 dloss = math.fsum(float(pact_options[(unit, fmt)].predicted_dloss)
                                   for unit, fmt in assign.items())
+            if prefill_ms is None:
+                prefill_ms = math.fsum(pact_time_ms[(unit, fmt)] for unit, fmt in assign.items())
+            actual_claims = {"predicted_dloss": dloss, "operator_sum_ms": prefill_ms,
+                             "candidate_bytes": sum(pact_options[(unit, fmt)].memory_bytes
+                                                    for unit, fmt in assign.items()),
+                             **{key: record[key] for key in (
+                                 "achieved_bits", "payload_bytes", "whole_artifact_upper_bound_bytes")
+                                if key in record}}
+            if provenance.get("point_claims") != actual_claims:
+                raise ValueError("PACT replay point claims differ from the recorded solve")
             budget_stamp = None
             if pact_disk is not None:
                 budget_stamp = whole_artifact_budget_stamp(
@@ -4958,17 +4969,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                                **pact_limits}
                 if weights != {"baseline": built["baseline"], "constraints": constraints}:
                     raise ValueError("PACT constrained replay baseline or constraints differ")
-                solution, record = built["solution"], built["record"]
-                actual_claims = {"predicted_dloss": solution.predicted_dloss,
-                                 "operator_sum_ms": solution.prefill_ms,
-                                 "candidate_bytes": solution.memory_bytes,
-                                 **{key: record[key] for key in (
-                                     "achieved_bits", "payload_bytes", "whole_artifact_upper_bound_bytes")
-                                    if key in record}}
-                if provenance.get("point_claims") != actual_claims:
-                    raise ValueError("PACT constrained replay point claims differ from the recorded solve")
                 _pact_write_replay(built["solution"].assignment, expected_assignment, provenance,
-                                   dloss=built["solution"].predicted_dloss)
+                                   dloss=built["solution"].predicted_dloss,
+                                   prefill_ms=built["solution"].prefill_ms)
                 return
             try:
                 assign = probe_assignment(pact_candidates, pact_time_ms, weights,

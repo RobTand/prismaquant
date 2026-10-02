@@ -20910,6 +20910,9 @@ document.
   `candidate_generator: lower_convex_hull_dichotomic` and
   `time_claim: operator_sum_proposal`, inside a replay.v1 block, which
   `prefill_frontier_replay_claim` carries to `build.research_only`.
+  The shared replay owner independently re-derives the recorded loss,
+  operator-sum time and integer bytes from the selected assignment before
+  writing; altered numeric claims refuse in both PACT selection modes.
 
 Limits:
 

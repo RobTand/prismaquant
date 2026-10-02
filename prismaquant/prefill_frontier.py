@@ -1019,6 +1019,9 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
             "cost_sha256": file_sha256hex(Path(ctx.cost_path)),
             "probe_sha256": file_sha256hex(Path(ctx.probe_path)),
             "probe_bound_by_sweep": True,
+            "point_claims": {key: vertex[key] for key in (
+                "predicted_dloss", "operator_sum_ms", "candidate_bytes", "achieved_bits",
+                "payload_bytes", "whole_artifact_upper_bound_bytes") if vertex.get(key) is not None},
         }
         selection = document.get("pact_selection")
         if selection is not None:
@@ -1028,10 +1031,7 @@ def replay_hull(document: dict, raw: bytes, digest: str, output: Path) -> None:
             selection_input = {"baseline": document["baseline"],
                                "constraints": document["constraints"]}
             stamp.update(selection_input, point=vertex["point"],
-                         numeric_semantics=document["numeric_semantics"],
-                         point_claims={key: vertex[key] for key in (
-                             "predicted_dloss", "operator_sum_ms", "candidate_bytes", "achieved_bits",
-                             "payload_bytes", "whole_artifact_upper_bound_bytes") if key in vertex})
+                         numeric_semantics=document["numeric_semantics"])
         else:
             selection_input = vertex["finding_probe"]["weights"]
             stamp.update(vertex=vertex["vertex"], probe_weights=list(selection_input))

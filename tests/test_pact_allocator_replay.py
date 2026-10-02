@@ -251,6 +251,20 @@ def test_replay_refuses_a_moved_shape_table(tmp_path, monkeypatch):
     assert not (tmp_path / "out.json").exists()
 
 
+@pytest.mark.parametrize("field", ["operator_sum_ms", "predicted_dloss", "candidate_bytes"])
+def test_hull_replay_refuses_changed_numeric_claims(tmp_path, monkeypatch, field):
+    case = _fixture(tmp_path, monkeypatch)
+    frontier, doc = _hull(tmp_path, case.argv, "--bootstrap-draws", "20")
+    vertex = doc["vertices"][1]
+    vertex[field] += 1
+    frontier.write_text(json.dumps(doc))
+    output = tmp_path / "out.json"
+    with pytest.raises(SystemExit) as refused:
+        _replay(frontier, vertex["assignment_sha256"], output)
+    assert refused.value.code == 2
+    assert not output.exists()
+
+
 @pytest.mark.parametrize("extra,diagnostic", [
     (["--serve-device-budget-bytes", "1000000"], "tessera#624"),
     (["--slo-prefill-p95-ttft-ms", "5"], "mutually exclusive"),
