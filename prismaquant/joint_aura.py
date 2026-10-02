@@ -1077,14 +1077,38 @@ def paired_candidate_difference(entry_a: Mapping, entry_b: Mapping) -> dict:
         raise ValueError("paired joint AURA requires joint rows")
     if not _same_probe_identity(entry_a, entry_b):
         raise ValueError("paired joint AURA probe alignment mismatch")
-    values = [0.5 * (a - b) for a, b in zip(entry_a["x2_per_probe"], entry_b["x2_per_probe"])]
-    n = len(values)
-    mean = sum(values) / n
-    variance = sum((value - mean)**2 for value in values) / (n - 1) if n > 1 else 0.0
-    return {"mean_difference": mean, "paired_standard_error": math.sqrt(variance / n),
-            "difference_per_probe": values, "probe_ids": list(entry_a["probe_ids"]),
+    summary = paired_squared_probe_summary(entry_a["x2_per_probe"], entry_b["x2_per_probe"])
+    return {**summary, "probe_ids": list(entry_a["probe_ids"]),
             "probe_identity_sha256": entry_a["probe_identity_sha256"],
             "uncertainty_scope": "probe_sampling_conditional_on_fixed_calibration"}
+
+
+def paired_squared_probe_summary(squared_a, squared_b) -> dict:
+    """Bare A-minus-B moments retaining common-probe covariance.
+
+    Callers own sample alignment and source admission. This arithmetic does not
+    publish a cost row, source identity, model-quality verdict or confidence
+    interval. Validated rows and explicitly historical raw-sample diagnostics
+    use the same operation order, including scaling after subtraction.
+    """
+    if (not isinstance(squared_a, (list, tuple)) or not isinstance(squared_b, (list, tuple))
+            or len(squared_a) != len(squared_b) or len(squared_a) < 2):
+        raise ValueError("paired squared probes require at least two aligned samples")
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(value) or value < 0 for value in (*squared_a, *squared_b)):
+        raise ValueError("paired squared probes require finite nonnegative scalars")
+    values = [0.5 * (a - b) for a, b in zip(squared_a, squared_b)]
+    n = len(values)
+    mean = sum(values) / n
+    try:
+        variance = sum((value - mean)**2 for value in values) / (n - 1)
+        stderr = math.sqrt(variance / n)
+    except OverflowError as exc:
+        raise ValueError("paired squared probe moments overflow") from exc
+    if not math.isfinite(mean) or not math.isfinite(stderr):
+        raise ValueError("paired squared probe moments must be finite")
+    return {"mean_difference": mean, "paired_standard_error": stderr,
+            "difference_per_probe": values}
 
 
 def _same_probe_identity(left: Mapping, right: Mapping) -> bool:
