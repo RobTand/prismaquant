@@ -7,13 +7,17 @@ _WRAPPER_REFUSAL = (
 _NATIVE_GUARD = "sample_dsv4_native_guard.py"
 
 
+def native_dsv4_session(tmp_path, *targets):
+    """Run real targets after the lazy-mapping refusal, retaining native guards."""
+    return _session(tmp_path, _WRAPPER_REFUSAL, *targets, _NATIVE_GUARD)
+
+
 def _assert_mixed_session_passes(tmp_path, *targets):
     """Use the real lazy-mapping import trigger, not a fake module or profile."""
-    proc, output, outcomes, _out = _session(
-        tmp_path, _WRAPPER_REFUSAL,
+    proc, output, outcomes, _out = native_dsv4_session(
+        tmp_path,
         *([f"../test_layer_streaming_mxfp4.py::{name}" for name in targets]
-          if targets else ["../test_layer_streaming_mxfp4.py"]),
-        _NATIVE_GUARD)
+          if targets else ["../test_layer_streaming_mxfp4.py"]))
     controls = {
         "test_vl_wrapper_config_reproduces_issue_12",
         "test_native_dsv4_import_still_refuses_the_vendored_override",
