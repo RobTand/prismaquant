@@ -1028,10 +1028,10 @@ class StagedShardReader:
     # -- the stage -------------------------------------------------------
 
     def _parse(self) -> None:
-        """Read the header once, on the first payload read, never before.
+        """Read the header once when payload or strict metadata first needs it.
 
-        An open that only asks for ``keys()``, ``metadata()`` or a slice pays
-        nothing for this reader beyond the object.
+        Strict ``keys()``, ``metadata()`` and ``get_slice()`` also parse the
+        header. Inactive metadata queries delegate to the pool handle.
         """
         if self._parsed:
             return
