@@ -44,6 +44,29 @@ extent is exact. The immutable pin, serving/export gates, menu and pipeline
 defaults are unchanged. CPU wire agreement is not GPU, served-quality or
 upstream Tessera accountant qualification; those #1504 boundaries remain open.
 
+Re-stamped 2026-10-02 (Refs PQ #1663): Tessera campaign launches publish
+`<out-stem>.waits.json` separately from prices, checkpoint and capture identities.
+The existing verified `RowStream` observes only pending reader deliveries through
+the shared IO telemetry owner, including refused deliveries before admission.
+Its `row_stream_exposed_wait` block declares `row-stream-load-only` coverage.
+The launch records its own pre-work power samples and measured idle ceiling;
+CPU runs start no GPU sampler, and missing samples/baselines remain unsampled.
+Success and failure both publish a status-bearing observation after source
+cleanup; telemetry errors cannot replace a primary workload failure.
+Whole-row `exposed_wait.instrumented` remains false because construction,
+checkpoint and publication waits are not fully covered. Stage A still records
+source-prefetch-only waits. This is an observability slice, not completion of
+#1663's fanout coverage gate or a performance, energy, numerical, residency,
+format or serving qualification. Pricing bytes and defaults are unchanged.
+
+Re-stamped 2026-10-02 (Refs PQ #1663): pending-delivery wait observation
+is owned by `io_spans.observed_future_result`. The streamed source owner
+delegates to it while retaining retry, verification and residency ownership.
+Ready deliveries record no wait; observer failures preserve an existing
+delivery exception and refuse a successful delivery whose observation failed.
+This refactor preserves Stage A's source-only coverage and adds no numerical,
+format, serving, memory-admission or pipeline-default change.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
