@@ -1,0 +1,81 @@
+{
+  "test_old_atomic_publication_digest_and_existing_file[\\x00\\xff\\r\\n]#0": {
+    "returned": "('e9489f37fb3051e9efa1dc916004d7274e7b63975e3209708947267f2393a9be', b'\\x00\\xff\\r\\n')"
+  },
+  "test_old_atomic_publication_digest_and_existing_file[\\x00\\xff\\r\\n]#1": {
+    "cause": null,
+    "raised": "prismaquant.cluster_campaign.CampaignContractError",
+    "text": "output already exists: <tmp>/nested/output.bin"
+  },
+  "test_old_atomic_publication_digest_and_existing_file[\\xc3\\xa9\\xf0\\x9f\\x98\\x80\\n]#0": {
+    "returned": "('f26b68b6994ea006d176890661e1c0401f133bb6cffe91cecfc5bd0570921cb8', b'\\xc3\\xa9\\xf0\\x9f\\x98\\x80\\n')"
+  },
+  "test_old_atomic_publication_digest_and_existing_file[\\xc3\\xa9\\xf0\\x9f\\x98\\x80\\n]#1": {
+    "cause": null,
+    "raised": "prismaquant.cluster_campaign.CampaignContractError",
+    "text": "output already exists: <tmp>/nested/output.bin"
+  },
+  "test_old_atomic_publication_digest_and_existing_file[]#0": {
+    "returned": "('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', b'')"
+  },
+  "test_old_atomic_publication_digest_and_existing_file[]#1": {
+    "cause": null,
+    "raised": "prismaquant.cluster_campaign.CampaignContractError",
+    "text": "output already exists: <tmp>/nested/output.bin"
+  },
+  "test_old_atomic_publication_refuses_dangling_symlink#0": {
+    "cause": null,
+    "raised": "prismaquant.cluster_campaign.CampaignContractError",
+    "text": "output already exists: <tmp>/output.bin"
+  },
+  "test_old_bound_input_bytes_and_wrong_digest[\\x00\\xff\\r\\n]#0": {
+    "returned": "b'\\x00\\xff\\r\\n'"
+  },
+  "test_old_bound_input_bytes_and_wrong_digest[\\x00\\xff\\r\\n]#1": {
+    "cause": null,
+    "raised": "builtins.SystemExit",
+    "text": "input <tmp>/input.bin: SHA-256 e9489f37fb3051e9efa1dc916004d7274e7b63975e3209708947267f2393a9be, expected 0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "test_old_bound_input_bytes_and_wrong_digest[\\xc3\\xa9\\xf0\\x9f\\x98\\x80\\n]#0": {
+    "returned": "b'\\xc3\\xa9\\xf0\\x9f\\x98\\x80\\n'"
+  },
+  "test_old_bound_input_bytes_and_wrong_digest[\\xc3\\xa9\\xf0\\x9f\\x98\\x80\\n]#1": {
+    "cause": null,
+    "raised": "builtins.SystemExit",
+    "text": "input <tmp>/input.bin: SHA-256 f26b68b6994ea006d176890661e1c0401f133bb6cffe91cecfc5bd0570921cb8, expected 0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "test_old_bound_input_bytes_and_wrong_digest[]#0": {
+    "returned": "b''"
+  },
+  "test_old_bound_input_bytes_and_wrong_digest[]#1": {
+    "cause": null,
+    "raised": "builtins.SystemExit",
+    "text": "input <tmp>/input.bin: SHA-256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855, expected 0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "test_old_bound_open_errors[False]#0": {
+    "cause": null,
+    "raised": "builtins.FileNotFoundError",
+    "text": "[Errno 2] No such file or directory: '<tmp>/input.bin'"
+  },
+  "test_old_bound_open_errors[True]#0": {
+    "cause": null,
+    "raised": "builtins.IsADirectoryError",
+    "text": "[Errno 21] Is a directory: '<tmp>/input.bin'"
+  },
+  "test_old_main_post_binding_config_fence[False]#0": {
+    "cause": null,
+    "raised": "builtins.RuntimeError",
+    "text": "fixture stopped after the checked projection"
+  },
+  "test_old_main_post_binding_config_fence[False]#1": {
+    "returned": "b'{\\n  \"x\": {\\n    \"data_type\": \"float\",\\n    \"bits\": 16\\n  }\\n}\\n'"
+  },
+  "test_old_main_post_binding_config_fence[True]#0": {
+    "cause": null,
+    "raised": "builtins.SystemExit",
+    "text": "layer config <tmp>/layer-config changed after it was bound"
+  },
+  "test_old_main_post_binding_config_fence[True]#1": {
+    "returned": "None"
+  }
+}
