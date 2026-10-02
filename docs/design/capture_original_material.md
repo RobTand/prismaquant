@@ -102,8 +102,12 @@ accounting. Original context/head/layer/direct dequant GPU routes refuse before
 material acquisition or CUDA work. Existing legacy CUDA completion fences remain
 unchanged and have not been qualified for this original path.
 
-This scope is the internal CPU context. Higher-level runner/profile/calibration
-input propagation, exact source-generation adoption, tokenizer consumers,
+This scope is the internal CPU context. The higher-level Stage A API now has an
+explicit dev-only [selected-row diagnostic seam](stage_a_selected_row_diagnostic.md)
+that accepts this existing owner and preserves the original CUDA refusal before
+backend/profile/device work. Its positive plumbing test substitutes CPU device
+seams; it is not original CUDA or full-source capture qualification. Higher-level
+production runner/calibration qualification, exact source-generation adoption, tokenizer consumers,
 complete original capture and numerical qualification remain separate gates.
 The cache estimator still reads whole admitted shards for headers; it can
 reacquire released header-only material when tensors are later demanded. No

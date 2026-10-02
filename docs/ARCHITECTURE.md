@@ -1,5 +1,18 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs PQ #2010/#2008, selected-row diagnostic seam):
+the existing Stage A core can capture one explicitly bound global calibration
+row, generate one fresh tail and roll to a named boundary while preserving the
+full draw's tensor identity, global-row noise and token normalization. Diagnostic
+roots/receipts are distinct and cannot feed Stage B or resume as a campaign.
+The higher-level API accepts the existing qualified original-material owner,
+selects its profile through owned metadata and threads that same owner into
+the existing runner. The unchanged original CUDA gate refuses before device or
+source/profile work; the CLI supplies geometry and constructs no authority.
+CPU selector/plumbing controls do not qualify original CUDA lifetimes, a complete
+provider, historical GLM primal/cotangent agreement, corrected prices or serving.
+See [selected-row diagnostic contract](design/stage_a_selected_row_diagnostic.md).
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
