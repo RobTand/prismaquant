@@ -6633,6 +6633,28 @@ def _read_streamed_model_identity_cache(
     return cached, identity
 
 
+def _streamed_identity_record(*, config_dict, mapping, shards, checkpoint_weight_map,
+                              source_model, resolved_commit):
+    """The existing v1 identity serialization, shared by admitted source intake."""
+    from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
+
+    value_bearing = {
+        "config": canonical_json(config_dict, where="streamed model config"),
+        "weight_map": mapping,
+        "shards": shards,
+    }
+    if checkpoint_weight_map is not None:
+        value_bearing["checkpoint_weight_map"] = checkpoint_weight_map
+    return {
+        "schema": STREAMED_MODEL_IDENTITY_SCHEMA,
+        "source": str(source_model),
+        "resolved_commit": resolved_commit,
+        "content_sha256": canonical_json_sha256(
+            value_bearing, where="streamed model content identity"),
+        **value_bearing,
+    }
+
+
 def build_streamed_model_identity(
     runner: StreamedCausalLM,
     source_model: str,
@@ -6851,22 +6873,10 @@ def build_streamed_model_identity(
             "size": int(fingerprint["size"]),
             "sha256": digest,
         })
-    value_bearing = {
-        "config": canonical_json(config_dict, where="streamed model config"),
-        "weight_map": mapping,
-        "shards": shards,
-    }
-    if checkpoint_weight_map is not None:
-        value_bearing["checkpoint_weight_map"] = checkpoint_weight_map
-    identity = {
-        "schema": STREAMED_MODEL_IDENTITY_SCHEMA,
-        "source": str(source_model),
-        "resolved_commit": getattr(config, "_commit_hash", None),
-        "content_sha256": canonical_json_sha256(
-            value_bearing, where="streamed model content identity"
-        ),
-        **value_bearing,
-    }
+    identity = _streamed_identity_record(
+        config_dict=config_dict, mapping=mapping, shards=shards,
+        checkpoint_weight_map=checkpoint_weight_map, source_model=source_model,
+        resolved_commit=getattr(config, "_commit_hash", None))
     if cache_path is not None:
         from prismaquant.cost_stage_checkpoint import atomic_write_bytes
 
