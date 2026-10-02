@@ -5,6 +5,7 @@ views of the same ordered integer fields the tuple plan retained.
 """
 from array import array
 from collections.abc import Mapping, Sequence
+from itertools import chain
 import operator
 
 _UNSET = (1 << 64) - 1
@@ -36,14 +37,44 @@ class UInt64Rows(Sequence):
         start = index * self.width
         return tuple(self.raw[start:start + self.width])
 
-    def append(self, row):
+    def _require_growth(self, count):
         if self._frozen:
             raise RuntimeError("spill metadata rows are frozen")
-        if len(self) >= self.max_rows:
+        if len(self) + count > self.max_rows:
             raise RuntimeError("spill metadata exceeds its geometry")
-        if len(row) != self.width or any(type(v) is not int or not 0 <= v < 1 << 64 for v in row):
+
+    @staticmethod
+    def _require_fields(values):
+        if any(type(v) is not int or not 0 <= v < 1 << 64 for v in values):
             raise ValueError("spill metadata fields must be unsigned uint64")
+
+    def append(self, row):
+        self._require_growth(1)
+        if len(row) != self.width:
+            raise ValueError("spill metadata fields must be unsigned uint64")
+        self._require_fields(row)
         self.raw.extend(row)
+
+    def extend_scalars(self, values):
+        """Check a bounded scalar section before extending its existing array."""
+        self._require_growth(len(values))
+        if self.width != 1:
+            raise ValueError("spill metadata scalar extension requires width one")
+        self._require_fields(values)
+        self.raw.extend(values)
+
+    def extend(self, rows):
+        """Check an entire sized row section before any array growth.
+
+        The planner supplies owned immutable tuples. No temporary packed
+        buffer is retained or allocated: the existing array consumes their
+        fields directly, in order, after validation.
+        """
+        self._require_growth(len(rows))
+        if any(len(row) != self.width for row in rows):
+            raise ValueError("spill metadata fields must be unsigned uint64")
+        self._require_fields(chain.from_iterable(rows))
+        self.raw.extend(chain.from_iterable(rows))
 
     def repeat(self, value, count):
         if self._frozen or self.width != 1 or type(count) is not int or count < 0:
@@ -174,12 +205,9 @@ class PackedReadPlan(Sequence):
                 len(rows) + len(values) > rows.max_rows for rows, values in sections):
             raise RuntimeError("spill read-plan metadata exceeds its geometry")
         rs, xs, gs = len(self._records), len(self._inputs), len(self._gradients)
-        for position in records:
-            self._records.append((position,))
-        for pair in inputs:
-            self._inputs.append(pair)
-        for pair in gradients:
-            self._gradients.append(pair)
+        self._records.extend_scalars(records)
+        self._inputs.extend(inputs)
+        self._gradients.extend(gradients)
         self._headers.append((self._name_ids[owner], rs, len(records), xs, len(inputs),
                               gs, len(gradients), used))
 

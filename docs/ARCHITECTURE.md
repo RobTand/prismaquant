@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (`sol/pq-readplan-construction-cpu`, Refs #1086/#2115):
+compact read-plan construction extends each geometry-admitted integer section
+through the existing UInt64Rows array owner. Scalar/row sections validate exact
+integer type, uint64 range and row width before extension; section capacity and
+frozen guards remain fail-closed. Chunk headers, frozen views, last-use order,
+IO-engine ownership and the constructor-only research selection remain unchanged.
+The proposal removes per-record array append calls without a second packed
+buffer/cache or default change. The bounded CPU measurement harness can run two
+fresh compact arms with `--packed-only`, reusing qualified original profiles;
+this is independent of production/GPU acceptance under #1086.
+
 Re-stamped 2026-10-02 (`sol/pq-spill-readplan-1086-20261002`, PQ #2115 / Refs #1086):
 constructor-only `StageBReplaySpill(packed_read_plan=True)` reuses the packed
 firing table and its common bounded uint64 row-storage abstraction for frozen chunk fields,

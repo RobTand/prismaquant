@@ -115,14 +115,19 @@ def main():
     parser.add_argument("--mode", choices=("legacy", "packed"))
     parser.add_argument("--label", default="baseline")
     parser.add_argument("--paired", action="store_true")
+    parser.add_argument("--packed-only", action="store_true",
+                        help="two fresh compact arms; reuse qualified legacy/before evidence")
     args = parser.parse_args()
     if not (1 <= args.targets <= 867 and 1 <= args.batches <= 512 and 1 <= args.probes <= 4):
         parser.error("bounded corpus: 867 targets, 512 batches, 4 probes maximum")
+    if args.packed_only and (args.paired or args.mode):
+        parser.error("--packed-only cannot combine with --paired or --mode")
     args.out.mkdir(parents=True, exist_ok=True)
     if args.mode:
         arm(args)
         return
-    modes = ("legacy", "packed", "legacy", "packed") if args.paired else ("legacy",)
+    modes = (("packed", "packed") if args.packed_only else
+             (("legacy", "packed", "legacy", "packed") if args.paired else ("legacy",)))
     reports = []
     with (args.out / "netdata.jsonl").open("x") as handle:
         writer = NetdataWriter(handle)
