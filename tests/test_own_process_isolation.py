@@ -35,7 +35,7 @@ SAMPLES = Path(__file__).resolve().parent / "own_process_samples"
 ISOLATED = "tests/own_process_samples/sample_isolated.py"
 
 
-def _session(tmp_path, *files, extra=(), environ=None):
+def _session(tmp_path, *files, extra=(), environ=None, setup_delay_s=0):
     """Run one pytest session over ``files``; return what it reported."""
     out = tmp_path / "out"
     out.mkdir()
@@ -43,6 +43,20 @@ def _session(tmp_path, *files, extra=(), environ=None):
     env = {name: value for name, value in os.environ.items()
            if not name.startswith("PYTEST_") and name != "PQ_OWN_PROCESS_REPORT"}
     env["OWN_PROCESS_SAMPLE_OUT"] = str(out)
+    if setup_delay_s:
+        # A causal startup delay, without loading the host or changing the
+        # sample's report. In a shared session the child inherits this plugin.
+        plugin = tmp_path / "registration_setup_delay.py"
+        plugin.write_text(
+            "import time\nimport pytest\n"
+            "@pytest.hookimpl(trylast=True)\n"
+            "def pytest_runtest_setup(item):\n"
+            "    if item.name == 'test_reports_its_bound':\n"
+            f"        time.sleep({setup_delay_s!r})\n")
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(tmp_path), str(ROOT), env.get("PYTHONPATH", "")])
+        env["PYTEST_PLUGINS"] = ",".join(filter(None, [
+            env.get("PYTEST_PLUGINS", ""), plugin.stem]))
     # ``None`` removes a variable: a PrismaBuild shard exports the per-test
     # bound to every test, so "unset" has to be said.
     for name, value in (environ or {}).items():
@@ -265,9 +279,10 @@ def _bound_report(out):
     return json.loads((out / "bound.json").read_text())
 
 
-@pytest.mark.parametrize("shared", [False, True], ids=["alone", "shared"])
+@pytest.mark.parametrize("shared,setup_delay_s", [
+    (False, 0), (True, 0), (True, 31)], ids=["alone", "shared", "shared-delayed"])
 def test_the_bound_loads_from_the_environment_without_importing_prismabuild(
-        tmp_path, shared):
+        tmp_path, shared, setup_delay_s):
     """The variable loads the plugin, and ``prismabuild`` stays unimported.
 
     The Stage A harness fails a process whose ``prismabuild`` is not its
@@ -277,7 +292,8 @@ def test_the_bound_loads_from_the_environment_without_importing_prismabuild(
     _prismabuild_installed()
     files = ("sample_bound_loaded.py",) + (("sample_shared.py",) if shared else ())
     proc, output, _outcomes, out = _session(
-        tmp_path, *files, environ={BOUND_ENV: str(REGISTRATION_BOUND_S)})
+        tmp_path, *files, environ={BOUND_ENV: str(REGISTRATION_BOUND_S)},
+        setup_delay_s=setup_delay_s)
     assert proc.returncode == 0, output
     report = _bound_report(out)
     assert report["registered"] is True, report
