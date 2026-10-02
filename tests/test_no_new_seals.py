@@ -139,7 +139,7 @@ ALLOWLIST = {
         1, STRUCTURE, "stored cotangent metadata reproduces its enclosing checkpoint's "
         "session, slot, kind and coordinates; not a comparison with the running campaign"),
     ("prismaquant/joint_cost_quantum.py", "verify_quantum_identity"): (
-        4, AMBIGUOUS, "record bytes, the record's own seal and each input file against its "
+        3, AMBIGUOUS, "record bytes, the record's own seal and each input file against its "
         "digest (integrity); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_cost_quantum.py", "require_chain_readset"): (
         1, INTEGRITY, "the staged data manifest is the readset the record names"),
@@ -532,7 +532,7 @@ def test_a_new_seal_fails_the_lint(allowed):
     problems = violations(sources)
     assert len(problems) == 1
     assert "seal_check" in problems[0]
-    assert ("verify_quantum_identity: 5" if allowed else "load_run: 1") in problems[0]
+    assert ("verify_quantum_identity: 4" if allowed else "load_run: 1") in problems[0]
 
 
 NEW_SEAL_FORMS = {
