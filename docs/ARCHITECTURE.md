@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1504): Tessera rendering, planned lane facts and
+context-scoped synthesized format prices share the existing served-recipe
+resolver. A declared routed E2M1x2 sub-cap unit therefore plans and renders
+the same span-2 TCQ wire its menu prices. An explicit recipe remains
+authoritative; absent serving structure retains the research recipe. The
+production render accepts an optional `tessera_structure_by_unit` lever map;
+when present it must name this unit with a valid structure, and the existing
+render identity binds the declaration. Missing or invalid declarations refuse
+before encoding. This adds no inferred topology or alternate cache. Existing
+manifest-ratio slack remains part of the whole-container estimate; the plane
+extent is exact. The immutable pin, serving/export gates, menu and pipeline
+defaults are unchanged. CPU wire agreement is not GPU, served-quality or
+upstream Tessera accountant qualification; those #1504 boundaries remain open.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
