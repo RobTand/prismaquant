@@ -38,7 +38,9 @@ class ReuseGuards(unittest.TestCase):
                     text='fixture', seed_base=7000, n_probes=2, n_single=0, layer_arms=False,
                     profile=False, pricing_from=str(root / 'foreign.pt'), output=str(root / 'run'),
                     dz_dtype='float32', deterministic_backward=False)
-                with patch.object(diagnostic, 'DEVICE', 'cpu'), patch.object(diagnostic, 'build_plan', return_value=[]):
+                with patch.object(diagnostic, 'DEVICE', 'cpu'), \
+                        patch.object(diagnostic, 'build_plan', return_value=[]), \
+                        patch.object(diagnostic, 'arms_sequence', return_value=None):
                     with self.assertRaisesRegex(SystemExit, 'cached pricing reuse is unsupported'):
                         diagnostic.run(args, model, ids=ids)
                 self.assertFalse((root / 'run.json').exists())
