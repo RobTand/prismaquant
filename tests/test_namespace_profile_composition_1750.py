@@ -16,7 +16,7 @@ from tools import tessera_campaign_container as adapter
 @pytest.fixture(autouse=True)
 def owned_local_policy(tmp_path, monkeypatch):
     # Isolate metadata fixtures, preserving the same deterministic root rule.
-    monkeypatch.setattr(profiler, "PROFILE_LOCAL_ROOT", tmp_path / "local-profiles")
+    monkeypatch.setattr(profiler, "PROFILE_LOCAL_ROOT", tmp_path.parent / (tmp_path.name + "-host-local"))
 
 
 def profiled_arguments(tmp_path):
@@ -263,3 +263,14 @@ def test_profile_output_collision_refuses_before_process_creation(tmp_path, monk
     monkeypatch.setattr(profiler.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("process started"))
     with pytest.raises(FileExistsError):
         profiler.main(launch_args(row, tmp_path))
+
+
+def test_broad_writable_identity_mount_can_cover_owned_metadata(tmp_path):
+    kwargs = profiled_arguments(tmp_path)
+    row = kwargs["requests"][0]
+    spec = json.loads(row["argv"][4])
+    parent = str(tmp_path.parent)
+    spec["container"]["mounts"] = [{"source": parent, "target": parent, "readonly": False}]
+    row["argv"][4] = json.dumps(spec)
+    replace_fixture_request(kwargs, row)
+    namespace.validate_namespace_request(dispatch.prepare_namespace_requests(**kwargs)[0])

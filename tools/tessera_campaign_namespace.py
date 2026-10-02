@@ -332,7 +332,7 @@ def validate_namespace_request(row: dict, *, executed_commit: str | None = None)
     for target, writable_identity in mounts:
         if any(target.is_relative_to(root) for root in owned_roots):
             raise RuntimeError("namespace output is hidden by a declared mount")
-        if directory.is_relative_to(target) and not writable_identity:
+        if any(destination.is_relative_to(target) for destination, _ in namespace_destinations(request, binding)) and not writable_identity:
             raise RuntimeError("namespace needs writable identity-mapped output mounts")
     for destination, _ in namespace_destinations(request, binding):
         if not any(destination.is_relative_to(target) and writable_identity

@@ -29,3 +29,16 @@ whole-tree snapshot proof and observed outcomes are recorded externally at
 No final pass is inferred from submission. No Docker, GPU row, measurement
 window, serving change, throughput improvement or complete #1750 acceptance
 is claimed. Astra owns acceptance, the central batch and merge.
+
+
+## Append: metadata mount shadow correction
+
+Initial affected-family action `66664112cf124ab0977e4a3ed27e368bbcf210fe051763cb8c4379dfb3e23216`
+on `be4a41f0` observed 257 passes and three failed coverage controls. A broad
+identity mount legitimately covered the missing dedicated local mount in that
+fixture; its metadata root was moved outside that broad mount, and a positive
+broad-coverage control was retained. The readonly/remapped failures exposed a
+real new-destination gap: the old shadow refusal checked only the cost row.
+The existing owner now applies that same refusal to every owned destination,
+including host-local metadata. No new mount policy or baseline growth. The
+failed action has no successful CAS result and is not called GREEN.
