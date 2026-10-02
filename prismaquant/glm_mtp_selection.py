@@ -256,6 +256,11 @@ def _mtp_probe(payload) -> tuple[str, dict]:
     return digests.pop(), last_row["probe_identity"]
 
 
+def _unit_storage(payload, unit):
+    """Read one unit's storage metadata separately from rung eligibility."""
+    return payload["wire_bytes"].get(unit, {}), payload["params"][unit]
+
+
 def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
     """``{unit: {rung: (E, bytes)}}`` and the priced rungs the runtime does not attest.
 
@@ -269,7 +274,7 @@ def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
         raise ValueError("MTP groups must partition the priced units")
     rows, unattested = {}, {}
     for unit in units:
-        wire = payload["wire_bytes"].get(unit, {})
+        wire, params = _unit_storage(payload, unit)
         if set(wire) != set(payload["costs"][unit]):
             raise ValueError(f"MTP unit {unit}: wire bytes and costs name different rungs")
         if _BF16 in payload["costs"][unit]:
@@ -281,7 +286,7 @@ def _unit_rows(payload, eligible=None) -> tuple[dict, dict]:
                 continue
             rows[unit][rung] = (float(row["predicted_dloss"]), int(wire[rung]))
         if payload["source_dtype"][unit] == "bfloat16":
-            rows[unit][_BF16] = (0.0, 2 * int(payload["params"][unit]))
+            rows[unit][_BF16] = (0.0, 2 * int(params))
     return rows, {rung: sorted(units) for rung, units in sorted(unattested.items())}
 
 
