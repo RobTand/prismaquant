@@ -356,3 +356,16 @@ def test_peak_admission_callback_cannot_reap_material_the_new_window_reuses(mate
         assert observed == [(len(m['raws']['one.safetensors']), 0)]
     assert owner.material_live_bytes == 0
     owner.close()
+
+
+def test_control_validation_requires_generation_bound_client_before_original_material(material, monkeypatch):
+    from prismaquant import staged_lease, staged_whole_file
+
+    def unavailable():
+        raise RuntimeError('generation-bound control client unavailable')
+    def original_read(*args, **kwargs):
+        pytest.fail('original material read before control-client qualification')
+    monkeypatch.setattr(staged_lease, 'client_sdk', unavailable)
+    monkeypatch.setattr(staged_whole_file, 'read_staged_sealed_file', original_read)
+    with pytest.raises(RuntimeError, match='generation-bound control client'):
+        _owner(material)
