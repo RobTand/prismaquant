@@ -8,7 +8,8 @@ metadata, which only a selected-source row sets. The branch requests page
 release for the render shard and the ``.tessera`` wire of each completed rung;
 this test observes the advice call and file identity, not physical eviction.
 
-This module runs the real census, the real capture and then the real
+This controlled legacy-mechanism module runs the real census and capture,
+without immutable-provider qualification, followed by the real
 selected-source row of ``prismaquant.tessera_campaign.main`` on the tiny GLM
 checkpoint, with a selection the real planner drew from a packed probe, so the
 stack path reaches the release branch on the bytes the row actually wrote.
@@ -112,7 +113,7 @@ def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):
 
 
 def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
-        glm_checkpoint, tmp_path, monkeypatch):
+        glm_checkpoint, tmp_path, monkeypatch, legacy_capture_mechanism):
     """The stack row completes, and every completed anchor is released.
 
     One test rather than two because the release evidence is a property of a

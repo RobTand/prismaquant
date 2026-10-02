@@ -236,8 +236,13 @@ def test_bounded_capture_child_is_needed_only_where_main_checks_the_policy():
 
 
 @pytest.mark.parametrize('capture_policy', ['shared-inputs-release-v1', 'shared-inputs-bounded-v1'])
-def test_streamed_campaign_publishes_original_layout_census_and_capture(glm_checkpoint, tmp_path, monkeypatch, capture_policy, request):
-    """The CLI publishes a complete capture from real GLM source forwards."""
+def test_streamed_campaign_publishes_original_layout_census_and_capture(
+        glm_checkpoint, tmp_path, monkeypatch, capture_policy, request, legacy_capture_mechanism):
+    """Legacy CLI mechanics publish a complete capture from real GLM forwards.
+
+    The named test-only seam preserves numerical and lifecycle assertions;
+    this fixture does not qualify an immutable original-generation provider.
+    """
     if bounded_capture_child_needed(capture_policy, cuda=torch.cuda.is_available(),
                                     environ=os.environ):
         run_in_bounded_capture_child(request, tmp_path)
