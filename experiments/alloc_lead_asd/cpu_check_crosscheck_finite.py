@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 
 from experiments.alloc_lead_asd import a_side_diag as diagnostic
+from experiments.alloc_lead_asd.banked_guard_observations import observations
 
 
 class _ProfileFixture:
@@ -33,7 +34,7 @@ class FiniteCrosscheck(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             args = argparse.Namespace(output=str(Path(directory) / 'control'), deterministic_backward=False)
             model = SimpleNamespace(config=SimpleNamespace(vocab_size=3))
-            reference = torch.ones(3, 1, 2, 1, dtype=torch.float64)
+            reference, banked_arm = observations()
             if fault == 'reference_nan':
                 reference[0, 0, 0, 0] = float('nan')
             if fault == 'reference_rms_overflow':
@@ -46,12 +47,15 @@ class FiniteCrosscheck(unittest.TestCase):
                     components[0, 0, 0, 0] = float('nan')
 
             def measure(*args, **kwargs):
-                return dict(kl=torch.ones(1), q=torch.ones(1), s_real=torch.ones(2, 1))
+                return dict(kl=torch.tensor([banked_arm['kl_v1']], dtype=torch.float64),
+                    q=torch.tensor([banked_arm['q_v1']], dtype=torch.float64),
+                    s_real=torch.tensor(banked_arm['s_real_v1'], dtype=torch.float64).reshape(2, 1))
 
             def arms(*args, **kwargs):
                 result = args[11]['A_all']
-                for name in ('kl', 'q', 's_real'):
-                    result[name].fill_(1)
+                result['kl'].fill_(banked_arm['kl_v2'])
+                result['q'].fill_(banked_arm['q_v2'])
+                result['s_real'].copy_(torch.tensor(banked_arm['s_real_v2']).reshape(2, 1))
                 if fault in ('kl_nan', 'q_nan', 'probe_nan'):
                     result[dict(kl_nan='kl', q_nan='q', probe_nan='s_real')[fault]].fill_(float('nan'))
 
@@ -66,7 +70,7 @@ class FiniteCrosscheck(unittest.TestCase):
                     {name: None for name in diagnostic.SPECS}, 2, 'all', 1.0)
 
     def test_finite_matched_observations_pass(self):
-        self.assertEqual(self.control()['arm_crosscheck']['kl_rel_diff'], 0)
+        self.assertLess(self.control()['arm_crosscheck']['kl_rel_diff'], 1e-6)
 
     def test_nonfinite_observations_cannot_certify_crosscheck(self):
         for fault in ('reference_nan', 'candidate_nan', 'reference_rms_overflow',

@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 
 from experiments.alloc_lead_asd import a_side_diag as diagnostic
+from experiments.alloc_lead_asd.banked_guard_observations import observations
 
 
 class ReuseGuards(unittest.TestCase):
@@ -30,6 +31,7 @@ class ReuseGuards(unittest.TestCase):
         model.model.layers = torch.nn.ModuleList([torch.nn.Linear(2, 2, bias=False)])
         model.config = SimpleNamespace(vocab_size=4)
         ids = torch.tensor([[1, 2]], dtype=torch.int64)
+        actual_components, _ = observations()
         expected = dict(model='current-checkpoint', dtype='float32',
                         n_global=2, impl=diagnostic.IMPL)
         for field, foreign in (('model', 'foreign-checkpoint'), ('dtype', 'bfloat16'),
@@ -38,7 +40,7 @@ class ReuseGuards(unittest.TestCase):
                 root = Path(directory)
                 saved = dict(units=['model.layers.0'], seeds=[7000, 7001],
                     ids_sha256=diagnostic.hashlib.sha256(ids.numpy().tobytes()).hexdigest(),
-                    specs=list(diagnostic.SPECS), comps=torch.ones(3, 1, 2, 1),
+                    specs=list(diagnostic.SPECS), comps=actual_components,
                     n_global=expected['n_global'], impl=expected['impl'],
                     args=dict(model=expected['model'], dtype=expected['dtype'], deterministic_backward=False))
                 if field in ('model', 'dtype'):
