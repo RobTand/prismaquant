@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1271, MTP source parameter binding): the shared
+MTP probe-identity admission compares each unit's exact positive integer
+parameter count with the product of its validated joint-AURA source-weight
+shape for every priced rung. Selection and bound-cost record validation both
+use this owner before rung eligibility, so metadata cannot manufacture a BF16
+budget fit or change bits-per-parameter independently of the priced source.
+The producer's existing weight-numel counts agree with this contract. This
+adds malformed-source-metadata refusal only; current prices, encoded bytes,
+objective currencies, menus, runtime pins, serving gates and defaults do not
+change. Original-price and matched served acceptance qualification for #1271
+remain open.
+
 Re-stamped 2026-10-02 (Refs #1271, MTP storage admission slice): storage
 metadata admission is separate from rung eligibility. The GLM MTP payload
 requires exact positive integer serialized wire bytes and parameter counts
