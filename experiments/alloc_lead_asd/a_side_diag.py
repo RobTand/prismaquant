@@ -399,6 +399,10 @@ def profile_and_crosscheck(args, model, units, names, ids, seeds, specs_obj, n_g
         tables.append(f"===== {label}: wall {wall:.3f}s\n" + prof.key_averages().table(
             sort_by=sort_key, row_limit=18))
         report[label] = {"wall_s": wall}
+        if label.startswith("v2 pricing"):
+            trace = args.output + ".pricing.trace.json.gz"
+            prof.export_chrome_trace(trace)
+            report[label]["trace"] = trace
         log(f"profile {label}: {wall:.3f}s")
         return value
 
