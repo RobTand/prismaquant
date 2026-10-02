@@ -19,6 +19,7 @@ import json
 import random
 import statistics
 from importlib.resources import as_file
+from pathlib import Path
 
 import pytest
 
@@ -197,6 +198,13 @@ def test_a_malformed_table_is_refused_by_name(mutate, needle):
         srp.parse_shape_table(doc)
 
 
+def test_a_declared_but_unmeasured_regime_is_refused():
+    doc = _doc([_row("dense", "4096x1024", E4M3, 1024, 2048, DENSE_E4M3,
+                     (1.5, 1.6, 1.4))], regimes=(512, 2048))
+    with pytest.raises(srp.ShapeRuntimeError, match="context declares regimes"):
+        srp.parse_shape_table(doc)
+
+
 def test_load_verifies_every_receipt_digest(tmp_path):
     receipt = tmp_path / "bench.json"
     receipt.write_bytes(b"{}")
@@ -206,7 +214,7 @@ def test_load_verifies_every_receipt_digest(tmp_path):
     path.write_text(json.dumps(doc))
     assert srp.load_shape_table(path).identity()["n_rows"] == 1
     receipt.write_bytes(b"{} ")
-    with pytest.raises(srp.ShapeRuntimeError, match="SHA-256 mismatch"):
+    with pytest.raises(srp.ShapeRuntimeError, match="SHA-256"):
         srp.load_shape_table(path)
 
 
@@ -508,11 +516,11 @@ def test_one_shared_row_is_drawn_once_per_draw(glm_eligibility, formats):
     assert shared["p97.5"] - shared["p2.5"] == pytest.approx(42 * (one["p97.5"] - one["p2.5"]))
 
 
-def test_the_receipt_converter_is_a_named_stub(tmp_path):
+def test_the_converter_refuses_without_observations(tmp_path):
     assert srp.main(["convert", "--out", str(tmp_path / "t.json"), "--table-id", "x",
-                     "--receipts", str(tmp_path / "r.json")]) == 2
-    with pytest.raises(srp.ShapeRuntimeError, match="tessera#688"):
-        srp.consume_shape_time_panel([], table_id="x")
+                     "--observations", str(tmp_path / "missing-observation.json")]) == 2
+    with pytest.raises(srp.ShapeRuntimeError, match="at least one observation"):
+        srp.consume_shape_time_observation([], table_id="x")
 
 
 def test_the_kernel_lane_histogram_counts_units_per_priced_lane(glm_eligibility, formats):
@@ -529,3 +537,454 @@ def test_the_kernel_lane_histogram_counts_units_per_priced_lane(glm_eligibility,
     assert sum(histogram.values()) == len(routed)
     with pytest.raises(srp.ShapeRuntimeError, match="no prefill time"):
         pricing.kernel_lane_histogram({"L10.experts": "not-a-format"})
+
+
+# --------------------------------------------------------------------------- #
+# Tessera observation consumer (tessera.shape_time_observation.v1)
+# --------------------------------------------------------------------------- #
+
+OBS_IMAGE = ("localhost/prismaquant/spark-vllm-nccl230@sha256:"
+             "f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5")
+OBS_COMMIT = "b40c93cb73745097e57a1ba4cf5b9eee166c759a"
+OBS_CONTRACT = "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
+OBS_PRODUCER_TOOL = "a" * 64
+OBS_REPLAY_TOOL = "b" * 64
+OBS_ROUTE = "TESSERA_FP8"
+OBS_FAMILY = "TESSERA_E4M3_K1"
+OBS_LANE = ("tessera::fused_window_dense", "native_fused_window_dense")
+_CHECKER_RESULTS = {}
+
+
+@pytest.fixture(autouse=True)
+def checker_sdk_fixture(tmp_path, monkeypatch):
+    """Domain fixtures model the public SDK; actual PB acceptance is separate."""
+    from prismaquant import staged_lease
+    _CHECKER_RESULTS.clear()
+    config = tmp_path / "checker-config.json"
+    _obs_write(config, {"schema": srp.CHECKER_CONFIG_SCHEMA, "checkers": []})
+    monkeypatch.setattr(srp, "CHECKER_CONFIG_PATH", config)
+
+    class FixtureSDK:
+        PoolQueue = staticmethod(lambda: None)
+
+        @staticmethod
+        def read_verified_action_result(queue, action_key, **selector):
+            result = copy.deepcopy(_CHECKER_RESULTS[action_key])
+            if (selector["attempt"] != result["attempt"]
+                    or selector["published_unix"] != result["published_unix"]):
+                raise ValueError("wrong explicit selector")
+            return result
+
+        @staticmethod
+        def bind_standard_capture_command(request):
+            expected = ["fixture-capture", *request["params"]["command"]]
+            if request["task"]["argv"] != expected:
+                raise ValueError("unbound wrapper")
+            return expected
+
+    monkeypatch.setattr(staged_lease, "client_sdk", lambda: FixtureSDK)
+
+
+def _consume_observations(observations, **kwargs):
+    return srp.consume_shape_time_observation(
+        observations, checker_receipts=[path.parent / "checker-receipt.json" for path in observations],
+        **kwargs)
+
+
+def _obs_write(path, value, raw=False):
+    path.write_bytes(value if raw else srp.DIRECT_ASCII_STRICT.encoded(value) + b"\n")
+    import hashlib
+    body = path.read_bytes()
+    return {"path": str(path), "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
+
+
+def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0, 4.0),
+                        agent="obs", mutate=None):
+    """One internal-consistent bound observation, as Tessera#856 emits it."""
+    import statistics
+    scope = {"route": OBS_ROUTE, "grid": "E4M3", "q256": 896, "structure": "dense",
+             "mode": "resident", "execution_mode": "eager", "regime": "batch",
+             "tp_degree": tp_degree, "requested_platform": "sm_121",
+             "shape": {"M": m, "N": 256, "K": 256}}
+    runtime = {"image": OBS_IMAGE, "tessera_commit": OBS_COMMIT, "serving_source_sha256": "c" * 64,
+               "contract_sha256": OBS_CONTRACT, "platform": "sm_121", "torch": "2.13.0+cu130",
+               "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904",
+               "serve_flags": {"TESSERA_SERVE_MODE": "resident"}, "residency": "resident",
+               "execution_mode": "eager", "tp_rank": 0, "tp_degree": tp_degree,
+               "package_root": "/mnt/shared/tessera-suite-envs/pq1934-pb95-tessera-b40-py312/"
+                               "site-packages/tessera"}
+    root = tmp_path / agent
+    root.mkdir(parents=True)
+    samples_doc = {"samples_ms": list(samples), "warmup_iterations": 5,
+                   "interval_unix": [10.0, 11.0]}
+    routes = {"records": [{"symbol": OBS_LANE[0], "decoder": OBS_LANE[1]} for _ in samples]}
+    samples_b = _obs_write(root / "samples.json", samples_doc)
+    routes_b = _obs_write(root / "routes.json", routes)
+    contract_b = _obs_write(root / "contract.bin", b"raw b40 contract bytes", raw=True)
+    wire_b = _obs_write(root / "wire.bin", b"fused wire bytes", raw=True)
+    producer_doc = {"schema": "tessera.native_panel_producer_identity.v1", "commit": "8eb3c05174" + "0" * 30,
+                    "commit_source": "sealed_checkout", "source_tree_sha256": "d" * 64,
+                    "source_tree_members": 1, "tool_source_sha256": OBS_PRODUCER_TOOL}
+    producer_b = _obs_write(root / "producer.json", producer_doc)
+    request_doc = {"producer_identity": producer_b}
+    request_b = _obs_write(root / "request.json", request_doc)
+    runtime_b = _obs_write(root / "runtime.json", runtime)
+    import gzip
+    with (root / "trace.json.gz").open("wb") as handle:
+        handle.write(gzip.compress(b'{"traceEvents":[{"cat":"kernel","name":"fixture","dur":1.0}]}'))
+    trace_b = _obs_write(root / "trace.json.gz", (root / "trace.json.gz").read_bytes(), raw=True)
+    evidence = {
+        "runtime": runtime_b, "producer": producer_b, "contract": contract_b, "wire": wire_b,
+        "preparation": _obs_write(root / "preparation.json",
+                                  {"builder": "tessera.serving.lane.build_tessera_method",
+                                   "wire_sha256": wire_b["sha256"], "roles": [],
+                                   "shape": scope["shape"], "tp_rank": 0, "tp_degree": 1,
+                                   "grid": "E4M3", "native_packed_bytes": 1}),
+        "samples": samples_b, "routes": routes_b, "trace": trace_b,
+        "telemetry": _obs_write(root / "telemetry.json",
+                                {"interval_unix": [10.0, 11.0], "fast_power_samples": [[10.5, 40.0]],
+                                 "netdata": {"sparky": {}, "sparklina": {}}}),
+        "native_binary": _obs_write(root / "fused.so", b"\x7fELF fixture", raw=True),
+        "runtime_origins": _obs_write(root / "origins.json", {"package_root": runtime["package_root"]}),
+    }
+    q1, _mid, q3 = statistics.quantiles([float(v) for v in samples], n=4, method="inclusive")
+    timing = {"method": "cuda_events", "n": len(samples), "median_ms": float(statistics.median(samples)),
+              "p25_ms": float(q1), "p75_ms": float(q3), "iqr_ms": float(q3 - q1),
+              "quartiles": "statistics.quantiles.inclusive"}
+    preflight = {"result": _obs_write(root / "preflight-result.json",
+                                      {"schema": "tessera.installed_contract_preflight.v1"}),
+                 "phase": _obs_write(root / "preflight-phase.json",
+                                     {"phase": "runtime-preflight", "returncode": 0,
+                                      "command": ["env", "CUDA_VISIBLE_DEVICES=", "worker",
+                                                  "--job-sha256", "e" * 64, "--preflight"]})}
+    panel = {"schema": "tessera.shape_time_panel.v1", "status": "measured", "claims": dict(srp.CLAIMS),
+             "runtime": runtime, "plan": {"gpu_executed": False, "rows": [{"id": "ffa460d8" * 8, "scope": scope}]},
+             "rows": [{"scope_id": "ffa460d8" * 8, "cell_id": "dense-e4m3-sm121-batch-resident"}],
+             "evidence": evidence, "preflight": preflight, "energy": {"status": "hold"}}
+    panel_b = _obs_write(root / "panel.json", panel)
+    replay_b = _obs_write(root / "replay-tool.json", {"tool": "replay"})
+    command = ["env", "CUDA_VISIBLE_DEVICES=", "python", "--job-sha256", "e" * 64, "--preflight"]
+    observation = {
+        "schema": srp.SHAPE_TIME_OBSERVATION_SCHEMA, "status": "validated",
+        "claims": dict(srp.CLAIMS), "gpu_executed": False, "panel": panel_b,
+        "expected_panel_sha256": panel_b["sha256"], "request": request_b,
+        "expected_runtime": runtime_b, "contract": contract_b, "evidence": evidence,
+        "preflight": preflight, "producer": producer_b,
+        "replay": {"source_tree_sha256": "f" * 64, "source_tree_members": 1,
+                   "tool_source_sha256": OBS_REPLAY_TOOL, "tool": replay_b},
+        "invocation": {"command": command, "phase": "runtime-preflight", "returncode": 0},
+        "scope": scope, "scope_id": "ffa460d8" * 8,
+        "cell_id": "dense-e4m3-sm121-batch-resident", "kernel_lane": list(OBS_LANE),
+        "structure": "dense", "rank_local_shape": "256x256", "family": OBS_FAMILY,
+        "payload": {"route": OBS_ROUTE, "grid": "E4M3", "q256": 896, "rows": 256, "columns": 256},
+        "timing": timing,
+        "sampling": {"method": "cuda_events", "sample_unit": "single_apply", "warmup_iterations": 5,
+                     "n": len(samples), "samples_ms": list(samples), "interval_unix": [10.0, 11.0]},
+        "operator_projection": {"batch_size": 1, "rows": m,
+                                "reading": "one 2-D M-by-K operator apply; PQ may key this row at "
+                                           "batch_size=1 for M prompt rows; not end-to-end serving evidence"},
+        "energy_status": "hold"}
+    emitted = copy.deepcopy(observation)
+    if mutate is not None:
+        mutate(observation)
+    obs_b = _obs_write(root / "observation.json", observation)
+    key = hashlib.sha256(str(root).encode()).hexdigest()
+    source = {"id": "pbrun.checkout-snapshot", "bytes": 123, "sha256": "9" * 64}
+    snapshot = {"schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+                "input": source, "commit": "1" * 40, "parent": "2" * 40,
+                "subdirectory": ".", "refs": {}}
+    command = ["fixture-checker", str(root / "panel.json"), "--observation-out", obs_b["path"]]
+    environment = {"variables": {"CUDA_VISIBLE_DEVICES": ""}}
+    _CHECKER_RESULTS[key] = {
+        "action_key": key, "published_unix": 10.0, "attempt": 1,
+        "inputs": [source], "payload": json.dumps(emitted, sort_keys=True).encode() + b"\n",
+        "request": {"params": {"command": command, "checkout_snapshot": snapshot, "cwd": "."},
+                    "environment": environment,
+                    "task": {"argv": ["fixture-capture", *command], "working_directory": "."}}}
+    config = json.loads(srp.CHECKER_CONFIG_PATH.read_bytes())
+    config["checkers"].append({"snapshot": snapshot, "command": command, "cwd": ".",
+                               "working_directory": ".",
+                               "environment": environment, "observation_output": obs_b["path"]})
+    _obs_write(srp.CHECKER_CONFIG_PATH, config)
+    _obs_write(root / "checker-receipt.json", {
+        "schema": srp.CHECKER_RECEIPT_SCHEMA, "observation": obs_b,
+        "selector": {"action_key": key, "published_unix": 10.0, "attempt": 1}})
+    return obs_b
+
+
+def _obs_scope(**overrides):
+    base = {"contract_sha256": OBS_CONTRACT, "tessera_commit": OBS_COMMIT,
+            "runtime_image_digest": OBS_IMAGE, "tensor_parallel": 1, "platform": "sm_121",
+            "residency": "resident", "execution_mode": "eager"}
+    base.update(overrides)
+    return srp.ShapeTableScope(**base)
+
+
+def test_observation_converts_to_one_proposal_row(tmp_path):
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    assert table.context.tensor_parallel == 1 and table.context.regimes == (512,)
+    assert len(table.rows) == 1 and table.rate_pools == ()
+    row = table.rows[0]
+    assert row.key == srp.ShapeKey("dense", "256x256", OBS_FAMILY, 896, 512)
+    assert row.kernel_lane.as_pair() == OBS_LANE
+    assert row.measurement.method == "cuda_events"
+    assert row.measurement.samples_ms == (1.0, 2.0, 3.0, 4.0)
+    assert row.measurement.median_ms == 2.5 and row.measurement.warmup_iterations == 5
+    # The observation times one M; conversion does not invent a decode row.
+    assert table.lookup(srp.ShapeKey("dense", "256x256", OBS_FAMILY, 896, 1)) is None
+
+
+def test_observation_parses_the_already_bound_panel_samples_and_routes(tmp_path, monkeypatch):
+    observation_fixture(tmp_path)
+    reads = []
+    original = srp.ArtifactReader.bytes
+
+    def read(reader, binding, where, **kwargs):
+        result = original(reader, binding, where, **kwargs)
+        reads.append(result[0])
+        return result
+
+    monkeypatch.setattr(srp.ArtifactReader, "bytes", read)
+    _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    for name in ("panel.json", "samples.json", "routes.json"):
+        assert reads.count(tmp_path / "obs" / name) == 1
+
+
+@pytest.mark.parametrize("raw, needle", [
+    (b'{"schema":"first","schema":"second"}', "duplicate JSON key"),
+    (b'{"value":NaN}', "nonfinite JSON constant"),
+    (b'{"value":Infinity}', "nonfinite JSON constant"),
+    (b'{"value":-Infinity}', "nonfinite JSON constant"),
+])
+def test_observation_reader_retains_strict_json_refusals(tmp_path, raw, needle):
+    path = tmp_path / "observation.json"
+    path.write_bytes(raw)
+    with pytest.raises(srp.ShapeRuntimeError, match=needle):
+        srp.read_shape_time_observation(path)
+
+
+def test_observation_itself_refuses_a_tp2_scope(tmp_path):
+    observation_fixture(tmp_path, tp_degree=2)
+    with pytest.raises(srp.ShapeRuntimeError):
+        _consume_observations([tmp_path / "obs" / "observation.json"], table_id="tp2")
+
+
+def test_observation_is_admitted_against_pq_pinned_scope(tmp_path, eligibility):
+    from dataclasses import replace
+    eligibility = replace(eligibility, contract_sha256=OBS_CONTRACT, runtime_commit=OBS_COMMIT)
+    observation_fixture(tmp_path)
+    table = _consume_observations(
+        [tmp_path / "obs" / "observation.json"], table_id="pilot",
+        expected_scope=_obs_scope(), eligibility=eligibility)
+    assert table.admitted
+    assert table.admission["rows_admitted"] == 1
+    assert table.admission["cell_by_key"] == {
+        table.rows[0].key.label(): table.admission["cell_by_key"][table.rows[0].key.label()]}
+    assert list(table.admission["cell_by_key"]) == [table.rows[0].key.label()]
+
+
+def test_a_tp2_expected_scope_refuses_the_tp1_observation(tmp_path, eligibility):
+    observation_fixture(tmp_path)
+    with pytest.raises(srp.ShapeRuntimeError):
+        _consume_observations(
+            [tmp_path / "obs" / "observation.json"], table_id="pilot",
+            expected_scope=_obs_scope(tensor_parallel=2), eligibility=eligibility)
+
+
+def test_an_unbacked_kernel_lane_refuses_pq_admission(tmp_path, eligibility):
+    def swap_lane(doc):
+        doc["kernel_lane"] = ["tessera::window_gemm_dense", "native_window_gemm"]
+    observation_fixture(tmp_path, mutate=swap_lane)
+    with pytest.raises(srp.ShapeRuntimeError):
+        _consume_observations(
+            [tmp_path / "obs" / "observation.json"], table_id="pilot",
+            expected_scope=_obs_scope(), eligibility=eligibility)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("cuda_events", "synchronized_gpu_wall_clock"), ("single_apply", "loop_average")])
+def test_observation_refuses_a_non_event_or_loop_timing_method(tmp_path, field, value):
+    def corrupt(doc):
+        key = "method" if field == "cuda_events" else "sample_unit"
+        doc["sampling"][key] = value
+    observation_fixture(tmp_path, mutate=corrupt)
+    with pytest.raises(srp.ShapeRuntimeError):
+        _consume_observations([tmp_path / "obs" / "observation.json"], table_id="x")
+
+
+@pytest.mark.parametrize("mutation", ["samples", "summary", "lane", "family", "duplicate", "token"])
+def test_observation_refuses_tampered_or_unbound_fields(tmp_path, mutation):
+    def corrupt(doc):
+        if mutation == "samples":
+            doc["sampling"]["samples_ms"] = [1.0, 2.0, 99.0, 4.0]
+        elif mutation == "summary":
+            doc["timing"]["median_ms"] = 9.0
+        elif mutation == "lane":
+            doc["kernel_lane"] = ["x", "y"]
+        elif mutation == "family":
+            # Self-consistent with the panel's own claims: the observation
+            # names a family its bound payload route does not resolve to.
+            doc["family"] = "TESSERA_E2M1_K2"
+        elif mutation == "token":
+            # The replay may share the producer's SOURCE TREE; what it may not
+            # do is be the sealed producer tool itself. Point the replay tool
+            # at the producer's own bound bytes.
+            doc["replay"]["tool"] = dict(doc["producer"])
+    obs = [tmp_path / "obs" / "observation.json"]
+    if mutation == "duplicate":
+        observation_fixture(tmp_path)
+        _consume_observations(obs, table_id="one")
+        # Two observations with the same shape key refuse.
+        with pytest.raises(srp.ShapeRuntimeError, match="duplicate shape key"):
+            _consume_observations(obs * 2, table_id="two")
+        return
+    observation_fixture(tmp_path, mutate=corrupt)
+    with pytest.raises(srp.ShapeRuntimeError):
+        _consume_observations(obs, table_id="x")
+
+
+def test_convert_writes_out_atomically_and_refuses_on_a_bad_observation(tmp_path):
+    observation_fixture(tmp_path)
+    out = tmp_path / "table.json"
+    rc = srp.main(["convert", "--out", str(out), "--table-id", "pilot",
+                   "--checker-receipts", str(tmp_path / "obs" / "checker-receipt.json"),
+                   "--observations", str(tmp_path / "obs" / "observation.json")])
+    assert rc == 0 and out.exists()
+    loaded = srp.load_shape_table(out)
+    assert len(loaded.rows) == 1 and loaded.rows[0].measurement.samples_ms == (1.0, 2.0, 3.0, 4.0)
+    # A refused conversion leaves no output and no partial file.
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "observation.json").write_bytes(b"{not json")
+    out2 = tmp_path / "should-not-exist.json"
+    assert srp.main(["convert", "--out", str(out2), "--table-id", "bad",
+                     "--checker-receipts", str(tmp_path / "obs" / "checker-receipt.json"),
+                     "--observations", str(broken / "observation.json")]) == 2
+    assert not out2.exists()
+
+
+def test_load_refuses_a_row_whose_samples_were_edited_with_a_valid_receipt(tmp_path):
+    observation_fixture(tmp_path)
+    table_path = tmp_path / "table.json"
+    srp.main(["convert", "--out", str(table_path), "--table-id", "pilot",
+              "--checker-receipts", str(tmp_path / "obs" / "checker-receipt.json"),
+              "--observations", str(tmp_path / "obs" / "observation.json")])
+    document = json.loads(table_path.read_text())
+    document["rows"][0]["measurement"]["samples_ms"] = [10.0, 20.0, 30.0, 40.0]
+    table_path.write_text(srp.DIRECT_ASCII_STRICT.text(document))
+    with pytest.raises(srp.ShapeRuntimeError, match="differ from the receipt's raw samples"):
+        srp.load_shape_table(table_path)
+
+
+def test_load_refuses_a_forged_panel_with_matching_hashes_and_no_checker(tmp_path):
+    observation_fixture(tmp_path)
+    observation = json.loads((tmp_path / "obs" / "observation.json").read_bytes())
+    row = _row("dense", "256x256", OBS_FAMILY, 896, 512,
+               dict(zip(("symbol", "decoder"), OBS_LANE)), (1.0, 2.0, 3.0, 4.0))
+    row["measurement"].update(receipt_path=observation["panel"]["path"],
+                              receipt_sha256=observation["panel"]["sha256"],
+                              warmup_iterations=5)
+    document = _doc([row], regimes=(512,), runtime_image_digest=OBS_IMAGE,
+                    tessera_commit=OBS_COMMIT, contract_sha256=OBS_CONTRACT,
+                    tensor_parallel=1)
+    path = tmp_path / "forged-table.json"
+    _obs_write(path, document)
+    with pytest.raises(srp.ShapeRuntimeError, match="checker"):
+        srp.load_shape_table(path)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "selector", "source", "commit", "subdirectory", "refs",
+                                      "cwd", "working_directory", "command", "environment", "wrapper"])
+def test_observation_requires_the_selected_reviewed_checker_at_convert_and_load(tmp_path, mutation):
+    observation_fixture(tmp_path)
+    observation = tmp_path / "obs" / "observation.json"
+    table = _consume_observations([observation], table_id="pilot")
+    table_path = tmp_path / "table.json"
+    srp.write_shape_table(table, table_path)
+    result = next(iter(_CHECKER_RESULTS.values()))
+    if mutation == "missing":
+        _CHECKER_RESULTS.clear()
+    elif mutation == "selector":
+        result["attempt"] = 2
+    elif mutation == "source":
+        result["request"]["params"]["checkout_snapshot"]["input"]["sha256"] = "8" * 64
+    elif mutation == "commit":
+        result["request"]["params"]["checkout_snapshot"]["commit"] = "3" * 40
+    elif mutation == "subdirectory":
+        result["request"]["params"]["checkout_snapshot"]["subdirectory"] = "archive"
+    elif mutation == "refs":
+        result["request"]["params"]["checkout_snapshot"]["refs"] = {"other": "3" * 40}
+    elif mutation == "cwd":
+        result["request"]["params"]["cwd"] = "archive"
+    elif mutation == "working_directory":
+        result["request"]["task"]["working_directory"] = "archive"
+    elif mutation == "command":
+        result["request"]["params"]["command"][0] = "forged-checker"
+        result["request"]["task"]["argv"][1] = "forged-checker"
+    elif mutation == "environment":
+        result["request"]["environment"]["variables"]["CUDA_VISIBLE_DEVICES"] = "0"
+    else:
+        result["request"]["task"]["argv"][0] = "unbound"
+    with pytest.raises(srp.ShapeRuntimeError):
+        _consume_observations([observation], table_id="forged")
+    with pytest.raises(srp.ShapeRuntimeError):
+        srp.load_shape_table(table_path)
+
+
+def test_convert_refuses_forged_observation_without_a_real_checker(tmp_path):
+    observation_fixture(tmp_path)
+    _CHECKER_RESULTS.clear()
+    out = tmp_path / "out.json"
+    assert srp.main(["convert", "--out", str(out), "--table-id", "forged",
+                     "--observations", str(tmp_path / "obs" / "observation.json"),
+                     "--checker-receipts", str(tmp_path / "obs" / "checker-receipt.json")]) == 2
+    assert not out.exists()
+
+
+def test_checker_result_requires_exact_output_and_a_bounded_observation(tmp_path, monkeypatch):
+    binding = observation_fixture(tmp_path)
+    path = tmp_path / "obs" / "observation.json"
+    result = next(iter(_CHECKER_RESULTS.values()))
+    result["payload"] *= 2
+    with pytest.raises(srp.ShapeRuntimeError, match="owned output"):
+        _consume_observations([path], table_id="duplicate-output")
+    monkeypatch.setattr(srp, "CHECKER_RESULT_MAX_BYTES", binding["bytes"] - 1)
+    with pytest.raises(srp.ShapeRuntimeError, match="byte cap"):
+        _consume_observations([path], table_id="oversized")
+
+
+@pytest.mark.parametrize("field", ["key", "lane", "context"])
+def test_load_compares_the_table_to_the_checker_projection(tmp_path, field):
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    doc = table.as_dict()
+    if field == "key":
+        doc["rows"][0]["family"] = "TESSERA_E2M1_K2"
+    elif field == "lane":
+        doc["rows"][0]["kernel_lane"]["decoder"] = "other"
+    else:
+        doc["context"]["tensor_parallel"] = 2
+    path = tmp_path / "tampered-table.json"
+    _obs_write(path, doc)
+    with pytest.raises(srp.ShapeRuntimeError, match="checker observation"):
+        srp.load_shape_table(path)
+
+
+def test_relative_checker_receipt_does_not_skip_the_row_comparison(tmp_path):
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    doc = table.as_dict()
+    doc["rows"][0]["measurement"]["receipt_path"] = "obs/checker-receipt.json"
+    doc["rows"][0]["family"] = "TESSERA_E2M1_K2"
+    path = tmp_path / "relative-proof-table.json"
+    _obs_write(path, doc)
+    with pytest.raises(srp.ShapeRuntimeError, match="checker observation"):
+        srp.load_shape_table(path)
+
+
+def test_relative_observation_and_checker_paths_convert(tmp_path, monkeypatch):
+    observation_fixture(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    table = _consume_observations([Path("obs/observation.json")], table_id="relative")
+    assert len(table.rows) == 1
