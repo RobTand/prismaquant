@@ -38,22 +38,6 @@ PINNED_PRODUCER = ('/mnt/shared/tessera-measurements/first-model-20260907'
                    '/inputs/tessera-382a1a97')
 
 
-def _campaign_source(tmp_path):
-    """The bumped tiny GLM checkpoint the streamed campaign fixture uses."""
-    from test_glm5_next_streamed_forward_parity import _build_model, _tiny_config
-
-    config = _tiny_config()
-    config.text_config.hidden_size = 256
-    config.text_config.intermediate_size = 512
-    config.text_config.moe_intermediate_size = 256
-    config.vision_config.out_hidden_size = 256
-    config = type(config).from_dict(config.to_dict())
-    source = tmp_path / 'campaign-source'
-    model = _build_model(config).to(torch.bfloat16)
-    write_original_layout_checkpoint(model, source)
-    return model, source
-
-
 def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):
     """The planner's own sampled ``s:`` row, drawn from a packed probe.
 
@@ -112,6 +96,31 @@ def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):
     return path, selection
 
 
+def _two_dynamic_rungs(menus):
+    """Two common rates from one real dynamic-activation family."""
+    from prismaquant import format_registry as fr
+    from prismaquant.tessera_formats import parse_tessera_format_name
+
+    shared = set.intersection(*[{row.format_name for row in rows}
+                                for rows in menus.values()])
+    by_family: dict = {}
+    for name in sorted(shared):
+        if fr.get_format(name).static_activation_contract is not None:
+            # A static rung needs a calibrated scale; this fixture carries
+            # the inputs the dynamic routes need.
+            continue
+        family, rung = parse_tessera_format_name(name)
+        by_family.setdefault(family.name, []).append((int(rung), name))
+    assert by_family, 'the fixture must admit a dynamic activation family'
+    # This test owns stack sampling and anchor lifetimes, not family breadth.
+    # CHANNEL-plane E4M3 admits partial superblocks: real menus at the tiny
+    # (32, 64)/(64, 32) shapes share R256 and R264. Keep the producer's normal
+    # L=14 recipe and derive the two legal rates from the actual intersection.
+    dynamic = by_family.get('TESSERA_E4M3_K1', [])
+    assert len(dynamic) >= 2, 'the fixture needs two common dynamic E4M3 rungs'
+    return [name for _, name in sorted(dynamic)[:2]]
+
+
 def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
         glm_checkpoint, tmp_path, monkeypatch, legacy_capture_mechanism):
     """The stack row completes, and every completed anchor is released.
@@ -131,7 +140,15 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
                     f'(unset, and {PINNED_PRODUCER} is absent)')
     monkeypatch.setenv('TESSERA_REPO', str(producer))
 
-    model, source = _campaign_source(tmp_path)
+    # The already-built fixture has four experts and a genuine partial-
+    # superblock wire domain. A second 256-wide model needlessly multiplied
+    # Viterbi's row/column work; sampling and page advice do not require it.
+    model, source = glm_checkpoint
+    # The campaign prices BF16 live weights. Keep the original test's BF16
+    # source bytes too: its projection gate correctly refuses FP32 originals.
+    write_original_layout_checkpoint(model.to(torch.bfloat16), source)
+    assert model.config.text_config.n_routed_experts == 4
+    assert model.config.text_config.num_experts_per_tok == 2
     tokens = [torch.arange(257).remainder(126).add(2).reshape(1, -1)]
     monkeypatch.setattr(campaign, '_calibration_tokens',
                         lambda *_: (tokens, 'tiny GLM frozen draw'))
@@ -165,26 +182,10 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
     original_menus = campaign.expand_menus_for_targets
 
     def two_rungs(weights, targets, **kwargs):
-        from prismaquant import format_registry as fr
-        from prismaquant.tessera_formats import parse_tessera_format_name
-
         menus = original_menus(weights, targets, **kwargs)
         assert set(menus) == set(priced), 'the selection must narrow the scope'
         if not chosen:
-            shared = set.intersection(*[{row.format_name for row in rows}
-                                        for rows in menus.values()])
-            by_family: dict = {}
-            for name in sorted(shared):
-                if fr.get_format(name).static_activation_contract is not None:
-                    # A static contract rung needs a calibrated input scale to
-                    # be priced honestly; the dynamic families need nothing
-                    # this fixture does not already have.
-                    continue
-                family, rung = parse_tessera_format_name(name)
-                by_family.setdefault(family.name, []).append((int(rung), name))
-            assert by_family, 'the fixture must admit a dynamic activation family'
-            widest = max(sorted(by_family), key=lambda key: len(by_family[key]))
-            chosen['formats'] = [name for _, name in sorted(by_family[widest])[:2]]
+            chosen['formats'] = _two_dynamic_rungs(menus)
         keep = set(chosen['formats'])
         narrowed = {name: [row for row in rows if row.format_name in keep]
                     for name, rows in menus.items()}
