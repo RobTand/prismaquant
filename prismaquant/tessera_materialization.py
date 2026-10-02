@@ -197,6 +197,19 @@ def _journal(plan_data, identity, index, names):
         identity={**identity, 'group': index}, qnames=names)
 
 
+def _expert_input_identity(api, weight, unit, fmt, activation):
+    """The same served expert identity at completion, resume and finalization."""
+    from .tessera_formats import parse_tessera_format_name, tessera_served_wire_recipe
+    from .tessera_render import rung_accepts_hessian
+
+    family, rung = parse_tessera_format_name(fmt)
+    wire = tessera_served_wire_recipe(family, rung, structure='routed_moe')
+    active = (activation if activation is not None and rung_accepts_hessian(fmt, wire)
+              else None)
+    return api.unit_input_identity(weight, unit, family.payload_grid(), rung,
+                                   activation=active, structure='routed_moe')
+
+
 def run(plan_path, group_index, *, anchor_batch_size=1):
     """Execute inside one admitted action; never submit recursively."""
     import functools
@@ -208,8 +221,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     from .cost_stage_checkpoint import write_unit
     from .model_profiles import detect_profile
     from .production_weight_cache import ProductionWeightCache
-    from .tessera_formats import parse_tessera_format_name, tessera_wire_recipe
-    from .tessera_render import rung_accepts_hessian
+    from .tessera_formats import parse_tessera_format_name
 
     if anchor_batch_size < 1:
         raise ValueError('anchor batch size must be positive')
@@ -218,6 +230,10 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
         require_tessera_batch_encoder()
     data, request, cost, source, units, _expanded, census, identity, group = _inputs(plan_path, group_index)
     names = sorted(group['assignment'])
+    # These are the producer-declared expert projections _request expanded,
+    # not a structure guessed from a name or shape. Reuse the campaign's
+    # structure-aware recipe and batch contracts throughout this quantum.
+    structures = {name: 'routed_moe' for name in names}
     root, (journal, journal_sha, completed) = _journal(data, identity, group_index, names)
     provenance = {**cost['provenance']['hessian']['calibration_identity'], **cost['provenance']}
     model_path = provenance['model']
@@ -284,10 +300,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     for name in names:
         fmt = group['assignment'][name]
         family, rung = parse_tessera_format_name(fmt)
-        active = (activation if activation is not None and
-                  rung_accepts_hessian(fmt, tessera_wire_recipe(family, rung)) else None)
-        expected = api.unit_input_identity(weights[name], units[name], family.payload_grid(), rung,
-                                           activation=active)
+        expected = _expert_input_identity(api, weights[name], units[name], fmt, activation)
         wire_path = tc._wire_path(wire_dir, name, fmt)
         state = completed.get(name)
         record = None if state is None else state['record']
@@ -315,7 +328,7 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
         write_unit(journal, stage=STAGE, qname=name, identity_sha256=journal_sha,
             state=dict(format=fmt, record=record, anchor=anchor))
     for batch in tc._anchor_batches(missing, weights=weights,
-                                    batch_size=anchor_batch_size):
+                                    batch_size=anchor_batch_size, structures=structures):
         batch_names = [item[0] for item in batch]
         fmt = group['assignment'][batch_names[0]]
         common = dict(format_name=fmt, cache=cache, wire_dir=wire_dir,
@@ -323,12 +336,14 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
         if len(batch) == 1:
             name = batch_names[0]
             anchors = [tc._measure_anchor(qname=name, weight=weights[name].to(device),
-                activations=acts[name].to(device), static_input_scale=scales.get(name), **common)]
+                activations=acts[name].to(device), static_input_scale=scales.get(name),
+                structure=structures[name], **common)]
         else:
             anchors = tc._measure_anchor_batch(qnames=batch_names,
                 weights=[weights[name].to(device) for name in batch_names],
                 activations=[acts[name].to(device) for name in batch_names],
-                static_input_scales=scales, **common)
+                static_input_scales=scales,
+                structures={name: structures[name] for name in batch_names}, **common)
         for anchor in anchors:
             name = anchor.qname
             record = tc._checkpoint_wire_record(anchor, wire_dir, expected_by_name[name])
@@ -374,8 +389,7 @@ def finalize(plan_path):
     from . import tessera_campaign as tc
     from . import tessera_hessian as th
     from . import tessera_export_lane as export
-    from .tessera_formats import parse_tessera_format_name, tessera_wire_recipe
-    from .tessera_render import rung_accepts_hessian
+    from .tessera_formats import parse_tessera_format_name
 
     data, request, cost, source, units, expanded, census, identity, _group = _inputs(plan_path)
     provenance = {**cost['provenance']['hessian']['calibration_identity'], **cost['provenance']}
@@ -452,11 +466,8 @@ def finalize(plan_path):
                 source_dir = Path(data['workspace']) / 'groups' / str(index) / 'wire'
                 break
         family, rung = parse_tessera_format_name(fmt)
-        active = (activation if activation is not None and
-                  rung_accepts_hessian(fmt, tessera_wire_recipe(family, rung)) else None)
         weight = tep.source_unit_weight(provenance['model'], source, units[name])
-        expected = api.unit_input_identity(weight, units[name], family.payload_grid(), rung,
-                                           activation=active)
+        expected = _expert_input_identity(api, weight, units[name], fmt, activation)
         checked = tep.check_expert_wire_receipt(record, name=name, unit=units[name], q256=rung,
             grid=family.payload_grid().name)
         source_path = source_dir / checked['file']
