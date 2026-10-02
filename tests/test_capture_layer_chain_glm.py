@@ -16,6 +16,15 @@ from prismaquant.cost_streaming import build_streamed_causal_lm
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 
 
+@pytest.fixture
+def _cpu_glm_kernels(monkeypatch):
+    # Import inside the fixture: importing this autouse fixture at module scope
+    # would also replace the real kernels in the CUDA controls below.
+    from test_glm5_next_streamed_forward_parity import _torch_only_causal_conv1d
+
+    _torch_only_causal_conv1d.__wrapped__(monkeypatch)
+
+
 def _runner(source, offload):
     return build_streamed_causal_lm(str(source), device=torch.device("cpu"),
         dtype=torch.bfloat16, offload_folder=str(offload), profile=Glm5NextProfile(),
@@ -50,7 +59,8 @@ def _visit(runner, tokens, targets, *, start=None, stop_layer=None):
     return captured, final, visited
 
 
-def test_glm_chained_visits_equal_the_monolith_and_their_witnesses_merge(glm_checkpoint, tmp_path):
+def test_glm_chained_visits_equal_the_monolith_and_their_witnesses_merge(
+        glm_checkpoint, tmp_path, _cpu_glm_kernels):
     """Two quanta over the real GLM forward equal one traversal, and so do their witnesses."""
     from prismaquant.routed_experts import profile_declared_packed_expert_projections
     from prismaquant.streaming_model import merge_selected_initialization_witnesses
@@ -302,7 +312,8 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     ("legacy", "0:1,1:2,2:3"),
     ("shared-inputs-bounded-v1", "0:1,1:2,2:3"),
 ])
-def test_glm_capture_chain_equals_the_monolith_entry_for_entry(tmp_path, monkeypatch, policy, ranges):
+def test_glm_capture_chain_equals_the_monolith_entry_for_entry(
+        tmp_path, monkeypatch, policy, ranges, _cpu_glm_kernels):
     """The chain on CPU, including on a box that has CUDA."""
     _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, device="cpu")
 
