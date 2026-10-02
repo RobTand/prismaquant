@@ -334,3 +334,25 @@ def test_accounting_failure_closes_sealed_material_without_delivery(material, mo
         _ = buffers[0].path
     assert owner.material_live_bytes == 0
     owner.close()
+
+
+def test_peak_admission_callback_cannot_reap_material_the_new_window_reuses(material):
+    m = material
+    owner = _owner(m)
+    aliases = []
+    with owner.material_window([m['root'] / 'one.safetensors']):
+        original_inode = owner.file_stat(m['root'] / 'one.safetensors').st_ino
+        with owner.safe_open(safe_open, m['root'] / 'one.safetensors', framework='pt') as reader:
+            aliases.append(reader.get_tensor('w').detach())
+    observed = []
+    def admit(label, **kwargs):
+        # A shared guard callback may release/reap other owners while checking.
+        aliases.clear()
+        gc.collect()
+        observed.append((owner.material_live_bytes, kwargs['reserve_bytes']))
+    owner.resource_check = admit
+    with owner.material_window([m['root'] / 'one.safetensors']):
+        assert owner.file_stat(m['root'] / 'one.safetensors').st_ino == original_inode
+        assert observed == [(len(m['raws']['one.safetensors']), 0)]
+    assert owner.material_live_bytes == 0
+    owner.close()
