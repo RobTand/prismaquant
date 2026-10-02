@@ -205,9 +205,12 @@ def namespace_destinations(request: dict, binding: dict) -> list[tuple[Path, boo
 
 def namespace_mounts(spec: dict) -> list[tuple[Path, bool]]:
     """One mount view for namespace containment and writable identity coverage."""
-    return [(Path(mount["target"]),
-             mount["source"] == mount["target"] and not mount.get("readonly", False))
-            for mount in spec["container"].get("mounts", [])]
+    mounts = []
+    for mount in spec["container"].get("mounts", []):
+        source = namespace_absolute_path(mount["source"])
+        target = namespace_absolute_path(mount["target"])
+        mounts.append((target, source == target and not mount.get("readonly", False)))
+    return mounts
 
 
 def validate_namespace_request(row: dict, *, executed_commit: str | None = None) -> dict:

@@ -472,6 +472,88 @@ def test_review_adapter_repairs_missing_owned_temps_before_entry(tmp_path, monke
     assert directory.is_dir()
 
 
+def mount_component_aliases(mounts, root, violation):
+    result = copy.deepcopy(mounts)
+    if violation == "source":
+        result.append({"source": "//foreign", "target": "/external", "readonly": True})
+    elif violation == "target":
+        result.append({"source": "/foreign", "target": "//external", "readonly": True})
+    else:
+        result.append({"source": "/foreign", "target": "/" + root, "readonly": False})
+    return result
+
+
+@pytest.mark.parametrize("violation", ["source", "target", "shadow"])
+def test_mount_component_preparation_refuses_leading_double_slash(tmp_path, violation):
+    kwargs = arguments(tmp_path)
+    row = kwargs["requests"][0]
+    spec = json.loads(row["argv"][4])
+    spec["container"]["mounts"] = mount_component_aliases(
+        spec["container"]["mounts"], kwargs["root"], violation)
+    row["argv"][4] = json.dumps(spec)
+    replace_fixture_request(kwargs, row)
+    with pytest.raises(RuntimeError, match="namespace paths must be canonical"):
+        dispatch.prepare_namespace_requests(**kwargs)
+    assert not (tmp_path / "new").exists()
+
+
+@pytest.mark.parametrize("violation", ["source", "target", "shadow"])
+def test_mount_component_adapter_refuses_self_consistent_alias_before_docker(tmp_path, monkeypatch, violation):
+    row = prepared(tmp_path)[0]
+    binding = json.loads(row["argv"][4])["namespace_binding"]
+    normalized = binding["normalized_request"]
+    spec = json.loads(normalized["argv"][4])
+    spec["container"]["mounts"] = mount_component_aliases(
+        spec["container"]["mounts"], binding["root"], violation)
+    normalized["argv"][4] = owner.canonical_json_bytes(spec, where="fixture spec").decode()
+    base = {key: value for key, value in binding.items() if key not in ("request_key", "request", "request_sha256")}
+    request_key = owner.canonical_json_sha256(base, where="namespace row binding")
+    request = namespace.namespace_retarget(normalized, binding["root"] + "/" + request_key)
+    binding = {**base, "request_key": request_key, "request": copy.deepcopy(request),
+               "request_sha256": owner.canonical_json_sha256(request, where="namespace request")}
+    spec = json.loads(request["argv"][4])
+    spec["namespace_binding"] = binding
+    row = copy.deepcopy(request)
+    row["argv"][4] = owner.canonical_json_bytes(spec, where="fixture bound spec").decode()
+    # Model an already published, self-consistent old contract without asking the
+    # current preparation/publication policy to admit it first.
+    root = tmp_path / "new"
+    directory = root / request_key
+    directory.mkdir(parents=True)
+    record = {"schema": namespace.SCHEMA, "root": str(root), "bindings": {
+        request_key: owner.canonical_json_sha256(binding, where="namespace ownership")}}
+    for path, value in ((root / "namespace.json", record),
+                        (directory / "binding.json", binding), (directory / "request.json", row)):
+        path.write_bytes(owner.canonical_json_bytes(value, where="namespace publication"))
+    before = {path: path.read_bytes() for path in root.rglob("*.json")}
+    for name, value in row["env"].items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: COMMIT)
+    monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **k: type("Result", (), {"returncode": 0, "stdout": ""})())
+    monkeypatch.setattr(adapter, "inspect_or_load", lambda *a: pytest.fail("Docker reached"))
+    with pytest.raises(RuntimeError, match="namespace paths must be canonical"):
+        adapter.main(["--spec", json.dumps(spec), "--", *row["argv"][6:]])
+    assert {path: path.read_bytes() for path in before} == before
+    assert not (directory / "environment").exists()
+
+
+def test_mount_component_valid_identity_mount_covers_outputs_and_owned_temps(tmp_path, monkeypatch):
+    kwargs = arguments(tmp_path)
+    rows = dispatch.prepare_namespace_requests(**kwargs)
+    assert not (tmp_path / "new").exists()
+    dispatch.publish_namespace_requests(rows)
+    row = rows[0]
+    spec = json.loads(row["argv"][4])
+    (tmp_path / "prismaquant").mkdir()
+    (tmp_path / "prismaquant" / "__init__.py").write_text("# mount component checkout\n")
+    monkeypatch.setattr(adapter, "checkout_commit", lambda cwd: COMMIT)
+    monkeypatch.setattr(adapter.subprocess, "run", lambda *a, **k: type("Result", (), {"returncode": 0, "stdout": ""})())
+    assert adapter.validate_namespace_launch(spec, row["argv"][6:], cwd=str(tmp_path), environ=row["env"]) == COMMIT
+    for name in ("TMPDIR", "TMP", "TEMP"):
+        path = adapter.Path(row["env"][name])
+        assert path.is_relative_to(tmp_path / "new") and path.is_dir()
+
+
 @pytest.mark.parametrize("violation", ["mount", "input"])
 def test_review_adapter_rechecks_self_consistent_old_contract_gaps(tmp_path, violation):
     row = prepared(tmp_path)[0]
