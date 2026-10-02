@@ -87,22 +87,15 @@ def load_source_model(config, state_dict, *, dtype, device):
     return model.to(device=device).eval()
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--data-manifest-sha256", required=True)
-    args = parser.parse_args()
-    output = Path(args.output)
-    output.mkdir(exist_ok=False)
-    torch.set_num_threads(1)
-    torch.set_num_interop_threads(1)
+def load_staged_inputs(manifest_sha256):
+    """Use the existing PB lease reader once for the diagnostic's source inputs."""
     model_path = Path("/mnt/shared/models/qwen3-small-alloc-lead/Qwen3-0.6B")
     input_path = Path("/mnt/shared/tessera-measurements/alloc-lead-asd/inputs_qwen3.safetensors")
     activate_staged_tier_policy("ram,ssd")
-    bind_residency_manifest(args.data_manifest_sha256)
+    bind_residency_manifest(manifest_sha256)
     manifest_path = Path(__file__).with_name("recipes") / "pair-inputs.json"
     manifest_raw = manifest_path.read_bytes()
-    if hashlib.sha256(manifest_raw).hexdigest() != args.data_manifest_sha256:
+    if hashlib.sha256(manifest_raw).hexdigest() != manifest_sha256:
         raise RuntimeError("sealed data manifest differs from diagnostic recipe")
     manifest = json.loads(manifest_raw)
     bindings = {row["path"]: row["sha256"] for row in manifest["entries"]}
@@ -128,6 +121,21 @@ def main():
     del tokens
     if transformers.__version__ != "5.16.1":
         raise RuntimeError("producer Transformers version differs from recovered runtime")
+    return config, generation_config, state_dict, ids
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--data-manifest-sha256", required=True)
+    args = parser.parse_args()
+    output = Path(args.output)
+    output.mkdir(exist_ok=False)
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    config, generation_config, state_dict, ids = load_staged_inputs(args.data_manifest_sha256)
+    model_path = Path("/mnt/shared/models/qwen3-small-alloc-lead/Qwen3-0.6B")
+    input_path = Path("/mnt/shared/tessera-measurements/alloc-lead-asd/inputs_qwen3.safetensors")
     identity = {
         "schema": "prismaquant.research.surrogate_dtype_pair.v1",
         "screen_only": True, "n_sequences": 4, "sequence_length": 512,
