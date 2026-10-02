@@ -448,24 +448,32 @@ class CaptureSourceAuthentication:
         with self._lock:
             self._require_open()
             if name not in self._files:
-                # A replaced FIFO must be refused by fstat, never block in
-                # open waiting for a writer. Regular files and HF symlinks
-                # retain the same read semantics with O_NONBLOCK.
-                fd = os.open(self.root/name, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
-                try:
-                    before = os.fstat(fd)
-                    if not stat.S_ISREG(before.st_mode):
-                        raise RuntimeError('authenticated source must be a regular file')
-                    state = dict(fd=fd, before=before, sha256=None, sha256_source=None,
-                                 payload_reads=0,
-                                 lock=threading.Lock())
-                    self._check_file(name, state)
-                    self._check_fingerprint(name, before)
-                    self._files[name] = state
-                except BaseException:
-                    os.close(fd)
-                    raise
+                self._files[name] = self._open_source_state(name)
             return name, self._files[name]
+
+    def _open_source_state(self, name):
+        """Acquire one source object's state before making it decoder-visible."""
+        # O_NONBLOCK lets fstat refuse a replaced FIFO without waiting on it.
+        fd = os.open(self.root/name, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise RuntimeError('authenticated source must be a regular file')
+            state = dict(fd=fd, before=before, sha256=None, sha256_source=None,
+                         payload_reads=0, lock=threading.Lock())
+            self._check_file(name, state)
+            self._check_fingerprint(name, before)
+            return state
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def _source_read_path(self, state):
+        """The held object used by JSON, header and tensor readers alike."""
+        return f"/proc/self/fd/{state['fd']}"
+
+    def _close_source_state(self, state):
+        os.close(state['fd'])
 
     def _check_fingerprint(self, name, observed):
         """Hold a recording owner's held object to the object its prep stat."""
@@ -722,7 +730,7 @@ class CaptureSourceAuthentication:
             self._readers += 1
         try:
             self._authenticate(name, state)
-            with open(f"/proc/self/fd/{state['fd']}", 'rb') as handle:
+            with open(self._source_read_path(state), 'rb') as handle:
                 result = json.load(handle)
             self._check_file(name, state)
             return result
@@ -743,7 +751,7 @@ class CaptureSourceAuthentication:
         self._check_file(name, state)
         if state['sha256'] is None:
             raise RuntimeError('source payload descriptor has not been authenticated')
-        return f"/proc/self/fd/{state['fd']}"
+        return self._source_read_path(state)
 
     def receipt(self):
         self.require_unchanged()
@@ -848,7 +856,7 @@ class CaptureSourceAuthentication:
                             os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
                         except OSError:
                             pass
-                    os.close(state['fd'])
+                    self._close_source_state(state)
 
 
 class _CaptureSourceSafeOpen:
@@ -861,7 +869,7 @@ class _CaptureSourceSafeOpen:
             owner._readers += 1
         self.context = None
         try:
-            self.context = factory(f"/proc/self/fd/{self.state['fd']}", *args, **kwargs)
+            self.context = factory(owner._source_read_path(self.state), *args, **kwargs)
             owner._check_file(self.name, self.state)
         except BaseException as exc:
             try:
