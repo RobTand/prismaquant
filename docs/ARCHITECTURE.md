@@ -246,6 +246,17 @@ a different, internally valid record whose raw bytes it never hashed. The
 schema, identity, campaign, adjoint, chunk and window checks are unchanged;
 plan and prepared inputs keep their existing digest checks. No format, stage,
 pipeline default or serving gate changes.
+Re-stamped 2026-10-02 (Refs #1301, checkpoint JSON stream): the census seal
+uses the existing digest owner's explicit `checkpoint_json_sha256` path.
+It retains the strict direct UTF-8 codec, depth-two partitioning, shallow
+string-key checks, deeper direct-encoded leaf acceptance, first-error order
+and leaf-relative Unicode errors. The census reader keeps its own
+`CensusCacheError`; generic normalized JSON is not substituted. The existing
+streamed JSON hash loop is reused, with no second hash loop, source read,
+normalization or tensor/cache mechanism. Two primitive census scopes leave
+the shrink-only baseline; no stored identity migration, default, pin,
+numerical or performance claim follows.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment

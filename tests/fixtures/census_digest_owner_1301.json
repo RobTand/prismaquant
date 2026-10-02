@@ -1,0 +1,76 @@
+{
+  "test_old_loaded_checkpoint_cycle_refusal#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "Circular reference detected"
+  },
+  "test_old_loaded_checkpoint_outcomes[None]#0": {
+    "returned": "'74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b'"
+  },
+  "test_old_loaded_checkpoint_outcomes[\\ud800]#0": {
+    "cause": null,
+    "raised": "builtins.UnicodeEncodeError",
+    "text": "'utf-8' codec can't encode character '\\ud800' in position 1: surrogates not allowed"
+  },
+  "test_old_loaded_checkpoint_outcomes[nan]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "Out of range float values are not JSON compliant: nan"
+  },
+  "test_old_loaded_checkpoint_outcomes[value10]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "'<' not supported between instances of 'str' and 'int'"
+  },
+  "test_old_loaded_checkpoint_outcomes[value11]#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "Object of type set is not JSON serializable"
+  },
+  "test_old_loaded_checkpoint_outcomes[value13]#0": {
+    "cause": null,
+    "raised": "builtins.ValueError",
+    "text": "Out of range float values are not JSON compliant: nan"
+  },
+  "test_old_loaded_checkpoint_outcomes[value14]#0": {
+    "cause": null,
+    "raised": "prismaquant.tessera_census_cache.CensusCacheError",
+    "text": "checkpoint identity has a non-string key"
+  },
+  "test_old_loaded_checkpoint_outcomes[value16]#0": {
+    "cause": null,
+    "raised": "builtins.UnicodeEncodeError",
+    "text": "'utf-8' codec can't encode character '\\ud800' in position 1: surrogates not allowed"
+  },
+  "test_old_loaded_checkpoint_outcomes[value1]#0": {
+    "returned": "'44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a'"
+  },
+  "test_old_loaded_checkpoint_outcomes[value2]#0": {
+    "returned": "'4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'"
+  },
+  "test_old_loaded_checkpoint_outcomes[value3]#0": {
+    "returned": "'49a64717d5d4cb19952e6eac2946415cf6879adacf9908e7d872332d32c6e684'"
+  },
+  "test_old_loaded_checkpoint_outcomes[value4]#0": {
+    "returned": "'f4b7496f189a229c97b9f22d4ebbe6e6962a6d3eade53f963992bf5649b525dd'"
+  },
+  "test_old_loaded_checkpoint_outcomes[value5]#0": {
+    "returned": "'7b7225522cb1c4927b88659dde4136001e5615249bb9a98538b0ec6de3205af9'"
+  },
+  "test_old_loaded_checkpoint_outcomes[value6]#0": {
+    "cause": null,
+    "raised": "prismaquant.tessera_census_cache.CensusCacheError",
+    "text": "checkpoint identity has a non-string key"
+  },
+  "test_old_loaded_checkpoint_outcomes[value7]#0": {
+    "cause": null,
+    "raised": "prismaquant.tessera_census_cache.CensusCacheError",
+    "text": "checkpoint identity has a non-string key"
+  },
+  "test_old_loaded_checkpoint_outcomes[value8]#0": {
+    "returned": "'58ccfcb9054062662486481130bdc32a51bc65fc9b31c48f2e2aeee919752a55'"
+  },
+  "test_old_loaded_checkpoint_outcomes[value9]#0": {
+    "returned": "'a9a70284d5b5b01c704dfd936481f210494ea7f85219442d088d1d0909033766'"
+  }
+}

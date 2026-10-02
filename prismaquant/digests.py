@@ -61,6 +61,13 @@ Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
   payload preceded by its eight-byte big-endian byte length. No sorting,
   reconstruction, separators or final trailer; those stay with the caller.
 
+Checkpoint JSON stream:
+
+- ``checkpoint_json_sha256``: ``DIRECT_UTF8_STRICT`` bytes partitioned at
+  depth two; shallow dict keys require strings, deeper leaves preserve the
+  direct encoder's accepted keys. The caller retains its key-error class.
+  No normalization or whole-graph precheck changes first-error order.
+
 Pickle profile:
 
 - ``canonical_pickle_bytes``: ``pickle.dumps`` at explicit protocol 4 of a
@@ -90,7 +97,7 @@ import json
 import math
 import os
 import re
-from typing import BinaryIO
+from typing import BinaryIO, Protocol
 
 
 # A regex checks the underlying text, not a str subclass's Python length or
@@ -204,7 +211,11 @@ def _require_normalized_json(value: object, *, where: str) -> None:
             "JSON encoding")
 
 
-def _stream_sha256(encoder: json.JSONEncoder, value: object) -> str:
+class _JsonChunkEncoder(Protocol):
+    def iterencode(self, value: object) -> Iterable[str]: ...
+
+
+def _stream_sha256(encoder: _JsonChunkEncoder, value: object) -> str:
     """Stream ``encoder.iterencode`` chunks, as UTF-8, into one SHA-256.
 
     The one streaming recipe for every digest owner: chunks arrive as
@@ -298,6 +309,48 @@ DIRECT_UTF8_INDENT2_STRICT = JsonProfile(
 DIRECT_ASCII_INDENT2_LAX = JsonProfile(
     "direct-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
     separators=(",", ": "), indent=2)
+
+
+class _CheckpointJsonEncoder:
+    """The inherited two-level partition, with the reader's own key error."""
+
+    def __init__(self, error: type[Exception]):
+        self.error = error
+
+    def iterencode(self, value: object) -> Iterable[str]:
+        return self._chunks(value, 0)
+
+    def _chunks(self, value: object, depth: int):
+        encode = DIRECT_UTF8_STRICT._encoder().encode
+        if depth >= 2 or not isinstance(value, (dict, list)):
+            yield encode(value)
+            return
+        if isinstance(value, dict):
+            yield "{"
+            for index, key in enumerate(sorted(value)):
+                if not isinstance(key, str):
+                    raise self.error("checkpoint identity has a non-string key")
+                yield ("," if index else "") + encode(key) + ":"
+                yield from self._chunks(value[key], depth + 1)
+            yield "}"
+        else:
+            yield "["
+            for index, item in enumerate(value):
+                if index:
+                    yield ","
+                yield from self._chunks(item, depth + 1)
+            yield "]"
+
+
+def checkpoint_json_sha256(value: object, *, error: type[Exception] = ValueError) -> str:
+    """Strict direct UTF-8 JSON, partitioned at depth two without normalization.
+
+    Shallow dict keys must be strings; deeper leaves retain the stdlib direct
+    encoder's acceptance and errors. The caller supplies its existing key-error
+    class. Chunk boundaries, first-error order and UTF-8 error positions stay
+    with this inherited checkpoint profile rather than a whole-graph precheck.
+    """
+    return _stream_sha256(_CheckpointJsonEncoder(error), value)
 
 
 def canonical_pickle_bytes(value: object) -> bytes:
