@@ -463,9 +463,11 @@ def tessera_served_wire_recipe(
     (:func:`tessera_served_route_refusal`).
 
     ``refuse_unattested=False`` resolves the same wire without the refusal,
-    for a reader that recomputes an existing receipt's identity rather than
-    planning a new encode: the receipt is checked against the wire it was
-    stamped on, and whether that wire serves is the planner's question.
+    for a reader that recomputes an existing receipt's identity or a spec
+    query that reports producer eligibility rather than planning a new
+    encode. The receipt is checked against the wire it was stamped on, and
+    the spec's independent eligibility gate reports whether the route is
+    admitted. Planning a served encode retains the default refusal.
     """
     spec = get_tessera_family(family)
     if structure is None:
