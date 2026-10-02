@@ -927,7 +927,8 @@ def _observation_lane(value, where) -> KernelLane:
     return KernelLane(symbol, decoder)
 
 
-def _observation_context(payload: Mapping, where: str) -> ShapeRuntimeContext:
+def _observation_context(payload: Mapping, where: str, *, scope: Mapping,
+                         scope_where: str) -> ShapeRuntimeContext:
     runtime = _object(payload, _OBSERVATION_RUNTIME, where)
     serve_flags = runtime["serve_flags"]
     if (not isinstance(serve_flags, dict)
@@ -950,11 +951,11 @@ def _observation_context(payload: Mapping, where: str) -> ShapeRuntimeContext:
         execution_mode=runtime["execution_mode"],
         residency=runtime["residency"],
         batch_size=1,
-        regimes=_observation_regimes(payload),
+        regimes=_observation_regimes(scope, scope_where),
     )
 
 
-def _observation_regimes(_payload: Mapping) -> tuple[int, ...]:
+def _observation_regimes(scope_payload: Mapping, where: str) -> tuple[int, ...]:
     """The M the observation's own scope names, as the one measured regime.
 
     The producer times one operator apply at a single M; PQ declares exactly
@@ -962,9 +963,9 @@ def _observation_regimes(_payload: Mapping) -> tuple[int, ...]:
     :meth:`ShapeRuntimeTable.lookup` for an unmeasured regime gets ``None`` --
     a gap, never a fabricated number.
     """
-    scope = _object(_payload.get("scope"), _OBSERVATION_SCOPE, "observation.scope")
-    shape = _object(scope["shape"], ("M", "N", "K"), "observation.scope.shape")
-    return (_integer(shape["M"], "observation scope M", 1),)
+    scope = _object(scope_payload, _OBSERVATION_SCOPE, where)
+    shape = _object(scope["shape"], ("M", "N", "K"), where + ".shape")
+    return (_integer(shape["M"], where + " M", 1),)
 
 def _read_json_bound(reader: ArtifactReader, binding, where: str) -> Mapping:
     return reader.json(binding, where)[1]
@@ -1057,8 +1058,11 @@ def _verify_observation(observation: Mapping) -> dict:
         raise ShapeRuntimeError("observation preflight bindings differ from its panel")
     if panel.get("runtime") != expected_runtime:
         raise ShapeRuntimeError("observation expected runtime differs from the panel runtime")
-    context = _observation_context(expected_runtime, "observation.expected_runtime")
-    observed = _observation_context(panel["runtime"], "observation.panel.runtime")
+    scope_doc = _object(top["scope"], _OBSERVATION_SCOPE, "observation.scope")
+    context = _observation_context(expected_runtime, "observation.expected_runtime",
+                                   scope=scope_doc, scope_where="observation.scope")
+    observed = _observation_context(panel["runtime"], "observation.panel.runtime",
+                                    scope=scope_doc, scope_where="observation.scope")
     if context != observed:
         raise ShapeRuntimeError("observation runtime context differs from the panel runtime")
     claims = panel.get("claims", top["claims"])
