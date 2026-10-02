@@ -737,20 +737,22 @@ remote-code execution, cold shard hashing or the broader worker header audit.
 No new cache, format, numerical method, export wire, runtime pin, pipeline
 default or serving gate; CPU regressions are not model/GPU qualification.
 
-Re-stamped 2026-10-01 (PQ #1888): the reviewed PrismaBuild reader and
-client SDK pin is `95a59051d48cda82eea7927f31870c6c862d7174` (PB #1402),
-with exact SDK version 3. The existing sealed-root resolver, test-only
+Re-stamped 2026-10-02 (Refs PQ #1293, PB #1453): the reviewed PrismaBuild
+reader and client SDK pin is `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`,
+with exact SDK version 4. The existing sealed-root resolver, test-only
 Git/RECORD-qualified installed injection, and same-package import checks
-remain authoritative; SDK1/2 and unknown versions refuse, with no shim.
-Produced-output fixtures use SDK3 source bundles through their existing
-pin schemas. Their pinned files match the staged
-`5aca8ee9323c-1790835144-b584825fe9d4` generation; staging/source equivalence
-is not runtime activation. Activation belongs to pb-sched at a row boundary
-after this PQ pin merges, independently of CPU reader/SDK receipts.
-No Tessera pin, numerical kernel, export wire, pipeline default or measured
-speed result changes. The paired DL380 CPU interpreter is
-`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python`; old interpreters
-remain untouched. Commands and verification are in PR #1900.
+remain authoritative; SDK1/2/3 and unknown versions refuse, with no shim.
+SDK4 adds the public selected-action result reader and standard-capture
+command binder. Historical produced-output fixtures keep their recorded
+source bundles and pin schemas; fixture history does not choose the current
+client. The reviewed SDK4 source bundle is
+`/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk4-20261002/dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
+The separately provisioned DL380 CPU interpreter is
+`/home/rob/venvs/pq-pbdc4803da-tessera-b40c93cb/bin/python`, a non-editable
+Git install of that PB commit and the unchanged Tessera b40c93cb pin.
+SDK installation and source review do not establish fleet runtime activation;
+the published worker generation remains independent. This dependency move
+makes no numerical, wire, pipeline-default, serving or speed claim.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
