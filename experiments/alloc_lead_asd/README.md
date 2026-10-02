@@ -105,3 +105,68 @@ values/dtypes and logits in both FP32/BF16, plus refusal of a missing
 checkpoint parameter. Exit 0 and cleanup complete. Source parent
 `a9684ac44d8e5e0c76ff204b918f4175c18f8941`; CAS receipt
 `376c4302977d7f7f5d573d7a40596338990a40abf1f58efb02c6f2d03d9b7d47`.
+
+## Qualified small-model result, 2026-10-02
+
+The recovered v2 diagnostic failed its required BF16 lease crosscheck in
+action `a2ad67617ebbe6679157a20ba8c2a9311188f5b179cbc4251a9afde472d9e6de`:
+maximum difference/RMS was 8.58% for A and 5.10% for W. Its FP32 leg completed
+and was retained, not rerun. A same-graph, same-probe control then separated
+cotangent production from contraction arithmetic:
+
+- Ordinary backward: 190/196 units changed their cotangents even between
+  two `backward()` calls on the same graph/scalar. Every hook ran exactly
+  once; clones excluded retained alias mutation. Fixed-g FP32 operator and
+  output-space contractions agreed within 3.80e-6 relative RMS. Trace events
+  identified actual BF16 FlashAttention backward kernels.
+- Strict deterministic backward: every cotangent became bitwise identical
+  across `grad`, `backward`, and repeated `backward`, for both probes.
+  The resulting API projection difference was exactly zero; fixed-g
+  contractions agreed within 4.74e-6. The trace still used FlashAttention.
+
+Controls were PB `773eebb6edfcc8b6193781dc09562754c9957dad238e8522caed2d6084d92f91`
+and `30f0312ae001d194e0f3ffa6b6c2fc1edeae2ffa21988f28eb59c72963792498`,
+both exit 0 and cleanup complete. Their CAS receipts are respectively
+`78f1717a52be97a41e7eb3d5b6a8eb960e99e3fb30953c0b9a409856d90b7404`
+and `c67f315b97dcd99c4a20f5088f0ff47f6d84499ffd33bd162913e1c11116b307`.
+This localizes the diagnostic discrepancy to nondeterministic backward;
+it does not establish GLM's factor-seven cause.
+
+The correction is opt-in and diagnostic-only: `backward_policy` enables
+strict deterministic algorithms around pricing autograd calls and restores
+the prior enabled/warn-only flags in `finally`. Forward/probe construction
+and the production estimator remain unchanged. The BF16-only completion
+reused the banked FP32 result with this explicit backward-policy difference:
+
+| Term | FP32 full price | BF16 strict-backward full price | Paired sequence-diagonal BF16/FP32 ratio, screen 95% CI |
+| --- | ---: | ---: | --- |
+| A all | 0.0112950816 | 0.0107347344 | 0.9662 [0.9233, 1.0179] |
+| A without position zero | 0.0110305633 | 0.0104136215 | 0.9644 [0.9237, 1.0129] |
+| W4 all | 0.2101098709 | 0.2094051954 | 0.9949 [0.9873, 1.0035] |
+
+The FP32 A-all KL is 0.0104800690; KL/full-price is 0.9278. The FP32
+KL/sequence-diagonal-price ratio is 0.9635 [0.8968, 1.0379]. BF16's own
+forward-differenced KL is not substituted for that reference. Four sequences
+and eight probes are a mechanism screen; these 4,000 paired bootstrap draws
+describe only the observed sequence set with fixed probes, not domain-wide
+uncertainty. There was no net positive BF16 excess, so a top-five positive
+excess concentration share is not applicable. H9's generic BF16-inflation
+mechanism is negative on this screen; GLM H7/H10 remain open.
+
+BF16 completion `cec83e225733784fd80235019c01fd3d6b1ec4ce2c6c7662b13c82918aeb1400`
+ran source `1127ff021eb243856d41fe5918f24f1fb62d4db3`, exit 0, cleanup
+complete, CAS receipt
+`7d803aa1efe1d3e0c597d49eb8f91e0dde73db586ced0b5b4272c86cd5b6c5e8`.
+Its lease-v2 crosscheck is within 4.54e-6 and its repeated-clean-forward
+null gate is bitwise equal. CPU comparison plus exceptional flag restoration
+passed action `5ee8292b34821a3955362d6bccd26b39ac1cce648d28824436a14e07dcbc9b96`,
+CAS receipt `d6335611f6fe6afea1db2c69a12308adddca323cf5ed62f7ea530f2ccd912c27`.
+Compilation of nine touched/diagnostic modules passed action
+`f7be838f9ad8155e5af2da8d54d7deabe573426fa2c7bd60541cf122b335d9b3`.
+
+All payloads/terminal records were read; source parents, return codes and
+cleanup were checked. Outputs and Torch traces are under the shared root
+above in `pair2`, `control1`, `control2-deterministic`, `bf16-complete3`.
+Aligned both-box Netdata windows are in `netdata-*-aligned`. These runs used
+ordinary exclusive GPU admission and ambient CPU load; profiles/telemetry
+are contextual evidence, with no timing or throughput acceptance.
