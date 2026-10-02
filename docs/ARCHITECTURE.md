@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PR #2046, Refs #1504): a context-scoped Tessera
+format query resolves the producer's wire for its descriptor and price, then
+reports the existing producer-eligibility gate's answer. A valid unattested
+rung returns `producer_eligible=False` instead of raising during recipe
+resolution. Invalid structures still raise. Planning and rendering a served
+wire retain the existing strict refusal; pins, menus and serving/export gates
+are unchanged.
+
 Re-stamped 2026-10-02 (Refs #1492, explicit head I/O width): the existing
 ordered head-walk driver accepts an explicit `head_walk_workers` plan input,
 `--head-walk-workers` in the selected-cache CLI, or the existing environment

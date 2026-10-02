@@ -91,9 +91,49 @@ def test_declared_production_structure_map_cannot_silently_fall_back(mapping):
             levers={"tessera_weights_only": True, "tessera_structure_by_unit": mapping})
 
 
-def test_dense_unattested_plan_refuses_before_encoding():
+@pytest.mark.parametrize("operation", ["plan", "encode", "render", "production"])
+def test_dense_unattested_plan_and_render_refuse_before_encoding(operation, monkeypatch):
+    def unexpected_plan(*_args, **_kwargs):
+        pytest.fail("an unattested dense wire reached the encoder plan")
+
+    monkeypatch.setattr(render, "_plan", unexpected_plan)
     with pytest.raises(TesseraRouteRefused, match="dense"):
-        render.planned_wire_facts(FAMILY, RUNG, structure="dense")
+        if operation == "plan":
+            render.planned_wire_facts(FAMILY, RUNG, structure="dense")
+        elif operation == "encode":
+            render._encode_planned_unit(_weight(), NAME, structure="dense")
+        elif operation == "render":
+            render.render_tessera_weight(_weight(), NAME, structure="dense")
+        else:
+            render.render_tessera_production(
+                _weight(), NAME, qname="dense.down", activations=None,
+                levers={"tessera_weights_only": True,
+                        "tessera_structure_by_unit": {"dense.down": "dense"}})
+
+
+def test_unattested_scoped_spec_reports_ineligibility_and_preserves_wire_price(monkeypatch):
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "attested")
+    context = ServingContext("sm_121", "dense", "resident",
+                             "fixture@sha256:" + "a" * 64, "eager")
+    name = "TESSERA_E2M1_K2_R512"
+    family, rung = parse_tessera_format_name(name)
+    spec = render.synthesize_tessera_spec(name, serving_context=context)
+    assert spec.producer_eligible is False
+    wire = tessera_served_wire_recipe(
+        family, rung, structure="dense", refuse_unattested=False)
+    price = tessera_tensor_payload_breakdown(
+        SHAPE, family=family, body_rate_q256=rung, recipe=wire)
+    assert spec.memory_bytes_for_shape(SHAPE) == price["total_bytes"]
+
+
+@pytest.mark.parametrize("structure", ["routed-moe", [], 0])
+@pytest.mark.parametrize("explicit_recipe", [False, True])
+def test_spec_query_does_not_mask_invalid_structure(structure, explicit_recipe):
+    context = SimpleNamespace(structure=structure)
+    with pytest.raises(ValueError, match="structure"):
+        render.synthesize_tessera_spec(
+            NAME, serving_context=context,
+            recipe=_served() if explicit_recipe else None)
 
 
 def test_structure_free_and_explicit_research_recipe_are_preserved():
