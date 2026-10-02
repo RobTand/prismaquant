@@ -75,6 +75,18 @@ Legacy descriptor/recording JSON reads retain their existing semantics.
 Automatic capture admission stays closed. This bounded integrity correction
 adds no source generation, provider eligibility, GPU or capture qualification.
 
+Re-stamped 2026-10-02 (Refs PQ #1086): explicit constructor-only
+`StageBReplaySpill(packed_records=True)` stores probe-0 firing metadata in
+six uint64 fields with fixed window roster IDs and interned complete layouts.
+The existing tuple interface preserves order, entry/offset/length checks,
+shape/stride and address residues; every window refuses records beyond the
+existing conservative layer part bound, including empty operands. The default
+list storage, spill bytes, checksum gates, replay arithmetic, cache, pipeline
+and serving contracts are unchanged. This research option has CPU operand,
+order and corruption checks; a synthetic 867-target metadata stress measures
+only its table, not GLM routing, full read-plan memory or GPU performance.
+Representative proxy arithmetic and production profiling remain under #1086.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
