@@ -57,3 +57,17 @@ Only the bounded #1986 namespace/import criteria are proposed for closure after
 Astra acceptance. #1588's actual reconciliation/compatibility/resource/missing14
 prices/all42 qualification and #1842 remain open. Existing legacy absent-contract
 behavior, seed/checkpoint/journal gates and all raw failed evidence are retained.
+
+
+## Append: publication race correction
+
+Astra review found that metadata publication used pathname parents after symlink
+preflight. A swapped fresh root or row parent could receive foreign metadata
+before later admission refused. Both causal PB regressions fail on the retained
+pre-fix source; their terminal records are retained in the external evidence directory.
+The shared `cost_stage_checkpoint.publish_new_bytes` now offers opt-in no-follow
+directory-descriptor publication. Namespace metadata opts in; existing callers keep
+their defaults. The same admitted parent anchors staging/link/cleanup/fsync, with
+exclusive independent stages for concurrent identical callers. The final affected
+publisher/namespace gate supersedes the earlier 176-pass source for acceptance;
+the earlier result remains valid historical evidence, not qualification of this fix.

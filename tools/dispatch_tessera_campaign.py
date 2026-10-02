@@ -151,7 +151,7 @@ def publish_namespace_requests(rows: list[dict]) -> None:
         if path.exists() and path.read_bytes() != payload:
             raise RuntimeError("namespace existing publication bytes differ")
     for path, payload in payloads:
-        if not publish_new_bytes(path, payload) and path.read_bytes() != payload:
+        if not publish_new_bytes(path, payload, nofollow=True) and path.read_bytes() != payload:
             raise RuntimeError("namespace concurrent publication bytes differ")
     for row in rows:
         establish_namespace_temporaries(row)

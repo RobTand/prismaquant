@@ -736,3 +736,26 @@ def test_publication_parent_symlink_race_cannot_write_foreign_metadata(tmp_path,
         dispatch.publish_namespace_requests(rows)
     assert swapped, "the publication boundary was exercised"
     assert list(foreign.iterdir()) == [], "publication wrote through the raced parent symlink"
+
+
+def test_publication_concurrent_identical_callers_preserve_no_clobber(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from prismaquant import cost_stage_checkpoint as checkpoint
+
+    rows = prepared(tmp_path)
+    first_publication = Barrier(2)
+    publish = checkpoint.publish_new_bytes
+
+    def both_preflights_complete(path, payload, **kwargs):
+        if path.name == "namespace.json":
+            first_publication.wait(timeout=10)
+        return publish(path, payload, **kwargs)
+
+    monkeypatch.setattr(checkpoint, "publish_new_bytes", both_preflights_complete)
+    with ThreadPoolExecutor(max_workers=2) as callers:
+        futures = [callers.submit(dispatch.publish_namespace_requests, rows) for _ in range(2)]
+        for future in futures:
+            future.result(timeout=20)
+    namespace.require_namespace_publication(rows[0])
+    assert not list((tmp_path / "new").rglob("*.tmp*"))

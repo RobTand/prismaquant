@@ -23,6 +23,11 @@ objects before Docker inspection; source-package precedence and legacy unguarded
 selection remain unchanged. This declared-path admission does not freeze host
 source/model bytes: a read-only bind mount is not immutable-generation evidence.
 Dynamic import hooks and container ABI resolution remain outside this CPU proof.
+Namespace metadata publication opts into the existing shared no-clobber publisher's
+no-follow mode. Every parent is opened or created through directory descriptors;
+staging, hard-link publication, cleanup and directory fsync stay relative to that
+same admitted parent. A parent replaced by a symlink after preflight cannot redirect
+metadata writes. Legacy publisher callers retain the existing default path behavior.
 No contract means unchanged legacy behavior. This
 metadata-only CPU slice does not verify completion evidence or input bytes,
 rederive resource demand, prove legacy/current runtime compatibility, adopt
