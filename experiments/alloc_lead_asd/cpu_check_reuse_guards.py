@@ -12,6 +12,18 @@ from experiments.alloc_lead_asd import a_side_diag as diagnostic
 
 
 class ReuseGuards(unittest.TestCase):
+    def test_unbound_partial_cannot_resume_under_a_mutable_model_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'partial.pt'
+            identity = {'model': 'mutable-checkpoint', 'dtype': 'float32'}
+            torch.save({'identity': identity, 'done': 1, 'comps': torch.ones(3, 1, 2, 1)}, path)
+            with self.assertRaisesRegex(SystemExit, 'partial resume is unsupported'):
+                diagnostic.load_partial(str(path), identity)
+
+    def test_absent_partial_starts_a_fresh_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(diagnostic.load_partial(str(Path(directory) / 'absent.pt'), {}))
+
     def test_foreign_pricing_cannot_publish_decision_numbers(self):
         model = torch.nn.Module()
         model.model = torch.nn.Module()
