@@ -1,5 +1,40 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (PQ #1986, Refs #1588), integrated on
+`sol/pq1986-integrated-20261002` from current main and the preserved component commits. The opt-in campaign namespace preparation API extends the
+existing dispatcher, without a new scheduler or CLI: a complete hash-keyed
+reconciliation roster explicitly selects unfinished requests and independently
+supplied evidence/readset/dependency expectations bind each digest-keyed row.
+Reviewed baseline and executed full commits remain distinct. Owned output and
+cache/temp destinations are deterministic; shared no-clobber publication admits
+only identical ownership/request bytes on resume. The container adapter checks
+publication, command/environment, paths and the committed full executed source
+before Docker inspection. Guarded import resolution must reach that actual
+checkout, not a defaulted or image-only root. Every owned output/cache/temp path
+requires a writable identity-mapped persistent mount. Path-valued input references
+must be canonical before overlap checks, without reading their artifacts. After
+ownership publication/admission, descriptor-anchored no-follow directory creation
+establishes writable TMPDIR/TMP/TEMP destinations; preparation remains write-free.
+Every mount source and target passes the shared canonical absolute-path grammar
+before containment or writable coverage comparisons, including refusal of leading
+`//`. Opt-in guarded import selection conservatively refuses earlier mounted
+source modules, sourceless bytecode/package initializers and native-looking shared
+objects before Docker inspection; source-package precedence and legacy unguarded
+selection remain unchanged. This declared-path admission does not freeze host
+source/model bytes: a read-only bind mount is not immutable-generation evidence.
+Dynamic import hooks and container ABI resolution remain outside this CPU proof.
+Namespace metadata publication opts into the existing shared no-clobber publisher's
+no-follow mode. Every parent is opened or created through directory descriptors;
+staging, hard-link publication, cleanup and directory fsync stay relative to that
+same admitted parent. A parent replaced by a symlink after preflight cannot redirect
+metadata writes. Legacy publisher callers retain the existing default path behavior.
+No contract means unchanged legacy behavior. This
+metadata-only CPU slice does not verify completion evidence or input bytes,
+rederive resource demand, prove legacy/current runtime compatibility, adopt
+seeds, submit rows, or qualify prices/serving/GPU recovery. Existing campaign
+seed, checkpoint and journal gates, caches, pins, formats and ship gates remain
+unchanged. Gate: `tests/test_tessera_campaign_namespace_1986.py`.
+
 Re-stamped 2026-10-02 (Refs #1992, DSv4 CPU fixture family): the real
 vendored rope, model-walk, grouped-Fisher and compressor-layout tests use the
 existing item-level `own_process` boundary in mixed-file sessions. Unsupported
