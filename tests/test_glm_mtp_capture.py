@@ -473,8 +473,8 @@ def mtp_source(request, tmp_path, monkeypatch):
 
     The MTP layer is stored in float32 unless the test asks for another dtype
     (``indirect`` parametrization). A ``{"dtype": ..., "wide": True}``
-    parameter widens the model to 256-column Linears, the narrowest a Tessera
-    superblock encodes, for a test that prices through the real producer."""
+    parameter widens the model to 256-column Linears, a complete Tessera
+    superblock width; CHANNEL-plane encodes also admit narrower units."""
     param = getattr(request, "param", torch.float32)
     mtp_dtype, wide = ((param["dtype"], param.get("wide", False))
                        if isinstance(param, dict) else (param, False))

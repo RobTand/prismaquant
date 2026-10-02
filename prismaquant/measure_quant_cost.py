@@ -1257,32 +1257,45 @@ def derive_per_expert_activations(
                     parent_mod, "e_score_correction_bias", None),
                 expert_bias=getattr(parent_mod, "expert_bias", None),
             )
-        expert_mask = F.one_hot(
-            top_k_index.to(torch.long), num_classes=num_experts).permute(2, 1, 0)
-    gate_up_list: list[torch.Tensor] = []
+        top_k_index = top_k_index.to(torch.long)
+        order, counts = _routed_pair_order(top_k_index, num_experts)
+    n_tokens = int(top_k_index.size(0))
+    # ``order`` lists the routed (top-k slot, token) pairs grouped by expert,
+    # each group in the row-major order ``torch.where(one_hot(...)[e])``
+    # yields. Subsampling permutes and truncates a group exactly as the
+    # per-expert loop did: same generator, same seed, same row order.
+    kept = list(counts)
+    if max_rows_per_expert is not None and any(n > max_rows_per_expert for n in counts):
+        pieces = []
+        start = 0
+        for e, n in enumerate(counts):
+            group = order[start:start + n]
+            start += n
+            if n > max_rows_per_expert:
+                gen = torch.Generator(device=dev).manual_seed(subsample_seed + e)
+                keep = torch.randperm(n, device=dev, generator=gen)[:max_rows_per_expert]
+                group = group[keep]
+                kept[e] = int(group.size(0))
+            pieces.append(group)
+        order = torch.cat(pieces)
+    token_idx = order % n_tokens if n_tokens else order
+    top_k_pos = order // n_tokens if n_tokens else order
+    # One gather for every expert's rows and one for their router weights;
+    # the per-expert outputs are views split from them, with no host sync.
+    gate_up_list = list(Xf[token_idx].split(kept))
+    gw_list = list(top_k_weights[token_idx, top_k_pos].split(kept))
     down_list: list[torch.Tensor] = []
-    gw_list: list[torch.Tensor] = []
-    counts: list[int] = []
-    for e in range(num_experts):
-        top_k_pos, token_idx = torch.where(expert_mask[e])
-        n = int(token_idx.numel())
-        counts.append(n)
+    for e, n in enumerate(counts):
         if n == 0:
-            gate_up_list.append(torch.empty(0, hidden, device=dev, dtype=dt))
-            gw_list.append(torch.empty(0, device=dev, dtype=dt))
+            # The empties keep the dtype the per-expert loop gave them.
+            gate_up_list[e] = torch.empty(0, hidden, device=dev, dtype=dt)
+            gw_list[e] = torch.empty(0, device=dev, dtype=dt)
             if capture_down:
                 down_list.append(torch.empty(0, inter, device=dev, dtype=dt))
             continue
-        if max_rows_per_expert is not None and n > max_rows_per_expert:
-            gen = torch.Generator(device=dev).manual_seed(subsample_seed + e)
-            keep = torch.randperm(n, device=dev, generator=gen)[:max_rows_per_expert]
-            token_idx, top_k_pos = token_idx[keep], top_k_pos[keep]
-        Xe = Xf[token_idx]
-        gate_up_list.append(Xe)
-        gw_list.append(top_k_weights[token_idx, top_k_pos])
         if capture_down:
             with torch.no_grad():
-                gate_up = F.linear(Xe, gate_up_w[e])
+                gate_up = F.linear(gate_up_list[e], gate_up_w[e])
                 if callable(apply_gate):
                     di = apply_gate(gate_up)
                 elif act_fn is not None:
@@ -1294,6 +1307,32 @@ def derive_per_expert_activations(
             down_list.append(di)
     return {"gate_up": gate_up_list, "down": down_list,
             "gate_weights": gw_list, "row_counts": counts}
+
+
+def _routed_pair_order(
+    top_k_index: torch.Tensor, num_experts: int,
+) -> tuple[torch.Tensor, list[int]]:
+    """Group the routed (top-k slot, token) pairs by expert in one pass.
+
+    ``top_k_index`` is ``[tokens, top_k]``. Returns ``(order, counts)``:
+    ``order`` holds flat pair indices ``slot * tokens + token``, stably
+    sorted by expert, so expert ``e``'s group is in the row-major (slot,
+    token) order ``torch.where(F.one_hot(top_k_index).permute(2, 1, 0)[e])``
+    yields. ``counts[e]`` is the group size. The only host sync is the one
+    ``.tolist()`` that reads the counts; the per-expert ``torch.where`` this
+    replaces synced once per expert (PQ #1931).
+    """
+    pair_expert = top_k_index.t().reshape(-1)
+    invalid = ((pair_expert < 0) | (pair_expert >= num_experts)).sum().view(1)
+    order = torch.argsort(pair_expert, stable=True)
+    counts_t = torch.zeros(num_experts, dtype=torch.long, device=pair_expert.device)
+    counts_t.index_add_(0, pair_expert.clamp(0, num_experts - 1),
+                        torch.ones_like(pair_expert))
+    host = torch.cat([counts_t, invalid]).tolist()
+    if host[-1]:
+        raise ValueError(
+            f"router returned {host[-1]} expert indices outside [0, {num_experts})")
+    return order, host[:-1]
 
 
 def _packed_expert_activation_quantizer(spec: fr.FormatSpec):

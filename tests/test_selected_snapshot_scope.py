@@ -239,6 +239,82 @@ def test_failed_snapshot_configuration_preserves_source_maps(monkeypatch):
     assert context.estimated_layer_bytes == 4
 
 
+def _exact_tensor_context():
+    import threading
+    from prismaquant.streaming_model import StreamingContext
+    context = object.__new__(StreamingContext)
+    context.source_snapshot_only = True
+    context._inflight, context._inflight_lock = {}, threading.Lock()
+    context.layers_prefix, context.num_layers, context.source_layers = 'layers.', 2, (0, 1)
+    context.weight_ckpt = {name: name for name in (
+        'layers.0.fn', 'layers.0.gate.bias', 'layers.1.fn', 'lm_head.weight')}
+    context.weight_shard = {name: 'sealed-source' for name in context.weight_ckpt}
+    context.dtype, context.buffer_dtypes = torch.bfloat16, {}
+    context.source_fp4_experts, context.source_authentication = False, object()
+    context.estimated_layer_bytes = 99
+    return context
+
+
+@pytest.mark.parametrize('keys,layers', [
+    ((), (0,)), (('layers.0.fn', 'layers.0.fn'), (0,)),
+    (('layers.0.missing',), (0,)), (('lm_head.weight',), (0,)),
+    (('layers.1.fn',), (0,)), (('layers.0.fn',), ()),
+    (('layers.0.fn',), (2,)), (('layers.0.fn',), (True,)),
+])
+def test_exact_snapshot_selection_refuses_before_header_read(monkeypatch, keys, layers):
+    from prismaquant import streaming_model as sm
+    context = _exact_tensor_context()
+    before = context.weight_shard.copy(), context.weight_ckpt.copy()
+    monkeypatch.setattr(sm, '_estimate_layer_cache_bytes',
+                        lambda **_kw: pytest.fail('invalid selection read a header'))
+    with pytest.raises((ValueError, RuntimeError)):
+        context.configure_selected_source_tensors(keys, layers=layers)
+    assert (context.weight_shard, context.weight_ckpt) == before
+    assert context.estimated_layer_bytes == 99
+    assert getattr(context, '_snapshot_source_keys', None) is None
+
+
+def test_exact_snapshot_selection_non_linear_state_and_failure_rollback(monkeypatch):
+    from prismaquant import streaming_model as sm
+    context = _exact_tensor_context()
+    before = context.weight_shard.copy(), context.weight_ckpt.copy()
+    keys = ('layers.0.gate.bias', 'layers.0.fn')
+    def failed(**kwargs):
+        assert context._inflight_lock.locked()
+        raise OSError('sealed header authentication refused')
+    monkeypatch.setattr(sm, '_estimate_layer_cache_bytes', failed)
+    with pytest.raises(OSError, match='authentication'):
+        context.configure_selected_source_tensors(keys, layers=(0,))
+    assert (context.weight_shard, context.weight_ckpt) == before
+    assert context.estimated_layer_bytes == 99
+    assert getattr(context, '_snapshot_source_keys', None) is None
+    def estimate(**kwargs):
+        assert context._inflight_lock.locked()
+        assert tuple(kwargs['weight_ckpt']) == tuple(sorted(keys))
+        assert kwargs['source_authentication'] is context.source_authentication
+        return 16, {0: 16}
+    monkeypatch.setattr(sm, '_estimate_layer_cache_bytes', estimate)
+    context.configure_selected_source_tensors(keys, layers=(0,))
+    assert context._snapshot_source_keys == tuple(sorted(keys))
+    assert context.estimated_layer_bytes == 16
+    with pytest.raises(RuntimeError, match='already'):
+        context.configure_selected_source_tensors(keys, layers=(0,))
+
+
+def test_exact_snapshot_selection_refuses_active_or_forward_context(monkeypatch):
+    from prismaquant import streaming_model as sm
+    monkeypatch.setattr(sm, '_estimate_layer_cache_bytes',
+                        lambda **_kw: pytest.fail('forbidden context read a header'))
+    context = _exact_tensor_context()
+    context._inflight[0] = object()
+    with pytest.raises(RuntimeError, match='already'):
+        context.configure_selected_source_tensors(('layers.0.fn',), layers=(0,))
+    context._inflight.clear()
+    context.source_snapshot_only = False
+    with pytest.raises(RuntimeError, match='source-only'):
+        context.configure_selected_source_tensors(('layers.0.fn',), layers=(0,))
+
+
 def test_selected_snapshot_walks_an_uncapped_layer_cache(tmp_path, monkeypatch):
     """A byte-bounded cache declares no slot cap, and the walk must still run.
 

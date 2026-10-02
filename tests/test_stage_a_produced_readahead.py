@@ -675,8 +675,9 @@ def test_read_ahead_given_up_first_is_the_group_read_last():
         ("boundary", 6, -1, 3), ("boundary", 7, -1, 0)]
 
 
+@pytest.mark.parametrize("wake_delay", [0.0, 0.2], ids=["on-time", "late-wake"])
 def test_a_reclaim_that_cannot_finish_ends_inside_the_reads_own_budget(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, wake_delay):
     """A reclaim is part of the group's staging, never a budget of its own."""
 
     import time
@@ -688,31 +689,52 @@ def test_a_reclaim_that_cannot_finish_ends_inside_the_reads_own_budget(
     monkeypatch.setattr(storage, "PRODUCED_DEFERRAL_POLL_S", 0.01)
     chain._write_group(storage)
     wanted = chain._write_group(storage, first=GROUP_SIZE, count=GROUP_SIZE - 1)
+    clock = {"now": 100.0}
+    funding = []
+    retirements = []
+    sleeps = []
 
     def never_funds(key, group, deadline=None):
+        funding.append(deadline)
+        # Funding spends part of the SAME half-second read budget before
+        # reclaim starts. A fresh reclaim budget would end at 100.7.
+        clock["now"] += 0.2
         raise _shortfall(group)
 
     def always_deferred(batch_id, **kwargs):
+        retirements.append(clock["now"])
         return chain._incomplete(deferred_own=["own-copy-in-flight"],
                                  entries_deferred=GROUP_SIZE)
 
-    with chain._fleet(q, tmp_path):
-        chain._strict(monkeypatch, env, pb_repo, q)
-        real_retire = publication.retire
+    def wake_after(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds + wake_delay
+
+    # Retirement is already controlled above: no mover is needed to say
+    # "still in flight". Keep the real owner funding/reclaim/expiry paths,
+    # and restore the clock before stopping its real background stager.
+    with monkeypatch.context() as controlled:
+        controlled.setattr(time, "monotonic", lambda: clock["now"])
+        controlled.setattr(time, "sleep", wake_after)
         monkeypatch.setattr(storage, "_produced_publish", never_funds)
         monkeypatch.setattr(publication, "retire", always_deferred)
         storage._produced_plan["staging_timeout_s"] = 0.5
-        started = time.monotonic()
         with pytest.raises(BoundaryProducedPublicationFailed):
             with storage.prefetch(wanted):
                 pass
-        assert time.monotonic() - started < 10.0, (
-            "the reclaim minted itself a budget the read never had")
+        assert funding == [100.5], funding
+        assert sleeps, "reclaim must actually wait for a deferred retirement"
+        assert retirements and all(at < 100.5 for at in retirements), (
+            "a retirement started after the read's deadline", retirements)
+        if wake_delay:
+            assert clock["now"] - wake_delay < 100.5, (
+                "reclaim restarted the budget before a delayed wake", clock)
+        else:
+            assert clock["now"] == pytest.approx(100.5), (
+                "reclaim minted itself a fresh half-second budget", clock)
+        assert clock["now"] >= 100.5
         assert any(entry.get("step") == "reclaim-credit"
                    for entry in storage._produced_release_errors)
-        storage._produced_plan["staging_timeout_s"] = 900.0
-        monkeypatch.setattr(publication, "retire", real_retire)
-        storage.settle_produced_releases()
 
 
 def test_another_groups_egress_is_not_the_failure_of_this_read(
