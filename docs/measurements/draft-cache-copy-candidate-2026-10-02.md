@@ -56,3 +56,27 @@ No derived image was built, no runtime/pin/default/gate moved, and no MTP or
 EAGLE load, GPU backend selection, acceptance, performance or energy was
 measured. The parent issue stays open for actual-image qualification or an
 upstream fix.
+
+## Current reviewed CPU environment
+
+Final clean-source action
+`a7d53544a8bd63bed6a2b9ead46c3e01dba4730056e8e77e2240e5fb77dbdc8e`
+passed all eight candidate cases and seven duplication/digest-ratchet checks
+(15 passed, zero skipped, exit 0). It used the coordinator's current
+`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python` on dl380g10;
+published pin preflight verified PB `95a59051d48cda82eea7927f31870c6c862d7174`
+and Tessera `b40c93cb73745097e57a1ba4cf5b9eee166c759a` plus RECORD/import
+ownership before collection. The request reserved two CPUs/4 GiB, native
+threads one, priority -10 and hard 180 seconds. CAS result
+`0c88527fc118e1044415f59748f0c4e623aa4d79eb4f47419f3aa0684b5a9b40`,
+5217 bytes; receipt
+`e4948263c1ecaf20e20d0210b301a6bff4826c6a062e4486606984353a14c5d8`.
+The source snapshot's parent is delivery commit
+`baf436b0598aedf6dba6206373cf33d94a2a14d2`; executable candidate/test bytes
+are unchanged from the earlier field-shape checks.
+
+The preceding `a87edfb4...` action is retained as failed: 14 passes and one
+digest-site ratchet failure exposed the owned temporary validation drivers
+still under `tools/`. They were banked with their original source evidence and
+removed from the delivered tree; the clean action above verifies the final
+source without those files. The ratchet or its baseline was not changed.
