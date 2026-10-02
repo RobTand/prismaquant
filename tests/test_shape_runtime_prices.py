@@ -705,7 +705,7 @@ def test_observation_refuses_tampered_or_unbound_fields(tmp_path, mutation):
         elif mutation == "family":
             doc["family"] = "TESSERA_FP8"
         elif mutation == "token":
-            doc["replay"]["tool_source_sha256"] = doc["producer"]["tool_source_sha256"]
+            doc["replay"]["tool_source_sha256"] = OBS_PRODUCER_TOOL
     obs = [tmp_path / "obs" / "observation.json"]
     if mutation == "duplicate":
         observation_fixture(tmp_path)

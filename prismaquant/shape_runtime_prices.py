@@ -1035,7 +1035,7 @@ def _verify_observation(observation: Mapping) -> dict:
         raise ShapeRuntimeError("observation.panel must be a measured shape-time panel")
     request = _read_json_bound(reader, top["request"], "observation.request")
     expected_runtime = _read_json_bound(reader, top["expected_runtime"], "observation.expected_runtime")
-    _read_json_bound(reader, top["contract"], "observation.contract")
+    reader.bytes(top["contract"], "observation.contract")
     evidence = _object(top["evidence"], _OBSERVATION_EVIDENCE, "observation.evidence")
     bound: dict[str, tuple[Path, bytes]] = {}
     for name in _OBSERVATION_EVIDENCE:
@@ -1285,6 +1285,9 @@ def _convert_eligibility(scope: "ShapeTableScope | None") -> "EligibilityTable |
     """
     if scope is None:
         return None
+    if scope.contract_sha256 != _pinned_contract_sha256():
+        raise ShapeRuntimeError(
+            f"expected scope contract {scope.contract_sha256} is not PQ's pinned contract")
     from .tessera_lane import allocation_shape_price_scope
     from .tessera_serving_scope import ServingTarget
     target = ServingTarget(platform=scope.platform, runtime_image=scope.runtime_image_digest,
@@ -1295,6 +1298,12 @@ def _convert_eligibility(scope: "ShapeTableScope | None") -> "EligibilityTable |
         raise ShapeRuntimeError(
             f"expected scope {scope} differs from the pinned runtime's own scope {live_scope}")
     return eligibility
+
+
+def _pinned_contract_sha256() -> str:
+    """PQ's tracked serving pin's contract digest, without importing a runtime."""
+    from .tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
+    return load_tessera_serving_runtime_pin().contract_sha256
 
 
 def main(argv: Sequence[str] | None = None) -> int:
