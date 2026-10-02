@@ -1858,6 +1858,37 @@ def _await_layer_readset(by_shard, *, source_authentication=None,
               "the read below decides", flush=True)
 
 
+class _SourceCopyCompletion:
+    """One existing reader's host aliases through its copy-stream event.
+
+    This is completion bookkeeping, not a source owner or residency cache.
+    A failed record/sync leaves the host list held by the exception frame.
+    """
+
+    def __init__(self, device, *, enabled):
+        self.device = torch.device(device)
+        self.enabled = bool(enabled) and self.device.type == 'cuda'
+        self.host_staging = []
+        self.cuda_copied = False
+
+    def retain(self, tensor):
+        if self.enabled and tensor.device.type == 'cpu':
+            self.host_staging.append(tensor)
+
+    def observed(self, tensor):
+        self.cuda_copied |= tensor.device.type == 'cuda'
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.enabled and self.cuda_copied:
+            event = torch.cuda.Event()
+            event.record(torch.cuda.current_stream(self.device))
+            event.synchronize()
+        self.host_staging.clear()
+
+
 def _read_layer_to_device(prefix: str,
                           model_to_shard: dict[str, str],
                           model_to_ckpt: dict[str, str],
@@ -1924,39 +1955,24 @@ def _read_layer_to_device(prefix: str,
             used_direct = False
         # This existing read chunk owns its mmap-backed/converted staging
         # through one stream event, rather than retaining it for the layer.
-        host_staging = []
-        cuda_copied = False
-        try:
+        with _SourceCopyCompletion(device, enabled=release_pages) as copies:
             with f_ctx as f:
                 for model_name, ckpt_name in pairs:
                     t = f.get_tensor(ckpt_name)
-                    cuda_copied |= t.device.type == 'cuda'
-                    if release_pages and t.device.type == 'cpu':
-                        host_staging.append(t)
+                    copies.observed(t)
+                    copies.retain(t)
                     _require_fp8_scale(model_name, t, fp8_scale_inv_map)
                     if (t.is_floating_point()
                             and not _is_fp8_scaled_tensor(
                                 model_name, fp8_scale_inv_map)):
                         t = t.to((buffer_dtypes or {}).get(model_name, dtype))
                     if not used_direct:
-                        if release_pages and t.device.type == 'cpu':
-                            host_staging.append(t)
+                        copies.retain(t)
                         t = t.to(device, non_blocking=True)
-                        cuda_copied |= t.device.type == 'cuda'
+                        copies.observed(t)
                     if not t.is_contiguous():
                         t = t.contiguous()
                     local[model_name] = t
-        finally:
-            if release_pages and cuda_copied:
-                # Fence this chunk's stream through its final transfer, even
-                # when a later source read fails. Do not fence the device or
-                # wait for unrelated work queued after this event.
-                # If record/sync fails, the propagated traceback retains
-                # this chunk's staging; completion has not been proven.
-                event = torch.cuda.Event()
-                event.record(torch.cuda.current_stream(device))
-                event.synchronize()
-            host_staging.clear()
         if release_pages and local and all(t.device.type == 'cuda' for t in local.values()):
             # Reached only on a successful chunk: its map is closed, copies
             # completed and CPU views released. Other readers may still run.
