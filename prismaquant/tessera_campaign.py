@@ -59,6 +59,8 @@ cannot mistake output MSE for measured joint AURA.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import argparse
 import re
 import functools
@@ -4533,11 +4535,11 @@ def _campaign_layer_scope(names, layer_stride: int) -> list[str]:
     """The same explicit layer scope for supported and unsupported units."""
     if layer_stride <= 1:
         return list(names)
-    import re
+    from .qnames import DOTTED_LAYER_QNAME
 
     selected = []
     for name in names:
-        match = re.search(r"\.layers\.(\d+)\.", name)
+        match = DOTTED_LAYER_QNAME.search(name)
         if match is None or int(match.group(1)) % layer_stride == 0:
             selected.append(name)
     return selected
@@ -4582,15 +4584,29 @@ def campaign_roster(linear_names, profile, *, allow_pinned=None,
     scoped campaign over units the body campaign does not price (GLM
     attention). A token that lifts nothing refuses, so a misspelled token
     cannot shrink the roster silently.
+
+    An explicit head token uses the existing fixed-head alias policy to lift
+    that one unit (PQ #1949). This declares a research census/capture roster,
+    not a head serving route or a joint-cost measurement. Default head
+    exclusion, profile pins and independent export admission remain unchanged.
     """
-    from .fixed_head import parse_allow_pinned
+    from .fixed_head import (
+        allow_pinned_lifts_lm_head, is_lm_head_name, parse_allow_pinned,
+    )
 
     tokens = parse_allow_pinned(allow_pinned)
     if pinned_roster_only and not tokens:
         raise ValueError("--pinned-roster-only requires --allow-pinned")
     extra = profile.probe_linear_exclude_extra()
+    head_tokens = tuple(token for token in tokens
+                        if allow_pinned_lifts_lm_head(profile, (token,)))
     dense, pinned, lifted, used = [], [], [], set()
     for name in linear_names:
+        if head_tokens and is_lm_head_name(name, profile):
+            used.update(head_tokens)
+            lifted.append(name)
+            dense.append(name)
+            continue
         if name.endswith("lm_head") or "embed" in name:
             continue
         if profile.is_pinned_name(name) or (extra and re.search(extra, name)):
@@ -4920,12 +4936,13 @@ def _check_projected_unit(name, unit, *, live, model_path, source,
 class _UnitCheck:
     """One unit's comparison: decided on the host, or a device flag to read later."""
 
-    __slots__ = ("description", "differs", "flag")
+    __slots__ = ("description", "differs", "flag", "pinned")
 
-    def __init__(self, description, *, differs=None, flag=None):
+    def __init__(self, description, *, differs=None, flag=None, pinned=None):
         self.description = description
         self.differs = differs
         self.flag = flag
+        self.pinned = pinned
 
 
 def _device_comparable(dtype) -> bool:
@@ -4965,6 +4982,17 @@ def _start_projected_unit_check(name, unit, *, live, model_path, source,
     """
     import torch
 
+    live = live.detach()
+    if live.device.type == "cuda" and _device_comparable(live.dtype):
+        check = _prepare_device_projected_check(name, unit,
+            live_shape=tuple(live.shape), live_dtype=live.dtype,
+            model_path=model_path, source=source,
+            release_source_pages=release_source_pages,
+            source_authentication=source_authentication)
+        if check.pinned is not None:
+            _launch_prepared_projected_check(check, live)
+            check.pinned = None
+        return check
     weight, release = _read_projected_unit(
         name, unit, model_path=model_path, source=source,
         release_source_pages=release_source_pages,
@@ -4980,14 +5008,176 @@ def _start_projected_unit_check(name, unit, *, live, model_path, source,
             del weight
             release()
         return _UnitCheck(description, differs=differs)
-    # The caching host allocator keeps a pinned block until the copy that
-    # reads it completes, so the block outlives this frame safely.
-    pinned = torch.empty_like(weight, pin_memory=True)
-    pinned.copy_(weight)
-    del weight
-    release()
-    staged = pinned.to(live.device, non_blocking=True)
-    return _UnitCheck(description, flag=_device_differs(live, staged))
+
+
+def _prepare_device_projected_check(name, unit, *, live_shape, live_dtype,
+                                    model_path, source, release_source_pages,
+                                    source_authentication, cancelled=lambda:False):
+    """CPU preparation only; the caller owns authenticated whole-file residency."""
+    import torch
+    from concurrent.futures import CancelledError
+    weight = pinned = release = None
+    try:
+        if cancelled():
+            raise CancelledError('projected preparation cancelled before source read')
+        weight, release = _read_projected_unit(name, unit, model_path=model_path,
+            source=source, release_source_pages=release_source_pages,
+            source_authentication=source_authentication)
+        description = (f"{name} (live {tuple(live_shape)} {live_dtype} vs source "
+            f"{unit['source_tensor']} {tuple(weight.shape)} {weight.dtype})")
+        if live_dtype != weight.dtype or tuple(live_shape) != tuple(weight.shape):
+            return _UnitCheck(description, differs=True)
+        if cancelled():
+            raise CancelledError('projected preparation cancelled before private copy')
+        pinned = torch.empty_like(weight, pin_memory=True)
+        pinned.copy_(weight)
+        weight = None
+        if cancelled():
+            raise CancelledError('projected preparation cancelled after private copy')
+        return _UnitCheck(description, pinned=pinned)
+    finally:
+        # Failed futures must not retain native source aliases in their traceback.
+        weight = pinned = None
+        if release is not None:
+            release()
+
+
+def _launch_prepared_projected_check(check, live):
+    """The ordered coordinator alone enqueues CUDA work."""
+    staged = check.pinned.to(live.device, non_blocking=True)
+    check.flag = _device_differs(live.detach(), staged)
+    return staged
+
+
+@contextmanager
+def _parallel_projected_checks(units, *, weights, model_path, source,
+                               resource_check, source_authentication,
+                               release_source_pages, preparation_max_bytes, cancel):
+    """Four finite credits on the existing read pool; no resident weight cache."""
+    from collections import deque
+    from concurrent.futures import CancelledError, TimeoutError, wait
+    import threading
+    import torch
+    from . import layer_streaming
+    from .memory_management import reserve_allocation
+
+    if (type(preparation_max_bytes) is not int or preparation_max_bytes <= 0
+            or not callable(resource_check) or source_authentication is None):
+        raise RuntimeError('parallel projected preparation requires finite bytes, guard and source owner')
+    if layer_streaming.layer_read_threads() != 2:
+        raise RuntimeError('parallel projected preparation requires the shared two-thread read pool')
+    rows = list(units.items())
+    sizes = [weights[n].numel()*weights[n].element_size() for n,_u in rows]
+    elements = [weights[n].numel() for n,_u in rows]
+    if any(size > preparation_max_bytes for size in sizes):
+        raise RuntimeError('one projected unit exceeds the private preparation byte cap')
+    pin_bound = min(preparation_max_bytes, sum(sorted(sizes, reverse=True)[:4]))
+    gpu_bound = pin_bound + min(pin_bound, sum(sorted(elements, reverse=True)[:4]))
+    reserve_allocation(resource_check, 'before_parallel_projected_preparation',
+                       cpu_bytes=pin_bound, device_bytes=gpu_bound)
+    pool = layer_streaming._layer_read_pool(2, allow_resize=False)
+    pending, inflight, futures, checks = deque(), deque(), [], []
+    stop = threading.Event()
+    devices = set()
+    index = held_bytes = 0
+    succeeded = False
+    def cancelled():
+        return stop.is_set() or (cancel is not None and cancel.is_set())
+    def require_running():
+        if cancelled():
+            raise CancelledError('projected preparation cancelled')
+    def reap():
+        nonlocal held_bytes
+        while inflight and inflight[0][2].query():
+            check, staged, event, size = inflight.popleft()
+            check.pinned = None
+            held_bytes -= size
+    try:
+        while index < len(rows) or pending:
+            require_running()
+            reap()
+            while index < len(rows) and len(pending)+len(inflight) < 4:
+                name, unit = rows[index]
+                live, size = weights[name], sizes[index]
+                eligible = live.device.type == 'cuda' and _device_comparable(live.dtype)
+                # Serial fallbacks never coexist with pending private staging.
+                if not eligible and (pending or inflight):
+                    break
+                if held_bytes + size > preparation_max_bytes:
+                    break
+                resource_check(f'before_source_projection_check:{name}')
+                if eligible:
+                    future = pool.submit(_prepare_device_projected_check, name, unit,
+                        live_shape=tuple(live.shape), live_dtype=live.dtype,
+                        model_path=model_path, source=source,
+                        release_source_pages=release_source_pages,
+                        source_authentication=source_authentication, cancelled=cancelled)
+                    futures.append(future)
+                else:
+                    future = None
+                pending.append((name, unit, future, size))
+                held_bytes += size
+                index += 1
+                if not eligible:
+                    break
+            if not pending:
+                # Event polling grants no progress and never reads a verdict.
+                stop.wait(.001)
+                continue
+            name, unit, future, size = pending[0]
+            if future is None:
+                check = _start_projected_unit_check(name, unit, live=weights[name],
+                    model_path=model_path, source=source,
+                    release_source_pages=release_source_pages,
+                    source_authentication=source_authentication)
+            else:
+                while True:
+                    require_running()
+                    try:
+                        check = future.result(timeout=.05)
+                        break
+                    except TimeoutError:
+                        continue
+                require_running()
+            if check.pinned is not None:
+                live = weights[name]
+                # Register the device BEFORE a partially failing H2D/compare.
+                devices.add(live.device)
+                staged = _launch_prepared_projected_check(check, live)
+                event = torch.cuda.Event()
+                event.record(torch.cuda.current_stream(live.device))
+                inflight.append((check, staged, event, size))
+                staged = None
+            else:
+                held_bytes -= size
+            pending.popleft()
+            checks.append(check)
+            resource_check(f'after_source_projection_check:{name}')
+        yield checks
+        succeeded = True
+    finally:
+        stop.set()
+        for future in futures:
+            future.cancel()
+        # CPU source aliases may outlive a failed/abandoned foreground future.
+        wait(futures)
+        if not succeeded:
+            for device in devices:
+                torch.cuda.synchronize(device)
+        else:
+            for check, staged, event, size in inflight:
+                if not event.query():
+                    event.synchronize()
+        # Only a proven completion fence permits dropping these owners. If a
+        # fence fails, the traceback retains the lists and their bounded data.
+        for future in futures:
+            if not future.cancelled() and future.exception() is None:
+                future.result().pinned = None
+        for check, staged, event, size in inflight:
+            check.pinned = None
+        pending.clear(); inflight.clear(); futures.clear()
+
+
 
 
 def _settle_projected_unit_checks(checks) -> list:
@@ -5127,7 +5317,9 @@ def _require_streamed_projection(streamed, projected_units, source, admitted_key
 
 def _checked_projected_units(bound, *, weights, model_path, source,
                              measured=None, resource_check=None,
-                             release_source_pages=False, source_authentication=None) -> dict[str, dict]:
+                             release_source_pages=False, source_authentication=None,
+                             parallel_preparation=False, preparation_max_bytes=None,
+                             cancel=None) -> dict[str, dict]:
     """The producer's unit records for the units this run prices, bytes checked.
 
     Each unit's source tensor is read from the shard the producer hashed and
@@ -5143,19 +5335,25 @@ def _checked_projected_units(bound, *, weights, model_path, source,
     with one sync for the whole pass (PQ #1935).
     """
     units = _measured_projected_units(bound, measured)
-    checks = []
-    for name, unit in units.items():
-        if resource_check is not None:
-            resource_check(f'before_source_projection_check:{name}')
-        checks.append(_start_projected_unit_check(
-            name, unit, live=weights[name], model_path=model_path, source=source,
-            release_source_pages=release_source_pages,
-            source_authentication=source_authentication))
-        if resource_check is not None:
-            resource_check(f'after_source_projection_check:{name}')
-    # One host sync reads every device verdict; the loop above issued none
-    # (PQ #1935).
-    outcomes = _settle_projected_unit_checks(checks)
+    if parallel_preparation:
+        with _parallel_projected_checks(units, weights=weights,
+                model_path=model_path, source=source, resource_check=resource_check,
+                source_authentication=source_authentication,
+                release_source_pages=release_source_pages,
+                preparation_max_bytes=preparation_max_bytes, cancel=cancel) as checks:
+            outcomes = _settle_projected_unit_checks(checks)
+    else:
+        checks = []
+        for name, unit in units.items():
+            if resource_check is not None:
+                resource_check(f'before_source_projection_check:{name}')
+            checks.append(_start_projected_unit_check(
+                name, unit, live=weights[name], model_path=model_path, source=source,
+                release_source_pages=release_source_pages,
+                source_authentication=source_authentication))
+            if resource_check is not None:
+                resource_check(f'after_source_projection_check:{name}')
+        outcomes = _settle_projected_unit_checks(checks)
     projected: dict[str, dict] = {}
     mismatched: list[str] = []
     for (name, unit), mismatch in zip(units.items(), outcomes):
@@ -5952,11 +6150,14 @@ def _publish_capture_load_execution(args, *, capture, execution, resources, guar
 
 def main(argv: "Sequence[str] | None" = None) -> int:
     from contextlib import ExitStack
-    with ExitStack() as source_scope:
-        return _main(argv, source_scope=source_scope)
+    from .tessera_row_stream import RowWaitTelemetry
+    with RowWaitTelemetry() as waits, ExitStack() as source_scope:
+        result = _main(argv, source_scope=source_scope, waits=waits)
+        waits.returncode = result
+        return result
 
 
-def _main(argv, *, source_scope) -> int:
+def _main(argv, *, source_scope, waits) -> int:
     import torch
 
     from . import format_registry as fr
@@ -6301,6 +6502,7 @@ def _main(argv, *, source_scope) -> int:
             "H-aware encoder branch is merged."
         )
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    waits.start(args.out, device)
     if (args.streaming_capture_policy == "shared-inputs-bounded-v1" or selected_source) and device == "cuda":
         from .autoscale import require_bounded_capture_environment
         require_bounded_capture_environment(os.environ)
@@ -6343,6 +6545,8 @@ def _main(argv, *, source_scope) -> int:
 
     source_authentication = None
     selected_guard = None
+    waits.row_head = ROW_HEAD_STREAM if streaming_head else ROW_HEAD_LOAD_ALL
+    waits.before_gpu_work()
     if selected_source:
         from . import tessera_calibration_cache as calibration_store
         if device == 'cuda':
@@ -7123,6 +7327,7 @@ def _main(argv, *, source_scope) -> int:
             threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
             memo_capacity=selected_resources['encoder_memo_capacity'],
             resource_check=None if selected_guard is None else selected_guard.check,
+            wait_sink=waits.ledger.sink,
             factor_scratch_bytes=(selected_resources['phases']['resident_anchors']
                                   ['factorization_scratch_bytes']))
         source_scope.callback(row_stream.close)

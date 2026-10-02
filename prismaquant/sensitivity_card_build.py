@@ -31,6 +31,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
+from .qnames import DOTTED_LAYER_QNAME as _LAYER_RE
 from .sensitivity_card import (
     CardProvenance,
     RenderBasis,
@@ -62,7 +63,6 @@ _ROLE_PATTERNS = (
     (re.compile(r"\bqkv\b"), "qkv"),
 )
 
-_LAYER_RE = re.compile(r"\.layers\.(\d+)\.")
 _EXPERT_RE = re.compile(r"\.experts\.(\d+)\.")
 
 

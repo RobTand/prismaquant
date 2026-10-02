@@ -3533,3 +3533,90 @@ def test_a_verified_activation_load_waits_for_its_declared_entry_landing(
     assert report['range_waits_served'] == 1
     assert _tier_bytes(resolver) == {'ram': 0, 'stage': path.stat().st_size, 'pool': 0}
     assert _pins_live(tmp_path, consumer) == []
+
+
+@pytest.mark.parametrize("close_operation", ["one", "all"])
+@pytest.mark.parametrize("replacement_action", ["hold", "close"])
+def test_descriptor_reuse_cannot_remove_another_readers_ownership(
+        tmp_path, monkeypatch, replacement_action, close_operation):
+    """Force close(2) to recycle an FD while its first closer still unwinds.
+
+    Both readers use the actual pinned SDK. The pause is after the real
+    kernel close, so the replacement is a real held descriptor at the same
+    number; no reader/pin behavior is substituted.
+    """
+    require_prismabuild_sdk()
+    from prismaquant.staged_lease import LeaseWindow
+
+    spec, key, consumer, _staged, blob = _window_fixture(tmp_path, monkeypatch)
+    window = LeaseWindow(spec, acquire_token="token-fd-reuse")
+    closed = threading.Event()
+    replacement_done = threading.Event()
+    real_close = os.close
+    first_closer = None
+    replacement_fd = None
+
+    def pause_after_kernel_close(fd):
+        real_close(fd)
+        if threading.get_ident() == first_closer and fd == first_fd:
+            closed.set()
+            # A synchronized window holds registration until this close has
+            # removed its own entry. The bounded wait allows that correct
+            # serialization while forcing the old race when no lock exists.
+            replacement_done.wait(3)
+
+    def close_first():
+        nonlocal first_closer
+        first_closer = threading.get_ident()
+        if close_operation == "one":
+            window.close_fd(first_fd)
+        else:
+            window.close_fds()
+
+    def use_replacement():
+        try:
+            fd, serving = window.open(key)
+            assert fd == first_fd, "the test must exercise exact FD reuse"
+            assert os.pread(fd, len(blob), 0) == blob
+            if replacement_action == "close":
+                window.close_fd(fd)
+            return fd, serving
+        finally:
+            replacement_done.set()
+
+    try:
+        with window:
+            first_fd, _serving = window.open(key)
+            monkeypatch.setattr(os, "close", pause_after_kernel_close)
+            with ThreadPoolExecutor(max_workers=2) as readers:
+                first = readers.submit(close_first)
+                try:
+                    assert closed.wait(5), "first closer never reached kernel close"
+                    replacement = readers.submit(use_replacement)
+                    replacement_fd, _serving = replacement.result(timeout=10)
+                finally:
+                    replacement_done.set()
+                first.result(timeout=5)
+            assert len(_pins_live(tmp_path, consumer)) == 1
+            if replacement_action == "hold":
+                assert replacement_fd in window._fds
+                assert os.pread(replacement_fd, len(blob), 0) == blob
+                window.close_fd(replacement_fd)
+            assert window._fds == {}
+            with pytest.raises(OSError):
+                os.fstat(replacement_fd)
+        assert _pins_live(tmp_path, consumer) == []
+    finally:
+        # A failing old-source control must not leave its deliberately lost
+        # descriptor live. Only close the exact staged inode this test owns.
+        monkeypatch.setattr(os, "close", real_close)
+        if replacement_fd is not None:
+            try:
+                current = os.fstat(replacement_fd)
+            except OSError:
+                pass
+            else:
+                expected = _staged.stat()
+                assert (current.st_dev, current.st_ino) == (
+                    expected.st_dev, expected.st_ino)
+                real_close(replacement_fd)

@@ -13,6 +13,8 @@ unless the profile states otherwise:
 - ``DIRECT_ASCII_SPACED_LAX``: default-spaced ``(", ", ": ")`` separators,
   ``ensure_ascii=True``, ``allow_nan=True`` and no fallback serializer. This
   is direct JSON, not a round trip; its inherited spaces are identity bytes.
+- ``DIRECT_UTF8_INDENT2_STRICT``: two-space indentation, UTF-8 characters,
+  strict nonfinite refusal and no fallback serializer. No final LF is added.
 - ``DIRECT_ASCII_INDENT2_LAX``: two-space indentation, ``(",", ": ")``
   separators, ASCII escaping, lax nonfinite values and no fallback serializer.
   File writers retain their own final LF and publication policy.
@@ -50,10 +52,21 @@ Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
   only how the file is read, never the digest. The path may be a ``str`` or a
   ``PathLike``; a missing path or a directory raises what ``open`` raises.
 
+- ``length_framed_bytes_sha256``: caller-owned prefix followed by caller-ordered
+  raw byte frames, each preceded by its eight-byte big-endian byte length.
+  No normalization, sorting, reconstruction or final trailer. Domain tags stay
+  with the caller and are not interchangeable.
 - ``LengthFramedSourceSha256``: incremental records in caller order, each
   strict UTF-8 name preceded by its four-byte big-endian byte length, then a
   payload preceded by its eight-byte big-endian byte length. No sorting,
   reconstruction, separators or final trailer; those stay with the caller.
+
+Checkpoint JSON stream:
+
+- ``checkpoint_json_sha256``: ``DIRECT_UTF8_STRICT`` bytes partitioned at
+  depth two; shallow dict keys require strings, deeper leaves preserve the
+  direct encoder's accepted keys. The caller retains its key-error class.
+  No normalization or whole-graph precheck changes first-error order.
 
 Pickle profile:
 
@@ -84,7 +97,7 @@ import json
 import math
 import os
 import re
-from typing import BinaryIO
+from typing import BinaryIO, Protocol
 
 
 # A regex checks the underlying text, not a str subclass's Python length or
@@ -198,7 +211,11 @@ def _require_normalized_json(value: object, *, where: str) -> None:
             "JSON encoding")
 
 
-def _stream_sha256(encoder: json.JSONEncoder, value: object) -> str:
+class _JsonChunkEncoder(Protocol):
+    def iterencode(self, value: object) -> Iterable[str]: ...
+
+
+def _stream_sha256(encoder: _JsonChunkEncoder, value: object) -> str:
     """Stream ``encoder.iterencode`` chunks, as UTF-8, into one SHA-256.
 
     The one streaming recipe for every digest owner: chunks arrive as
@@ -286,9 +303,54 @@ DIRECT_ASCII_LAX_DEFAULT_STR = JsonProfile(
 DIRECT_ASCII_SPACED_LAX = JsonProfile(
     "direct-ascii-spaced-lax", ensure_ascii=True, allow_nan=True,
     separators=(", ", ": "))
+DIRECT_UTF8_INDENT2_STRICT = JsonProfile(
+    "direct-utf8-indent2-strict", ensure_ascii=False, allow_nan=False,
+    separators=(",", ": "), indent=2)
 DIRECT_ASCII_INDENT2_LAX = JsonProfile(
     "direct-ascii-indent2-lax", ensure_ascii=True, allow_nan=True,
     separators=(",", ": "), indent=2)
+
+
+class _CheckpointJsonEncoder:
+    """The inherited two-level partition, with the reader's own key error."""
+
+    def __init__(self, error: type[Exception]):
+        self.error = error
+
+    def iterencode(self, value: object) -> Iterable[str]:
+        return self._chunks(value, 0)
+
+    def _chunks(self, value: object, depth: int):
+        encode = DIRECT_UTF8_STRICT._encoder().encode
+        if depth >= 2 or not isinstance(value, (dict, list)):
+            yield encode(value)
+            return
+        if isinstance(value, dict):
+            yield "{"
+            for index, key in enumerate(sorted(value)):
+                if not isinstance(key, str):
+                    raise self.error("checkpoint identity has a non-string key")
+                yield ("," if index else "") + encode(key) + ":"
+                yield from self._chunks(value[key], depth + 1)
+            yield "}"
+        else:
+            yield "["
+            for index, item in enumerate(value):
+                if index:
+                    yield ","
+                yield from self._chunks(item, depth + 1)
+            yield "]"
+
+
+def checkpoint_json_sha256(value: object, *, error: type[Exception] = ValueError) -> str:
+    """Strict direct UTF-8 JSON, partitioned at depth two without normalization.
+
+    Shallow dict keys must be strings; deeper leaves retain the stdlib direct
+    encoder's acceptance and errors. The caller supplies its existing key-error
+    class. Chunk boundaries, first-error order and UTF-8 error positions stay
+    with this inherited checkpoint profile rather than a whole-graph precheck.
+    """
+    return _stream_sha256(_CheckpointJsonEncoder(error), value)
 
 
 def canonical_pickle_bytes(value: object) -> bytes:
@@ -327,6 +389,15 @@ FILE_BLOCK_BYTES = 8 << 20
 #: (``autoscale.selected_anchor_resources``, RobTand/prismaquant#1491), so the
 #: two read the same number from here.
 SOURCE_HASH_BLOCK_BYTES = 16 * 1024**2
+
+
+def length_framed_bytes_sha256(frames: Iterable[bytes], *, prefix: bytes) -> str:
+    """Prefix plus ordered u64-BE-length/raw-byte frames, consumed once."""
+    digest = hashlib.sha256(prefix)
+    for raw in frames:
+        digest.update(len(raw).to_bytes(8, "big"))
+        digest.update(raw)
+    return digest.hexdigest()
 
 
 class LengthFramedSourceSha256:
@@ -389,13 +460,14 @@ def source_tree_profiles(records: Iterable[tuple[str, bytes]]) -> dict[str, str]
             raise TypeError("source profiles require UTF-8 names and byte contents")
         legacy.update(name, raw)
         encoded.append((name.encode("utf-8"), raw))
-    framed = hashlib.sha256(SOURCE_TREE_V2.encode("ascii") + b"\0")
-    for name, raw in sorted(encoded, key=lambda entry: entry[0]):
-        framed.update(len(name).to_bytes(8, "big"))
-        framed.update(name)
-        framed.update(len(raw).to_bytes(8, "big"))
-        framed.update(raw)
-    return {SOURCE_TREE_V1: legacy.hexdigest(), SOURCE_TREE_V2: framed.hexdigest()}
+    def frames():
+        for name, raw in sorted(encoded, key=lambda entry: entry[0]):
+            yield name
+            yield raw
+
+    framed = length_framed_bytes_sha256(
+        frames(), prefix=SOURCE_TREE_V2.encode("ascii") + b"\0")
+    return {SOURCE_TREE_V1: legacy.hexdigest(), SOURCE_TREE_V2: framed}
 
 
 def compare_source_profiles(left: Mapping[str, str], right: Mapping[str, str]) -> dict[str, str]:

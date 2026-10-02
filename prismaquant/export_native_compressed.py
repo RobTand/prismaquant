@@ -7575,8 +7575,9 @@ def _bf16_packed_expert_ignore_regex(
     # emitting a body-prefixed regex for a BF16 MTP assignment
     # accidentally ignores the body's NVFP4 experts at that layer idx.
     is_mtp = recipe_key.startswith("mtp.")
+    from .qnames import DOTTED_LAYER_QNAME
     layer_idx = None
-    lm = _re.search(r"\.layers\.(\d+)\.", recipe_key)
+    lm = DOTTED_LAYER_QNAME.search(recipe_key)
     if lm:
         layer_idx = lm.group(1)
     # vLLM's should_ignore_layer probes the canonical gate_proj/up_proj/

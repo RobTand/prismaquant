@@ -457,7 +457,7 @@ class CaptureSourceAuthentication:
                     set(weight_map.values()) != weights or weight_map != tensors):
                 raise RuntimeError('original generation complete index differs from producer/publisher')
             with self.material_window([self.root / 'config.json']):
-                value = _original_bootstrap_json(self._source_read_path(self._files['config.json']))
+                value = self.read_json(self.root / 'config.json')
             if (not isinstance(value, dict) or value.get('configuration_files') or value.get('auto_map')):
                 raise RuntimeError('unsupported dynamic original bootstrap configuration')
             return self
@@ -468,6 +468,12 @@ class CaptureSourceAuthentication:
     @property
     def is_qualified_original_material(self):
         return self._original is not None
+
+    def require_material_device(self, device):
+        """Internal original decoder/load integration is CPU-only for now."""
+        import torch
+        if self._original is not None and torch.device(device).type != 'cpu':
+            raise RuntimeError('original material GPU loads/transfers are not qualified')
 
     def _reap_original_material(self):
         """Called only under the owner lock; native storage aliases retain credit."""
@@ -917,8 +923,11 @@ class CaptureSourceAuthentication:
             self._reader_started(state)
         try:
             self._authenticate(name, state)
-            with open(self._source_read_path(state), 'rb') as handle:
-                result = json.load(handle)
+            if self._original is not None:
+                result = _original_bootstrap_json(self._source_read_path(state))
+            else:
+                with open(self._source_read_path(state), 'rb') as handle:
+                    result = json.load(handle)
             self._check_file(name, state)
             return result
         finally:

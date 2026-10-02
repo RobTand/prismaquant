@@ -70,6 +70,8 @@ from .layer_streaming import (
     _model_tensor_dtypes,
     _source_tensor_dtypes,
     _source_json,
+    _source_safe_open,
+    _source_profile,
     _build_expert_packer,
     _build_install_resolver,
     _build_weight_map,
@@ -576,8 +578,11 @@ def _estimate_layer_cache_bytes(
     sizes = [0 for _ in range(num_layers)]
     try:
         for shard, pairs in by_shard.items():
-            context = (safe_open(shard, framework="pt") if source_authentication is None else
-                       source_authentication.safe_open(safe_open, shard, framework="pt"))
+            if getattr(source_authentication, 'is_qualified_original_material', False):
+                context = _source_safe_open(shard, framework="pt", source_authentication=source_authentication)
+            else:
+                context = (safe_open(shard, framework="pt") if source_authentication is None else
+                           source_authentication.safe_open(safe_open, shard, framework="pt"))
             with context as f:
                 for idx, ckpt_name, fp4_packed, load_dtype in pairs:
                     sl = f.get_slice(ckpt_name)
@@ -1293,26 +1298,11 @@ class StreamingContext:
 
     def _prefetch_result(self, layer, future):
         """Take one delivery result; retry ownership stays in ``_await_prefetch``."""
-        sink = getattr(self, '_source_wait_sink', None)
-        if sink is None or future.done():
-            return future.result()
-        started = time.time()
-        failure = None
-        try:
-            return future.result()
-        except BaseException as error:
-            failure = error
-            raise
-        finally:
-            finished = time.time()
-            try:
-                sink('source-prefetch', started, finished,
-                     {'layer': int(layer), 'wait_s': max(0.0, finished - started)})
-            except BaseException as error:
-                if failure is None:
-                    # An observer's failure is not a loader availability cause.
-                    raise RuntimeError('source wait observer failed') from error
-                failure.add_note(f'source wait observer failed: {type(error).__name__}: {error}')
+        from .io_spans import observed_future_result
+        return observed_future_result(
+            future, sink=getattr(self, '_source_wait_sink', None),
+            kind='source-prefetch', info={'layer': int(layer)}, clock=time.time,
+            observer='source wait observer')
 
     def _await_prefetch(self, layer, future, *, retry_availability):
         """Await delivery, retaining its owner even when speculation is replaced.
@@ -1836,11 +1826,18 @@ def load_streaming_auto_config(source_model: str, staged_model: str, *,
         return AutoConfig.from_pretrained(
             staged_model, trust_remote_code=True, **options)
 
-    from prismaquant.io_engine import SealedBuffer
     from prismaquant.staged_whole_file import read_staged_source_metadata_bytes
 
     raw = read_staged_source_metadata_bytes(
         Path(source_model) / "config.json", label="streaming AutoConfig input")
+    return _streaming_auto_config_from_bytes(source_model, raw)
+
+
+def _streaming_auto_config_from_bytes(source_model, raw, *, resource_check=None):
+    """The existing stock AutoConfig adapter over privately sealed config bytes."""
+    from transformers import AutoConfig
+    from .io_engine import SealedBuffer
+
     config_dict = json.loads(raw)
     if config_dict.get("configuration_files"):
         raise RuntimeError("undeclared configuration-file indirection is unsupported")
@@ -1848,6 +1845,9 @@ def load_streaming_auto_config(source_model: str, staged_model: str, *,
     if isinstance(auto_map, dict) and auto_map.get("AutoConfig"):
         raise RuntimeError("undeclared dynamic AutoConfig execution is unsupported")
 
+    if resource_check is not None:
+        from .memory_management import reserve_allocation
+        reserve_allocation(resource_check, 'before_original_bootstrap_derived_config', cpu_bytes=len(raw))
     buffer = SealedBuffer(len(raw))
     try:
         buffer.fill_bytes(raw)
@@ -1855,10 +1855,42 @@ def load_streaming_auto_config(source_model: str, staged_model: str, *,
         # Stock HF chooses its class/defaults and retains the original root;
         # only the local configuration-file input is redirected.
         return AutoConfig.from_pretrained(
-            staged_model, trust_remote_code=False, local_files_only=True,
+            source_model, trust_remote_code=False, local_files_only=True,
             _configuration_file=buffer.path)
     finally:
         buffer.close()
+
+
+def _streaming_auto_model_options(config):
+    """The input execution policy for the stock streaming auto-class route."""
+    from .staged_tier_policy import active_policy
+
+    if active_policy() is None:
+        return {"trust_remote_code": True}
+    auto_map = getattr(config, "auto_map", None) or {}
+    if "AutoModelForCausalLM" in auto_map:
+        raise RuntimeError(
+            "undeclared dynamic AutoModelForCausalLM execution is unsupported")
+    return {"trust_remote_code": False}
+def load_original_streaming_bootstrap(model_path, owner, *, multimodal=False):
+    """Internal CPU body bootstrap from the existing original-material owner."""
+    from .digests import indent2_json_file_bytes
+    from .sensitivity_probe import text_only_stage_config
+
+    if not getattr(owner, 'is_qualified_original_material', False):
+        raise RuntimeError('original bootstrap requires the qualified material owner')
+    if multimodal:
+        raise RuntimeError('original bootstrap visual input is not qualified')
+    original = _source_json(Path(model_path) / 'config.json', owner)
+    profile = _source_profile(model_path, owner, config=original)
+    construction = construction_multimodal(profile, multimodal)
+    derived = original if construction else text_only_stage_config(original, profile=profile)
+    derived = original if derived is None else derived
+    if derived.get('configuration_files') or derived.get('auto_map'):
+        raise RuntimeError('unsupported dynamic original bootstrap configuration')
+    config = _streaming_auto_config_from_bytes(model_path, indent2_json_file_bytes(derived),
+                                             resource_check=owner.resource_check)
+    return config, profile, construction, original
 
 
 def build_streaming_skeleton(config, *, multimodal: bool,
@@ -1871,11 +1903,13 @@ def build_streaming_skeleton(config, *, multimodal: bool,
         config, multimodal=multimodal, log_prefix=log_prefix)
     attention_kwargs = ({"attn_implementation": attn_implementation}
                         if attn_implementation is not None else {})
+    auto_options = (_streaming_auto_model_options(config)
+                    if model_cls is AutoModelForCausalLM else {})
     with _mask_cuda_queries_during_meta_init(log_prefix):
         with init_empty_weights():
             if model_cls is AutoModelForCausalLM:
                 return AutoModelForCausalLM.from_config(
-                    config, trust_remote_code=True, **attention_kwargs)
+                    config, **auto_options, **attention_kwargs)
             return model_cls._from_config(config, **attention_kwargs)
 
 
@@ -2023,7 +2057,8 @@ def _build_streaming_context(model_path: str, *,
         raise TypeError('source_snapshot_only must be a bool')
     if source_snapshot_only and source_authentication is None:
         raise RuntimeError('snapshot-only source requires authenticated source ownership')
-    if max_cache_slots is not None:
+    original_material = getattr(source_authentication, 'is_qualified_original_material', False)
+    if not original_material and max_cache_slots is not None:
         if (
             isinstance(max_cache_slots, bool)
             or not isinstance(max_cache_slots, int)
@@ -2034,6 +2069,23 @@ def _build_streaming_context(model_path: str, *,
 
     authenticated = ({} if source_authentication is None else
                      {'source_authentication': source_authentication})
+    # Construction can require a multimodal class even for token-only input.
+    # Only the caller's input declaration permits materializing a visual tower.
+    materialize_visual = multimodal
+    original_config = None
+    original_profile = None
+    if original_material:
+        source_authentication.require_material_device(device)
+        if source_scope is not None:
+            raise RuntimeError('original bootstrap source scopes are not qualified')
+        if cache_headroom_gb is None:
+            raise RuntimeError('original CPU source requires explicit cache headroom')
+        from .schemas import Contract
+        original_entry = Contract(RuntimeError, 'original CPU source: ')
+        original_entry.integer(max_cache_slots, where='max_cache_slots', minimum=1)
+        original_entry.integer(prefetch_workers, where='prefetch_workers', minimum=1)
+        config, original_profile, multimodal, original_config = load_original_streaming_bootstrap(
+            model_path, source_authentication, multimodal=multimodal)
     if source_authentication is not None:
         source_authentication.require_unchanged()
     scope = None
@@ -2056,9 +2108,7 @@ def _build_streaming_context(model_path: str, *,
     # text-only staged readset refused the first range (PQ #872). The streamed exporter already keeps the two apart:
     # `materialize_tensors_streaming` flips on the same profile fact and
     # leaves the visual tower on meta.
-    materialize_visual = multimodal
-
-    if not multimodal:
+    if not multimodal and not original_material:
         # A family with no <Arch>ForCausalLM auto-route (e.g. glm5_next on
         # transformers 5.16) cannot build a text-only skeleton at all; the
         # profile declares that fact and every caller inherits the flip
@@ -2079,7 +2129,9 @@ def _build_streaming_context(model_path: str, *,
         print(f"{log_prefix} source scope {scope.name!r}: layers {list(scope.layers)} "
               f"under {scope.layers_prefix!r}", flush=True)
     else:
-        if multimodal:
+        if original_material:
+            pass  # Configuration and profile were read through the owned bootstrap above.
+        elif multimodal:
             staged = stage_multimodal(model_path)
         else:
             staged = stage_text_only(model_path)
@@ -2087,7 +2139,8 @@ def _build_streaming_context(model_path: str, *,
                 print(f"{log_prefix} manual meta streaming load avoids HF fp8 "
                       "module rewrite; PrismaQuant will apply weight_scale_inv "
                       "during layer loads", flush=True)
-        config = load_streaming_auto_config(model_path, staged)
+        if not original_material:
+            config = load_streaming_auto_config(model_path, staged)
         skeleton = build_streaming_skeleton(config, multimodal=multimodal,
             log_prefix=log_prefix, attn_implementation=attn_implementation)
     skel_base, skel_layers = _get_layer_list(skeleton)
@@ -2128,6 +2181,7 @@ def _build_streaming_context(model_path: str, *,
 
     weight_shard, weight_ckpt = _build_weight_map(
         model_path, multimodal=multimodal, **authenticated,
+        **({'profile': original_profile} if original_material else {}),
         **({'live_name': scope.live_name} if scope is not None else {}))
     # Native-FP8 source dequant map. Populated only for checkpoints that
     # ship `.weight_scale_inv` siblings (MiniMax-M2/M2.7, DeepSeek-V3).
@@ -2138,8 +2192,10 @@ def _build_streaming_context(model_path: str, *,
     # leaving every downstream pass operating on raw codes (range ±448)
     # instead of true weights (range ±0.2).
     fp8_scale_inv_map = _build_fp8_scale_inv_map(
-        model_path, multimodal=multimodal, **authenticated)
-    if source_snapshot_only and (fp8_scale_inv_map or declared_fp4_expert_dtype(model_path)):
+        model_path, multimodal=multimodal, **authenticated,
+        **({'profile': original_profile, 'config': original_config} if original_material else {}))
+    fp4_source = declared_fp4_expert_dtype(model_path, **({'config': original_config} if original_material else {}))
+    if source_snapshot_only and (fp8_scale_inv_map or fp4_source):
         raise RuntimeError('selected tensor snapshots require unscaled floating source weights')
     if fp8_scale_inv_map:
         print(f"{log_prefix} fp8 scale_inv map: {len(fp8_scale_inv_map)} "
@@ -2321,7 +2377,7 @@ def _build_streaming_context(model_path: str, *,
         layers_prefix=layers_prefix,
         num_layers=num_layers,
         target_dtype=dtype,
-        fp4_experts=declared_fp4_expert_dtype(model_path),
+        fp4_experts=fp4_source,
         tensor_dtypes=_source_tensor_dtypes(model, dtype, concat_merger),
         **authenticated,
     )
@@ -2377,7 +2433,7 @@ def _build_streaming_context(model_path: str, *,
         expert_packer=_build_expert_packer(model, weight_ckpt),
         concat_merger=concat_merger,
         source_snapshot_only=source_snapshot_only,
-        source_fp4_experts=declared_fp4_expert_dtype(model_path),
+        source_fp4_experts=fp4_source,
         source_layers=source_layers,
         source_scope=None if scope is None else scope.name,
         **authenticated,

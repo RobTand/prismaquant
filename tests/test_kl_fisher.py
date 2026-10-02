@@ -1,4 +1,5 @@
 import torch
+import pytest
 import torch.nn.functional as F
 
 from prismaquant.kl_fisher import fisher_probe_scalar, fisher_quadratic_form
@@ -94,3 +95,97 @@ def test_fisher_probe_token_count_override_rescales():
     # override == 4x real count scales the probe (hence the scalar) by 1/2
     quad = fisher_probe_scalar(logits, token_count_override=4 * 32, **kw)
     assert torch.allclose(quad, base * 0.5, rtol=1e-5, atol=0.0)
+
+
+@pytest.mark.parametrize('teacher_dtype', [torch.float32, torch.float64])
+@pytest.mark.parametrize('student_dtype', [torch.bfloat16, torch.float32, torch.float64])
+def test_shared_forward_kl_preserves_existing_dtype_broadcast_and_reductions(
+        teacher_dtype, student_dtype):
+    from prismaquant.build_rtn_cache import kl_divergence
+    from prismaquant.kl_fisher import forward_kl_per_token
+
+    # A strided teacher broadcasts over two student batches. The old API
+    # preserves teacher precision while deliberately widening students to FP32.
+    teacher = torch.log_softmax(torch.linspace(-16, 16, 42, dtype=teacher_dtype)
+                               .reshape(3, 14)[:, ::2], dim=-1)
+    student = torch.linspace(13, -11, 42, dtype=student_dtype).reshape(2, 3, 7)
+    student_lp = torch.log_softmax(student.float(), dim=-1)
+    old_tokens = (teacher.exp() * (teacher - student_lp)).sum(dim=-1)
+    actual_tokens = forward_kl_per_token(student_lp, teacher)
+    torch.testing.assert_close(actual_tokens, old_tokens, rtol=0, atol=0)
+    torch.testing.assert_close(kl_divergence(student, teacher), old_tokens.mean(), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize('scope', ['all', 'last', 'causal'])
+@pytest.mark.parametrize('temperature', [0.7, 1.0, 1.7])
+def test_global_probe_second_moment_matches_production_kl_hessian(
+        monkeypatch, scope, temperature):
+    """Exact orthogonal noise moment, rather than a Monte Carlo variance screen.
+
+    Only the random draw is replaced. The real row-indexed Fisher probe,
+    temperature/scoping and global normalization remain in the measured path.
+    The independent oracle differentiates the existing production KL metric.
+    """
+    from prismaquant.build_rtn_cache import kl_divergence
+    from prismaquant.kl_fisher import select_token_scope, token_count_for_logits
+
+    logits = torch.linspace(-1.7, 2.1, 24, dtype=torch.float64).reshape(2, 3, 4)
+    selected = select_token_scope(logits, scope)
+    token_count = token_count_for_logits(selected)
+    dimensions = selected.numel()
+    # Omit the constant column: every retained Rademacher coordinate has zero
+    # mean and the complete draw's second moment is exactly the identity.
+    hadamard = torch.ones((1, 1))
+    while hadamard.shape[0] <= dimensions:
+        hadamard = torch.cat((torch.cat((hadamard, hadamard), 1),
+                              torch.cat((hadamard, -hadamard), 1)), 0)
+    noise = hadamard[:, 1:dimensions + 1]
+    assert torch.equal(noise.T @ noise, torch.eye(dimensions) * len(noise))
+    assert torch.equal(noise.sum(0), torch.zeros(dimensions))
+    current = {'noise': None, 'row': 0}
+
+    def complete_draw(target, _probability=0.5, *, generator=None):
+        row = current['row']
+        target.copy_((current['noise'][row] + 1) / 2)
+        current['row'] += 1
+        return target
+
+    monkeypatch.setattr(torch.Tensor, 'bernoulli_', complete_draw)
+    gradients, wrong_normalizer_gradients = [], []
+    for draw in noise:
+        current.update(noise=draw.reshape(selected.shape), row=0)
+        leaf = logits.detach().requires_grad_(True)
+        probe = fisher_probe_scalar(leaf, seed=7000, token_scope=scope,
+            temperature=temperature, distribution='rademacher',
+            token_count_override=token_count, global_row_offset=0)
+        gradient, = torch.autograd.grad(probe, leaf)
+        assert current['row'] == len(logits)
+        gradients.append(gradient.reshape(-1))
+        current['row'] = 0
+        wrong_probe = fisher_probe_scalar(leaf, seed=7000, token_scope=scope,
+            temperature=temperature, distribution='rademacher',
+            token_count_override=token_count * 4, global_row_offset=0)
+        wrong_gradient, = torch.autograd.grad(wrong_probe, leaf)
+        wrong_normalizer_gradients.append(wrong_gradient.reshape(-1))
+    matrix = torch.stack(gradients)
+    second_moment = matrix.T @ matrix / len(matrix)
+    teacher_lp = torch.log_softmax(selected.float() / temperature, dim=-1).detach()
+
+    def measured_loss(student):
+        return kl_divergence(select_token_scope(student, scope).float() / temperature, teacher_lp)
+
+    hessian = torch.autograd.functional.hessian(measured_loss, logits).reshape(24, 24)
+    assert torch.isfinite(second_moment).all() and torch.isfinite(hessian).all()
+    # The production metric/probe execute FP32; the Hessian and moment sums
+    # are retained in FP64. This is their rounding bound, not sampling error.
+    torch.testing.assert_close(second_moment, hessian, rtol=3e-6, atol=1e-8)
+    # A fourfold wrong token normalizer quarters the squared price and must
+    # fail this gate. Keep that discriminating control explicit.
+    wrong_matrix = torch.stack(wrong_normalizer_gradients)
+    wrong_second_moment = wrong_matrix.T @ wrong_matrix / len(wrong_matrix)
+    torch.testing.assert_close(wrong_second_moment, second_moment / 4, rtol=3e-6, atol=1e-8)
+    assert not torch.allclose(wrong_second_moment, hessian, rtol=3e-6, atol=1e-8)
+    print({'scope': scope, 'temperature': temperature, 'tokens': token_count,
+           'orthogonal_draws': len(matrix),
+           'max_abs_second_moment_minus_kl_hessian': float((second_moment - hessian).abs().max()),
+           'wrong_global_normalizer_refused': True})

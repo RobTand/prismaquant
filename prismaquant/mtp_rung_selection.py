@@ -3,8 +3,9 @@
 Normative spec: ``docs/design/mtp_rung_selection.md`` (Robert, 2026-07-20). A draft can
 NEVER change outputs (rejection sampling reproduces the target distribution
 exactly), so this selector optimises **throughput only** — there is no quality
-gate on the draft. The reference integration is
-``scripts/build_hy3_mtp_cb_inputs.py --rung-select auto``.
+gate on the draft. The current GLM integration is
+``glm_mtp_selection.select_mtp_rungs``, reached by the allocator's
+``--mtp-joint-cost`` and ``--mtp-byte-budget`` inputs.
 
 Objective (per spec-decode cycle, ``k`` speculative tokens; doc §1):
 
@@ -25,10 +26,13 @@ import math
 from dataclasses import dataclass, field
 from typing import Mapping, Optional
 
+from .schemas import Contract
+
 _LN2 = math.log(2.0)
 # Doc §3.6: degenerate iff the cost side varies < 1% across the menu. This is
 # the spec constant, not a tunable heuristic (exposed only for testability).
 _DEGENERATE_FRACTION = 0.01
+_STORAGE = Contract(ValueError, "group_product_menu: ")
 
 
 # --------------------------------------------------------------------------- #
@@ -142,9 +146,9 @@ def group_product_menu(groups: Mapping, rows: Mapping, *, params: Mapping):
             incomplete[g] = missing
         if not offered[g]:
             raise ValueError(f"group_product_menu: group {g!r} has no rung priced for every unit")
-    total_params = sum(int(params[u]) for u in seen)
-    if total_params <= 0:
-        raise ValueError("group_product_menu: parameter count must be positive")
+    total_params = sum(
+        _STORAGE.integer(params[u], where=f"params[{u}]", minimum=1) for u in seen
+    )
     menu = []
     for combo in itertools.product(*(offered[g] for g in names)):
         E = resident = 0
@@ -152,7 +156,8 @@ def group_product_menu(groups: Mapping, rows: Mapping, *, params: Mapping):
             for unit in groups[g]:
                 unit_E, unit_bytes = rows[unit][rung]
                 E += float(unit_E)
-                resident += int(unit_bytes)
+                resident += _STORAGE.integer(
+                    unit_bytes, where=f"resident_bytes[{unit}][{rung}]", minimum=0)
         menu.append(RungPoint(name="|".join(f"{g}={r}" for g, r in zip(names, combo)),
                               bits=8.0 * resident / total_params, resident_bytes=resident, E=E))
     return menu, incomplete
