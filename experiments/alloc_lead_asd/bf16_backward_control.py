@@ -24,7 +24,7 @@ def relative_max(a, b):
             "bitwise_equal": torch.equal(a, b)}
 
 
-def control(model, ids):
+def control(model, ids, *, deterministic_backward=False):
     units = {name: module for name, module in model.named_modules()
              if isinstance(module, torch.nn.Linear) and name.startswith("model.layers.")}
     names = list(units)
@@ -42,6 +42,10 @@ def control(model, ids):
             operands[name] = (weight, x2, dx, dw, dx @ weight.T, x2 @ dw.T)
             ys.append(y)
     capture.store.clear()
+    # Primal tensors and probe construction are unchanged. Only the backward
+    # kernel policy below is varied; unsupported determinism must refuse.
+    if deterministic_backward:
+        torch.use_deterministic_algorithms(True, warn_only=False)
     hook_values, hook_counts, handles = {}, {}, []
     for name, y in zip(names, ys):
         def record(g, name=name):
@@ -113,6 +117,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
     parser.add_argument("--data-manifest-sha256", required=True)
+    parser.add_argument("--deterministic-backward", action="store_true")
     args = parser.parse_args()
     output = Path(args.output); output.mkdir(exist_ok=False)
     torch.set_num_threads(1); torch.set_num_interop_threads(1); torch.manual_seed(0)
@@ -121,6 +126,8 @@ def main():
                 "input_prefix_sha256": hashlib.sha256(ids.numpy().tobytes()).hexdigest(),
                 "row": 0, "seeds": [7000, 7001], "normalization": 2048,
                 "same_primal_graph": True, "same_probe_scalar": True,
+                "primal_deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+                "deterministic_backward_requested": args.deterministic_backward,
                 "source_commit": os.environ.get("PRISMAQUANT_IDENTITY_GIT_COMMIT"),
                 "input_residency": residency_report()}
     diag.atomic_json_dump(identity, str(output / "inputs.ready.json")); commit(1, "startup")
@@ -131,11 +138,15 @@ def main():
     commit(1, "control")
     with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
                                             torch.profiler.ProfilerActivity.CUDA]) as profiler:
-        names, results, scalars = control(model, ids)
+        names, results, scalars = control(model, ids,
+                                         deterministic_backward=args.deterministic_backward)
         torch.cuda.synchronize()
     profiler.export_chrome_trace(str(output / "control.trace.json.gz"))
     diag.atomic_torch_save({"units": names, "scalars": scalars}, str(output / "control.pt"))
-    diag.atomic_json_dump({"identity": identity, "results": results, "complete": True},
+    identity["backward_deterministic_algorithms"] = torch.are_deterministic_algorithms_enabled()
+    stable = all(u["backward_vs_repeat"]["bitwise_equal"] for r in results for u in r["units"])
+    diag.atomic_json_dump({"identity": identity, "results": results, "complete": True,
+                          "repeat_cotangents_bitwise_stable": stable},
                           str(output / "control.json")); commit(2, "control")
     print(json.dumps({"complete": True, "results": [{"seed": r["seed"],
         "fixed_g_contractions": r["fixed_g_contractions"],
@@ -143,6 +154,8 @@ def main():
         "units_with_api_difference": sum(not u["grad_vs_backward"]["bitwise_equal"] for u in r["units"]),
         "units_with_repeat_difference": sum(not u["backward_vs_repeat"]["bitwise_equal"] for u in r["units"])}
         for r in results]}, sort_keys=True), flush=True); commit(3, "publish")
+    if args.deterministic_backward and not stable:
+        raise SystemExit("deterministic backward failed repeated-cotangent equality")
 
 
 if __name__ == "__main__":
