@@ -1,0 +1,39 @@
+{
+  "schema": "prismaquant.pq2039_documentation_validation.v1",
+  "source_parent": "acb8a35c92807ebf9cd711e129e646ae317b45a0",
+  "action_key": "24a505cc53ba062aabf156cfcfef49c167dea398da4493a0116d593b3772ae7a",
+  "returncode": 0,
+  "executed_host": "dl380g10",
+  "cpu": 1,
+  "memory_gib": 4,
+  "gpu": false,
+  "native_threads": 1,
+  "mode": "Python3.14.4/Torch2.11.0+cpu, CUDA_VISIBLE_DEVICES empty",
+  "files": [
+    "tests/test_architecture_doc.py",
+    "tests/test_docs_staleness.py"
+  ],
+  "collected": 19,
+  "ran": 19,
+  "passed": 19,
+  "skipped": 0,
+  "missing_outcomes": 0,
+  "warnings": 14,
+  "warning_kind": "torch.jit.script_method deprecation under Python3.14",
+  "cas_lookup_verified": true,
+  "payload_hashed": true,
+  "claim_sha256": "08fba572853a933d247b07eb640d39227311aecf10a311b79cb6c4465dcec1c2",
+  "payload_sha256": "131f3734ec806892b189f3e34866cc2b67e189c6ffdd28fa242bd289ec9a1b25",
+  "snapshot": {
+    "commit": "f2a15c379086b7e8c5e427cad3a15fca7180dca3",
+    "input": {
+      "bytes": 40701441,
+      "id": "pbrun.checkout-snapshot",
+      "sha256": "7757d9c20c7f32188f79be7c390dbd2040c5cc8885b6256807a076ef18e67ad0"
+    },
+    "parent": "acb8a35c92807ebf9cd711e129e646ae317b45a0",
+    "refs": {},
+    "schema": "prismaquant.prismabuild.pbrun_checkout_snapshot.v2",
+    "subdirectory": "."
+  }
+}

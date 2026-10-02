@@ -298,6 +298,25 @@ maps. Active and already configured contexts refuse another transition.
 Snapshot-only forward installation, nonbody materialization and complete
 initialization attestation remain forbidden. This selection capability supplies
 no source-provider, GPU-lifetime or numerical qualification by itself.
+Re-stamped 2026-10-02 (Refs #2039): projected-unit checking has an internal,
+explicitly opt-in private-preparation window. It retains every source read,
+private CPU copy and device comparison; the default remains serial preparation.
+The window uses the existing shared layer-read pool at two configured workers,
+refuses to resize a live pool, and owns at most four credits under a finite
+private-byte cap and prospective CPU/device reservations. The source owner
+continues to charge whole immutable deliveries and their native aliases;
+subviews do not reduce that charge. Ordered main-thread CUDA comparisons retain
+private buffers until completion; failure/cancellation drains readers and fences
+submitted CUDA work before releasing owners. This is not a new cache, source
+provider or automatic GPU admission. Bounded pending-CUDA ownership and
+original-layer timing controls are recorded in
+[the 2026-10-02 preparation report](measurements/pq2039_preparation_2026-10-02.md).
+The measured local latency gain preserves every source copy/comparison;
+aggregate CPU copy work increased. The option remains off, the higher
+CPU-material provider remains unqualified for GPU transfers, and no
+full-campaign, saturation or energy claim follows.
+
+
 Re-stamped 2026-10-02 (`sol/pq-1934-recovery-20261002`, Refs #1931, #1935):
 packed activation derivation stable-sorts slot-major routed pairs once and
 reads all expert counts with one host sync. Per-expert row order, duplicate

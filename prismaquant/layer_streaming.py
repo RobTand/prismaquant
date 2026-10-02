@@ -1650,7 +1650,7 @@ def layer_read_threads() -> int:
     return max(1, min(8, cpu // 2))
 
 
-def _layer_read_pool(threads: int) -> ThreadPoolExecutor:
+def _layer_read_pool(threads: int, *, allow_resize: bool = True) -> ThreadPoolExecutor:
     """One shared, bounded pool for every streamed layer read.
 
     Shared on purpose: the layer prefetcher already runs several layer
@@ -1659,6 +1659,9 @@ def _layer_read_pool(threads: int) -> ThreadPoolExecutor:
     """
     global _LAYER_READ_POOL, _LAYER_READ_POOL_THREADS
     with _LAYER_READ_POOL_LOCK:
+        if (_LAYER_READ_POOL is not None and _LAYER_READ_POOL_THREADS != threads
+                and not allow_resize):
+            raise RuntimeError("shared layer read pool cannot be resized by this consumer")
         if _LAYER_READ_POOL is None or _LAYER_READ_POOL_THREADS != threads:
             if _LAYER_READ_POOL is not None:
                 _LAYER_READ_POOL.shutdown(wait=False)
