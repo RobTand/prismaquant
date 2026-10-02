@@ -700,6 +700,93 @@ def _fleet(q, tmp_path: Path, *, capacity=None):
     return _Fleet(q, _tier_host(q), tmp_path, capacity=capacity)
 
 
+def test_fixture_fleet_accepts_only_its_own_escalated_cleanup_kill(
+        tmp_path, monkeypatch):
+    """The cleanup guard expired while OUR child was still alive.
+
+    Reproduce that transition immediately, without waiting sixty seconds.
+    The process and watcher are real; only the cleanup wait is controlled.
+    """
+    import signal
+    from types import SimpleNamespace
+
+    fleet = _Fleet(SimpleNamespace(root=tmp_path), "fixture", tmp_path)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    fleet._proc = proc
+    real_wait = proc.wait
+    responders = []
+    monkeypatch.setattr(fleet, "_spawn",
+                        lambda mode, label: responders.append((mode, label)))
+
+    def expired_cleanup_wait(timeout=None):
+        if timeout == 60:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        return real_wait(timeout=timeout)
+
+    monkeypatch.setattr(proc, "wait", expired_cleanup_wait)
+    fleet._watcher = threading.Thread(target=fleet._watch)
+    fleet._watcher.start()
+    try:
+        assert fleet.__exit__(None, None, None) is False
+        assert proc.returncode == -signal.SIGKILL
+        assert not fleet._watcher.is_alive()
+        assert fleet.died is False
+        assert responders == []
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        real_wait(timeout=120)
+        proc.stdin.close()
+        fleet._watcher.join(timeout=120)
+
+
+@pytest.mark.parametrize("returncode", [17, -9], ids=["failed", "killed-earlier"])
+def test_fixture_fleet_preserves_a_failure_observed_before_cleanup(
+        tmp_path, monkeypatch, returncode):
+    """A cleanup request must not hide a failure that already happened."""
+    from types import SimpleNamespace
+
+    fleet = _Fleet(SimpleNamespace(root=tmp_path), "fixture", tmp_path)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.buffer.read(); sys.exit(17)"],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    fleet._proc = proc
+    responders = []
+    monkeypatch.setattr(fleet, "_spawn",
+                        lambda mode, label: responders.append((mode, label)))
+    try:
+        if returncode == -9:
+            proc.kill()
+        else:
+            proc.stdin.close()
+        assert proc.wait(timeout=120) == returncode
+        # Even if the cleanup wait reports timeout after this exit, no
+        # signal to a live process is left for cleanup to take credit for.
+        real_wait = proc.wait
+
+        def expired_cleanup_wait(timeout=None):
+            if timeout == 60:
+                raise subprocess.TimeoutExpired(proc.args, timeout)
+            return real_wait(timeout=timeout)
+
+        monkeypatch.setattr(proc, "wait", expired_cleanup_wait)
+        fleet._stopping.set()
+        fleet._stop_process(proc)
+        fleet._watch()
+        assert fleet.died is True
+        assert fleet.returncode == returncode
+        assert responders == [(f"dead:{proc.pid}:{returncode}", "dead")]
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        real_wait = getattr(proc, "wait")
+        real_wait(timeout=120)
+        if not proc.stdin.closed:
+            proc.stdin.close()
+
+
 def _stage_groups(storage, q):
     """Seal each pending group's mover and run it through the real pool.
 
