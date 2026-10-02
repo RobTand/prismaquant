@@ -94,10 +94,15 @@ def _fresh_priced_campaign(monkeypatch, tmp_path, *, hessian=False):
     if hessian:
         argv[argv.index("--hessian") + 1] = "require"
     assert campaign.main(argv) == 0
+    return fixture, _priced_cost_payload(tmp_path)
+
+
+def _priced_cost_payload(tmp_path):
+    """Check the actual measured table before a consumer receives it."""
     with (tmp_path / "cost.pkl").open("rb") as handle:
         payload = pickle.load(handle)
     assert payload["costs"][UNIT]["TESSERA_E4M3_K1_R1024"]["output_mse_measured"]
-    return fixture, payload
+    return payload
 
 
 @pytest.fixture
