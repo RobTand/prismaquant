@@ -10,8 +10,13 @@ continues to charge whole immutable deliveries and their native aliases;
 subviews do not reduce that charge. Ordered main-thread CUDA comparisons retain
 private buffers until completion; failure/cancellation drains readers and fences
 submitted CUDA work before releasing owners. This is not a new cache, source
-provider or automatic GPU admission. Real GPU qualification and timing remain
-pending independent review; no speed, saturation or energy claim is made.
+provider or automatic GPU admission. Bounded pending-CUDA ownership and
+original-layer timing controls are recorded in
+[the 2026-10-02 preparation report](measurements/pq2039_preparation_2026-10-02.md).
+The measured local latency gain preserves every source copy/comparison;
+aggregate CPU copy work increased. The option remains off, the higher
+CPU-material provider remains unqualified for GPU transfers, and no
+full-campaign, saturation or energy claim follows.
 
 
 Re-stamped 2026-10-02 (`sol/pq-1934-recovery-20261002`, Refs #1931, #1935):

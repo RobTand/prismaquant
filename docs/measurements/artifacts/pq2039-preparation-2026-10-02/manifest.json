@@ -1,0 +1,252 @@
+{
+  "schema": "prismaquant.pq2039_preparation_evidence.v1",
+  "action_key": "cd5b0d0d95c30bb7f6a3a8b683df31f49afe2348e195c7a784ece8f9f70563c0",
+  "files": [
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-0-serial.json",
+      "relative": "check-0-serial.json",
+      "bytes": 19454,
+      "sha256": "c909611ae098437edeb1c888548d37432ea79fce8b959067b037cbe7f11e31f7"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-0-serial.netdata-raw.json",
+      "relative": "check-0-serial.netdata-raw.json",
+      "bytes": 90047,
+      "sha256": "81198da285ef8c7eddcbf4284899581ed1a47d4642ca7d95dc41c8cf80bc95b6"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-0-serial.trace.json",
+      "relative": "check-0-serial.trace.json",
+      "bytes": 13225760,
+      "sha256": "5257c87253fe8af896ec5fc5ace4f60d77585808a24451a3fe90cf331f1ebca1"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-1-prepared.json",
+      "relative": "check-1-prepared.json",
+      "bytes": 19308,
+      "sha256": "d67ec911226aaa767a01705ddc31bff1305d1890811a3f112566af570930b603"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-1-prepared.netdata-raw.json",
+      "relative": "check-1-prepared.netdata-raw.json",
+      "bytes": 89346,
+      "sha256": "44bc60b51f4ea4e1a68854c9f4a29cab2683b73652a15646fd859ae64ff4a96f"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-1-prepared.trace.json",
+      "relative": "check-1-prepared.trace.json",
+      "bytes": 13862593,
+      "sha256": "1851f20c6943af30a6e9710bdb63a88e5d334a4507b4a0cc95ea75b622edb363"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-2-prepared.json",
+      "relative": "check-2-prepared.json",
+      "bytes": 19439,
+      "sha256": "bc3cb3f1e69194c0eb6614a142a589cc7b73229043b9e131bd8d9ea41ca28320"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-2-prepared.netdata-raw.json",
+      "relative": "check-2-prepared.netdata-raw.json",
+      "bytes": 89480,
+      "sha256": "5a7042d084ebff3ff9646bca8f5bf1373d4ee2e753dfa42e8475190b2cb9d11a"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-2-prepared.trace.json",
+      "relative": "check-2-prepared.trace.json",
+      "bytes": 13870995,
+      "sha256": "0078339ac1a2ecfdc16a2f1a15802894343f3867162297bb3e2a826c3a31c379"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-3-serial.json",
+      "relative": "check-3-serial.json",
+      "bytes": 18973,
+      "sha256": "3dd6e49d08ea16dd705de090dc8a60b82b6f8276d0f8570579b2cc5af35e70b6"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-3-serial.netdata-raw.json",
+      "relative": "check-3-serial.netdata-raw.json",
+      "bytes": 88106,
+      "sha256": "5c5825ed74508e0b929065f60eaa49655924f1bd65c9306a6638de250d5d91d1"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/check-3-serial.trace.json",
+      "relative": "check-3-serial.trace.json",
+      "bytes": 13295245,
+      "sha256": "b61653f454e30764c21ceb49ad35b161745bf9574b755a40aeb10e8330bf6104"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/partial.json",
+      "relative": "partial.json",
+      "bytes": 90980,
+      "sha256": "df43becd841fcdf651bc1ed57a5ad1dbed24034f8ed0c2d914a2ccd88b0951ff"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/result.json",
+      "relative": "result.json",
+      "bytes": 96815,
+      "sha256": "97c710cbe5abbfd967e692593b7f4f885fbb1bc075093d9b0f236f60216d4e9f"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/startup.json",
+      "relative": "startup.json",
+      "bytes": 1628,
+      "sha256": "4d71d061e6888f8281c30c1e63f0659e7ef7f9bedbaa926e9432ad51e335dc24"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/system-observer/netdata.jsonl",
+      "relative": "system-observer/netdata.jsonl",
+      "bytes": 941197,
+      "sha256": "1a2e0876986e49bf190255a0e529f837b327b34a490458d9459210b4ef4eb7ea"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/system-observer/progress.json",
+      "relative": "system-observer/progress.json",
+      "bytes": 1035,
+      "sha256": "b706e965a64ce69ecd5913412e85498232ea9bdf5b068fe77e6c583074a407ec"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/system-observer/python_sampler.jsonl",
+      "relative": "system-observer/python_sampler.jsonl",
+      "bytes": 185974,
+      "sha256": "60e366c05d35da11a1f2692d9de3823fd08986a724d853226c8d9fdbec419d8f"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/original-check-dd76-v1/system-observer/result.json",
+      "relative": "system-observer/result.json",
+      "bytes": 1035,
+      "sha256": "b706e965a64ce69ecd5913412e85498232ea9bdf5b068fe77e6c583074a407ec"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/pending_control.py",
+      "bytes": 10882,
+      "sha256": "0d7b4ef05355761dd4dee2679fd5cdb2d5e2b1577f6c982391c703c06a068e42",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/pending-argv.json",
+      "bytes": 18923,
+      "sha256": "2be8d80574986d432725ffb03c0f6b1a9c4b00d120f0a2849136e79afcd9c2e1",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/pending-current.json",
+      "bytes": 26046,
+      "sha256": "791ba6b66f6ec72ae868b6d9c2a2e9be86ec5cce875f58532dd6902a01ebb1b5",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/pending-claim.json",
+      "bytes": 2075,
+      "sha256": "9c4e67c8245871aab1a81d299534884ebdf32d039d729fbaefe8efa2209f6c8a",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/pending-result.json",
+      "bytes": 7780,
+      "sha256": "4979f5639fd734a3b43c6217f57ca60a4f4e9099e8b7dcf3e4f81ca0bd073a22",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/pending-summary.json",
+      "bytes": 5303,
+      "sha256": "ca7c1e0a9232874dd981b0448204e3b14d69c11aa2a3e5213e8aa960761db9f2",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original_check_driver.py",
+      "bytes": 6745,
+      "sha256": "8eddbc9bf77b544ad35ff10b0c8bc06e2ce892028d5ac0b926a2c8ffa481dca7",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-check-argv.json",
+      "bytes": 15174,
+      "sha256": "2b3355f2b80f4b9db1084935b5553bf136261735541083e6aae82de7f783c799",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-sealed-request.json",
+      "bytes": 33934,
+      "sha256": "325cae0569eda44f39ed186a59e041b2a358aa717098fdcb5b16beeabc6eeda6",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-sealed-summary.json",
+      "bytes": 2129,
+      "sha256": "ba01bdd4216d4338bd7d25fae5202e6445f1bf26569a241d308a60964e6ae779",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-manifest-preflight.json",
+      "bytes": 635,
+      "sha256": "5c4a86cfd1222c0abaa5c0deacf4030ffd276d71fd59b65546353df1a3aa4c25",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-runtime-receipt-summary.json",
+      "bytes": 1641,
+      "sha256": "29ab46b2f4284f270129421746710cadf145317f508c0ab1d98f8d3812dad385",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-current.json",
+      "bytes": 22403,
+      "sha256": "0d3761d40154f7c65c892b822839e50e4b117587a0361c485622cf5da5cdb93d",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-claim.json",
+      "bytes": 2074,
+      "sha256": "b319a8ee8fbd8d25bef25b492f6250fd0de7f441c6c05b0f603f84207009032e",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-summary.json",
+      "bytes": 14757,
+      "sha256": "50be1402c417d03c20ae66e036fe9a44d738d62768cd49b3c55da88a846319be",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/analyze-original-traces.py",
+      "bytes": 3244,
+      "sha256": "b0a5c0a0f2c44b6faac4554b51327cac74680f7341248a869260aeb8098f2b1a",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/trace-copy-attribution.json",
+      "bytes": 3039868,
+      "sha256": "01d87107da2348659bf9138bcfae6bb64399da1f9d349fea43dfa91ecfc462ce",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/home/rob/tmp/astra-resume-20261002/pq2039_performance/original-submit-contract-refusal.log",
+      "bytes": 1601,
+      "sha256": "fd1fd35ae7dc5b77cff64e9650c6002a38e1d255a6f79c2dd2c7b4946b828e17",
+      "kind": "control-or-receipt"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/binding-check-only-v1.json",
+      "bytes": 173017,
+      "sha256": "122f3ee6352aaf5916023624a11f2b232f7bc2fdf1b994003e9c4dda38310829",
+      "kind": "control-input"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/data-manifest-check-only-v1.json",
+      "bytes": 2585,
+      "sha256": "0206412957217f0996f32d7cb4b49c12af091627c4c2c2ddc219fced86f4f1bd",
+      "kind": "control-input"
+    },
+    {
+      "path": "/mnt/shared/tessera-measurements/pq2039-performance-20261002/data-manifest-check-only-v2.json",
+      "bytes": 2604,
+      "sha256": "3247d0b61ef91be8a23c3650c079fcd7b35731fa301173aa6c00c8880c0fc957",
+      "kind": "control-input"
+    }
+  ],
+  "measured_source": "dd76f0e3ae59730a100e9615975fdd57e8688736",
+  "scope": "bounded original-layer matched guarded ABBA and pending-CUDA ownership control",
+  "energy_qualified": false,
+  "provider_gpu_qualified": false,
+  "full_campaign_qualified": false,
+  "file_count": 40
+}
