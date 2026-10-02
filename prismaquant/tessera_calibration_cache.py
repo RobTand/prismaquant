@@ -23,6 +23,7 @@ from .digests import (
     DIRECT_ASCII_STRICT,
     SOURCE_HASH_BLOCK_BYTES,
     bytes_sha256hex,
+    git_blob_sha1hex,
     hex_chain_sha256hex,
     indent2_json_file_bytes,
 )
@@ -612,10 +613,9 @@ class CaptureSourceAuthentication:
             try:
                 buffer.require_sealed()
                 if row.git_blob is not None:
-                    digest = hashlib.sha1(b'blob ' + str(row.size).encode('ascii') + b'\0')
                     with buffer.readonly() as view:
-                        digest.update(view)
-                    if digest.hexdigest() != row.git_blob:
+                        observed = git_blob_sha1hex(view)
+                    if observed != row.git_blob:
                         raise RuntimeError(f'{name}: delivered auxiliary differs from publisher Git object')
                 fd = os.open(buffer.path, os.O_RDONLY | os.O_CLOEXEC)
                 state = dict(fd=fd, before=os.fstat(fd), buffer=buffer, sha256=row.sha256,

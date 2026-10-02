@@ -9,8 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
+import re
 
 from .schemas import Contract, strict_json_loads
+from .digests import is_sha256hex
 from .stage_inputs import read_bound, require_source_identity
 
 
@@ -18,15 +20,14 @@ _contract = Contract(RuntimeError, 'original generation: ')
 _require = _contract.require
 
 
-def _hex(value, length):
-    return isinstance(value, str) and len(value) == length and all(c in '0123456789abcdef' for c in value)
+_GIT_OBJECT_ID = re.compile(r'[0-9a-f]{40}\Z')
 
 
 def _control(record, label):
     # These are small authority/control inputs, not model payloads. A caller
     # must bind their digests independently in the enclosing reviewed action.
     _require(isinstance(record, dict) and set(record) == {'path', 'sha256'} and
-             _hex(record.get('sha256'), 64), f'{label} needs independently bound control input')
+             is_sha256hex(record.get('sha256')), f'{label} needs independently bound control input')
     _require(Path(record['path']).stat().st_size <= 16 * 1024**2, f'{label} control input too large')
     return strict_json_loads(read_bound(record, label),
                             duplicate=lambda key: RuntimeError(f'{label}: duplicate key {key}'),
@@ -50,8 +51,8 @@ def original_generation_coordinates(*, publisher_input, publisher_id, publisher_
     bootstrap. LFS SHA256 and lengths are independently publisher-derived.
     """
     publisher = _control(publisher_input, 'publisher authority')
-    _require(isinstance(publisher_id, str) and publisher_id and _hex(publisher_revision, 40),
-             'explicit publisher and full revision required')
+    _contract.string(publisher_id, where='explicit publisher ID')
+    _contract.string(publisher_revision, where='full publisher revision', pattern=_GIT_OBJECT_ID)
     _require(isinstance(publisher, dict) and publisher.get('id') == publisher_id and
              publisher.get('sha') == publisher_revision, 'publisher/revision authority mismatch')
     siblings = publisher.get('siblings')
@@ -68,8 +69,9 @@ def original_generation_coordinates(*, publisher_input, publisher_id, publisher_
         lfs = row.get('lfs')
         if lfs is not None:
             _require(isinstance(lfs, dict) and lfs.get('size') == size and
-                     _hex(lfs.get('sha256'), 64), f'{name}: invalid publisher LFS authority')
-        _require(_hex(row.get('blobId'), 40), f'{name}: native Git blob authority missing')
+                     is_sha256hex(lfs.get('sha256')), f'{name}: invalid publisher LFS authority')
+        _contract.string(row.get('blobId'), where=f'{name}: native Git blob authority',
+                         pattern=_GIT_OBJECT_ID)
         native[name] = row
     _require(isinstance(source_paths, dict) and set(source_paths) == set(native),
              'source mapping must cover exactly the closed publisher roster')
@@ -82,7 +84,7 @@ def original_generation_coordinates(*, publisher_input, publisher_id, publisher_
         _contract.absolute_posix_path(path, where=f'{name}: physical mapping')
         entry = entries.get((path, 0))
         _require(entry is not None and entry['bytes'] == row['size'] and
-                 _hex(entry['sha256'], 64), f'{name}: complete whole-file readset binding required')
+                 is_sha256hex(entry['sha256']), f'{name}: complete whole-file readset binding required')
         lfs = row.get('lfs')
         _require(lfs is None or entry['sha256'] == lfs['sha256'],
                  f'{name}: readset differs from publisher LFS digest')
