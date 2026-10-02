@@ -214,7 +214,9 @@ def test_writer_resume_seal_and_prefetch_preserve_artifact_identity(capture):
     assert Path(result['path']).read_bytes() == original_manifest
     assert hashes == {name: cc.sha256(root/f'inputs/{name}.pt') for name in acts}
     assert writer.load_execution['loaded_entries'] == 2
-    assert writer.seal_load_execution['loaded_entries'] == 2
+    # The replay verified each entry; the seal holds it to the stat
+    # fingerprint taken then and loads nothing again (PQ #1896).
+    assert writer.seal_load_execution['loaded_entries'] == 0
     execution = {}
     values, _ = cc.prefetch_capture(result['path'], expected_identity=identity,
         census=census, names=acts, device='cpu', verified_load_policy=policy(), load_execution=execution)

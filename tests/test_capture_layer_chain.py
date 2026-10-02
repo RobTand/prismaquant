@@ -115,9 +115,11 @@ class _Chain:
             self.prepare()
 
     def prepare(self):
-        self.prep = chain.prepare(self.root, census_path=self.census, ranges=[(0, 1), (1, 2)],
-            n_batches=self.n_batches, boundary_storage=_boundary_policy(self.boundaries),
-            identity=self.identity)["document"]
+        # The prep seals the traversal identity and reads no payload (PQ #1896).
+        with self.cache.record_capture_source(self.census, model=self.source) as source:
+            self.prep = chain.prepare(self.root, census_path=self.census, ranges=[(0, 1), (1, 2)],
+                n_batches=self.n_batches, boundary_storage=_boundary_policy(self.boundaries),
+                identity=lambda: self.identity(source))["document"]
         return self.prep
 
     def identity(self, source_authentication=None):
@@ -311,15 +313,16 @@ def test_join_publishes_the_monolith_manifest_without_reading_an_entry(tmp_path,
 
 def test_a_quantum_reads_its_source_through_the_prep_roster(tmp_path):
     fixture = _Chain(tmp_path)
-    with pytest.raises(CaptureChainRefused, match="prep's roster"):
+    with pytest.raises(CaptureChainRefused, match="prep's recording owner"):
         chain.ChainQuantum(fixture.root, (0, 1), num_layers=2, source_authentication=None)
     fixture.quantum((0, 1))
     receipt = json.loads(chain.fragment_path(fixture.root, 0, 1).read_text())["source_authentication"]
-    # Only the metadata file the identity reads is hashed; the payload shard
-    # this fixture never reads is not.
-    assert [row["name"] for row in receipt["verified_files"]] == ["config.json"]
+    # The quantum's owner records what its reads hash (PQ #1896). The identity
+    # reads nothing, and this fixture reads no payload, so nothing is hashed.
+    assert receipt["schema"] == cc.RECORDING_RECEIPT_SCHEMA
+    assert receipt["verified_files"] == []
     assert receipt["payload_bytes_hashed"] == 0
-    assert receipt["capture_manifest_sha256"] == fixture.prep["prep_sha256"]
+    assert receipt["binding_sha256"] == fixture.prep["prep_sha256"]
 
 
 def test_quanta_run_in_order_and_once(tmp_path):
@@ -409,7 +412,7 @@ def test_join_refuses_an_entry_changed_after_its_quantum_verified_it(tmp_path):
         "units"]["a"]["path"]
     observed = entry.stat()
     os.utime(entry, ns=(observed.st_atime_ns, observed.st_mtime_ns + 1_000_000_000))
-    with pytest.raises(RuntimeError, match="changed since its quantum verified it"):
+    with pytest.raises(RuntimeError, match="changed since its writer or quantum verified it"):
         chain.join(fixture.root, census_path=fixture.census)
 
 
