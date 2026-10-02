@@ -1216,9 +1216,9 @@ def consume_shape_time_observation(observations: Sequence[Path], *, table_id: st
     for index, path in enumerate(observations):
         observation, _raw = read_shape_time_observation(path)
         projection = _verify_observation(observation)
-            if any(canonical_strict(projection["context"].as_dict())
-                   == canonical_strict(previous["context"].as_dict())
-                   and projection["rank_local_shape"] == previous["rank_local_shape"]
+        if any(canonical_strict(projection["context"].as_dict())
+               == canonical_strict(previous["context"].as_dict())
+               and projection["rank_local_shape"] == previous["rank_local_shape"]
                and projection["family"] == previous["family"]
                and projection["rate_q256"] == previous["rate_q256"]
                and projection["m"] == previous["m"]
