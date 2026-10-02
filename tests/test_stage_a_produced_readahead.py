@@ -675,7 +675,7 @@ def test_read_ahead_given_up_first_is_the_group_read_last():
         ("boundary", 6, -1, 3), ("boundary", 7, -1, 0)]
 
 
-@pytest.mark.parametrize("wake_delay", [0.0, 0.75], ids=["on-time", "late-wake"])
+@pytest.mark.parametrize("wake_delay", [0.0, 0.2], ids=["on-time", "late-wake"])
 def test_a_reclaim_that_cannot_finish_ends_inside_the_reads_own_budget(
         tmp_path, monkeypatch, wake_delay):
     """A reclaim is part of the group's staging, never a budget of its own."""
