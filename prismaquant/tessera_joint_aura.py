@@ -12,7 +12,6 @@ from collections import defaultdict
 from collections.abc import Mapping
 import functools
 from dataclasses import dataclass
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -39,6 +38,7 @@ from .residency_map import (
 from .digests import (
     DIRECT_UTF8_STRICT, bytes_sha256hex, file_digest_sha256hex,
     file_sha256hex, indent2_json_file_bytes, newline_utf8_sha256,
+    length_framed_bytes_sha256,
 )
 from .file_identity import file_stat_signature
 from .prismabuild_progress import commit as _pb_commit
@@ -1782,17 +1782,17 @@ def _qualification_cells_sha256(cells):
     their complete sorted cell records here. Length framing keeps adjacent
     variable-sized JSON rows unambiguous; one row is the largest live buffer.
     """
-    digest = hashlib.sha256(QUALIFICATION_CELLS_SCHEMA.encode() + b"\n")
-    for name, fmt in sorted(cells):
-        cell = cells[name, fmt]
-        row = DIRECT_UTF8_STRICT.encoded((name, fmt, {
-            'anchor': cell['anchor'], 'record': cell['record'],
-            'render': cell['render'], 'wire': cell['wire'],
-            'render_origin': cell['render_origin'],
-        }))
-        digest.update(len(row).to_bytes(8, 'big'))
-        digest.update(row)
-    return digest.hexdigest()
+    def rows():
+        for name, fmt in sorted(cells):
+            cell = cells[name, fmt]
+            yield DIRECT_UTF8_STRICT.encoded((name, fmt, {
+                'anchor': cell['anchor'], 'record': cell['record'],
+                'render': cell['render'], 'wire': cell['wire'],
+                'render_origin': cell['render_origin'],
+            }))
+
+    return length_framed_bytes_sha256(
+        rows(), prefix=QUALIFICATION_CELLS_SCHEMA.encode() + b"\n")
 
 
 def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
