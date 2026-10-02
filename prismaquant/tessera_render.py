@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from functools import lru_cache
@@ -44,7 +45,7 @@ from .tessera_formats import (
     lazily_sized_cache,
     parse_tessera_format_name,
     scale_plane_name,
-    tessera_wire_recipe,
+    tessera_served_wire_recipe,
 )
 from .tessera_serving_runtime_pin import TESSERA_SERVING_PLUGIN_NAME
 
@@ -637,6 +638,28 @@ def _plan(family: TesseraFamily, body_rate_q256: int, n_columns: int, recipe):
     return grid, rates, forests, channel_sigma
 
 
+def _render_wire_recipe(
+        family, rung, *, recipe=None, structure=None, refuse_unattested=True):
+    """One recipe for a render, its plan-time facts and its shape price.
+
+    Explicit recipes describe existing or experimental bytes and remain
+    authoritative. Otherwise the existing producer resolver owns the served
+    wire and its refusal; an absent structure retains its research default.
+    Only a descriptive spec query resolves an unattested wire without raising,
+    so it can report producer_eligible=False. Planning and rendering retain
+    the strict default.
+    """
+    if structure is not None:
+        from .lane_eligibility import STRUCTURES
+
+        if not isinstance(structure, str) or structure not in STRUCTURES:
+            raise ValueError(f"structure {structure!r} is not one of {sorted(STRUCTURES)}")
+    return (tessera_served_wire_recipe(
+                family, rung, structure=structure,
+                refuse_unattested=refuse_unattested)
+            if recipe is None else recipe)
+
+
 def planned_wire_facts(family, rung: int, *, recipe=None, structure=None) -> dict:
     """The wire this producer WILL encode for ``family`` at ``rung``, as lane facts.
 
@@ -645,7 +668,8 @@ def planned_wire_facts(family, rung: int, *, recipe=None, structure=None) -> dic
     ``diagonals``, ``rotation``, ``start_state``, ``grid_arity`` -- read at
     PLAN time, before any tensor exists, from the same three sources the
     render encodes from: the family's grid, the wire recipe
-    (``tessera_wire_recipe``, the exporter's own) and the decoration
+    (``tessera_served_wire_recipe``, the producer's structure-aware resolver)
+    and the decoration
     constants above.  ``lane_eligibility.cell_lane_admits`` hands this dict
     to ``tessera.serving.scheme.decide_lane_requirements``, so a lane's
     published predicate is decided over what this producer plans rather than
@@ -672,7 +696,7 @@ def planned_wire_facts(family, rung: int, *, recipe=None, structure=None) -> dic
     from tessera.manifest import BodyKind, ScalePlaneKind
 
     spec = get_tessera_family(family)
-    wire = tessera_wire_recipe(spec, rung) if recipe is None else recipe
+    wire = _render_wire_recipe(spec, rung, recipe=recipe, structure=structure)
     root = spec.root_rate(int(rung), recipe=wire)
     facts = {
         "rates": rate_set(root, cap=family_rate_cap(spec, wire)),
@@ -703,6 +727,7 @@ def render_tessera_weight(
     *,
     col_weights: "torch.Tensor | None" = None,
     recipe=None,
+    structure=None,
 ) -> torch.Tensor:
     """Encode ``weight`` at the rung ``name`` names and return the reconstruction.
 
@@ -712,10 +737,10 @@ def render_tessera_weight(
     requires, established by construction rather than by keeping three code
     paths in step.
 
-    The wire it renders is the **recipe**: ``tessera.export.wire_recipe`` is the
-    single statement of which body, span, scale plane and window the exporter
-    writes for this grid at this rung, and every knob below is resolved from it
-    exactly as ``encode_linear`` resolves its own ``None`` wire kwargs.  Passing
+    The wire it renders is the **recipe**: the producer's structure-aware
+    resolver states which body, span, scale plane and window it serves for this
+    grid at this rung. An absent ``structure`` retains the research recipe.
+    Every encoder knob below is resolved from that recipe. Passing
     ``recipe`` explicitly renders a wire the exporter does not write by default
     -- which is how a candidate recipe gets priced before it is the default,
     and how the test that pins this function against ``encode_linear`` reaches
@@ -737,7 +762,7 @@ def render_tessera_weight(
     from tessera.decode import reconstruct_unit
 
     unit, forests = _encode_planned_unit(
-        weight, name, col_weights=col_weights, recipe=recipe)
+        weight, name, col_weights=col_weights, recipe=recipe, structure=structure)
     out = reconstruct_unit(unit, forests, _tessera_export.DEFAULT_CODE)
     return out.to(dtype=weight.dtype, device=weight.device)
 
@@ -748,6 +773,7 @@ def _encode_planned_unit(
     *,
     col_weights: "torch.Tensor | None" = None,
     recipe=None,
+    structure=None,
 ):
     """The encoded unit ``render_tessera_weight`` reconstructs, and its forests.
 
@@ -784,7 +810,7 @@ def _encode_planned_unit(
             "every other format already keys MoE units."
         )
     rows, cols = weight.shape
-    wire = tessera_wire_recipe(family, rung) if recipe is None else recipe
+    wire = _render_wire_recipe(family, rung, recipe=recipe, structure=structure)
     body = BodyKind(wire.body)
     # A window body has no super-symbols; ``encode_linear`` resolves the span
     # to 1 there rather than making every window caller escape a default that
@@ -869,10 +895,13 @@ def synthesize_tessera_spec(
     handling: an unknown name must still produce ``get_format``'s KeyError,
     naming the registry, not a Tessera parse failure.
 
-    ``recipe`` is the wire being described and defaults to the one the
-    exporter writes for this family at this rung. ``serving_context`` scopes
-    producer eligibility, not the wire or its price. Under v5 the attested
-    menu requires this context; research keeps its existing unattested policy.
+    ``recipe`` is the wire being described and remains authoritative when
+    explicit. Otherwise ``serving_context.structure`` selects the served wire
+    for rendering and pricing as well as scoping producer eligibility. An
+    absent context preserves the research recipe. Under v5 the attested menu
+    requires a context; research keeps its existing unattested policy.
+    A valid but unattested scoped rung returns a descriptive spec with the
+    eligibility gate's False answer; planning a served encode still refuses.
 
     Every recipe charges something **per unit** -- a CHANNEL row field, a
     WINDOW table, a TCQ forest -- so no Tessera rung has a bits-per-parameter
@@ -889,14 +918,17 @@ def synthesize_tessera_spec(
     from .tessera_footprint import TesseraShapeRate
     from .tessera_formats import (
         artifact_bpp, route_static_activation_contract, scale_plane_name,
-        tessera_serving_route, tessera_wire_recipe,
+        tessera_serving_route,
     )
 
     parsed = parse_tessera_format_name(name)
     if parsed is None:
         return None
     family, rung = parsed
-    wire = tessera_wire_recipe(family, rung) if recipe is None else recipe
+    wire = _render_wire_recipe(
+        family, rung, recipe=recipe,
+        structure=None if serving_context is None else serving_context.structure,
+        refuse_unattested=False)
     plane = scale_plane_name(wire.scale_plane)
 
     # The price is a function, not a rate -- on every Tessera wire, since
@@ -1247,7 +1279,7 @@ def rung_accepts_hessian(format_name: str, recipe=None) -> bool:
     if parsed is None:
         raise ValueError(f"{format_name!r} is not a Tessera format name")
     family, rung = parsed
-    wire = tessera_wire_recipe(family, rung) if recipe is None else recipe
+    wire = _render_wire_recipe(family, rung, recipe=recipe)
     emitted = _encoder_kwargs_for_plane(wire.scale_plane)
     return bool(emitted & _H_BEARING_KWARGS)
 
@@ -1321,7 +1353,7 @@ def _tessera_unit_encode_kwargs(format_name, *, activation_kwargs,
     if parsed is None:
         raise ValueError(f"{format_name!r} is not a Tessera format name")
     family, rung = parsed
-    wire = tessera_wire_recipe(family, rung) if recipe is None else recipe
+    wire = _render_wire_recipe(family, rung, recipe=recipe)
 
     accepted, required, _params = _encoder_accepts_hessian()
     if not rung_accepts_hessian(format_name, wire):
@@ -1505,6 +1537,12 @@ def render_tessera_production(
 
     ``levers['tessera_weights_only']`` is the deliberate opt-out and must be
     stamped by whoever sets it.
+
+    ``levers['tessera_structure_by_unit']`` optionally declares the serving
+    structure for each unit in this fill. A declared map must cover this qname
+    with a valid structure; missing entries never fall back to research bytes.
+    The existing render identity binds the levers, including this declaration.
+    An absent map retains the structure-free research recipe.
     """
     from .tessera_formats import parse_tessera_format_name
     from .tessera_hessian import activation_source, encoder_kwargs, hessian_from_rows
@@ -1516,7 +1554,14 @@ def render_tessera_production(
     parsed = parse_tessera_format_name(fmt)
     if parsed is None:
         raise ValueError(f"{fmt!r} is not a Tessera format name")
-    wire = tessera_wire_recipe(*parsed)
+    structure = None
+    if levers is not None and "tessera_structure_by_unit" in levers:
+        structures = levers["tessera_structure_by_unit"]
+        if (not isinstance(structures, Mapping) or qname not in structures
+                or structures[qname] is None):
+            raise ValueError(f"{qname}: declared Tessera structure map lacks a unit structure")
+        structure = structures[qname]
+    wire = _render_wire_recipe(*parsed, structure=structure)
 
     weights_only = bool(levers.get("tessera_weights_only", False)) if levers \
         else False

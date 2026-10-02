@@ -39,8 +39,11 @@ independent SHA256 and actual `F_GET_SEALS` verification precede decoding. The
 lease can release after acquisition because the owned kernel-sealed memfd is
 then the material; source files themselves may still be mutable.
 
-JSON and safetensors header/payload reads use the same admitted memfd. CPU
-`framework="pt"` safetensors is the only tensor decoder admitted in this slice.
+JSON and safetensors header/payload reads use the same admitted memfd.
+JSON bootstrap, including the complete checkpoint index, delegates to the one
+strict decoder and refuses duplicate keys or nonfinite constants before an
+authenticated document can be interpreted.
+CPU `framework="pt"` safetensors is the only tensor decoder admitted in this slice.
 The shared layer-streaming source seam selects that whole-file decoder directly,
 so a range adapter cannot read a pool header and a different staged payload.
 Outside-window reads, arbitrary factories and device transfers refuse. Raw
