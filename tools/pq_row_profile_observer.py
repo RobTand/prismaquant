@@ -8,6 +8,7 @@ workload. Output never enters a wire, cost row or anchor identity.
 import argparse
 from tools.pq_profile_digest import file_sha256hex
 from tools.pq_profile_artifact import publish_profile
+from tools.pq_admitted_profile import PROFILE_LOCAL_ROOT
 from tools.pq_profile_source import profile_source_owner
 import json
 import math
@@ -41,7 +42,7 @@ if local_host not in ('sparky', 'sparklina'):
 out = Path(a.out)
 out.mkdir(parents=True, exist_ok=False)
 profile_dir = Path(a.profile_local).resolve()
-local_root = Path('/home/rob/tmp/claude-campaign-20260926/tmp/row-startup/profiles').resolve()
+local_root = PROFILE_LOCAL_ROOT.resolve()
 if not profile_dir.is_relative_to(local_root) or profile_dir == local_root:
     raise ValueError('profile-local must be a new directory below the host-local campaign profiles root')
 profile_dir.mkdir(parents=True, exist_ok=False)

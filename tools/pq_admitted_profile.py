@@ -11,6 +11,9 @@ import sys
 import time
 
 
+PROFILE_LOCAL_ROOT = Path('/home/rob/tmp/claude-campaign-20260926/tmp/row-startup/profiles')
+
+
 def run_observed(command, observer_command, observations: Path, *, target_out,
                  ready_timeout=60, observer_exit_timeout=540):
     observations = Path(observations)
@@ -61,8 +64,8 @@ def run_observed(command, observer_command, observations: Path, *, target_out,
             observer.wait(timeout=30)
 
 
-def profiled_row_command(command, *, destination, profiler_executable):
-    """Keep container ownership and original argv; profile its same-UID child."""
+def profile_row_parts(command):
+    """Locate the existing row boundary without changing command operands."""
     boundary = 0
     if 'tools.tessera_campaign_container' in command:
         module = command.index('tools.tessera_campaign_container')
@@ -70,9 +73,57 @@ def profiled_row_command(command, *, destination, profiler_executable):
     inner = command[boundary:]
     if not inner or not Path(inner[0]).name.startswith('python'):
         raise ValueError('profiling requires the original Python row argv')
+    return boundary, inner
+
+
+def profiled_row_command(command, *, destination, profiler_executable):
+    """Keep container ownership and original argv; profile its same-UID child."""
+    boundary, inner = profile_row_parts(command)
     return [*command[:boundary], inner[0], '-u', '-m', 'tools.pq_profile_child',
             '--profiler-executable', profiler_executable, '--out', str(destination),
             '--', *inner]
+
+
+def profiled_workload_parts(command, *, destination, profiler_executable):
+    """Accept only the exact existing canonical child wrapper; keep full argv."""
+    boundary, inner = profile_row_parts(command)
+    if len(inner) < 10 or inner[8] != '--':
+        raise RuntimeError('namespace profile requires the canonical child wrapper')
+    original = [*command[:boundary], *inner[9:]]
+    if command != profiled_row_command(original, destination=destination,
+                                       profiler_executable=profiler_executable):
+        raise RuntimeError('namespace profile wrapper differs from its declaration')
+    return boundary + 9
+
+
+def profile_local_destination(request_key):
+    """Same existing host-local policy; namespace owns one deterministic child."""
+    return PROFILE_LOCAL_ROOT / request_key
+
+
+def bound_profile_command(row, *, observations, profile_local, profiler_executable, row_s):
+    """Admit the already sealed instrumented row, never rewrite its identity."""
+    command = row['argv']
+    if command[:4] != ['python3', '-m', 'tools.tessera_campaign_container', '--spec']:
+        return None
+    spec = json.loads(command[4])
+    if 'namespace_binding' not in spec and 'namespace_profile' not in spec:
+        return None
+    from tools.tessera_campaign_namespace import (
+        namespace_profile_record, namespace_request_parts, require_namespace_publication)
+    profile = namespace_profile_record(spec)
+    if profile is None or 'namespace_binding' not in spec:
+        raise RuntimeError('namespace profiling must be prepared before binding and publication')
+    _, _, inner_start = namespace_request_parts(row)
+    require_namespace_publication(row)
+    expected = (profile['observations'], profile['profile_local'], profile['profiler']['path'], profile['row_s'])
+    if (observations, profile_local, profiler_executable, row_s) != expected:
+        raise RuntimeError('namespace profile launch arguments differ from sealed instrumentation')
+    local = Path(profile_local)
+    if local.exists() or local.is_symlink():
+        raise FileExistsError('refusing stale namespace profile-local output directory')
+    target = command[command.index('--out', inner_start) + 1]
+    return command, target, Path(profile['observations']) / 'child-profile.speedscope'
 
 
 def main(argv=None):
@@ -89,10 +140,16 @@ def main(argv=None):
     if (not isinstance(command, list) or not command or
             any(not isinstance(part, str) for part in command)):
         raise RuntimeError('launch must carry a nonempty string argv')
-    target = command[command.index('--out') + 1]
-    child_profile = Path(args.observations).resolve() / 'child-profile.speedscope'
-    observed_command = profiled_row_command(command, destination=child_profile,
-                                            profiler_executable=args.profiler_executable)
+    bound = bound_profile_command(row, observations=args.observations,
+                                  profile_local=args.profile_local,
+                                  profiler_executable=args.profiler_executable, row_s=args.row_s)
+    if bound is None:
+        target = command[command.index('--out') + 1]
+        child_profile = Path(args.observations).resolve() / 'child-profile.speedscope'
+        observed_command = profiled_row_command(command, destination=child_profile,
+                                                profiler_executable=args.profiler_executable)
+    else:
+        observed_command, target, child_profile = bound
     observer = [sys.executable, '-u', '-m', 'tools.pq_row_profile_observer',
                 '--out', args.observations, '--target-out', target,
                 '--profile-local', args.profile_local, '--wait-s', '60',
