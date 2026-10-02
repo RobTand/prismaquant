@@ -10,8 +10,12 @@ from contextlib import suppress
 from pathlib import Path, PurePosixPath
 
 from tools.pq_profile_digest import canonical_json_bytes, canonical_json_sha256
+from tools.pq_admitted_profile import (
+    profile_local_destination, profiled_row_command, profiled_workload_parts,
+)
 
 SCHEMA = "prismaquant.tessera_campaign_namespace.v1"
+PROFILE_SCHEMA = "prismaquant.tessera_namespace_profile.v1"
 RECONCILIATION_SCHEMA = "prismaquant.tessera_namespace_reconciliation.v1"
 OUTPUTS = {"--out": "cost.pkl", "--cache-dir": "cache", "--checkpoint": "cost.anchors.json"}
 # Only these cache/temp destinations are supported by this opt-in CPU slice.
@@ -64,9 +68,16 @@ def namespace_request_parts(row: dict) -> tuple[int, dict, int]:
         spec = json.loads(argv[4])
     except (ValueError, TypeError) as exc:
         raise RuntimeError("namespace container spec is not valid JSON") from exc
-    module_index = 8 if argv[7:8] == ["-u"] else 7
-    if (not isinstance(spec, dict)
-            or argv[module_index:module_index + 2] != ["-m", "prismaquant.tessera_campaign"]):
+    if not isinstance(spec, dict):
+        raise RuntimeError("namespace container spec must be a mapping")
+    profile = namespace_profile_record(spec)
+    payload = 6
+    if profile is not None:
+        payload = profiled_workload_parts(argv,
+            destination=str(Path(profile["observations"]) / "child-profile.speedscope"),
+            profiler_executable=profile["profiler"]["path"])
+    module_index = payload + (2 if argv[payload + 1:payload + 2] == ["-u"] else 1)
+    if argv[module_index:module_index + 2] != ["-m", "prismaquant.tessera_campaign"]:
         raise RuntimeError("namespace requires a direct campaign command")
     inner_start = module_index + 2
     if not isinstance(row.get("env"), dict):
@@ -85,6 +96,41 @@ def namespace_request_parts(row: dict) -> tuple[int, dict, int]:
     return 4, spec, inner_start
 
 
+def namespace_profile_record(spec: dict) -> dict | None:
+    """Typed declared instrumentation, not evidence of input byte qualification."""
+    if "namespace_profile" not in spec:
+        return None
+    profile = spec["namespace_profile"]
+    if (not isinstance(profile, dict)
+            or set(profile) != {"schema", "profiler", "observations", "profile_local", "row_s"}
+            or profile["schema"] != PROFILE_SCHEMA
+            or type(profile["row_s"]) is not int or profile["row_s"] <= 0
+            or any(not isinstance(profile[name], str) or not profile[name]
+                   for name in ("observations", "profile_local"))):
+        raise RuntimeError("namespace profile declaration is missing or unsupported")
+    namespace_reference(profile["profiler"])
+    return profile
+
+
+def prepare_namespace_profile_request(row: dict, *, profiler_reference: dict,
+                                      observations: str, profile_local: str, row_s: int) -> dict:
+    """Compose before roster/reconciliation binding; no published row is adopted."""
+    result = copy.deepcopy(row)
+    index, spec, _ = namespace_request_parts(result)
+    if "namespace_binding" in spec or "namespace_profile" in spec:
+        raise RuntimeError("namespace profiling requires a direct unbound request")
+    spec["namespace_profile"] = {"schema": PROFILE_SCHEMA,
+        "profiler": copy.deepcopy(profiler_reference), "observations": observations,
+        "profile_local": profile_local, "row_s": row_s}
+    namespace_profile_record(spec)
+    result["argv"][index] = canonical_json_bytes(spec, where="namespace profile spec").decode()
+    result["argv"] = profiled_row_command(result["argv"],
+        destination=str(Path(observations) / "child-profile.speedscope"),
+        profiler_executable=profiler_reference["path"])
+    namespace_request_parts(result)
+    return result
+
+
 def namespace_unbound_request(row: dict) -> dict:
     result = copy.deepcopy(row)
     index, spec, _ = namespace_request_parts(result)
@@ -101,6 +147,15 @@ def namespace_retarget(row: dict, destination: str) -> dict:
     for name in WRITABLE_ENV:
         # Explicit cache/temp roots prevent image defaults writing shared legacy paths.
         result["env"][name] = destination + "/environment/" + name
+    profile = namespace_profile_record(spec)
+    if profile is not None:
+        payload = profiled_workload_parts(result["argv"],
+            destination=str(Path(profile["observations"]) / "child-profile.speedscope"),
+            profiler_executable=profile["profiler"]["path"])
+        profile["observations"] = destination + "/profile/observations"
+        # The normalized template contains a placeholder, never its own future key.
+        profile["profile_local"] = str(profile_local_destination(Path(destination).name))
+        result["argv"][payload - 2] = str(Path(profile["observations"]) / "child-profile.speedscope")
     spec["env"] = result["env"]
     result["argv"][index] = canonical_json_bytes(spec, where="namespace spec").decode()
     return result
@@ -199,8 +254,12 @@ def prepare_namespace_requests(*, requests: list[dict], selected: list[str],
 def namespace_destinations(request: dict, binding: dict) -> list[tuple[Path, bool]]:
     """The same owned destinations drive path and mount validation."""
     directory = Path(binding["root"]) / binding["request_key"]
-    return [(directory / filename, flag == "--cache-dir") for flag, filename in OUTPUTS.items()] + [
+    destinations = [(directory / filename, flag == "--cache-dir") for flag, filename in OUTPUTS.items()] + [
         (Path(request["env"][name]), True) for name in WRITABLE_ENV]
+    profile = namespace_profile_record(namespace_request_parts(request)[1])
+    if profile is not None:
+        destinations.extend((Path(profile[name]), True) for name in ("observations", "profile_local"))
+    return destinations
 
 
 def namespace_mounts(spec: dict) -> list[tuple[Path, bool]]:
@@ -245,9 +304,15 @@ def validate_namespace_request(row: dict, *, executed_commit: str | None = None)
     for path, is_directory in namespace_destinations(request, binding):
         namespace_path(str(path), directory=is_directory)
     # No input or mount may place read-only evidence inside owned writable space.
-    for reference in (binding["readset"], binding["reconciliation"]["evidence"]):
+    profile = namespace_profile_record(spec)
+    owned_roots = [Path(binding["root"])]
+    references = [binding["readset"], binding["reconciliation"]["evidence"]]
+    if profile is not None:
+        owned_roots.append(Path(profile["profile_local"]))
+        references.append(profile["profiler"])
+    for reference in references:
         namespace_reference(reference)
-        if Path(reference["path"]).is_relative_to(Path(binding["root"])):
+        if any(Path(reference["path"]).is_relative_to(root) for root in owned_roots):
             raise RuntimeError("namespace input evidence overlaps owned outputs")
     _, _, inner_start = namespace_request_parts(request)
     argv = request["argv"][inner_start:]
@@ -261,11 +326,11 @@ def validate_namespace_request(row: dict, *, executed_commit: str | None = None)
             else:
                 continue
             input_path = namespace_absolute_path(value)
-            if input_path.is_relative_to(Path(binding["root"])):
+            if any(input_path.is_relative_to(root) for root in owned_roots):
                 raise RuntimeError("namespace input overlaps owned outputs")
     mounts = namespace_mounts(spec)
     for target, writable_identity in mounts:
-        if target.is_relative_to(Path(binding["root"])):
+        if any(target.is_relative_to(root) for root in owned_roots):
             raise RuntimeError("namespace output is hidden by a declared mount")
         if directory.is_relative_to(target) and not writable_identity:
             raise RuntimeError("namespace needs writable identity-mapped output mounts")
