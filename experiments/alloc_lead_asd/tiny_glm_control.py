@@ -24,13 +24,13 @@ from experiments.alloc_lead_asd.run_pair import runtime_identity
 from prismaquant import aura_cost, format_registry
 from prismaquant.joint_aura import SignedJointProjectionLease, JointOperatorStatisticsLease, select_invocation_gradient
 from prismaquant.perturbed_x_cache import _activation_qdq
-from prismaquant.residency_map import bind_residency_manifest
+from prismaquant.residency_map import bind_residency_manifest, residency_report
 from prismaquant.staged_tier_policy import activate_staged_tier_policy
 from prismaquant.staged_whole_file import read_staged_whole_file
 from prismaquant.glm_source_derivative import bind_source_derivative
 from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.routed_experts import profile_declared_packed_expert_projections
-from prismaquant.sensitivity_probe import fisher_probe_scalar
+from prismaquant.kl_fisher import fisher_probe_scalar
 from prismaquant.stage_a_produced_output import BoundaryProducedPublication
 from prismaquant.joint_replay_spill import StageBReplaySpill, spill_geometry
 from prismaquant.joint_cost_stage_a import run_adjoint_capture_core
@@ -314,6 +314,12 @@ def main():
     assert sha(ids.numpy().tobytes()) == source['tokens_sha256'] and list(ids.shape) == [4, 32]
     os.environ['TINY_GLM_MANIFEST_SHA256'] = args.manifest_sha256
     publication = BoundaryProducedPublication.bind_from_admitted_owner()
+    (args.output / 'inputs.ready.json').write_text(json.dumps({
+        'manifest_sha256': args.manifest_sha256,
+        'input_residency': residency_report(),
+        'source_identity_sha256': source['model_identity']['content_sha256'],
+        'tokens_sha256': source['tokens_sha256'],
+    }, indent=2) + '\n')
     commit(1, 'startup')
     results = {'source': source, 'legs': {}, 'scope': 'synthetic tiny GLM; no original GLM tensor reads'}
     try:
