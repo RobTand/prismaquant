@@ -144,6 +144,7 @@ def test_actual_runtime_menu_branch_keeps_full_roster_and_narrows_receipts(monke
     from types import SimpleNamespace
     import torch
     from prismaquant import tessera_menu
+    from prismaquant.model_profiles import DefaultProfile
 
     nodes = ast.parse(Path(campaign.__file__).read_text())
     branches = [node for node in ast.walk(nodes) if isinstance(node, ast.If)
@@ -168,6 +169,7 @@ def test_actual_runtime_menu_branch_keeps_full_roster_and_narrows_receipts(monke
         args=SimpleNamespace(tp_degree=1, family_restriction=None), PARALLEL_NONE="none",
         context_by_unit={"a": context, "b": context},
         structure_by_unit={"a": "routed_moe", "b": "routed_moe"},
+        profile=DefaultProfile(),
         expand_menus_for_targets=campaign.expand_menus_for_targets)
     module = ast.Module(body=[branches[0]], type_ignores=[])
     exec(compile(ast.fix_missing_locations(module), "actual-runtime-menu-branch", "exec"), namespace)

@@ -1,11 +1,13 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-02 (PQ #2096, Refs #1842): the shared Tessera campaign
-menu intersects structural family restrictions with the profile's per-Linear
-activation arithmetic (`ModelProfile.tessera_pricing_families`). GLM's
+Re-stamped 2026-10-02 (PQ #2096, Refs #1842, B32 lane-boundary repair): core
+profiles declare the generic per-Linear activation precision fact
+(`ModelProfile.linear_requires_unquantized_activations`). The existing Tessera
+menu interprets that fact through the format registry's single
+`act_bits_quantize_input` predicate on each route. GLM's
 absorbed MLA `kv_b_proj` offers TESSERA_BF16_K1 (T-16) only after a scoped
 roster lifts its existing pin; other attention units retain their ordinary
-menus. Shape/context/family caching distinguishes the effective unit policy,
+menus. Shape/context/family/precision caching distinguishes the effective unit policy,
 and an empty intersection remains empty. Streamed capture, partition planning
 and encoding use the same policy. Incompatible active seed rows refuse before
 wire linking, including when no global family restriction was supplied.
@@ -7062,12 +7064,16 @@ top-k indices, so it has no AURA cotangent. Gate:
 `tests/test_tessera_campaign_pinned_roster.py`.
 
 **Unit activation arithmetic (PQ #2096).** A lifted pin is still constrained
-by the operation being priced. The profile's `tessera_pricing_families(qname)`
-optionally narrows each unit's family menu. GLM's absorbed MLA `kv_b_proj`
+by the operation being priced. The profile's generic
+`linear_requires_unquantized_activations(qname)` declares whether a Linear
+requires identity input precision; no lane or family names belong in that
+core fact. GLM's absorbed MLA `kv_b_proj`
 keeps BF16 activations, so its Tessera menu contains only TESSERA_BF16_K1;
 the source BF16 fallback is unchanged. The shared campaign expansion intersects
-that policy with any structural family restriction before shape/context/family
-caching, and preserves empty intersections. Streamed capture and both encoding
+that policy with any structural family restriction. The existing lane menu
+uses the registry's `act_bits_quantize_input` on every route before shape/byte
+accounting. Shape/context/family/precision caching distinguishes the fact
+and preserves empty intersections. Streamed capture and both encoding
 planning paths pass their profile. The same intersection checks stored active
 anchors before seed wire linking and on resume. It does not lift other pins,
 declare the DSA indexer priceable, or establish a native reader or kernel.

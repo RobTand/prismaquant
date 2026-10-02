@@ -1447,6 +1447,7 @@ def expand_tessera_menu(
     parallel_kind: str = PARALLEL_NONE,
     max_act_bits: "int | None" = None,
     serving_context: "ServingContext | None" = None,
+    require_unquantized_activations: bool = False,
 ) -> list[MenuRung]:
     """Every Tessera rung legal for one unit, cheapest first.
 
@@ -1462,12 +1463,18 @@ def expand_tessera_menu(
     the menu never offers it.  It defaults to the route's own ``act_bits``,
     which is the construction the brief asks for; passing a number narrows it
     further (a target that will only ever serve A4, say).
+
+    ``require_unquantized_activations`` is a profile's generic identity-input
+    constraint. The registry's single precision predicate interprets each
+    admitted route before shape and byte accounting; no family names encode
+    the policy, and unset preserves the existing menu.
     """
     if mode not in MENU_MODES:
         raise TesseraMenuError(
             f"unknown menu mode {mode!r}; expected one of {sorted(MENU_MODES)}"
         )
     from .tessera_footprint import tessera_exact_bits_for_shape
+    from .format_registry import act_bits_quantize_input
 
     dims = tuple(int(d) for d in shape)
     structure = serving_context.structure if serving_context is not None else None
@@ -1483,6 +1490,8 @@ def expand_tessera_menu(
             admission = (route_admission(name, serving_context=serving_context)
                          if serving_context is not None else route_admission(name))
             if not admission.admits(mode):
+                continue
+            if require_unquantized_activations and act_bits_quantize_input(admission.act_bits):
                 continue
             legal, _reason = tessera_tp_legal(
                 spec, rung, dims,

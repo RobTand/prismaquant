@@ -142,7 +142,7 @@ def test_seed_scope_refuses_before_linking_any_wire_from_the_unit(tmp_path, prof
     output = tmp_path / "wire"
     output.mkdir()
     adopted = []
-    with pytest.raises(RuntimeError, match="family restriction"):
+    with pytest.raises(RuntimeError, match="activation precision" if profile_only else "family restriction"):
         campaign._adopt_seed_checkpoint(manifest, None, targets=[name], wire_dir=output,
             adopt=lambda *args, **kw: adopted.append(args), admits=lambda *args: True,
             identity_sha256="new", expected_identity=seed_inputs, validate_state=lambda name, state:

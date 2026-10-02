@@ -460,14 +460,12 @@ class Glm5NextProfile(ModelProfile):
     # ------------------------------------------------------------
     # Probe
     # ------------------------------------------------------------
-    def tessera_pricing_families(self, qname: str) -> tuple[str, ...] | None:
+    def linear_requires_unquantized_activations(self, qname: str) -> bool:
         # MLA absorbs this projection into BF16 W_UK/W_UV. Its activation
         # arithmetic is BF16, so an A8/A4 candidate would price a different
         # operation (#1842). This applies only after a scoped roster lifts
         # the existing pin; it grants no native reader/kernel admission.
-        if re.search(r"(?:^|\.)self_attn\.kv_b_proj(?:\.weight)?$", qname):
-            return ("TESSERA_BF16_K1",)
-        return None
+        return bool(re.search(r"(?:^|\.)self_attn\.kv_b_proj(?:\.weight)?$", qname))
 
     def probe_linear_exclude_extra(self) -> str:
         # Every Linear outside the serving contract's quantizable set. The
