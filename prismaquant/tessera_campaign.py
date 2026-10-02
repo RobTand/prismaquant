@@ -4582,15 +4582,29 @@ def campaign_roster(linear_names, profile, *, allow_pinned=None,
     scoped campaign over units the body campaign does not price (GLM
     attention). A token that lifts nothing refuses, so a misspelled token
     cannot shrink the roster silently.
+
+    An explicit head token uses the existing fixed-head alias policy to lift
+    that one unit (PQ #1949). This declares a research census/capture roster,
+    not a head serving route or a joint-cost measurement. Default head
+    exclusion, profile pins and independent export admission remain unchanged.
     """
-    from .fixed_head import parse_allow_pinned
+    from .fixed_head import (
+        allow_pinned_lifts_lm_head, is_lm_head_name, parse_allow_pinned,
+    )
 
     tokens = parse_allow_pinned(allow_pinned)
     if pinned_roster_only and not tokens:
         raise ValueError("--pinned-roster-only requires --allow-pinned")
     extra = profile.probe_linear_exclude_extra()
+    head_tokens = tuple(token for token in tokens
+                        if allow_pinned_lifts_lm_head(profile, (token,)))
     dense, pinned, lifted, used = [], [], [], set()
     for name in linear_names:
+        if head_tokens and is_lm_head_name(name, profile):
+            used.update(head_tokens)
+            lifted.append(name)
+            dense.append(name)
+            continue
         if name.endswith("lm_head") or "embed" in name:
             continue
         if profile.is_pinned_name(name) or (extra and re.search(extra, name)):

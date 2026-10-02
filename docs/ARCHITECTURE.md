@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1949): the existing scoped Tessera campaign roster
+honors an explicit head lift through `--allow-pinned` and
+`--pinned-roster-only`, using the fixed-head owner's alias policy shared with
+the allocator/cache. The census records the actual lifted head and the existing
+scope check refuses its reuse as a body census. A missing requested head still
+refuses; embeddings stay excluded and unset head/attention rosters retain their
+previous behavior. The GLM profile continues to pin `lm_head`. This is a
+research census/capture prerequisite, with no head price, joint projection,
+MTP acceptance or runtime/export admission claim. The current pinned producer
+head route, exact same-probe head costs and serving/export/accounting acceptance
+remain required by #1949; a generic dense cell cannot establish a head route.
+
 Re-stamped 2026-10-02 (PQ #2030): the existing PACT owner adds explicit
 `--pact-selection-mode constrained`; `hull` remains the default and
 `--pact-time-ceiling-ms` remains a report bound. A complete comparison assignment
