@@ -249,3 +249,41 @@ def test_cancellation_stops_new_reads_and_joins_started_private_copies(monkeypat
     assert isinstance(result[0],CancelledError),repr(result[0])
     assert set(started) == {0,1}
     assert not cpu_transport.synchronized
+
+
+@pytest.mark.parametrize('exit_kind', ['mismatch','cancel','allocation','copy','success'])
+def test_preparation_releases_once_after_source_alias_drop_on_every_exit(monkeypatch, cpu_transport, exit_kind):
+    import weakref
+    from concurrent.futures import CancelledError
+    released, read_done = [], threading.Event()
+    source_ref = []
+    def read(name, unit, **kwargs):
+        weight = torch.ones((2,3),dtype=torch.bfloat16)
+        ref = weakref.ref(weight)
+        source_ref.append(ref)
+        def release():
+            assert ref() is None, 'source alias remains live at page release'
+            released.append(name)
+        read_done.set()
+        return weight,release
+    monkeypatch.setattr(campaign,'_read_projected_unit',read)
+    if exit_kind == 'allocation':
+        def bad_allocate(value,**kwargs):
+            value = None
+            return torch.empty((-1,))
+        monkeypatch.setattr(torch,'empty_like',bad_allocate)
+    elif exit_kind == 'copy':
+        monkeypatch.setattr(torch,'empty_like',lambda value,**kwargs:
+                            torch.empty((3,2),dtype=value.dtype))
+    kwargs = dict(live_shape=(2,3),live_dtype=torch.float32 if exit_kind=='mismatch' else torch.bfloat16,
+        model_path='unused',source={},release_source_pages=True,source_authentication=object(),
+        cancelled=lambda:exit_kind=='cancel' and read_done.is_set())
+    unit=dict(source_tensor='w',rows=2,cols=3)
+    if exit_kind in ('allocation','copy','cancel'):
+        with pytest.raises((RuntimeError,CancelledError)):
+            campaign._prepare_device_projected_check('u',unit,**kwargs)
+    else:
+        check=campaign._prepare_device_projected_check('u',unit,**kwargs)
+        assert check.differs is True if exit_kind=='mismatch' else check.pinned is not None
+    assert released == ['u']
+    assert source_ref[0]() is None

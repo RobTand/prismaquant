@@ -5002,7 +5002,7 @@ def _prepare_device_projected_check(name, unit, *, live_shape, live_dtype,
     """CPU preparation only; the caller owns authenticated whole-file residency."""
     import torch
     from concurrent.futures import CancelledError
-    weight = pinned = None
+    weight = pinned = release = None
     try:
         if cancelled():
             raise CancelledError('projected preparation cancelled before source read')
@@ -5018,13 +5018,14 @@ def _prepare_device_projected_check(name, unit, *, live_shape, live_dtype,
         pinned = torch.empty_like(weight, pin_memory=True)
         pinned.copy_(weight)
         weight = None
-        release()
         if cancelled():
             raise CancelledError('projected preparation cancelled after private copy')
         return _UnitCheck(description, pinned=pinned)
     finally:
         # Failed futures must not retain native source aliases in their traceback.
         weight = pinned = None
+        if release is not None:
+            release()
 
 
 def _launch_prepared_projected_check(check, live):
