@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .cost_stage_checkpoint import MANIFEST_SCHEMA, _load_unit, unit_path
+from .digests import checkpoint_json_sha256
 from .layer_config import LAYER_CONFIG_META_KEY
 from .tessera_expert_projection import (
     EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, WIRE_DIR_KEY,
@@ -62,32 +63,6 @@ class CensusCacheError(ValueError):
 # ---------------------------------------------------------------------------
 # The checkpoint seal
 # ---------------------------------------------------------------------------
-_STREAM_DEPTH = 2
-
-
-def _canonical_chunks(value: Any, depth: int):
-    encode = json.JSONEncoder(sort_keys=True, separators=(",", ":"),
-                              ensure_ascii=False, allow_nan=False).encode
-    if depth >= _STREAM_DEPTH or not isinstance(value, (dict, list)):
-        yield encode(value)
-        return
-    if isinstance(value, dict):
-        yield "{"
-        for index, key in enumerate(sorted(value)):
-            if not isinstance(key, str):
-                raise CensusCacheError("checkpoint identity has a non-string key")
-            yield ("," if index else "") + encode(key) + ":"
-            yield from _canonical_chunks(value[key], depth + 1)
-        yield "}"
-    else:
-        yield "["
-        for index, item in enumerate(value):
-            if index:
-                yield ","
-            yield from _canonical_chunks(item, depth + 1)
-        yield "]"
-
-
 def canonical_json_sha256_of_loaded(value: Any) -> str:
     """``cost_stage_checkpoint.canonical_json_sha256`` for data ``json.load`` produced.
 
@@ -96,10 +71,7 @@ def canonical_json_sha256_of_loaded(value: Any) -> str:
     already JSON-decoded the round trip is the identity, so the same bytes
     are streamed into the digest instead, the outer two levels chunk by chunk.
     """
-    digest = hashlib.sha256()
-    for chunk in _canonical_chunks(value, 0):
-        digest.update(chunk.encode("utf-8"))
-    return digest.hexdigest()
+    return checkpoint_json_sha256(value, error=CensusCacheError)
 
 
 def seal_roster(manifest: Mapping[str, Any]) -> dict:
