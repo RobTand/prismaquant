@@ -1216,8 +1216,9 @@ def consume_shape_time_observation(observations: Sequence[Path], *, table_id: st
     for index, path in enumerate(observations):
         observation, _raw = read_shape_time_observation(path)
         projection = _verify_observation(observation)
-        if any(projection["context"] == previous["context"]
-               and projection["rank_local_shape"] == previous["rank_local_shape"]
+            if any(canonical_strict(projection["context"].as_dict())
+                   == canonical_strict(previous["context"].as_dict())
+                   and projection["rank_local_shape"] == previous["rank_local_shape"]
                and projection["family"] == previous["family"]
                and projection["rate_q256"] == previous["rate_q256"]
                and projection["m"] == previous["m"]
@@ -1226,7 +1227,7 @@ def consume_shape_time_observation(observations: Sequence[Path], *, table_id: st
                 f"observation {index}: duplicate shape key {projection['rank_local_shape']} "
                 f"{projection['family']} R{projection['rate_q256']} M{projection['m']}")
         projections.append(projection)
-    contexts = {tuple(projection["context"].as_dict().items()) for projection in projections}
+    contexts = {canonical_strict(projection["context"].as_dict()) for projection in projections}
     if len(contexts) != 1:
         raise ShapeRuntimeError("every observation in one conversion must share one runtime context")
     context = projections[0]["context"]
