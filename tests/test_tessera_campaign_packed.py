@@ -188,20 +188,17 @@ def _main_argv(tmp_path, *, stride=1):
 
 
 @pytest.mark.parametrize("stride", [1, 2])
-def test_main_refuses_a_packed_population_without_the_producer_tool(monkeypatch, tmp_path, stride):
-    """The bridge shells out to the producer; no producer, no packed price.
-
-    The refusal names the packed parameters it cannot price and arrives
-    before calibration, so a campaign started without ``TESSERA_REPO`` does
-    not spend an hour on a dense-only table (PrismaQuant #183).
-    """
-    monkeypatch.delenv("TESSERA_REPO", raising=False)
+def test_main_refuses_a_packed_population_without_a_declared_producer(monkeypatch, tmp_path, stride):
+    """An absent producer declaration must refuse before calibration."""
+    from prismaquant import lane_spec
+    monkeypatch.setattr(lane_spec, "load_lane_spec",
+                        lambda _lane: SimpleNamespace(campaign_tools=()))
     campaign = _refusing_main_fixture(monkeypatch, _mixed_model())
     with pytest.raises(RuntimeError, match="cannot ask the producer for its expert projection") as error:
         campaign.main(_main_argv(tmp_path, stride=stride))
     for parameter in ("gate_up_proj", "down_proj"):
         assert f"model.layers.2.feed_forward.experts.{parameter}" in str(error.value)
-    assert "TESSERA_REPO" in str(error.value)
+    assert "campaign_tools" in str(error.value)
     assert not (tmp_path / "cost.pkl").exists()
 
 
@@ -242,43 +239,19 @@ RUNG = "TESSERA_E4M3_K1_R1024"
 #: (``_producer_without_the_bf16_expert_route``).
 UNROUTED_RUNG = "TESSERA_BF16_K1_R1792"
 
-#: Wraps the pinned producer's plan tool with ``TESSERA_BF16`` removed from
-#: ``scheme.MOE_BUILDERS`` -- the pre-#606 build -- and runs it unchanged.
-_NO_BF16_EXPERT_ROUTE_TOOL = """\
-import runpy, sys
-from tessera.serving import scheme
-scheme.MOE_BUILDERS.pop(scheme.TESSERA_BF16, None)
-real = {real!r}
-sys.argv[0] = real
-runpy.run_path(real, run_name="__main__")
-"""
-
-
 def _producer_without_the_bf16_expert_route(monkeypatch, tmp_path):
-    """Point ``TESSERA_REPO`` at the pinned checkout with one route removed.
+    """Run the installed producer with its real BF16 builder removed.
 
-    At the af7a86d43 pin every Tessera route has an expert builder, so the
-    real producer refuses no family for lack of one and the #280 walk has no
-    natural witness. This builds one the way the pre-#606 build refused: the
-    plan tool is the pinned one, run in-process after ``TESSERA_BF16`` is
-    dropped from ``MOE_BUILDERS``, so the refusal is Tessera's own
-    ``refuse_a_family_with_no_expert_route`` and the accepted plan is the
-    pinned producer's real answer. Every other file is the pinned checkout's.
+    The child interpreter imports this controlled sitecustomize before invoking
+    the public CLI. Projection and refusal grammar stay in the real producer.
     """
-    import os
-    from prismaquant.tessera_expert_projection import PRODUCER_PLAN_TOOL
-
-    real_root = Path(os.environ["TESSERA_REPO"])
-    witness = tmp_path / "tessera-without-bf16-expert-route"
-    experiments = witness / "experiments"
-    experiments.mkdir(parents=True)
-    for entry in (real_root / "experiments").iterdir():
-        (experiments / entry.name).symlink_to(entry)
-    tool = witness / PRODUCER_PLAN_TOOL
-    tool.unlink()
-    tool.write_text(_NO_BF16_EXPERT_ROUTE_TOOL.format(
-        real=str(real_root / PRODUCER_PLAN_TOOL)))
-    monkeypatch.setenv("TESSERA_REPO", str(witness))
+    witness = tmp_path / "without-bf16-builder"
+    witness.mkdir()
+    (witness / "sitecustomize.py").write_text(
+        "from tessera.serving import scheme\n"
+        "scheme.MOE_BUILDERS.pop(scheme.TESSERA_BF16, None)\n")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(
+        part for part in (str(witness), os.environ.get("PYTHONPATH")) if part))
 
 
 def test_the_pinned_producer_routes_a_bf16_expert_stack(monkeypatch, tmp_path):
@@ -394,21 +367,6 @@ def _write_source_checkpoint(model, root, *, perturb=None):
     }, indent=1))
 
 
-def _pinned_producer_checkout():
-    """The fleet's checkout of the pinned Tessera release, or None.
-
-    pbtest cannot set ``TESSERA_REPO``, so without this every bridge test
-    skipped on the fleet and a green receipt certified nothing about the
-    bridge (PQ #1329). The commit is the one PQ pins
-    (``tessera_runtime/tessera_serving_runtime_pin.json``); GitHub CI has no
-    ``/mnt/shared`` and still skips.
-    """
-    from pathlib import Path
-
-    pin = json.loads((Path(__file__).resolve().parents[1] / "prismaquant" / "tessera_runtime"
-                      / "tessera_serving_runtime_pin.json").read_text())
-    checkout = Path("/mnt/shared/tessera-pins") / pin["commit"]
-    return checkout if (checkout / "experiments").is_dir() else None
 
 
 def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
@@ -426,16 +384,10 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     pytest.importorskip("tessera.cached_unit")
     pytest.importorskip("safetensors")
     from prismaquant import model_profiles, tessera_campaign, tessera_render
+    from prismaquant.format_registry import get_format
     from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
-    from prismaquant.tessera_expert_projection import ExpertProjectionError, producer_plan_tool
-
-    pinned = _pinned_producer_checkout()
-    if not os.environ.get("TESSERA_REPO") and pinned is not None:
-        monkeypatch.setenv("TESSERA_REPO", str(pinned))
-    try:
-        producer_plan_tool()
-    except ExpertProjectionError as exc:
-        pytest.skip(f"producer projection tool unavailable: {exc}")
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
 
     model = _WideRoutedModel().to(dtype=torch.bfloat16)
     # The fixture substitutes HF loading; checkpoint-initialization behavior
@@ -485,7 +437,8 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
             body_rate_q256=1024,
             dloss=float(((render.float() - weight.float()) ** 2).mean()), dloss_stderr=0.0,
             memory_bytes=len(blob), bits_per_param=8 * len(blob) / weight.numel(),
-            activation_contract="w8a8-dynamic-e4m3-channel", activation_quantized=True,
+            activation_contract=str(get_format(format_name).act_dtype_name or "a16"),
+            activation_quantized=True,
             wire_bytes=len(blob), seconds=0.01, hessian_applied=False)
 
     monkeypatch.setattr(tessera_campaign, "_measure_anchor", measure_without_route_admission)

@@ -141,7 +141,8 @@ def producer_owner(tmp_path, pb_repo, producer, storage, *,
               resources={"cpu": 1, "mem_gb": 1, **po.owner_demand_terms(template)},
               produced_output_template=template,
               **({} if max_attempts is None else {"max_attempts": max_attempts}))
-    claimed = q.claim(owner="w-owner", capacity=claim_capacity)
+    claimed = q.claim(owner="w-owner", capacity=(
+        chain._FIXTURE_HOST_CAPACITY if claim_capacity is None else claim_capacity))
     assert claimed is not None and claimed["action_key"] == owner
     control = chain._broker_control(q, owner)
     env = {"PRISMABUILD_ACTION_KEY": owner,
@@ -259,26 +260,18 @@ def test_a_producer_commits_its_handoff_as_origin_batches(
     _src, pb_repo = pb_source(monkeypatch)
     from prismaquant.joint_quantum_handoff import (
         QuantumHandoffRefused, bind_handoff_publication)
-    from prismaquant.stage_a_produced_output import BoundaryProducedPublication
 
     producer, consumer, storage = band_campaign(tmp_path)
-    publication, _q, env = producer_owner(tmp_path, pb_repo, producer, storage)
+    publication, q, env = producer_owner(tmp_path, pb_repo, producer, storage)
     assert publication.write_only is True
 
-    # The quantum binds exactly as Stage A does in production (queue and
-    # tier from the launch context); here that answer is the private queue's.
-    calls = []
-
-    def bind(cls, **kwargs):
-        calls.append(kwargs)
-        return publication
-
-    monkeypatch.setattr(BoundaryProducedPublication, "bind_from_admitted_owner",
-                        classmethod(bind))
+    # Bind from the actual admitted request and launch context, not a wiring stub.
+    env = {**env, "PRISMABUILD_RESIDENCY_MAP":
+           str(q.root / "residency" / f"{env['PRISMABUILD_ACTION_KEY']}.json")}
     assert bind_handoff_publication(boundary_storage=storage, env={}) is None
-    assert bind_handoff_publication(boundary_storage=storage, env=env) is publication
-    assert calls == [{"queue_root": None, "tier": None, "env": env,
-                      "command_extra": ()}]
+    bound = bind_handoff_publication(boundary_storage=storage, env=env)
+    assert bound.instance == publication.instance
+    assert bound.template == publication.template
     with pytest.raises(QuantumHandoffRefused, match="durable payload maximum"):
         bind_handoff_publication(
             boundary_storage={**storage, "max_artifact_bytes": ARTIFACT_MAX * 2},
@@ -419,19 +412,19 @@ def test_a_write_only_owner_names_its_lifetime_and_never_reads_back(
         assert not (owner.directory / "a.json").exists()
 
 
-def _publish_consumer(q, pb_repo, tmp_path, key):
-    """File the consumer's row, as ``pbrun`` does right after declaring it."""
-    q.publish(action_key=key, cas_root=str(tmp_path / "cas"),
-              worker_script=str(pb_repo / "tools" / "prismabuild_worker.py"),
-              checkout_root=str(tmp_path / "consumer-checkout"),
-              resources={"cpu": 1, "mem_gb": 1}, max_attempts=1)
-
-
 def _consumer_executes(q, key):
-    """Claim and finish the consumer's row through the real queue."""
-    claimed = q.claim(owner="w-consumer")
+    """Execute the consumer request and finish its own admitted attempt."""
+    claimed = q.claim(owner="w-consumer", capacity=chain._FIXTURE_HOST_CAPACITY)
     assert claimed is not None and claimed["action_key"] == key
-    q.finish(key, status="executed")
+    from prismabuild import client
+    outcome = q.execute(claimed, timeout_s=120)
+    assert outcome.get("returncode") == 0, outcome
+    ending = json.loads(q.finish(key, status="executed", detail=outcome).read_text())
+    result = client.read_verified_action_result(
+        q, key, published_unix=claimed["published_unix"],
+        attempt=ending["attempts"], max_result_bytes=1024)
+    assert client.bind_standard_capture_command(result["request"])
+    assert result["payload"] == b""
 
 
 def _charged(publication):
@@ -473,11 +466,18 @@ def test_prismabuild_retires_the_handoff_once_its_consumer_succeeds(
 
     # What ``pbrun`` does for a consumer that declares the batches: one
     # declaration per batch, then its row.
-    key = hashlib.sha256(b"band-serial consumer L-1").hexdigest()
+    command = [sys.executable, "-c",
+               "import hashlib,json,pathlib,sys; "
+               "entries=json.loads(sys.argv[1]); "
+               "assert all(hashlib.sha256(pathlib.Path(e['path']).read_bytes()).hexdigest() "
+               "== e['sha256'] for e in entries)",
+               json.dumps(manifest["entries"], sort_keys=True)]
+    key = chain._published_consumer(
+        tmp_path, tmp_path / "cas", q, pb_repo, name="band-serial-consumer",
+        command=command)
     for ref in refs:
         assert po.declare_origin_consumer(q, ref, consumer_action_key=key) == {
             "ok": True, "declared": True}
-    _publish_consumer(q, pb_repo, tmp_path, key)
     assert po.origin_retirement_tick(q) == [], (
         "a queued consumer holds every batch, quietly")
     assert all(p.is_file() for p in paths)

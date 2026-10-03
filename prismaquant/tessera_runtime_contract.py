@@ -2771,6 +2771,11 @@ class TesseraRouteCell:
     #: reviewed answer gains this column at the bump that activates a v3 pin.
     runtime_tessera_commit: str = ""
     runtime_serving_source_sha256: str = ""
+    covered_rungs_q256: frozenset[int] = frozenset()
+    run_tables: tuple[tuple[int, ...], ...] | None = None
+
+    def covers_rate(self, rate_q256: int) -> bool:
+        return rate_q256 in self.rungs_q256 or rate_q256 in self.covered_rungs_q256
 
     @property
     def native(self) -> bool:
@@ -2908,6 +2913,7 @@ class TesseraContract:
     path: str
     lane_schema: str
     regimes: tuple[str, ...]
+    allowable_rungs: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     #: ``activation_contract -> the runtime's own quantiser table``, empty when
     #: the contract publishes none.  Empty is not "fine": it is what
     #: :func:`require_activation_quantizer_attested` REFUSES on, which is the
@@ -2952,7 +2958,7 @@ class TesseraContract:
         selected = tuple(
             cell for cell in self.cells
             if cell.family == str(family)
-            and int(rate_q256) in cell.rungs_q256
+            and cell.covers_rate(int(rate_q256))
             and cell.native
             # The development menu reads the SAME evidence predicate the
             # export gate reads (``lane_eligibility.cell_evidence_admits``).
@@ -3149,6 +3155,9 @@ def contract_answer(contract: "TesseraContract") -> dict:
                     str(axis): str(status) for axis, status in
                     sorted(contract.loader_axes.get(family, {}).items())
                 },
+                **({"allowable_rungs": {k: v for k, v in contract.allowable_rungs[family].items()
+                                       if k != "evidence"}}
+                   if family in contract.allowable_rungs else {}),
             }
             for family, rng in sorted(contract.reader_rate_range.items())
         },
@@ -3179,6 +3188,9 @@ def contract_answer(contract: "TesseraContract") -> dict:
             # for the same reason the image is: they scope the claim.
             + ([cell.runtime_vllm, cell.runtime_torch, cell.evidence.answer()]
                if cell.evidence is not None else [])
+            + ([{"run_tables": [list(t) for t in cell.run_tables],
+                 "covered_rungs_q256": sorted(cell.covered_rungs_q256)}]
+               if cell.run_tables is not None else [])
             for cell in contract.cells
         ),
     }
@@ -3353,7 +3365,7 @@ _FORMAT_ROW_MEMBERS_READ = (
     "kind", "family", "grid", "name_pattern", "activation_contract",
     "reader_rate_range_q256", "reader_rate_step_q256", "attested_rungs_q256",
     "candidate_rungs_q256", "attested_wire", "residency_modes", "structures",
-    "mode", "n_sub", "rungs",
+    "mode", "n_sub", "rungs", "allowable_rungs", "native_terminal_q256",
 )
 
 
@@ -4663,6 +4675,8 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
             evidence=cell.evidence,
             runtime_tessera_commit=cell.runtime_tessera_commit,
             runtime_serving_source_sha256=cell.runtime_serving_source_sha256,
+            covered_rungs_q256=frozenset(cell.covered_rungs_q256),
+            run_tables=cell.run_tables,
         ))
 
     world, loader_axes = _parse_tensor_parallel(payload, path)
@@ -4689,6 +4703,9 @@ def _parse(payload: Mapping[str, Any], *, commit: str, sha: str, path: str
         lane_schema=table.schema,
         regimes=table.regimes,
         activation_quantizers=_parse_activation_quantizers(payload, path),
+        allowable_rungs={str(e["family"]): dict(e["allowable_rungs"])
+                         for e in formats if "allowable_rungs" in e}
+        if table.schema == "tessera.lane-eligibility.v11" else {},
     )
 
 
