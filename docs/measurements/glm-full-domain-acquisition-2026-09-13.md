@@ -149,3 +149,10 @@ inside the same bracket, with lower-q256 ties. Full-grid measurement is not a
 proposal prerequisite; every unknown legal rate remains visible. Exact shipped
 pick confirmation and held-out evaluation remain separate, and original-source
 CUDA/provider plus fresh-global diagnostic prerequisites are not bypassed.
+
+The actual adapter smoke exposed an existing BF16 footprint round-trip defect:
+the writer priced CHANNEL reach sigma, but its recorded footprint/reconstructed
+recipe discarded it, so revalidation differed by 23 bytes and refused the
+candidate. The shared recipe/footprint owners now retain window seed, window
+sigma and channel sigma rather than suppressing the mismatch or subtracting
+bytes. All size claims remain the public writer's; no native admission changes.

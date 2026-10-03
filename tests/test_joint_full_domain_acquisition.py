@@ -213,7 +213,7 @@ def test_rehashed_calibration_change_cannot_leave_the_bound_run(joint_payload):
 
 def test_nonmapping_row_does_not_become_an_unmeasured_family(joint_payload):
     payload = copy.deepcopy(joint_payload)
-    name, _ = selection(payload)
+    name, shape = selection(payload)
     payload["costs"][name][FORMATS[0]] = "error: unbound scalar summary"
     with pytest.raises(ValueError, match="raw row mappings"):
-        acquire(payload)
+        joint_acquisition_from_cost_data(payload, {name: shape}, [FAMILY], max_new_points=2)
