@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Refs #2174/#2169: the PrismaSnap campaign builder establishes the direct
+worker's sibling module search context temporarily while synthetically loading
+`cluster_campaign`; the consolidated `digests` owner stays stdlib-only and
+the context is removed before runtime dispatch. Host hash/transfer commands
+do not initialize PrismaQuant or Torch. Digest recipes and worker/package
+behavior are unchanged; the retained 6d23 full-suite failure is not erased.
+
 Re-stamped 2026-10-03 (Refs #2147; required source dependencies #2148/#2149):
 the existing routed capture CLI, GLM visitor and native boundary intake carry an
 exclusive current-original first-sequence contract, not canonical complete-v2

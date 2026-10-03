@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -262,6 +263,16 @@ def test_hash_only_bootstrap_does_not_import_torch_or_package_initializer(tmp_pa
         "raise RuntimeError('torch must not be imported by bootstrap')\n",
         encoding="utf-8",
     )
+    (blocker / "digests.py").write_text(
+        "raise RuntimeError('ambient digests must not be imported')\n",
+        encoding="utf-8",
+    )
+    package = blocker / "prismaquant"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "raise RuntimeError('package init must not run during bootstrap')\n",
+        encoding="utf-8",
+    )
     completed = subprocess.run(
         [sys.executable, str(_TOOL), "hash-tree", "--path", str(tree)],
         check=False,
@@ -271,4 +282,10 @@ def test_hash_only_bootstrap_does_not_import_torch_or_package_initializer(tmp_pa
         env={"PYTHONPATH": str(blocker), "PATH": "/usr/bin:/bin"},
     )
     assert completed.returncode == 0, completed.stderr
-    assert '"sha256"' in completed.stdout
+    unsigned = {"files": [{"path": "payload", "size": 7,
+                           "sha256": hashlib.sha256(b"content").hexdigest()}]}
+    expected = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    assert json.loads(completed.stdout) == {**unsigned, "sha256": expected}
