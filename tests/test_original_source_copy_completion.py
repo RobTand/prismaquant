@@ -354,3 +354,19 @@ def test_double_fence_failure_roots_abandoned_owner_until_explicit_recovery(
     assert reference() is None
     with pytest.raises(OSError):
         os.fstat(held_fd)
+
+def test_cuda_observation_without_original_copy_cannot_root_unregistered_completion(
+        original_copy_spy, monkeypatch):
+    owner = original_copy_spy['owner']
+    def failed_event():
+        raise RuntimeError('unregistered event constructor failure')
+    monkeypatch.setattr(torch.cuda, 'Event', failed_event)
+    with pytest.raises(RuntimeError, match='unregistered event constructor') as failed:
+        with ls._SourceCopyCompletion(torch.device('cuda'), enabled=True, source_owner=owner) as copies:
+            copies.observed(FakeCudaTensor(torch.ones(1)))
+    _clear_frames(failed.value)
+    failed = None
+    gc.collect()
+    assert not owner._original_copy_completions
+    assert owner not in cc._FAILED_ORIGINAL_COPY_OWNERS
+    owner.close()

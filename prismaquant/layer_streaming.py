@@ -1934,7 +1934,7 @@ class _SourceCopyCompletion:
                              else torch.cuda.current_stream(self.device))
                 event.synchronize()
             except BaseException:
-                if self.source_owner is not None:
+                if self.source_owner is not None and self.stream is not None:
                     try:
                         self.drain_failed_copy()
                     except BaseException:

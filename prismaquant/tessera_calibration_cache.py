@@ -552,6 +552,8 @@ class CaptureSourceAuthentication:
 
     def _root_failed_original_copy(self, completion):
         with self._lock:
+            if completion not in self._original_copy_completions or completion.stream is None:
+                raise RuntimeError('failed original copy was not registered before enqueue')
             completion.failed = True
             with _FAILED_ORIGINAL_COPY_LOCK:
                 _FAILED_ORIGINAL_COPY_OWNERS.add(self)
