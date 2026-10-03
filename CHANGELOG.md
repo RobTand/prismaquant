@@ -11,6 +11,11 @@
   replay remain active; no checker attestation or GPU price is fabricated.
   The numerics-pair exporter tests require the already-declared `gguf` full
   dependency, not a changed numeric golden or a skipped arithmetic regression.
+- **Remaining producer test callers use the qualified public dependency** (#2158).
+  GLM census/capture and stack CLI fixtures select the declared producer
+  interpreter with verified installed-package provenance. Namespace and
+  materialization handoffs exercise the supported PrismaQuant plan writer,
+  not retired Tessera experiment scripts. Serving pins and assertions remain.
 - **Expert projection uses Tessera's public installed producer CLI** (#2128).
   The campaign invokes `python -m tessera.producer_plan` with the unchanged
   `tessera.expert_projection.v1` contract; it no longer locates an experiment

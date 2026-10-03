@@ -32,11 +32,6 @@ from test_glm_campaign_streaming import (  # noqa: E402,F401
 )
 from test_tessera_stack_sample_cost import _packed_probe_row  # noqa: E402
 
-#: The producer the census, the capture and every encode in this module run
-#: against, resolved the way ``test_glm_campaign_streaming`` resolves it.
-PINNED_PRODUCER = ('/mnt/shared/tessera-measurements/first-model-20260907'
-                   '/inputs/tessera-382a1a97')
-
 
 def _stack_selection(tmp_path, census_payload, model, source, monkeypatch):
     """The planner's own sampled ``s:`` row, drawn from a packed probe.
@@ -134,11 +129,8 @@ def test_selected_source_row_prices_a_sampled_stack_and_releases_each_anchor(
     from prismaquant import tessera_campaign as campaign
     from prismaquant.tessera_expert_projection import EXPERT_WIRES_KEY
 
-    producer = Path(os.environ.get('TESSERA_REPO') or PINNED_PRODUCER)
-    if not producer.is_dir():
-        pytest.skip('TESSERA_REPO must name the pinned producer checkout '
-                    f'(unset, and {PINNED_PRODUCER} is absent)')
-    monkeypatch.setenv('TESSERA_REPO', str(producer))
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
 
     # The already-built fixture has four experts and a genuine partial-
     # superblock wire domain. A second 256-wide model needlessly multiplied
