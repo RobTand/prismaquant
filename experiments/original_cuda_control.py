@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shlex
 import stat
+import socket
 import subprocess
 import time
 import urllib.parse
@@ -23,10 +24,14 @@ CONTEXTS={'system.cpu','system.ram','system.io','system.load','nvidia_smi.gpu_po
 
 def netdata(host,endpoint):
     url='http://127.0.0.1:19999/api/v1/'+endpoint
-    raw=subprocess.run(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5',
-                        '-o','ControlMaster=no','-o','ControlPath=none','-o','ControlPersist=no',host,
-                        'curl -fsS --max-time 8 --max-filesize 8388608 '+shlex.quote(url)],capture_output=True,text=True,
-                       timeout=15,check=True).stdout
+    request=['curl','-fsS','--max-time','8','--max-filesize','8388608',url]
+    if host!=socket.gethostname():
+        request=['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5',
+                 '-o','ControlMaster=no','-o','ControlPath=none','-o','ControlPersist=no',host,
+                 shlex.join(request)]
+    # Same-host HTTP is the same real Netdata owner, not an SSH failure fallback.
+    # A remote peer remains SSH-bound; either route still refuses any error.
+    raw=subprocess.run(request,capture_output=True,text=True,timeout=15,check=True).stdout
     if len(raw.encode())>8*1024**2:
         raise RuntimeError('Netdata response exceeds bound')
     return json.loads(raw)
@@ -83,36 +88,47 @@ def main():
     if a.cpu_preflight == bool(a.node_id):
         raise RuntimeError('exactly CPU preflight or one GPU control is required')
     a.out.mkdir(parents=True,exist_ok=False)
+    setup_start=time.time()
     charts={}
-    if not a.cpu_preflight:
-        for host in ('sparky','sparklina'):
-            selected={key:value for key,value in netdata(host,'charts')['charts'].items()
-                      if value.get('context') in CONTEXTS}
-            if {meta.get('context') for meta in selected.values()}!=CONTEXTS:
-                raise RuntimeError('required Netdata context missing: '+host)
-            if any(type(meta.get('update_every')) is not int or meta['update_every']<=0 for meta in selected.values()):
-                raise RuntimeError('required Netdata cadence missing')
-            charts[host]=selected
-    env=dict(PYTHONPATH='/workspace:/workspace/tests',OMP_NUM_THREADS='1',
-             MKL_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',NUMEXPR_NUM_THREADS='1',
-             HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',PYTHONDONTWRITEBYTECODE='1',
-             TMPDIR='/run/tmp',PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_OUT='/run/controls')
-    mounts=[dict(source=str(a.dependencies.parent),target='/dependencies',readonly=True),
-            dict(source=str(a.out),target='/run',readonly=False)]
-    profile=os.environ.get('PRISMABUILD_PROFILE_TORCH_OUT')
-    if not a.cpu_preflight:
-        if not profile or os.environ.get('CUDA_VISIBLE_DEVICES')=='':
-            raise RuntimeError('actual GPU scope/profile grant missing')
-        env['PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST']='1'
-        env['PRISMABUILD_PROFILE_TORCH_OUT']='/profile/'+Path(profile).name
-        mounts.append(dict(source=str(Path(profile).parent),target='/profile',readonly=False))
-    (a.out/'tmp').mkdir()
-    spec=dict(cpu_memory_gb=4,container=dict(image='prismaquant-glm-derivative:causal-exp-v1-20260908',
-              content_sha256=PQ_IMAGE,mounts=mounts),env=env)
-    command=['python3','-P','/workspace/experiments/original_cuda_inner.py',
-             '--dependencies','/dependencies/'+a.dependencies.name,
-             '--dependencies-sha256',a.dependencies_sha256,'--out','/run']
-    command+=['--cpu-preflight'] if a.cpu_preflight else ['--node-id',a.node_id]
+    try:
+        if not a.cpu_preflight:
+            for host in ('sparky','sparklina'):
+                selected={key:value for key,value in netdata(host,'charts')['charts'].items()
+                          if value.get('context') in CONTEXTS}
+                if {meta.get('context') for meta in selected.values()}!=CONTEXTS:
+                    raise RuntimeError('required Netdata context missing: '+host)
+                if any(type(meta.get('update_every')) is not int or meta['update_every']<=0 for meta in selected.values()):
+                    raise RuntimeError('required Netdata cadence missing')
+                charts[host]=selected
+        env=dict(PYTHONPATH='/workspace:/workspace/tests',OMP_NUM_THREADS='1',
+                 MKL_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',NUMEXPR_NUM_THREADS='1',
+                 HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',PYTHONDONTWRITEBYTECODE='1',
+                 TMPDIR='/run/tmp',PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_OUT='/run/controls')
+        mounts=[dict(source=str(a.dependencies.parent),target='/dependencies',readonly=True),
+                dict(source=str(a.out),target='/run',readonly=False)]
+        profile=os.environ.get('PRISMABUILD_PROFILE_TORCH_OUT')
+        if not a.cpu_preflight:
+            if not profile or os.environ.get('CUDA_VISIBLE_DEVICES')=='':
+                raise RuntimeError('actual GPU scope/profile grant missing')
+            env['PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST']='1'
+            env['PRISMABUILD_PROFILE_TORCH_OUT']='/profile/'+Path(profile).name
+            mounts.append(dict(source=str(Path(profile).parent),target='/profile',readonly=False))
+        (a.out/'tmp').mkdir()
+        spec=dict(cpu_memory_gb=4,container=dict(image='prismaquant-glm-derivative:causal-exp-v1-20260908',
+                  content_sha256=PQ_IMAGE,mounts=mounts),env=env)
+        command=['python3','-P','/workspace/experiments/original_cuda_inner.py',
+                 '--dependencies','/dependencies/'+a.dependencies.name,
+                 '--dependencies-sha256',a.dependencies_sha256,'--out','/run']
+        command+=['--cpu-preflight'] if a.cpu_preflight else ['--node-id',a.node_id]
+    except BaseException as exc:
+        (a.out/'action-result.json').write_text(json.dumps(dict(
+            returncode=None,start_unix=setup_start,finish_unix=time.time(),
+            phase='preflight_refused',cpu_preflight=a.cpu_preflight,node_id=a.node_id,
+            preflight_error=dict(type=type(exc).__name__,message=str(exc),
+                                 stderr=(getattr(exc,'stderr','') or '')[-4096:]),
+            container_invocation_started=False,actual_cuda_test_entered=False,
+            automatic_capture_qualified=False,actual_glm=False),indent=2)+'\n')
+        raise
     start=time.time()
     code=None
     try:
