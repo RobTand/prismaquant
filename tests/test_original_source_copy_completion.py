@@ -57,7 +57,9 @@ def original_copy_spy(material, monkeypatch):
     def copy(value, target=None, *args, **kwargs):
         device = kwargs.get('device', target)
         if isinstance(device, torch.device) and device.type == 'cuda':
-            state['copies'].append(weakref.ref(value))
+            reference = weakref.ref(value)
+            state['copies'].append(reference)
+            current_stream().pending.append(reference)
             state['transfer_options'].append(dict(kwargs))
             if state['cancel'] is not None:
                 state['cancel'].set()
@@ -72,12 +74,14 @@ def original_copy_spy(material, monkeypatch):
     class Stream:
         def __init__(self):
             self.thread = threading.get_ident()
+            self.pending = []
         def synchronize(self):
             assert owner.material_live_bytes == len(material['raws']['one.safetensors'])
-            assert all(ref() is not None for ref in state['copies'])
+            assert all(ref() is not None for ref in self.pending)
             state['events'].append('stream-sync')
             if state.get('drain_fault'):
                 raise RuntimeError('exact stream drain failed')
+            self.pending.clear()
 
     def current_stream(*args):
         return streams.setdefault(threading.get_ident(), Stream())
@@ -86,6 +90,8 @@ def original_copy_spy(material, monkeypatch):
         def record(self, stream):
             assert stream.thread == threading.get_ident()
             self.native = list(state['local'].native)
+            self.stream = stream
+            self.copies = list(stream.pending)
             state['events'].append('record')
             if state['fault'] == 'record':
                 raise RuntimeError('event record failed')
@@ -93,10 +99,12 @@ def original_copy_spy(material, monkeypatch):
             # Reader/windows have exited, so only true native storage owners
             # and the completion frame can keep whole serialized credit live.
             assert all(ref() is not None for ref in self.native)
+            assert all(ref() is not None for ref in self.copies)
             assert owner.material_live_bytes == len(material['raws']['one.safetensors'])
             state['events'].append('sync')
             if state['fault'] == 'sync':
                 raise RuntimeError('event sync failed')
+            del self.stream.pending[:len(self.copies)]
 
     real_open = owner.safe_open
     def opened(factory, path, **kwargs):
@@ -424,6 +432,9 @@ def test_same_generation_and_stream_preserve_success_before_failed_fence_recover
     # CPU-spied copy calls. Neither receipt is real CUDA qualification.
     _layer(state)
     first = owner.receipt()['copy_completions']
+    first_copies = tuple(state['copies'])
+    gc.collect()
+    assert all(reference() is None for reference in first_copies)
     state['fault'] = 'sync'
     with pytest.raises(RuntimeError, match='event sync failed') as failed:
         _layer(state)
@@ -437,6 +448,8 @@ def test_same_generation_and_stream_preserve_success_before_failed_fence_recover
     assert second[-1]['fence'] == 'cuda_stream_synchronize_after_event_failure'
     second[-2]['files'].clear()
     assert owner.receipt()['copy_completions'][:-1] == first
+    gc.collect()
+    assert all(reference() is None for reference in state['copies'])
     assert owner.material_live_bytes == len(material['raws']['one.safetensors'])
     del native
     gc.collect()

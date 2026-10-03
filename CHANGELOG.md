@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **Original proper-prefix coverage compares its exact checkpoint roster**
+  (Refs #2147). Python set equality preserves the whole required head/layer
+  coverage and rejects missing or extra checkpoints without sending sets to
+  the JSON identity encoder. CPU copy-history controls distinguish unfinished
+  aliases, which must remain alive through their fence, from successfully
+  completed aliases that may be released; native fences and retention stay
+  unchanged. Superseded native claims retain their public lease-refusal type.
 - **Original authority resources use the native claimed reservation**
   (Refs #2148, #2149). The strict join reads PrismaBuild's actual `resources`
   field, not an invented `demand` alias; missing, changed and misleading alias

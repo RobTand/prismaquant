@@ -1013,6 +1013,33 @@ def test_synthetic_original_scoped_transport_retains_all_original_identity_and_l
     assert routed['source_acquisition']['source_material']['pending_copy_completions'] == original['source_material']['pending_copy_completions']
 
 
+@pytest.mark.parametrize('damage', ['missing-checkpoint', 'extra-checkpoint', 'same-cardinality-replacement'])
+def test_original_prefix_requires_exact_checkpoint_roster_after_valid_initialization(tmp_path, damage):
+    from prismaquant.native_moe_panel import original_capture_entry
+    from prismaquant.streaming_initialization import validate_streaming_prefix_initialization_contract
+
+    case = original_protocol_case(tmp_path, 3)
+    metadata = case['payload']['boundary_metadata']
+    contract = metadata['model_load_contract']
+    state = contract['state']
+    name = 'model.language_model.layers.3.norm.weight'
+    if damage == 'missing-checkpoint':
+        state[name] = {'shape': [4], 'dtype': 'torch.bfloat16',
+                       'kind': 'derived_buffer', 'sha256': 'e' * 64}
+    elif damage == 'extra-checkpoint':
+        state['model.language_model.layers.3.extra.weight'] = dict(state[name])
+    else:
+        state['model.language_model.layers.3.replacement.weight'] = state.pop(name)
+    contract['persistent_tensors'] = sum(row['kind'] == 'checkpoint' for row in state.values())
+    contract['derived_buffers'] = sum(row['kind'] == 'derived_buffer' for row in state.values())
+    contract['state_sha256'] = identity_sha256(state)
+    assert validate_streaming_prefix_initialization_contract(contract) == contract
+    metadata['source_acquisition']['source_initialization'] = copy.deepcopy(contract)
+    metadata['source_acquisition']['entry'] = original_capture_entry(metadata)
+    with pytest.raises(ValueError, match='actual original prefix checkpoint coverage'):
+        original_protocol_intake(case)
+
+
 @pytest.mark.parametrize('change', ['authority', 'session', 'source', 'map', 'calibration', 'text', 'device',
     'coordinates_device', 'bias_device', 'class', 'cast', 'runtime', 'entry_hash', 'raw_hash', 'bias',
     'head', 'prefix', 'layer44_prefix', 'mixed_dev', 'canonical', 'full_scope', 'missing_completion',

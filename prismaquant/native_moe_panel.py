@@ -943,7 +943,8 @@ def _validate_original_source_acquisition(capture, *, source_model_identity,
     contract = capture["model_load_contract"]
     if layer < 44:
         checkpoint_state = {name for name, record in contract["state"].items() if record["kind"] == "checkpoint"}
-        _equal(checkpoint_state, required, "actual original prefix checkpoint coverage")
+        if checkpoint_state != required:
+            raise ValueError("native panel actual original prefix checkpoint coverage differs from independently frozen input")
     else:
         _equal(contract["persistent_tensors"], len(required), "actual original full text checkpoint coverage")
     required_files = {Path(source["checkpoint_weight_map"][mapping[name]]).name for name in required}

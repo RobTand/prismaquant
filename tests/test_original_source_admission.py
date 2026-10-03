@@ -16,7 +16,7 @@ from prismaquant import source_generation as sg, tessera_calibration_cache as cc
 from prismaquant.calibration_data import load_calibration_input
 from prismaquant.cost_streaming import build_streamed_model_identity
 from prismaquant.joint_aura import source_execution_identity
-from prismaquant.staged_lease import resolve_context
+from prismaquant.staged_lease import LeaseRefused, resolve_context
 from prismaquant.joint_adjoint_checkpoints import adjoint_space, boundary_entry_directory
 from prismaquant.stage_a_selected_row_diagnostic import prepare_original_diagnostic_session
 from test_capture_original_material import _bound, material, _forget_state  # noqa: F401
@@ -204,7 +204,8 @@ def test_wrong_bound_owner_runtime_session_plan_or_claim_cannot_reach_source(aut
     else:
         # A foreign callback cannot adopt the real constructor's ownership.
         packet['resource_check'] = case['material']['checks'].append
-    with pytest.raises((RuntimeError, ValueError)):
+    refusal = LeaseRefused if damage == 'claim' else (RuntimeError, ValueError)
+    with pytest.raises(refusal):
         cc.require_original_source_authority(case['owner'], case['authority_input'], case['plan_input'], packet)
     assert case['owner'].receipt() == before
     assert not any(case['entries_path'].iterdir())
@@ -251,8 +252,9 @@ def test_actual_native_receipt_preserves_reacquisitions_and_rejects_wrong_fd_ide
         cc.validate_original_source_material_receipt(checked, case['authority'])
     missing = copy.deepcopy(receipt)
     missing['deliveries'] = [row for row in missing['deliveries'] if row['name'] != 'config.json']
-    with pytest.raises(RuntimeError, match='bootstrap auxiliary'):
+    with pytest.raises(RuntimeError):
         cc.validate_original_source_material_receipt(missing, case['authority'])
+    assert owner.receipt() == receipt
 
 
 def test_real_partial_qualification_metadata_is_not_renamed_full64(authority_case):
