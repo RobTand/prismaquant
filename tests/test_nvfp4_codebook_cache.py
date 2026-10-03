@@ -47,9 +47,6 @@ def test_registry_math_codebook_keeps_fifteen_exact_values():
 
 
 def test_all_packed_bytes_keep_signed_zero_and_nibble_order():
-    from prismaquant.kernels.nvfp4_fused import (
-        _pack_fp4_indices, nvfp4_dequantize_weight,
-    )
 
     packed = torch.arange(256, dtype=torch.uint8).reshape(16, 16)
     levels = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
@@ -58,17 +55,11 @@ def test_all_packed_bytes_keep_signed_zero_and_nibble_order():
     indices = torch.stack(((packed & 15).long(), (packed >> 4).long()),
                           dim=-1).reshape(16, 32)
     expected = levels[indices]
-    actual = nvfp4_dequantize_weight(
-        packed, torch.ones(16, 2), torch.ones(1),
-    )
-    assert torch.equal(actual.view(torch.uint8), expected.view(torch.uint8))
     assert torch.equal(enc._round_to_codebook(expected), indices)
     assert torch.equal(enc.pack_fp4_indices(indices, 32), packed)
-    assert torch.equal(_pack_fp4_indices(indices, 32), packed)
 
 
-def test_export_and_kernel_keep_ties_range_and_nonfinite_mapping():
-    from prismaquant.kernels.nvfp4_fused import _indices_from_signed_e2m1_values
+def test_export_keeps_ties_range_and_nonfinite_mapping():
 
     values = torch.tensor([0.0, -0.0, 0.25, -0.25, 0.75, -0.75,
                            1.25, -1.25, 1.75, -1.75, 2.5, -2.5,
@@ -78,7 +69,6 @@ def test_export_and_kernel_keep_ties_range_and_nonfinite_mapping():
     expected = torch.tensor([0, 8, 0, 8, 1, 9, 2, 10, 3, 11, 4, 12,
                              5, 13, 6, 14, 7, 15, 7, 15, 7, 15, 7])
     assert torch.equal(enc._round_to_codebook(values), expected)
-    assert torch.equal(_indices_from_signed_e2m1_values(values), expected)
 
 
 def test_cache_is_keyed_by_device():

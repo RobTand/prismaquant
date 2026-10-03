@@ -124,6 +124,36 @@ def test_indices_from_signed_e2m1_values_nearest_with_epsilon():
     assert (got & 0x7).tolist() == [1, 3, 5, 7]
 
 
+def test_kernel_all_packed_bytes_preserve_signed_zero_and_nibble_order():
+    from prismaquant.kernels.nvfp4_fused import _pack_fp4_indices
+
+    packed = torch.arange(256, dtype=torch.uint8).reshape(16, 16)
+    levels = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
+                          -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+                         dtype=torch.float32)
+    indices = torch.stack(((packed & 15).long(), (packed >> 4).long()),
+                          dim=-1).reshape(16, 32)
+    expected = levels[indices]
+    actual = nvfp4_dequantize_weight(
+        packed, torch.ones(16, 2), torch.ones(1),
+    )
+    assert torch.equal(actual.view(torch.uint8), expected.view(torch.uint8))
+    assert torch.equal(_pack_fp4_indices(indices, 32), packed)
+
+
+def test_kernel_keeps_ties_range_and_nonfinite_mapping():
+    from prismaquant.kernels.nvfp4_fused import _indices_from_signed_e2m1_values
+
+    values = torch.tensor([0.0, -0.0, 0.25, -0.25, 0.75, -0.75,
+                           1.25, -1.25, 1.75, -1.75, 2.5, -2.5,
+                           3.5, -3.5, 5.0, -5.0, 6.0, -6.0, 7.0, -7.0,
+                           float("inf"), float("-inf"), float("nan")],
+                          dtype=torch.float32)
+    expected = torch.tensor([0, 8, 0, 8, 1, 9, 2, 10, 3, 11, 4, 12,
+                             5, 13, 6, 14, 7, 15, 7, 15, 7, 15, 7])
+    assert torch.equal(_indices_from_signed_e2m1_values(values), expected)
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Triton kernel requires CUDA")
 def test_fused_activation_quant_ties_round_half_toward_zero():
     """§3.15b: the Triton activation quant's tie rounding must be

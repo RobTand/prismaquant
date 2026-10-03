@@ -7,7 +7,9 @@ tuple instead of maintaining independent literals or exporter aliases.
 The sorted unique mathematical codebook still has fifteen entries; the
 packed wire still has sixteen sign/magnitude codes, including negative zero
 at code 8. Tie, range, scaling and packing arithmetic are unchanged. CPU
-equivalence checks do not qualify compiled CUDA or served quality.
+equivalence checks do not qualify compiled CUDA or served quality. Exporter
+and cache controls remain CPU-compatible without optional Triton; kernel-only
+wire/tie controls follow the existing guarded fused-kernel test convention.
 
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
