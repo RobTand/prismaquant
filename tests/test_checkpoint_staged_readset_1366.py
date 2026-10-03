@@ -129,6 +129,17 @@ def test_rehashed_wrong_consuming_plan_refuses(tmp_path, change):
         _bound(setup, changed)
 
 
+@pytest.mark.parametrize("dev_mode", ["0", "1"])
+def test_foreign_incoming_slice_refuses_in_both_modes(tmp_path, monkeypatch, dev_mode):
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_mode)
+    setup = _setup(tmp_path)
+    manifest = _manifest(setup)
+    bound = _bound(setup, manifest)
+    manifest["annotations"]["slice_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="checkpoint incoming readset binds a foreign slice"):
+        quanta.check_checkpoint_incoming_readset(bound, manifest, _slice(setup))
+
+
 def test_claim_digest_and_pb_decoder_are_used(tmp_path, monkeypatch):
     """Real bounded CAS read/SDK decoder, with only the claim identity doubled."""
     import prismabuild.client as sdk
