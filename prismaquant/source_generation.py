@@ -817,6 +817,87 @@ def _verified_original_result(selection, resource_check):
     return result
 
 
+ORIGINAL_ARTIFACT_PUBLICATION_PREFIX = b'ORIGINAL_SOURCE_ARTIFACTS '
+ORIGINAL_CUDA_ARTIFACT_ROLES = frozenset({
+    'control', 'execution', 'action_result', 'netdata_sparky', 'netdata_sparklina', 'torch_trace',
+})
+
+
+def _original_artifact_publication(payload, *, node_id, roles):
+    """Interpret the one actual producer publication in authenticated CAS bytes."""
+    _require(type(payload) is bytes, 'qualified result payload must be owned CAS bytes')
+    lines = [line[len(ORIGINAL_ARTIFACT_PUBLICATION_PREFIX):] for line in payload.splitlines()
+             if line.startswith(ORIGINAL_ARTIFACT_PUBLICATION_PREFIX)]
+    _require(len(lines) == 1, 'selected result lacks exactly one actual artifact publication; old receipts remain unqualified')
+    try:
+        publication = strict_json_loads(lines[0],
+            duplicate=lambda key: RuntimeError(f'artifact publication duplicate key {key}'),
+            constant=lambda key: RuntimeError(f'artifact publication invalid constant {key}'))
+    except (ValueError, UnicodeError) as exc:
+        raise RuntimeError('selected artifact publication is not strict JSON') from exc
+    _exact(publication, {'schema', 'node_id', 'artifacts'}, 'selected artifact publication')
+    _same(publication['schema'], 'prismaquant.original_source_artifact_publication.v1', 'actual artifact publication schema')
+    _same(publication['node_id'], node_id, 'actual artifact publication selected node')
+    _same(lines[0], json.dumps(publication, sort_keys=True, separators=(',', ':'),
+                              allow_nan=False).encode(), 'canonical actual artifact publication')
+    artifacts = _exact(publication['artifacts'], roles, 'actual published artifact roles')
+    paths = set()
+    for role, artifact in artifacts.items():
+        _exact(artifact, {'path', 'sha256', 'bytes'}, f'actual published {role}')
+        _contract.absolute_posix_path(artifact['path'], where=f'actual published {role} path')
+        _contract.sha256(artifact['sha256'], where=f'actual published {role} SHA256')
+        _contract.integer(artifact['bytes'], where=f'actual published {role} bytes', minimum=1)
+        _require(artifact['path'] not in paths, 'artifact publication reuses a path for different roles')
+        paths.add(artifact['path'])
+    return artifacts
+
+
+def _published_original_artifact(artifacts, role, binding, *, resource_check, max_bytes, decode_json=True):
+    """Join independently selected bytes to the digest/length the result published."""
+    artifact = artifacts[role]
+    _same(_binding(binding, f'independent qualified {role}'),
+          {key: artifact[key] for key in ('path', 'sha256')}, f'selected published {role} binding')
+    _require(artifact['bytes'] <= max_bytes, f'published {role} exceeds the qualified evidence envelope')
+    _same(Path(binding['path']).stat().st_size, artifact['bytes'], f'actual published {role} length')
+    reserve_allocation(resource_check, f'before_original_published_artifact:{role}', cpu_bytes=2 * artifact['bytes'])
+    raw = read_bound(binding, f'actual published {role}')
+    _same(len(raw), artifact['bytes'], f'owned actual {role} length')
+    if not decode_json:
+        return raw
+    try:
+        return strict_json_loads(raw,
+            duplicate=lambda key: RuntimeError(f'published {role}: duplicate key {key}'),
+            constant=lambda key: RuntimeError(f'published {role}: invalid constant {key}'))
+    except (ValueError, UnicodeError) as exc:
+        raise RuntimeError(f'published {role} is not strict JSON') from exc
+
+
+def _published_original_json(artifacts, role, binding, selection, resource_check):
+    return _published_original_artifact(artifacts, role, binding, resource_check=resource_check,
+                                        max_bytes=selection['max_evidence_bytes'])
+
+
+def _require_original_qualified_source(row, request, accepted, target_runtime):
+    """Every selected member needs independently selected source-transfer proof.
+
+    A null compatibility binding is not proof that the executed implementation
+    equals the target. The existing acceptance can describe identical sources,
+    but still binds the actual executed snapshot and target package/runtime.
+    """
+    snapshot = request['params']['checkout_snapshot']
+    _same(snapshot['parent'], row['source_snapshot'], 'original actual qualified source snapshot')
+    _require(row['compatibility'] is not None,
+             'every CUDA member requires independently bound executed-to-target source acceptance')
+    family = accepted.get(row['node_id'])
+    _require(family is not None, 'CUDA member lacks independently selected source-family acceptance')
+    _same(row['compatibility'], family['compatibility'], 'original source-family proof binding')
+    _same(row['source_snapshot'], family['old_source'], 'original executed member source is not restamped')
+    _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
+          'qualified member actual target source implementation')
+    _same(family['target_runtime_sha256'], _canonical_sha256(target_runtime, 'actual original target runtime'),
+          'qualified member actual target runtime')
+
+
 _CUDA_CASES = frozenset({
     'layer', 'read-failure', 'copy-failure', 'cancel', 'event-record-failure',
     'event-sync-failure', 'head', 'dequant', 'parallel-layer', 'parallel-read-failure',
@@ -934,11 +1015,16 @@ def _require_original_source_proofs(authority, resource_check):
     accepted = {}
     for binding in families:
         _, family = _control(binding, 'original unchanged-family root acceptance')
-        _exact(family, {'schema', 'old_source', 'new_source', 'compatibility', 'controls'},
+        _exact(family, {'schema', 'old_source', 'new_source', 'compatibility', 'controls',
+                        'target_prismaquant_source_sha256', 'target_runtime_sha256'},
                'original unchanged-family acceptance')
         _same(family['schema'], 'prismaquant.original_source_unchanged_family.v1', 'unchanged-family schema')
         for key in ('old_source', 'new_source'):
             _contract.string(family[key], where=f'unchanged-family {key}', pattern=_GIT_OBJECT_ID)
+        _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
+              'unchanged-family actual target source implementation')
+        _same(family['target_runtime_sha256'], _canonical_sha256(target_runtime, 'actual original target runtime'),
+              'unchanged-family actual target runtime')
         _control(family['compatibility'], 'independently accepted unchanged source compatibility')
         _require(isinstance(family['controls'], list) and family['controls'], 'unchanged-family accepted controls missing')
         for node in family['controls']:
@@ -951,14 +1037,21 @@ def _require_original_source_proofs(authority, resource_check):
                      'compatibility'}, 'original qualified CUDA member')
         _contract.string(row['node_id'], where='original actual CUDA node')
         _contract.string(row['source_snapshot'], where='original qualified snapshot', pattern=_GIT_OBJECT_ID)
-        _, control = _control(row['control'], 'actual CUDA control')
-        _, execution = _control(row['execution'], 'actual CUDA test execution')
+        result = _verified_original_result(row['result'], resource_check)
+        command = result['request']['params']['command']
+        _require('--node-id' in command and command.index('--node-id') + 1 < len(command)
+                 and command[command.index('--node-id') + 1] == row['node_id'],
+                 'actual CUDA request executed a different control')
+        artifacts = _original_artifact_publication(result['payload'], node_id=row['node_id'],
+                                                   roles=ORIGINAL_CUDA_ARTIFACT_ROLES)
+        control = _published_original_json(artifacts, 'control', row['control'], row['result'], resource_check)
+        execution = _published_original_json(artifacts, 'execution', row['execution'], row['result'], resource_check)
         member = _actual_cuda_control(control, execution, row['node_id'])
         for key in ('torch', 'cuda'):
             _same(control[key], target_runtime['versions'][key], f'qualified actual source runtime {key}')
         _require(member not in seen, 'original full64 repeats an actual CUDA member')
         seen.add(member)
-        _, ending = _control(row['action_result'], 'actual CUDA controller ending')
+        ending = _published_original_json(artifacts, 'action_result', row['action_result'], row['result'], resource_check)
         _exact(ending, {'returncode', 'start_unix', 'finish_unix', 'cpu_preflight', 'netdata',
                        'netdata_errors', 'torch_trace', 'torch_trace_errors', 'automatic_capture_qualified',
                        'actual_glm'}, 'actual CUDA controller ending')
@@ -966,23 +1059,35 @@ def _require_original_source_proofs(authority, resource_check):
                  and ending['cpu_preflight'] is False and not ending['netdata_errors']
                  and not ending['torch_trace_errors'] and isinstance(ending['torch_trace'], dict),
                  'actual CUDA controller/trace/native telemetry did not complete')
-        result = _verified_original_result(row['result'], resource_check)
-        snapshot = result['request']['params']['checkout_snapshot']
-        _same(snapshot['parent'], row['source_snapshot'], 'original actual qualified source snapshot')
-        command = result['request']['params']['command']
-        _require('--node-id' in command and command[command.index('--node-id') + 1] == row['node_id'],
-                 'actual CUDA request executed a different control')
-        if row['compatibility'] is not None:
-            family = accepted.get(row['node_id'])
-            _require(family is not None, 'old CUDA member lacks independently accepted unchanged-family proof')
-            _same(row['compatibility'], family['compatibility'], 'original unchanged-family proof binding')
-            _same(row['source_snapshot'], family['old_source'], 'original old member source is not restamped')
+        trace = artifacts['torch_trace']
+        _same(ending['torch_trace'], trace, 'selected controller/native trace artifact')
+        _published_original_artifact(artifacts, 'torch_trace',
+            {key: trace[key] for key in ('path', 'sha256')}, resource_check=resource_check,
+            max_bytes=row['result']['max_evidence_bytes'], decode_json=False)
+        _same({record['host'] for record in ending['netdata']}, {'sparky', 'sparklina'},
+              'selected actual raw telemetry hosts')
+        for host in ('sparky', 'sparklina'):
+            role = 'netdata_' + host
+            artifact = artifacts[role]
+            raw_host = _published_original_json(artifacts, role,
+                {key: artifact[key] for key in ('path', 'sha256')}, row['result'], resource_check)
+            _same(raw_host['host'], host, 'selected native telemetry producer host')
+            actual_host = next(record for record in ending['netdata'] if record['host'] == host)
+            _same(actual_host['charts'], len(raw_host['charts']), 'selected actual raw host chart census')
+            _require(raw_host['after'] <= ending['start_unix'] and raw_host['before'] <= ending['finish_unix']
+                     and raw_host['after'] < raw_host['before'], 'selected native telemetry window differs from controller')
+        _require_original_qualified_source(row, result['request'], accepted, target_runtime)
     _same(seen, {(case, pages, dtype) for case in _CUDA_CASES for pages in ('0', '1')
                  for dtype in ('torch.float32', 'torch.bfloat16')}, 'actual full64 CUDA coverage')
-    reader = _exact(qualification['reader'], {'result', 'receipt', 'authority'}, 'original qualified reader')
-    _verified_original_result(reader['result'], resource_check)
-    _, receipt = _control(reader['receipt'], 'original actual reader receipt')
-    _, reader_authority = _control(reader['authority'], 'independently selected reader proof authority')
+    reader = _exact(qualification['reader'], {'node_id', 'result', 'receipt', 'authority'}, 'original qualified reader')
+    _contract.string(reader['node_id'], where='actual qualified reader node')
+    reader_result = _verified_original_result(reader['result'], resource_check)
+    _require(reader['node_id'] in reader_result['request']['params']['command'],
+             'selected native reader request executed another proof')
+    artifacts = _original_artifact_publication(reader_result['payload'], node_id=reader['node_id'],
+                                               roles={'receipt', 'authority'})
+    receipt = _published_original_json(artifacts, 'receipt', reader['receipt'], reader['result'], resource_check)
+    reader_authority = _published_original_json(artifacts, 'authority', reader['authority'], reader['result'], resource_check)
     _exact(reader_authority, ORIGINAL_AUTHORITY_KEYS, 'reader proof source authority')
     from .tessera_calibration_cache import validate_original_source_material_receipt
 
