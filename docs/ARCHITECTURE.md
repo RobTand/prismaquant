@@ -12,6 +12,19 @@ readset receipt separately. No logical-pool stat/index reopening or redundant
 bulk identity hash occurs on this path. Original CUDA/automatic admission and
 actual full-source GLM fresh-g6 acceptance remain separate closed gates.
 
+Re-stamped 2026-10-03 (PQ #2134, failed original copy ownership): the existing
+source owner registers each reader completion before H2D enqueue. Failed event
+proofs survive ordinary exception/traceback disposal without releasing native
+or converted host staging. Event failure first drains the exact stream while
+preserving the event error. Double-fence failure process-roots the existing
+charged owner, surviving loss of all external references and GC. Explicit
+close/recovery proves completion before unregistering/reaping; repeated drain
+failure retains the open owner/holds/FDs and blocks new copies. Active copies
+refuse close. No successful material enters that fatal-fence set; there is no
+cache, background retry or silent fallback. Original CUDA/automatic gates
+stay closed; the retained frozen56 protocol is a historical negative reference,
+not acceptance of this new source. CPU stand-ins cannot qualify outstanding DMA.
+
 Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original copy completion): the
 existing layer reader's copy-stream completion bookkeeping retains native
 original source aliases and converted/stacked host staging through a successful

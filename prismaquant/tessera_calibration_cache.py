@@ -40,6 +40,11 @@ MAX_CAPTURE_METADATA_BYTES = 16 * 1024**2
 MAX_CAPTURE_EXECUTION_POLICIES = 8
 #: The receipt of a streamed capture's recording source owner (PQ #1896).
 RECORDING_RECEIPT_SCHEMA = 'prismaquant.capture_source_recording.v1'
+# Fatal copy-fence containment only: source charges/FDs remain with these
+# existing owners until explicit close proves the exact streams completed.
+# No successful owner or reusable activation/weight enters this registry.
+_FAILED_ORIGINAL_COPY_OWNERS = set()
+_FAILED_ORIGINAL_COPY_LOCK = threading.Lock()
 
 
 #: The guarded source hash's read block is ``digests.SOURCE_HASH_BLOCK_BYTES``,
@@ -529,6 +534,43 @@ class CaptureSourceAuthentication:
                              for name, row in sorted(coordinates.items()) if name not in weights],
             }
 
+    def _retain_original_copy_completion(self, completion):
+        with self._lock:
+            self._require_open()
+            if self._original is None:
+                raise RuntimeError('original copy completion requires the original source owner')
+            if any(value.failed for value in self._original_copy_completions):
+                raise RuntimeError('original source has unproved CUDA completion; close/recover before more copies')
+            self._original_copy_completions.add(completion)
+
+    def _release_original_copy_completion(self, completion):
+        with self._lock:
+            self._original_copy_completions.remove(completion)
+            if not any(value.failed for value in self._original_copy_completions):
+                with _FAILED_ORIGINAL_COPY_LOCK:
+                    _FAILED_ORIGINAL_COPY_OWNERS.discard(self)
+
+    def _root_failed_original_copy(self, completion):
+        with self._lock:
+            if completion not in self._original_copy_completions or completion.stream is None:
+                raise RuntimeError('failed original copy was not registered before enqueue')
+            completion.failed = True
+            with _FAILED_ORIGINAL_COPY_LOCK:
+                _FAILED_ORIGINAL_COPY_OWNERS.add(self)
+
+    @classmethod
+    def close_failed_original_copies(cls):
+        """Explicit fatal-fence recovery, including owners callers abandoned.
+
+        Failure preserves the process root and existing resource charges.
+        This is teardown, never background work or permission to retry capture.
+        """
+        with _FAILED_ORIGINAL_COPY_LOCK:
+            owners = tuple(_FAILED_ORIGINAL_COPY_OWNERS)
+        for owner in owners:
+            owner.close()
+        return len(owners)
+
     def _reap_original_material(self):
         """Called only under the owner lock; native storage aliases retain credit."""
         if self._original is None:
@@ -637,6 +679,7 @@ class CaptureSourceAuthentication:
         self._readers = 0
         self._closed = False
         self._original = None
+        self._original_copy_completions = set()
 
     def __enter__(self):
         self._require_open()
@@ -1108,12 +1151,19 @@ class CaptureSourceAuthentication:
         with self._lock:
             if self._closed:
                 return
+            if self._readers:
+                raise RuntimeError('cannot close capture source with active readers')
             if self._original is not None:
+                if any(not value.failed for value in self._original_copy_completions):
+                    raise RuntimeError('cannot close original material with active source copies')
+                # Registered before enqueue, these holds survive dropped error
+                # frames. A failed drain leaves the owner open and charged.
+                for completion in tuple(self._original_copy_completions):
+                    completion.drain_failed_copy()
+                    self._release_original_copy_completion(completion)
                 self._reap_original_material()
                 if self._files or any(self._original['windows'].values()):
                     raise RuntimeError('cannot close original material with live readers or consumers')
-            if self._readers:
-                raise RuntimeError('cannot close capture source with active readers')
             try:
                 self.require_unchanged()
             finally:
