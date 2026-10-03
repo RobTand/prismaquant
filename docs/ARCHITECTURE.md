@@ -27422,8 +27422,10 @@ These four are the canonical statement; §12 references them rather than restati
 | L4 | **FIXED 2026-07-30 (R27).** Both MiniMax hardcodes now go through profile accessors. `streaming_model.py`'s FP8-rewrite bypass was already half config-derived (`quant_method == "fp8"` and `weight_block_size`); the architecture half is a static property, so it became `staging.bypass_hf_fp8_module_rewrite` in the spec behind `profile.bypass_hf_fp8_module_rewrite()` (`base.py`), leaving the per-checkpoint half a config read where it belongs. `incremental_probe.py`'s `type(module).__name__ == "MiniMaxM2Experts"` became `profile.packed_expert_module_class_names()` (`base.py:235-245`) — the accessor that already existed for exactly this lookup — plus the structural shape test; the declared class stays **required**, because the replacement forward implements one specific expert-loop signature and applying it to a lookalike container would silently change a forward pass. `specs/minimax_m2.json` declares both, and `unpacked_expert_projection_names` with them. | closed |
 
 Cosmetic, listed so they are not re-discovered as leaks:
-`export_native_compressed.py:101,151-152` imports `Qwen3_5Profile` for `_COMPAT_QWEN_PROFILE`
-(verified test-only back-compat); `_fast_kernel_guard.py:86-90`'s Qwen substring list is a
+Historical exception: the exporter imported `Qwen3_5Profile` for a test-only
+`_COMPAT_QWEN_PROFILE`; #2177 removed that instance, naming copy and regex alias,
+and live tests now use the declared profile owners. Current cosmetic cases:
+`_fast_kernel_guard.py:86-90`'s Qwen substring list is a
 labelled fallback for remote HF IDs with no local `config.json`; `layer_streaming.py:1914-1920`
 imports an upstream transformers Gemma3 masking helper under config-driven selection;
 `gridbook/config.py:174-194` shared-prefix aliasing is HunYuan-motivated but written
