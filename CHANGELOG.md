@@ -17,6 +17,9 @@
   sibling fixture work preserving the same source HEAD. Qualification places
   pytest scratch outside the authenticated checkout without moving compiler
   TMPDIR, adding ignore rules or changing the cleanliness guard.
+  Ticket scenarios send the pinned broker's actual scope-ID intent fields;
+  malformed requests remain failures instead of being mislabeled as missing
+  creator cgroup membership. Actual membership refusal remains nonqualified.
 
 - **Original proper-prefix coverage compares its exact checkpoint roster**
   (Refs #2147). Python set equality preserves the whole required head/layer
