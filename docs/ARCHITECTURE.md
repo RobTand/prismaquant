@@ -94,6 +94,10 @@ The selected-result consumer above supplies those bindings; the genuine GPU
 pilot remains open under #1293.
 Counter encoding, arithmetic, pipeline defaults and serving gates are unchanged.
 
+Reconciled PR #2114 with current main on 2026-10-02: the fresh producer and
+resume/active-seed guard retain the same registry declaration. Input templates
+remain explicitly unmeasured; genuine same-contract resumes retain their
+encoded wire and scores. This integration changes no format default or pin.
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
