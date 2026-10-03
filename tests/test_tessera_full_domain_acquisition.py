@@ -130,3 +130,31 @@ def test_deferring_expensive_bookends_cannot_claim_the_unknown_domain_converged(
     assert result['full_domain_measured'] is False
     with pytest.raises(ValueError, match='boundary_policy'):
         propose_full_domain_acquisition(domain, (512,), max_new_points=1, boundary_policy='guess')
+
+
+def test_actual_partial_shape_preserves_holes_and_refines_on_legal_grid():
+    from prismaquant.tessera_allocator import build_tessera_allocator_candidate
+    from prismaquant.tessera_full_domain_acquisition import adaptive_acquisition_from_records
+    records = tuple(build_tessera_allocator_candidate(
+        "kda", (8192, 128), family="TESSERA_E4M3_K1", body_rate_q256=q,
+        layout="tight", schedule=None, alphabets=None, predicted_dloss=loss,
+        target_profile="research") for q, loss in ((256, 8.0), (258, 7.9), (2048, 1.0)))
+    report = adaptive_acquisition_from_records("TESSERA_E4M3_K1", records, max_new_points=3)
+    assert report["legal_rate_count"] == 897
+    assert len(report["producer_refused_q256"]) == 896
+    assert report["proposed_q256"]
+    assert all(q in report["legal_q256"] and q not in (256, 258, 2048)
+               for q in report["proposed_q256"])
+    assert report["prices"] is None
+
+
+def test_table_width_witnesses_choose_both_legal_sides_of_a_shape_hole():
+    from prismaquant.tessera_allocator import build_tessera_allocator_candidate
+    from prismaquant.tessera_full_domain_acquisition import adaptive_acquisition_from_records
+    record = build_tessera_allocator_candidate(
+        "kda", (8192, 128), family="TESSERA_BF16_K1", body_rate_q256=1024,
+        layout="tight", schedule=None, alphabets=None, predicted_dloss=1.0,
+        target_profile="research")
+    report = adaptive_acquisition_from_records("TESSERA_BF16_K1", [record], max_new_points=6)
+    assert report["proposed_q256"] == [256, 4096, 3584, 3586, 3840, 3842]
+    assert report["producer_refused_q256"]
