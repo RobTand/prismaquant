@@ -260,26 +260,18 @@ def test_a_producer_commits_its_handoff_as_origin_batches(
     _src, pb_repo = pb_source(monkeypatch)
     from prismaquant.joint_quantum_handoff import (
         QuantumHandoffRefused, bind_handoff_publication)
-    from prismaquant.stage_a_produced_output import BoundaryProducedPublication
 
     producer, consumer, storage = band_campaign(tmp_path)
-    publication, _q, env = producer_owner(tmp_path, pb_repo, producer, storage)
+    publication, q, env = producer_owner(tmp_path, pb_repo, producer, storage)
     assert publication.write_only is True
 
-    # The quantum binds exactly as Stage A does in production (queue and
-    # tier from the launch context); here that answer is the private queue's.
-    calls = []
-
-    def bind(cls, **kwargs):
-        calls.append(kwargs)
-        return publication
-
-    monkeypatch.setattr(BoundaryProducedPublication, "bind_from_admitted_owner",
-                        classmethod(bind))
+    # Bind from the actual admitted request and launch context, not a wiring stub.
+    env = {**env, "PRISMABUILD_RESIDENCY_MAP":
+           str(q.root / "residency" / f"{env['PRISMABUILD_ACTION_KEY']}.json")}
     assert bind_handoff_publication(boundary_storage=storage, env={}) is None
-    assert bind_handoff_publication(boundary_storage=storage, env=env) is publication
-    assert calls == [{"queue_root": None, "tier": None, "env": env,
-                      "command_extra": ()}]
+    bound = bind_handoff_publication(boundary_storage=storage, env=env)
+    assert bound.instance == publication.instance
+    assert bound.template == publication.template
     with pytest.raises(QuantumHandoffRefused, match="durable payload maximum"):
         bind_handoff_publication(
             boundary_storage={**storage, "max_artifact_bytes": ARTIFACT_MAX * 2},
