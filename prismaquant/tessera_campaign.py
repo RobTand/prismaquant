@@ -895,10 +895,130 @@ def _stale_served_wire(anchor, record, *, structure) -> "str | None":
             f"served on {served} at this rung (#1502); re-priced, not adopted")
 
 
+def _load_campaign_acquisition(args, parser):
+    """Authenticate opt-in work before any campaign preparation has side effects."""
+    binding = (args.acquisition_request, args.acquisition_request_sha256)
+    if all(value is None for value in binding):
+        return None
+    if not all(binding):
+        parser.error("--acquisition-request and --acquisition-request-sha256 go together")
+    if args.menu_mode != "research" or args.max_rounds != 1:
+        parser.error("acquisition requires explicit --menu-mode research and --max-rounds 1")
+    if (args.rate_band is not None or args.exhaustive_rate_grid or args.census_out
+            or args.capture_calibration_out or args.capture_chain
+            or args.research_exact_member is not None):
+        parser.error("acquisition refuses rate-band, exhaustive, capture-only and partial-member modes")
+    # Selection metadata is small and must refuse partial/audit work before
+    # calibration intake, profile discovery, source pools or output creation.
+    if args.units:
+        selection = load_unit_selection(args.units)
+        if any(any(field in entry for field in
+                   ("partition", "sampled", "audit", "inclusion_probability", "stack_samples"))
+               for entry in selection["groups"]):
+            parser.error("acquisition refuses sampled, audit and expert partition selections")
+    from .tessera_full_domain_acquisition import load_joint_campaign_acquisition
+    return load_joint_campaign_acquisition(binding={"path": binding[0], "sha256": binding[1]})
+
+
+def _campaign_acquisition_scope(acquisition, scope_groups, *, selected=None):
+    """Require every real atomic member and exactly the requested scope."""
+    requests, sources = acquisition["requests"], acquisition["source_weights"]
+    known = {name for members in scope_groups.values() for name in members}
+    if not requests or set(requests) - known:
+        raise ValueError("acquisition names empty or unknown unit scope")
+    keys = [key for key, members in sorted(scope_groups.items()) if set(members) & set(requests)]
+    expanded = {name for key in keys for name in scope_groups[key]}
+    if set(requests) != expanded or set(sources) != expanded:
+        raise ValueError("acquisition requires request and source identity for every atomic member")
+    if selected is not None and set(selected) != expanded:
+        raise ValueError("acquisition selected scope differs from requested atomic-expanded scope")
+    return keys, expanded
+
+
+def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap,
+                                 requests=None, rates_by_unit=None):
+    """One seam for early priming and actual round one; validate the whole plan.
+
+    An acquisition takes the exact union of a group's requested q256s. Empty
+    report families buy no work, and neither endpoints nor an audit add work.
+    """
+    names = {name for members in groups.values() for name in members}
+    schedule = {name: {} for name in sorted(names)}
+    if requests is not None:
+        if set(requests) != names:
+            raise ValueError("acquisition schedule requires every atomic member, no extra units")
+        if (audit_units or getattr(args, "rate_band", None) is not None
+                or args.exhaustive_rate_grid or args.max_rounds != 1):
+            raise ValueError("acquisition schedule refuses audit, band, exhaustive or adaptive work")
+    for key, members in sorted(groups.items()):
+        if requests is None:
+            families = group_rates[key]
+        else:
+            families = sorted({family for name in members for family in requests[name]})
+        for family in families:
+            allowed = group_rates[key].get(family, [])
+            if requests is None:
+                want = round_one_rates(allowed, band=parse_rate_band(getattr(args, "rate_band", None)),
+                    anchors=args.anchors, snap=snap, exhaustive_band=args.exhaustive_rate_grid)
+                extra = None if not audit_units else audit_extra_rate(allowed, want, snap=snap)
+            else:
+                proposed = [q for name in members for q in requests[name].get(family, [])]
+                # An explicitly deferred report family requests no encode. Its
+                # lack of an admitted grid is evidence to retain, not a reason
+                # to invent work or refuse another family's actual work.
+                if proposed and (rates_by_unit is None or any(
+                        family not in rates_by_unit[name] for name in members)):
+                    raise ValueError(f"acquisition family {family} has no actual atomic-member grid")
+                if any(type(q) is not int or q not in allowed for q in proposed):
+                    raise ValueError(f"acquisition {key}:{family} requests illegal or route-refused q256")
+                want, extra = sorted(set(proposed)), None
+            for name in members:
+                rates = set(want)
+                if extra is not None and name in audit_units:
+                    rates.add(extra)
+                schedule[name][family] = sorted(rates)
+    return schedule
+
+
+def _campaign_acquisition_origin(acquisition, schedule, menus):
+    return {**acquisition["identity"],
+        "purpose": "actual_scalar_render_journal_and_wire_preparation",
+        "currency": CURRENCY,
+        "expanded_actual_work_count": sum(len(qs) for families in schedule.values() for qs in families.values()),
+        "deferred_domain": {name: sorted(({r.family for r in menus[name]} | set(schedule[name]))
+            - {family for family, qs in schedule[name].items() if qs}) for name in sorted(schedule)}}
+
+
+def _require_campaign_acquisition_source(name, weight, expected, *, receipt=None):
+    """Compare actual source bytes, never reinterpret a producer's other digest.
+
+    The current producer hashes dtype/shape + NUL + bytes, unlike joint AURA's
+    raw-byte digest. That receipt cannot project its content digest: use the
+    existing joint helper once per unit only when a raw-byte receipt is absent.
+    """
+    if (expected["shape"] != list(weight.shape) or expected["dtype"] != str(weight.dtype)
+            or expected["logical_bytes"] != weight.numel() * weight.element_size()):
+        raise ValueError(f"acquisition source weight identity differs for {name}")
+    fields = {"shape", "dtype", "logical_bytes", "content_sha256"}
+    if isinstance(receipt, Mapping) and fields <= set(receipt):
+        actual = {field: receipt[field] for field in fields}
+    else:
+        from .production_weight_cache import _cb_cache_tensor_identity
+        actual = _cb_cache_tensor_identity(weight)
+    if actual != expected:
+        raise ValueError(f"acquisition source weight identity differs for {name}")
+
+
+def _require_campaign_acquisition_anchor(anchor, schedule):
+    if (anchor.qname not in schedule or anchor.body_rate_q256 not in
+            schedule[anchor.qname].get(anchor.family, [])):
+        raise ValueError("acquisition refuses extra checkpoint/seed anchor work")
+
+
 def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
                               weights, profile, expert_members, encode_structure,
                               projected_units, audit_units, route_cache,
-                              partitioned=False):
+                              partitioned=False, acquisition_requests=None):
     """Overlap a new head's exact first batch; never read ahead of resume gates.
 
     Use the existing group/anchor/batch mechanisms and row-local refusal memo.
@@ -934,26 +1054,15 @@ def _prime_first_anchor_batch(row_stream, *, args, checkpoint, targets, menus,
             per_family.setdefault(rung.family, set()).add(rung.body_rate_q256)
         rates_by_unit[name] = per_family
     groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
-    band = parse_rate_band(getattr(args, "rate_band", None))
-    pending = []
-    for _key, members in sorted(groups.items()):
-        families = set.intersection(*[set(rates_by_unit[m]) for m in members]) if members else set()
-        for family in sorted(families):
-            shared = set.intersection(*[rates_by_unit[m][family] for m in members])
-            refused = _served_route_refusals(family, shared, members,
-                encode_structure=encode_structure, projected_units=projected_units,
-                route_cache=route_cache)
-            allowed = sorted(shared - {int(rung) for rung in refused})
-            if not allowed:
-                continue
-            want = round_one_rates(allowed, band=band, anchors=args.anchors,
-                                   snap=snap, exhaustive_band=args.exhaustive_rate_grid)
-            extra = None if not audit_units else audit_extra_rate(allowed, want, snap=snap)
-            for name in members:
-                rates = set(want)
-                if extra is not None and name in audit_units:
-                    rates.add(extra)
-                pending.extend((name, family, rate) for rate in sorted(rates))
+    group_rates, _refused = anchor_group_rate_grids(groups, rates_by_unit,
+        encode_structure=encode_structure, projected_units=projected_units,
+        route_cache=route_cache)
+    schedule = _campaign_round_one_schedule(groups, group_rates, args=args,
+        audit_units=audit_units, snap=snap, requests=acquisition_requests,
+        rates_by_unit=rates_by_unit)
+    pending = [(name, family, rate) for key, members in sorted(groups.items())
+               for family in sorted({f for name in members for f in schedule[name]})
+               for name in members for rate in schedule[name].get(family, [])]
     batches = _anchor_batches(pending, weights=weights, batch_size=args.anchor_batch_size,
                               structures=encode_structure)
     if batches:
@@ -2212,6 +2321,11 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
 
     api = _checkpoint_identity_api()
     settings = vars(args).copy()
+    # Locations and a duplicate digest are never scheduling identity. Opted-in
+    # origin + exact atomic-expanded schedule below stay bound by value; unset
+    # flags leave the historical settings bytes unchanged.
+    settings.pop("acquisition_request", None)
+    settings.pop("acquisition_request_sha256", None)
     restriction = parse_family_restriction(settings.get("family_restriction"))
     if settings.get("source_scope") is None:
         # Unset, the body's identity is byte-identical to before the flag.
@@ -6383,7 +6497,12 @@ def _main(argv, *, source_scope, waits) -> int:
                          "refuses leaves every read to hash fresh (PQ #1497).")
     ap.add_argument("--source-identity-cache-sha256", default=None,
                     help="Expected SHA256 of the --source-identity-cache file, bound by the planner.")
+    ap.add_argument("--acquisition-request", default=None,
+                    help="Opt-in authenticated joint full-domain acquisition request; schedules exact research render/wire work only.")
+    ap.add_argument("--acquisition-request-sha256", default=None,
+                    help="Independent SHA256 of --acquisition-request; both flags are required together.")
     args = ap.parse_args(argv)
+    acquisition = _load_campaign_acquisition(args, ap)
     calibration_options = (args.calibration_input, args.calibration_input_sha256,
                            args.calibration_corpus)
     if any(value is not None for value in calibration_options) and not all(calibration_options):
@@ -6788,6 +6907,14 @@ def _main(argv, *, source_scope, waits) -> int:
                 f"--units {args.units}: the selection prices no unit")
     elif args.research_exact_member is not None:
         raise RuntimeError("--research-exact-member requires --units")
+
+    if acquisition is not None:
+        selected_groups, keep = _campaign_acquisition_scope(acquisition, scope_groups,
+            selected=targets if args.units else None)
+        dense_targets = [name for name in dense_targets if name in keep]
+        expert_targets = [name for name in expert_targets if name in keep]
+        expert_members = {name: member for name, member in expert_members.items() if name in keep}
+        targets = [*dense_targets, *expert_targets]
 
     context_by_unit = None
     structure_by_unit = None
@@ -7197,6 +7324,24 @@ def _main(argv, *, source_scope, waits) -> int:
             selected_source_preparation['source_authentication'] = source_authentication.receipt()
             source_authentication.close()
 
+    route_cache: dict[tuple, str | None] = {}
+    acquisition_schedule = None
+    if acquisition is not None:
+        acquisition_groups = resolve_anchor_groups(targets, profile=profile, expert_members=expert_members)
+        acquisition_rates = {name: {} for name in targets}
+        for name in targets:
+            for rung in menus[name]:
+                if args.max_artifact_bpp > 0 and rung.bpp > args.max_artifact_bpp:
+                    continue
+                acquisition_rates[name].setdefault(rung.family, set()).add(rung.body_rate_q256)
+        acquisition_grids, _ = anchor_group_rate_grids(acquisition_groups, acquisition_rates,
+            encode_structure=encode_structure, projected_units=projected_units, route_cache=route_cache)
+        acquisition_schedule = _campaign_round_one_schedule(acquisition_groups, acquisition_grids,
+            args=args, audit_units=audit_units, snap=None, requests=acquisition["requests"],
+            rates_by_unit=acquisition_rates)
+        args.acquisition_schedule = acquisition_schedule
+        args.acquisition_origin = _campaign_acquisition_origin(acquisition, acquisition_schedule, menus)
+
     if not streaming_head:
         close_source_authentication()
     elif source_authentication is not None:
@@ -7290,8 +7435,14 @@ def _main(argv, *, source_scope, waits) -> int:
                  f"; capture seal ahead {seal_ahead.seconds:.1f} s, waited {seal_wait_seconds:.1f} s"),
               flush=True)
 
+    if acquisition is not None and not streaming_head:
+        for name in sorted(targets):
+            receipt = (bound_checkpoint_units[name].campaign_inputs()["source"]
+                       if bound_checkpoint_units else None)
+            _require_campaign_acquisition_source(name, weights[name],
+                acquisition["source_weights"][name], receipt=receipt)
+
     row_stream = None
-    route_cache: dict[tuple, str | None] = {}
     if streaming_head:
         from .tessera_row_stream import RowStream
         stream_threads = identity_threads
@@ -7330,15 +7481,31 @@ def _main(argv, *, source_scope, waits) -> int:
             release()
             return weight
 
+        acquisition_source_checked = set()
+
+        def bind_stream_unit(name, *, weight, inputs, hessian, source):
+            holder, receipts = _stream_unit_identity(name, weight=weight,
+                inputs=inputs, hessian=hessian, source=source if want_h else None,
+                menu=menus[name], projected_unit=projected_units.get(name),
+                static_scales=static_scales, metadata_bound=window_bounds[name])
+            try:
+                if acquisition is not None and name not in acquisition_source_checked:
+                    _require_campaign_acquisition_source(name, weight,
+                        acquisition["source_weights"][name], receipt=receipts["weight"])
+                    acquisition_source_checked.add(name)
+            except BaseException:
+                if holder is not None:
+                    holder.close()
+                raise
+            # A reread is already bound to the first producer receipt by
+            # RowStream; do not add another full raw-byte hash for that unit.
+            return holder, receipts
+
         row_stream = RowStream(
             capture_path=args.calibration_cache, expected_sha256=args.calibration_cache_sha256,
             expected_identity=capture_identity, census=census, names=targets,
             policy=args.capture_load_policy, weights=weights, hessian_identity=hessian_identity,
-            bind=lambda name, *, weight, inputs, hessian, source: _stream_unit_identity(
-                name, weight=weight, inputs=inputs, hessian=hessian,
-                source=source if want_h else None, menu=menus[name],
-                projected_unit=projected_units.get(name), static_scales=static_scales,
-                metadata_bound=window_bounds[name]),
+            bind=bind_stream_unit,
             load_unit=load_projected_source if streamed_units else None,
             threads=stream_threads, batch_size=args.anchor_batch_size, device=device,
             memo_capacity=selected_resources['encoder_memo_capacity'],
@@ -7352,7 +7519,8 @@ def _main(argv, *, source_scope, waits) -> int:
             targets=targets, menus=menus, weights=weights, profile=profile,
             expert_members=expert_members, encode_structure=encode_structure,
             projected_units=projected_units, audit_units=audit_units, route_cache=route_cache,
-            partitioned=partition_menu_targets is not None)
+            partitioned=partition_menu_targets is not None,
+            acquisition_requests=None if acquisition is None else acquisition["requests"])
 
     def run_identity(**receipts):
         # The resume identity, run level: everything a price is a function of,
@@ -7439,6 +7607,11 @@ def _main(argv, *, source_scope, waits) -> int:
         require_seed_family_scope(name, state, family_restriction=args.family_restriction,
                                   structure_by_unit=structure_by_unit,
                                   rate_band=restricted_rate_band, profile=profile)
+        if acquisition_schedule is not None:
+            for row in state["anchors"]:
+                _require_campaign_acquisition_anchor(CampaignAnchor(**row), acquisition_schedule)
+            if state.get("unservable"):
+                raise ValueError("acquisition refuses unservable checkpoint/seed anchor work")
 
     def adopt_state(name: str, state, *, where: str, deferred=None, entry=None) -> None:
         """Verify one unit's stored anchors against this run and take them.
@@ -7994,6 +8167,10 @@ def _main(argv, *, source_scope, waits) -> int:
             return None
         return min(allowed, key=lambda r: (abs(int(r) - int(rate)), int(r)))
 
+    round_one_schedule = _campaign_round_one_schedule(anchor_groups, group_rates,
+        args=args, audit_units=audit_units, snap=_snap,
+        requests=None if acquisition is None else acquisition["requests"], rates_by_unit=rates_by_unit)
+
     # Round 1, breadth-first over units, so a deadline yields every unit priced
     # at the same depth rather than a prefix priced deeply and a tail not at all.
     budget = int(args.anchor_budget)
@@ -8039,15 +8216,8 @@ def _main(argv, *, source_scope, waits) -> int:
                         for m in members}
                     grid = sorted(set.intersection(*member_rates.values())) if members else []
                     if round_index == 1:
-                        want = round_one_rates(allowed, band=rate_band,
-                                               anchors=args.anchors, snap=_snap,
-                                               exhaustive_band=args.exhaustive_rate_grid)
-                        extra = (None if not audit_units else
-                                 audit_extra_rate(allowed, want, snap=_snap))
                         for m in members:
-                            rates = set(want)
-                            if extra is not None and m in audit_units:
-                                rates.add(extra)
+                            rates = set(round_one_schedule[m].get(family, []))
                             have = member_rates[m]
                             pending.extend((m, family, rate)
                                            for rate in sorted(rates - have))
@@ -8349,6 +8519,8 @@ def _main(argv, *, source_scope, waits) -> int:
     provenance = {
         "provenance": {
             "menu_mode": mode,
+            **({"acquisition": args.acquisition_origin,
+                "acquisition_schedule": acquisition_schedule} if acquisition is not None else {}),
             # How the artifacts were written, and what that cost. Absent means
             # the default: every render and wire published on the encode
             # thread before the next batch started. Present means one bounded
