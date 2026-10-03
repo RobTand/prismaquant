@@ -95,9 +95,9 @@ PB_GENERATION_PIN = Path(__file__).resolve().parent / "pb_runtime_generation_pin
 GROUP_SIZE = 4
 
 # SDK4 executable claims require explicit host admission even in a private
-# queue. Producer, independent reader and one mover fit this bounded fixture;
-# its PB action reserves at least four CPUs and four GiB. Tier credit remains
-# independently minted by _queue and cannot substitute for host capacity.
+# queue. All produced-output fixture consumers use this single capacity
+# authority; tier credit cannot substitute for host CPU/memory admission.
+# Producer, independent reader and one mover fit this bounded fixture.
 _FIXTURE_HOST_CAPACITY = {"cpu": 4, "mem_gb": 4}
 
 #: An owner that owes nothing. Three buckets, not two: an egress refusal

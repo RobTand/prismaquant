@@ -141,7 +141,8 @@ def producer_owner(tmp_path, pb_repo, producer, storage, *,
               resources={"cpu": 1, "mem_gb": 1, **po.owner_demand_terms(template)},
               produced_output_template=template,
               **({} if max_attempts is None else {"max_attempts": max_attempts}))
-    claimed = q.claim(owner="w-owner", capacity=claim_capacity)
+    claimed = q.claim(owner="w-owner", capacity=(
+        chain._FIXTURE_HOST_CAPACITY if claim_capacity is None else claim_capacity))
     assert claimed is not None and claimed["action_key"] == owner
     control = chain._broker_control(q, owner)
     env = {"PRISMABUILD_ACTION_KEY": owner,
