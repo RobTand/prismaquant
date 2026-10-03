@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Refs #2199/#1303: the immutable positive E2M1 magnitudes remain owned by
+`nvfp4_activation_contract._E2M1_POSITIVE`. Native and batched exporters,
+the format registry and the fused kernel Torch helpers consume that same
+tuple instead of maintaining independent literals or exporter aliases.
+The sorted unique mathematical codebook still has fifteen entries; the
+packed wire still has sixteen sign/magnitude codes, including negative zero
+at code 8. Tie, range, scaling and packing arithmetic are unchanged. CPU
+equivalence checks do not qualify compiled CUDA or served quality.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing

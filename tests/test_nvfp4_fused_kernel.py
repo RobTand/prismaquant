@@ -8,6 +8,7 @@ import torch
 pytest.importorskip("triton")
 
 from prismaquant import format_registry as fr
+from prismaquant.nvfp4_activation_contract import _E2M1_POSITIVE
 from prismaquant.kernels.nvfp4_fused import (
     nvfp4_dequantize_weight,
     nvfp4_fused_aw_matmul,
@@ -25,7 +26,6 @@ def _export_convention_act_qdq(x: torch.Tensor) -> torch.Tensor:
     ~0.036% of bf16 elements land on exact midpoints at large shapes.
     """
     from prismaquant.export_native_compressed import (
-        FLOAT_TO_E2M1,
         _round_to_codebook,
     )
 
@@ -34,7 +34,7 @@ def _export_convention_act_qdq(x: torch.Tensor) -> torch.Tensor:
     g = xf.reshape(M, K // 16, 16)
     scale = (g.abs().amax(dim=-1, keepdim=True) / 6.0).clamp_min(1e-8 / 6.0)
     idx = _round_to_codebook(g / scale)
-    cb = torch.tensor(FLOAT_TO_E2M1, device=x.device, dtype=torch.float32)
+    cb = torch.tensor(_E2M1_POSITIVE, device=x.device, dtype=torch.float32)
     q = torch.where((idx & 0x8) != 0, -1.0, 1.0) * cb[idx & 0x7] * scale
     return q.reshape(M, K).to(x.dtype)
 
@@ -97,14 +97,13 @@ def test_indices_from_signed_e2m1_values_nearest_with_epsilon():
     mapped a value ε ABOVE a code (a bf16 round-trip artifact) to the NEXT
     code — a full-step error."""
     from prismaquant.kernels.nvfp4_fused import (
-        _FP4_E2M1_POS,
         _indices_from_signed_e2m1_values,
     )
 
-    codes = torch.tensor(_FP4_E2M1_POS, dtype=torch.float32)
+    codes = torch.tensor(_E2M1_POSITIVE, dtype=torch.float32)
     eps = 1e-4
     for sign in (1.0, -1.0):
-        for i, c in enumerate(_FP4_E2M1_POS):
+        for i, c in enumerate(_E2M1_POSITIVE):
             for v in (c, c + eps, max(c - eps, 0.0)):
                 got = _indices_from_signed_e2m1_values(
                     torch.tensor([sign * v], dtype=torch.float32))
@@ -117,7 +116,7 @@ def test_indices_from_signed_e2m1_values_nearest_with_epsilon():
     # Exact midpoints round toward zero (matches _round_to_codebook).
     midpoints = (codes[1:] + codes[:-1]) / 2.0
     got = _indices_from_signed_e2m1_values(midpoints)
-    assert got.tolist() == list(range(len(_FP4_E2M1_POS) - 1))
+    assert got.tolist() == list(range(len(_E2M1_POSITIVE) - 1))
 
     # Off-grid values still map to the nearest code.
     got = _indices_from_signed_e2m1_values(
