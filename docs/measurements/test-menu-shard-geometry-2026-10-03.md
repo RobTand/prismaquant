@@ -98,8 +98,14 @@ Average Netdata CPU busy excludes idle/iowait:
 | sparky |2.308%|1.727%|
 | sparklina |1.779%|1.399%|
 
-Windows:1791055646..1791055846 and1791055970..1791056047. No response has
-flagged/empty buckets. PB's own DL window averages are13.836%/13.476%, with
+Requested queries were1791055646..1791055846 and1791055970..1791056047.
+Captured before response view is1791055647..1791055846, with data timestamps
+1791055648..1791055846 (100 buckets). Captured after view is1791055968..1791056047,
+with data timestamps1791055969..1791056047 (40 buckets), including about2.5s
+before the PB claim. The table means cover those full response buckets, not
+claim-only intervals. PB scope windows are1791055646.640335..1791055845.549253
+and1791055970.520300..1791056046.989485. No response has flagged/empty buckets.
+PB's own DL window averages are13.836%/13.476%, with
 explicit missing-pqteld-CSV diagnostics retained. No GPU, energy or monetary
 claim is made. The designated parent reviews this exact source; independent
 review and one compatible full-cohort integration qualification remain separate
