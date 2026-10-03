@@ -140,10 +140,16 @@ Launched readers drain on cancellation or failure; cancelled original output
 refuses installation. Original head copies all complete before the first
 installation, so a later copy failure cannot expose a partially installed head.
 
+Original-owned batched FP8, MXFP4 and fallback scale transfers explicitly use
+nonblocking copies through that same completion owner. Disabled/legacy scopes
+keep the existing blocking policy. Source aliases are retained before enqueue,
+the same stream event proves completion, and all cast/dequant arithmetic is
+unchanged; changing transfer policy does not qualify a source or device.
+
 These dormant paths retain the original CPU-only device predicate. The CPU
 controls enter the actual source memfd/decoder/StorageWeakRef paths with explicit
 CPU CUDA spies. `tests/test_original_source_copy_completion_cuda.py` supplies
-real CUDA source-alias/event controls, but remains unrun. Retained frozen56
+real CUDA source-alias/event controls requiring explicit PB approval. Retained frozen56
 protocol698a0a0 is a historical negative reference: its harness drained streams
 while exception frames remained held and cannot qualify traceback-independent
 production ownership. New controls must catch/clear those frames while actual
@@ -152,6 +158,29 @@ prove no GPU behavior. A future explicitly reviewed PB
 action may temporarily override only a fixture owner's device predicate; the
 test-only environment is never read by production code. That fixture action
 cannot qualify actual original GLM primals/cotangents or a complete provider.
+
+The abandoned-owner controls use a longer bounded real CUDA delay to cover
+exception-frame disposal and garbage collection, followed by the same strict
+pending-stream, native-alias, held-FD and whole-credit assertions. The retained
+04 failures exhausted their 500M-cycle delay before the post-GC stream query;
+they remain failures, not ownership qualification. Increasing only the fatal
+control delay does not relax any assertion or enable a source/device gate.
+
+The fixture execution owner supervises the existing container adapter CLI as a
+child: its Docker `execvp` does not replace the owner that records the actual
+ending, exact granted Torch trace and both raw host telemetry windows. Application
+output, controls and temporary files use `/qualification`; runtime-owned `/run`
+is never shadowed by the application mount. A separately admitted bounded
+`--cuda-entry-preflight` exercises actual CUDA arithmetic, owner UID/GID, output
+bytes and GPU profile events under those same bindings. It is an entry proof,
+not a source-lifetime or actual GLM qualification, and enables no production gate.
+
+Successful fixture nodes publish one canonical `ORIGINAL_SOURCE_ARTIFACTS` JSON
+line after the parent records the actual ending and binds its raw evidence. The
+selected stdout CAS result thereby binds SHA-256 and byte length for the actual
+control, counted execution, parent result, both host series and granted trace.
+Historical results without this publication remain unchanged and do not acquire
+the new selected-artifact binding merely because sidecars were later retained.
 
 This scope is the internal CPU context. The higher-level Stage A API now has an
 explicit dev-only [selected-row diagnostic seam](stage_a_selected_row_diagnostic.md)
