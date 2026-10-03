@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tools.container_runtime_identity import image_content_sha256
+from prismaquant.container_runtime_identity import image_content_sha256
 
 image = "prismaquant-glm-derivative:causal-exp-v1-20260908"
 parser = argparse.ArgumentParser()

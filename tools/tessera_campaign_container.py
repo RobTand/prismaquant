@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
-from tools.container_runtime_identity import (
+from prismaquant.container_runtime_identity import (
     image_content_sha256, prismaquant_source_sha256)
 from tools.tessera_campaign_namespace import (
     establish_namespace_temporaries, namespace_adapter_request,

@@ -5,7 +5,7 @@ Both images must already be present and declared to PB. No pull or deployment.
 import argparse,json,os,subprocess,sys,tempfile,shutil
 from pathlib import Path
 sys.path.insert(0,str(Path.cwd()))
-from tools.container_runtime_identity import image_content_sha256
+from prismaquant.container_runtime_identity import image_content_sha256
 
 TS=Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/native-pact-acquisition-20260922/tessera-32e92e85e')
 TS_CONTAINER=Path('/native-sources')/TS.name

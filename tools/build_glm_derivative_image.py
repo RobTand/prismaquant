@@ -15,7 +15,7 @@ import shutil
 import tarfile
 import runpy
 
-from tools.container_runtime_identity import image_content_sha256
+from prismaquant.container_runtime_identity import image_content_sha256
 # This build driver is stdlib-only; the host need not install Torch merely to
 # read image metadata and apply the closed byte transform.
 _contract = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'prismaquant/glm_source_derivative.py'))

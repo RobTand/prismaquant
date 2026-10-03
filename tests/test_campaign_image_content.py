@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from tools import container_runtime_identity as identity
+from prismaquant import container_runtime_identity as identity
 from tools import tessera_campaign_container as runner
 
 

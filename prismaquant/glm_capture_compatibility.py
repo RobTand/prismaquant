@@ -72,7 +72,7 @@ def _verify_cas_receipt(receipt, snapshot, output):
 
 
 def _producer(evidence, capture):
-    from tools.container_runtime_identity import image_content_sha256
+    from prismaquant.container_runtime_identity import image_content_sha256
     _require(isinstance(evidence, dict) and set(evidence) ==
              {'request', 'terminal', 'receipt', 'output', 'image_inspection', 'modeling_source'}, 'closed original producer evidence required')
     _require(evidence['request']['sha256'] == CAPTURE_REQUEST_SHA256, 'original capture request is not the reviewed action')
@@ -289,7 +289,7 @@ def _issuance_plan(binding):
 
 def _issuance_static_inputs(plan):
     """Check the available producer/config inputs without declaring completion."""
-    from tools.container_runtime_identity import image_content_sha256
+    from prismaquant.container_runtime_identity import image_content_sha256
     evidence = plan['producer']
     _require(evidence['request']['sha256'] == CAPTURE_REQUEST_SHA256,
              'original capture request is not the reviewed action')

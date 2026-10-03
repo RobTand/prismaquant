@@ -78,7 +78,7 @@ def corrected_source(raw):
 
 
 def validate_image_build(build):
-    from tools.container_runtime_identity import image_content_sha256
+    from prismaquant.container_runtime_identity import image_content_sha256
     _require(build.get('schema') == 'prismaquant.glm_derivative_image_build.v1' and build.get('status') == 'complete',
              'complete corrected image build required')
     _require(build.get('original_image_content_sha256') == ORIGINAL_IMAGE_CONTENT_SHA256 and

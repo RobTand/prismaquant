@@ -31,7 +31,6 @@ import sys
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-TOOLS = REPO / "tools"
 PIN_RELATIVE = Path("prismaquant") / "tessera_runtime" / "tessera_serving_runtime_pin.json"
 
 _CHILD = (
@@ -130,11 +129,11 @@ _CRI_REFUSE = (
 
 
 def _stage(workdir: Path, tool: str, with_pin: bool = False) -> Path:
-    """Rebuild the container layout: the tool file plus its data files."""
+    """Stage a standalone source file at its real bootstrap-relative path."""
     root = workdir / "container"
-    tools_dir = root / "tools"
-    tools_dir.mkdir(parents=True)
-    shutil.copy2(TOOLS / tool, tools_dir / tool)
+    destination = root / tool
+    destination.parent.mkdir(parents=True)
+    shutil.copy2(REPO / tool, destination)
     if with_pin:
         pin = root / PIN_RELATIVE
         pin.parent.mkdir(parents=True)
@@ -147,7 +146,7 @@ def _run_isolated(root: Path, tool: str, stmt: str, payload: Path) -> str:
     env.pop("PYTHONPATH", None)
     proc = subprocess.run(
         [sys.executable, "-c", _CHILD.format(stmt=stmt),
-         str(REPO), str(root / "tools" / tool), str(payload)],
+         str(REPO), str(root / tool), str(payload)],
         cwd=root, capture_output=True, text=True, env=env, timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]
     return proc.stdout
@@ -160,40 +159,40 @@ def _write(root: Path, name: str, text: str) -> Path:
 
 
 def test_pin_loader_runs_without_the_package(tmp_path: Path) -> None:
-    root = _stage(tmp_path, "serve_fingerprint.py", with_pin=True)
-    out = _run_isolated(root, "serve_fingerprint.py", _PIN_ACCEPT,
+    root = _stage(tmp_path, "tools/serve_fingerprint.py", with_pin=True)
+    out = _run_isolated(root, "tools/serve_fingerprint.py", _PIN_ACCEPT,
                         _write(root, "pin.json", '{"a": 1}'))
     assert "PIN-OK" in out
-    out = _run_isolated(root, "serve_fingerprint.py", _PIN_REFUSE,
+    out = _run_isolated(root, "tools/serve_fingerprint.py", _PIN_REFUSE,
                         _write(root, "dup.json", '{"a": 1, "a": 2}'))
     assert "PIN-DUP-OK" in out
 
 
 def test_models_endpoint_loader_runs_without_the_package(tmp_path: Path) -> None:
-    root = _stage(tmp_path, "serve_fingerprint.py", with_pin=True)
+    root = _stage(tmp_path, "tools/serve_fingerprint.py", with_pin=True)
     out = _run_isolated(
-        root, "serve_fingerprint.py", _MODELS_ACCEPT,
+        root, "tools/serve_fingerprint.py", _MODELS_ACCEPT,
         _write(root, "models.json", json.dumps(CARD)))
     assert "MODELS-OK" in out
 
 
 def test_snapshot_manifest_loader_runs_without_the_package(tmp_path: Path) -> None:
-    root = _stage(tmp_path, "prismaquant_runtime_snapshot.py")
-    out = _run_isolated(root, "prismaquant_runtime_snapshot.py",
+    root = _stage(tmp_path, "tools/prismaquant_runtime_snapshot.py")
+    out = _run_isolated(root, "tools/prismaquant_runtime_snapshot.py",
                         _SNAP_ACCEPT, _write(root, "m.json", '{"a": 1}'))
     assert "SNAP-OK" in out
-    out = _run_isolated(root, "prismaquant_runtime_snapshot.py",
+    out = _run_isolated(root, "tools/prismaquant_runtime_snapshot.py",
                         _SNAP_REFUSE,
                         _write(root, "d.json", '{"a": 1, "a": 2}'))
     assert "SNAP-DUP-OK" in out
 
 
 def test_container_identity_loader_runs_without_the_package(tmp_path: Path) -> None:
-    root = _stage(tmp_path, "container_runtime_identity.py")
-    out = _run_isolated(root, "container_runtime_identity.py",
+    root = _stage(tmp_path, "prismaquant/container_runtime_identity.py")
+    out = _run_isolated(root, "prismaquant/container_runtime_identity.py",
                         _CRI_ACCEPT, _write(root, "o.json", '{"a": 1}'))
     assert "CRI-OK" in out
-    out = _run_isolated(root, "container_runtime_identity.py",
+    out = _run_isolated(root, "prismaquant/container_runtime_identity.py",
                         _CRI_REFUSE,
                         _write(root, "d.json", '{"a": 1, "a": 2}'))
     assert "CRI-DUP-OK" in out

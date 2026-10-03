@@ -143,7 +143,7 @@ def test_a_mount_target_deeper_than_its_source_still_maps(tmp_path):
 
 def test_the_receipt_records_the_pinned_and_resolved_digests(tmp_path):
     module = runner()
-    identity = importlib.import_module("tools.container_runtime_identity")
+    identity = importlib.import_module("prismaquant.container_runtime_identity")
     pinned, checkout = trees(tmp_path)
     receipt = module.verify_pinned_import(spec(pinned), cwd=str(checkout))
     expected = identity.prismaquant_source_sha256(pinned / "prismaquant")
@@ -177,7 +177,7 @@ def test_a_mounted_tree_no_entry_reaches_stays_visible_in_the_receipt(tmp_path):
     """
 
     module = runner()
-    identity = importlib.import_module("tools.container_runtime_identity")
+    identity = importlib.import_module("prismaquant.container_runtime_identity")
     pinned, checkout = trees(tmp_path)
     data = spec(pinned, pythonpath=".")
     receipt = module.verify_pinned_import(data, cwd=str(checkout))
