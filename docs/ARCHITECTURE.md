@@ -165,6 +165,20 @@ load-bearing stored identities, with no byte/profile/default/numerical change.
 Runtime-source snapshot tooling remains stdlib-only: its bootstrap dependency
 contract is not changed merely to share this file loop. Broader #1301 stays open.
 
+Refs #2172 / #1303: shipcard full-content verification and offline export
+structure metadata reads share `source_read_plan.safetensors_prefix_length`
+without losing their decoded-length diagnostics. Its existing literal error
+contract also accepts a range-message factory, evaluated only after the
+unsigned length fails the existing bounds; literal strings stay literal.
+Shipcard keeps its fused prefix/body/tensor hashes and earlier exact-read
+truncation error. Metadata reads keep their stat fences, header-only IO and
+separate unprefixed JSON-index size gate. Bounds, output bytes and refusal text
+are unchanged. Before extending the exported helper, pylsp references mapped
+source_read_plan, residency_shard_reader and the accepted #2166 calibration
+and consumed-page callers; existing string callers need no migration.
+The unbounded model-profile/benchmark readers remain protocol-distinct, and
+this bounded slice does not close the broader domain-numerics epic.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
