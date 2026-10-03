@@ -272,6 +272,18 @@ SHA-256 constructor through `digests.bytes_sha256hex`. Their distinct
 checkpoint detach/CPU/contiguous/uint8 view and CLI CPU/NumPy C-order extraction
 remain local, including native refusals. Identity fields, byte recipes and
 widths, checkpoint policy and provenance serialization retain their contracts.
+Re-stamped 2026-10-03 (PQ #2200, internal core/domain ownership): checkpoint
+and streamed identity paths obtain authenticated original metadata through
+`source_generation.original_checkpoint_description`, the existing generic
+source-generation public owner. The core private copy and direct calibration
+domain import are removed; both callers retain the same exact
+`CaptureSourceAuthentication` class/qualified-material check, absolute source
+root equality, owned descriptor and RuntimeError vocabulary. This is not an
+external Tessera package import repair, a duck-typed provider or a new source
+admission. Real PB-leased internal CPU metadata remains distinct from native
+GLM/capture/runtime qualification; no original guard, data meaning or
+boundary allowlist is relaxed.
+
 Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original identity intake): when the
 existing qualified original owner is explicitly selected, the existing model
 and source-checkpoint identity mechanisms consume its independently bound

@@ -6487,7 +6487,9 @@ def build_source_checkpoint_identity(
     if source_authentication is not None:
         if digest_cache_path is not None or extra_shard_paths:
             raise RuntimeError('original checkpoint identity accepts no stat cache or extra roster')
-        descriptor = _original_checkpoint_description(source_model, source_authentication)
+        from .source_generation import original_checkpoint_description
+
+        descriptor = original_checkpoint_description(source_model, source_authentication)
         shards = [{key: row[key] for key in ('name', 'size', 'sha256')}
                   for row in descriptor['shards']]
         metadata = [row for row in descriptor['metadata']
@@ -6695,14 +6697,6 @@ def _streamed_identity_record(*, config_dict, mapping, shards, checkpoint_weight
     }
 
 
-def _original_checkpoint_description(source_model, owner):
-    from .tessera_calibration_cache import CaptureSourceAuthentication
-
-    if not isinstance(owner, CaptureSourceAuthentication) or not owner.is_qualified_original_material:
-        raise RuntimeError('original identity requires the qualified existing original owner')
-    if os.path.abspath(str(source_model)) != str(owner.root):
-        raise RuntimeError('original identity source root differs from its owner')
-    return owner.original_checkpoint_descriptor()
 
 
 def _original_streamed_identity(runner, source_model, config_dict, mapping, owner):
@@ -6717,7 +6711,9 @@ def _original_streamed_identity(runner, source_model, config_dict, mapping, owne
     context = runner.context
     if context.source_snapshot_only or context.source_scope is not None:
         raise RuntimeError('original identity requires a complete body resolution')
-    descriptor = _original_checkpoint_description(source_model, owner)
+    from .source_generation import original_checkpoint_description
+
+    descriptor = original_checkpoint_description(source_model, owner)
     original = descriptor['config']
     profile = detect_profile(source_model, config=original)
     profile._declare_checkpoint_index(descriptor['index'])

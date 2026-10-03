@@ -32,6 +32,14 @@
   instead of relying on a production fallback. Native reader, resource, CUDA,
   source-admission and automatic-capture gates are unchanged; these corrections
   do not establish full-suite, GPU, scientific or serving qualification.
+- **Original checkpoint metadata uses its generic public source owner**
+  (#2200). Core checkpoint and streamed identities share
+  `source_generation.original_checkpoint_description`, rather than reaching
+  directly into the PQ-internal Tessera calibration domain. The old private
+  core copy is gone; exact class qualification, absolute-root equality,
+  descriptor provenance and refusal vocabulary remain unchanged. CPU
+  metadata tests do not establish original GLM/native/capture admission.
+
 - **Original proper-prefix coverage compares its exact checkpoint roster**
   (Refs #2147). Python set equality preserves the whole required head/layer
   coverage and rejects missing or extra checkpoints without sending sets to
