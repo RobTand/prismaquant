@@ -177,7 +177,7 @@ def test_the_parallel_walk_commits_and_banks_exactly_what_the_serial_walk_does(
         tmp_path, monkeypatch):
     """However the walks finish, the durable sequence is the roster's order."""
     import os
-    import time
+    from threading import Event
     from prismaquant import tessera_joint_aura as bridge
 
     # I/O threads may wait concurrently on a one-core CPU reservation.
@@ -187,18 +187,25 @@ def test_the_parallel_walk_commits_and_banks_exactly_what_the_serial_walk_does(
     # The FIRST roster unit finishes last; the driver must still commit it
     # first, or the banked prefix and the reported counts would reorder. The
     # roster's first unit is ``sorted(names)[0]`` -- not the fixture list's
-    # first -- or the delay would sit on the last unit walked and reorder
+    # first -- or the gate would sit on the last unit walked and reorder
     # nothing.
     first = sorted(names)[0]
+    later_finished = Event()
+    finishes = []
     real_load = bridge._load_unit
     def slow_first(path, *, qname, **kwargs):
         if qname == first:
-            time.sleep(0.05)
-        return real_load(path, qname=qname, **kwargs)
+            assert later_finished.wait(5), "later unit never finished"
+        result = real_load(path, qname=qname, **kwargs)
+        finishes.append(qname)
+        if qname != first:
+            later_finished.set()
+        return result
     monkeypatch.setattr(bridge, "_load_unit", slow_first)
     parallel = bridge.load_measured_anchor_input(config, verify_payloads=False,
                                                  head_checkpoint=tmp_path / "parallel-walk",
                                                  head_walk_workers=4)
+    assert finishes == list(reversed(sorted(names)))
     monkeypatch.setattr(bridge, "_load_unit", real_load)
     serial = bridge.load_measured_anchor_input(config, verify_payloads=False,
                                                head_checkpoint=tmp_path / "serial-walk",
@@ -241,13 +248,18 @@ def test_the_serial_driver_commits_each_unit_before_walking_the_next():
 
 
 def test_the_parallel_driver_commits_in_roster_order_however_walks_finish():
-    import time
+    from threading import Barrier, Event
     from prismaquant.tessera_joint_aura import _drive_ordered_walk
 
     finishes = []
+    later_finished = Event()
+    later = Barrier(2, action=later_finished.set, timeout=5)
     def walk(name):
-        time.sleep({"a": 0.05}.get(name, 0.0))
+        if name == "a":
+            assert later_finished.wait(5), "later walks never finished"
         finishes.append(name)
+        if name != "a":
+            later.wait()
         return {}
     committed = []
     _drive_ordered_walk(["a", "b", "c"], walk,

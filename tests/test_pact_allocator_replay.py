@@ -79,7 +79,11 @@ def _fixture(tmp_path, monkeypatch, *, units=None):
     import hashlib
 
     receipt = tmp_path / "bench.json"
-    receipt.write_text("Synthetic CPU test fixture, not GPU measurement evidence.\n")
+    # The shape reader parses every receipt as JSON, even legacy digest-only
+    # artifacts. This is deliberately NOT a checker receipt or observation:
+    # synthetic prices test allocation mechanics, never measurement authority.
+    receipt.write_text(json.dumps({"synthetic_cpu_fixture": True,
+                                   "gpu_measurement_evidence": False}))
     receipt_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
     regime = srp.regime_for_m(M)
     rows = []
@@ -138,6 +142,32 @@ def _replay(frontier, digest, output):
     return prefill_frontier.main(["replay", "--frontier", str(frontier),
                                   "--assignment-sha256", digest, "--layer-config", str(output)])
 
+
+@pytest.mark.parametrize("mutation", ["digest", "invalid_json", "bare_observation"])
+def test_receipt_refuses_before_frontier_publication(tmp_path, monkeypatch, mutation):
+    import hashlib
+    from prismaquant import shape_runtime_prices as srp
+
+    case = _fixture(tmp_path, monkeypatch)
+    receipt = tmp_path / "bench.json"
+    if mutation == "invalid_json":
+        receipt.write_bytes(b"not JSON")
+    elif mutation == "bare_observation":
+        receipt.write_text(json.dumps({"schema": srp.SHAPE_TIME_OBSERVATION_SCHEMA}))
+    else:
+        receipt.write_text(json.dumps({"changed": True}))
+    # A matching digest is not checker authority, nor does it make malformed
+    # JSON acceptable. The first case separately exercises byte integrity.
+    if mutation != "digest":
+        table = json.loads(case.table_path.read_text())
+        for row in table["rows"]:
+            row["measurement"]["receipt_sha256"] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+        case.table_path.write_text(json.dumps(table))
+    output = tmp_path / "refused.json"
+    with pytest.raises(SystemExit):
+        prefill_frontier.main(["--output", str(output), "--", *case.argv])
+    assert not output.exists()
+    assert not output.with_suffix(".json.assignments").exists()
 
 def test_hull_replay_and_export_intake_carry_the_research_standing(tmp_path, monkeypatch,
                                                                      capsys):

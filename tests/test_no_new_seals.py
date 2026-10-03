@@ -138,6 +138,14 @@ ALLOWLIST = {
     ("prismaquant/joint_adjoint_checkpoints.py", "_validated_checkpoint_stream_plane"): (
         1, STRUCTURE, "stored cotangent metadata reproduces its enclosing checkpoint's "
         "session, slot, kind and coordinates; not a comparison with the running campaign"),
+    ("prismaquant/joint_dispatch_pilot.py", "_authenticated_quantum_record"): (
+        2, INTEGRITY, "the PB producer original quantum bytes against the bound argv digest "
+        "and declared length, then decoded bytes against their digest; no running identity"),
+    ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_completion"): (
+        1, INTEGRITY, "supplied counters bytes against the authenticated PB producer reference"),
+    ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_source_contract"): (
+        1, STRUCTURE, "the independently reviewed pilot implementation names the proposed "
+        "code; this is the explicitly overridable fanout qualification gate, not a resume seal"),
     ("prismaquant/joint_cost_quantum.py", "verify_quantum_identity"): (
         3, AMBIGUOUS, "record bytes, the record's own seal and each input file against its "
         "digest (integrity); the Stage A slice binding (ambiguous, #1147 report)"),
@@ -230,8 +238,11 @@ ALLOWLIST = {
     ("prismaquant/tessera_joint_aura.py", "_read_wire_bytes"): (
         1, INTEGRITY, "staged wire bytes against the receipt digest"),
     ("tools/dispatch_joint_quanta.py", "_admit_dispatch_pilots"): (
-        1, INTEGRITY, "pilot counters bytes against the operator's bound receipt digest "
-        "(#1293); source/regime/shape admission is the explicitly overridable pilot gate"),
+        2, INTEGRITY, "pilot counters and independently reviewed source-contract bytes against "
+        "their operator-bound digests (#1293); source/regime/shape admission is explicitly overridable"),
+    ("tools/dispatch_joint_quanta.py", "_verify_pilot_result"): (
+        1, STRUCTURE, "authenticated PB counters and original quantum record name the same "
+        "producer identity; neither is compared with the running campaign"),
     ("tools/dispatch_joint_quanta.py", "_executable_prepared_input"): (
         5, AMBIGUOUS, "the manifest wire against its digest (integrity); the prepared "
         "payload, its render prerequisite, the bound prepared contract and the Stage A "

@@ -1,11 +1,7 @@
 """Packed decisions reach the pinned producer translator as source units."""
 import hashlib
 import json
-import os
 from pathlib import Path
-import runpy
-
-import pytest
 
 from test_tessera_export_projection import (
     case, _cli, _isolate_other_gates, _units, DENSE, N, ROUTER, STACK,
@@ -20,16 +16,12 @@ def test_preflight_packed_census_reaches_real_producer_translator(case, tmp_path
     assert _cli(case, tmp_path) == 0
     build = json.loads((tmp_path / 'build.json').read_text())
     translated = Path(build.get('plan_assignment', str(case.assignment)))
-    # Exercise the actual pinned producer, whose source names are the ABI.
-    repo = os.environ.get('TESSERA_REPO')
-    if not repo:
-        pytest.skip('TESSERA_REPO must name the pinned producer checkout')
-    producer = runpy.run_path(str(Path(repo) / 'experiments/plan_from_layer_config.py'))
+    from prismaquant.tessera_plan_writer import build_serving_plan, tessera_surface
     config = json.loads(translated.read_text())
-    plan, provenance = producer['build'](config,
+    plan, provenance = build_serving_plan(config,
         {**{n + '.weight': (N, N) for n in (DENSE, *_units())},
          ROUTER + '.weight': (2, N)},
-        cover='as-allocated', allow_disagreement=False, prismaquant=None, with_control=False)
+        cover='as-allocated', allow_disagreement=False, surface=tessera_surface(), with_control=False)
     assert all(plan[n + '.weight'] == {'grid': 'E4M3', 'q256': 1024} for n in _units())
     assert not any(name in config for name in parameters)
     assert case.assignment.read_bytes() == original

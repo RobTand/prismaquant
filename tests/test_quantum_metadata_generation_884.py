@@ -792,7 +792,7 @@ def test_receipt_and_readsets_bind_under_metadata_namespace(tmp_path):
         assert _sha(slice_path) == record["adjoint"]["slice_sha256"]
         # The consumer's identity gate passes with the DATA output root.
         record_path = meta / "records" / f"{record['quantum_id']}.json"
-        found, loaded = quantum.verify_quantum_identity(
+        found, loaded, _record_bytes = quantum.verify_quantum_identity(
             quantum_path=record_path,
             quantum_sha256=_sha(record_path),
             plan_path=campaign["plan_path"], plan_sha256=campaign["plan_sha"],

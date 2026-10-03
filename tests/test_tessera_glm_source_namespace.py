@@ -14,19 +14,18 @@ names.  Three joins broke on the real allocation, one preflight at a time:
   refuses as absent from its body projection.
 
 This drives one layer-43-shaped glm5_next checkpoint through the lane CLI and
-then through the pinned translator's own ``main``, so a fourth join of the
-same kind fails here rather than on the fleet.
+the supported PrismaQuant plan writer, so a fourth join of the same kind
+fails here rather than on the fleet.
 """
 from __future__ import annotations
 
 import json
 from pathlib import Path
-import runpy
 
 import pytest
 
 from prismaquant import tessera_export_lane as export
-from test_tessera_campaign_packed import _pinned_producer_checkout
+from prismaquant import tessera_plan_writer as writer
 from test_tessera_export_projection import _hessian_block, _isolate_other_gates
 from test_tessera_pin_v38_scope import NEW_IMAGE, _Target
 
@@ -88,10 +87,8 @@ def _preflight(model, assignment, tmp_path):
 
 
 def test_glm_source_units_pass_preflight_and_the_pinned_translator(tmp_path, monkeypatch):
-    checkout = _pinned_producer_checkout()
-    if checkout is None:
-        pytest.skip("the pinned Tessera checkout is not on this host")
-    pytest.importorskip("tessera", reason="the translator imports the producer package")
+    # Translation is owned by PrismaQuant; the serving package supplies the
+    # supported classification surface, not a private experiment checkout.
     _isolate_other_gates(monkeypatch)
     model, assignment = _glm_case(tmp_path)
     original = assignment.read_bytes()
@@ -106,10 +103,9 @@ def test_glm_source_units_pass_preflight_and_the_pinned_translator(tmp_path, mon
     assert view["__prismaquant__"]["tessera_export_assignment"][
         "source_precision_outside_graph"] == [VISUAL]
 
-    translator = runpy.run_path(str(checkout / "experiments" / "plan_from_layer_config.py"))
     out = tmp_path / "plan.json"
-    translator["main"]([str(view_path), str(model), str(out),
-                        "--cover", "as-allocated", "--no-uniform-control"])
+    assert writer.main([str(view_path), str(model), str(out),
+                        "--cover", "as-allocated", "--no-uniform-control"]) == 0
     plan = json.loads(out.read_text())
     # The routed expert units come back as their producer stack, at the pick.
     assert plan[f"{LAYER}.mlp.experts"] == {

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from test_stage_a_produced_boundary_chain import (
-    TIER, _broker_control, _isolated_launch_context, _pb_source, _queue,
+    TIER, _FIXTURE_HOST_CAPACITY, _broker_control, _isolated_launch_context, _pb_source, _queue,
     _sealed_producer_request, _template,
 )
 
@@ -53,7 +53,7 @@ def render_owner(tmp_path, request):
         checkout_root=str(tmp_path / "mover-checkout"),
         resources={"cpu": 1, "mem_gb": 1, **po.owner_demand_terms(template)},
         produced_output_template=template)
-    claim = queue.claim(owner="render-fixture")
+    claim = queue.claim(owner="render-fixture", capacity=_FIXTURE_HOST_CAPACITY)
     assert claim is not None and claim["action_key"] == owner
     control = _broker_control(queue, owner)
     env = {"PRISMABUILD_ACTION_KEY": owner,

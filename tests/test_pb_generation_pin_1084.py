@@ -45,10 +45,12 @@ def test_no_two_pin_files_name_one_prismabuild_bundle():
             owners[value] = path
 
 
-def test_the_shared_pin_names_the_published_generation():
+def test_the_shared_pin_names_the_reviewed_source_bundle():
     pin = json.loads(SHARED.read_text())
     generation = pin["runtime_generation"]
-    assert pin["bundle_root"].endswith("/runtime-generations/" + generation)
+    assert Path(pin["bundle_root"]).name == generation
+    assert generation == pin["candidate_commit"]
+    assert "/qualification/pq-pb-sdk4-" in pin["bundle_root"]
     assert generation.startswith(pin["candidate_commit"][:12])
     assert {"path": pin["bundle_root"]} in pin["search_paths"]
     for consumer in pin["consumers"]:
@@ -58,6 +60,7 @@ def test_the_shared_pin_names_the_published_generation():
 #: Each suite on the shared generation, and the name its pin path has there.
 CONSUMER_PIN_NAMES = {
     "fullstack_pb_generation": "PIN_PATH",
+    "test_stage_a_produced_boundary_chain": "PIN_PATH",
     "test_band_serial_handoff_produced": "ORIGIN_PIN",
     "test_band_serial_handoff_spool_real_pb": "ORIGIN_PIN",
     "test_produced_output_spool_real_pb": "PIN_PATH",

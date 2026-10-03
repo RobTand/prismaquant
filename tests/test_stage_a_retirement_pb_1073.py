@@ -81,7 +81,7 @@ def _owner(tmp_path, pb_repo, template):
               checkout_root=str(tmp_path / "mover-checkout"),
               resources={"cpu": 1, "mem_gb": 1, **po.owner_demand_terms(template)},
               produced_output_template=template)
-    claimed = q.claim(owner="w-owner")
+    claimed = q.claim(owner="w-owner", capacity=chain._FIXTURE_HOST_CAPACITY)
     assert claimed is not None and claimed["action_key"] == owner
     control = chain._broker_control(q, owner)
     po.declare_template(q.root, template)

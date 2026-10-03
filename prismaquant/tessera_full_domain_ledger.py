@@ -76,19 +76,16 @@ def _interpolated_cost_source() -> str:
     return TESSERA_INTERPOLATED_COST_SOURCE
 
 
-def _legal_rates(family: str, shapes: Sequence[Sequence[int]]) -> tuple[int, ...]:
-    from .tessera_legal_domain import legal_rate_domain
-
-    return legal_rate_domain(family, shapes).rates
+_LEGAL_CACHE: dict[tuple[str, tuple[tuple[int, ...], ...]],
+                   tuple[tuple[int, ...], dict[int, tuple[str, ...]]]] = {}
 
 
-_LEGAL_CACHE: dict[tuple[str, tuple[tuple[int, ...], ...]], tuple[int, ...]] = {}
+def _cached_domain(family: str, shapes: Sequence[Sequence[int]]):
+    from .tessera_legal_domain import legal_rates
 
-
-def _cached_legal_rates(family: str, shapes: Sequence[Sequence[int]]) -> tuple[int, ...]:
     key = (family, tuple(tuple(shape) for shape in shapes))
     if key not in _LEGAL_CACHE:
-        _LEGAL_CACHE[key] = _legal_rates(family, shapes)
+        _LEGAL_CACHE[key] = legal_rates(family, shapes)
     return _LEGAL_CACHE[key]
 
 
@@ -126,14 +123,16 @@ def build_full_domain_ledger(
     families: Sequence[str],
     shapes: Sequence[Sequence[int]] | None = None,
     currency: str | None = None,
+    unit_shapes: Mapping[str, Sequence[int]] | None = None,
 ) -> dict[str, Any]:
     """Classify every legal rate of every ``(unit, family)`` the rows name.
 
     ``families`` is the explicit roster to ledger -- no model-wide default.
     ``shapes`` go to the legal-domain derivation (default: the GLM-5.3-Flash
     Linear shapes); ``currency`` defaults to the campaign's.  Units are read
-    off the rows; a ``(unit, family)`` with no row at all is simply absent,
-    never invented.
+    off the rows unless ``unit_shapes`` supplies the census roster. With an
+    explicit roster, wholly unmeasured unit/families retain their legal domain
+    at the actual Linear shape; no prices or serving admission are invented.
     """
     names = tuple(families)
     if not names or any(not isinstance(name, str) for name in names):
@@ -145,6 +144,18 @@ def build_full_domain_ledger(
     interpolated_source = _interpolated_cost_source()
 
     by_unit_family: dict[tuple[str, str], dict[int, Mapping[str, Any]]] = {}
+    roster_shapes = {}
+    if unit_shapes is not None:
+        if not unit_shapes:
+            raise FullDomainLedgerError("unit_shapes must be a nonempty census roster")
+        for unit, shape in unit_shapes.items():
+            shape = tuple(shape)
+            if (not isinstance(unit, str) or not unit or len(shape) != 2
+                    or any(type(value) is not int or value <= 0 for value in shape)):
+                raise FullDomainLedgerError("unit_shapes requires named positive integer Linear shapes")
+            roster_shapes[unit] = (shape,)
+            for family in names:
+                by_unit_family[(unit, family)] = {}
     for index, row in enumerate(cost_rows):
         if not isinstance(row, Mapping):
             raise FullDomainLedgerError(f"cost row {index} is not a mapping")
@@ -159,6 +170,8 @@ def build_full_domain_ledger(
                 f"cost row {index} names no {exc.args[0]!r}") from exc
         if family not in names:
             continue
+        if unit_shapes is not None and unit not in roster_shapes:
+            raise FullDomainLedgerError(f"cost row {index} names unit {unit!r} outside census roster")
         if row_currency != want_currency:
             raise FullDomainLedgerError(
                 f"cost row {index} ({unit}, {family} R{rate}) carries currency "
@@ -180,7 +193,8 @@ def build_full_domain_ledger(
 
     entries: dict[str, dict[str, Any]] = {}
     for (unit, family), rows in sorted(by_unit_family.items()):
-        legal = _cached_legal_rates(family, resolved_shapes)
+        owner_shapes = roster_shapes.get(unit, resolved_shapes)
+        legal, refused = _cached_domain(family, owner_shapes)
         legal_set = set(legal)
         for rate in rows:
             if rate not in legal_set:
@@ -204,7 +218,7 @@ def build_full_domain_ledger(
                 predicted[rate] = ("transfer_law" if "transfer_law" in row
                                    else "interpolated")
         priced = set(measured) | set(predicted)
-        transitions = set(_cached_transition_rates(family, legal, resolved_shapes))
+        transitions = set(_cached_transition_rates(family, legal, owner_shapes))
         missing: dict[int, str] = {}
         for rate in legal:
             if rate in priced:
@@ -228,12 +242,14 @@ def build_full_domain_ledger(
             "currency": want_currency,
             "legal_q256": list(legal),
             "legal_rate_count": len(legal),
+            "producer_refused_q256": {str(rate): list(reasons)
+                                      for rate, reasons in sorted(refused.items())},
             "measured_q256": measured,
             "measured_envelope_q256": list(envelope) if envelope else None,
             "predicted_q256": {str(rate): predicted[rate] for rate in sorted(predicted)},
             "missing_q256": {str(rate): missing[rate] for rate in sorted(missing)},
             "missing_rate_count": len(missing),
-            "complete": not missing,
+            "complete": bool(legal) and not missing,
         }
     return {
         "schema": SCHEMA,
@@ -248,14 +264,24 @@ def build_full_domain_ledger(
 def _selected(ledger: Mapping[str, Any], *, units: Sequence[str] | None,
               families: Sequence[str] | None) -> dict[str, Any]:
     entries = ledger["entries"]
-    keys = sorted(entries)
-    if units is not None:
-        wanted = set(units)
-        keys = [key for key in keys if entries[key]["unit"] in wanted]
-    if families is not None:
-        wanted_families = set(families)
-        keys = [key for key in keys if entries[key]["family"] in wanted_families]
-    return {key: entries[key] for key in keys}
+    if not entries:
+        raise FullDomainLedgerError("empty ledger has no full-domain coverage")
+    available_units = {entry["unit"] for entry in entries.values()}
+    wanted_units = set(units) if units is not None else available_units
+    wanted_families = set(families) if families is not None else set(ledger["families"])
+    if not wanted_units or wanted_units - available_units:
+        raise FullDomainLedgerError("requested units absent from ledger")
+    if not wanted_families or wanted_families - set(ledger["families"]):
+        raise FullDomainLedgerError("requested families absent from ledger")
+    wanted = sorted(f"{unit}|{family}" for unit in wanted_units for family in wanted_families)
+    absent = [key for key in wanted if key not in entries]
+    if absent:
+        raise FullDomainLedgerError(f"requested unit/family pairs absent from ledger: {absent}")
+    unsupported = [key for key in wanted
+                   if not entries[key]["legal_q256"] or entries[key]["legal_rate_count"] == 0]
+    if unsupported:
+        raise FullDomainLedgerError(f"requested unit/family pairs have no producer-legal rates: {unsupported}")
+    return {key: entries[key] for key in wanted}
 
 
 def require_full_domain(ledger: Mapping[str, Any], *, units: Sequence[str] | None = None,
