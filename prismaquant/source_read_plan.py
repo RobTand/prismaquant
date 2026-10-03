@@ -174,17 +174,22 @@ def check_sealed_selection(selection: Mapping[str, Sequence[tuple[str, str]]],
 
 
 def safetensors_prefix_length(raw: bytes, size: int, *, max_bytes: int,
-                              short_error: str, range_error: str) -> int:
+                              short_error: str, range_error: str | Callable[[int], str]) -> int:
     """Decode a bounded u64 prefix; acquisition and refusal text stay local.
 
     Callers supply exactly the eight prefix bytes, not the header body. The
     explicit bound and messages preserve each reader's existing contract.
+    A callable range message receives the decoded unsigned length only on
+    refusal; existing literal messages remain unchanged.
     """
     if len(raw) != 8:
         raise ValueError(short_error)
     (length,) = struct.unpack("<Q", raw)
     if not 0 < length <= min(max_bytes, size - 8):
-        raise ValueError(range_error)
+        message = (range_error(length)
+                   if callable(range_error) and not isinstance(range_error, str)
+                   else range_error)
+        raise ValueError(message)
     return length
 
 
