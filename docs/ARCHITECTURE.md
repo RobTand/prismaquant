@@ -16357,10 +16357,21 @@ Gate: `tests/test_tessera_expert_projection.py` (pre-fix:
 Re-stamped (2026-09-05, `claude/pq-183-packed-bridge`) for **the producer's
 expert projection, read in one place** (§4.10, §9.4; PrismaQuant #183).
 The projection requires a Tessera producer package containing Tessera #871;
-missing modules and producer refusals fail at the actual request. The caller's
-interpreter and environment select that package explicitly. This does not
-install a package, move an export/serving pin, requalify a cell, or activate
-the HELD #1549 v3 split. Export still applies its separate exact-pin gates.
+missing modules refuse during the producer CLI preflight before packed capture.
+Interpreter selection is explicit `python=` first, then `TESSERA_PRODUCER_PYTHON`,
+then the caller's interpreter. A newer public producer can therefore run beside
+an unchanged pinned serving/consumer package; the two interpreter roles are not
+interchangeable. This does not install a package, move an export/serving pin,
+requalify a cell, or activate the HELD #1549 split. Export keeps its exact-pin gates.
+The CPU test dependency is declared separately in
+`tests/projection_producer_environment.json`: named external executable and
+digest, landed producer commit/archive, complete installed package-code digest,
+and the public output schema. `projection_producer_fixture` authenticates those
+installed bytes before the ordinary campaign/MTP controls select the interpreter.
+The declaration travels in PB's source snapshot, so a closed worker environment
+does not rely on inheriting an arbitrary ambient variable. Missing or drifted
+declared producers fail rather than hiding behind a consumer-package import skip.
+This scoped producer dependency is not the serving/dev pin or a full-suite result.
 
 `prismaquant/tessera_expert_projection.py` is the only reader of Tessera's
 `tessera.expert_projection.v1` answer (`python -m tessera.producer_plan`,

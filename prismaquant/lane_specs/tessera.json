@@ -100,7 +100,7 @@
     {
       "module": "tessera.producer_plan",
       "output_schema": "tessera.expert_projection.v1",
-      "description": "Public installed producer CLI. Reads checkpoint headers and source seals through Tessera's exporter-owned expert planners. The campaign invokes python -m tessera.producer_plan once per nominal whole-stack request, carries its versioned projection and prices those exact units. No sibling checkout or experiments import is needed. Requires a producer package containing RobTand/tessera#871; unavailable modules refuse in the producer subprocess. Runtime/export pins and source binding remain independent and unchanged."
+      "description": "Public installed producer CLI publishing expert_projection.v1. Explicit python= takes precedence over TESSERA_PRODUCER_PYTHON, then the caller interpreter is the standalone default. All campaign/MTP preflights and requests use that one selection; a newer producer package need not replace the pinned serving package. Checkpoint headers, source seals, expert geometry and digest-cache behavior remain exporter-owned. No sibling checkout, experiments import, runtime/export pin change or serving qualification follows."
     }
   ],
   "kl_evaluator": {

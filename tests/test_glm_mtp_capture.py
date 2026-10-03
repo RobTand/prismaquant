@@ -425,9 +425,9 @@ BODY_REQUEST = {"grid": "E4M3", "q256": 256, "source_layout": "unpacked_per_expe
 
 
 def _producer(monkeypatch):
-    """The installed public producer; no historical sibling checkout fallback."""
-    pytest.importorskip("tessera.producer_plan")
-    monkeypatch.delenv("TESSERA_REPO", raising=False)
+    """The explicitly declared public producer, not the serving interpreter."""
+    from projection_producer_fixture import require_projection_producer
+    return require_projection_producer(monkeypatch)
 
 
 def _meta_wrapper(text_config):

@@ -121,8 +121,10 @@ def test_source_identity_keys_are_what_the_producer_publishes(tmp_path):
 # ---------------------------------------------------------------------------
 # The declared tool
 # ---------------------------------------------------------------------------
-def test_projection_request_uses_real_public_producer_and_keeps_request(tmp_path):
-    pytest.importorskip("tessera.producer_plan")
+@pytest.mark.parametrize("selection", ["env", "explicit"])
+def test_projection_request_uses_real_public_producer_and_keeps_request(tmp_path, monkeypatch, selection):
+    from projection_producer_fixture import require_projection_producer
+    producer_python = require_projection_producer(monkeypatch)
     import torch
     from safetensors.torch import save_file
 
@@ -135,9 +137,13 @@ def test_projection_request_uses_real_public_producer_and_keeps_request(tmp_path
     save_file(tensors, str(source / SHARD))
     env = {key: value for key, value in os.environ.items() if key != "TESSERA_REPO"}
     env["PYTHONSAFEPATH"] = "1"
+    producer_args = {}
+    if selection == "explicit":
+        env[tep.PRODUCER_PYTHON_ENV] = "/bin/false"
+        producer_args["python"] = producer_python
     output = tmp_path / "projection.json"
     answer = request_expert_projection(
-        source, {STACK: ("E4M3", 1024)}, out_path=output, env=env)
+        source, {STACK: ("E4M3", 1024)}, out_path=output, env=env, **producer_args)
     request = json.loads(output.with_name(output.name + ".request.json").read_text())
     assert request == stack_plan_request({STACK: ("E4M3", 1024)})
     assert answer["schema"] == tep.PROJECTION_SCHEMA
@@ -150,7 +156,7 @@ def test_projection_request_uses_real_public_producer_and_keeps_request(tmp_path
     save_file(tensors, str(source / SHARD))
     with pytest.raises(ExpertProjectionError, match=r"(?s)exit .*missing"):
         request_expert_projection(
-            source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "refused.json", env=env)
+            source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "refused.json", env=env, **producer_args)
 
 
 def test_stack_plan_request_is_the_producers_exact_shape():

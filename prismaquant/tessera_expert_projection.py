@@ -52,7 +52,7 @@ from .stage_inputs import (
     SOURCE_IDENTITY_KEYS, ExpertProjectionError, require_source_identity,
 )
 
-#: The producer's projection schema (``export_tessera_serving.project_expert_plan``).
+#: The producer's public projection schema (``tessera.export_serving.project_expert_plan``).
 PROJECTION_SCHEMA = "tessera.expert_projection.v1"
 #: The only source layout this bridge executes: one whole per-expert 2-D source
 #: tensor per unit.  Pinned to ``tessera.serving.scheme.MOE_SOURCE_UNPACKED`` by
@@ -65,6 +65,8 @@ WHOLE_SELECTOR = "whole"
 #: ``lane_specs/tessera.json`` ``campaign_tools`` (#1587: a campaign
 #: dependency, not an export-arm call).
 PRODUCER_PLAN_TOOL = "tessera.producer_plan"
+#: Optional public producer interpreter; never the serving-runtime package pin.
+PRODUCER_PYTHON_ENV = "TESSERA_PRODUCER_PYTHON"
 #: The keys of a producer unit record that ``tessera.cached_unit.unit_input_identity``
 #: seals into the priced-wire receipt.  Pinned against the producer by test.
 UNIT_IDENTITY_KEYS = ("cols", "expert", "group", "projection", "rows",
@@ -86,18 +88,25 @@ CARRIED_PROJECTION_SCHEMA = "prismaquant.tessera_expert_projection.v1"
 # ---------------------------------------------------------------------------
 # Asking the producer
 # ---------------------------------------------------------------------------
+def _producer_python(env: Mapping[str, str] | None, python: str | None) -> str:
+    supplied = os.environ if env is None else env
+    return python or supplied.get(PRODUCER_PYTHON_ENV) or sys.executable
+
+
 def producer_plan_tool(env: Mapping[str, str] | None = None, *, python: str | None = None) -> str:
     """Require the declared public CLI before an expensive packed capture.
 
     CLI availability is checked in the producer interpreter, not by importing
     a serving runtime into PrismaQuant or locating a sibling checkout.
+    An explicit ``python=`` wins over ``TESSERA_PRODUCER_PYTHON``; absent both,
+    the caller's interpreter remains the standalone-install default.
     """
     from .lane_spec import load_lane_spec
 
     for tool in load_lane_spec("tessera").campaign_tools:
         if tool.module == PRODUCER_PLAN_TOOL and tool.output_schema == PROJECTION_SCHEMA:
             completed = subprocess.run(
-                [python or sys.executable, "-m", tool.module, "--help"],
+                [_producer_python(env, python), "-m", tool.module, "--help"],
                 env=None if env is None else dict(env), capture_output=True, text=True)
             if completed.returncode:
                 tail = "\n".join(completed.stderr.strip().splitlines()[-12:])
@@ -140,14 +149,15 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
     """
     if not stacks:
         raise ExpertProjectionError("no stacks to project")
-    tool = producer_plan_tool(env=env, python=python)
+    child_env = dict(os.environ if env is None else env)
+    producer_python = _producer_python(child_env, python)
+    tool = producer_plan_tool(env=child_env, python=producer_python)
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     request = out.with_name(out.name + ".request.json")
     request.write_text(json.dumps(stack_plan_request(stacks), indent=1, sort_keys=True))
-    command = [python or sys.executable, "-m", tool, str(model_path),
+    command = [producer_python, "-m", tool, str(model_path),
                "--stack-plan", str(request), "--out", str(out)]
-    child_env = dict(os.environ if env is None else env)
     completed = subprocess.run(
         command, env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

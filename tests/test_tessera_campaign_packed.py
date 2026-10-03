@@ -385,8 +385,8 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     pytest.importorskip("safetensors")
     from prismaquant import model_profiles, tessera_campaign, tessera_render
     from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
-    pytest.importorskip("tessera.producer_plan")
-    monkeypatch.delenv("TESSERA_REPO", raising=False)
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
 
     model = _WideRoutedModel().to(dtype=torch.bfloat16)
     # The fixture substitutes HF loading; checkpoint-initialization behavior
