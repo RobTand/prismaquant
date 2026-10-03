@@ -160,6 +160,10 @@ backend/profile/device work. Its positive plumbing test substitutes CPU device
 seams; it is not original CUDA or full-source capture qualification. Higher-level
 production runner/calibration qualification, exact source-generation adoption, tokenizer consumers,
 complete original capture and numerical qualification remain separate gates.
+The existing quantum source runner applies that same device predicate before
+any profile discovery for an explicitly qualified original owner, then derives
+the profile through its owned parsed config. It does not inspect a mutable pool
+config first; legacy selected-capture profile behavior is unchanged (Refs #2143).
 The cache estimator still reads whole admitted shards for headers; it can
 reacquire released header-only material when tensors are later demanded. No
 single-pass, GPU-bound or cold-source performance claim follows.
