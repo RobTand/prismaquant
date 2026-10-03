@@ -35,6 +35,7 @@ from .io_spans import mem_available_bytes
 from .source_read_plan import (
     live_weight_map,
     resident_head_prefixes,
+    safetensors_prefix_length,
     select_source_tensors,
 )
 
@@ -1700,9 +1701,10 @@ def _advise_consumed_safetensors_pages(shard: str, keys: list[str],
             if any(getattr(source_stat, k) != getattr(expected_stat, k) for k in fields):
                 raise RuntimeError('source changed before consumed-page release')
         raw_size = os.pread(fd, 8, 0)
-        header_size = int.from_bytes(raw_size, 'little')
-        if len(raw_size) != 8 or not 0 < header_size <= min(100_000_000, source_stat.st_size - 8):
-            raise ValueError('invalid safetensors header for consumed-page release')
+        header_size = safetensors_prefix_length(
+            raw_size, source_stat.st_size, max_bytes=100_000_000,
+            short_error='invalid safetensors header for consumed-page release',
+            range_error='invalid safetensors header for consumed-page release')
         header = json.loads(os.pread(fd, header_size, 8))
         base = 8 + header_size
         page = os.sysconf('SC_PAGE_SIZE')
