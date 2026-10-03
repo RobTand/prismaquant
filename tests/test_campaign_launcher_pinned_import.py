@@ -242,9 +242,12 @@ def test_main_refuses_a_shadowed_launch_before_it_execs(tmp_path, monkeypatch):
     module = runner()
     pinned, checkout = trees(tmp_path)
     launched = {}
-    monkeypatch.setattr(module, "inspect_or_load", lambda container: [
-        {"Id": "sha256:" + "c" * 64, "RepoDigests": [], "RootFS": {"Layers": []}}])
-    monkeypatch.setattr(module, "image_content_sha256", lambda inspected: "d" * 64)
+    # Exercise the real identity owner, not a fake digest attached to a retired
+    # imported alias. Only Docker inspection is replaced with retained bytes.
+    image = json.loads((Path(__file__).resolve().parents[1]
+        / "experiments/measurements/glm-derivative-contract-20260908"
+        / "image-build-result.json").read_text())["original_image"]
+    monkeypatch.setattr(module, "inspect_or_load", lambda container: [image])
     monkeypatch.setattr(module.os, "execvp",
                         lambda file, argv: launched.setdefault("argv", argv))
     monkeypatch.chdir(checkout)
