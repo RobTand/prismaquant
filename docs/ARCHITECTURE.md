@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Refs #1301 (2026-10-02): allocator measured-runtime cost admission, prefill
+frontier cost provenance and measured-runtime receipt authentication share
+`digests.file_digest_sha256hex` for the existing open-handle SHA-256 profile.
+All three identities are load-bearing, not ephemeral. Each caller keeps its
+own binary open, closure, path resolution, error handling and comparison;
+the owner calls the identical stdlib `hashlib.file_digest` primitive without
+reopening or changing bytes. No numerical, profile, pin or default changes.
+This completes only the measured-runtime/frontier open-handle family. The
+special page-releasing capture-source hash and unrelated JSON/raw-byte sites
+remain distinct or unconsolidated; #1301 and #1303 remain open.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
