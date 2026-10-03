@@ -168,6 +168,21 @@ reviewed profiling/placement remain required for the PB #905 default gate.
 See `docs/design/pb905_checkpoint_export_component.md` for the finite input,
 retained-origin and launch-review contracts.
 
+Re-stamped 2026-10-02 (`sol/pq-spill-readplan-1086-20261002`, PQ #2115 / Refs #1086):
+constructor-only `StageBReplaySpill(packed_read_plan=True)` reuses the packed
+firing table and its common bounded uint64 row-storage abstraction for frozen chunk fields,
+record/offset views and the last-use index. Existing spill geometry caps the
+metadata; a probe-0 firing beyond that declaration refuses before another
+input or payload write. The chunk fields, direct-I/O offsets, record order,
+checksum gates and last-use semantics retain their existing contract.
+Per-probe IO-engine descriptors bind chunk indexes, resolving frozen metadata
+only on the existing reader. IO-engine scheduling and per-chunk state remain
+unchanged and O(chunks × probes); capture entries and transient per-chunk
+work still have their existing owners. Defaults, sealed phases, numerics,
+source lifetime, spool writers, formats and serving gates are unchanged.
+This CPU research increment does not establish constant total memory or
+close #1086's representative proxy/production acceptance.
+
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
 reused by another reader cannot lose its tracking entry during an earlier
