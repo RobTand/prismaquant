@@ -420,19 +420,19 @@ def test_a_write_only_owner_names_its_lifetime_and_never_reads_back(
         assert not (owner.directory / "a.json").exists()
 
 
-def _publish_consumer(q, pb_repo, tmp_path, key):
-    """File the consumer's row, as ``pbrun`` does right after declaring it."""
-    q.publish(action_key=key, cas_root=str(tmp_path / "cas"),
-              worker_script=str(pb_repo / "tools" / "prismabuild_worker.py"),
-              checkout_root=str(tmp_path / "consumer-checkout"),
-              resources={"cpu": 1, "mem_gb": 1}, max_attempts=1)
-
-
 def _consumer_executes(q, key):
-    """Claim and finish the consumer's row through the real queue."""
-    claimed = q.claim(owner="w-consumer")
+    """Execute the consumer request and finish its own admitted attempt."""
+    claimed = q.claim(owner="w-consumer", capacity=chain._FIXTURE_HOST_CAPACITY)
     assert claimed is not None and claimed["action_key"] == key
-    q.finish(key, status="executed")
+    from prismabuild import client
+    outcome = q.execute(claimed, timeout_s=120)
+    assert outcome.get("returncode") == 0, outcome
+    q.finish(key, status="executed", detail=outcome)
+    result = client.read_verified_action_result(
+        q, key, published_unix=claimed["published_unix"],
+        attempt=claimed["attempts"], max_result_bytes=1024)
+    assert client.bind_standard_capture_command(result["request"])
+    assert result["payload"] == b""
 
 
 def _charged(publication):
@@ -474,11 +474,18 @@ def test_prismabuild_retires_the_handoff_once_its_consumer_succeeds(
 
     # What ``pbrun`` does for a consumer that declares the batches: one
     # declaration per batch, then its row.
-    key = hashlib.sha256(b"band-serial consumer L-1").hexdigest()
+    command = [sys.executable, "-c",
+               "import hashlib,json,pathlib,sys; "
+               "entries=json.loads(sys.argv[1]); "
+               "assert all(hashlib.sha256(pathlib.Path(e['path']).read_bytes()).hexdigest() "
+               "== e['sha256'] for e in entries)",
+               json.dumps(manifest["entries"], sort_keys=True)]
+    key = chain._published_consumer(
+        tmp_path, tmp_path / "cas", q, pb_repo, name="band-serial-consumer",
+        command=command)
     for ref in refs:
         assert po.declare_origin_consumer(q, ref, consumer_action_key=key) == {
             "ok": True, "declared": True}
-    _publish_consumer(q, pb_repo, tmp_path, key)
     assert po.origin_retirement_tick(q) == [], (
         "a queued consumer holds every batch, quietly")
     assert all(p.is_file() for p in paths)
