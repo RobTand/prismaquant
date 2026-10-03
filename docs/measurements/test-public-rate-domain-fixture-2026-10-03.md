@@ -282,3 +282,105 @@ No wait/poll loop, GPU/numerical/energy/$ qualification or frozen-cohort change
 occurs. Designated-parent, independent review and normal integration gates
 remain; P1 parent1929 stays OPEN.
 
+## Successor: immutable campaign research-menu fixture (Closes #2207; Refs #1929)
+
+Issue2207 was created with leading[P3] and soleP3 before this implementation,
+after the new actual baseline established material repeated work. This
+successor starts at accepted2201head49c322c8af2dd21b800e269b70cb2264258cab86.
+Only tests/test_tessera_campaign.py imports lru_cache and moves the identical
+whole expand_tessera_menu((2048,1024),mode=MENU_RESEARCH) call into a lazy
+single-entry _research_menu_rows() tuple. MenuRung and RouteAdmission are
+frozen/slots; this graph contains immutable scalar/Fraction/tuple fields and
+None serving_context at the exact old arguments. Every _menu call still makes
+its own mutable outer dict and filtered list. No family/shape/context narrowing,
+production cache/menu change, source/pin/default/SDK/H/encoder change or test-body
+change. The actual payload, pricing, static-scale, capture-digest and legacy
+activation-resume refusal calls still execute. No assertions or nodes removed.
+
+Test commit:5b28616d17079eed90b9919ede266c4f09b43e54.
+Test-file SHA-256:8160c598754cf9441b2528aec5f93325aa21d19f8857c0b885a5697da8972b1e.
+NEW selected7 existing nodes: measured-v-interpolated, output-space pricing,
+non-extrapolating envelope, non-monotone anchors, priced static scale,
+resume refusal for another activation contract, and capture-digest forwarding.
+The final capture-digest case constructs two menus, for eight old expansions.
+Both arms:7passed,0skipped,44deselected,14 existing warnings; exact same IDs and
+zero missing-file/never-ran/not-collected/duplicate/phase/outcome problems.
+Older accepted six/three/seven populations and the44 excluded cases are not
+rerun or requalified. H-bearing numerical, process/deadline, SDK guards and
+CLI controls remain unchanged and are not pruning targets.
+
+Published PB owns partitioning: one file/pytest worker, explicit dl380g10,
+CPU2/mem4GiB/native1,600s deadline,priority-10, sample profile. The fixed target
+pq-pb95a59051-tessera-b40c93cb interpreter passes the same actual PB95a59051
+preflight verifying44 files. Both py-spy0.4.2/100Hz backends and actions return0.
+PB chose preferred cores[0,2] before and[0,1] after; affinity is not overridden.
+
+| New7-node observation | Before | After |
+|---|---:|---:|
+| Pytest wall |31.51s|22.42s|
+| PB contained wall |38.952s|29.653s|
+| Cgroup CPU |41.929s|30.455s|
+| Cgroup peak memory |546758656 bytes|547966976 bytes|
+| Process writes |5976536 bytes|4391384 bytes|
+| Process reads |24576 bytes|65536 bytes|
+| Whole menu inclusive sampled time |24.90s|15.83s|
+| FIRST case menu inclusive sampled time |17.00s|15.83s|
+| LATER cases menu inclusive sampled time |7.90s|0 sampled seconds|
+| _menu inclusive sampled time |25.08s|15.94s|
+| tessera_exact_bits_for_shape inclusive samples |15.22s|14.03s|
+| tessera_tp_legal inclusive samples |5.22s|0.73s|
+| py-spy samples |3378|2459|
+
+Before later-case menu samples are0.94/1.05/1.36/1.19/1.14/2.22s in the six
+remaining selected cases. The first whole derivation remains after: it is not
+removed, mocked or relabeled as savings. No encoder_fixture_id/encode_linear
+samples occur in either arm. Zero later menu samples does not imply zero
+execution: fresh containers and all original real consumers/assertions run.
+Observed selected wall decreases9.09s (28.85%) and CPU decreases11.474s.
+This is one sequential pair with different preferred core pairs and lower
+after DL load. Do not attribute the first-case difference to this change;
+claim only the bounded eliminated repeat work, not guaranteed/full-suite,
+GPU, numerical, energy or dollar qualification. Inclusive samples overlap.
+
+Before action:0164b2791fa5abfbc530998c75a2a02e91792aa795477996cb00e08992516bfb.
+Receipt:0abe8657a7fd188a0b4b4f557b1f8b37d8fd8e0c38153baa709014fbeaf44719.
+Snapshot:40ca952fb05fc32cad9aad9181627f7e3ec2c9d1; parent exact accepted base.
+Input:c85faf4f98099097de8361534ff7cfea97fdf8dc96ca9f248356ac785e3e92e5.
+Profile:0fa2a7b42ff38a3698c986d96454a096065a426070a8bb0ee6be12441f4e93ca.
+After action:54fe72539ef7e2bb69f31959652d8c12fb34ee5a56fe3b74de7f7cdd69504df3.
+Receipt:90e569507075791aa61f81515b06a7114392756ba749df6fbf198d3700e52307.
+Snapshot:eec417bb87d69102938c035dc5ff9b57a9033fcb; parent exact test commit.
+Input:c5e2a72f870bc744fb83a119c71c31c5f4cd7573f5024d308a6bbcdfe1de30a9.
+Profile:2edec1b79b3b7baac1cd63fcb10262c3f6dbd63a112727f4ab65e01130d5b578.
+Both actual extracted profile bytes hash to their CAS descriptors.
+
+Netdata requested1791070030..1791070070 and1791070972..1791071002. Before
+view AND actual data span2026-10-03T23:27:10Z..23:27:50Z (41one-second buckets);
+after view/data23:42:52Z..23:43:22Z (31buckets). The rounded windows slightly
+extend exact PB scopes1791070030.2150855..1791070069.1669648 and
+1791070972.1942413..1791071001.8470614. These full-response busy means are not
+claim-only means; all six retained responses have zero empty/flagged buckets.
+
+| Host | Before full-response busy | After full-response busy |
+|---|---:|---:|
+| dl380g10 |17.288%|13.150%|
+| sparky |2.202%|1.826%|
+| sparklina |1.451%|1.470%|
+
+Busy excludes idle/iowait. PB's own DL means17.326%/13.810% and missing-pqteld
+diagnostics are preserved separately. Raw fullsource/capture/CAS/profile/
+CPUwallpeakIO/three-host request-view-data packet:
+/home/rob/tmp/pq1929-campaign-menu-evidence.json,
+SHA-256:a6a0ddb49fc8e4a81e48cbe5679037a4823d49b5e2de87a0268b42063ae1ffe2.
+
+The first specialised SSH read hit a30s cell interruption before terminal
+MCP authentication, then a master startup failure. Exact-source discovery and
+bounded artifact computation recovered the actual ending; the resolved
+canonical rob@sparky.local specialised reader acquired the complete original
+report and receipt. No workload replay or wait/poll/status loop occurred.
+Seven historical Hindsight hits were September CPU receipts, not a prior menu
+fixture optimization; old Python3.12/Sparky/broad CUDA-skip receipts are stale
+for this qualification and were not reused. Designated-parent, independent
+review and normal integration gates remain; frozen cohorts unchanged and
+P1 parent1929 OPEN. Only the bounded child2207 is the closing target.
+
