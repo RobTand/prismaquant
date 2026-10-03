@@ -60,6 +60,14 @@ passed to `build_streamed_causal_lm`. The caller retains owner lifetime and
 close responsibility. Direct core CUDA diagnostic calls require the same owner
 and device gate. CPU fixtures may exercise the core without a model publisher.
 
+An explicitly selected original owner also selects the existing model identity
+mechanism's authenticated descriptor intake. Configured legacy source identity/
+digest caches refuse before device work, and no legacy proof cache is seeded.
+Expected complete-file identity and owned config/index/roster agreement are
+distinct from actual source deliveries: the diagnostic receipt retains
+`original_source_material` separately with `automatic_capture_qualified: false`.
+This identity intake grants no new CUDA or complete-provider authority.
+
 `--selected-row-diagnostic` and `--selected-row-diagnostic-sha256` are paired
 intake flags. The spec reader authenticates and decodes the same bound bytes,
 rejecting duplicate keys and nonfinite constants. The standalone CLI constructs

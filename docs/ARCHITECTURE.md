@@ -141,6 +141,42 @@ SHA-256 constructor through `digests.bytes_sha256hex`. Their distinct
 checkpoint detach/CPU/contiguous/uint8 view and CLI CPU/NumPy C-order extraction
 remain local, including native refusals. Identity fields, byte recipes and
 widths, checkpoint policy and provenance serialization retain their contracts.
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original identity intake): when the
+existing qualified original owner is explicitly selected, the existing model
+and source-checkpoint identity mechanisms consume its independently bound
+publisher descriptors and authenticated config/complete-index facts. Model
+resolution and the complete live/checkpoint shard roster must agree; missing
+proof, incomplete scopes and legacy stat-cache inputs refuse. Existing v1
+identity schemas and value meaning remain intact. Expected whole-file identity
+does not establish actual delivery: Stage A retains the owner's held-decoder/
+readset receipt separately. No logical-pool stat/index reopening or redundant
+bulk identity hash occurs on this path. Original CUDA/automatic admission and
+actual full-source GLM fresh-g6 acceptance remain separate closed gates.
+
+Re-stamped 2026-10-03 (PQ #2134, failed original copy ownership): the existing
+source owner registers each reader completion before H2D enqueue. Failed event
+proofs survive ordinary exception/traceback disposal without releasing native
+or converted host staging. Event failure first drains the exact stream while
+preserving the event error. Double-fence failure process-roots the existing
+charged owner, surviving loss of all external references and GC. Explicit
+close/recovery proves completion before unregistering/reaping; repeated drain
+failure retains the open owner/holds/FDs and blocks new copies. Active copies
+refuse close. No successful material enters that fatal-fence set; there is no
+cache, background retry or silent fallback. Original CUDA/automatic gates
+stay closed; the retained frozen56 protocol is a historical negative reference,
+not acceptance of this new source. CPU stand-ins cannot qualify outstanding DMA.
+
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original copy completion): the
+existing layer reader's copy-stream completion bookkeeping retains native
+original source aliases and converted/stacked host staging through a successful
+event record and synchronization. The dormant original layer/head/direct-scale
+paths use that same bookkeeping independently of the legacy source-page flag;
+head copies complete before installation and cancelled readers drain before
+refusing output. Failed completion proofs retain true owners and serialized
+material credit. Original CUDA and automatic-capture gates remain closed.
+CPU spies and an unrun real-CUDA harness establish no original GPU, GLM g6,
+complete-provider, performance or serving qualification.
+See [original material contract](design/capture_original_material.md).
 
 Re-stamped 2026-10-02 (Refs PQ #2010/#2008, selected-row diagnostic seam):
 the existing Stage A core can capture one explicitly bound global calibration

@@ -74,6 +74,25 @@ implicit/chain consumers remain refused. GLM publisher authority stays
 or accepted by this internal path. Full consumer coverage, immutable delivery
 provenance across the chain and complete GPU/admission lifetimes remain open.
 
+For explicitly selected original owners, `original_checkpoint_descriptor`
+exposes expected whole-file coordinates from the independently bound publisher/
+readset parser and config/complete-index facts authenticated from owned sealed
+buffers during construction. It reuses immutable metadata facts under the
+existing owner lock and charges metadata decoding through the same resource
+check. Missing publication/readset/auxiliary proof or an incomplete roster
+refuses. It does not open/stat mutable pool paths or license future deliveries:
+every later decoder still independently authenticates its own held whole file.
+
+The existing `build_streamed_model_identity` and explicitly owned
+`build_source_checkpoint_identity` consume those descriptors using their existing
+v1 schemas. Streamed identity additionally checks stock resolved config through
+the shared semantic-config rules and exact profile-derived live/checkpoint/shard
+maps against the complete authenticated index. Incomplete body scopes and legacy
+stat identity/digest-cache inputs refuse. Expected file identity is not an
+actual-read receipt or complete-provider proof. Stage A bypasses legacy identity
+cache seeding and records `original_source_material` separately from the model
+and chain identity, with the original admission gates still closed.
+
 The internal `load_original_streaming_bootstrap` and existing
 `_build_streaming_context` now consume owned strict config/index metadata,
 profile selection and the shared pure `text_only_stage_config` rules. The stock
@@ -99,8 +118,40 @@ until all model/cache/caller aliases are gone; `shutdown()` joins readers but
 does not dispose of an externally retained model or cache. The enclosing action
 still owns decoded metadata, model tensors and conversion/packing scratch
 accounting. Original context/head/layer/direct dequant GPU routes refuse before
-material acquisition or CUDA work. Existing legacy CUDA completion fences remain
-unchanged and have not been qualified for this original path.
+material acquisition or CUDA work. The existing legacy reader completion fence
+is now shared bookkeeping: the dormant original layer/head/direct-scale paths
+retain native source aliases plus converted/stacked host staging until their
+current copy stream records and synchronizes an event. The original fence is
+independent of the legacy source-page flag, and original decoders remain CPU
+`framework="pt"` even when the direct-CUDA-load environment flag is set. Failed
+record/synchronization keeps native and converted host owners registered with
+the existing source owner from before H2D enqueue, not merely in an exception
+frame. Catching/discarding every error frame does not release storage credit.
+Event failure first drains the exact enqueue stream and rethrows the original
+event error; safe drain is not success. If that drain also fails, a process-rooted
+FAILED-owner set preserves already admitted source/cache/staging charges and
+held descriptors even after every external owner reference is dropped and GC runs.
+The failed owner refuses new copies. Explicit close, or
+`CaptureSourceAuthentication.close_failed_original_copies()` for abandoned owners,
+drains exact streams before reaping and unregisters only proved completions.
+Repeated failure leaves the owner open/charged/rooted. No successful material is
+retained there, no background retry occurs and no device/capture gate is enabled.
+Launched readers drain on cancellation or failure; cancelled original output
+refuses installation. Original head copies all complete before the first
+installation, so a later copy failure cannot expose a partially installed head.
+
+These dormant paths retain the original CPU-only device predicate. The CPU
+controls enter the actual source memfd/decoder/StorageWeakRef paths with explicit
+CPU CUDA spies. `tests/test_original_source_copy_completion_cuda.py` supplies
+real CUDA source-alias/event controls, but remains unrun. Retained frozen56
+protocol698a0a0 is a historical negative reference: its harness drained streams
+while exception frames remained held and cannot qualify traceback-independent
+production ownership. New controls must catch/clear those frames while actual
+stream work remains outstanding and prove owner-driven completion. CPU skips
+prove no GPU behavior. A future explicitly reviewed PB
+action may temporarily override only a fixture owner's device predicate; the
+test-only environment is never read by production code. That fixture action
+cannot qualify actual original GLM primals/cotangents or a complete provider.
 
 This scope is the internal CPU context. The higher-level Stage A API now has an
 explicit dev-only [selected-row diagnostic seam](stage_a_selected_row_diagnostic.md)
