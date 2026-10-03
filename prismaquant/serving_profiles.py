@@ -733,7 +733,7 @@ class ServingLaneSpec:
         covering = [
             cell for cell in cells
             if rung is not None
-            and rung in (cell.rungs_q256 if cell.is_trellis else cell.rungs)
+            and (cell.covers_rate(rung) if cell.is_trellis else rung in cell.rungs)
         ]
         if not covering:
             # The rung this lane would serve is not in any cell's list. A rung
