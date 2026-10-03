@@ -602,10 +602,6 @@
    "tools/dspark_memavailable_sampler.py",
    "tools/regenerate_joint_quanta.py"
   ],
-  "_file_sha256": [
-   "prismaquant/cluster_campaign.py",
-   "tools/prismaquant_runtime_snapshot.py"
-  ],
   "_finite": [
    "prismaquant/anchored_shape.py",
    "prismaquant/quality_prefill_pb_adapter.py",

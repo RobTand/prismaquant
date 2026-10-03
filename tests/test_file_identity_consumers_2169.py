@@ -1,6 +1,7 @@
 """Load-bearing file identities and caller-owned fallback/classification."""
 import hashlib
 import subprocess
+from pathlib import Path
 import sys
 
 import pytest
@@ -54,6 +55,14 @@ def test_dataset_lone_surrogate_keeps_native_encode_refusal():
 @pytest.mark.parametrize("module", ["prismaquant.cluster_campaign", "prismaquant.fisher_col_weights"])
 def test_public_cli_import_and_argument_surface(module):
     result = subprocess.run([sys.executable, "-m", module, "--help"],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "usage:" in result.stdout
+
+
+def test_campaign_worker_direct_script_keeps_stdlib_only_bootstrap():
+    script = Path(__file__).resolve().parents[1] / "prismaquant" / "cluster_campaign.py"
+    result = subprocess.run([sys.executable, str(script), "--help"],
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     assert "usage:" in result.stdout

@@ -42,7 +42,11 @@ import tempfile
 import time
 from typing import Any
 
-from .digests import file_sha256hex
+if __package__:
+    from .digests import file_sha256hex
+else:
+    # Local workers execute this file directly without importing PQ/torch.
+    from digests import file_sha256hex
 
 
 CAMPAIGN_MANIFEST_SCHEMA_V2 = "prismaquant.cluster_campaign.manifest.v2"
