@@ -139,3 +139,59 @@ def test_stack_sample_measurements_count_as_measured():
     ledger = _ledger([_row("u", 960, source="tessera_campaign_measured_stack_sample")])
     entry = ledger["entries"]["u|" + FAMILY]
     assert entry["measured_q256"] == [960]
+
+
+@pytest.mark.parametrize("operation", [require_full_domain, missing_acquisition_work])
+@pytest.mark.parametrize("selection", [{"units": ["missing"]}, {"families": ["missing"]},
+                                      {"units": []}, {"families": []}])
+def test_absent_or_empty_selection_refuses(operation, selection):
+    with pytest.raises(FullDomainLedgerError, match="absent"):
+        operation(_ledger([_row("u", 960)]), **selection)
+
+
+def test_empty_ledger_is_not_complete():
+    with pytest.raises(FullDomainLedgerError, match="empty ledger"):
+        require_full_domain(_ledger([]))
+
+
+def test_census_retains_wholly_unmeasured_units_and_families():
+    ledger = build_full_domain_ledger(
+        [_row("u", 960)], families=[FAMILY, "TESSERA_BF16_K1"],
+        unit_shapes={"u": (256, 256), "fresh": (256, 256)})
+    assert len(ledger["entries"]) == 4
+    for key in ("fresh|" + FAMILY, "fresh|TESSERA_BF16_K1", "u|TESSERA_BF16_K1"):
+        entry = ledger["entries"][key]
+        assert entry["measured_q256"] == []
+        assert entry["missing_rate_count"] == entry["legal_rate_count"]
+        assert not entry["complete"]
+    with pytest.raises(FullDomainLedgerError, match="fresh"):
+        require_full_domain(ledger, units=["fresh"])
+
+
+def test_census_legality_uses_individual_shape(monkeypatch):
+    import prismaquant.tessera_full_domain_ledger as module
+    monkeypatch.setattr(module, "_cached_legal_rates",
+                        lambda family, shapes: (shapes[0][0],))
+    monkeypatch.setattr(module, "_cached_transition_rates", lambda *args: ())
+    ledger = _ledger([], unit_shapes={"a": (256, 512), "b": (512, 256)})
+    assert ledger["entries"]["a|" + FAMILY]["legal_q256"] == [256]
+    assert ledger["entries"]["b|" + FAMILY]["legal_q256"] == [512]
+
+
+def test_cost_unit_outside_census_refuses():
+    with pytest.raises(FullDomainLedgerError, match="outside census"):
+        _ledger([_row("foreign", 960)], unit_shapes={"u": (256, 256)})
+
+
+def test_missing_cross_family_pair_refuses():
+    ledger = build_full_domain_ledger([_row("u", 960)],
+                                     families=[FAMILY, "TESSERA_BF16_K1"])
+    with pytest.raises(FullDomainLedgerError, match="pairs absent"):
+        require_full_domain(ledger)
+
+
+@pytest.mark.parametrize("roster", [{}, {"u": (0, 256)}, {"u": (True, 256)},
+                                    {"u": (256,)}, {"": (256, 256)}])
+def test_invalid_census_roster_refuses(roster):
+    with pytest.raises(FullDomainLedgerError, match="unit_shapes"):
+        _ledger([], unit_shapes=roster)

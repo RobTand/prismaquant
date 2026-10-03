@@ -98,3 +98,14 @@ crash: it called a nonexistent `TesseraRateSurface.as_dict()`. A separate
 commit serializes the surface through its existing canonical identity. The
 pre-fix PB receipt `6574670092b2` reaches and records that AttributeError; the
 regression test then passes. No allocator objective or serving gate changed.
+
+## Census completeness repair (2026-10-02, #2132)
+
+The coverage ledger accepts `unit_shapes`, an explicit census mapping from
+Linear name to `(rows, columns)`. Supply it when auditing a model-wide request:
+the priced-row roster alone cannot reveal wholly unmeasured units or families.
+Each requested family retains every legal rate at that unit's actual shape.
+Empty ledgers, absent selections and absent unit/family pairs now refuse
+instead of vacuously certifying complete coverage. `missing_acquisition_work`
+retains these missing cells in the existing v1 format. No missing cell receives
+a price, runtime admission, export qualification or quality certification.
