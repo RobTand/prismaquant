@@ -108,7 +108,7 @@ def _hosts_prismabuild(entry: str) -> bool:
 
 
 @contextlib.contextmanager
-def prismabuild_imports_restored():
+def prismabuild_imports_restored(*, source_root: Path | None = None):
     """Leave ``import prismabuild`` resolving where it did before (PQ #1281).
 
     Several tests import PrismaBuild from a sealed generation tree: they
@@ -133,36 +133,76 @@ def prismabuild_imports_restored():
     Restoring is silent and unconditional, like the other restore fixtures
     in ``tests/conftest.py``: importing from a sealed tree is legitimate,
     only its escape from the test is the defect.
+
+    ``source_root`` is an explicit fixture-owned binding, authenticated by
+    its caller before entry. It detaches the canonical PB graph and sibling
+    fleet tools for this scope, then restores their identities and path order
+    exactly. Callers must finish using its objects and join their work before
+    leaving; production resolution and its divergence refusals are unchanged.
     """
 
+    from types import ModuleType
+
     saved_path = list(sys.path)
+    tool_names = set()
+    if source_root is not None:
+        source_root = Path(source_root).resolve(strict=True)
+        fleet = source_root / "tools" / "fleet"
+        tool_names = {path.stem for path in fleet.glob("*.py")}
     saved_modules = prismabuild_entries()
+    saved_modules.update({name: sys.modules[name] for name in tool_names
+                          if name in sys.modules})
+    missing = object()
+    saved_attributes = {}
+    for name, parent in saved_modules.items():
+        if parent is None or not name.startswith("prismabuild"):
+            continue
+        for leaf, value in vars(parent).items():
+            if isinstance(value, ModuleType) and value.__name__ == f"{name}.{leaf}":
+                saved_attributes[f"{name}.{leaf}"] = (parent, leaf, value)
+    for name in saved_modules:
+        parent_name, _, leaf = name.rpartition(".")
+        parent = saved_modules.get(parent_name)
+        if parent is not None:
+            saved_attributes[name] = (parent, leaf, getattr(parent, leaf, missing))
+    if source_root is not None:
+        for name in saved_modules:
+            sys.modules.pop(name, None)
+        sys.path[:0] = [str(source_root / "src"), str(fleet)]
     try:
         yield
     finally:
-        added_paths = {entry for entry in sys.path if entry not in saved_path}
-        if added_paths:
+        if source_root is not None:
+            sys.path[:] = saved_path
+        else:
+            added_paths = {entry for entry in sys.path if entry not in saved_path}
             dropped = {entry for entry in added_paths if _hosts_prismabuild(entry)}
             if dropped:
-                # In place: importers hold the list object, not its name.
                 sys.path[:] = [entry for entry in sys.path if entry not in dropped]
         current = prismabuild_entries()
+        current.update({name: sys.modules[name] for name in tool_names
+                        if name in sys.modules})
         for name in set(current) | set(saved_modules):
-            module = current.get(name)
-            if name in saved_modules and saved_modules[name] is module:
-                continue
-            parent_name, _, leaf = name.rpartition(".")
-            parent = saved_modules.get(parent_name)
             if name in saved_modules:
                 sys.modules[name] = saved_modules[name]
-                if (parent is not None and module is not None
-                        and getattr(parent, leaf, None) is module):
-                    setattr(parent, leaf, saved_modules[name])
+            else:
+                sys.modules.pop(name, None)
+        # A loader or injection can already have removed an entry while its
+        # parent still holds the replacement. Restore those orphan edges too.
+        for name, parent in saved_modules.items():
+            if parent is None or not name.startswith("prismabuild"):
                 continue
-            del sys.modules[name]
-            if (parent is not None and module is not None
-                    and getattr(parent, leaf, None) is module):
-                delattr(parent, leaf)
+            for leaf, value in tuple(vars(parent).items()):
+                edge = f"{name}.{leaf}"
+                if (isinstance(value, ModuleType) and value.__name__ == edge
+                        and edge not in saved_attributes):
+                    delattr(parent, leaf)
+        for parent, leaf, value in saved_attributes.values():
+            if value is missing:
+                if hasattr(parent, leaf):
+                    delattr(parent, leaf)
+            else:
+                setattr(parent, leaf, value)
 
 
 @contextlib.contextmanager

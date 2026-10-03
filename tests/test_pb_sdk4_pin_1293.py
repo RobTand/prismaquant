@@ -17,6 +17,7 @@ def test_reviewed_reader_and_sdk_move_together():
     assert staged_lease.PB_CLIENT_SDK_VERSION == 4
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_real_sdk4_sealed_tree_is_the_production_resolver(monkeypatch):
     # The sealed tree lives on the fleet's shared mount, so this test is
     # fleet-only like every other PB SDK test: the hosted runner, which has
@@ -54,6 +55,7 @@ def test_sdk_missing_reader_surface_still_refuses():
         staged_lease._require_client_surface(module)
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_band_planner_and_reader_share_the_reviewed_sdk4_root(monkeypatch):
     from pathlib import Path
     from fullstack_pb_generation import require_paths

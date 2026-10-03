@@ -449,6 +449,7 @@ def test_dispatch_refuses_mover_reference_shaped_contract(
     assert gateway.submitted == []
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_prepared_manifest_passes_pb_phase_planner(tmp_path):
     from test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()
