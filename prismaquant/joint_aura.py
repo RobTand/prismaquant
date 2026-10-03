@@ -23,7 +23,7 @@ from prismaquant.perturbed_x_cache import (
 )
 from prismaquant.memory_management import env_truthy
 from prismaquant.routed_experts import PackedExpertProjection
-from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_STRICT, DIRECT_ASCII_STRICT, bytes_sha256hex
 
 
 JOINT_CURRENCY = "joint_aura_predicted_dloss"
@@ -191,6 +191,38 @@ def activation_identity(spec, activation_max_abs: Mapping, qname: str) -> dict:
     }
 
 
+SOURCE_EXECUTION_SCHEMA = "prismaquant.joint_aura.source_execution.v1"
+SOURCE_EXECUTION_KEYS = frozenset({"schema", "modules"})
+SOURCE_EXECUTION_SELECTOR_KEYS = frozenset({"attention", "experts"})
+
+
+def _source_execution_selectors(selectors):
+    """The source identity's nonempty module-selector envelope, not its backends."""
+    return (isinstance(selectors, dict) and bool(selectors)
+            and set(selectors) <= SOURCE_EXECUTION_SELECTOR_KEYS)
+
+
+def require_native_source_execution(value, *, unit):
+    """Native panels require resolved eager/root/target backends and strict JSON.
+
+    Unlike Original controls, native identities retain isinstance string checks
+    and their direct unsorted JSON refusal; these are distinct caller policies.
+    """
+    if (not isinstance(value, dict) or set(value) != SOURCE_EXECUTION_KEYS
+            or value["schema"] != SOURCE_EXECUTION_SCHEMA
+            or not isinstance(value["modules"], dict) or not value["modules"]):
+        raise ValueError("native MoE requires explicit source execution identity")
+    for name, selectors in value["modules"].items():
+        if not isinstance(name, str) or not _source_execution_selectors(selectors):
+            raise ValueError("native MoE source execution selectors are malformed")
+    for name in ("", unit):
+        selectors = value["modules"].get(name, {})
+        if selectors.get("attention") != "eager" or not isinstance(selectors.get("experts"), str) or not selectors["experts"]:
+            raise ValueError("native MoE source execution lacks resolved root/target backends")
+    json.dumps(value, allow_nan=False)
+    return value
+
+
 def source_execution_identity(model) -> dict:
     """Bind resolved dispatch selectors omitted by Transformers config dumps.
 
@@ -206,8 +238,8 @@ def source_execution_identity(model) -> dict:
             if config is not None and hasattr(config, field):
                 # Take an independent JSON value, so later config mutation
                 # cannot mutate the sealed identity through a shared dict.
-                selectors[label] = json.loads(json.dumps(
-                    getattr(config, field), sort_keys=True, allow_nan=False))
+                selectors[label] = json.loads(DIRECT_ASCII_SPACED_STRICT.text(
+                    getattr(config, field)))
         if selectors:
             modules[name] = selectors
     from .glm_source_derivative import source_derivative_identity
@@ -215,7 +247,7 @@ def source_execution_identity(model) -> dict:
     if derivative is not None:
         return {"schema": "prismaquant.joint_aura.source_execution.v2", "modules": modules,
                 "source_derivative": derivative}
-    return {"schema": "prismaquant.joint_aura.source_execution.v1", "modules": modules}
+    return {"schema": SOURCE_EXECUTION_SCHEMA, "modules": modules}
 
 
 def arithmetic_identity(measurement_dtype, projection_backend=None) -> dict:

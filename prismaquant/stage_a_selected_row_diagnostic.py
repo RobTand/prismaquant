@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .cost_stage_checkpoint import publish_new_bytes
 from .dev_mode import dev_mode_enabled
-from .digests import bytes_sha256hex, indent2_json_file_bytes
+from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex, indent2_json_file_bytes
 from .schemas import Contract, strict_json_loads
 from .stage_inputs import read_bound
 
@@ -293,7 +293,6 @@ def prepare_original_diagnostic_session(base_plan_input, static_authority_input)
 def main(argv=None):
     """The explicit PB CPU metadata issuance command; it never runs a model."""
     import argparse
-    import json
     from .stage_b_prep_io import bind_staged_reads
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -310,7 +309,7 @@ def main(argv=None):
     result = prepare_original_diagnostic_session(
         {"path": args.base_plan, "sha256": args.base_plan_sha256},
         {"path": args.static_authority, "sha256": args.static_authority_sha256})
-    print(json.dumps(result, sort_keys=True, allow_nan=False))
+    print(DIRECT_ASCII_SPACED_STRICT.text(result))
     return 0
 
 

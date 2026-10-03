@@ -281,7 +281,6 @@
   "sorted-json:prismaquant/joint_adjoint_band.py::main",
   "sorted-json:prismaquant/joint_adjoint_checkpoints.py::reference_from_record",
   "sorted-json:prismaquant/joint_aura.py::_joint_projection_requirements",
-  "sorted-json:prismaquant/joint_aura.py::source_execution_identity",
   "sorted-json:prismaquant/joint_catalog_extension.py::main",
   "sorted-json:prismaquant/joint_cost_quantum.py::publish_quantum_outputs",
   "sorted-json:prismaquant/joint_cost_quantum.py::write_failure_counters",

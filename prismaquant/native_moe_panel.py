@@ -14,7 +14,8 @@ import math
 from pathlib import Path
 import re
 
-from .joint_aura import identity_sha256, validate_joint_aura_entry
+from .digests import DIRECT_ASCII_SPACED_STRICT
+from .joint_aura import identity_sha256, require_native_source_execution, validate_joint_aura_entry
 from .measured_runtime_prices import RuntimeBinding
 from .native_operator_panel import (PHASES, ROUTE_FIELDS, ROUTE_OPTIONAL_FIELDS, RUNTIME_FIELDS,
                                     RUNTIME_OPTIONAL_FIELDS, _admit, _bytes, _equal, _executed,
@@ -811,11 +812,11 @@ def original_capture_entry(metadata):
             raise ValueError(f"original {name} byte length differs")
         _sha(record["content_sha256"], f"original {name} content")
     _equal(metadata.get("profile_role_order"), list(ROLES), "original profile role order")
-    return json.loads(json.dumps({
+    return json.loads(DIRECT_ASCII_SPACED_STRICT.text({
         "schema": "prismaquant.original_routed_capture_entry.v1", "unit": unit, "layer": layer,
         "sample": 0, "positions": list(range(512)), "profile_role_order": list(ROLES),
         "raw_boundary_schema": "prismaquant.native_moe_raw_boundary.v1", "tensors": tensors,
-    }, sort_keys=True, allow_nan=False))
+    }))
 
 
 def _validate_original_capture_entry(entry, metadata):
@@ -1428,23 +1429,6 @@ def _native_member_identity(member):
             "wire_record_sha256": identity_sha256(member["wire"]["record"])}
 
 
-def _source_execution(value, *, unit):
-    if (not isinstance(value, dict) or set(value) != {"schema", "modules"}
-            or value["schema"] != "prismaquant.joint_aura.source_execution.v1"
-            or not isinstance(value["modules"], dict) or not value["modules"]):
-        raise ValueError("native MoE requires explicit source execution identity")
-    for name, selectors in value["modules"].items():
-        if (not isinstance(name, str) or not isinstance(selectors, dict) or not selectors
-                or not set(selectors) <= {"attention", "experts"}):
-            raise ValueError("native MoE source execution selectors are malformed")
-    for name in ("", unit):
-        selectors = value["modules"].get(name, {})
-        if selectors.get("attention") != "eager" or not isinstance(selectors.get("experts"), str) or not selectors["experts"]:
-            raise ValueError("native MoE source execution lacks resolved root/target backends")
-    json.dumps(value, allow_nan=False)
-    return value
-
-
 def _qualified_source_execution(inputs, probe, path, expected_sha256):
     """Verify a fresh source replay of a retained boundary, never rewrite it."""
     import struct
@@ -1499,7 +1483,7 @@ def _qualified_source_execution(inputs, probe, path, expected_sha256):
         for key in ("actual_sha256", "captured_sha256"):
             _equal(compared[key], expected["content_sha256"], f"qualified boundary {name} {key}")
         _equal(metadata["tensors"][name]["content_sha256"], expected["content_sha256"], f"qualified original {name} bytes")
-    execution = _source_execution(proof["source_execution_identity"], unit=inputs["unit"])
+    execution = require_native_source_execution(proof["source_execution_identity"], unit=inputs["unit"])
     _equal(execution, proof["streamed_source_execution_identity"], "qualified reference/streamed source execution")
     return execution
 
@@ -1569,8 +1553,8 @@ def freeze_moe_panel(inputs, preflight, cost_rows, *, cost_sha256,
         if captured_execution is not None:
             _equal(captured_execution, qualified, "captured/qualified source execution")
         captured_execution = qualified
-    execution = _source_execution(captured_execution, unit=inputs["unit"])
-    _equal(execution, _source_execution(probe.get("source_execution"), unit=inputs["unit"]),
+    execution = require_native_source_execution(captured_execution, unit=inputs["unit"])
+    _equal(execution, require_native_source_execution(probe.get("source_execution"), unit=inputs["unit"]),
            "capture/probe source execution")
     for key in ("n_probes", "seed_base", "token_scope", "temperature", "distribution", "normalization"):
         _equal(probe[key], request[key], f"predeclared probe {key}")

@@ -20,6 +20,8 @@ from types import MappingProxyType
 from .cost_stage_checkpoint import atomic_write_bytes, prepare_journal, write_unit
 from .digests import (
     DIRECT_ASCII_LAX,
+    DIRECT_ASCII_SPACED_LAX,
+    DIRECT_ASCII_SPACED_STRICT,
     DIRECT_ASCII_STRICT,
     SOURCE_HASH_BLOCK_BYTES,
     bytes_sha256hex,
@@ -431,12 +433,12 @@ class CaptureSourceAuthentication:
         from .source_generation import original_generation_coordinates
         from .stage_inputs import require_source_identity
 
-        inputs = json.loads(json.dumps({
+        inputs = json.loads(DIRECT_ASCII_SPACED_STRICT.text({
             'publisher': {'id': publisher_id, 'revision': publisher_revision,
                           'input': publisher_input},
             'producer_source': require_source_identity(producer_source),
             'readset': readset_input, 'source_paths': source_paths,
-        }, sort_keys=True, allow_nan=False))
+        }))
         publisher_input = inputs['publisher']['input']
         readset_input, source_paths = inputs['readset'], inputs['source_paths']
         producer_source = inputs['producer_source']
@@ -458,7 +460,7 @@ class CaptureSourceAuthentication:
                               windows={}, verified={}, publisher_id=publisher_id,
                               publisher_revision=publisher_revision,
                               readset_sha256=readset_input['sha256'],
-                              inputs_json=json.dumps(inputs, sort_keys=True, allow_nan=False),
+                              inputs_json=DIRECT_ASCII_SPACED_STRICT.text(inputs),
                               completed_copies=[])
         try:
             # This bounded first lane checks the closed auxiliary bootstrap, not
@@ -484,8 +486,8 @@ class CaptureSourceAuthentication:
             reserve_allocation(resource_check, 'before_original_identity_metadata',
                                cpu_bytes=2 * (coordinates['config.json'].size
                                               + coordinates['model.safetensors.index.json'].size))
-            self._original['bootstrap_json'] = json.dumps(
-                {'config': value, 'index': index}, sort_keys=True, allow_nan=False)
+            self._original['bootstrap_json'] = DIRECT_ASCII_SPACED_STRICT.text(
+                {'config': value, 'index': index})
             return self
         except BaseException:
             self.close()
@@ -788,7 +790,7 @@ class CaptureSourceAuthentication:
                 delivery.update(sealed_fd_stat=list(file_stat_signature(state['before'])),
                                 kernel_seals=fcntl.fcntl(fd, fcntl.F_GET_SEALS))
                 reserve_allocation(self.resource_check, 'before_original_delivery_witness',
-                                   cpu_bytes=2 * len(json.dumps(delivery, sort_keys=True)))
+                                   cpu_bytes=2 * len(DIRECT_ASCII_SPACED_LAX.text(delivery)))
                 previous = self._original['verified'].get(name)
                 history = [] if previous is None else list(previous['prior_deliveries'])
                 if previous is not None:
@@ -1158,7 +1160,7 @@ class CaptureSourceAuthentication:
                         for value in self._original_copy_completions],
                     copy_completions=list(self._original['completed_copies']))
                 # Nested lease/delivery rows are independent snapshots too.
-                return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+                return json.loads(DIRECT_ASCII_SPACED_STRICT.text(value))
         if self.is_recording:
             return self._recording_receipt()
         adopted = self.adopted_identity_cache_sha256 is not None

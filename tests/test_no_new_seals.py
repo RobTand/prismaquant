@@ -106,9 +106,13 @@ ALLOWLIST = {
         1, AMBIGUOUS, "the source execution backend changed during one measurement"),
     ("prismaquant/aura_cost.py", "compute_aura_cost_streamed._record_joint_operator"): (
         1, INTEGRITY, "the operator measured is the render the cache holds, within one run"),
-    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.rebind"): (
-        1, WALL, "the bind identity digest covers calibration; a dev resume compares key "
-        "by key first and rebinds the stored identity"),
+    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.inspect_published_session"): (
+        3, WALL, "the bind digest covers calibration/data and reproduces the selected "
+        "generation's session; a dev resume first checks fields and adopts the stored "
+        "bind identity (wall). Pending-only exact policy equality authenticates the "
+        "issued empty namespace, including byte ceilings; the requested completed "
+        "metadata owner's session, policy, label and bound fields agree (structure). "
+        "Ordinary resume byte-ceiling differences still go through seal_check"),
     ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.authorize_resume_inputs"): (
         1, STRUCTURE, "a resumed boundary entry belongs to this generation"),
     ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.attach"): (
@@ -302,6 +306,11 @@ ALLOWLIST = {
         1, INTEGRITY, "production cache bytes against the pinned digest"),
     ("tools/regenerate_joint_quanta.py", "main"): (
         1, STRUCTURE, "a path and its digest are supplied together"),
+    ("prismaquant/joint_cost_stage_a.py", "run_original_diagnostic_capture"): (
+        3, STRUCTURE, "the independently issued original-diagnostic admission tuple "
+        "binds the current producer-package digest, live full-model identity and "
+        "resolved source-dispatch selectors. These source/authority refusals stay "
+        "in both modes; they are not resumable-run seals or CUDA qualification"),
     # Found by the _require call form, loop fields and resource ceilings.
     ("prismaquant/joint_cost_stage_a.py", "bind_stage_a_produced_output"): (
         1, RESOURCE, "the produced-output template's durable payload maximum against the "
@@ -620,4 +629,29 @@ def test_incoming_readset_classification_allows_only_its_existing_slice_check():
     problems = violations(sources)
     assert len(problems) == 1
     assert ("check_checkpoint_incoming_readset: 2 identity check site(s), 1 allowed"
+            in problems[0])
+
+
+@pytest.mark.parametrize("path,scope,existing,indent,allowed", [
+    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.inspect_published_session",
+     '        directory = Path(self.config["directory"]) / str(session["generation"])\n',
+     "        ", 3),
+    ("prismaquant/cost_streaming.py", "StreamedBoundaryArtifacts.rebind",
+     '        session, directory = self.inspect_published_session(session, identity=identity)\n',
+     "        ", 0),
+    ("prismaquant/joint_cost_stage_a.py", "run_original_diagnostic_capture",
+     '    if prepared_context["implementation_sha256"] != _aura_source_sha256():\n',
+     "    ", 3),
+], ids=["published-session", "rebind", "original-diagnostic-capture"])
+def test_original_classifications_do_not_admit_another_run_seal(
+        path, scope, existing, indent, allowed):
+    """Exact classification counts leave no room for a new run-identity refusal."""
+    sources = _campaign_sources()
+    assert sources[path].count(existing) == 1
+    extra = (f"{indent}if running_plan_sha256 != recorded_plan_sha256:\n"
+             f"{indent}    raise RuntimeError('new run seal')\n")
+    sources[path] = sources[path].replace(existing, extra + existing, 1)
+    problems = violations(sources)
+    assert len(problems) == 1
+    assert (f"{scope}: {allowed + 1} identity check site(s), {allowed} allowed"
             in problems[0])

@@ -64,6 +64,7 @@ import time
 import uuid
 from pathlib import Path
 
+from .digests import DIRECT_ASCII_SPACED_STRICT
 from .staged_tier_policy import TierPolicyRefused
 
 #: Reviewed PB source pin for the reader lease and the client SDK
@@ -1450,11 +1451,11 @@ class LeaseWindow:
             if entries[0]['file_id'] != dict(ino=signature[1], size=signature[2],
                     mtime_ns=signature[3], ctime_ns=signature[4]):
                 raise RuntimeError('lease receipt descriptor differs from native pinned object')
-            return json.loads(json.dumps({
+            return json.loads(DIRECT_ASCII_SPACED_STRICT.text({
                 'claim': self._context, 'serving': serving,
                 'ref_id': self._ref_id, 'entry': entries[0],
                 'source_fd_stat': list(signature),
-            }, sort_keys=True, allow_nan=False))
+            }))
 
     # -- open ----------------------------------------------------------
 
