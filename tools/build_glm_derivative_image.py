@@ -11,6 +11,7 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import sys
 import shutil
 import tarfile
 import runpy
@@ -19,7 +20,13 @@ _runtime_identity = runpy.run_path(str(
     Path(__file__).resolve().parents[1] / "prismaquant/container_runtime_identity.py"))
 # This build driver is stdlib-only; the host need not install Torch merely to
 # read image metadata and apply the closed byte transform.
-_contract = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'prismaquant/glm_source_derivative.py'))
+_contract_path = Path(__file__).resolve().parents[1] / "prismaquant/glm_source_derivative.py"
+# Synthetic loads need the sibling search context supplied to direct scripts.
+sys.path.insert(0, str(_contract_path.parent))
+try:
+    _contract = runpy.run_path(str(_contract_path))
+finally:
+    sys.path.pop(0)
 ORIGINAL_IMAGE_CONTENT_SHA256 = _contract['ORIGINAL_IMAGE_CONTENT_SHA256']
 ORIGINAL_MODELING_SHA256 = _contract['ORIGINAL_MODELING_SHA256']
 CORRECTED_MODELING_SHA256 = _contract['CORRECTED_MODELING_SHA256']
