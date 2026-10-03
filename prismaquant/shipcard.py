@@ -309,13 +309,16 @@ MAX_CONTROL_RELATIVE_SLACK = Fraction(1, 1000)
 #: own ``gold.kl`` record carries them.  Driven by the candidate rather than
 #: by a fixed list so the control cannot dodge a key by omitting it: the
 #: candidate side is the card's published gold number and is gated separately.
+UNIFORM_CONTROL_EXACT_CONTRACT_KEYS = (
+    "measurement_fidelity", "calibration_contract_sha256", "teacher_evidence",
+)
 UNIFORM_CONTROL_CONTRACT_KEYS = (
     "n_samples",
     "seqlen",
     "n_positions",
     "score_positions",
     "corpus_sha256",
-)
+) + UNIFORM_CONTROL_EXACT_CONTRACT_KEYS
 #: Which gold metric the two arms are compared on.  Both must quote the same
 #: one, and it must be a KL: the gate's whole point is the serving metric.
 UNIFORM_CONTROL_METRIC_KEYS = ("kl_mean", "kl_confident_mean")
@@ -2347,8 +2350,8 @@ def _replay_control_arms(
     """Bind both arms to the serving metric, structurally.
 
     The candidate arm is not accepted as a number at all: it must BE the
-    card's own ``gold.kl``, which is already gated to exact full-vocab
-    KL-vs-BF16 with ``score_positions=all`` on a no-spec-decode serve.  So a
+    card's own ``gold.kl``, which is already gated to served KL
+    with ``score_positions=all`` on a no-spec-decode serve. So a
     last-token hook screen or a weight-space error cannot reach this slot
     through the candidate leg, and a block measured on some other allocation
     cannot be pasted onto this artifact -- its candidate KL would not be this
@@ -2463,7 +2466,21 @@ def _replay_control_arms(
             continue
         want = gold_metrics.get(contract_key)
         got = arm_metrics.get(contract_key)
-        if got != want:
+        same = got == want
+        if contract_key in UNIFORM_CONTROL_EXACT_CONTRACT_KEYS:
+            from .digests import DIRECT_ASCII_STRICT
+
+            try:
+                same = (contract_key in arm_metrics
+                        and DIRECT_ASCII_STRICT.text(got) == DIRECT_ASCII_STRICT.text(want))
+            except (TypeError, ValueError):
+                same = False
+        if not same:
+            if contract_key in UNIFORM_CONTROL_EXACT_CONTRACT_KEYS:
+                problems.append(
+                    f"{slot}: control arm: missing or different {contract_key}; "
+                    "the arms did not run the same measurement contract")
+                continue
             problems.append(
                 f"{slot}: control arm: {contract_key}={got!r} but the "
                 f"candidate's gold.kl says {want!r} — the arms did not run "
