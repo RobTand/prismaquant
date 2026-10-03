@@ -176,6 +176,19 @@ a gold record. Existing offline receipt ingestion consumes the producer record
 without changing the artifact or inventing a canonical manifest. This closes
 no independent PPL, compiled, census, control, quality or served-SLO gate.
 
+Refs #2174 / #1301: the remaining campaign identity constructors use the
+existing `DIRECT_UTF8_STRICT`, `bytes_sha256hex` and `text_sha256hex` owners.
+Manifest/state canonical bytes stay direct JSON, not normalization; domain
+errors and native causes stay campaign-owned. Attempt owners retain NUL
+framing and integer coercion; probe owners retain their NUL/probe suffix.
+Sealed receipts retain normalized child binding and their final LF. Every
+remaining raw campaign hash constructor is removed, without changing public
+signatures or stored identities. Direct workers retain stdlib sibling imports.
+Pylsp references were obtained for both exported digest functions before the
+implementation changes. Pretty persisted state and CLI presentation remain
+distinct from identity bytes; their existing formatting is not flattened.
+This actor-local slice follows #2169 and leaves the broader digest epic open.
+
 Refs #2169 / #1301: campaign receipt observations and Fisher dataset
 provenance share `digests.file_sha256hex`. The campaign retains its exact
 8 MiB read window and missing/mismatched/symlink classifications; its obsolete
