@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Original CUDA fixture dependencies use the existing source-owned pins**
+  (#2188). The finite pure-Python packer resolves the authoritative PB and
+  Tessera pins through their existing stdlib owners, and the inner fixture
+  reuses that exact mapping instead of retaining a separate SDK3 literal.
+  Installed provenance, RECORD/digest and closed extraction checks remain;
+  no new pin, dependency artifact, CUDA qualification or deployment follows.
 - **Original proper-prefix coverage compares its exact checkpoint roster**
   (Refs #2147). Python set equality preserves the whole required head/layer
   coverage and rejects missing or extra checkpoints without sending sets to
