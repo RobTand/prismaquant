@@ -1251,10 +1251,16 @@ def _qualified_source_execution(inputs, probe, path, expected_sha256):
         _equal(subset[key], expected, f"qualified calibration {key}")
     prefill = inputs["phases"]["prefill"]
     count = prefill["m"]
+    protocol = inputs["routing"]["source_protocol"]
+    if geometry_family(inputs["shape"]) == "glm53_next_routed_stack_v1":
+        expert_bias = {**protocol["correction_bias"],
+                       "shape": [_shape_for_roster(inputs["shape"])["experts"]]}
+    else:
+        expert_bias = protocol["selection_bias"]
     expected_tensors = {"inputs": prefill["input"],
         "top_k_index": prefill["transport"]["topk_ids"]["source"],
         "top_k_weights": prefill["transport"]["topk_weights"]["source"],
-        "expert_bias": inputs["routing"]["source_protocol"]["selection_bias"],
+        "expert_bias": expert_bias,
         "coordinates": {"shape": [count, 2], "dtype": "torch.int64",
             "content_sha256": hashlib.sha256(b"".join(struct.pack("<qq", 0, row) for row in range(count))).hexdigest()}}
     comparisons = proof["tensor_comparisons"]
