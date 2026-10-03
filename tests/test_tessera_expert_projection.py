@@ -24,7 +24,6 @@ from prismaquant.tessera_expert_projection import (
     cached_units_manifest,
     carried_projection,
     carried_units,
-    producer_plan_tool,
     request_expert_projection,
     require_stack_uniform_assignment,
     stack_plan_request,
@@ -122,84 +121,42 @@ def test_source_identity_keys_are_what_the_producer_publishes(tmp_path):
 # ---------------------------------------------------------------------------
 # The declared tool
 # ---------------------------------------------------------------------------
-def test_lane_spec_declares_the_producer_projection_tool(tmp_path):
-    from prismaquant.lane_spec import load_lane_spec
+@pytest.mark.parametrize("selection", ["env", "explicit"])
+def test_projection_request_uses_real_public_producer_and_keeps_request(tmp_path, monkeypatch, selection):
+    from projection_producer_fixture import require_projection_producer
+    producer_python = require_projection_producer(monkeypatch)
+    import torch
+    from safetensors.torch import save_file
 
-    spec = load_lane_spec("tessera")
-    # #1587: the projection tool is a campaign dependency, declared on the
-    # campaign_tools roster, not an export producer tool
-    declared = {tool.path for tool in spec.campaign_tools}
-    assert tep.PRODUCER_PLAN_TOOL in declared, (
-        "the packed-expert bridge shells out to the producer's projection tool; "
-        "an undeclared external dependency is one nobody can check for")
-    for tool in (*spec.producer_tools, *spec.campaign_tools):
-        (tmp_path / tool.path).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / tool.path).write_text("# stub\n")
-    assert producer_plan_tool(env={"TESSERA_REPO": str(tmp_path)}) == (
-        tmp_path / tep.PRODUCER_PLAN_TOOL)
-    (tmp_path / tep.PRODUCER_PLAN_TOOL).unlink()
-    with pytest.raises(ExpertProjectionError, match="tessera_producer_plan.py"):
-        producer_plan_tool(env={"TESSERA_REPO": str(tmp_path)})
-
-
-def test_request_runs_the_declared_tool_once_and_keeps_the_request(tmp_path):
-    from prismaquant.lane_spec import load_lane_spec
-
-    repo = tmp_path / "repo"
-    spec = load_lane_spec("tessera")
-    # the campaign's projection tool lives on the campaign_tools roster
-    # (#1587); stub every declared tool on both rosters so the resolver
-    # finds what it needs either way
-    for tool in (*spec.producer_tools, *spec.campaign_tools):
-        (repo / tool.path).parent.mkdir(parents=True, exist_ok=True)
-        (repo / tool.path).write_text("# stub\n")
-    tool = repo / tep.PRODUCER_PLAN_TOOL
-    tool.write_text(
-        "import json, sys\n"
-        "args = sys.argv[1:]\n"
-        "plan = json.load(open(args[args.index('--stack-plan') + 1]))\n"
-        "out = args[args.index('--out') + 1]\n"
-        "json.dump({'echo': plan, 'src': args[0]}, open(out, 'w'))\n")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text(json.dumps({
+        "num_experts": 2, "hidden_size": 32, "moe_intermediate_size": 32}))
+    tensors = {f"{STACK}.{expert}.{role}.weight": torch.zeros(32, 32, dtype=torch.bfloat16)
+               for expert in range(2) for role in ("w1", "w2", "w3")}
+    save_file(tensors, str(source / SHARD))
+    env = {key: value for key, value in os.environ.items() if key != "TESSERA_REPO"}
+    env["PYTHONSAFEPATH"] = "1"
+    producer_args = {}
+    if selection == "explicit":
+        env[tep.PRODUCER_PYTHON_ENV] = "/bin/false"
+        producer_args["python"] = producer_python
+    output = tmp_path / "projection.json"
     answer = request_expert_projection(
-        "/model", {STACK: ("E4M3", 1024)}, out_path=tmp_path / "proj.json",
-        env={**os.environ, "TESSERA_REPO": str(repo)})
-    request = json.loads((tmp_path / "proj.json.request.json").read_text())
-    assert request == {STACK: {"grid": "E4M3", "q256": 1024,
-                               "source_layout": tep.SOURCE_LAYOUT_UNPACKED}}
-    assert answer == {"echo": request, "src": "/model"}
-    tool.write_text("import sys\nprint('stack refused: not a route', file=sys.stderr)\nsys.exit(3)\n")
-    with pytest.raises(ExpertProjectionError, match=r"(?s)exit 3.*stack refused") as error:
+        source, {STACK: ("E4M3", 1024)}, out_path=output, env=env, **producer_args)
+    request = json.loads(output.with_name(output.name + ".request.json").read_text())
+    assert request == stack_plan_request({STACK: ("E4M3", 1024)})
+    assert answer["schema"] == tep.PROJECTION_SCHEMA
+    assert answer["source"]["files"][SHARD] == hashlib.sha256((source / SHARD).read_bytes()).hexdigest()
+    bound = bind_expert_projection(answer, declared=_declared(n=32, k=32))
+    assert set(bound[STACK]) == set(_declared(n=32, k=32)[STACK])
+    assert [unit["projection"] for unit in answer["stacks"][STACK]["units"]] == [
+        "gate_proj", "up_proj", "down_proj"] * 2
+    tensors.pop(f"{STACK}.1.w3.weight")
+    save_file(tensors, str(source / SHARD))
+    with pytest.raises(ExpertProjectionError, match=r"(?s)exit .*missing"):
         request_expert_projection(
-            "/model", {STACK: ("E4M3", 1024)}, out_path=tmp_path / "proj2.json",
-            env={**os.environ, "TESSERA_REPO": str(repo)})
-    assert "tessera_producer_plan.py" in str(error.value)
-
-
-def test_request_runs_the_tool_as_a_script_under_the_container_safe_path(tmp_path):
-    """The campaign container runs with ``PYTHONSAFEPATH=1``. The producer's
-    plan tool is a script that imports its sibling ``export_tessera_serving``
-    from its own directory, so the request still answers under that guard."""
-    from prismaquant.lane_spec import load_lane_spec
-
-    repo = tmp_path / "repo"
-    spec = load_lane_spec("tessera")
-    # the campaign's projection tool lives on the campaign_tools roster
-    # (#1587); stub every declared tool on both rosters so the resolver
-    # finds what it needs either way
-    for tool in (*spec.producer_tools, *spec.campaign_tools):
-        (repo / tool.path).parent.mkdir(parents=True, exist_ok=True)
-        (repo / tool.path).write_text("# stub\n")
-    tool = repo / tep.PRODUCER_PLAN_TOOL
-    (tool.parent / "export_tessera_serving.py").write_text("ANSWER = 'the sibling'\n")
-    tool.write_text(
-        "import json, sys\n"
-        "from export_tessera_serving import ANSWER\n"
-        "args = sys.argv[1:]\n"
-        "json.dump({'answer': ANSWER}, open(args[args.index('--out') + 1], 'w'))\n")
-    answer = request_expert_projection(
-        "/model", {STACK: ("E4M3", 1024)}, out_path=tmp_path / "proj.json",
-        env={**os.environ, "TESSERA_REPO": str(repo), "PYTHONSAFEPATH": "1"})
-    assert answer == {"answer": "the sibling"}
+            source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "refused.json", env=env, **producer_args)
 
 
 def test_stack_plan_request_is_the_producers_exact_shape():

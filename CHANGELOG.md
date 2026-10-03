@@ -11,6 +11,13 @@
   replay remain active; no checker attestation or GPU price is fabricated.
   The numerics-pair exporter tests require the already-declared `gguf` full
   dependency, not a changed numeric golden or a skipped arithmetic regression.
+- **Expert projection uses Tessera's public installed producer CLI** (#2128).
+  The campaign invokes `python -m tessera.producer_plan` with the unchanged
+  `tessera.expert_projection.v1` contract; it no longer locates an experiment
+  through `TESSERA_REPO` or disables `PYTHONSAFEPATH`. Requires a producer
+  package containing Tessera #871. Export/serving pins and admission stay fixed.
+  `TESSERA_PRODUCER_PYTHON` can select a separate installed producer without
+  changing the pinned consumer/serving package; explicit `python=` overrides it.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
