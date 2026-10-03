@@ -41,7 +41,7 @@ runtime generation carries is a dated observation in the pin record, not a
 claim this file makes, because a fixture that asserts a live-fleet fact
 goes stale the moment the fleet moves. It is
 pinned by file digest against an IMMUTABLE bundle
-(``stagea_produced_pb_pin.json``) cut from the owning lane's committed
+(``pb_runtime_generation_pin.json``) cut from the owning lane's committed
 tree, never against that lane's live worktree, and these tests skip loudly
 rather than implying support that does not exist.
 
@@ -81,7 +81,7 @@ if str(REPO) not in sys.path:
 
 TIER = "prismabuild-stage:dl380g10"
 KIND = "stage_gib"
-PIN_PATH = Path(__file__).resolve().parent / "stagea_produced_pb_pin.json"
+PIN_PATH = Path(__file__).resolve().parent / "pb_runtime_generation_pin.json"
 #: The ONE pin of the published PrismaBuild generation the write-only
 #: produced-output suites run against (PQ #1084): Stage B preparation
 #: (#1070), Stage A retirement (#1073) and the band-serial handoff (#1075)
@@ -93,6 +93,12 @@ PB_GENERATION_PIN = Path(__file__).resolve().parent / "pb_runtime_generation_pin
 #: window's own batch count (``prefetch_batches``, 64); neither the adapter
 #: nor the owner knows that number, which is why this can be 4.
 GROUP_SIZE = 4
+
+# SDK4 executable claims require explicit host admission even in a private
+# queue. Producer, independent reader and one mover fit this bounded fixture;
+# its PB action reserves at least four CPUs and four GiB. Tier credit remains
+# independently minted by _queue and cannot substitute for host capacity.
+_FIXTURE_HOST_CAPACITY = {"cpu": 4, "mem_gb": 4}
 
 #: An owner that owes nothing. Three buckets, not two: an egress refusal
 #: this lane cannot classify is reported in its own, because folding it
@@ -381,7 +387,8 @@ def _execute_mover(q, mover: str) -> dict:
     """
 
     from prismabuild import pool
-    claimed = q.claim(owner=f"w-mover-{mover[:8]}", tags=[_tier_host(q)])
+    claimed = q.claim(owner=f"w-mover-{mover[:8]}", tags=[_tier_host(q)],
+                      capacity=_FIXTURE_HOST_CAPACITY)
     assert claimed is not None and claimed["action_key"] == mover, (
         "the mover row must be claimable on its tier host", claimed)
     row = pool._read_json(q.item_path(pool.CLAIMED, mover))
@@ -443,7 +450,8 @@ def _bound_owner(tmp_path: Path, *, n_batches: int = GROUP_SIZE,
               checkout_root=str(tmp_path / "mover-checkout"),
               resources={"cpu": 1, "mem_gb": 1, **terms},
               produced_output_template=template)
-    claimed = q.claim(owner="w-owner", capacity=claim_capacity)
+    claimed = q.claim(owner="w-owner", capacity=(
+        _FIXTURE_HOST_CAPACITY if claim_capacity is None else claim_capacity))
     assert claimed is not None and claimed["action_key"] == owner
     control = _broker_control(q, owner)
     env = {"PRISMABUILD_ACTION_KEY": owner,
@@ -624,7 +632,7 @@ class _Fleet:
         self._tag = tag
         self._stop = tmp_path / f"{name}.stop"
         self._logs = tmp_path / name
-        self._capacity = capacity
+        self._capacity = (_FIXTURE_HOST_CAPACITY if capacity is None else capacity)
         self._stopping = threading.Event()
         self._proc = None
         self._responder = None
@@ -993,7 +1001,7 @@ def _claimed_consumer(tmp_path: Path, cas_root: Path, q, pb_repo: Path,
               worker_script=str(pb_repo / "tools" / "prismabuild_worker.py"),
               checkout_root=str(checkout),
               resources={"cpu": 1, "mem_gb": 1})
-    claimed = q.claim(owner=f"w-{name}")
+    claimed = q.claim(owner=f"w-{name}", capacity=_FIXTURE_HOST_CAPACITY)
     assert claimed is not None and claimed["action_key"] == key, claimed
     return key
 
@@ -1391,7 +1399,8 @@ def test_a_mutated_origin_is_refused_before_it_can_be_staged(
         "check rather than a digest")
     from prismabuild import pool
     mover = str(group["published"]["mover_key"])
-    claimed = q.claim(owner=f"w-mover-{mover[:8]}", tags=[_tier_host(q)])
+    claimed = q.claim(owner=f"w-mover-{mover[:8]}", tags=[_tier_host(q)],
+                      capacity=_FIXTURE_HOST_CAPACITY)
     assert claimed is not None and claimed["action_key"] == mover
     row = pool._read_json(q.item_path(pool.CLAIMED, mover))
     outcome = q.execute(row, timeout_s=240)
@@ -1977,9 +1986,9 @@ def test_a_funding_lock_that_never_clears_leaves_diagnosed_debt(
 # the refusal is the category and the receipt is the cause.
 #
 # These tests drive the REAL bound owner and the real release path; only
-# the egress receipt is substituted, because provoking a genuine own-copy
-# deferral needs the PrismaBuild candidate that is not pinned yet. The
-# shapes below are the confirmed ones, not invented ones.
+# the egress receipt is substituted to select each retry transition
+# deterministically. SDK4 carries this receipt shape; these controls do not
+# establish a concurrent own-copy handoff measurement.
 
 
 def _staged_group(tmp_path, monkeypatch, **kwargs):

@@ -51,7 +51,8 @@ def anchor_templates(tc, names, weights, source, kwargs, bound):
         name, kwargs["menus"][name], calibration_source=source,
         static_scales=kwargs["static_scales"]) for name in names}
     return {(name, anchor.format_name): tc._checkpoint_anchor_identity(
-        anchor, weights=weights, menus=kwargs["menus"], calibration_source=source,
+        anchor, check_scoring_metadata=False,
+        weights=weights, menus=kwargs["menus"], calibration_source=source,
         static_scales=kwargs["static_scales"], projected_units={}, bound_unit=bound[name])
         for name in names for anchor in rosters[name]}
 

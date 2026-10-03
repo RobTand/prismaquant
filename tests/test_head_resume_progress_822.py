@@ -1,6 +1,7 @@
 """A durable reverified prefix needs one cumulative publication, not N writes."""
 import json
 import os
+from functools import partial
 
 from prismaquant import tessera_joint_aura as bridge
 from prismaquant.cost_stage_checkpoint import unit_path
@@ -99,14 +100,16 @@ def test_replay_longer_than_the_cadence_commits_during_the_drive(tmp_path, monke
     config, names, _, journal, writes = _case(tmp_path, monkeypatch)
     allowance_s = 0.2
     cadence_s = allowance_s / bridge.PROGRESS_CADENCE_SAFETY_FACTOR
-    import time as _time
+    clock = [0.0]
+    monkeypatch.setattr(bridge, "_ProgressCadence", partial(
+        bridge._ProgressCadence, clock=lambda: clock[0]))
     real_sha = bridge._sha
 
     def slow_sha(path):
-        # Every banked unit re-hashes its journal shard once; making that
-        # slower than the cadence makes the replay outlive every window.
-        _time.sleep(cadence_s * 1.5)
-        return real_sha(path)
+        result = real_sha(path)
+        # Keep real verification, advance only the cadence's injected clock.
+        clock[0] += cadence_s * 1.5
+        return result
 
     monkeypatch.setattr(bridge, '_sha', slow_sha)
     during = _replay_drive_writes(monkeypatch, writes)
@@ -155,13 +158,15 @@ def test_overlay_fence_continues_the_count_on_the_cadence(tmp_path, monkeypatch)
     cadence_s = allowance_s / bridge.PROGRESS_CADENCE_SAFETY_FACTOR
     overlay_cells = 3
     calls = []
+    clock = [0.0]
+    monkeypatch.setattr(bridge, "_ProgressCadence", partial(
+        bridge._ProgressCadence, clock=lambda: clock[0]))
 
     def slow_overlay(data, bound, **kwargs):
-        import time as _time
         calls.append(kwargs)
         progress = kwargs.get('progress')
         for index in range(overlay_cells):
-            _time.sleep(cadence_s * 1.5)
+            clock[0] += cadence_s * 1.5
             data.cells[names[0], f'OVERLAY_{index}'] = {'overlay': index}
             if progress is not None:
                 progress(index + 1, f'{names[0]}@OVERLAY_{index}')
