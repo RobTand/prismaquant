@@ -886,6 +886,9 @@ def main(argv=None) -> int:
                          "the own boundary run once per probe for the "
                          "one-pass spill; the quantum refuses a launch in "
                          "the other mode. Default %(default)s")
+    ap.add_argument("--checkpoint-incoming-mode", choices=("stream_once_staged",),
+                    default=None, help="with --executable-readsets: seal checkpoint cotangents "
+                    "in their first consuming phases; no default change (PQ #1366)")
     ap.add_argument("--replay-regime", default=None,
                     help="with --replay-mode spill: the campaign spec's "
                          "PRISMAQUANT_STAGE_B_REPLAY_REGIME (unset: the "
@@ -911,6 +914,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     if args.head_slices and not args.executable_readsets:
         return _fail("--head-slices needs --executable-readsets")
+    if args.checkpoint_incoming_mode is not None and not args.executable_readsets:
+        return _fail("--checkpoint-incoming-mode needs --executable-readsets")
     if args.replay_mode != "windowed" and not args.executable_readsets:
         return _fail("--replay-mode needs --executable-readsets")
     if args.replay_mode != "spill" and (args.replay_regime is not None
@@ -1351,6 +1356,7 @@ def main(argv=None) -> int:
                             head_slice=(head_slices[layer]["binding"]
                                         if head_slices else None),
                             replay_mode=args.replay_mode,
+                            checkpoint_incoming_mode=args.checkpoint_incoming_mode,
                             head_source=head_source,
                             spill_bound=spill_by_layer.get(layer)):
                         emitted.append(row)

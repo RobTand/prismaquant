@@ -33,7 +33,9 @@ def producer_identity():
             "experiment_files": {name: sha256(ROOT / "experiments" / name)
                                  for name in ("glm_tr3_full_vocab.py", "build_glm_tr3_teacher.py",
                                               "measure_glm_tr3_vllm.py", "glm_full_capture_profile.py",
-                                              "workspace_netdata.py")}}
+                                              "workspace_netdata.py")},
+            "measurement_tool_files": {
+                "tools/gold_measurement_fidelity.py": sha256(ROOT / "tools/gold_measurement_fidelity.py")}}
 
 
 def require_reference_binding(binding, identity, model):

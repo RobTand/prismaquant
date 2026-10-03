@@ -437,8 +437,8 @@ def require_producer_tools(
     Since #1587 that roster holds only the supported package entry point
     ``src/tessera/export_serving.py`` (RobTand/tessera#687): the plan
     translation moved in-tree (``prismaquant.tessera_plan_writer``) and the
-    campaign-side projection tool moved to the ``campaign_tools`` roster,
-    resolved by :func:`require_campaign_tools`.  A tool declared
+    campaign-side projection tool moved to the public installed-package
+    ``campaign_tools`` roster. A tool declared
     ``unsupported_experiments`` is not refused, but it must name a tracking
     issue, which ``LaneProducerTool.from_dict`` enforces, and it is echoed
     on every run so the debt is visible where it is being incurred
@@ -480,54 +480,6 @@ def require_producer_tools(
     return tuple(resolved)
 
 
-def require_campaign_tools(
-    env: Mapping[str, str] | None = None,
-) -> tuple[str, ...]:
-    """Refuse unless every tool on the lane's ``campaign_tools`` roster exists.
-
-    The same existence check as :func:`require_producer_tools`, over the
-    second roster (PrismaQuant #1587): dependencies the campaign shells out
-    to that the export arm does not call.  Today that is only the
-    producer's expert projection (``experiments/tessera_producer_plan.py``,
-    tracked by #183), resolved for ``tessera_expert_projection``.  A
-    separate gate rather than a flag on the first one, so the export arm's
-    ``unsupported`` report -- which reads ``producer_tools`` only -- stays a
-    statement about what the arm calls, while the campaign dependency stays
-    named and checked instead of becoming a bare path again.
-    """
-    import os
-
-    from .lane_spec import load_lane_spec
-
-    env = os.environ if env is None else env
-    spec = load_lane_spec("tessera")
-    if not spec.campaign_tools:
-        raise TesseraExportLaneError(
-            "lane_specs/tessera.json declares no `campaign_tools`, but the "
-            "campaign shells out to the producer's expert projection. An "
-            "undeclared external dependency is one nobody can check for"
-        )
-    resolved: list[str] = []
-    for tool in spec.campaign_tools:
-        root = str(env.get(tool.repo_env, "") or "").strip()
-        if not root:
-            raise TesseraExportLaneError(
-                f"{tool.repo_env} is unset, so {tool.path} cannot be located. "
-                "This repository NAMES Tessera's tools instead of vendoring "
-                f"them; point {tool.repo_env} at the checkout of the pinned "
-                "release."
-            )
-        path = Path(root.rstrip("/")) / tool.path
-        if not path.is_file():
-            raise TesseraExportLaneError(
-                f"{path} does not exist. It is declared in "
-                f"lane_specs/tessera.json's campaign_tools as "
-                f"stability={tool.stability!r}"
-                + (f" ({tool.tracking_issue})" if tool.tracking_issue else "")
-                + f": {tool.description}"
-            )
-        resolved.append(str(path))
-    return tuple(resolved)
 
 
 def unsupported_producer_tool_lines(spec) -> list[str]:

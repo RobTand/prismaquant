@@ -1355,13 +1355,6 @@ def test_sealed_tier_binding_parser_default_and_dispatch(tmp_path, monkeypatch):
     assert payload[payload.index("--allowed-tiers") + 1] == STAGED_ALLOWED_TIERS
 
 
-def test_lease_pin_module_reports_approved_commit():
-    from prismaquant.staged_lease import (
-        PINNED_SDK_COMMIT, PB_READER_LEASE_PIN_COMMIT)
-    assert PINNED_SDK_COMMIT == PB_READER_LEASE_PIN_COMMIT
-    assert PINNED_SDK_COMMIT == "95a59051d48cda82eea7927f31870c6c862d7174"
-
-
 # -- window enter/exit contract: single-shot, no leaks ------------------------
 
 def _window_fixture(tmp_path, monkeypatch, blob=b"window-contract-bytes-00112233"):

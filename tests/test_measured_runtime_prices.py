@@ -259,3 +259,26 @@ def test_invalid_resource_values_refused(field, value):
     fields[field] = value
     with pytest.raises(RuntimePriceError):
         RuntimeResources(**fields)
+
+
+@pytest.mark.parametrize("size", [0, 1, 262143, 262144, 262145])
+def test_loader_preserves_raw_binary_receipt_identity(payload, tmp_path, size):
+    raw = (bytes(range(256)) * ((size + 255) // 256))[:size]
+    receipt = tmp_path / "synthetic-receipt.txt"
+    receipt.write_bytes(raw)
+    with receipt.open("rb") as stream:
+        expected = hashlib.file_digest(stream, "sha256").hexdigest()
+    payload["fixed_resources_receipt_sha256"] = expected
+    for row in payload["rows"]:
+        row["prefill"]["receipt_sha256"] = expected
+    path = tmp_path / "table.json"
+    path.write_text(json.dumps(payload))
+    context = parse_runtime_context(payload["context"])
+    table = load_measured_runtime_table(
+        path, expected_context=context, expected_cost_sha256=SHA, now=NOW)
+    assert table.fixed_resources_receipt_sha256 == expected
+    assert all(row.prefill.receipt_sha256 == expected for row in table.rows)
+    receipt.write_bytes(raw + b"\x00")
+    with pytest.raises(RuntimePriceError, match="receipt SHA-256 mismatch"):
+        load_measured_runtime_table(
+            path, expected_context=context, expected_cost_sha256=SHA, now=NOW)

@@ -26,6 +26,7 @@ cache, no cross-layer state, no writes outside
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -40,6 +41,7 @@ from types import SimpleNamespace
 
 import torch
 
+from .digests import bytes_sha256hex
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .cost_currency import probe_identity_seals, probe_identity_walls_differ
 from .dev_mode import seal_check
@@ -197,15 +199,20 @@ def verify_quantum_identity(
     prepared_path: Path, prepared_sha256: str,
     adjoint_path: Path, adjoint_sha256: str,
     output_root: Path,
-) -> tuple[dict, dict]:
+) -> tuple[dict, dict, bytes]:
     """Verify the four digests and the record's campaign binding.
 
     ``adjoint_path`` is the quantum's stage-A slice (PQ #993), never a whole
     receipt: the file is the slice's canonical JSON, so its digest is the
     ``slice_sha256`` the record binds.
 
-    Returns ``(record, adjoint_slice)``; raises :class:`QuantumIdentityRefused`
-    (the caller exits 3) with nothing written. The producer's
+    Returns ``(record, adjoint_slice, record_bytes)``, where ``record_bytes``
+    is the exact owned read the digest check authenticated (PQ #1293): the
+    producer inlines these ORIGINAL bytes in its typed completion so a
+    consumer can bind the pilot to the record that actually ran, without
+    reopening a mutable path or canonical-reencoding. Raises
+    :class:`QuantumIdentityRefused` (the caller exits 3) with nothing written.
+    The producer's
     ``check_quantum_for_campaign`` runs too when the producer module has
     landed; until then the same checks run here from the record's own fields,
     so a record built for another campaign revision refuses the same way.
@@ -225,7 +232,11 @@ def verify_quantum_identity(
         except ValueError:
             raise QuantumIdentityRefused(
                 f"quantum record digest mismatch at {quantum_path}")
-        record = json.loads(raw.decode("utf-8"))
+        from .joint_dispatch_pilot import QUANTUM_RECORD_MAX_BYTES
+        if len(raw) > QUANTUM_RECORD_MAX_BYTES:
+            raise QuantumIdentityRefused("quantum record exceeds the control-byte cap")
+        record_bytes = raw
+        record = json.loads(record_bytes.decode("utf-8"))
         if record.get("schema") != QUANTUM_RECORD_SCHEMA:
             raise QuantumIdentityRefused(
                 f"quantum record schema mismatch: {record.get('schema')!r}")
@@ -357,7 +368,7 @@ def verify_quantum_identity(
     except (KeyError, TypeError, ValueError, OSError) as exc:
         raise QuantumIdentityRefused(
             f"quantum record is not a valid {QUANTUM_RECORD_SCHEMA} document: {exc}") from exc
-    return record, adjoint_slice
+    return record, adjoint_slice, record_bytes
 
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -1596,6 +1607,28 @@ def quantum_adjoint_space(record, adjoint_slice, output_root):
     return space
 
 
+def _authenticate_checkpoint_incoming_readset(record, adjoint_slice, execution):
+    """Bind production streaming to the current PB claim and strict readers.
+
+    Input authority is checked here; ordinary exact readers retain ownership
+    of residency, open lifetimes, and per-payload digest verification.
+    """
+    from .joint_layer_quanta import check_checkpoint_incoming_readset
+    from .residency_map import ENV_VAR as residency_map_env
+    from .staged_lease import ReadsetUnbound, load_sealed_manifest
+    from .staged_tier_policy import active_policy
+    if active_policy() is None or not os.environ.get(residency_map_env):
+        raise QuantumIdentityRefused("checkpoint incoming staged mode requires strict residency context")
+    try:
+        block = record["executable_readset"]
+        manifest = load_sealed_manifest(block["manifest_sha256"])
+        if manifest["annotations"].get("n_probes") != execution["n_probes"]:
+            raise ValueError("checkpoint incoming launch has a foreign probe count")
+        check_checkpoint_incoming_readset(record, manifest, adjoint_slice)
+    except (ReadsetUnbound, ValueError, KeyError, TypeError) as exc:
+        raise QuantumIdentityRefused(f"checkpoint incoming staged readset: {exc}") from exc
+
+
 def run_layer_quantum_core(
     runner, production_cache, calib_ids, formats_by_qname, *,
     record, adjoint_slice, execution, output_root,
@@ -1666,23 +1699,41 @@ def run_layer_quantum_core(
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
 
-    incoming_mode = execution.get("checkpoint_incoming_mode")
+    from .joint_layer_quanta import (
+        CHECKPOINT_INCOMING_STAGED,
+        normalize_checkpoint_incoming_mode,
+    )
+    sealed_block = record.get("executable_readset")
+    try:
+        sealed_incoming_mode = normalize_checkpoint_incoming_mode(
+            sealed_block.get("checkpoint_incoming_mode")
+            if isinstance(sealed_block, dict) else None)
+    except ValueError as exc:
+        raise QuantumIdentityRefused(str(exc)) from exc
+    incoming_mode = execution.get("checkpoint_incoming_mode", sealed_incoming_mode)
     checkpoint_streaming = incoming_mode is not None
     if checkpoint_streaming:
         from .residency_map import ENV_VAR as residency_map_env
         from .staged_tier_policy import active_policy
-        if type(incoming_mode) is not str or incoming_mode != "stream_once_research":
+        if incoming_mode == CHECKPOINT_INCOMING_STAGED:
+            if incoming_mode != sealed_incoming_mode:
+                raise QuantumIdentityRefused("checkpoint incoming mode is not explicitly sealed")
+            _authenticate_checkpoint_incoming_readset(record, adjoint_slice, execution)
+        elif type(incoming_mode) is str and incoming_mode == "stream_once_research":
+            if torch.device(runner.device).type != "cpu":
+                raise QuantumIdentityRefused("checkpoint incoming research is CPU-only")
+            if (record.get("executable_readset") is not None
+                    or os.environ.get(residency_map_env) or active_policy() is not None
+                    or any(execution.get(key) is not None for key in (
+                        "staged_manifest", "staged_manifest_sha256", "data_manifest_sha256"))):
+                raise QuantumIdentityRefused(
+                    "checkpoint incoming research refuses executable/staged read bindings")
+        else:
             raise QuantumIdentityRefused("checkpoint incoming research selection is invalid")
-        if torch.device(runner.device).type != "cpu":
-            raise QuantumIdentityRefused("checkpoint incoming research is CPU-only")
-        if (record.get("executable_readset") is not None
-                or os.environ.get(residency_map_env) or active_policy() is not None
-                or any(execution.get(key) is not None for key in (
-                    "staged_manifest", "staged_manifest_sha256", "data_manifest_sha256"))):
-            raise QuantumIdentityRefused(
-                "checkpoint incoming research refuses executable/staged read bindings")
         if adjoint_handoff is not None or handoff_emitter is not None:
-            raise QuantumIdentityRefused("checkpoint incoming research refuses band-serial handoff")
+            raise QuantumIdentityRefused("checkpoint incoming streaming refuses band-serial handoff")
+    if sealed_incoming_mode is not None and incoming_mode != sealed_incoming_mode:
+        raise QuantumIdentityRefused("checkpoint incoming launch conflicts with sealed mode")
 
     checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
     checkpoint_jobs = publication_job_limit(
@@ -1774,19 +1825,24 @@ def run_layer_quantum_core(
     pass_profile = pass_profile_request()
     if checkpoint_streaming:
         from .joint_adjoint_slices import checkpoint_is_referenced
-        if (chain_regime["batch_size"] != 1 or chain_regime["probe_fusion"]
-                or replay_regime != DEFAULT_REPLAY_REGIME):
+        research = incoming_mode == "stream_once_research"
+        if ((research or record["adjoint"]["chain_layers"])
+                and (chain_regime["batch_size"] != 1 or chain_regime["probe_fusion"]
+                     or replay_regime != DEFAULT_REPLAY_REGIME)):
             raise QuantumIdentityRefused(
-                "checkpoint incoming research refuses nondefault batching/fusion")
-        if workspace_profile is not None or pass_profile is not None:
-            raise QuantumIdentityRefused("checkpoint incoming research refuses capture/shadow profiles")
+                "checkpoint incoming streaming refuses nondefault batching/fusion")
+        if (workspace_profile is not None
+                or (pass_profile is not None and (
+                    research or pass_profile.capture_probes
+                    or pass_profile.windowed_probe is not None))):
+            raise QuantumIdentityRefused("checkpoint incoming streaming refuses capture/shadow profiles")
         if record["adjoint"]["chain_layers"]:
             if not checkpoint_is_referenced(adjoint_slice["checkpoint"]):
                 raise QuantumIdentityRefused(
-                    "checkpoint incoming research first chain requires referenced owner entries")
+                    "checkpoint incoming streaming first chain requires referenced owner entries")
         elif stage_b_spill_config() is None:
             raise QuantumIdentityRefused(
-                "checkpoint incoming research chain-empty consumer requires one-pass spill")
+                "checkpoint incoming streaming chain-empty consumer requires one-pass spill")
     # PQ #1011: an executable read plan is sealed for one replay mode, and a
     # launch in the other mode would stage reads this quantum never makes.
     sealed_spill = False
@@ -2241,7 +2297,7 @@ def run_layer_quantum_core(
         if chain_layers:
             if checkpoint_incoming.session != storage.session:
                 raise QuantumIdentityRefused(
-                    "checkpoint incoming research first chain has a foreign owner session")
+                    "checkpoint incoming streaming first chain has a foreign owner session")
             checkpoint_chain_entries = checkpoint_incoming.references()
         else:
             # Reuse the final-pass incoming seam, including all-complete resume.
@@ -2321,7 +2377,9 @@ def run_layer_quantum_core(
                 "max_resident_bytes": int(storage.config["max_resident_bytes"]),
                 "probes": []}
             if checkpoint_streaming:
-                counters.handoff_incoming["source"] = "checkpoint_research"
+                counters.handoff_incoming["source"] = ("checkpoint_staged"
+                                                        if incoming_mode == CHECKPOINT_INCOMING_STAGED
+                                                        else "checkpoint_research")
         if spill is not None and capture_batch > 1:
             # Before the chain: a batched capture merges samples, so every
             # sample's pass state must be empty (no profile shared state, no
@@ -3626,9 +3684,13 @@ def publish_quantum_outputs(record, *, payload, result, counters,
     result["units_total"] = units_total
     result["passed"] = status == "complete"
     counters = {**counters, "outcome": {"status": status}}
-    atomic_write_bytes(
-        Path(record["output_space"]["counters"]),
-        (json.dumps(counters, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
+    counters_path = Path(record["output_space"]["counters"])
+    counters_bytes = (
+        json.dumps(counters, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
+    atomic_write_bytes(counters_path, counters_bytes)
+    result["counters"] = {"path": str(counters_path),
+                          "sha256": hashlib.sha256(counters_bytes).hexdigest(),
+                          "bytes": len(counters_bytes)}
     atomic_write_bytes(
         Path(record["output_space"]["results"]),
         (json.dumps(result, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
@@ -4123,6 +4185,28 @@ def run_layer_quantum(
     return result
 
 
+def quantum_completion_record(result: Mapping, *, record_bytes: bytes) -> dict:
+    """The producer's single completion record carried by PB stdout.
+
+    ``record_bytes`` is the exact owned quantum wire read the identity gate
+    authenticated (PQ #1293). The consumer binds its pilot to the record that
+    actually ran by comparing these bytes to the sealed ``--quantum-sha256``;
+    the bytes are the ORIGINAL wire, never a canonical re-encoding.
+    """
+    from .joint_dispatch_pilot import QUANTUM_COMPLETION_SCHEMA, QUANTUM_RECORD_MAX_BYTES
+
+    if (not isinstance(record_bytes, bytes) or not record_bytes
+            or len(record_bytes) > QUANTUM_RECORD_MAX_BYTES):
+        raise QuantumIdentityRefused("completion quantum record exceeds the control-byte cap or is absent")
+
+    return {"schema": QUANTUM_COMPLETION_SCHEMA,
+            "quantum_record": base64.b64encode(record_bytes).decode("ascii"),
+            "quantum_record_bytes": len(record_bytes),
+            "quantum_record_sha256": bytes_sha256hex(record_bytes),
+            **{key: result[key] for key in (
+                "quantum_id", "passed", "status", "units_done", "units_total", "counters")}}
+
+
 def progress_grace_stamps(raw: str | None) -> list | None:
     """The dispatcher's grace stamps (load and compute phases), as recorded.
 
@@ -4198,7 +4282,7 @@ def main(argv=None) -> int:
     progress_grace = progress_grace_stamps(args.progress_grace_derivation)
     try:
         require_dev_mode("joint_cost_quantum")
-        record, adjoint_slice = verify_quantum_identity(
+        record, adjoint_slice, record_bytes = verify_quantum_identity(
             quantum_path=args.quantum, quantum_sha256=args.quantum_sha256,
             plan_path=args.plan, plan_sha256=args.plan_sha256,
             prepared_path=args.prepared, prepared_sha256=args.prepared_sha256,
@@ -4286,8 +4370,7 @@ def main(argv=None) -> int:
                 "cumulative").print_stats(100)
             (Path(record["output_space"]["root"]) / "profile.txt").write_text(
                 text.getvalue())
-    print(json.dumps({key: result[key] for key in (
-        "quantum_id", "passed", "status", "units_done", "units_total")}))
+    print(json.dumps(quantum_completion_record(result, record_bytes=record_bytes)))
     if result["status"] != "complete":
         return EXIT_GAPPED
     return EXIT_OK
