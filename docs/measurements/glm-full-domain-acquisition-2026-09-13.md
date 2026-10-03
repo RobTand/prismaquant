@@ -98,3 +98,30 @@ crash: it called a nonexistent `TesseraRateSurface.as_dict()`. A separate
 commit serializes the surface through its existing canonical identity. The
 pre-fix PB receipt `6574670092b2` reaches and records that AttributeError; the
 regression test then passes. No allocator objective or serving gate changed.
+
+## Census completeness repair (2026-10-02, #2132)
+
+The coverage ledger accepts `unit_shapes`, an explicit census mapping from
+Linear name to `(rows, columns)`. Supply it when auditing a model-wide request:
+the priced-row roster alone cannot reveal wholly unmeasured units or families.
+Each requested family retains every legal rate at that unit's actual shape.
+`producer_refused_q256` separately retains shape-illegal rates and their reasons;
+for a real KDA `(8192, 128)` E4M3 Linear, 897 rates remain legal and 896
+are explicitly refused rather than dropping the entire Linear or smoothing
+the odd-q256 quota holes. Priced rows at those refused rates still fail closed.
+Empty ledgers, absent selections and absent unit/family pairs now refuse
+instead of vacuously certifying complete coverage. `missing_acquisition_work`
+retains these missing cells in the existing v1 format. No missing cell receives
+a price, runtime admission, export qualification or quality certification.
+If the producer refuses every rate at a positive shape (for example arity-2
+E2M1 at `(1, 32)`), the ledger retains all refusal reasons but never marks the
+entry complete. Coverage and acquisition selections of such an entry refuse
+with `no producer-legal rates`; no fictional missing legal rate is invented.
+
+The near GLM milestone remains T8-only at the measured EXL3 serialized size.
+The final objective is an actual per-Linear T4/T8/T16 accuracy/size/prefill/decode
+frontier, not a uniform-format artifact or arbitrary weighted scalar default.
+The 42 historical PACT gamut cells and native seven-rung subsets do not define
+the legal q256 domain. Missing native, quality, original-source CUDA and
+construction cells remain repair blockers; scalar screens, historical census
+restamps and the retained TP1 timing pilot cannot authorize production picks.
