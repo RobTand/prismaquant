@@ -17,7 +17,11 @@ from pathlib import Path
 import types
 import weakref
 
-from .digests import bytes_sha256hex, file_sha256hex
+if __package__:
+    from .digests import bytes_sha256hex, file_sha256hex
+else:
+    # The stdlib image driver loads this file without initializing PQ/Torch.
+    from digests import bytes_sha256hex, file_sha256hex
 
 VERSION = 'glm_kda_causal_exp_v1'
 SCHEMA = 'prismaquant.glm_source_derivative.v1'
