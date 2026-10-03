@@ -891,9 +891,34 @@ _QUALITY_MUTATIONS = {
     "cache_bytes": "owned bytes",
 }
 
+@pytest.fixture(scope="module")
+def _glm_quality_template(tmp_path_factory):
+    """Build the expensive real 864-member baseline once, in consumer context."""
+    baseline = []
+
+    def prepare():
+        if not baseline:
+            root = tmp_path_factory.mktemp("glm-quality-template")
+            cell = _glm_cell(root)
+            completion = json.loads((root / "qualified-completion.json").read_text())
+            baseline.append((cell, completion))
+        return baseline[0]
+
+    return prepare
+
+
+@pytest.fixture
+def glm_quality_cell(tmp_path, _glm_quality_template):
+    """Private object graph and freshly bound private files for every mutation."""
+    template, completion = _glm_quality_template()
+    inputs, preflight, rows = copy.deepcopy(template)
+    _bind_glm_quality_fixture(tmp_path, inputs, completion["source_model_identity"],
+                              completion["calibration_input"])
+    return inputs, preflight, rows
+
 
 @pytest.mark.parametrize("mutation", sorted(_QUALITY_MUTATIONS))
-def test_full_quality_and_rank_cut_are_independently_bound(tmp_path, mutation):
+def test_full_quality_and_rank_cut_are_independently_bound(tmp_path, mutation, glm_quality_cell):
     """One forged field per run, each refused by the gate that owns it.
 
     The quality identity is the whole container's render and the cut proof is
@@ -902,7 +927,7 @@ def test_full_quality_and_rank_cut_are_independently_bound(tmp_path, mutation):
     refusal must name the thing that was forged.
     """
     from prismaquant import native_moe_panel as native
-    inputs, preflight, rows = _glm_cell(tmp_path)
+    inputs, preflight, rows = glm_quality_cell
     member = inputs["members"][0]
     joint = rows[member["unit"]]["joint_operator_identity"]
     if mutation == "full_hash":
@@ -1005,7 +1030,7 @@ def test_the_rank_render_proof_moves_its_window_with_the_rank(tmp_path, rank):
     assert member["quality_rendered_weight"]["shape"] == [GLM_INTERMEDIATE, GLM_HIDDEN]
 
 
-def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
+def test_a_glm_288_owner_prices_two_ranks_end_to_end(tmp_path):
     """The main objective's geometry: 288 experts, top-8, TP2, one atomic row.
 
     Nothing here is a measurement -- the receipts are synthetic CPU fixtures --
@@ -1036,19 +1061,13 @@ def test_a_glm_288_owner_prices_two_ranks_end_to_end(joined, tmp_path):
     assert isinstance(admitted.resources, RuntimeRankResources)
     assert admitted.resources.world_size == GLM_TP and len(admitted.resources.ranks) == GLM_TP
     assert panel["execution"]["tensor_parallel"] == GLM_TP
-
-
-def test_a_glm_owner_is_refused_a_single_rank_vector_for_a_two_rank_world(joined, tmp_path):
-    """288 experts do not change the rule: one rank's bound is not the world's."""
-    cell = _glm_cell(tmp_path)
-    phases = _one_token_phases(hidden=GLM_HIDDEN, top_k=8)
-    item, _context, _relation, _panel, receipts = _routed_gate(
-        cell, tmp_path, world_size=GLM_TP, phases=phases, route_shape=GLM_ROUTE_SHAPE)
-    collapsed = copy.deepcopy(item["row"]["resources"])
+    # Reuse the same genuine world row for its single-rank-vector refusal.
+    # The parse mutates no file or row; only the private copy is truncated.
+    collapsed = copy.deepcopy(resources)
     collapsed["ranks"] = collapsed["ranks"][:1]
     with pytest.raises(RuntimePriceError, match="exactly one record per rank"):
         parse_row_resources(collapsed, tensor_parallel=GLM_TP, where="glm row")
-    assert len(receipts) == GLM_TP
+    assert len(_receipts) == GLM_TP
 
 
 # --------------------------------------------------------------------------
