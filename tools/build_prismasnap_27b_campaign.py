@@ -31,7 +31,13 @@ _CLUSTER_SPEC = importlib.util.spec_from_file_location(
 if _CLUSTER_SPEC is None or _CLUSTER_SPEC.loader is None:  # pragma: no cover
     raise RuntimeError(f"cannot load cluster campaign module: {_CLUSTER_CAMPAIGN_PATH}")
 _cluster_campaign = importlib.util.module_from_spec(_CLUSTER_SPEC)
-_CLUSTER_SPEC.loader.exec_module(_cluster_campaign)
+# A synthetic file load lacks the sibling search path a direct script gets.
+# Expose the shared stdlib digest owner only during this host-only import.
+sys.path.insert(0, str(_CLUSTER_CAMPAIGN_PATH.parent))
+try:
+    _CLUSTER_SPEC.loader.exec_module(_cluster_campaign)
+finally:
+    sys.path.pop(0)
 CAMPAIGN_MANIFEST_SCHEMA_V2 = _cluster_campaign.CAMPAIGN_MANIFEST_SCHEMA_V2
 canonical_sha256 = _cluster_campaign.canonical_sha256
 seal_campaign_manifest_v2 = _cluster_campaign.seal_campaign_manifest_v2
