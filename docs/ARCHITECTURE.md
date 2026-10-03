@@ -4143,6 +4143,16 @@ identity or a resource ceiling (`max_*bytes`, `gpu_bytes`, `limits`), including
 field names carried by an enclosing loop over a literal. Each allowlist entry
 names its kind (integrity, structure, wall, resource or ambiguous) and its
 reason.
+Pilot admission preserves a separate qualification boundary (#2136): original
+quantum and counters bytes must match the authenticated PB producer, and source
+contract bytes must match the independently reviewed input. The source contract
+names the proposed implementation, and the counters name their original quantum
+record. These are byte-integrity/internal qualification checks, not resume
+comparisons with a running campaign. Their exact sites remain ratcheted; the
+existing explicit, recorded `--force-unverified-pilot` override is unchanged.
+Adaptive progress fixtures likewise carry the current `fp8_e4m3` scoring
+contract so rejection, durable partial-success resume, and hard-error tests
+exercise the scheduler rather than failing earlier on obsolete `a8` metadata.
 
 Dev mode also skips work that only a seal needed. A chain resume does not
 rebuild the source model identity; it records `not computed`. The catalog

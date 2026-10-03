@@ -174,7 +174,10 @@ def test_mx_power2_rounding_keeps_its_bits(site, device):
 # ---------------------------------------------------------------------------
 # 3. The GGUF imatrix from the activation cache.
 # ---------------------------------------------------------------------------
-from prismaquant.moe_imatrix import build_imatrix_from_act_cache
+IMATRIX_SITES = [
+    "prismaquant.export_gguf.build_imatrix_from_act_cache",
+    "prismaquant.export_gguf_direct.build_direct_imatrix",
+]
 
 
 @pytest.fixture(scope="module")
@@ -245,20 +248,15 @@ def _imatrix_bits(value):
     return result
 
 
-def test_imatrix_keeps_its_bits(act_dir, tmp_path):
-    # Each nonempty fixture column has squared sum t * scale**2 over t rows.
-    # Assert that independent closed-form result, not a copy of the reducer.
-    squared_scales = torch.tensor([1/16, 1/4, 1., 4., 16.])
-    expected = {name: squared_scales[torch.arange(width) % 5]
-                for name, width in (("model.layers.0.mlp.experts", 48),
-                                    ("model.layers.0.self_attn.q_proj", 96),
-                                    ("model.layers.1.mlp.down_proj", 40),
-                                    ("model.layers.2.mlp.up_proj", 8))}
-    expected['g'] = torch.full((8,), float('nan'))
-    for path in (act_dir, str(act_dir)):
-        actual = build_imatrix_from_act_cache(path)
-        assert _imatrix_bits(actual) == _imatrix_bits(expected)
-    assert build_imatrix_from_act_cache(tmp_path / 'missing') == {}
+@pytest.mark.parametrize("site", IMATRIX_SITES)
+def test_imatrix_keeps_its_bits(site, act_dir, tmp_path):
+    fn = _site(site)
+    _check(lambda: fn(act_dir), tmp=act_dir, table=CPU_GOLDEN,
+           bits=_imatrix_bits)
+    _check(lambda: fn(str(act_dir)), tmp=act_dir, table=CPU_GOLDEN,
+           bits=_imatrix_bits)
+    _check(lambda: fn(tmp_path / "missing"), tmp=tmp_path, table=CPU_GOLDEN,
+           bits=_imatrix_bits)
 
 
 # ---------------------------------------------------------------------------
