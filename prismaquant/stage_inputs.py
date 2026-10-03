@@ -24,8 +24,10 @@ from .schemas import Contract
 require = Contract(ValueError).require
 
 
-def same(actual, expected, label):
-    require(actual == expected, f"{label}: identity mismatch")
+def same(actual, expected, label, *, contract: Contract | None = None):
+    """Compare identity with the caller's refusal vocabulary, or the stage default."""
+    check = require if contract is None else contract.require
+    check(actual == expected, f"{label}: identity mismatch")
 
 
 def bound(record, label):

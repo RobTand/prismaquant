@@ -1171,3 +1171,81 @@ def test_original_source_execution_cannot_inherit_derivative_or_different_dispat
         execution['modules'][metadata['unit']]['experts'] = 'different_dispatch'
     with pytest.raises((ValueError, RuntimeError)):
         original_protocol_intake(case)
+
+
+def test_native_source_execution_owner_keeps_isinstance_and_unsorted_json_policy():
+    from prismaquant import joint_aura, native_moe_panel
+
+    class Selector(str):
+        pass
+
+    value = {'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {
+        '': {'attention': Selector('eager'), 'experts': Selector('grouped_mm')},
+        Selector('u'): {'attention': Selector('eager'), 'experts': Selector('grouped_mm')},
+        'extra': {'attention': {2: 'café', 'z': '\ud800'}}}}
+    assert native_moe_panel.require_native_source_execution is joint_aura.require_native_source_execution
+    assert joint_aura.require_native_source_execution(value, unit='u') is value
+    # Mixed leaf keys retain the native reader's unsorted JSON acceptance; an
+    # Original control separately refuses this selector's non-string leaf key.
+    assert json.dumps(value, allow_nan=False).encode('utf-8')
+
+
+@pytest.mark.parametrize(('value', 'message'), [
+    (None, 'native MoE requires explicit source execution identity'),
+    ({'schema': 'prismaquant.joint_aura.source_execution.v2', 'modules': {}},
+     'native MoE requires explicit source execution identity'),
+    ({'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {}},
+     'native MoE requires explicit source execution identity'),
+    ({'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {2: {'attention': 'eager'}}},
+     'native MoE source execution selectors are malformed'),
+    ({'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {'u': {}}},
+     'native MoE source execution selectors are malformed'),
+    ({'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {'u': {'unknown': 'eager'}}},
+     'native MoE source execution selectors are malformed'),
+    ({'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {
+        '': {'attention': 'eager', 'experts': 'grouped_mm'}}},
+     'native MoE source execution lacks resolved root/target backends'),
+    ({'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {
+        '': {'attention': 'sdpa', 'experts': 'grouped_mm'},
+        'u': {'attention': 'eager', 'experts': 'grouped_mm'}}},
+     'native MoE source execution lacks resolved root/target backends'),
+    ({'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {
+        '': {'attention': 'eager', 'experts': 'grouped_mm'},
+        'u': {'attention': 'eager', 'experts': None}}},
+     'native MoE source execution lacks resolved root/target backends'),
+])
+def test_native_source_execution_owner_keeps_exact_envelope_and_backend_refusals(value, message):
+    from prismaquant.joint_aura import require_native_source_execution
+
+    with pytest.raises(ValueError) as caught:
+        require_native_source_execution(value, unit='u')
+    assert str(caught.value) == message
+    assert caught.value.__cause__ is None
+
+
+def test_native_source_execution_owner_still_requires_dictionary_envelope():
+    from types import MappingProxyType
+    from prismaquant.joint_aura import require_native_source_execution
+
+    value = MappingProxyType({'schema': 'prismaquant.joint_aura.source_execution.v1',
+        'modules': {'': {'attention': 'eager', 'experts': 'grouped_mm'},
+                    'u': {'attention': 'eager', 'experts': 'grouped_mm'}}})
+    with pytest.raises(ValueError) as caught:
+        require_native_source_execution(value, unit='u')
+    assert str(caught.value) == 'native MoE requires explicit source execution identity'
+
+
+@pytest.mark.parametrize('leaf', [float('nan'), float('inf'), float('-inf'), object()])
+def test_native_source_execution_owner_keeps_strict_json_error(leaf):
+    from prismaquant.joint_aura import require_native_source_execution
+
+    value = {'schema': 'prismaquant.joint_aura.source_execution.v1', 'modules': {
+        '': {'attention': 'eager', 'experts': 'grouped_mm'},
+        'u': {'attention': 'eager', 'experts': 'grouped_mm'},
+        'extra': {'attention': leaf}}}
+    with pytest.raises((TypeError, ValueError)) as previous:
+        json.dumps(value, allow_nan=False)
+    with pytest.raises(type(previous.value)) as current:
+        require_native_source_execution(value, unit='u')
+    assert str(current.value) == str(previous.value)
+    assert current.value.__cause__ is None
