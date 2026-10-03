@@ -92,6 +92,22 @@ def test_v11_cell_cannot_claim_an_uncensused_run_table():
         _parse(payload)
 
 
+@pytest.mark.parametrize("rungs", [None, [], [True], [[896]], [896, 896]])
+def test_v11_malformed_census_is_a_named_refusal(rungs):
+    payload = _payload()
+    payload["lane_eligibility"]["cells"][0]["rungs_q256"] = rungs
+    with pytest.raises(runtime.TesseraContractError, match="rungs_q256"):
+        _parse(payload)
+
+
+def test_v11_does_not_remove_the_plugin_requirement():
+    payload = _payload()
+    del payload["lane_eligibility"]["cells"][0]["requires_plugin"]
+    with pytest.raises(runtime.TesseraContractError, match="requires_plugin"):
+        _parse(payload)
+
+
+
 def test_v11_exclusions_change_coverage_and_reviewed_answer():
     payload = _payload()
     before = _parse(payload)

@@ -1905,7 +1905,7 @@ def _cell_rule_coverage(payload: Mapping[str, Any],
                         ) -> tuple[tuple[tuple[int, ...], ...], tuple[int, ...]]:
     if not isinstance(payload, Mapping):
         raise LaneEligibilityError(f"{where} must be a JSON object")
-    census = payload.get("rungs_q256", ())
+    census = _parse_rungs(payload.get("rungs_q256"), f"{where}.rungs_q256")
     want = sorted({allowable[q] for q in census if q in allowable})
     got = payload.get("run_tables", [])
     if got != [list(t) for t in want]:
