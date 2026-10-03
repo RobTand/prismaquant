@@ -125,7 +125,7 @@ def test_actual_build_refuses_changed_runtime_configuration(actual_derivative_bu
     build = actual_derivative_build
     build["corrected_image"]["Config"]["Env"].append("PRISMAQUANT_WRONG_RUNTIME=1")
     assert identity.image_content_sha256(build["corrected_image"]) != build["corrected_image_content_sha256"]
-    with pytest.raises(RuntimeError, match="image build config or layer content differs"):
+    with pytest.raises(ValueError, match="image build config or layer content differs"):
         validate_image_build(build)
 
 
