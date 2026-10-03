@@ -1,16 +1,19 @@
 """Finite PB fixture action using the existing container adapter and raw Netdata."""
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import shlex
+import stat
 import subprocess
 import time
 import urllib.parse
 
 from tools.tessera_campaign_container import main as container_main
+from prismaquant.file_identity import file_stat_signature
 
 PQ_IMAGE='d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026'
 CONTEXTS={'system.cpu','system.ram','system.io','system.load','nvidia_smi.gpu_power_draw'}
@@ -116,6 +119,22 @@ def main():
         finish=time.time()
         observations=[]
         errors=[]
+        profile_evidence=None
+        profile_errors=[]
+        if not a.cpu_preflight:
+            try:
+                fd=os.open(profile,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW|os.O_NONBLOCK)
+                with os.fdopen(fd,'rb') as trace:
+                    before=os.fstat(trace.fileno())
+                    if not stat.S_ISREG(before.st_mode) or before.st_size<=0:
+                        raise RuntimeError('granted Torch trace is missing/empty/nonregular')
+                    digest=hashlib.file_digest(trace,'sha256').hexdigest()
+                    if (file_stat_signature(os.fstat(trace.fileno()))!=file_stat_signature(before)
+                            or file_stat_signature(os.stat(profile,follow_symlinks=False))!=file_stat_signature(before)):
+                        raise RuntimeError('granted Torch trace changed while binding')
+                profile_evidence=dict(path=profile,bytes=before.st_size,sha256=digest)
+            except BaseException as exc:
+                profile_errors.append(dict(path=profile,error=f'{type(exc).__name__}: {exc}'))
         if charts:
             padding=2*max(meta['update_every'] for host in charts.values() for meta in host.values())
             with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
@@ -128,10 +147,11 @@ def main():
                         errors.append(dict(host=host,error=str(exc)))
         (a.out/'action-result.json').write_text(json.dumps(dict(returncode=code,
             start_unix=start,finish_unix=finish,cpu_preflight=a.cpu_preflight,
-            netdata=observations,netdata_errors=errors,automatic_capture_qualified=False,
+            netdata=observations,netdata_errors=errors,torch_trace=profile_evidence,
+            torch_trace_errors=profile_errors,automatic_capture_qualified=False,
             actual_glm=False),indent=2)+'\n')
-        if errors:
-            raise RuntimeError('required raw Netdata evidence incomplete: '+repr(errors))
+        if errors or profile_errors:
+            raise RuntimeError('required raw Netdata/Torch trace evidence incomplete: '+repr(errors+profile_errors))
     return code
 
 
