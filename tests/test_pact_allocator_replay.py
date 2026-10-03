@@ -79,7 +79,11 @@ def _fixture(tmp_path, monkeypatch, *, units=None):
     import hashlib
 
     receipt = tmp_path / "bench.json"
-    receipt.write_text("Synthetic CPU test fixture, not GPU measurement evidence.\n")
+    # The shape reader parses every receipt as JSON, even legacy digest-only
+    # artifacts. This is deliberately NOT a checker receipt or observation:
+    # synthetic prices test allocation mechanics, never measurement authority.
+    receipt.write_text(json.dumps({"synthetic_cpu_fixture": True,
+                                   "gpu_measurement_evidence": False}))
     receipt_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
     regime = srp.regime_for_m(M)
     rows = []
