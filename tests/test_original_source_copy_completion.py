@@ -284,11 +284,38 @@ def test_double_fence_failure_roots_abandoned_owner_until_explicit_recovery(
         material, monkeypatch, fault):
     import os
 
+    close_snapshots = []
+
     class Stream:
+        device = torch.device('cuda:0')
+        cuda_stream = 91
         fail = True
         calls = 0
         def synchronize(self):
             self.calls += 1
+            if self.calls > 1:
+                # Explicit recovery must allow another reader to inspect debt
+                # without admitting a new material/copy consumer mid-drain.
+                owner = reference()
+                failures = []
+                def inspect_during_drain():
+                    try:
+                        close_snapshots.append(owner.receipt())
+                        with pytest.raises(RuntimeError, match='close is draining'):
+                            with owner.material_window([owner.root / 'one.safetensors']):
+                                pytest.fail('material was admitted during fatal recovery')
+                        extra = ls._SourceCopyCompletion(
+                            torch.device('cuda:0'), enabled=True, source_owner=owner)
+                        with pytest.raises(RuntimeError, match='close is draining'):
+                            extra.retain(torch.ones(1))
+                    except BaseException as error:
+                        failures.append(error)
+                observer = threading.Thread(target=inspect_during_drain, daemon=True)
+                observer.start()
+                observer.join(timeout=5)
+                assert not observer.is_alive(), 'receipt reader blocked on the hardware drain'
+                if failures:
+                    raise failures[0]
             if self.fail:
                 raise RuntimeError('fatal exact-stream drain failure')
 
@@ -352,6 +379,14 @@ def test_double_fence_failure_roots_abandoned_owner_until_explicit_recovery(
     stream.fail = False
     assert cc.CaptureSourceAuthentication.close_failed_original_copies() == 1
     assert stream.calls == 4
+    assert len(close_snapshots) == 3
+    for snapshot in close_snapshots:
+        assert snapshot['material_live_bytes'] == len(material['raws']['one.safetensors'])
+        pending, = snapshot['pending_copy_completions']
+        assert pending['device'] == 'cuda:0' and pending['stream_id'] == 91
+        assert pending['fence'] is None and pending['failed'] is True
+        assert pending['retained_host_aliases'] > 0
+        assert pending['files'] == {'one.safetensors': 1}
     assert not cc._FAILED_ORIGINAL_COPY_OWNERS
     gc.collect()
     assert reference() is None
