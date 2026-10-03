@@ -238,7 +238,7 @@ def tessera_attesting_cells(
         cell for cell in table.cells
         if cell.is_trellis
         and cell.family == family
-        and rate in cell.rungs_q256
+        and cell.covers_rate(rate)
         and cell.qualification == "device_qualified"
         and cell.route_status in _NATIVE_ROUTE_STATUSES
         and (ignore_evidence or cell_evidence_admits(cell)[0])
