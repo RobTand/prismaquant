@@ -11,6 +11,7 @@ import inspect
 import json
 import math
 import platform
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -451,6 +452,17 @@ def _environment_matches(runtime):
     _same(modeling['path'], str(installed), 'original installed modeling source path')
     _same(file_sha256hex(Path(modeling['path'])), modeling['sha256'], 'installed modeling source')
     return sdk, claim
+
+
+def original_checkpoint_description(source_model, owner):
+    """Read checkpoint metadata only from the existing qualified original owner."""
+    from .tessera_calibration_cache import CaptureSourceAuthentication
+
+    if not isinstance(owner, CaptureSourceAuthentication) or not owner.is_qualified_original_material:
+        raise RuntimeError("original identity requires the qualified existing original owner")
+    if os.path.abspath(str(source_model)) != str(owner.root):
+        raise RuntimeError("original identity source root differs from its owner")
+    return owner.original_checkpoint_descriptor()
 
 
 def original_source_runtime(runner, owner):
