@@ -30,7 +30,7 @@ def cuda_entry_preflight(args, torch):
         if value.device.type!='cuda' or result.device.type!='cuda':
             raise RuntimeError('entry proof did not allocate/execute on CUDA')
         torch.cuda.synchronize()
-        if not torch.equal(result.cpu(),torch.arange(32,dtype=torch.float32).square()+3):
+        if not torch.equal(result.cpu(),torch.arange(32,dtype=torch.float32,device='cpu').square()+3):
             raise RuntimeError('real CUDA entry work differs from independent CPU reference')
     profiler.export_chrome_trace(profile)
     opener=gzip.open if profile.endswith('.gz') else open
