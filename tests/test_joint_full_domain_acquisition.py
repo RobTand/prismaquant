@@ -194,3 +194,26 @@ def test_cli_default_does_not_silently_select_joint_currency(joint_payload, tmp_
     assert done.returncode != 0
     assert "requires measured scalar render-score" in done.stderr
     assert not out.exists()
+
+
+def test_rehashed_calibration_change_cannot_leave_the_bound_run(joint_payload):
+    payload = copy.deepcopy(joint_payload)
+    name, _ = selection(payload)
+    for fmt, old in payload["costs"][name].items():
+        probe = copy.deepcopy(old["probe_identity"])
+        probe["calibration_sha256"] = "e" * 64
+        operator = copy.deepcopy(old["joint_operator_identity"])
+        operator["probe_identity_sha256"] = identity_sha256(probe)
+        payload["costs"][name][fmt] = make_joint_aura_entry(
+            operator_identity=operator, probe_identity=probe,
+            signed_components=old["signed_components_per_probe"])
+    with pytest.raises((ValueError, CostCurrencyError), match="probe|calibration"):
+        acquire(payload)
+
+
+def test_nonmapping_row_does_not_become_an_unmeasured_family(joint_payload):
+    payload = copy.deepcopy(joint_payload)
+    name, _ = selection(payload)
+    payload["costs"][name][FORMATS[0]] = "error: unbound scalar summary"
+    with pytest.raises(ValueError, match="raw row mappings"):
+        acquire(payload)

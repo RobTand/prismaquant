@@ -261,7 +261,11 @@ def joint_acquisition_from_cost_data(cost_data, unit_shapes, families, *,
         records_by_family = {family: [] for family in families}
         raw_by_family = {family: {} for family in families}
         source_identity = None
+        if not isinstance(cost_data["costs"][unit], dict):
+            raise ValueError(f"joint acquisition cost unit is not a row mapping: {unit}")
         for fmt, row in sorted(cost_data["costs"][unit].items()):
+            if not isinstance(row, dict):
+                raise ValueError(f"joint acquisition requires raw row mappings: {unit}/{fmt}")
             if "error" in row:
                 continue
             operator = row["joint_operator_identity"]
