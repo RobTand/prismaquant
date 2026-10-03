@@ -1905,9 +1905,10 @@ class _SourceCopyCompletion:
 
     def retain(self, tensor):
         if self.enabled and tensor.device.type == 'cpu':
-            self.host_staging.append(tensor)
-            if self.source_owner is not None:
-                self.source_owner._observe_original_copy_sources(self, tensor)
+            if self.source_owner is None:
+                self.host_staging.append(tensor)
+            else:
+                self.source_owner._retain_original_host_staging(self, tensor)
 
     def observed(self, tensor):
         self.cuda_copied |= tensor.device.type == 'cuda'
@@ -1919,8 +1920,9 @@ class _SourceCopyCompletion:
             if self.stream is not None and self.stream != stream:
                 raise RuntimeError('source copy completion spans different CUDA streams')
             if self.stream is None and self.source_owner is not None:
-                self.source_owner._retain_original_copy_completion(self)
-            self.stream = stream
+                self.source_owner._retain_original_copy_completion(self, stream)
+            else:
+                self.stream = stream
             # An exception from the copy API does not prove nothing was
             # enqueued; the owning stream must drain in that case too.
             self.cuda_copied = True
@@ -1938,8 +1940,6 @@ class _SourceCopyCompletion:
                 event.record(self.stream if self.stream is not None
                              else torch.cuda.current_stream(self.device))
                 event.synchronize()
-                self._original_fence = 'cuda_event_synchronize'
-                self._original_retained_aliases = len(self.host_staging)
             except BaseException:
                 if self.source_owner is not None and self.stream is not None:
                     try:
@@ -1949,20 +1949,21 @@ class _SourceCopyCompletion:
                         # not retire storage while completion is unproved.
                         self.source_owner._root_failed_original_copy(self)
                     else:
-                        self.source_owner._release_original_copy_completion(self)
+                        self.source_owner._release_original_copy_completion(self,
+                            fence='cuda_stream_synchronize_after_event_failure')
                 # Preserve the failed event proof, even after a safe drain.
                 raise
-        self.host_staging.clear()
         if self.source_owner is not None and self.stream is not None:
-            self.source_owner._release_original_copy_completion(self)
+            self.source_owner._release_original_copy_completion(self, fence='cuda_event_synchronize')
+        else:
+            self.host_staging.clear()
 
     def drain_failed_copy(self):
         # No event proof survived. The exact owning stream is the fence;
         # failed synchronization must leave every host alias held.
         self.stream.synchronize()
-        self._original_fence = 'cuda_stream_synchronize_after_event_failure'
-        self._original_retained_aliases = len(self.host_staging)
-        self.host_staging.clear()
+        if self.source_owner is None:
+            self.host_staging.clear()
 
 
 def _read_layer_to_device(prefix: str,

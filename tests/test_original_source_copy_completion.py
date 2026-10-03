@@ -403,3 +403,100 @@ def test_same_generation_and_stream_preserve_success_before_failed_fence_recover
     del native
     gc.collect()
     assert owner.material_live_bytes == 0
+
+
+@pytest.mark.parametrize('fallback', [False, True])
+def test_native_shaped_cpu_spy_receipt_registration_and_fence_transition_are_atomic(
+        material, monkeypatch, fallback):
+    """Native-shaped identities test lock ordering, not CUDA qualification."""
+    from safetensors import safe_open
+
+    owner = _owner(material)
+    path = owner.root / 'one.safetensors'
+    snapshots, lock_observations = [], []
+
+    class Stream:
+        device = torch.device('cuda:0')
+        cuda_stream = 73
+        def synchronize(self):
+            assert not owner._lock._is_owned()
+            snapshots.append(owner.receipt())
+            assert owner.material_live_bytes > 0
+
+    stream = Stream()
+
+    class Event:
+        def record(self, observed):
+            assert observed is stream
+        def synchronize(self):
+            assert not owner._lock._is_owned()
+            snapshots.append(owner.receipt())
+            if fallback:
+                raise RuntimeError('CPU-spied event failure')
+
+    class Registered(set):
+        def add(self, completion):
+            super().add(completion)
+            # Reentrant inspection of the published registration cannot see
+            # a missing stream/device, even before the copy call begins.
+            snapshots.append(owner.receipt())
+
+    class Retained(list):
+        def clear(self):
+            def inspect():
+                acquired = owner._lock.acquire(blocking=False)
+                lock_observations.append(acquired)
+                if acquired:
+                    try:
+                        snapshots.append(owner.receipt())
+                    finally:
+                        owner._lock.release()
+            thread = threading.Thread(target=inspect)
+            thread.start()
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+            super().clear()
+
+    original_to = torch.Tensor.to
+    def transfer(tensor, target=None, *args, **kwargs):
+        if isinstance(target, torch.device) and target.type == 'cuda':
+            snapshots.append(owner.receipt())
+            return FakeCudaTensor(tensor.clone())
+        return original_to(tensor, target, *args, **kwargs) if target is not None else original_to(tensor, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, 'to', transfer)
+    monkeypatch.setattr(torch.cuda, 'current_stream', lambda *args: stream)
+    monkeypatch.setattr(torch.cuda, 'Event', Event)
+    owner._original_copy_completions = Registered()
+    completion = ls._SourceCopyCompletion(torch.device('cuda:0'), enabled=True, source_owner=owner)
+    completion.host_staging = Retained()
+    with owner.material_window([path]):
+        with owner.safe_open(safe_open, path, framework='pt') as reader:
+            native = reader.get_tensor('w')
+    try:
+        if fallback:
+            with pytest.raises(RuntimeError, match='CPU-spied event failure') as failed:
+                with completion:
+                    completion.copy(native)
+            _clear_frames(failed.value)
+        else:
+            with completion:
+                completion.copy(native)
+        assert lock_observations == [False]
+        assert snapshots
+        for snapshot in snapshots:
+            pending = snapshot['pending_copy_completions']
+            assert len(pending) == 1
+            assert pending[0]['device'] == 'cuda:0' and pending[0]['stream_id'] == 73
+            assert pending[0]['fence'] is None and pending[0]['retained_host_aliases'] > 0
+            assert pending[0]['files'] and snapshot['material_live_bytes'] > 0
+        final = owner.receipt()
+        assert not final['pending_copy_completions']
+        assert len(final['copy_completions']) == 1
+        assert final['copy_completions'][0]['retained_host_aliases'] == 0
+        assert final['copy_completions'][0]['fence'] == (
+            'cuda_stream_synchronize_after_event_failure' if fallback else 'cuda_event_synchronize')
+    finally:
+        del native
+        gc.collect()
+        owner.close()

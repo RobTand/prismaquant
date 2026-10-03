@@ -547,11 +547,14 @@ class CaptureSourceAuthentication:
                              for name, row in sorted(coordinates.items()) if name not in weights],
             }
 
-    def _observe_original_copy_sources(self, completion, tensor):
-        # Native source storage identity, not pathname or a predicted readset.
+    def _retain_original_host_staging(self, completion, tensor):
+        # Alias retention and its native source join share the receipt lock.
         key = tensor.untyped_storage()._cdata
         with self._lock:
             self._require_open()
+            if self._original_close_in_progress:
+                raise RuntimeError('original material close is draining source copies')
+            completion.host_staging.append(tensor)
             for name, state in self._files.items():
                 if key in state.get('storages', {}):
                     completion._original_sources[name] = self._original['verified'][name]['delivery_index']
@@ -570,20 +573,27 @@ class CaptureSourceAuthentication:
             retained_host_aliases=len(completion.host_staging),
             host_aliases_at_fence=completion._original_retained_aliases)
 
-    def _retain_original_copy_completion(self, completion):
+    def _retain_original_copy_completion(self, completion, stream):
         with self._lock:
             self._require_open()
             if self._original is None:
                 raise RuntimeError('original copy completion requires the original source owner')
+            if self._original_close_in_progress:
+                raise RuntimeError('original material close is draining source copies')
             if any(value.failed for value in self._original_copy_completions):
                 raise RuntimeError('original source has unproved CUDA completion; close/recover before more copies')
+            completion.stream = stream
             self._original_copy_completions.add(completion)
 
-    def _release_original_copy_completion(self, completion):
+    def _release_original_copy_completion(self, completion, *, fence):
         with self._lock:
+            # The hardware fence has already completed OUTSIDE this lock.
+            # No receipt can observe a half-retired pending completion.
+            completion._original_fence = fence
+            completion._original_retained_aliases = len(completion.host_staging)
+            completion.host_staging.clear()
             witness = self._original_copy_receipt(completion)
-            if witness['fence'] is not None:
-                self._original['completed_copies'].append(witness)
+            self._original['completed_copies'].append(witness)
             self._original_copy_completions.remove(completion)
             if not any(value.failed for value in self._original_copy_completions):
                 with _FAILED_ORIGINAL_COPY_LOCK:
@@ -639,6 +649,8 @@ class CaptureSourceAuthentication:
         names = sorted({self._name(path) for path in paths})
         with self._lock:
             self._require_open()
+            if self._original_close_in_progress:
+                raise RuntimeError('original material close is draining source copies')
             if self._original is None or not names:
                 raise RuntimeError('qualified original material window required')
             self._reap_original_material()
@@ -719,6 +731,7 @@ class CaptureSourceAuthentication:
         self._closed = False
         self._original = None
         self._original_copy_completions = set()
+        self._original_close_in_progress = False
 
     def __enter__(self):
         self._require_open()
@@ -741,6 +754,8 @@ class CaptureSourceAuthentication:
         name = self._name(path)
         with self._lock:
             self._require_open()
+            if self._original_close_in_progress:
+                raise RuntimeError('original material close is draining source copies')
             if self._original is not None and not self._original['windows'].get(name):
                 raise RuntimeError('original source read requires an active material window')
             if name not in self._files:
@@ -1225,38 +1240,57 @@ class CaptureSourceAuthentication:
             raise RuntimeError('complete capture source authentication omitted a file')
         return receipt
 
+    def _finish_close_locked(self):
+        try:
+            self.require_unchanged()
+        finally:
+            self._closed = True
+            for name, state in self._files.items():
+                if (self.is_recording and self.release_read_pages
+                        and name not in self._released):
+                    # The bounded page policy's last word: nothing this
+                    # owner retained outlives it. Advice only, so a
+                    # failure to advise never leaks a descriptor.
+                    try:
+                        os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
+                    except OSError:
+                        pass
+                self._close_source_state(state)
+
     def close(self):
         with self._lock:
             if self._closed:
                 return
             if self._readers:
                 raise RuntimeError('cannot close capture source with active readers')
+            if self._original is None:
+                self._finish_close_locked()
+                return
+            completions = ()
             if self._original is not None:
+                if self._original_close_in_progress:
+                    raise RuntimeError('original material close is already draining source copies')
                 if any(not value.failed for value in self._original_copy_completions):
                     raise RuntimeError('cannot close original material with active source copies')
-                # Registered before enqueue, these holds survive dropped error
-                # frames. A failed drain leaves the owner open and charged.
-                for completion in tuple(self._original_copy_completions):
-                    completion.drain_failed_copy()
-                    self._release_original_copy_completion(completion)
-                self._reap_original_material()
-                if self._files or any(self._original['windows'].values()):
-                    raise RuntimeError('cannot close original material with live readers or consumers')
-            try:
-                self.require_unchanged()
-            finally:
-                self._closed = True
-                for name, state in self._files.items():
-                    if (self.is_recording and self.release_read_pages
-                            and name not in self._released):
-                        # The bounded page policy's last word: nothing this
-                        # owner retained outlives it. Advice only, so a
-                        # failure to advise never leaks a descriptor.
-                        try:
-                            os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
-                        except OSError:
-                            pass
-                    self._close_source_state(state)
+                completions = tuple(self._original_copy_completions)
+                self._original_close_in_progress = True
+        try:
+            # Hardware drains never hold the receipt lock. Pending snapshots
+            # remain truthful while a fatal fence is outstanding; new material
+            # consumers cannot race this explicit close.
+            for completion in completions:
+                completion.drain_failed_copy()
+                self._release_original_copy_completion(completion,
+                    fence='cuda_stream_synchronize_after_event_failure')
+            with self._lock:
+                if self._original is not None:
+                    self._reap_original_material()
+                    if self._files or any(self._original['windows'].values()):
+                        raise RuntimeError('cannot close original material with live readers or consumers')
+                self._finish_close_locked()
+        finally:
+            with self._lock:
+                self._original_close_in_progress = False
 
 
 class _CaptureSourceSafeOpen:
