@@ -76,6 +76,14 @@ identity, receipt, original record and independently bound source contract.
 PB alone owns placement and retry. PQ adds no CAS reader, Git materializer,
 cache, dispatcher or serving runtime.
 
+CPU consumer smoke also runs the production `Gateway` through the sealed SDK4
+root resolver against a private real CAS/queue. Only the queue owner's default
+root is redirected; result reading and capture binding use their unmodified
+public implementations. A matching dry-run emits authenticated receipt stamps,
+while foreign source, refs, wrapper and attempt selections refuse without
+writing dispatch state or submitting fleet work. Controlled producer telemetry
+and source-review fixtures remain CPU doubles, not genuine GPU pilot evidence.
+
 ## Finite genuine-pilot protocol for root review
 
 The next measurement is one complete GLM-5.3-Flash layer-007 joint quantum in
