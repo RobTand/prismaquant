@@ -1,7 +1,6 @@
 """Real-byte prefix compatibility; no GPU or serving qualification."""
 import hashlib
 import json
-import os
 
 import pytest
 import torch
