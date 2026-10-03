@@ -13,6 +13,18 @@ derivation, including through a bound holder. Static-scale checks and arithmetic
 integrity, menus, pins and native/export/serving admission remain independent
 and unchanged. This CPU metadata check establishes no original-source capture,
 H measurement, device qualification or served attention acceptance.
+Reconciled PR #2114 with current main on 2026-10-02: the fresh producer and
+resume/active-seed guard retain the same registry declaration. Input templates
+remain explicitly unmeasured; genuine same-contract resumes retain their
+encoded wire and scores. This integration changes no format default or pin.
+Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
+base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
+measurements use `kl_fisher.forward_kl_per_token` for the existing
+exp/subtract/multiply/vocabulary-sum expression. FP32 log-softmax, teacher
+transfer, calibration batching, token/window normalization and weight
+restoration remain caller-owned. Lane replay also delegates the expression, preserving its teacher regrouping,
+row-count refusals and per-row position mean followed by row sum. CPU
+compatibility evidence does not qualify GPU arithmetic or served quality.
 
 Re-stamped 2026-10-02 (PQ #2096, Refs #1842, B32 lane-boundary repair): core
 profiles declare the generic per-Linear activation precision fact
@@ -29,6 +41,27 @@ BF16 source fallback, all profile pins and independent original-source,
 byte/kernel/runtime, export and serving gates remain unchanged. This CPU
 policy does not establish attention H capture, native wire qualification,
 per-unit AURA costs or served quality; those remain #1842 acceptance work.
+
+Re-stamped 2026-10-02 (PQ #2102, Refs #1301, branch
+`sol/pq-expert-calibration-digests-20261002`, base `693a38f3ae34`): empirical
+expert checkpoint and CLI calibration digests share only the final exact-byte
+SHA-256 constructor through `digests.bytes_sha256hex`. Their distinct
+checkpoint detach/CPU/contiguous/uint8 view and CLI CPU/NumPy C-order extraction
+remain local, including native refusals. Identity fields, byte recipes and
+widths, checkpoint policy and provenance serialization retain their contracts.
+
+Re-stamped 2026-10-02 (Refs PQ #2010/#2008, selected-row diagnostic seam):
+the existing Stage A core can capture one explicitly bound global calibration
+row, generate one fresh tail and roll to a named boundary while preserving the
+full draw's tensor identity, global-row noise and token normalization. Diagnostic
+roots/receipts are distinct and cannot feed Stage B or resume as a campaign.
+The higher-level API accepts the existing qualified original-material owner,
+selects its profile through owned metadata and threads that same owner into
+the existing runner. The unchanged original CUDA gate refuses before device or
+source/profile work; the CLI supplies geometry and constructs no authority.
+CPU selector/plumbing controls do not qualify original CUDA lifetimes, a complete
+provider, historical GLM primal/cotangent agreement, corrected prices or serving.
+See [selected-row diagnostic contract](design/stage_a_selected_row_diagnostic.md).
 
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
