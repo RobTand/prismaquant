@@ -108,6 +108,13 @@ reopening or changing bytes. No numerical, profile, pin or default changes.
 This completes only the measured-runtime/frontier open-handle family. The
 special page-releasing capture-source hash and unrelated JSON/raw-byte sites
 remain distinct or unconsolidated; #1301 and #1303 remain open.
+Re-stamped 2026-10-03 (Refs #2144, native MoE source replay): independent
+source qualification consumes GLM's FP32 `correction_bias` digest and derives
+its shape from the whole expert roster, including tensor-parallel panels.
+LFM continues to use `selection_bias`. The original tensor bytes, dtype,
+cardinality, source/runtime/calibration and backend joins remain required.
+CPU protocol acceptance is not original CUDA/provider, capture or serving
+qualification; no runtime cell, format menu, pin or ship gate is changed.
 
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
