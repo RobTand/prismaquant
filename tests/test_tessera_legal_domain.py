@@ -863,7 +863,7 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
 
 def test_the_report_names_the_source_state_the_numbers_came_from():
     """A reader of the report can tell which Tessera bytes produced the counts."""
-    inventory = domain.build_inventory()
+    inventory = _inventory()
     state = inventory["tessera_source_state"]
     assert state["state"] in domain.TESSERA_EQUIVALENT_SOURCE_STATES
     report = domain.format_report(inventory)
