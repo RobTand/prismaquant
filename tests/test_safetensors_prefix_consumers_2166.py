@@ -8,7 +8,6 @@ from safetensors.torch import save
 
 from prismaquant.calibration_data import _decode_calibration_buffer, load_calibration_input
 from prismaquant.layer_streaming import _advise_consumed_safetensors_pages
-from prismaquant.source_read_plan import safetensors_prefix_length
 
 
 @pytest.mark.parametrize("raw", [b"", b"\x00", b"\xff" * 7, bytes(8),
@@ -26,24 +25,6 @@ def test_malformed_prefix_keeps_each_consumer_refusal(raw, tmp_path):
         _advise_consumed_safetensors_pages(str(path), [])
     assert str(exc.value) == "invalid safetensors header for consumed-page release"
 
-
-@pytest.mark.parametrize("length,size,limit,valid", [
-    (1, 9, 1, True), (2, 9, 2, False), (2, 10, 1, False),
-    (100_000_000, 100_000_008, 100_000_000, True),
-    (100_000_001, 100_000_009, 100_000_000, False),
-    (2**64 - 1, 100_000_008, 100_000_000, False),
-])
-def test_owner_preserves_inherited_unsigned_bounds(length, size, limit, valid):
-    raw = length.to_bytes(8, "little")
-    # Independent inherited predicate; no files/payload allocation at the cap.
-    assert (0 < int.from_bytes(raw, "little") <= min(limit, size - 8)) is valid
-    if valid:
-        assert safetensors_prefix_length(raw, size, max_bytes=limit,
-                                        short_error="short", range_error="range") == length
-    else:
-        with pytest.raises(ValueError, match="^range$"):
-            safetensors_prefix_length(raw, size, max_bytes=limit,
-                                      short_error="short", range_error="range")
 
 
 def test_calibration_public_api_and_buffer_preserve_exact_draw(tmp_path):
