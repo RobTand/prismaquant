@@ -725,7 +725,7 @@ def _normalize_original_source_authority(owner, authority_input, plan_input, adm
     sdk, claim = _environment_matches(runtime)
     claimed = sdk.read_claimed_record(sdk.PoolQueue(claim['queue_root']), claim['action_key'])
     _require(isinstance(claimed, dict), 'original source has no active native claim')
-    _same(claimed.get('demand'), resources['claim_demand'], 'native reservation/resource demand')
+    _same(claimed.get('resources'), resources['claim_demand'], 'native reservation/resource demand')
     actual = _load_sealed_payload(bindings['read_manifest']['sha256'])
     active = {(row['path'], row['offset']): row for row in actual['entries']}
     for row in coordinates.values():

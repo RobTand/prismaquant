@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **Original authority resources use the native claimed reservation**
+  (Refs #2148, #2149). The strict join reads PrismaBuild's actual `resources`
+  field, not an invented `demand` alias; missing, changed and misleading alias
+  claims remain refused before source work. Synthetic native-panel controls
+  retain the existing complete full-calibration provenance grammar rather
+  than masking their intended refusal with an obsolete tokenizer field.
+  SDK installation pins and all original CUDA/adoption guards stay unchanged.
 - **Original render-free diagnostics use a real acyclic context and session**
   (#2149). The shared strict original BASE/preparation/execution contracts bind
   full calibration and current source/runtime/resources without borrowing

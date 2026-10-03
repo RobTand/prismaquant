@@ -879,9 +879,10 @@ def original_protocol_case(tmp_path, layer=3):
     calibration_ids = torch.zeros(512, 512, dtype=torch.int64)
     calibration = {'schema': 'prismaquant.calibration_input.v1', 'artifact_sha256': '9' * 64,
         'calibration_sha256': tensor_id(calibration_ids)['content_sha256'], 'shape': [512, 512], 'dtype': 'torch.int64',
-        'provenance': {'nsamples': 512, 'seqlen': 512, 'fit_tokens': 262144,
+        'provenance': {'nsamples': 512, 'seqlen': 512, 'fit_tokens': 262144, 'fit_tokens_min': 1,
             'fit_ids_sha256': hashlib.sha256(calibration_ids.int().numpy().tobytes()).hexdigest(),
-            'text_sha256': 'a' * 64, 'tokenizer': {'id': 'synthetic-tokenizer', 'revision': 'b' * 40}}}
+            'text_sha256': 'a' * 64, 'model': str(model_root), 'seed': 0,
+            'source': 'SYNTHETIC/parser-control', 'split_role': 'calibration'}}
     runtime = {'schema': 'prismaquant.original_source_runtime.v1',
         'prismaquant_source_sha256': 'b' * 64, 'tessera_source_sha256': 'c' * 64,
         'modeling_source': {'path': '/synthetic/modeling_glm5_next.py', 'sha256': 'd' * 64},
@@ -900,7 +901,7 @@ def original_protocol_case(tmp_path, layer=3):
         'cpu_bytes': 128 * 1024**2, 'source_cache_bytes': 1024, 'copy_bytes': 1024, 'gpu_bytes': 0,
         'native_bytes': 0, 'serialization_bytes': 8 * 1024**2, 'artifact_bytes': 16 * 1024**2,
         'deadline_seconds': 60, 'stall_seconds': 10, 'host_floor_bytes': 16 * 1024**3,
-        'margin_bytes': 0, 'claim_demand': {'cpus': 1, 'mem_gb': 1},
+        'margin_bytes': 0, 'claim_demand': {'cpu': 1, 'mem_gb': 1},
         'source_prefetch': {'max_cache_slots': 2, 'prefetch_workers': 1, 'prefetch_lookahead': 1,
                             'cache_headroom_gb': 1, 'prefetch_min_available_gb': 1,
                             'require_prefetched_residency': True}}

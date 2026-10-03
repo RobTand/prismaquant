@@ -54,7 +54,7 @@ def authority_case(original_runner, original_model, tmp_path):
     queue_root = Path(claim['queue_root'])
     claim_path = queue_root / 'claimed' / (claim['action_key'] + '.json')
     claim_row = json.loads(claim_path.read_bytes())
-    claim_row['demand'] = {'cpu': 1, 'mem_gb': 1}
+    claim_row['resources'] = {'cpu': 1, 'mem_gb': 1}
     claim_path.write_text(json.dumps(claim_row))
     prefetch = dict(max_cache_slots=2, prefetch_workers=1, prefetch_lookahead=1,
         cache_headroom_gb=1, prefetch_min_available_gb=1, require_prefetched_residency=True)
@@ -63,7 +63,7 @@ def authority_case(original_runner, original_model, tmp_path):
         source_prefetch=prefetch, copy_bytes=1024**2, gpu_bytes=0, native_bytes=0,
         serialization_bytes=16 * 1024**2, artifact_bytes=16 * 1024**2,
         deadline_seconds=60, stall_seconds=10, host_floor_bytes=1, margin_bytes=0,
-        claim_demand=claim_row['demand'])
+        claim_demand=claim_row['resources'])
     resources_input = _bound(tmp_path / 'resources.json', resources)
     runtime = sg.original_source_runtime(runner, owner)
     source = build_streamed_model_identity(runner, str(owner.root))
@@ -162,6 +162,25 @@ def test_owned_control_join_is_nonactivating_and_independently_frozen(authority_
         case['owner'].require_material_device('cuda:0')
     with pytest.raises(RuntimeError, match='qualified immutable source'):
         cc.require_automatic_capture_source_recording()
+
+
+@pytest.mark.parametrize('damage', ['missing', 'changed', 'demand-only'])
+def test_native_claim_resources_cannot_be_missing_rebound_or_replaced_by_demand(authority_case, monkeypatch, damage):
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    row = json.loads(case['claim_path'].read_bytes())
+    if damage == 'changed':
+        row['resources'] = {**row['resources'], 'mem_gb': 2}
+    else:
+        resources = row.pop('resources')
+        if damage == 'demand-only':
+            row['demand'] = resources
+    case['claim_path'].write_text(json.dumps(row))
+    with pytest.raises(RuntimeError, match='native reservation/resource demand'):
+        sg._normalize_original_source_authority(case['owner'], case['authority_input'],
+                                               case['plan_input'], case['packet'])
+    assert case['owner'].receipt() == before
+    assert not any(case['entries_path'].iterdir())
 
 
 @pytest.mark.parametrize('damage', ['runtime', 'session', 'session-identity', 'plan', 'claim', 'owner-resource'])
