@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Refs #2177 / #1303: the native exporter no longer carries a test-only
+imperative Qwen naming copy, a compatibility profile instance or a per-expert
+regex alias. All live callers now exercise the existing declared Qwen
+structure naming and profile regex owners. Production already used those
+owners; mapping rules, native/wrapper variants, numerical formats and defaults
+are unchanged. Pylsp references mapped both removed symbols to their sole
+live exporter test consumer before the clean cutover. Historical archives
+remain historical. Literal dispatch-name and mixed-group catch-all checks
+remain; incidental source/docstring wording assertions are removed rather
+than repinned. This bounded copy/alias removal does not complete the epic.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
