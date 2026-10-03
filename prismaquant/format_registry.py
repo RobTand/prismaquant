@@ -47,6 +47,7 @@ from prismaquant.mx_formats import (
 from prismaquant.nvfp4_activation_contract import (
     NVFP4_SERVED_ACTIVATION_CONTRACT,
     StaticActivationContract,
+    _E2M1_POSITIVE,
 )
 
 
@@ -508,7 +509,7 @@ def _rtn_fp_codebook(w: torch.Tensor, codebook: torch.Tensor,
 # FP codebooks
 def _e2m1_codebook() -> torch.Tensor:
     # 4-bit: 1 sign + 2 exp + 1 mantissa.  Values: 0, ±0.5, ±1, ±1.5, ±2, ±3, ±4, ±6
-    vals = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
+    vals = _E2M1_POSITIVE
     signed = [0.0] + [+v for v in vals[1:]] + [-v for v in vals[1:]]
     return torch.tensor(sorted(set(signed)), dtype=torch.float32)
 

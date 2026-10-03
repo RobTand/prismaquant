@@ -133,7 +133,6 @@ from .render_score import (
 # library's package __init__ pulls in transformers internals that are not
 # stable across the transformers 4.x -> 5.x break.
 # ---------------------------------------------------------------------------
-FLOAT_TO_E2M1 = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
 NVFP4_MAX = _nvfp4_activation_contract.FP4_E2M1_MAX
 FP8_E4M3_MAX = _nvfp4_activation_contract.FP8_E4M3_MAX
 NVFP4_SCALE_RULE_ENV = "PRISMAQUANT_NVFP4_SCALE_RULE"
@@ -230,7 +229,7 @@ def _nvfp4_codebook(device, dtype=torch.float32) -> torch.Tensor:
     key = (str(device), dtype)
     cb = _NVFP4_CODEBOOK_CACHE.get(key)
     if cb is None:
-        cb = torch.tensor(FLOAT_TO_E2M1, device=device, dtype=dtype)
+        cb = torch.tensor(_nvfp4_activation_contract._E2M1_POSITIVE, device=device, dtype=dtype)
         _NVFP4_CODEBOOK_CACHE[key] = cb
     return cb
 
@@ -3449,7 +3448,7 @@ def _scale_sweep_nvfp4(
     # Target per-chunk intermediate budget: ~2 GB max on the biggest
     # tensor `d = [chunk, n_g, grid, gs, len(cb)]` (float32).
     n_g = cols // group_size
-    bytes_per_row = n_g * grid * group_size * (2 * len(FLOAT_TO_E2M1) - 1) * 4
+    bytes_per_row = n_g * grid * group_size * (2 * len(_nvfp4_activation_contract._E2M1_POSITIVE) - 1) * 4
     chunk_target = max(1, (2 * 1024 * 1024 * 1024) // max(1, bytes_per_row))
     row_chunk = min(rows, int(chunk_target))
 

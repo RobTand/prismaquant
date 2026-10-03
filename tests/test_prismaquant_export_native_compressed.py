@@ -18,11 +18,11 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 import prismaquant.export_native_compressed as enc
+from prismaquant.nvfp4_activation_contract import _E2M1_POSITIVE
 
 from prismaquant.allocator import promote_fused
 from prismaquant.export_native_compressed import (
     DEFAULT_INPUT_GLOBAL_SCALE,
-    FLOAT_TO_E2M1,
     FP8_E4M3_MAX,
     NVFP4_MAX,
     PER_EXPERT_MOE_REGEX,
@@ -955,7 +955,7 @@ def _nvfp4_dequantize(weight_packed, weight_scale_fp8, weight_global_scale_divis
     """
     rows = weight_packed.shape[0]
     cols = weight_packed.shape[1] * 2
-    cb = torch.tensor(FLOAT_TO_E2M1, dtype=torch.float32)
+    cb = torch.tensor(_E2M1_POSITIVE, dtype=torch.float32)
     lo = (weight_packed & 0xF).long()
     hi = ((weight_packed >> 4) & 0xF).long()
     idx = torch.stack([lo, hi], dim=-1).reshape(rows, cols)
@@ -976,7 +976,7 @@ def _mxfp4_served_dequantize(weight_packed, weight_scale_e8m0, group_size=32):
     """Reconstruct MXFP4 as the compressed-tensors/vLLM loader serves it."""
     rows = weight_packed.shape[0]
     cols = weight_packed.shape[1] * 2
-    cb = torch.tensor(FLOAT_TO_E2M1, dtype=torch.float32)
+    cb = torch.tensor(_E2M1_POSITIVE, dtype=torch.float32)
     lo = (weight_packed & 0xF).long()
     hi = ((weight_packed >> 4) & 0xF).long()
     idx = torch.stack([lo, hi], dim=-1).reshape(rows, cols)
@@ -4522,12 +4522,9 @@ class TestActivationAwarePasses(unittest.TestCase):
 
     def _decode_nvfp4(self, wp, ws, wg):
         import torch
-        from prismaquant.export_native_compressed import (
-            FLOAT_TO_E2M1,
-        )
         rows = wp.shape[0]
         cols = wp.shape[1] * 2
-        cb = torch.tensor(FLOAT_TO_E2M1, dtype=torch.float32)
+        cb = torch.tensor(_E2M1_POSITIVE, dtype=torch.float32)
         lo = (wp & 0xF).long()
         hi = ((wp >> 4) & 0xF).long()
         idx = torch.stack([lo, hi], dim=-1).reshape(rows, cols)
