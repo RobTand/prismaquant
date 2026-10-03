@@ -10,10 +10,10 @@ import shlex
 import stat
 import socket
 import subprocess
+import sys
 import time
 import urllib.parse
 
-from tools.tessera_campaign_container import main as container_main
 from tools.pq_profile_source import profile_source_owner
 
 file_stat_signature=profile_source_owner('file_identity').file_stat_signature
@@ -103,9 +103,9 @@ def main():
         env=dict(PYTHONPATH='/workspace:/workspace/tests',OMP_NUM_THREADS='1',
                  MKL_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',NUMEXPR_NUM_THREADS='1',
                  HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1',PYTHONDONTWRITEBYTECODE='1',
-                 TMPDIR='/run/tmp',PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_OUT='/run/controls')
+                 TMPDIR='/qualification/tmp',PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_OUT='/qualification/controls')
         mounts=[dict(source=str(a.dependencies.parent),target='/dependencies',readonly=True),
-                dict(source=str(a.out),target='/run',readonly=False)]
+                dict(source=str(a.out),target='/qualification',readonly=False)]
         profile=os.environ.get('PRISMABUILD_PROFILE_TORCH_OUT')
         if not a.cpu_preflight:
             if not profile or os.environ.get('CUDA_VISIBLE_DEVICES')=='':
@@ -118,7 +118,7 @@ def main():
                   content_sha256=PQ_IMAGE,mounts=mounts),env=env)
         command=['python3','-P','/workspace/experiments/original_cuda_inner.py',
                  '--dependencies','/dependencies/'+a.dependencies.name,
-                 '--dependencies-sha256',a.dependencies_sha256,'--out','/run']
+                 '--dependencies-sha256',a.dependencies_sha256,'--out','/qualification']
         command+=['--cpu-preflight'] if a.cpu_preflight else ['--node-id',a.node_id]
     except BaseException as exc:
         (a.out/'action-result.json').write_text(json.dumps(dict(
@@ -132,7 +132,12 @@ def main():
     start=time.time()
     code=None
     try:
-        code=container_main(['--spec',json.dumps(spec),*(['--cpu-only'] if a.cpu_preflight else []),'--',*command])
+        # The existing adapter execs Docker. Supervise its CLI as a child so
+        # this owner can bind the trace, collect both raw host windows and
+        # preserve the actual container ending; never shadow runtime /run.
+        code=subprocess.run([sys.executable,'-m','tools.tessera_campaign_container',
+            '--spec',json.dumps(spec),*(['--cpu-only'] if a.cpu_preflight else []),
+            '--',*command],check=False).returncode
     finally:
         finish=time.time()
         observations=[]
