@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **Original authority proof sidecars bind to their selected CAS result**
+  (#2152, Refs #2148). The strict consumer requires the existing producer's
+  one canonical artifact publication and joins actual control/call/ending,
+  raw host/trace and native-reader artifacts by exact node, digest and length.
+  Independently rebound sidecars and old receipts without publication refuse.
+  Unchanged-family transfers bind the actual target package/runtime, not a
+  bare new-source commit string. No old16/full64 restamp or source gate waiver.
+
 - **Original copy lifecycle snapshots are atomic** (#2155, Refs #2148).
   Actual stream registration and pending-to-completed fence/alias retirement
   share the existing source-owner receipt lock. Hardware fences and fatal

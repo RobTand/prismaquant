@@ -245,3 +245,62 @@ def test_real_partial_qualification_metadata_is_not_renamed_full64(authority_cas
     # positive source qualifications or an independently approved root record.
     with pytest.raises(RuntimeError, match='partial full64'):
         sg._require_original_source_proofs(authority, case['owner'].resource_check)
+
+
+def test_actual_cas_publication_cannot_adopt_an_independently_rebound_artifact(
+        tmp_path, material):
+    """Real sealed action/CAS receipt bytes, not a stubbed result-reader echo."""
+    from test_strict_reader_tier_enforcement import _pb
+
+    sdk, _pool, _map = _pb()
+    from prismabuild import core, movement_actions
+
+    checkout = tmp_path / 'artifact-checkout'
+    checkout.mkdir()
+    (checkout / 'publication.py').write_text('# CPU parser artifact fixture, not a CUDA execution\n')
+    node = 'tests/private_cpu_artifact_join'
+    receipt_binding = _bound(tmp_path / 'reader-receipt.json', {'observed_cpu_bytes': 17})
+    authority_binding = _bound(tmp_path / 'reader-authority.json', {'independent_cpu_source': 'first'})
+    artifacts = {role: dict(binding, bytes=Path(binding['path']).stat().st_size)
+                 for role, binding in (('receipt', receipt_binding), ('authority', authority_binding))}
+    publication = dict(schema='prismaquant.original_source_artifact_publication.v1',
+                       node_id=node, artifacts=artifacts)
+    payload = sg.ORIGINAL_ARTIFACT_PUBLICATION_PREFIX + json.dumps(
+        publication, sort_keys=True, separators=(',', ':'), allow_nan=False).encode() + b'\n'
+    command = ['/bin/echo', node]
+    action = core.seal_action({
+        'schema': core.ACTION_SCHEMA_V2,
+        'task': {'definition_id': 'tests/original-artifact-binding', 'definition_version': 'v1',
+            'task_class': 'generation', 'determinism': 'deterministic', 'artifact_family': 'generic',
+            'artifact_kind': 'generic', 'argv': movement_actions.standard_capture_argv(
+                command, 'result.txt', path_prefix='/opt/pb-tools'),
+            'working_directory': '.', 'result_path': 'result.txt'},
+        'inputs': [], 'code_closure': core.build_code_closure(checkout, ['publication.py']),
+        'params': {'command': command},
+        'environment': {'variables': {'PATH': '/opt/pb-tools:/usr/bin:/bin'}, 'toolchain': {}},
+        'execution_scope': {'portability': 'portable', 'platform_key': None, 'host_class': None},
+    })
+    cas = core.PrismaBuildCAS(tmp_path / 'artifact-cas')
+    cas.publish_action_request(action)
+    output = tmp_path / 'actual-captured-payload.txt'
+    output.write_bytes(payload)
+    attestation = core.preflight_action(action, cas_root=cas.root, checkout_root=checkout)
+    receipt, _ = cas.publish_result(action, output, attestation=attestation, return_execution_receipt=True)
+    assert sdk.cas_receipt_self_check(receipt) is None
+    owned = cas.read_declared_blob(dict(id='actual-result', **receipt['result']),
+                                   max_bytes=len(payload), where='actual CPU result fixture')
+    assert owned == payload and _digest(owned) == receipt['result']['sha256']
+    published = sg._original_artifact_publication(owned, node_id=node, roles={'receipt', 'authority'})
+    assert sg._published_original_artifact(published, 'receipt', receipt_binding,
+        resource_check=material['options']['resource_check'], max_bytes=1024) == {'observed_cpu_bytes': 17}
+    # Same pathname, new valid independent SHA: the selected CAS receipt
+    # remains about the original observed artifact, not the replacement.
+    changed = _bound(Path(receipt_binding['path']), {'observed_cpu_bytes': 17000})
+    with pytest.raises(RuntimeError, match='selected published receipt binding'):
+        sg._published_original_artifact(published, 'receipt', changed,
+            resource_check=material['options']['resource_check'], max_bytes=1024)
+    with pytest.raises(RuntimeError, match='selected node'):
+        sg._original_artifact_publication(owned, node_id='another-reader', roles={'receipt', 'authority'})
+    with pytest.raises(RuntimeError, match='old receipts remain unqualified'):
+        sg._original_artifact_publication(b'old pytest summary without sidecar digests\n',
+                                         node_id=node, roles={'receipt', 'authority'})

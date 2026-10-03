@@ -299,3 +299,40 @@ query, wait, event, copy or release is added. Native-shaped CPU stream spies
 exercise deterministic registration and success/fallback transition windows;
 their synthetic stream identities are never CUDA qualification evidence.
 
+## Selected result artifact linkage — #2152
+
+An independently hash-bound sidecar is not evidence that the selected action
+produced it. The authority consumer now requires exactly one canonical
+`ORIGINAL_SOURCE_ARTIFACTS ` JSON line inside the SDK-authenticated selected
+CAS payload. The record has exactly `schema`, `node_id`, `artifacts`, with
+schema `prismaquant.original_source_artifact_publication.v1`; each artifact has
+exactly absolute `path`, `sha256`, and positive `bytes`. Duplicate/absent lines,
+ambiguous keys, different selected nodes and rebound role bytes refuse.
+
+The forward existing CUDA controller publishes six closed roles:
+`control`, `execution`, `action_result`, `netdata_sparky`, `netdata_sparklina`,
+`torch_trace`. The consumer joins the independently selected control,
+entered-call execution and controller ending to those exact published bytes,
+and joins both raw host records and the trace to the same ending. The
+publication node must equal the selected sealed command, actual execution
+node and decoded case/page/source-dtype coordinates. The existing action
+ending format gains no fictional node/schema field.
+
+A separate actual native-reader producer must publish `receipt` and `authority`
+under the same authenticated publication contract; the metadata session issuer
+is not such a reader proof. Its selected node is independently declared and
+joined to the sealed command. Unchanged-family acceptance additionally binds
+`target_prismaquant_source_sha256` and `target_runtime_sha256` to the observed
+target package bytes and complete runtime, rather than accepting a well-formed
+new-source commit string as transfer authority.
+
+Historical selected results without this publication do not qualify the new
+authority, even when their sidecars were separately ingested or primitive
+controls were independently accepted. In particular old16 is not relabeled as
+new full64: new selected, artifact-bound identities and actual reader/root
+admission remain required. No compatibility override, receipt restamp or
+re-ingestion bridge is introduced. The mismatch regression uses a real sealed
+private CPU action, native CAS receipt and verified result blob; it mutates the
+independent artifact binding without mutating the selected publication. It is
+not a CUDA, original-model or public source qualification.
+
