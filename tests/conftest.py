@@ -259,6 +259,15 @@ def installed_client_sdk(monkeypatch):
         yield module
 
 
+@pytest.fixture
+def pinned_pb_source():
+    """Explicit, non-autouse ownership of the reviewed PB source graph."""
+    from fullstack_pb_generation import source_bound
+
+    with source_bound():
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _restore_profile_detection_globals():
     """Snapshot and restore the process-global state ``detect_profile`` reads.

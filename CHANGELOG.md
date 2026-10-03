@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **Connected PB fixtures own their authenticated import contexts** (#2192).
+  Explicit source fixtures detach and restore the canonical PB graph, fleet
+  tools and parent-package edges around their existing reviewed source pin.
+  Module-scoped movers retain that graph until their work finishes; installed
+  SDK controls retain their own provenance. Removed and orphaned module edges
+  restore exactly, so differential monkeypatch targets remain identical.
+  Production source-origin refusals, dependency pins, framework generation and
+  the next-full negative gate are unchanged; no deployment or native GPU claim.
+
 - **Original proper-prefix coverage compares its exact checkpoint roster**
   (Refs #2147). Python set equality preserves the whole required head/layer
   coverage and rejects missing or extra checkpoints without sending sets to

@@ -83,7 +83,8 @@ def _reader_sdk_bound():
 @pytest.fixture(scope="module")
 def pb():
     """The module's movers use one reviewed SDK3 source tree."""
-    return _pb()
+    with published.source_bound():
+        yield _pb()
 
 
 @pytest.fixture(scope="module")

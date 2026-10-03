@@ -62,10 +62,13 @@ PREFETCH = 2
 def _offline_tier_policy(monkeypatch):
     """Offline gateway fixture; planner and reader use one reviewed source root."""
     from prismaquant.staged_tier_policy import deactivate_staged_tier_policy_for_tests
-    _pin_published_helper_root(monkeypatch)
-    deactivate_staged_tier_policy_for_tests()
-    yield
-    deactivate_staged_tier_policy_for_tests()
+    from fullstack_pb_generation import source_bound
+
+    with source_bound():
+        _pin_published_helper_root(monkeypatch)
+        deactivate_staged_tier_policy_for_tests()
+        yield
+        deactivate_staged_tier_policy_for_tests()
 
 
 def _receipt(tmp_path, campaign, *, run_identity_extra=None):
