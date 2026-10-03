@@ -561,6 +561,60 @@ class StreamedBoundaryArtifacts:
             (self.directory / "entries").mkdir(exist_ok=True)
             self._publish_status()
 
+    def inspect_published_session(self, session, *, identity, pending=False,
+                                  owner_label=None, owner_fields=None):
+        """Read this existing generation without attaching, rebinding or writing it."""
+        from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
+        from .schemas import strict_json_loads
+
+        if not isinstance(session, dict) or set(session) != {"generation", "run_identity_sha256"}:
+            raise RuntimeError("a chain resume names no exact boundary session")
+        session = canonical_json(dict(session), where="resumed exact boundary session")
+        if canonical_json_sha256(identity, where="exact boundary source") != session["run_identity_sha256"]:
+            raise RuntimeError("the relaunch's bind identity is not the one the resumed session sealed")
+        directory = Path(self.config["directory"]) / str(session["generation"])
+        status_path = directory / "generation.json"
+
+        def read_status(path):
+            raw = path.read_bytes()
+            if not pending:
+                return json.loads(raw)
+            return strict_json_loads(raw,
+                duplicate=lambda key: RuntimeError(f"session duplicate key {key}"),
+                constant=lambda key: RuntimeError(f"session invalid constant {key}"))
+
+        try:
+            status = read_status(status_path)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"the resumed generation has no readable status file at {status_path}") from exc
+        if status.get("session") != session:
+            raise RuntimeError(f"{status_path} names another session than the chain resume")
+        policy_refusal = RuntimeError(f"{status_path} was written under another boundary storage policy")
+        if boundary_storage_layout_differs(status.get("policy"), self.identity):
+            raise policy_refusal
+        if pending:
+            if status.get("policy") != self.identity:
+                raise policy_refusal
+        else:
+            seal_check("boundary storage policy", status.get("policy"), self.identity,
+                       where=str(status_path), refusal=policy_refusal)
+        if status.get("status") not in (("running",) if pending else ("running", "failed")):
+            raise RuntimeError(f"the resumed generation's status is {status.get('status')!r}; "
+                               "only an interrupted run (running or failed) resumes")
+        entries = directory / "entries"
+        if not entries.is_dir():
+            raise RuntimeError(f"the resumed generation has no entries at {directory}")
+        if pending and any(entries.iterdir()):
+            raise RuntimeError("diagnostic pending generation already contains source entries")
+        if owner_label is not None:
+            label = _checked_owner_label(owner_label)
+            owner_status = read_status(directory / "owners" / (label + ".json"))
+            if (owner_status.get("session") != session or owner_status.get("status") != "complete"
+                    or owner_status.get("policy") != self.identity
+                    or owner_status.get("owner") != {"label": label, **(owner_fields or {})}):
+                raise RuntimeError("diagnostic session was not issued by its actual metadata owner")
+        return session, directory
+
     def rebind(self, session, *, identity, n_probes, check_memory=None,
                owner_label=None):
         """Adopt this run's own published generation again (PQ #1001).
@@ -593,43 +647,9 @@ class StreamedBoundaryArtifacts:
         ``owners/<owner_label>.json`` beside ``generation.json``, which this
         owner never rewrites.
         """
-        from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
         if self.session is not None:
             raise RuntimeError("exact boundary generation is already bound")
-        if (not isinstance(session, dict)
-                or set(session) != {"generation", "run_identity_sha256"}):
-            raise RuntimeError("a chain resume names no exact boundary session")
-        session = canonical_json(dict(session), where="resumed exact boundary session")
-        # A wall in dev mode too (PQ #1147): the digest covers the calibration
-        # draw as well as the run seals. A dev chain resume compares the bind
-        # identity key by key first and then rebinds the stored one.
-        if canonical_json_sha256(identity, where="exact boundary source") != session[
-                "run_identity_sha256"]:
-            raise RuntimeError(
-                "the relaunch's bind identity is not the one the resumed session sealed")
-        directory = Path(self.config["directory"]) / str(session["generation"])
-        status_path = directory / "generation.json"
-        try:
-            status = json.loads(status_path.read_bytes())
-        except (OSError, ValueError) as exc:
-            raise RuntimeError(
-                f"the resumed generation has no readable status file at {status_path}"
-            ) from exc
-        if status.get("session") != session:
-            raise RuntimeError(
-                f"{status_path} names another session than the chain resume")
-        policy_refusal = RuntimeError(
-            f"{status_path} was written under another boundary storage policy")
-        if boundary_storage_layout_differs(status.get("policy"), self.identity):
-            raise policy_refusal
-        seal_check("boundary storage policy", status.get("policy"), self.identity,
-                   where=str(status_path), refusal=policy_refusal)
-        if status.get("status") not in ("running", "failed"):
-            raise RuntimeError(
-                f"the resumed generation's status is {status.get('status')!r}; "
-                "only an interrupted run (running or failed) resumes")
-        if not (directory / "entries").is_dir():
-            raise RuntimeError(f"the resumed generation has no entries at {directory}")
+        session, directory = self.inspect_published_session(session, identity=identity)
         if owner_label is not None:
             self._owner_label = _checked_owner_label(owner_label)
         self._n_probes = n_probes

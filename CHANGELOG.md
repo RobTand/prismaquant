@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **Original render-free diagnostics use a real acyclic context and session**
+  (#2149). The shared strict original BASE/preparation/execution contracts bind
+  full calibration and current source/runtime/resources without borrowing
+  pricing PREPARED, old canonical captures, teachers or source caches. The
+  explicit PB CPU metadata issuer creates a genuine pending published artifact
+  generation; read-only inspection verifies its metadata owner, exact policy
+  and cold namespace before runtime rebinds that same session. The guarded
+  original entry keeps full-N row0/probe7000/boundary6 and one Fisher operation,
+  remains non-bandable and preserves every original CUDA/automatic refusal.
+  No source, GPU, numerical, pricing, wire or serving admission follows.
+
 - **Original-source authority intake is strict and nonactivating** (#2148,
   Refs #2008). The existing source owner joins independently bound
   publisher/producer/map/readset, original runtime, full calibration,

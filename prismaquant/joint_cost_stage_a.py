@@ -1053,7 +1053,7 @@ def run_adjoint_capture_core(
     min_free_gib=0.0, progress=None, produced_output=None, forward_recovery=None,
     chain_batch_size=1, chain_probe_fusion=False, chain_resume=None,
     arithmetic_extra=None, chain_seed=None, chain_split=None, forward_split=None,
-    selected_row_diagnostic=None,
+    selected_row_diagnostic=None, original_diagnostic_context=None,
 ) -> dict:
     """Forward boundaries, tail cotangents, strided render-free chain.
 
@@ -1179,6 +1179,55 @@ def run_adjoint_capture_core(
     )
 
     diagnostic = None
+    original_context = None
+    original_resource_check = None
+    if original_diagnostic_context is not None:
+        if selected_row_diagnostic is None:
+            raise AdjointIdentityRefused("original context is only a fresh selected-row diagnostic")
+        from .source_generation import (
+            _control, observe_original_source_execution, original_source_runtime,
+            validate_original_source_runtime,
+        )
+        from .stage_a_selected_row_diagnostic import load_original_diagnostic_issued_context
+        from .tessera_calibration_cache import require_original_source_authority
+
+        required = {"authority_input", "plan_input", "session_preparation_input"}
+        if (not isinstance(original_diagnostic_context, dict)
+                or set(original_diagnostic_context) != required):
+            raise AdjointIdentityRefused("original diagnostic requires its independently bound context inputs")
+        owner = getattr(runner.context, "source_authentication", None)
+        require_diagnostic_original_owner(owner, device=runner.device)
+        authority_input = original_diagnostic_context["authority_input"]
+        plan_input = original_diagnostic_context["plan_input"]
+        observed = observe_original_source_execution(authority_input, plan_input,
+                                                    resource_check=owner.resource_check)
+        authority = require_original_source_authority(owner, authority_input, plan_input, observed)
+        validate_original_source_runtime(original_source_runtime(runner, owner), authority["runtime"])
+        _, final_plan = _control(plan_input, "original diagnostic final plan")
+        session_input = original_diagnostic_context["session_preparation_input"]
+        if final_plan.get("original_session_preparation") != session_input:
+            raise AdjointIdentityRefused("original diagnostic session preparation is not independently selected")
+        bindings = final_plan["original_source"]
+        original_context = load_original_diagnostic_issued_context(
+            session_input, base_plan_input=bindings["base_plan"], authority=authority)
+        base, prepared_context = original_context["base_plan"], original_context["prepared"]
+        matches = (
+            prepared_sha256 == base["prepared"]["sha256"],
+            plan_sha256 == bindings["base_plan"]["sha256"],
+            read_manifest_sha256 == base["read_manifest"]["sha256"],
+            implementation_sha256 == prepared_context["implementation_sha256"],
+            source_model_identity == prepared_context["source_model_identity"],
+            selected_row_diagnostic == base["selected_row_diagnostic"],
+            execution == original_context["execution"],
+            Path(output_root) == Path(base["output_root"]),
+            stride == execution["stride"], runner.num_layers == 45,
+            chain_batch_size == 1, chain_probe_fusion is False,
+            boundary_artifact_bytes == execution["boundary_storage"]["max_artifact_bytes"],
+            artifact_budget_stamp is None,
+        )
+        if not all(matches):
+            raise AdjointIdentityRefused("original diagnostic core differs from its issued render-free context")
+        original_resource_check = owner.resource_check
     if selected_row_diagnostic is not None:
         if any(value is not None for value in (
                 chain_resume, chain_seed, chain_split, forward_split, forward_recovery)):
@@ -1339,6 +1388,8 @@ def run_adjoint_capture_core(
         "campaign_stage": "joint_adjoint_capture",
         **({"selected_row_diagnostic": diagnostic} if diagnostic is not None else {}),
     }
+    if original_context is not None:
+        bind_identity = original_context["session_identity"]
     run_identity = {
         "plan_sha256": str(plan_sha256),
         "prepared_sha256": str(prepared_sha256),
@@ -1357,6 +1408,13 @@ def run_adjoint_capture_core(
         # bytes (PQ #1028).
         **bf16_reduction_stamp(),
     }
+    if original_context is not None:
+        run_identity["original_diagnostic_context"] = {
+            "schema": original_context["prepared"]["schema"],
+            "scope": original_context["prepared"]["scope"],
+            "static_authority_sha256": original_context["base_plan"]["static_authority_sha256"],
+            "session_preparation": original_context["session_preparation_input"],
+        }
     stride_block = {"value": int(stride), "boundaries": [int(b) for b in boundaries],
                     "max_chain_layers": int(stride) - 1}
     arithmetic = chain_arithmetic_stamp(runner, arithmetic_extra)
@@ -1512,6 +1570,10 @@ def run_adjoint_capture_core(
             from .stage_a_forward_split import PREP_OWNER_LABEL
             storage.bind(bind_identity, n_probes=n_probes, published=True,
                          owner_label=PREP_OWNER_LABEL)
+        elif original_context is not None:
+            storage.rebind(original_context["session_preparation"]["session"],
+                           identity=bind_identity, n_probes=n_probes,
+                           check_memory=original_resource_check)
         elif resume_plan is None:
             storage.bind(bind_identity, n_probes=n_probes, published=True)
         else:
@@ -2462,6 +2524,126 @@ def _stage_a_source_identity(runner, config, identity_cache_path):
         runner, config["model"], identity_cache_path=identity_cache_path,
         **source_identity_proof_kwargs(
             config["model"], config.get("source_digest_cache")))
+
+
+def run_original_diagnostic_capture(authority_input, plan_input, session_preparation_input, *,
+                                    source_authentication):
+    """Run the current source's own row/tail without any pricing PREPARED join.
+
+    The caller owns this existing material owner and its final close. Actual
+    original CUDA admission still fails through that owner's unchanged gate.
+    """
+    from .aura_cost import _aura_source_sha256
+    from .calibration_data import load_calibration_input
+    from .cost_stage_checkpoint import canonical_json_sha256
+    from .cost_streaming import build_streamed_causal_lm, build_streamed_model_identity
+    from .gpu_guard import require_cuda_hot_path
+    from .joint_aura import source_execution_identity
+    from .layer_streaming import _source_profile
+    from .matmul_arithmetic import pin_matmul_arithmetic
+    from .memory_management import enforce_device_envelope
+    from .residency_map import bind_residency_manifest, residency_report
+    from .source_generation import (
+        _control, observe_original_source_execution, original_source_runtime,
+        validate_original_source_runtime,
+    )
+    from .stage_a_selected_row_diagnostic import load_original_diagnostic_issued_context
+    from .tessera_calibration_cache import require_original_source_authority
+
+    owner = source_authentication
+    require_diagnostic_original_owner(owner, device="cuda")
+    observed = observe_original_source_execution(authority_input, plan_input,
+                                                resource_check=owner.resource_check)
+    authority = require_original_source_authority(owner, authority_input, plan_input, observed)
+    _, final_plan = _control(plan_input, "original diagnostic final plan")
+    if final_plan.get("original_session_preparation") != session_preparation_input:
+        raise AdjointIdentityRefused("original diagnostic preparation is not independently selected")
+    bindings = final_plan["original_source"]
+    context = load_original_diagnostic_issued_context(
+        session_preparation_input, base_plan_input=bindings["base_plan"], authority=authority)
+    base, prepared_context = context["base_plan"], context["prepared"]
+    execution, resources = context["execution"], context["resources"]
+    require_diagnostic_original_owner(owner, model=base["model"], device="cuda")
+    if prepared_context["implementation_sha256"] != _aura_source_sha256():
+        raise AdjointIdentityRefused("original diagnostic current implementation differs")
+    require_cuda_hot_path("original selected-row diagnostic", "cuda")
+    bind_residency_manifest(bindings["read_manifest"]["sha256"])
+    ids, calibration = load_calibration_input(base["calibration_input"]["path"],
+        expected_sha256=base["calibration_input"]["sha256"], n_samples=512, seqlen=512)
+    if calibration != prepared_context["calibration"]:
+        raise AdjointIdentityRefused("original diagnostic full calibration differs")
+    pin_matmul_arithmetic()
+    torch.set_num_threads(1)
+    envelope = enforce_device_envelope("cuda", resources["gpu_bytes"],
+                                       where="original selected-row diagnostic")
+    owner.resource_check("before_original_diagnostic_model")
+    started, before_io = time.time(), _io_counters()
+    sampler = GpuPowerSampler().start()
+    kernel = _stage_a_kernel_profiler()
+    runner = None
+    source_waits = ExposedWaitLedger()
+    observations = ExitStack()
+    result = {"schema": "prismaquant.original_diagnostic_execution.v1", "passed": False,
+              "authority": authority_input, "plan": plan_input,
+              "session_preparation": session_preparation_input, "device_envelope": envelope,
+              "calibration": calibration, "started_epoch": started}
+    try:
+        runner = build_streamed_causal_lm(base["model"], device=torch.device("cuda"),
+            dtype=torch.bfloat16, offload_folder=str(adjoint_space(base["output_root"]) / "offload"),
+            profile=_source_profile(base["model"], owner), attn_implementation="eager",
+            source_authentication=owner, sealed_head_tensors=prepared_context["head_source"]["tensors"],
+            planned_source_window_bytes=resources["source_cache_bytes"],
+            **resources["source_prefetch"])
+        source = build_streamed_model_identity(runner, base["model"])
+        if source != prepared_context["source_model_identity"]:
+            raise AdjointIdentityRefused("original diagnostic live source identity differs")
+        if source_execution_identity(runner.model) != prepared_context["source_execution"]:
+            raise AdjointIdentityRefused("original diagnostic actual source execution differs")
+        validate_original_source_runtime(original_source_runtime(runner, owner), authority["runtime"])
+        runner.model.eval()
+        runner.context.begin_source_initialization_audit()
+        observations.enter_context(runner.observe_source_waits(source_waits.sink))
+        kernel.__enter__()
+        receipt = run_adjoint_capture_core(runner, ids.to(runner.device), execution=execution,
+            output_root=base["output_root"], stride=execution["stride"],
+            source_model_identity=source,
+            unit_roster_sha256=canonical_json_sha256(prepared_context["head_source"]["tensors"],
+                                                    where="diagnostic head source roster"),
+            plan_sha256=bindings["base_plan"]["sha256"], prepared_sha256=base["prepared"]["sha256"],
+            read_manifest_sha256=base["read_manifest"]["sha256"],
+            implementation_sha256=prepared_context["implementation_sha256"],
+            campaign_scope={"schema": "prismaquant.original_diagnostic_scope.v1",
+                            "scope": "fresh_original_global_row", "priced": False},
+            boundary_artifact_bytes=execution["boundary_storage"]["max_artifact_bytes"],
+            selected_row_diagnostic=base["selected_row_diagnostic"],
+            original_diagnostic_context={"authority_input": authority_input, "plan_input": plan_input,
+                                         "session_preparation_input": session_preparation_input})
+        receipt["source_initialization"] = runner.context.source_initialization_contract()
+        receipt["original_source_material"] = owner.receipt()
+        receipt["device_envelope"] = envelope
+        owner.resource_check("after_original_diagnostic_capture")
+        torch.cuda.synchronize()
+        result["peak_gpu_bytes"] = torch.cuda.max_memory_allocated()
+        result["peak_gpu_reserved_bytes"] = torch.cuda.max_memory_reserved()
+        if result["peak_gpu_reserved_bytes"] > resources["gpu_bytes"]:
+            raise AdjointIdentityRefused("original diagnostic exceeded its device envelope")
+        result["diagnostic_receipt"] = write_diagnostic_receipt(adjoint_space(base["output_root"]), receipt)
+        result["passed"] = True
+    finally:
+        observations.close()
+        kernel.__exit__(None, None, None)
+        if runner is not None:
+            runner.shutdown()
+        result["finished_epoch"] = time.time()
+        result["gpu"] = sampler.stop()
+        result["io_before"], result["io_after"] = before_io, _io_counters()
+        result["kernel_active_s"] = kernel.block()["kernel_active_s"]
+        result["kernel_profiler_error"] = kernel.error
+        result["source_waits"] = source_waits.snapshot()
+        result["residency"] = residency_report()
+        atomic_write_bytes(adjoint_space(base["output_root"]) / "original-diagnostic-results.json",
+                           indent2_json_file_bytes(result))
+    return result
 
 
 def run_adjoint_capture(
