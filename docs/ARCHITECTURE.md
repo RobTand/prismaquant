@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-03 (Refs #2147; required source dependencies #2148/#2149):
+the existing routed capture CLI, GLM visitor and native boundary intake carry an
+exclusive current-original first-sequence contract, not canonical complete-v2
+authority. The source owner's public gate compares independently sealed inputs
+before material; original non-CPU material/directGPU/automatic refusers remain.
+The actual owning artifact generation is re-bound, never newly minted by capture.
+Four source tensors retain their pre-host-copy indexed device and original dtype;
+ordered I64 coordinates remain deterministic CPU bookkeeping. Prefix/full source
+initialization, actual delivery generations, completed source-copy fences and
+all pending one-ahead debt are independently joined before lossless I32/F32
+transport. Row zero supplies no full-draw H, counts/maxima, prices, MTP/vision or
+native/serving qualification. Legacy DEV/cache/LFM and the geometry-bound GLM
+bias repair remain. No runtime pin, menu, adoption or default changes occur.
+
 Re-stamped 2026-10-02 (Refs #2094, Tessera #856): shape-time conversion
 requires an explicit PB action/publication/attempt selector for each checker
 completion. The public SDK4 result reader and standard capture binder join

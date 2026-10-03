@@ -26,6 +26,16 @@
   automatic-capture refusal. Shared issued-session validation composes with
   #2149 through the existing artifact owner; no new provider/cache/registry.
 
+- **Current-original routed capture has an exclusive scoped intake** (#2147;
+  integration dependencies #2148 and #2149). The existing CLI/visitor/source
+  owner bind independent authority, issued artifact session, full calibration,
+  actual source/runtime/initialization and all five raw tensor identities before
+  lossless route transport. Layers 3–43 remain proper prefixes; layer 44 requires
+  full text-forward initialization. The four source tensors retain their observed
+  indexed device; ordered coordinates remain CPU bookkeeping. Required source
+  deliveries/copy fences and all pending lookahead debt stay distinct. Missing
+  real qualification/root admission and the unchanged original CUDA guard refuse;
+  legacy DEV/cache/complete-v2, LFM, bias, format, pricing and serving gates stay fixed.
 - **Original quantum source intake refuses before mutable profile discovery**
   (#2143). An explicitly qualified original material owner applies its existing
   device predicate first and supplies the same owned config/profile to the

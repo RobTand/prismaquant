@@ -285,3 +285,69 @@ CUDA source tensor. All five original tensor identities remain exact. These
 controls establish neither full-draw H/prices nor complete capture, native
 wire/serving qualification, a source adoption or a changed production gate.
 
+## Current-original routed prefix intake (Refs #2147/#2148/#2149)
+
+This nonactivating source change consumes the frozen implementation contract
+SHA256 `d0c0a47a38d0732dc392c83db362469fb0bf31f1236cc97b0a43305d2132f870`.
+The prospective device criterion is corrected from that proposal: `inputs`,
+`top_k_index`, `top_k_weights` and the live FP32 `expert_bias` are source tensors
+whose consistent indexed device is observed before host copy. `coordinates`
+are the existing deterministic CPU I64 `(sample zero, position 0..511)`
+bookkeeping, not an original router output. No CUDA coordinate allocation or
+copy-back is introduced, and no old receipt is restamped.
+
+`tools/capture_glm_routed_layers.py` retains its legacy explicit DEV/cache/
+canonical-v2 branch. The exclusive original branch additionally requires
+`--original-authority`/`--original-authority-sha256` and
+`--session-preparation`/`--session-preparation-sha256`; these are independently
+bound inputs, never admission switches. They must equal the issued final plan's
+`original_source.authority` and `original_session_preparation`. The existing
+shared public source authority helper runs with `owner=None` before any source
+material, then rechecks the same actual `qualified_original_material` owner.
+Effective DEV mode, legacy identity/digest/canonical caches and source derivatives
+are not interchangeable original authority. Process-local arithmetic selectors
+are configured only after strict bound-control decoding and comparison with
+the independently sealed expected flags; an ambient disagreement refuses.
+
+The shared issued-context reader verifies the actual pending published artifact
+generation and its metadata issuer before material acquisition. Capture rebinds
+that existing session with its acyclic session identity and exact v2 storage
+policy. The original device predicate still refuses before calibration payload,
+source profile/model, CUDA envelope or output publication. There is no new
+loader, provider, source cache, dispatcher, standalone UUID or CPU admission mode.
+This slice requires the #2148 owner/parser and #2149 read-only issued-context
+implementations in the final source composition; it does not duplicate them.
+
+The producer uses the existing original router, `visit_routed_boundaries` and
+initialization audit. Each `original_source_acquisition.v1` carries exactly
+`schema`, `authority`, `session`, `source_material`, `source_initialization`,
+`source_execution`, `runtime` and `entry`. The closed entry retains the existing
+raw `shape`/`dtype`/`logical_bytes`/`content_sha256` identities of all five tensors,
+ordered role/position/sample coordinates and the exact source unit/layer. Its
+closed runtime carries `schema`, `source_runtime`, `device`, `source_tensor_dtypes`,
+`source_tensor_devices`, `expert_class`, `router_class` and `router_source_sha256`.
+Observed source runtime is joined to the separately bound runtime input;
+raw tensor identities are never replaced with I32/F32 transport identities.
+
+The native intake requires separately supplied expected full authority and
+session, not the payload's own claims. Its scoped manifest has exactly
+`schema`, `scope`, `authority`, `session`, `calibration`, with schema
+`prismaquant.first_sequence_original_capture.v1` and scope
+`first_sequence_original_capture`. Layers 3–43 require exactly their observed
+proper prefix; layer 44 requires the existing 45-layer full text-forward witness.
+Required head/prefix files need actual delivered whole-file/payload identities
+and successful exact-generation source-copy completion. Every actual delivery
+generation and all pending lookahead debt remain in the owner receipt: a newer
+pending read cannot overwrite an older completed installed-source witness.
+The original producer claim/session is preserved; a later consumer's claim is
+not substituted into it. Raw output byte length/file SHA is external to the
+serialized entry, with bounded serialization and exclusive publication.
+
+CPU protocol controls are synthetic and isolated from actual CUDA qualification.
+Synthetic descriptor/completion records are never added to a real owner receipt
+or used as qualification/admission. Real CPU owners have no CUDA completion;
+such a receipt cannot qualify an initialized original CUDA prefix. The one
+combined PB CPU/surface/compile check belongs after all source dependencies and
+the maintenance release. No mid-flight test/build/GPU execution, scientific
+capture, full-draw H/pricing, wire/kernel acceptance or serving admission is
+established by this source implementation.
