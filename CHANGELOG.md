@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Native MoE source replay binds the geometry's original router bias** (#2144).
+  GLM's strict FP32 `correction_bias` identity is checked with the whole
+  expert-roster shape; LFM retains its existing `selection_bias` identity.
+  Independent source/runtime/calibration and exact tensor-byte checks remain
+  mandatory. This CPU protocol repair grants no GPU, capture or serving admission.
+
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
   A v45 table was refused as an unknown requirement. The parser now reads the
