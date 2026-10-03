@@ -69,3 +69,49 @@ Refactor, dormant lifetime and identity changes are separate commits, with
 normative architecture/contracts updated alongside behavior. Remaining actual
 CUDA lifetime, original a6 source/readset/envelope and fresh g6 acceptance remain
 open in the parent task.
+
+## Failed-completion ownership correction — 2026-10-03
+
+The historical frame-retention controls above do not prove safety after an
+ordinary caller drops the exception or the source owner. Root held the retained
+56-node protocol698a0a0 rather than submitting it. PQ #2134 / draft #2135 fixes
+that seam in the existing source/completion owners; automatic and original CUDA
+device predicates remain closed. See the updated original material contract.
+
+Baseline d57a19f with a separate causal adverse-control module executed two CPU
+cases through unchanged layer intake: both failed at the ownership assertion
+after every external/error-frame owner reference was dropped and GC ran. This
+is CPU lifecycle evidence, not an actual DMA failure observation. Action
+`b515988b572c211c7e744a1e90f084bb8ddad9e50b168872ea7d3286c1e50c10`
+ended exit1 with 2 failures, zero skips, complete process telemetry, zero live
+processes and zero OOM. A failed action has no success CAS receipt; its retained
+attempt/stdout hashes are the failure evidence. The module and reports remain
+in the isolated baseline worktree and `original-copy-failure-owner-red-01.json`.
+
+CPU source77ccf40f995ccfa6b1ebd0857d83bcebf90cfcfc then exercised 23 lifecycle
+cases (including repeated failed recovery, dropped last owner, heldFD/whole-
+material credit, final collection/FDclose and unregistered-copy exclusion):
+23 passed, zero skips, 14 warnings, exit0 in action
+`5083d2d3e6d55aa25fa14c65f273090abe5dea46cd556f9860e72f79b24d6b69`.
+The final companion collection executed 64 explicit CUDA skips, zero missing,
+exit0 in `1016bf65d2375b2a3cfd3d4714f8f520ce28af64c89e732c6a822d7851b989c9`.
+All 64 remain unrun GPU controls, including the eight actual-DMA abandoned-owner
+controls. The complete final population is 87 outcomes, not 87 device passes.
+
+Published pbtest reserved cpu2/mem4GiB/native1 per action, timeout240s and
+per-test60s, with no GPU demand or host pin; PB placed both on dl380g10. The
+same pinned Python3.14.4/Torch2.11.0+cpu/Transformers5.16.1/PB95a59051/Tesserab40
+environment was used. Source snapshots name parent77ccf40f and input SHA256s
+`e1fcb34cbfb30aed1ae8ccd45c92dddfc67eea6cc2f5adabeaa17854dabf8196` and
+`1134d7147bee287c8c5fd7bf0a67f17795f0888ad8a5ef4c483702a2d56a7ceb`.
+Both terminal records have present success CAS receipts, complete telemetry,
+zero live processes/zero OOM, and peaks455049216B /448827392B. Host profiles
+retain the missing pqteld CSV statement; no performance claim follows.
+
+Reports are at sparky:/home/rob/tmp/astra-resume-20261002/quality-next/
+`original-copy-failure-owner-green-final.json`; earlier0884c819 integration
+(`original-copy-failure-owner-green-01.json`) separately recorded72 passes and
+64 skips over136 outcomes. Those counts are not combined or restamped as
+final-tree full-suite evidence. This appended prose follows the77ccf40f code
+freeze; GPU qualification, original a6 adoption/readset/resource review and
+actual row0/probe7000/N262144 fresh-boundary6 acceptance remain open.
