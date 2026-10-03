@@ -910,6 +910,18 @@ SDK installation and source review do not establish fleet runtime activation;
 the published worker generation remains independent. This dependency move
 makes no numerical, wire, pipeline-default, serving or speed claim.
 
+Re-stamped 2026-10-03 (Refs PQ #2106, #1293): produced-output CPU
+fixtures explicitly supply SDK4 host capacity for their private queue claims,
+using the existing shared Stage A fixture capacity authority. Zero-window
+write-only templates still require CPU/memory admission; tier credit and an
+outer admitted test action do not grant an implicit executable claim. Render
+publication/write-plan, retirement, band handoff, resumed local readback and
+Stage B preparation checks retain the actual admitted producer/request and
+attempt binding. The obsolete test of a historical reader SDK commit literal
+is removed rather than repinned; strict serving/refusal behavior remains the
+consumer contract. No production admission, SDK pin, runtime, numerical,
+pipeline-default or serving gate changes.
+
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
 using the existing delivery owner and exposed-wait ledger/report. Ready

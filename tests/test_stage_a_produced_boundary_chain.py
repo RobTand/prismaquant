@@ -95,9 +95,9 @@ PB_GENERATION_PIN = Path(__file__).resolve().parent / "pb_runtime_generation_pin
 GROUP_SIZE = 4
 
 # SDK4 executable claims require explicit host admission even in a private
-# queue. Producer, independent reader and one mover fit this bounded fixture;
-# its PB action reserves at least four CPUs and four GiB. Tier credit remains
-# independently minted by _queue and cannot substitute for host capacity.
+# queue. All produced-output fixture consumers use this single capacity
+# authority; tier credit cannot substitute for host CPU/memory admission.
+# Producer, independent reader and one mover fit this bounded fixture.
 _FIXTURE_HOST_CAPACITY = {"cpu": 4, "mem_gb": 4}
 
 #: An owner that owes nothing. Three buckets, not two: an egress refusal
@@ -965,18 +965,13 @@ def test_the_bounded_cycle_reads_retires_and_reads_again(
         "the repeat read must NOT be a second publication")
 
 
-def _claimed_consumer(tmp_path: Path, cas_root: Path, q, pb_repo: Path,
-                      *, name: str) -> str:
-    """A second, REAL claimed action: the holder the pin belongs to.
-
-    A reader pin names an owner, and PrismaBuild refuses one whose owner is
-    not a live claim (``ownership-uncertain: bad owner``) -- correctly, since
-    an unowned pin is a pin nothing can ever be held responsible for. So the
-    holder in this test is an actual published and claimed action, not a
-    string that looks like one.
-    """
+def _published_consumer(tmp_path: Path, cas_root: Path, q, pb_repo: Path,
+                        *, name: str, command=None) -> str:
+    """Publish a sealed independent consumer, ready for its own admission."""
 
     from prismabuild import core as pb
+    from prismabuild import movement_actions
+    command = ["/bin/true"] if command is None else list(command)
     checkout = tmp_path / "mover-checkout"
     body = {
         "schema": pb.ACTION_SCHEMA_V2,
@@ -984,12 +979,13 @@ def _claimed_consumer(tmp_path: Path, cas_root: Path, q, pb_repo: Path,
                  "definition_version": "v1", "task_class": "generation",
                  "determinism": "deterministic",
                  "artifact_family": "generic", "artifact_kind": "generic",
-                 "argv": ["/bin/true"], "working_directory": ".",
-                 "result_path": "result"},
+                 "argv": movement_actions.standard_capture_argv(
+                     command, "result", path_prefix="/usr/bin"),
+                 "working_directory": ".", "result_path": "result"},
         "inputs": [],
         "code_closure": pb.build_code_closure(
             checkout, ["tools/fleet/stage_move.py"]),
-        "params": {"cwd": ".", "command": ["/bin/true"]},
+        "params": {"cwd": ".", "command": command},
         "environment": {"variables": {"PATH": "/usr/bin:/bin"},
                         "toolchain": {}},
         "execution_scope": {"portability": "portable", "platform_key": None,
@@ -1001,6 +997,13 @@ def _claimed_consumer(tmp_path: Path, cas_root: Path, q, pb_repo: Path,
               worker_script=str(pb_repo / "tools" / "prismabuild_worker.py"),
               checkout_root=str(checkout),
               resources={"cpu": 1, "mem_gb": 1})
+    return key
+
+
+def _claimed_consumer(tmp_path: Path, cas_root: Path, q, pb_repo: Path,
+                      *, name: str) -> str:
+    """A real independent claimed reader, not a string that looks like one."""
+    key = _published_consumer(tmp_path, cas_root, q, pb_repo, name=name)
     claimed = q.claim(owner=f"w-{name}", capacity=_FIXTURE_HOST_CAPACITY)
     assert claimed is not None and claimed["action_key"] == key, claimed
     return key
