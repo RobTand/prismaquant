@@ -451,21 +451,19 @@ def test_real_producer_wire_materialization_and_translator_handoff(tmp_path, mon
     metadata = json.loads(output.read_text())['__prismaquant__']
     assert metadata[tep.EXPERT_WIRES_KEY][missing] == original_record
     assert load_assignment(output) == assignment
-    import os
-    import runpy
     from pathlib import Path
     from safetensors import safe_open
     shapes = {}
     for shard in Path(argv[1]).glob('*.safetensors'):
         with safe_open(str(shard), framework='pt', device='cpu') as handle:
             shapes.update({name:tuple(handle.get_slice(name).get_shape()) for name in handle.keys()})
-    producer = runpy.run_path(str(Path(os.environ['TESSERA_REPO']) / 'experiments/plan_from_layer_config.py'))
     derived = export._write_plan_assignment(output, expected_sha256=tm._sha(output),
                                             profile=profile)
     assert load_assignment(output) == assignment
     producer_config = json.loads(Path(derived['plan_assignment']).read_text())
-    translated, _provenance = producer['build'](producer_config, shapes,
-        cover='as-allocated', allow_disagreement=False, prismaquant=None, with_control=False)
+    from prismaquant.tessera_plan_writer import build_serving_plan, tessera_surface
+    translated, _provenance = build_serving_plan(producer_config, shapes,
+        cover='as-allocated', allow_disagreement=False, surface=tessera_surface(), with_control=False)
     assert translated[missing + '.weight'] == {'grid':'E4M3', 'q256':1024}
 
 
