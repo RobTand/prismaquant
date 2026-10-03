@@ -426,6 +426,7 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
     pytest.importorskip("tessera.cached_unit")
     pytest.importorskip("safetensors")
     from prismaquant import model_profiles, tessera_campaign, tessera_render
+    from prismaquant.format_registry import get_format
     from prismaquant.model_profiles.lfm2_moe import Lfm2MoeProfile
     from prismaquant.tessera_expert_projection import ExpertProjectionError, producer_plan_tool
 
@@ -485,7 +486,8 @@ def _bridge_main_fixture(monkeypatch, tmp_path, *, perturb=None):
             body_rate_q256=1024,
             dloss=float(((render.float() - weight.float()) ** 2).mean()), dloss_stderr=0.0,
             memory_bytes=len(blob), bits_per_param=8 * len(blob) / weight.numel(),
-            activation_contract="w8a8-dynamic-e4m3-channel", activation_quantized=True,
+            activation_contract=str(get_format(format_name).act_dtype_name or "a16"),
+            activation_quantized=True,
             wire_bytes=len(blob), seconds=0.01, hessian_applied=False)
 
     monkeypatch.setattr(tessera_campaign, "_measure_anchor", measure_without_route_admission)
