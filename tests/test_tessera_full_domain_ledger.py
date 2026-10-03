@@ -170,8 +170,8 @@ def test_census_retains_wholly_unmeasured_units_and_families():
 
 def test_census_legality_uses_individual_shape(monkeypatch):
     import prismaquant.tessera_full_domain_ledger as module
-    monkeypatch.setattr(module, "_cached_legal_rates",
-                        lambda family, shapes: (shapes[0][0],))
+    monkeypatch.setattr(module, "_cached_domain",
+                        lambda family, shapes: ((shapes[0][0],), {}))
     monkeypatch.setattr(module, "_cached_transition_rates", lambda *args: ())
     ledger = _ledger([], unit_shapes={"a": (256, 512), "b": (512, 256)})
     assert ledger["entries"]["a|" + FAMILY]["legal_q256"] == [256]
@@ -195,3 +195,16 @@ def test_missing_cross_family_pair_refuses():
 def test_invalid_census_roster_refuses(roster):
     with pytest.raises(FullDomainLedgerError, match="unit_shapes"):
         _ledger([], unit_shapes=roster)
+
+
+def test_short_column_linear_retains_legal_rates_and_explicit_refusals():
+    ledger = _ledger([], unit_shapes={"kda": (8192, 128)})
+    entry = ledger["entries"]["kda|" + FAMILY]
+    assert entry["legal_rate_count"] == 897
+    assert len(entry["producer_refused_q256"]) == 896
+    assert entry["missing_rate_count"] == 897
+    assert "257" in entry["producer_refused_q256"]
+    assert 256 in entry["legal_q256"]
+    assert 257 not in entry["legal_q256"]
+    with pytest.raises(FullDomainLedgerError, match="outside the legal domain"):
+        _ledger([_row("kda", 257)], unit_shapes={"kda": (8192, 128)})

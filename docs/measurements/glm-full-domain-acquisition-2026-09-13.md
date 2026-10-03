@@ -105,6 +105,10 @@ The coverage ledger accepts `unit_shapes`, an explicit census mapping from
 Linear name to `(rows, columns)`. Supply it when auditing a model-wide request:
 the priced-row roster alone cannot reveal wholly unmeasured units or families.
 Each requested family retains every legal rate at that unit's actual shape.
+`producer_refused_q256` separately retains shape-illegal rates and their reasons;
+for a real KDA `(8192, 128)` E4M3 Linear, 897 rates remain legal and 896
+are explicitly refused rather than dropping the entire Linear or smoothing
+the odd-q256 quota holes. Priced rows at those refused rates still fail closed.
 Empty ledgers, absent selections and absent unit/family pairs now refuse
 instead of vacuously certifying complete coverage. `missing_acquisition_work`
 retains these missing cells in the existing v1 format. No missing cell receives

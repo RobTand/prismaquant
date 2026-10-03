@@ -76,19 +76,16 @@ def _interpolated_cost_source() -> str:
     return TESSERA_INTERPOLATED_COST_SOURCE
 
 
-def _legal_rates(family: str, shapes: Sequence[Sequence[int]]) -> tuple[int, ...]:
-    from .tessera_legal_domain import legal_rate_domain
-
-    return legal_rate_domain(family, shapes).rates
+_LEGAL_CACHE: dict[tuple[str, tuple[tuple[int, ...], ...]],
+                   tuple[tuple[int, ...], dict[int, tuple[str, ...]]]] = {}
 
 
-_LEGAL_CACHE: dict[tuple[str, tuple[tuple[int, ...], ...]], tuple[int, ...]] = {}
+def _cached_domain(family: str, shapes: Sequence[Sequence[int]]):
+    from .tessera_legal_domain import legal_rates
 
-
-def _cached_legal_rates(family: str, shapes: Sequence[Sequence[int]]) -> tuple[int, ...]:
     key = (family, tuple(tuple(shape) for shape in shapes))
     if key not in _LEGAL_CACHE:
-        _LEGAL_CACHE[key] = _legal_rates(family, shapes)
+        _LEGAL_CACHE[key] = legal_rates(family, shapes)
     return _LEGAL_CACHE[key]
 
 
@@ -197,7 +194,7 @@ def build_full_domain_ledger(
     entries: dict[str, dict[str, Any]] = {}
     for (unit, family), rows in sorted(by_unit_family.items()):
         owner_shapes = roster_shapes.get(unit, resolved_shapes)
-        legal = _cached_legal_rates(family, owner_shapes)
+        legal, refused = _cached_domain(family, owner_shapes)
         legal_set = set(legal)
         for rate in rows:
             if rate not in legal_set:
@@ -245,6 +242,8 @@ def build_full_domain_ledger(
             "currency": want_currency,
             "legal_q256": list(legal),
             "legal_rate_count": len(legal),
+            "producer_refused_q256": {str(rate): list(reasons)
+                                      for rate, reasons in sorted(refused.items())},
             "measured_q256": measured,
             "measured_envelope_q256": list(envelope) if envelope else None,
             "predicted_q256": {str(rate): predicted[rate] for rate in sorted(predicted)},
