@@ -118,3 +118,90 @@ actual log, profile, inventory and telemetry are recovered after mount/SSH/PB
 health restoration. No completed baseline is rerun. Raw before/after evidence
 and all six raw Netdata series are preserved in
 /home/rob/tmp/pq1929-routed-evidence.json. No background test action remains.
+
+
+## Successor: remaining positive, rank and CLI consumers (Refs #1929)
+
+A separate successor branch starts at exact frozen PR2130 head
+818f8617a7d8ac515a127ef0888c6ae4ac7b9bb1; it does not edit that parent packet.
+The remaining consumers now request the existing glm_quality_cell fixture:
+unbound-quality refusal, whole-container quality identity, both rank windows,
+positive admitted GLM world and the two allocator CLI controls. The CLI helper
+requires that private cell explicitly. Its budgets, genuine serialized extents,
+FAST/SLOW rank samples, report/capture identities, precedence and all assertions
+are unchanged. Rank1 mutations and CLI wire/report edits can touch only their
+function-scoped deep copies/private completion and PWC files. The existing ten
+mutation consumers and their fixture implementation are unchanged.
+
+Test commit:74c45b71c55585d7f6c654e2902afcebd2e26cf5.
+Test file SHA-256:12ff75b5d8b7800459997ea5090c45d758f527e26a17452f027ab755da604db9.
+Before test SHA-256 is the PR2130 after hash stated above. No pytest node is
+added, removed, renamed or skipped in this successor. Both targeted arms run
+exactly the seven changed nodes and intentionally deselect54 other nodes,
+including the previously accepted ten mutation cases. This is not a new61-node
+qualification. The selected population, in source order:
+
+- test_a_rank_local_panel_refuses_an_unbound_quality_preparation
+- test_the_frozen_joint_names_the_container_render_not_the_rank_cut
+- test_the_rank_render_proof_moves_its_window_with_the_rank[0] and [1]
+- test_a_glm_288_owner_prices_two_ranks_end_to_end
+- test_the_glm_cost_model_reaches_the_cli_and_expands_to_its_864_members
+- test_the_cli_refuses_a_forged_or_changed_rank_report
+
+Published pbtest uses the earlier CPU2/mem4/native1/one-worker DL contract,
+600-second deadline and the same interpreter/packages as the original section.
+A -k OR-expression of the six test names seals precisely these seven nodes;
+PB alone partitions/places the file. Both action and profiler returns are0;
+both reconciliations record7passed,0skipped,54deselected, zero missing/duplicate
+collection or outcome problems and14 existing upstream warnings.
+
+| Successor observed measurement | Before | After |
+|---|---:|---:|
+| Pytest wall |135.17s|82.57s|
+| PB contained wall |142.804s|89.995s|
+| Cgroup CPU |163.847s|101.572s|
+| Cgroup memory peak |570261504 bytes|575143936 bytes|
+| Observed write bytes |41554392|39150040|
+| Observed read bytes |32768|32768|
+| _glm_cell inclusive sampled time |61.66s|10.09s|
+| _glm_cli_fixture inclusive sampled time |43.71s|26.12s|
+| Private fixture setup inclusive sampled time |absent|10.74s|
+| py-spy100Hz samples |13641|8467|
+
+The observed seven-case wall decreases52.60s (38.91%). This is one sequential
+pair, not a guaranteed speedup or a suite-wall result. Preferred assigned cores
+change from[1,2] to[2,3]; background DL load also changes. The source now calls
+the expensive builder once per module/process instead of separately in all
+seven selected consumers. Each still runs its real validation/emitter/admission
+or allocator control. Inclusive sampled times overlap and must not be added.
+
+Before action:eb9528c7fb05ee5e27cb2ce237b366a70adabde3b9b2fffd39b380748ae6253f.
+Receipt:23f417e10c14bad4bd2f3e735dc9a0c4015174ec27c9342caae9c187a9d4060e.
+Snapshot:d2c7b02cb92f8d0818e8cc5dbc2728bad1b58443; parent exact818f8617.
+Input:755274cecba3f402c8e3d5bc73eab911671918eb6c5659d78aaa400af036c128.
+Profile:ed6af6de9016a4772685c00e74a77fc8fe059ddcc38f03551f697b5869c708f9.
+After action:8dd7642112944686717b3c00b297531a9286ac60cbf9b4e7f9aca4f133d49b6b.
+Receipt:8ec423f4a97457e96249ac41e2aab266d4702d787572c33cf8b90934d1b20ad5.
+Snapshot:bcd43880315d80d775c34b91c13575896c6c0396; parent exact74c45b71.
+Input:79557fb3a613ebc26c856be80c7e98f31c6efe7c9d30567f6859d33ef84dfcf4.
+Profile:9b82cd8c9e639f2e3e5b0c565714c33a8e01f819ae668d5c353fee0115213d9a.
+A transient before-receipt lookup said absent; the actual emitted receipt and
+subsequent complete read-only receipt lookup bind the checksum above. The
+original absent observation remains in the raw evidence rather than being
+silently relabeled. No work was rerun to resolve that lookup.
+
+Two-second average host CPU busy excludes idle/iowait:
+
+| Successor host | Before busy | After busy |
+|---|---:|---:|
+| dl380g10 |11.803%|9.851%|
+| sparky |1.946%|2.436%|
+| sparklina |1.493%|1.459%|
+
+Windows are1791054574..1791054718 and1791054832..1791054923. All six series
+have zero flagged/empty buckets. PB's own DL averages are11.764%/9.822% and
+retain explicit missing-pqteld diagnostics. Raw receipts, inventories,
+resource records and Netdata are/home/rob/tmp/pq1929-routed-positive-evidence.json.
+No GPU/numeric acceptance, full-suite or line-coverage equality is claimed.
+The frozen full1032-file94ce cohort remains untouched and integration-owned.
+
