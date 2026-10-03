@@ -124,17 +124,31 @@ retain native source aliases plus converted/stacked host staging until their
 current copy stream records and synchronizes an event. The original fence is
 independent of the legacy source-page flag, and original decoders remain CPU
 `framework="pt"` even when the direct-CUDA-load environment flag is set. Failed
-record/synchronization keeps the true host owners in the failed frame and does
-not credit their material as released. Launched readers drain on cancellation
-or failure; cancelled original output refuses installation. Original head
-copies all complete before the first installation, so a later copy failure
-cannot expose a partially installed head.
+record/synchronization keeps native and converted host owners registered with
+the existing source owner from before H2D enqueue, not merely in an exception
+frame. Catching/discarding every error frame does not release storage credit.
+Event failure first drains the exact enqueue stream and rethrows the original
+event error; safe drain is not success. If that drain also fails, a process-rooted
+FAILED-owner set preserves already admitted source/cache/staging charges and
+held descriptors even after every external owner reference is dropped and GC runs.
+The failed owner refuses new copies. Explicit close, or
+`CaptureSourceAuthentication.close_failed_original_copies()` for abandoned owners,
+drains exact streams before reaping and unregisters only proved completions.
+Repeated failure leaves the owner open/charged/rooted. No successful material is
+retained there, no background retry occurs and no device/capture gate is enabled.
+Launched readers drain on cancellation or failure; cancelled original output
+refuses installation. Original head copies all complete before the first
+installation, so a later copy failure cannot expose a partially installed head.
 
 These dormant paths retain the original CPU-only device predicate. The CPU
 controls enter the actual source memfd/decoder/StorageWeakRef paths with explicit
 CPU CUDA spies. `tests/test_original_source_copy_completion_cuda.py` supplies
-real CUDA source-alias/event controls, but remains unrun: its CPU collection
-reports 32 skips, which prove no GPU behavior. A future explicitly reviewed PB
+real CUDA source-alias/event controls, but remains unrun. Retained frozen56
+protocol698a0a0 is a historical negative reference: its harness drained streams
+while exception frames remained held and cannot qualify traceback-independent
+production ownership. New controls must catch/clear those frames while actual
+stream work remains outstanding and prove owner-driven completion. CPU skips
+prove no GPU behavior. A future explicitly reviewed PB
 action may temporarily override only a fixture owner's device predicate; the
 test-only environment is never read by production code. That fixture action
 cannot qualify actual original GLM primals/cotangents or a complete provider.

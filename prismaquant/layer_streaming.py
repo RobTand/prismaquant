@@ -882,7 +882,8 @@ def _apply_fp8_dequant_inplace(
     original = getattr(source_authentication, 'is_qualified_original_material', False)
     if original:
         source_authentication.require_material_device(device)
-    with _SourceCopyCompletion(device, enabled=original) as copies:
+    with _SourceCopyCompletion(device, enabled=original,
+                               source_owner=source_authentication if original else None) as copies:
         return _apply_source_scale_values(
             out, fp8_scale_inv_map, device, source_authentication=source_authentication,
             copies=copies)
@@ -1117,7 +1118,8 @@ def _materialize(model: nn.Module, prefixes: list[str],
     # Collect loaded tensors first so we can batch the scale-read pass.
     out: dict[str, torch.Tensor] = {}
     open_kwargs = {"framework": "pt"} if original else _safe_open_kwargs(device)
-    with _SourceCopyCompletion(device, enabled=original) as copies:
+    with _SourceCopyCompletion(device, enabled=original,
+                               source_owner=source_authentication if original else None) as copies:
         for shard, pairs in by_shard.items():
             if original:
                 f_ctx = _source_safe_open(shard, source_authentication=source_authentication, **open_kwargs)
@@ -1886,14 +1888,17 @@ class _SourceCopyCompletion:
     """One existing reader's host aliases through its copy-stream event.
 
     This is completion bookkeeping, not a source owner or residency cache.
-    A failed record/sync leaves the host list held by the exception frame.
+    Failed original fences remain owned by the source, not an exception frame.
     """
 
-    def __init__(self, device, *, enabled):
+    def __init__(self, device, *, enabled, source_owner=None):
         self.device = torch.device(device)
         self.enabled = bool(enabled) and self.device.type == 'cuda'
+        self.source_owner = source_owner
         self.host_staging = []
         self.cuda_copied = False
+        self.stream = None
+        self.failed = False
 
     def retain(self, tensor):
         if self.enabled and tensor.device.type == 'cpu':
@@ -1905,6 +1910,12 @@ class _SourceCopyCompletion:
     def copy(self, tensor, **kwargs):
         self.retain(tensor)
         if self.enabled and tensor.device.type == 'cpu':
+            stream = torch.cuda.current_stream(self.device)
+            if self.stream is not None and self.stream != stream:
+                raise RuntimeError('source copy completion spans different CUDA streams')
+            if self.stream is None and self.source_owner is not None:
+                self.source_owner._retain_original_copy_completion(self)
+            self.stream = stream
             # An exception from the copy API does not prove nothing was
             # enqueued; the owning stream must drain in that case too.
             self.cuda_copied = True
@@ -1917,9 +1928,31 @@ class _SourceCopyCompletion:
 
     def __exit__(self, exc_type, exc, tb):
         if self.enabled and self.cuda_copied:
-            event = torch.cuda.Event()
-            event.record(torch.cuda.current_stream(self.device))
-            event.synchronize()
+            try:
+                event = torch.cuda.Event()
+                event.record(self.stream if self.stream is not None
+                             else torch.cuda.current_stream(self.device))
+                event.synchronize()
+            except BaseException:
+                if self.source_owner is not None:
+                    try:
+                        self.drain_failed_copy()
+                    except BaseException:
+                        # Even loss of every caller/error-frame reference must
+                        # not retire storage while completion is unproved.
+                        self.source_owner._root_failed_original_copy(self)
+                    else:
+                        self.source_owner._release_original_copy_completion(self)
+                # Preserve the failed event proof, even after a safe drain.
+                raise
+        self.host_staging.clear()
+        if self.source_owner is not None and self.stream is not None:
+            self.source_owner._release_original_copy_completion(self)
+
+    def drain_failed_copy(self):
+        # No event proof survived. The exact owning stream is the fence;
+        # failed synchronization must leave every host alias held.
+        self.stream.synchronize()
         self.host_staging.clear()
 
 
@@ -1994,7 +2027,8 @@ def _read_layer_to_device(prefix: str,
                 used_direct = False
         # This existing read chunk owns its mmap-backed/converted staging
         # through one stream event, rather than retaining it for the layer.
-        with _SourceCopyCompletion(device, enabled=release_pages or original) as copies:
+        with _SourceCopyCompletion(device, enabled=release_pages or original,
+                                   source_owner=source_authentication if original else None) as copies:
             with f_ctx as f:
                 for model_name, ckpt_name in pairs:
                     t = f.get_tensor(ckpt_name)

@@ -66,9 +66,24 @@ def original_copy_spy(material, monkeypatch):
             return _ArithmeticCudaSpyTensor(converted)
         return real_to(value, target, *args, **kwargs) if target is not None else real_to(value, **kwargs)
 
+    streams = {}
+
+    class Stream:
+        def __init__(self):
+            self.thread = threading.get_ident()
+        def synchronize(self):
+            assert owner.material_live_bytes == len(material['raws']['one.safetensors'])
+            assert all(ref() is not None for ref in state['copies'])
+            state['events'].append('stream-sync')
+            if state.get('drain_fault'):
+                raise RuntimeError('exact stream drain failed')
+
+    def current_stream(*args):
+        return streams.setdefault(threading.get_ident(), Stream())
+
     class Event:
         def record(self, stream):
-            assert stream == threading.get_ident()
+            assert stream.thread == threading.get_ident()
             self.native = list(state['local'].native)
             state['events'].append('record')
             if state['fault'] == 'record':
@@ -93,7 +108,7 @@ def original_copy_spy(material, monkeypatch):
     monkeypatch.setattr(owner, 'safe_open', opened)
     monkeypatch.setattr(torch.Tensor, 'to', copy)
     monkeypatch.setattr(torch.cuda, 'Event', Event)
-    monkeypatch.setattr(torch.cuda, 'current_stream', lambda *a: threading.get_ident())
+    monkeypatch.setattr(torch.cuda, 'current_stream', current_stream)
     monkeypatch.setattr(torch.cuda, 'synchronize', lambda *a: pytest.fail('device-wide fence'))
     monkeypatch.setattr(ls, '_advise_consumed_safetensors_pages', lambda *a: None)
     monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '1')
@@ -146,13 +161,13 @@ def test_original_failure_fences_copies_and_retains_failed_completion_aliases(
         _layer(s)
     assert 'record' in s['events']
     assert ('sync' in s['events']) is (fault != 'record')
-    if fault in ('record', 'sync'):
-        assert s['owner'].material_live_bytes > 0
-        with pytest.raises(RuntimeError):
-            s['owner'].close()
     _clear_frames(caught.value)
-    caught = None  # ExceptionInfo keeps its own traceback tuple as a true owner.
+    caught = None  # Discard pytest's own traceback owner too.
     gc.collect()
+    if fault in ('record', 'sync'):
+        assert s['events'].count('stream-sync') == 1
+    assert not cc._FAILED_ORIGINAL_COPY_OWNERS
+    assert not s['owner']._original_copy_completions
     assert s['owner'].material_live_bytes == 0
 
 
@@ -260,3 +275,82 @@ def test_original_dequant_fallback_transfers_host_weight_beside_scale(original_c
     assert s['events'] == ['record', 'sync']
     expected = torch.arange(32).reshape(4, 8).repeat_interleave(3, 0).repeat_interleave(3, 1)[:10, :22]
     assert torch.equal(out['weight'], expected.to(torch.bfloat16))
+
+@pytest.mark.parametrize('fault', ['record', 'sync'])
+def test_double_fence_failure_roots_abandoned_owner_until_explicit_recovery(
+        material, monkeypatch, fault):
+    import os
+
+    class Stream:
+        fail = True
+        calls = 0
+        def synchronize(self):
+            self.calls += 1
+            if self.fail:
+                raise RuntimeError('fatal exact-stream drain failure')
+
+    stream = Stream()
+    class Event:
+        def record(self, observed):
+            assert observed is stream
+            if fault == 'record':
+                raise RuntimeError('original event record failure')
+        def synchronize(self):
+            raise RuntimeError('original event sync failure')
+
+    real_to = torch.Tensor.to
+    def transfer(value, target=None, *args, **kwargs):
+        if isinstance(target, torch.device) and target.type == 'cuda':
+            return FakeCudaTensor(value.clone())
+        return real_to(value, target, *args, **kwargs) if target is not None else real_to(value, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, 'to', transfer)
+    monkeypatch.setattr(torch.cuda, 'current_stream', lambda *args: stream)
+    monkeypatch.setattr(torch.cuda, 'Event', Event)
+    assert not getattr(cc, '_FAILED_ORIGINAL_COPY_OWNERS', ())
+    reads = {}
+    real_get = cc._CaptureSourceSafeOpen.get_tensor
+    def get(reader, key):
+        value = real_get(reader, key)
+        reads['fd'] = reader.state['fd']
+        return value
+    monkeypatch.setattr(cc._CaptureSourceSafeOpen, 'get_tensor', get)
+    monkeypatch.setenv('PRISMAQUANT_LAYER_READ_THREADS', '1')
+
+    def abandon():
+        owner = _owner(material)
+        reference = weakref.ref(owner)
+        path = material['root'] / 'one.safetensors'
+        # A fixture-local predicate only; the loader intake is unchanged on
+        # the historical source, making loss of ownership the causal RED.
+        owner.require_material_device = lambda device: None
+        try:
+            ls._read_layer_to_device('unit.', {'unit.w': str(path)}, {'unit.w': 'w'},
+                                     torch.bfloat16, torch.device('cuda'), source_authentication=owner)
+        except RuntimeError as error:
+            assert 'original event' in str(error), 'secondary drain must not replace event error'
+            _clear_frames(error)
+        return reference, reads['fd']
+
+    reference, held_fd = abandon()  # Only a weakref and an integer escape.
+    gc.collect()
+    assert reference() is not None
+    assert reference().material_live_bytes == len(material['raws']['one.safetensors'])
+    assert os.fstat(held_fd).st_size == len(material['raws']['one.safetensors'])
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match='fatal exact-stream') as failed:
+            cc.CaptureSourceAuthentication.close_failed_original_copies()
+        _clear_frames(failed.value)
+        failed = None
+        gc.collect()
+        assert reference() is not None and not reference()._closed
+        assert reference().material_live_bytes > 0
+        assert os.fstat(held_fd).st_size > 0
+    stream.fail = False
+    assert cc.CaptureSourceAuthentication.close_failed_original_copies() == 1
+    assert stream.calls == 4
+    assert not cc._FAILED_ORIGINAL_COPY_OWNERS
+    gc.collect()
+    assert reference() is None
+    with pytest.raises(OSError):
+        os.fstat(held_fd)
