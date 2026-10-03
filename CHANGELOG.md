@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **PACT regression fixtures retain their declared synthetic standing after
+  JSON receipt validation** (#2137). The shared constrained/hull/replay fixture
+  now writes a JSON legacy digest-bound artifact rather than plain text. Real
+  receipt hashes, shape parsing, lane admission, baseline matching and solver
+  replay remain active; no checker attestation or GPU price is fabricated.
+  The numerics-pair exporter tests require the already-declared `gguf` full
+  dependency, not a changed numeric golden or a skipped arithmetic regression.
+
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
   A v45 table was refused as an unknown requirement. The parser now reads the
