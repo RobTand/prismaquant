@@ -336,3 +336,9 @@ private CPU action, native CAS receipt and verified result blob; it mutates the
 independent artifact binding without mutating the selected publication. It is
 not a CUDA, original-model or public source qualification.
 
+Every actual CUDA member must carry the existing independently bound
+executed-to-target source-family acceptance. Omitting `compatibility` is not
+evidence of same-source execution. Same-source acceptance may explicitly name
+the same old/new source, but still joins the selected snapshot, actual target
+package and complete runtime digests. No foreign forward64 can skip this
+requirement by setting a null compatibility binding.

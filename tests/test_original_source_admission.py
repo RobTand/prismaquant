@@ -248,7 +248,7 @@ def test_real_partial_qualification_metadata_is_not_renamed_full64(authority_cas
 
 
 def test_actual_cas_publication_cannot_adopt_an_independently_rebound_artifact(
-        tmp_path, material):
+        tmp_path, material, authority_case):
     """Real sealed action/CAS receipt bytes, not a stubbed result-reader echo."""
     from test_strict_reader_tier_enforcement import _pb
 
@@ -276,7 +276,8 @@ def test_actual_cas_publication_cannot_adopt_an_independently_rebound_artifact(
                 command, 'result.txt', path_prefix='/opt/pb-tools'),
             'working_directory': '.', 'result_path': 'result.txt'},
         'inputs': [], 'code_closure': core.build_code_closure(checkout, ['publication.py']),
-        'params': {'command': command},
+        'params': {'command': command, 'checkout_snapshot': {
+            'parent': '4d0a88e0057c7f01ff170fffb4744d0c5b5d29fe'}},
         'environment': {'variables': {'PATH': '/opt/pb-tools:/usr/bin:/bin'}, 'toolchain': {}},
         'execution_scope': {'portability': 'portable', 'platform_key': None, 'host_class': None},
     })
@@ -304,3 +305,10 @@ def test_actual_cas_publication_cannot_adopt_an_independently_rebound_artifact(
     with pytest.raises(RuntimeError, match='old receipts remain unqualified'):
         sg._original_artifact_publication(b'old pytest summary without sidecar digests\n',
                                          node_id=node, roles={'receipt', 'authority'})
+    # The same real sealed request cannot bypass actual target-source
+    # transfer proof by declaring the foreign baseline and null compatibility.
+    # No accepted-family or positive CUDA record is fabricated here.
+    member = dict(node_id=node, source_snapshot=action['params']['checkout_snapshot']['parent'],
+                  compatibility=None)
+    with pytest.raises(RuntimeError, match='every CUDA member requires'):
+        sg._require_original_qualified_source(member, action, {}, authority_case['packet']['runtime'])

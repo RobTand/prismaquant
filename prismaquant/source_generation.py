@@ -877,6 +877,27 @@ def _published_original_json(artifacts, role, binding, selection, resource_check
                                         max_bytes=selection['max_evidence_bytes'])
 
 
+def _require_original_qualified_source(row, request, accepted, target_runtime):
+    """Every selected member needs independently selected source-transfer proof.
+
+    A null compatibility binding is not proof that the executed implementation
+    equals the target. The existing acceptance can describe identical sources,
+    but still binds the actual executed snapshot and target package/runtime.
+    """
+    snapshot = request['params']['checkout_snapshot']
+    _same(snapshot['parent'], row['source_snapshot'], 'original actual qualified source snapshot')
+    _require(row['compatibility'] is not None,
+             'every CUDA member requires independently bound executed-to-target source acceptance')
+    family = accepted.get(row['node_id'])
+    _require(family is not None, 'CUDA member lacks independently selected source-family acceptance')
+    _same(row['compatibility'], family['compatibility'], 'original source-family proof binding')
+    _same(row['source_snapshot'], family['old_source'], 'original executed member source is not restamped')
+    _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
+          'qualified member actual target source implementation')
+    _same(family['target_runtime_sha256'], _canonical_sha256(target_runtime, 'actual original target runtime'),
+          'qualified member actual target runtime')
+
+
 _CUDA_CASES = frozenset({
     'layer', 'read-failure', 'copy-failure', 'cancel', 'event-record-failure',
     'event-sync-failure', 'head', 'dequant', 'parallel-layer', 'parallel-read-failure',
@@ -1055,13 +1076,7 @@ def _require_original_source_proofs(authority, resource_check):
             _same(actual_host['charts'], len(raw_host['charts']), 'selected actual raw host chart census')
             _require(raw_host['after'] <= ending['start_unix'] and raw_host['before'] <= ending['finish_unix']
                      and raw_host['after'] < raw_host['before'], 'selected native telemetry window differs from controller')
-        snapshot = result['request']['params']['checkout_snapshot']
-        _same(snapshot['parent'], row['source_snapshot'], 'original actual qualified source snapshot')
-        if row['compatibility'] is not None:
-            family = accepted.get(row['node_id'])
-            _require(family is not None, 'old CUDA member lacks independently accepted unchanged-family proof')
-            _same(row['compatibility'], family['compatibility'], 'original unchanged-family proof binding')
-            _same(row['source_snapshot'], family['old_source'], 'original old member source is not restamped')
+        _require_original_qualified_source(row, result['request'], accepted, target_runtime)
     _same(seen, {(case, pages, dtype) for case in _CUDA_CASES for pages in ('0', '1')
                  for dtype in ('torch.float32', 'torch.bfloat16')}, 'actual full64 CUDA coverage')
     reader = _exact(qualification['reader'], {'node_id', 'result', 'receipt', 'authority'}, 'original qualified reader')
