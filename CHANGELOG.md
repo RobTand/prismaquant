@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **Installed GLM evidence consumers have their container identity owner**
+  (#2190). The sole stdlib implementation is shipped as
+  `prismaquant.container_runtime_identity`, rather than imported from an
+  absent checkout-only `tools` package. Live API and bootstrap paths migrate
+  together; direct-file bootstrap still authenticates the mount before
+  importing PrismaQuant. Image fingerprint bytes, runtime/source identity,
+  duplicate-JSON refusals and scientific gates are unchanged.
+
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
   A v45 table was refused as an unknown requirement. The parser now reads the

@@ -3,13 +3,14 @@
 ``tools/serve_fingerprint.py`` and ``tools/prismaquant_runtime_snapshot.py``
 run inside serving containers from a bootstrap with no installed package
 (``prismaquant/tessera_runtime_contract.py:3477-3480`` and the snapshot
-module docstring). ``tools/container_runtime_identity.py`` is likewise
+module docstring). ``prismaquant/container_runtime_identity.py`` is likewise
 stdlib-only. A delegation to ``prismaquant.schemas`` inside any of their
 loader paths dies with ``ModuleNotFoundError`` in the container while every
 in-repo test stays green, because each test process can import the package.
 
 Each case below rebuilds the container layout under a fresh directory -- the
-tool file at ``<root>/tools/<name>`` plus, for the fingerprint, the pin data
+source file at its real ``tools/`` or ``prismaquant/`` bootstrap path plus,
+for the fingerprint, the pin data
 file its module-level table reads through ``__file__`` -- then loads the
 tool standalone in a subprocess whose ``sys.path`` has the real repo root
 and ``tools/`` scrubbed (``cwd`` is the case root, ``PYTHONPATH`` is unset)
@@ -31,7 +32,6 @@ import sys
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-TOOLS = REPO / "tools"
 PIN_RELATIVE = Path("prismaquant") / "tessera_runtime" / "tessera_serving_runtime_pin.json"
 
 _CHILD = (
@@ -60,6 +60,7 @@ _CHILD = (
     "    pass\n"
     "else:\n"
     "    raise SystemExit('package still importable')\n"
+    "{before}\n"
     "spec = importlib.util.spec_from_file_location('standalone_tool', tool)\n"
     "mod = importlib.util.module_from_spec(spec)\n"
     "spec.loader.exec_module(mod)\n"
@@ -130,11 +131,11 @@ _CRI_REFUSE = (
 
 
 def _stage(workdir: Path, tool: str, with_pin: bool = False) -> Path:
-    """Rebuild the container layout: the tool file plus its data files."""
+    """Stage a standalone source file at its real bootstrap-relative path."""
     root = workdir / "container"
-    tools_dir = root / "tools"
-    tools_dir.mkdir(parents=True)
-    shutil.copy2(TOOLS / tool, tools_dir / tool)
+    destination = root / tool
+    destination.parent.mkdir(parents=True)
+    shutil.copy2(REPO / tool, destination)
     if with_pin:
         pin = root / PIN_RELATIVE
         pin.parent.mkdir(parents=True)
@@ -142,12 +143,12 @@ def _stage(workdir: Path, tool: str, with_pin: bool = False) -> Path:
     return root
 
 
-def _run_isolated(root: Path, tool: str, stmt: str, payload: Path) -> str:
+def _run_isolated(root: Path, tool: str, stmt: str, payload: Path, *, before: str = "") -> str:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     proc = subprocess.run(
-        [sys.executable, "-c", _CHILD.format(stmt=stmt),
-         str(REPO), str(root / "tools" / tool), str(payload)],
+        [sys.executable, "-c", _CHILD.format(stmt=stmt, before=before),
+         str(REPO), str(root / tool), str(payload)],
         cwd=root, capture_output=True, text=True, env=env, timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]
     return proc.stdout
@@ -160,40 +161,69 @@ def _write(root: Path, name: str, text: str) -> Path:
 
 
 def test_pin_loader_runs_without_the_package(tmp_path: Path) -> None:
-    root = _stage(tmp_path, "serve_fingerprint.py", with_pin=True)
-    out = _run_isolated(root, "serve_fingerprint.py", _PIN_ACCEPT,
+    root = _stage(tmp_path, "tools/serve_fingerprint.py", with_pin=True)
+    out = _run_isolated(root, "tools/serve_fingerprint.py", _PIN_ACCEPT,
                         _write(root, "pin.json", '{"a": 1}'))
     assert "PIN-OK" in out
-    out = _run_isolated(root, "serve_fingerprint.py", _PIN_REFUSE,
+    out = _run_isolated(root, "tools/serve_fingerprint.py", _PIN_REFUSE,
                         _write(root, "dup.json", '{"a": 1, "a": 2}'))
     assert "PIN-DUP-OK" in out
 
 
 def test_models_endpoint_loader_runs_without_the_package(tmp_path: Path) -> None:
-    root = _stage(tmp_path, "serve_fingerprint.py", with_pin=True)
+    root = _stage(tmp_path, "tools/serve_fingerprint.py", with_pin=True)
     out = _run_isolated(
-        root, "serve_fingerprint.py", _MODELS_ACCEPT,
+        root, "tools/serve_fingerprint.py", _MODELS_ACCEPT,
         _write(root, "models.json", json.dumps(CARD)))
     assert "MODELS-OK" in out
 
 
 def test_snapshot_manifest_loader_runs_without_the_package(tmp_path: Path) -> None:
-    root = _stage(tmp_path, "prismaquant_runtime_snapshot.py")
-    out = _run_isolated(root, "prismaquant_runtime_snapshot.py",
+    root = _stage(tmp_path, "tools/prismaquant_runtime_snapshot.py")
+    out = _run_isolated(root, "tools/prismaquant_runtime_snapshot.py",
                         _SNAP_ACCEPT, _write(root, "m.json", '{"a": 1}'))
     assert "SNAP-OK" in out
-    out = _run_isolated(root, "prismaquant_runtime_snapshot.py",
+    out = _run_isolated(root, "tools/prismaquant_runtime_snapshot.py",
                         _SNAP_REFUSE,
                         _write(root, "d.json", '{"a": 1, "a": 2}'))
     assert "SNAP-DUP-OK" in out
 
 
 def test_container_identity_loader_runs_without_the_package(tmp_path: Path) -> None:
-    root = _stage(tmp_path, "container_runtime_identity.py")
-    out = _run_isolated(root, "container_runtime_identity.py",
+    root = _stage(tmp_path, "prismaquant/container_runtime_identity.py")
+    out = _run_isolated(root, "prismaquant/container_runtime_identity.py",
                         _CRI_ACCEPT, _write(root, "o.json", '{"a": 1}'))
     assert "CRI-OK" in out
-    out = _run_isolated(root, "container_runtime_identity.py",
+    out = _run_isolated(root, "prismaquant/container_runtime_identity.py",
                         _CRI_REFUSE,
                         _write(root, "d.json", '{"a": 1, "a": 2}'))
     assert "CRI-DUP-OK" in out
+
+
+@pytest.mark.parametrize("script,option", [
+    ("stageb_a4_quantizer_launch.py", "--group-policy-sha256"),
+    ("glm_native_moe_launch.py", "--spec-sha256"),
+])
+def test_host_image_launcher_help_before_package_or_device_access(tmp_path, script, option):
+    """Only the deployed launcher/public stdlib owner exist; PQ is denied."""
+    relative = "experiments/" + script
+    root = _stage(tmp_path, relative)
+    owner = root / "prismaquant/container_runtime_identity.py"
+    owner.parent.mkdir(parents=True)
+    shutil.copy2(REPO / "prismaquant/container_runtime_identity.py", owner)
+    before = (
+        "import subprocess\n"
+        "def no_process(*args, **kwargs):\n"
+        "    raise AssertionError('--help attempted process/device access')\n"
+        "for name in ('run', 'call', 'check_output', 'Popen'):\n"
+        "    setattr(subprocess, name, no_process)\n"
+        "class NoDevicePackage:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] in ('torch', 'tessera'):\n"
+        "            raise AssertionError('--help imported device package: ' + name)\n"
+        "sys.meta_path.insert(0, NoDevicePackage())\n"
+        "sys.argv = [tool, '--help']\n"
+    )
+    out = _run_isolated(root, relative, "", _write(root, "unused", ""), before=before)
+    assert "usage:" in out
+    assert option in out

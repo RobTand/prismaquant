@@ -435,7 +435,7 @@ def test_producer_closure_has_builder_and_shared_input_tools():
         "build_streamed_full_kl_teacher"])
     assert {"tools/build_streamed_full_kl_teacher.py", "tools/full_kl_teacher_payload.py",
             "tools/dsv4_wikitext_inputs.py", "tools/prepare_dsv4_wikitext_inputs.py",
-            "tools/container_runtime_identity.py"} <= names
+            "prismaquant/container_runtime_identity.py"} <= names
 
 
 @pytest.mark.parametrize("policy,execution", [

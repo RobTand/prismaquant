@@ -1,5 +1,29 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1589, root-approved comparison strengthening):
+the existing uniform-control contract loop additionally compares a new
+candidate's `measurement_fidelity`, `calibration_contract_sha256` and
+`teacher_evidence`. The control must carry each present candidate field at
+exact strict-JSON equality; absence, nonfinite values and typed differences
+refuse. Legacy candidates without these optional fields retain their original
+comparison. No corpus hash is repurposed and no new validator, format, pin,
+default or control override is introduced.
+
+Re-stamped 2026-10-02 (Refs #1589): the existing sealed-panel TR3 scorer can
+optionally publish `--gold-record-out` after a new complete measured panel.
+It records its actual all-position, full-vocabulary FP64 method, authenticated
+panel/teacher calibration context, clean source closure (including the
+fidelity helper), canonical shipcard model identity and observed no-spec
+execution. Existing digest-cache and entry/exit identity/engine fences remain
+the owners; no whole-weight rehash or parallel cache is added. The actual
+self-manifest requires a live engine descendant for this optional output and
+binds the model identity in its runtime context. The producer uses the existing
+slot constructor and atomic JSON writer. Raw retained results are not upgraded;
+qualification-only runs, reused output paths and failed fences cannot publish
+a gold record. Existing offline receipt ingestion consumes the producer record
+without changing the artifact or inventing a canonical manifest. This closes
+no independent PPL, compiled, census, control, quality or served-SLO gate.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
@@ -2199,9 +2223,11 @@ the existing trace constructor; body-only verdicts never substitute. All
 proposed records pass the unchanged verifier (including build/identity checks)
 before `--apply` uses the existing slot writer. Final verification still lists
 every missing slot. No serve, measurement, upload or manifest fabrication runs.
-Raw TR3 output is not gold-slot-shaped and lacks serialized shipcard identity
-and speculative-decoding observation; unsupported output remains a refusal,
-not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
+Legacy raw TR3 output is not gold-slot-shaped and lacks serialized shipcard
+identity and speculative-decoding observation; unsupported output remains a
+refusal, not an inferred pass. A newly measured TR3 run can explicitly publish
+an identity-bound `gold.kl.json` via `--gold-record-out`, for the existing
+`--records-dir` input. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
@@ -12735,7 +12761,7 @@ Before exec, the launcher replays the interpreter's module search over the
 launched environment and working directory, mapping container paths back
 through `/workspace` and the declared mounts, and refuses when the package that
 would be imported is not the pinned mount's, byte for byte, under
-`tools/container_runtime_identity.prismaquant_source_sha256` — the same digest
+`prismaquant.container_runtime_identity.prismaquant_source_sha256` — the same digest
 the row stamps as `prismaquant_source_sha256`. The refusal is narrow: it fires
 when a declared mount holds a PrismaQuant package and the import resolves
 elsewhere, which is #519 itself, and a `.` or `/workspace` entry written ahead
@@ -20444,15 +20470,26 @@ every tracked regular file and symlink, not only the importable package. The cac
 atomic and serialized; an existing entry is always re-hashed before reuse. The launcher verifies
 the complete closure on the host, mounts that standalone snapshot at `/pq:ro`, and passes its
 commit, tree, closure hash, and PrismaQuant package-source hash into the container. There the
-snapshot helper replays the complete closure check and `tools/container_runtime_identity.py`
+snapshot helper replays the complete closure check and `prismaquant/container_runtime_identity.py`
 proves both the package hash and Python import origin, with user-site/current-directory import
 fallbacks disabled, before the same shell process immediately execs the DSv4 producer. The
 dense path repeats that complete boundary immediately before each of its two producers and
 execs the terminal one. Thus neither a changing live worktree nor an old site-package install
 can enter the multi-hour measurement window.
 
+The identity owner is shipped as `prismaquant.container_runtime_identity` (#2190):
+installed GLM compatibility and derivative consumers use that sole public API,
+not a checkout-only `tools` import. Its `python -m` CLI is available in an installed
+environment. Pre-import bootstrap still executes the same stdlib source file
+directly at `prismaquant/container_runtime_identity.py`, so the package mount is
+authenticated before PrismaQuant is imported. The old tool path has no shim;
+transported snapshot and gold-producer closures name the new source member.
+Historical archives and already-sealed qualification records retain their
+observed source paths and digests. Fingerprint bytes and refusal vocabulary
+remain unchanged, with no image/source adoption or scientific-gate relaxation.
+
 The existing resumable identity semantics remain unchanged:
-`tools/container_runtime_identity.py` atomically binds the checkpoint tree to the image
+`prismaquant/container_runtime_identity.py` atomically binds the checkpoint tree to the image
 reference and ID, reviewed PrismaQuant commit and complete package-source hash, and external
 implementation-receipt hash. A nonempty legacy checkpoint tree with no identity is refused;
 an existing identity must match exactly. Replay, export, and gold measurement reuse the same

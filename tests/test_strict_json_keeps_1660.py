@@ -32,7 +32,7 @@ def _load(name: str, path: str):
 
 FINGERPRINT = _load("keep_fingerprint_1660", "tools/serve_fingerprint.py")
 SNAPSHOT = _load("keep_snapshot_1660", "tools/prismaquant_runtime_snapshot.py")
-IDENTITY = _load("keep_identity_1660", "tools/container_runtime_identity.py")
+IDENTITY = _load("keep_identity_1660", "prismaquant/container_runtime_identity.py")
 
 from prismaquant.dsv4_campaign_completion import (  # noqa: E402
     CampaignCompletionError,

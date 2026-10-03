@@ -63,7 +63,7 @@ def test_each_byte_hash_routes_and_retains_its_refusal(tmp_path, monkeypatch, ra
                                                         expected_sha256="d" * 64)])),
     )
     monkeypatch.setattr(compatibility, "bound_json", lambda bound, label: records.get(bound["path"], {}))
-    from tools import container_runtime_identity
+    from prismaquant import container_runtime_identity
     monkeypatch.setattr(container_runtime_identity, "image_content_sha256",
                         lambda image: compatibility.ORIGINAL_IMAGE_CONTENT_SHA256)
     monkeypatch.setattr(compatibility, "ORIGINAL_MODELING_SHA256", wrong if mismatch else digest)
