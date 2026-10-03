@@ -526,7 +526,7 @@ def test_local_producer_snapshot_rehash_refuses_manifested_file_tamper(tmp_path)
     (source / "prismaquant" / "incremental_probe.py").write_text(
         "# worker\n"
     )
-    (source / "tools" / "container_runtime_identity.py").write_text("# tool\n")
+    (source / "prismaquant" / "container_runtime_identity.py").write_text("# tool\n")
     (source / "tools" / "prismaquant_source_bootstrap.py").write_text(
         "# bootstrap\n"
     )

@@ -210,8 +210,8 @@ def cmd_host(args) -> int:
     if base.exists():
         raise SystemExit(f"{base} exists: use a fresh --label")
     base.mkdir(parents=True)
-    # ``tools`` too: prismaquant imports a few of its modules
-    # (``glm_source_derivative`` reads ``tools.container_runtime_identity``).
+    # Keep ``tools`` too: historical GLM baseline revisions imported their
+    # container identity helper from that source directory.
     archive = subprocess.run(["git", "-c", "safe.directory=*", "archive", args.base_ref,
                               "prismaquant", "tools"], check=True, capture_output=True).stdout
     subprocess.run(["tar", "-x", "-C", str(base)], input=archive, check=True)

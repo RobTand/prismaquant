@@ -3,13 +3,14 @@
 ``tools/serve_fingerprint.py`` and ``tools/prismaquant_runtime_snapshot.py``
 run inside serving containers from a bootstrap with no installed package
 (``prismaquant/tessera_runtime_contract.py:3477-3480`` and the snapshot
-module docstring). ``tools/container_runtime_identity.py`` is likewise
+module docstring). ``prismaquant/container_runtime_identity.py`` is likewise
 stdlib-only. A delegation to ``prismaquant.schemas`` inside any of their
 loader paths dies with ``ModuleNotFoundError`` in the container while every
 in-repo test stays green, because each test process can import the package.
 
 Each case below rebuilds the container layout under a fresh directory -- the
-tool file at ``<root>/tools/<name>`` plus, for the fingerprint, the pin data
+source file at its real ``tools/`` or ``prismaquant/`` bootstrap path plus,
+for the fingerprint, the pin data
 file its module-level table reads through ``__file__`` -- then loads the
 tool standalone in a subprocess whose ``sys.path`` has the real repo root
 and ``tools/`` scrubbed (``cwd`` is the case root, ``PYTHONPATH`` is unset)

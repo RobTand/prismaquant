@@ -12761,7 +12761,7 @@ Before exec, the launcher replays the interpreter's module search over the
 launched environment and working directory, mapping container paths back
 through `/workspace` and the declared mounts, and refuses when the package that
 would be imported is not the pinned mount's, byte for byte, under
-`tools/container_runtime_identity.prismaquant_source_sha256` — the same digest
+`prismaquant.container_runtime_identity.prismaquant_source_sha256` — the same digest
 the row stamps as `prismaquant_source_sha256`. The refusal is narrow: it fires
 when a declared mount holds a PrismaQuant package and the import resolves
 elsewhere, which is #519 itself, and a `.` or `/workspace` entry written ahead
@@ -20470,15 +20470,26 @@ every tracked regular file and symlink, not only the importable package. The cac
 atomic and serialized; an existing entry is always re-hashed before reuse. The launcher verifies
 the complete closure on the host, mounts that standalone snapshot at `/pq:ro`, and passes its
 commit, tree, closure hash, and PrismaQuant package-source hash into the container. There the
-snapshot helper replays the complete closure check and `tools/container_runtime_identity.py`
+snapshot helper replays the complete closure check and `prismaquant/container_runtime_identity.py`
 proves both the package hash and Python import origin, with user-site/current-directory import
 fallbacks disabled, before the same shell process immediately execs the DSv4 producer. The
 dense path repeats that complete boundary immediately before each of its two producers and
 execs the terminal one. Thus neither a changing live worktree nor an old site-package install
 can enter the multi-hour measurement window.
 
+The identity owner is shipped as `prismaquant.container_runtime_identity` (#2190):
+installed GLM compatibility and derivative consumers use that sole public API,
+not a checkout-only `tools` import. Its `python -m` CLI is available in an installed
+environment. Pre-import bootstrap still executes the same stdlib source file
+directly at `prismaquant/container_runtime_identity.py`, so the package mount is
+authenticated before PrismaQuant is imported. The old tool path has no shim;
+transported snapshot and gold-producer closures name the new source member.
+Historical archives and already-sealed qualification records retain their
+observed source paths and digests. Fingerprint bytes and refusal vocabulary
+remain unchanged, with no image/source adoption or scientific-gate relaxation.
+
 The existing resumable identity semantics remain unchanged:
-`tools/container_runtime_identity.py` atomically binds the checkpoint tree to the image
+`prismaquant/container_runtime_identity.py` atomically binds the checkpoint tree to the image
 reference and ID, reviewed PrismaQuant commit and complete package-source hash, and external
 implementation-receipt hash. A nonempty legacy checkpoint tree with no identity is refused;
 an existing identity must match exactly. Replay, export, and gold measurement reuse the same

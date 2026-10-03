@@ -25,7 +25,7 @@ def _repository(root: Path) -> tuple[Path, str]:
     (source / "prismaquant").mkdir(parents=True)
     (source / "tools").mkdir()
     (source / "prismaquant" / "__init__.py").write_text("VALUE = 1\n")
-    (source / "tools" / "container_runtime_identity.py").write_text("# tool\n")
+    (source / "prismaquant" / "container_runtime_identity.py").write_text("# tool\n")
     (source / "tools" / "prismaquant_runtime_snapshot.py").write_text("# self\n")
     subprocess.run(["git", "init", "-q", str(source)], check=True)
     subprocess.run(["git", "-C", str(source), "add", "."], check=True)
