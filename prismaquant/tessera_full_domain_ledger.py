@@ -249,7 +249,7 @@ def build_full_domain_ledger(
             "predicted_q256": {str(rate): predicted[rate] for rate in sorted(predicted)},
             "missing_q256": {str(rate): missing[rate] for rate in sorted(missing)},
             "missing_rate_count": len(missing),
-            "complete": not missing,
+            "complete": bool(legal) and not missing,
         }
     return {
         "schema": SCHEMA,
@@ -277,6 +277,10 @@ def _selected(ledger: Mapping[str, Any], *, units: Sequence[str] | None,
     absent = [key for key in wanted if key not in entries]
     if absent:
         raise FullDomainLedgerError(f"requested unit/family pairs absent from ledger: {absent}")
+    unsupported = [key for key in wanted
+                   if not entries[key]["legal_q256"] or entries[key]["legal_rate_count"] == 0]
+    if unsupported:
+        raise FullDomainLedgerError(f"requested unit/family pairs have no producer-legal rates: {unsupported}")
     return {key: entries[key] for key in wanted}
 
 

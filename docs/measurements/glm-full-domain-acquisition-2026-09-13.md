@@ -113,6 +113,10 @@ Empty ledgers, absent selections and absent unit/family pairs now refuse
 instead of vacuously certifying complete coverage. `missing_acquisition_work`
 retains these missing cells in the existing v1 format. No missing cell receives
 a price, runtime admission, export qualification or quality certification.
+If the producer refuses every rate at a positive shape (for example arity-2
+E2M1 at `(1, 32)`), the ledger retains all refusal reasons but never marks the
+entry complete. Coverage and acquisition selections of such an entry refuse
+with `no producer-legal rates`; no fictional missing legal rate is invented.
 
 The near GLM milestone remains T8-only at the measured EXL3 serialized size.
 The final objective is an actual per-Linear T4/T8/T16 accuracy/size/prefill/decode

@@ -208,3 +208,28 @@ def test_short_column_linear_retains_legal_rates_and_explicit_refusals():
     assert 257 not in entry["legal_q256"]
     with pytest.raises(FullDomainLedgerError, match="outside the legal domain"):
         _ledger([_row("kda", 257)], unit_shapes={"kda": (8192, 128)})
+
+
+@pytest.mark.parametrize("operation", [require_full_domain, missing_acquisition_work])
+def test_zero_producer_legal_domain_is_retained_but_never_complete(operation):
+    family = "TESSERA_E2M1_K2"
+    ledger = build_full_domain_ledger([], families=[family],
+                                     unit_shapes={"odd": (1, 32), "legal": (256, 256)})
+    key = "odd|" + family
+    entry = ledger["entries"][key]
+    assert entry["legal_q256"] == []
+    assert entry["legal_rate_count"] == 0
+    assert entry["producer_refused_q256"]
+    assert entry["missing_q256"] == {}
+    assert not entry["complete"]
+    assert key in ledger["incomplete_units"]
+    with pytest.raises(FullDomainLedgerError, match="no producer-legal rates.*odd"):
+        operation(ledger, units=["odd"])
+    with pytest.raises(FullDomainLedgerError, match="no producer-legal rates"):
+        operation(ledger)
+    # A structurally unsupported sibling does not erase a valid selection.
+    if operation is missing_acquisition_work:
+        assert operation(ledger, units=["legal"])
+    else:
+        with pytest.raises(FullDomainLedgerError, match="incomplete full-domain coverage"):
+            operation(ledger, units=["legal"])
