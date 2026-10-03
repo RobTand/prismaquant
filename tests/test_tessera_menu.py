@@ -222,7 +222,8 @@ def test_shard_granularity_matches_a_real_encoded_unit(
     weight = torch.randn(shape, generator=generator, dtype=torch.float32)
     _exported, unit, _forests = encode_linear_planes(
         weight, grid=spec.payload_grid(), q256=rung,
-        name=f"{family_name}_R{rung}", verify=False,
+        # Quality refits alter reconstructed values, not this wire geometry.
+        name=f"{family_name}_R{rung}", verify=False, scale_refit=0,
     )
     assert int(unit.scale_plane) == int(getattr(ScalePlaneKind, plane))
     assert int(unit.body) == int(getattr(BodyKind, body))
