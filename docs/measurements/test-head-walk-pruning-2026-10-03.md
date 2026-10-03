@@ -77,8 +77,10 @@ PB's own slightly different window averages are12.807% /14.188%; both retain
 explicit missing-pqteld diagnostics. These are sequential single observations
 on a non-isolated box; the routed baseline overlaps the after arm. The0.13s
 pytest difference is not a reliable speedup estimate; contained wall is flat
-and CPU slightly higher. This slice removes0.475s of literal success-path
-waits and fragile scheduler assumptions, not a full-suite performance claim.
+and CPU slightly higher. This slice removes at least0.475s of literal
+success-path waits (two ordering checks, two journal units, three overlay
+cells; the hash wrapper can run additional times) and fragile scheduler
+assumptions, not a full-suite performance claim.
 The larger previously accepted #2095 and #2103 profiles are retained evidence,
 not remeasured or attributed to this change. #1929 remains OPEN; union suite,
 line-coverage comparison and under-five-minute acceptance belong to the
