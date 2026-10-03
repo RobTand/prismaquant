@@ -2,10 +2,11 @@
 
 Both images must already be present and declared to PB. No pull or deployment.
 """
-import argparse,json,os,subprocess,sys,tempfile,shutil
+import argparse,json,os,subprocess,sys,tempfile,shutil,runpy
 from pathlib import Path
 sys.path.insert(0,str(Path.cwd()))
-from prismaquant.container_runtime_identity import image_content_sha256
+_runtime_identity=runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "prismaquant/container_runtime_identity.py"))
 
 TS=Path('/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/native-pact-acquisition-20260922/tessera-32e92e85e')
 TS_CONTAINER=Path('/native-sources')/TS.name
@@ -38,7 +39,7 @@ serving_env=dict(line.split('=',1) for line in declared.splitlines() if line)
 
 def run(image,command,*,serving):
     inspected=json.loads(subprocess.check_output(['docker','image','inspect',image],text=True))[0]
-    content=image_content_sha256(inspected)
+    content=_runtime_identity["image_content_sha256"](inspected)
     if not serving and content!=QUALITY_CONTENT:raise ValueError('quality producer image changed')
     env={'PRISMAQUANT_CONTAINER_CONTENT_SHA256':content,'PYTHONPATH':f'/pq:{TS_CONTAINER}:{TS_CONTAINER}/src',
          'TESSERA_REPO':str(TS_CONTAINER),'OMP_NUM_THREADS':'1','MKL_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1',

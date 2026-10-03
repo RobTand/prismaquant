@@ -4,10 +4,10 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
+import runpy
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from prismaquant.container_runtime_identity import image_content_sha256
+_runtime_identity = runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "prismaquant/container_runtime_identity.py"))
 
 image = "prismaquant-glm-derivative:causal-exp-v1-20260908"
 parser = argparse.ArgumentParser()
@@ -18,7 +18,7 @@ if bool(args.group_policy) != bool(args.group_policy_sha256):
     parser.error('group policy path and SHA256 are required together')
 pin = "/mnt/shared/tessera-pins/tessera-4c384e6049dca3eeaf503bb2c9cd1cd2778978d1"
 inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", image], text=True))[0]
-content = image_content_sha256(inspected)
+content = _runtime_identity["image_content_sha256"](inspected)
 assert content == "d0256efb83294e879ca33dd2d3131e861221c415ac5b024c2415e51c5467f026"
 env = {"PRISMAQUANT_CONTAINER_CONTENT_SHA256": content,
        "PYTHONPATH": "/pq:/tessera-pin/src", "TESSERA_REPO": "/tessera-pin",

@@ -60,6 +60,7 @@ _CHILD = (
     "    pass\n"
     "else:\n"
     "    raise SystemExit('package still importable')\n"
+    "{before}\n"
     "spec = importlib.util.spec_from_file_location('standalone_tool', tool)\n"
     "mod = importlib.util.module_from_spec(spec)\n"
     "spec.loader.exec_module(mod)\n"
@@ -142,11 +143,11 @@ def _stage(workdir: Path, tool: str, with_pin: bool = False) -> Path:
     return root
 
 
-def _run_isolated(root: Path, tool: str, stmt: str, payload: Path) -> str:
+def _run_isolated(root: Path, tool: str, stmt: str, payload: Path, *, before: str = "") -> str:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     proc = subprocess.run(
-        [sys.executable, "-c", _CHILD.format(stmt=stmt),
+        [sys.executable, "-c", _CHILD.format(stmt=stmt, before=before),
          str(REPO), str(root / tool), str(payload)],
         cwd=root, capture_output=True, text=True, env=env, timeout=120)
     assert proc.returncode == 0, proc.stderr[-2000:]
@@ -197,3 +198,32 @@ def test_container_identity_loader_runs_without_the_package(tmp_path: Path) -> N
                         _CRI_REFUSE,
                         _write(root, "d.json", '{"a": 1, "a": 2}'))
     assert "CRI-DUP-OK" in out
+
+
+@pytest.mark.parametrize("script,option", [
+    ("stageb_a4_quantizer_launch.py", "--group-policy-sha256"),
+    ("glm_native_moe_launch.py", "--spec-sha256"),
+])
+def test_host_image_launcher_help_before_package_or_device_access(tmp_path, script, option):
+    """Only the deployed launcher/public stdlib owner exist; PQ is denied."""
+    relative = "experiments/" + script
+    root = _stage(tmp_path, relative)
+    owner = root / "prismaquant/container_runtime_identity.py"
+    owner.parent.mkdir(parents=True)
+    shutil.copy2(REPO / "prismaquant/container_runtime_identity.py", owner)
+    before = (
+        "import subprocess\n"
+        "def no_process(*args, **kwargs):\n"
+        "    raise AssertionError('--help attempted process/device access')\n"
+        "for name in ('run', 'call', 'check_output', 'Popen'):\n"
+        "    setattr(subprocess, name, no_process)\n"
+        "class NoDevicePackage:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] in ('torch', 'tessera'):\n"
+        "            raise AssertionError('--help imported device package: ' + name)\n"
+        "sys.meta_path.insert(0, NoDevicePackage())\n"
+        "sys.argv = [tool, '--help']\n"
+    )
+    out = _run_isolated(root, relative, "", _write(root, "unused", ""), before=before)
+    assert "usage:" in out
+    assert option in out
