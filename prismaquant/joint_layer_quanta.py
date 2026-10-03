@@ -1574,10 +1574,16 @@ def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
     checkpoint_indices: list[int] = [_take(
         checkpoint_manifest_entry(checkpoint_record),
         where=f"checkpoint boundary {checkpoint_boundary} manifest")]
-    for exact in list(checkpoint_record.get("activation_entries", [])) \
-            + list(checkpoint_record.get("shared_state_entries", [])):
-        checkpoint_indices.append(_take(
-            exact, where=f"checkpoint boundary {checkpoint_boundary}"))
+    checkpoint_auxiliary_indices = list(checkpoint_indices)
+    checkpoint_activation_indices = []
+    for exact in checkpoint_record.get("activation_entries", []):
+        index = _take(exact, where=f"checkpoint boundary {checkpoint_boundary}")
+        checkpoint_activation_indices.append(index)
+        checkpoint_indices.append(index)
+    for exact in checkpoint_record.get("shared_state_entries", []):
+        index = _take(exact, where=f"checkpoint boundary {checkpoint_boundary}")
+        checkpoint_auxiliary_indices.append(index)
+        checkpoint_indices.append(index)
     if len(checkpoint_indices) < 2:
         raise ValueError("the checkpoint plane is empty: refusing")
     batch_counts = set()
@@ -1597,6 +1603,8 @@ def _collect_quantum_bulk_entries(*, adjoint_slice: Mapping,
     batch_total = batch_counts.pop()
     return {"entries": manifest_entries,
             "checkpoint_indices": checkpoint_indices,
+            "checkpoint_auxiliary_indices": checkpoint_auxiliary_indices,
+            "checkpoint_activation_indices": checkpoint_activation_indices,
             "boundary_runs": boundary_runs,
             "prefetch_batches": prefetch_batches,
             "batch_total": batch_total,
@@ -2432,6 +2440,108 @@ def head_source_from_streaming_plan(source_plan: Mapping) -> dict:
     return head
 
 
+CHECKPOINT_INCOMING_STAGED = "stream_once_staged"
+
+
+def normalize_checkpoint_incoming_mode(mode):
+    """Only an explicitly sealed staged selection changes production reads."""
+    if mode is not None and (type(mode) is not str or mode != CHECKPOINT_INCOMING_STAGED):
+        raise ValueError("checkpoint incoming mode must be stream_once_staged: refusing")
+    return mode
+
+
+def _checkpoint_incoming_phases(record, adjoint_slice, *, n_probes, bulk):
+    """Existing incoming adapter's first-consumption order, in bulk indices.
+
+    A first chain prefetches boundary then cotangent rows per bounded window,
+    probe-major. Repeated boundary entries keep their first position in the
+    phase, as in the existing immutable-input readsets.
+    """
+    from .joint_adjoint_checkpoints import CheckpointIncoming
+    from .joint_adjoint_slices import checkpoint_is_referenced
+    checkpoint = adjoint_slice["checkpoint"]
+    chain = record["adjoint"]["chain_layers"]
+    if chain and not checkpoint_is_referenced(checkpoint):
+        raise ValueError("checkpoint incoming first chain requires referenced owner entries")
+    if len(checkpoint.get("activation_entries", [])) != n_probes * bulk["batch_total"]:
+        raise ValueError("checkpoint incoming has an incomplete or foreign probe/batch grid")
+    incoming = CheckpointIncoming(checkpoint, n_probes=n_probes,
+                                  n_batches=bulk["batch_total"])
+    by_path = {row["path"]: i for i, row in enumerate(bulk["entries"])}
+    probes = [[by_path[_manifest_entry_from_exact(row, where="checkpoint incoming")["path"]]
+               for row in incoming.entries(probe)] for probe in range(n_probes)]
+    if chain:
+        run, seen = [], set()
+        boundary = bulk["boundary_runs"][chain[0]]
+        size = bulk["prefetch_batches"]
+        for rows in probes:
+            for start in range(0, len(boundary), size):
+                for index in boundary[start:start + size] + rows[start:start + size]:
+                    if index not in seen:
+                        seen.add(index)
+                        run.append(index)
+        return {executable_bound_phase_name(chain[0]): run}
+    boundary = bulk["boundary_runs"][record["layer"]]
+    return {executable_spill_phase_name(probe): boundary + rows
+            for probe, rows in enumerate(probes)}
+
+
+def check_checkpoint_incoming_readset(record, manifest, adjoint_slice):
+    """Match the opt-in to authenticated input phases and actual checkpoint rows.
+
+    The caller supplies a manifest decoded by the existing authenticated owner.
+    This validates membership; it never reads, stages or leases payload bytes.
+    """
+    block = record.get("executable_readset") or {}
+    mode = normalize_checkpoint_incoming_mode(block.get("checkpoint_incoming_mode"))
+    annotations = manifest.get("annotations") or {}
+    if mode != annotations.get("checkpoint_incoming_mode"):
+        raise ValueError("checkpoint incoming selection differs from sealed manifest")
+    if mode is None:
+        return
+    if annotations.get("slice_sha256") != record["adjoint"].get("slice_sha256"):
+        raise ValueError("checkpoint incoming readset binds a foreign slice")
+    n_probes = annotations.get("n_probes")
+    if type(n_probes) is not int or n_probes < 1:
+        raise ValueError("checkpoint incoming readset seals no probe count")
+    chain = record["adjoint"]["chain_layers"]
+    if not chain and normalize_replay_mode(block.get("replay_mode")) != "spill":
+        raise ValueError("checkpoint incoming chain-empty consumer requires spill")
+    bulk = _collect_quantum_bulk_entries(
+        adjoint_slice=adjoint_slice,
+        checkpoint_boundary=record["adjoint"]["checkpoint_boundary"],
+        needed=sorted(set(chain) | {record["layer"]}))
+    expected = _checkpoint_incoming_phases(record, adjoint_slice, n_probes=n_probes, bulk=bulk)
+    expected[CHECKPOINT_LOAD_PHASE] = bulk["checkpoint_auxiliary_indices"]
+    entries = manifest["entries"]
+    phases = manifest["read_plan"]["phases"]
+    if block.get("phases") != [phase["name"] for phase in phases]:
+        raise ValueError("checkpoint incoming phases differ from the bound record")
+    for key, value in (("quantum_id", record["quantum_id"]),
+                       ("quantum_layer", record["layer"]),
+                       ("checkpoint_boundary", record["adjoint"]["checkpoint_boundary"]),
+                       ("chain_layers", chain)):
+        if annotations.get(key) != value:
+            raise ValueError(f"checkpoint incoming readset binds foreign {key}")
+    by_name = {phase["name"]: phase for phase in phases}
+    activation_paths = {bulk["entries"][i]["path"] for i in bulk["checkpoint_activation_indices"]}
+    moved = {}
+    for name, indices in expected.items():
+        phase = by_name.get(name)
+        actual = None if phase is None else [entries[i] for i in phase["entry_indices"]]
+        wanted = [bulk["entries"][i] for i in indices]
+        if actual != wanted:
+            raise ValueError(f"checkpoint incoming phase {name} differs from consuming read order")
+        if name != CHECKPOINT_LOAD_PHASE:
+            moved[name] = sum(row["path"] in activation_paths for row in wanted)
+    for phase in phases:
+        if phase["name"] not in moved and any(entries[i]["path"] in activation_paths
+                                              for i in phase["entry_indices"]):
+            raise ValueError("checkpoint incoming entries occur outside their consuming phase")
+    if annotations.get("checkpoint_incoming") != {"streamed_incoming": moved}:
+        raise ValueError("checkpoint incoming work counts differ from actual rows")
+
+
 def build_quantum_executable_manifest(
         record: Mapping, receipt: Mapping, parent_manifest: Mapping, *,
         strided_boundaries: Sequence[int], n_probes: int, calib: Mapping,
@@ -2441,6 +2551,7 @@ def build_quantum_executable_manifest(
         prepared_inputs: Mapping | None = None,
         head_slice: Mapping | None = None,
         replay_mode: str | None = None,
+        checkpoint_incoming_mode: str | None = None,
         head_source: Mapping | None = None) -> dict:
     """ONE executable v2 read manifest for a quantum row (PQ #862).
 
@@ -2515,6 +2626,11 @@ def build_quantum_executable_manifest(
     ``annotations.replay_mode`` records the mode. The windowed default
     reproduces the historical manifest bytes unchanged.
 
+    With ``checkpoint_incoming_mode="stream_once_staged"`` (PQ #1366),
+    checkpoint metadata/shared states remain at checkpoint-load and original
+    cotangents stage in their consuming first-chain or per-probe spill phase.
+    The bound selection is explicit; absent selection keeps historical bytes.
+
     With ``head_source`` (PQ #1095), the ``head`` phase also declares the
     streamed model's resident head: the source tensors
     ``layer_streaming._materialize`` reads when the quantum builds its
@@ -2531,6 +2647,7 @@ def build_quantum_executable_manifest(
     from .joint_adjoint_slices import chain_layers_for
 
     replay_mode = normalize_replay_mode(replay_mode)
+    checkpoint_incoming_mode = normalize_checkpoint_incoming_mode(checkpoint_incoming_mode)
     _require_stage_a_input(receipt)
     if not isinstance(record, dict):
         raise ValueError("a quantum record must be an object: refusing")
@@ -2633,6 +2750,12 @@ def build_quantum_executable_manifest(
     bulk = _collect_quantum_bulk_entries(
         adjoint_slice=adjoint_slice, checkpoint_boundary=checkpoint_boundary,
         needed=needed)
+    incoming_phases = {}
+    if checkpoint_incoming_mode is not None:
+        if not chain and replay_mode != "spill":
+            raise ValueError("checkpoint incoming chain-empty consumer requires spill")
+        incoming_phases = _checkpoint_incoming_phases(
+            record, adjoint_slice, n_probes=n_probes, bulk=bulk)
     source_raw = _source_extent_entries(parent_manifest, layers=needed,
                                         source_model_root=source_model_root)
     manifest_entries: list[dict] = []
@@ -2770,13 +2893,18 @@ def build_quantum_executable_manifest(
             refuse=lambda phase: ValueError(
                 f"read phase {phase} is empty: refusing"))
 
+    activation_indices = set(bulk["checkpoint_activation_indices"])
     _seal_phase("head", head_indices)
-    _seal_phase(CHECKPOINT_LOAD_PHASE, checkpoint_indices)
+    _seal_phase(CHECKPOINT_LOAD_PHASE,
+                [index_of[i] for i in bulk["checkpoint_auxiliary_indices"]]
+                if checkpoint_incoming_mode else checkpoint_indices)
     for boundary in chain:
         _seal_phase(executable_source_phase_name(boundary),
                     source_runs[boundary])
         _seal_phase(executable_bound_phase_name(boundary),
-                    boundary_runs[boundary])
+                    [index_of[i] for i in incoming_phases[executable_bound_phase_name(boundary)]]
+                    if executable_bound_phase_name(boundary) in incoming_phases
+                    else boundary_runs[boundary])
     _seal_phase(executable_own_source_phase_name(layer), source_runs[layer])
     for window_index in range(len(replay_windows)):
         if prepared_windows:
@@ -2785,8 +2913,9 @@ def build_quantum_executable_manifest(
         if replay_mode == "spill":
             if window_index == 0:
                 for probe in range(n_probes):
-                    _seal_phase(executable_spill_phase_name(probe),
-                                boundary_runs[layer])
+                    name = executable_spill_phase_name(probe)
+                    _seal_phase(name, [index_of[i] for i in incoming_phases[name]]
+                                if name in incoming_phases else boundary_runs[layer])
             continue
         for probe in range(n_probes):
             _seal_phase(executable_replay_phase_name(window_index, probe),
@@ -2844,6 +2973,11 @@ def build_quantum_executable_manifest(
             "calib": {"path": calib_path, "bytes": calib_bytes,
                       "sha256": calib_sha256},
             "render_prerequisite": prerequisite,
+            **({"checkpoint_incoming_mode": checkpoint_incoming_mode,
+                "checkpoint_incoming": {"streamed_incoming": {
+                    name: sum(i in activation_indices for i in indices)
+                    for name, indices in incoming_phases.items()}}}
+               if checkpoint_incoming_mode else {}),
             **prepared_annotation,
             **head_annotation,
             **({"replay_mode": replay_mode} if replay_mode == "spill" else {}),
@@ -2928,6 +3062,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             prepared_inputs: Mapping | None = None,
                             head_slice: Mapping | None = None,
                             replay_mode: str | None = None,
+                            checkpoint_incoming_mode: str | None = None,
                             head_source: Mapping | None = None,
                             spill_bound: Mapping | None = None) -> dict:
     """Bind a sealed executable read manifest to a NEW record generation.
@@ -3029,7 +3164,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
             prepared_inputs=prepared_inputs, head_slice=head_slice,
-            replay_mode=replay_mode, head_source=head_source)
+            replay_mode=replay_mode, checkpoint_incoming_mode=checkpoint_incoming_mode,
+            head_source=head_source)
     except (TypeError, ValueError, KeyError, AttributeError) as exc:
         raise ValueError("the executable readset does not derive from its "
                          f"record, receipt and parent: refusing ({exc})") from exc
@@ -3073,6 +3209,8 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
     sealed_mode = manifest.get("annotations", {}).get("replay_mode")
     if sealed_mode is not None:
         fresh["executable_readset"]["replay_mode"] = sealed_mode
+    if checkpoint_incoming_mode is not None:
+        fresh["executable_readset"]["checkpoint_incoming_mode"] = checkpoint_incoming_mode
     if spill_bound is not None:
         if sealed_mode != "spill":
             raise ValueError("a spill bound seals only a spill-mode readset: "
@@ -3108,6 +3246,7 @@ def emit_quantum_executable_readsets(
         prepared_inputs: Mapping | None = None,
         head_slice: Mapping | None = None,
         replay_mode: str | None = None,
+        checkpoint_incoming_mode: str | None = None,
         head_source: Mapping | None = None,
         spill_bound: Mapping | None = None) -> list[dict]:
     """The post-capture generation path for executable read manifests.
@@ -3140,7 +3279,8 @@ def emit_quantum_executable_readsets(
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
             prepared_inputs=prepared_inputs, head_slice=head_slice,
-            replay_mode=replay_mode, head_source=head_source)
+            replay_mode=replay_mode, checkpoint_incoming_mode=checkpoint_incoming_mode,
+            head_source=head_source)
         quantum_id = record.get("quantum_id")
         manifest_path = f"{bound_dir}/{quantum_id}.executable.json.gz"
         if quantum_id in seen or manifest_path in seen:
@@ -3161,7 +3301,8 @@ def emit_quantum_executable_readsets(
                 layer_source_spans=layer_source_spans,
                 source_model_root=source_model_root,
                 prepared_inputs=prepared_inputs, head_slice=head_slice,
-                replay_mode=replay_mode, head_source=head_source,
+                replay_mode=replay_mode, checkpoint_incoming_mode=checkpoint_incoming_mode,
+                head_source=head_source,
                 spill_bound=spill_bound),
             "manifest": manifest,
             "manifest_path": manifest_path,

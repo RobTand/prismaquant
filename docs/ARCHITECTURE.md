@@ -59,6 +59,28 @@ integrity, menus, pins and native/export/serving admission remain independent
 and unchanged. This CPU metadata check establishes no original-source capture,
 H measurement, device qualification or served attention acceptance.
 
+Re-stamped 2026-10-02 (PQ #2118, Refs #1366, sealed checkpoint incoming):
+post-capture executable regeneration accepts the explicit
+`--checkpoint-incoming-mode stream_once_staged` selection. Absent selection
+preserves existing manifest bytes, phase topology and execution defaults.
+Checkpoint metadata/shared state stays in `checkpoint-load`; original cotangents
+move to bounded first-chain consumption order or chain-empty per-probe spill
+phases. The dispatcher excludes moved input entries from compute units and
+checks their membership against the hash-bound Stage A slice. The runtime derives
+selection from the immutable record, refuses conflicting execution settings,
+and authenticates mode/row/slice/probe/phase membership through the existing
+protected PB claim/CAS/public-SDK owner under strict residency policy. Exact-reader
+leases, digest checks, resource gates, destination planes and numerical/resume
+contracts remain with their existing owners. Research mode remains CPU-only.
+Staged first-chain batching/fusion and nondefault replay, capture/shadow profiles
+and handoffs refuse; chain-empty staged capture preserves its sealed grouped
+regime, and render-only profiling remains available. CPU context doubles qualify
+bitwise operands, final planes and costs/journals including partial and complete
+resume; they do not qualify staged lifetimes or GPU performance. No default,
+pin, serving gate or deployed runtime changes. The original GLM layer-7 two-arm
+GPU protocol remains a root-authorized gate under #1366; see
+[the sealed checkpoint contract and finite protocol](design/checkpoint_streaming_1366.md).
+
 Re-stamped 2026-10-02 (PQ #2106, Refs #1293, selected-result consumer):
 fan-out pilot admission uses the reviewed SDK4 public selected-action result
 reader and standard-capture binder. Explicit publication/attempt selectors

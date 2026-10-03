@@ -734,7 +734,7 @@ def _check_event_order(events, manifest, *, layer, chain,
 
 def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
                    replay_mode=None, spill_bound_edit=None, spill_ceiling=None,
-                   prepared_render_phases=False):
+                   prepared_render_phases=False, checkpoint_incoming_mode=None):
     """One real run_layer_quantum_core with instrumented seams.
 
     ``replay_mode`` is the mode the executable plan is sealed for (PQ
@@ -914,7 +914,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
         record, receipt, setup["parent"], strided_boundaries=strided,
         n_probes=n_probes, calib=dict(calib),
         render_prerequisite=dict(setup["render_prerequisite"]),
-        replay_mode=replay_mode, prepared_inputs=prepared_inputs)
+        replay_mode=replay_mode, prepared_inputs=prepared_inputs,
+        checkpoint_incoming_mode=checkpoint_incoming_mode)
     spill_bound = None
     if replay_mode == "spill":
         # The record builder seals the bound offline, from verified render
@@ -924,6 +925,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
         # from the live targets (spill_target); the offline seal's equality
         # with the live geometry is tested on a packed fixture
         # (test_stage_b_spill_ceiling_sealed).
+        from prismaquant.joint_replay_regime import normalize_replay_regime
+        capture_batch = normalize_replay_regime(execution.get("replay_regime"))["capture_batch"]
         from prismaquant.joint_replay_spill import (
             SPILL_ENV, SPILL_SEAL_BLOCK_BYTES, SPILL_SEAL_DTYPE,
             experts_per_token, seal_spill_bound, spill_capture_batch_tokens,
@@ -936,10 +939,10 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
             batch_tokens=spill_capture_batch_tokens(
                 len(rows), int(rows.shape[1]),
                 probe_microbatch=int(execution.get("probe_microbatch", 0)),
-                capture_batch=1),
+                capture_batch=capture_batch),
             n_probes=n_probes, element_size=2,
             experts_per_token=experts_per_token(runner.model)),
-            block=SPILL_SEAL_BLOCK_BYTES, capture_batch=1,
+            block=SPILL_SEAL_BLOCK_BYTES, capture_batch=capture_batch,
             element_dtype=SPILL_SEAL_DTYPE)
         if spill_bound_edit is not None:
             spill_bound = spill_bound_edit(spill_bound)
@@ -964,7 +967,8 @@ def _drive_quantum(tmp_path, monkeypatch, setup, *, layer, resume,
         calib=dict(calib),
         render_prerequisite=dict(setup["render_prerequisite"]),
         prepared_inputs=prepared_inputs,
-        replay_mode=replay_mode, spill_bound=spill_bound)
+        replay_mode=replay_mode, spill_bound=spill_bound,
+        checkpoint_incoming_mode=checkpoint_incoming_mode)
     monkeypatch.setenv(
         "PRISMABUILD_ACTION_PROGRESS_PHASES",
         json.dumps([p["name"] for p in manifest["read_plan"]["phases"]]))

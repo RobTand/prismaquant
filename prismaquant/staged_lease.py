@@ -702,6 +702,16 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
     return payload
 
 
+def load_sealed_manifest(bound_manifest_sha256: str) -> dict:
+    """Owned manifest metadata, authenticated and decoded by the PB owner.
+
+    For consumers that must bind annotations to immutable phase membership.
+    This establishes input authority only; existing staged readers still
+    acquire and verify every payload range through their normal leases.
+    """
+    return _load_sealed_payload(bound_manifest_sha256)
+
+
 def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int, int]]]:
     """PB's sealed readset as ``{declared path: merged [start, end) spans}``.
 
