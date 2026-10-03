@@ -1,10 +1,13 @@
 """Selected-result byte binding, not a synthetic CUDA/provider qualification."""
 import hashlib
 import json
+import subprocess
+import sys
 
 import pytest
+from prismabuild.core import PrismaBuildCAS
 
-from experiments.original_cuda_control import artifact_identity, publish_control_artifacts
+from experiments.original_cuda_control import artifact_identity, publish_control_artifacts, retain_artifact
 
 
 def test_publication_binds_all_actual_node_sidecars(tmp_path, capsys):
@@ -19,8 +22,9 @@ def test_publication_binds_all_actual_node_sidecars(tmp_path, capsys):
     }
     for role, path in roles.items():
         path.write_bytes((role + '\n').encode())
-    profile = artifact_identity(roles['torch_trace'])
-    publish_control_artifacts('actual-node', tmp_path, profile)
+    cas = PrismaBuildCAS(tmp_path / 'cas')
+    profile = retain_artifact(cas, 'torch_trace', roles['torch_trace'])
+    publish_control_artifacts('actual-node', tmp_path, profile, cas)
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 1 and lines[0].startswith('ORIGINAL_SOURCE_ARTIFACTS ')
     encoded = lines[0].removeprefix('ORIGINAL_SOURCE_ARTIFACTS ')
@@ -32,8 +36,12 @@ def test_publication_binds_all_actual_node_sidecars(tmp_path, capsys):
     assert set(value['artifacts']) == set(roles)
     for role, path in roles.items():
         raw = path.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        durable = cas.input_path({'id': 'published-' + role, 'sha256': digest, 'bytes': len(raw)})
         assert value['artifacts'][role] == {
-            'path': str(path), 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}
+            'path': str(durable), 'bytes': len(raw), 'sha256': digest}
+        assert durable.read_bytes() == raw
+        assert durable.stat().st_mode & 0o222 == 0
 
 
 @pytest.mark.parametrize('kind', ['empty', 'directory', 'symlink'])
@@ -57,5 +65,26 @@ def test_publication_refuses_missing_or_ambiguous_control(tmp_path, capsys, coun
     for index in range(count):
         (tmp_path / 'controls' / f'{index}.json').write_bytes(b'control')
     with pytest.raises(RuntimeError, match='exactly one actual control'):
-        publish_control_artifacts('actual-node', tmp_path, None)
+        publish_control_artifacts('actual-node', tmp_path, None, None)
     assert capsys.readouterr().out == ''
+
+
+def test_retained_artifact_refuses_replaced_granted_bytes(tmp_path):
+    path = tmp_path / 'granted-trace'
+    path.write_bytes(b'actual original granted bytes')
+    identity = artifact_identity(path)
+    path.write_bytes(b'different replacement bytes')
+    with pytest.raises((ValueError, RuntimeError), match="ingested input"):
+        retain_artifact(PrismaBuildCAS(tmp_path / 'cas'), 'torch_trace', path, identity)
+
+
+def test_artifact_sdk_loader_uses_actual_launch_without_numeric_host_imports(tmp_path):
+    program = (
+        'import sys; from experiments.original_cuda_control import artifact_cas; '
+        'cas=artifact_cas(sys.argv[1]); '
+        'from prismabuild.client import SDK_VERSION; assert SDK_VERSION==4; '
+        'assert "prismaquant" not in sys.modules and "torch" not in sys.modules; '
+        'print(str(cas.root))')
+    done = subprocess.run([sys.executable, '-S', '-c', program, str(tmp_path / 'cas')],
+                          capture_output=True, text=True, check=True)
+    assert done.stdout.strip() == str(tmp_path / 'cas')
