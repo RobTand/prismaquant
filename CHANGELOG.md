@@ -12,6 +12,11 @@
   restore exactly, so differential monkeypatch targets remain identical.
   Production source-origin refusals, dependency pins, framework generation and
   the next-full negative gate are unchanged; no deployment or native GPU claim.
+  Candidate qualification retains named refusal details, and real guard
+  controls distinguish rejected in-checkout generated executables from
+  sibling fixture work preserving the same source HEAD. Qualification places
+  pytest scratch outside the authenticated checkout without moving compiler
+  TMPDIR, adding ignore rules or changing the cleanliness guard.
 
 - **Original proper-prefix coverage compares its exact checkpoint roster**
   (Refs #2147). Python set equality preserves the whole required head/layer

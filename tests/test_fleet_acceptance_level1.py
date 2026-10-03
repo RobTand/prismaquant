@@ -694,8 +694,12 @@ def _run_scenario(name: str, tmp_path: Path, scenario_dir: str,
     assert doc["schema"] == "prismaquant.fleet_acceptance.result.v1", doc
     assert doc["scenario"] == name, doc
     if doc["status"] == "nonqualified":
-        print(f"nonqualified {name}: {doc['reason']}")
-        pytest.skip(f"nonqualified: {doc['reason']}")
+        reason = f"nonqualified: {doc['reason']}"
+        detail = doc.get("evidence", {}).get("detail", {})
+        if detail:
+            reason += "; detail=" + json.dumps(detail, sort_keys=True)
+        print(reason)
+        pytest.skip(reason)
     if doc["status"] != "qualified":
         print("EVIDENCE " + json.dumps(doc.get("evidence", {}),
                                        sort_keys=True)[:15000])
