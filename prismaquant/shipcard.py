@@ -84,6 +84,8 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from .source_read_plan import safetensors_prefix_length
+
 SCHEMA = "prismaquant.shipcard/1"
 
 #: Every slot all serving lanes must close before an artifact is shippable.
@@ -771,13 +773,10 @@ def _verify_open_safetensors_fd(
     raw_length, read_calls = _read_exact_fd(
         fd, 8, digest=full_digest, capture=True
     )
-    header_length = int.from_bytes(raw_length, byteorder="little", signed=False)
-    if (
-        header_length <= 0
-        or header_length > _MAX_SAFETENSORS_HEADER_BYTES
-        or header_length > int(initial_stat.st_size) - 8
-    ):
-        raise ValueError(f"{name}: invalid safetensors header length {header_length}")
+    header_length = safetensors_prefix_length(
+        raw_length, int(initial_stat.st_size), max_bytes=_MAX_SAFETENSORS_HEADER_BYTES,
+        short_error="truncated safetensors content during verification",
+        range_error=lambda length: f"{name}: invalid safetensors header length {length}")
     raw_header, calls = _read_exact_fd(
         fd, header_length, digest=full_digest, capture=True
     )
