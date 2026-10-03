@@ -8,6 +8,8 @@ import sys
 import tarfile
 import gzip
 
+from experiments.original_cuda_pack_dependencies import PINS
+
 
 def cuda_entry_preflight(args, torch):
     """Actual runtime entry/work/profile proof, never source-lifetime acceptance."""
@@ -89,8 +91,7 @@ def main():
     import importlib.metadata as metadata
     import pytest
     import torch
-    for name,commit in (('prismabuild','95a59051d48cda82eea7927f31870c6c862d7174'),
-                        ('tessera-quant','b40c93cb73745097e57a1ba4cf5b9eee166c759a')):
+    for name,commit in PINS.items():
         dist=metadata.distribution(name)
         direct=json.loads(dist.read_text('direct_url.json') or '{}')
         if not Path(dist._path).resolve().is_relative_to(deps.resolve()) or direct.get('vcs_info',{}).get('commit_id')!=commit:
