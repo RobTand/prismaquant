@@ -104,3 +104,85 @@ The authoritative raw source/action/receipt/outcome/profile/resource/Netdata
 packet is /home/rob/tmp/pq1929-domain-evidence.json. Existing prior packets and
 frozen integration cohorts remain untouched; normal designated-parent,
 independent reviewer and integration gates remain. PQ1929 is still OPEN.
+
+
+## Successor: default resolver transition result reuse (Refs #1929)
+
+This separate transition-only successor starts at frozen accepted PR2189 head
+06284118e526345608c2a8a7bf5b45108c9a4bc6; that packet is unchanged. The two
+read-only resolver convention tests formerly called the same real default BF16
+resolver twice. A module-scoped lru_cache fixture now shares its immutable tuple
+once per family. Each consumer still constructs its own mutable set. The real
+resolver is invoked with rates omitted, so its default legal-rate derivation
+and every real schedule_signature still execute; no public-domain cached answer
+or mock is substituted. E4M3 is independently derived. Width-boundary, uniform
+versus mixed schedule, exact expected transition sets, first-domain exclusion
+and every original assertion/node remain. No production, pin, shape or source
+gate changes. The earlier six provider/payload consumers and fixture are untouched.
+
+Test commit:a51b9af0cb84bb2d682256eec28f3a5a9d8c69c3.
+Test file SHA-256:da246fda9976e653ede6a4c5a229096a1fa6c99c25dfefe696c5060ee7fd2a45.
+Both arms select precisely test_a_transition_names_the_first_rate_of_the_new_regime
+and E4M3/BF16 cases of test_every_256_multiple_above_the_endpoint_is_a_resolver_transition.
+Same3 nodes:3passed,0skipped,60deselected,14 existing Torch warnings and zero
+missing/duplicate-collected/never-ran/outcome issues. This does not requalify
+PR2189's six nodes, all63 module nodes or the whole CPU suite.
+
+Published pbtest.py uses explicitDL, one PB-owned file shard/worker,
+CPU2/mem4GiB/native1,600s deadline, priority-10 and an exact two-name OR -k
+selector. The earlier pinned interpreter/package preflight is unchanged and
+both preferred cpusets are[0,1]. All action/profiler returns are0.
+
+| New3-case observed measurement | Before | After |
+|---|---:|---:|
+| Pytest wall |44.13s|28.68s|
+| PB contained wall |51.750s|35.631s|
+| Cgroup CPU |56.502s|37.864s|
+| Cgroup peak memory |456519680 bytes|454959104 bytes|
+| Observed writes |2191832 bytes|2122200 bytes|
+| Observed reads |40960 bytes|0 bytes|
+| resolver_transitions inclusive sampled time |37.90s|22.93s|
+| legal_rates inclusive sampled time |18.43s|11.32s|
+| schedule_signature inclusive sampled time |19.28s|11.49s|
+| py-spy100Hz samples |4573|3041|
+
+Observed selected wall decreases15.45s (35.01%) and CPU decreases18.639s.
+This is one sequential profiled pair, not an isolated guaranteed speedup or
+whole-suite saving. After host load is higher; both arms use the same preferred
+cores. Inclusive samples overlap and must not be added. The real default-path
+legal-rate and signature work remains in the after profile.
+
+Before action:0fe264814d1de9ad1eea7be3c343dcd4581374b71a5a96dad745b2ea4ce156bd.
+Receipt:edc53ba970a2c78d70eb6122a970cbe6ad1a092961b51345d681ccf0508e0208.
+Snapshot:063bcf5aaed35a24d06400d8686b5db8a8dd4b3b; parent exact accepted base.
+Input:116b1895455246bacaacfb6d725b71ec3673e23a33d57f0d6b70ecd76ea7e05e.
+Profile:4702060bf68cf998d4019c10f75f485b46087b120733b438082d1fa4271bbe35.
+After action:06c840dc6cab0acba378f343d843b03000499b552896f7f2ae3e502cae7ae4ff.
+Receipt:2a16290ba766a45fc1d1b4ef122aa65f6a2f8dbda6d8714be826bf85c671afef.
+Snapshot:8ba137e323daca30d16720002317f19f0de3ca25; parent exact test commit.
+Input:89525d2dc24174d6279ef08ec3e10865b8542707d77c91a3520cf06b5d34c28e.
+Profile:35d633d27341f5dfadd451eca34052d59771f3044922b8640ea921ea1d450901.
+Both profile CAS blobs are successful py-spy0.4.2/100Hz outputs. Read-only SSH
+extraction reported an agent-signing communication warning but then completed
+successfully with actual profile counts; it did not repeat or cancel a workload.
+
+Captured Netdata means below cover the full returned response buckets, not
+claim-only scopes. Queries requested1791063032..1791063085 and1791063229..1791063266.
+Before response view21:30:32Z..21:31:25Z (2026-10-03), data21:30:33Z..21:31:25Z,
+27buckets. After view21:33:47Z..21:34:26Z, data21:33:48Z..21:34:26Z,20buckets,
+about3s of response view before the PB claim. PB scopes are
+1791063032.821433..1791063084.571155 and1791063229.940526..1791063265.571539.
+
+| Host | Before full-response busy | After full-response busy |
+|---|---:|---:|
+| dl380g10 |12.987%|14.456%|
+| sparky |1.858%|2.099%|
+| sparklina |1.462%|1.389%|
+
+Busy excludes idle/iowait; all six retained responses have zero flagged/empty
+buckets. PB's own DL means12.878%/14.673% and missing-pqteld diagnostics are
+retained. Raw source/receipt/outcome/scope/profile/Netdata packet:
+/home/rob/tmp/pq1929-transition-evidence.json. No blocking wait/poll loop,
+measurement replay, GPU/numerical/energy/$ or full-suite qualification occurs.
+Designated-parent review, independent review and existing integration gates
+remain mandatory; P1 parent1929 stays OPEN.
