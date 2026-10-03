@@ -208,6 +208,7 @@ def _capture_original(args):
     from prismaquant.cost_streaming import (StreamedBoundaryArtifacts, build_streamed_model_identity,
                                             check_boundary_storage, LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA)
     from prismaquant.dev_mode import dev_mode_enabled
+    from prismaquant.digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
     from prismaquant.glm_routing_capture import capture_streamed_glm_routes
     from prismaquant.joint_adjoint_checkpoints import adjoint_space, boundary_entry_directory
     from prismaquant.joint_aura import source_execution_identity
@@ -334,7 +335,7 @@ def _capture_original(args):
                         raise ValueError(f"original routed capture output already exists: {target}")
                     total_artifact_bytes += len(raw)
                     entries.append({"layer": layer, "unit": result["metadata"]["unit"], "path": str(target),
-                                    "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)})
+                                    "sha256": bytes_sha256hex(raw), "bytes": len(raw)})
                 report("capture", len(entries), unit=result["metadata"]["unit"])
 
             layers = capture_streamed_glm_routes(runner, ids, calibration=calibration, producer_source=producer,
@@ -351,7 +352,7 @@ def _capture_original(args):
                 "calibration": calibration, "source_authentication": final_material,
                 "source_prefetch": prefetch, "device_envelope": envelope,
                 "source_owner_closed": owner._closed, "elapsed_s": time.monotonic() - started}
-            raw = (json.dumps(receipt, sort_keys=True, allow_nan=False) + "\n").encode()
+            raw = (DIRECT_ASCII_SPACED_STRICT.text(receipt) + "\n").encode()
             if total_artifact_bytes + len(raw) > resources["artifact_bytes"]:
                 raise RuntimeError("original routed receipt exceeds its admitted artifact envelope")
             if not publish_new_bytes(root / "receipt.json", raw):

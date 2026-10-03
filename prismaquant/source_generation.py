@@ -12,19 +12,23 @@ import json
 import math
 import platform
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from types import MappingProxyType
 import re
 from typing import TypedDict
 
 from .schemas import Contract, strict_json_loads
-from .digests import is_sha256hex
-from .stage_inputs import read_bound, require_source_identity
+from .digests import (
+    DIRECT_ASCII_SPACED_STRICT, DIRECT_ASCII_STRICT, canonical_json_sha256, is_sha256hex,
+)
+from .stage_inputs import read_bound, require_source_identity, same
 from .memory_management import reserve_allocation
 
 
 _contract = Contract(RuntimeError, 'original generation: ')
 _require = _contract.require
+_same = partial(same, contract=_contract)
 
 
 _GIT_OBJECT_ID = re.compile(r'[0-9a-f]{40}\Z')
@@ -110,7 +114,7 @@ class OriginalSourceAuthority(TypedDict):
 
 def _snapshot(value):
     """An independent JSON mapping, never a mutable adopted control object."""
-    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+    return json.loads(DIRECT_ASCII_SPACED_STRICT.text(value))
 
 
 def _exact(value, keys, label):
@@ -124,20 +128,11 @@ def _binding(value, label):
     return value
 
 
-def _same(actual, expected, label):
-    _require(actual == expected, f'{label}: identity mismatch')
-
-
-def _canonical_sha256(value, label):
-    from .cost_stage_checkpoint import canonical_json_sha256
-
-    return canonical_json_sha256(value, where=label)
-
-
 def original_authority_static_sha256(authority):
     _exact(authority, ORIGINAL_AUTHORITY_KEYS, 'original source authority')
-    return _canonical_sha256({key: authority[key] for key in ORIGINAL_STATIC_AUTHORITY_KEYS},
-                             'original static source authority')
+    return canonical_json_sha256(
+        {key: authority[key] for key in ORIGINAL_STATIC_AUTHORITY_KEYS},
+        where='original static source authority')
 
 
 def _session(value):
@@ -149,13 +144,17 @@ def _session(value):
 
 
 def _source_execution(value):
-    _exact(value, {'schema', 'modules'}, 'original source execution')
-    _same(value['schema'], 'prismaquant.joint_aura.source_execution.v1', 'original execution schema')
+    from .joint_aura import (
+        SOURCE_EXECUTION_KEYS, SOURCE_EXECUTION_SCHEMA, _source_execution_selectors,
+    )
+
+    _exact(value, SOURCE_EXECUTION_KEYS, 'original source execution')
+    _same(value['schema'], SOURCE_EXECUTION_SCHEMA, 'original execution schema')
     modules = _contract.mapping(value['modules'], where='original execution modules')
     _require(bool(modules), 'original execution has no resolved selectors')
     for name, selectors in modules.items():
-        _require(type(name) is str and isinstance(selectors, dict) and selectors and
-                 set(selectors) <= {'attention', 'experts'}, 'invalid original execution selector')
+        _require(type(name) is str and _source_execution_selectors(selectors),
+                 'invalid original execution selector')
         for key, selector in selectors.items():
             _require(selector is None or (type(selector) is str and selector) or
                      (isinstance(selector, dict) and selector and all(
@@ -743,7 +742,7 @@ def _normalize_original_source_authority(owner, authority_input, plan_input, adm
         execution_sha256=bindings['execution']['sha256'])
     _exact(identity, ORIGINAL_SESSION_IDENTITY_KEYS, 'original session identity')
     _same(identity, admitted_execution['session_identity'], 'independently owning original session identity')
-    _same(_canonical_sha256(identity, 'original source session identity'),
+    _same(canonical_json_sha256(identity, where='original source session identity'),
           authority['session']['run_identity_sha256'], 'owning original session digest')
     if owner is not None:
         from .tessera_calibration_cache import CaptureSourceAuthentication
@@ -838,8 +837,7 @@ def _original_artifact_publication(payload, *, node_id, roles):
     _exact(publication, {'schema', 'node_id', 'artifacts'}, 'selected artifact publication')
     _same(publication['schema'], 'prismaquant.original_source_artifact_publication.v1', 'actual artifact publication schema')
     _same(publication['node_id'], node_id, 'actual artifact publication selected node')
-    _same(lines[0], json.dumps(publication, sort_keys=True, separators=(',', ':'),
-                              allow_nan=False).encode(), 'canonical actual artifact publication')
+    _same(lines[0], DIRECT_ASCII_STRICT.encoded(publication), 'canonical actual artifact publication')
     artifacts = _exact(publication['artifacts'], roles, 'actual published artifact roles')
     paths = set()
     for role, artifact in artifacts.items():
@@ -894,7 +892,7 @@ def _require_original_qualified_source(row, request, accepted, target_runtime):
     _same(row['source_snapshot'], family['old_source'], 'original executed member source is not restamped')
     _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
           'qualified member actual target source implementation')
-    _same(family['target_runtime_sha256'], _canonical_sha256(target_runtime, 'actual original target runtime'),
+    _same(family['target_runtime_sha256'], canonical_json_sha256(target_runtime, where='actual original target runtime'),
           'qualified member actual target runtime')
 
 
@@ -1023,7 +1021,7 @@ def _require_original_source_proofs(authority, resource_check):
             _contract.string(family[key], where=f'unchanged-family {key}', pattern=_GIT_OBJECT_ID)
         _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
               'unchanged-family actual target source implementation')
-        _same(family['target_runtime_sha256'], _canonical_sha256(target_runtime, 'actual original target runtime'),
+        _same(family['target_runtime_sha256'], canonical_json_sha256(target_runtime, where='actual original target runtime'),
               'unchanged-family actual target runtime')
         _control(family['compatibility'], 'independently accepted unchanged source compatibility')
         _require(isinstance(family['controls'], list) and family['controls'], 'unchanged-family accepted controls missing')

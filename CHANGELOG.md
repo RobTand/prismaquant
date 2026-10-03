@@ -21,6 +21,17 @@
   malformed requests remain failures instead of being mislabeled as missing
   creator cgroup membership. Actual membership refusal remains nonqualified.
 
+- **Original-containing guard regressions retain their existing owners and
+  refusal semantics** (Refs #2198, #2125). The seal ratchet classifies the
+  issued session's real pending-policy and metadata-owner checks, removes the
+  obsolete rebind entry and still rejects an extra run seal at every changed
+  scope. Original snapshots and publication bytes use the exact shared JSON
+  profiles; identity comparison and source-dispatch validation reuse their
+  existing owners while retaining distinct Original/native type, backend and
+  error policies. Offline Stage A fixtures provide their real legacy context
+  instead of relying on a production fallback. Native reader, resource, CUDA,
+  source-admission and automatic-capture gates are unchanged; these corrections
+  do not establish full-suite, GPU, scientific or serving qualification.
 - **Original proper-prefix coverage compares its exact checkpoint roster**
   (Refs #2147). Python set equality preserves the whole required head/layer
   coverage and rejects missing or extra checkpoints without sending sets to

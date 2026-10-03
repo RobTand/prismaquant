@@ -12,6 +12,7 @@ from contextlib import nullcontext
 import hashlib
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -603,6 +604,8 @@ def _stage_a_run_stub(tmp_path, monkeypatch, out_root):
         num_layers = 2
         device = "cpu"
         model = object()
+        # Offline legacy fixture: explicitly no qualified original material owner.
+        context = SimpleNamespace(source_authentication=None)
 
         def observe_source_waits(self, sink):
             # The envelope/identity fixture creates no delivery Futures.
