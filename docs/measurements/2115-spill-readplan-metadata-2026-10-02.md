@@ -33,7 +33,7 @@ Published PB on dl380g10 ran the original five contract files plus the existing 
 - Architecture (13): `e2b92b2b0cfb463a7f8e17beab0cf153f364a01f321d24c045e12ab46a59fde5`.
 - Staleness (6): `d0ae10f5b529c5a399f7f7f78f5b024c55b212a5f338e2b6a2128877c5e2f9f2`.
 
-The existing `/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python` passed unchanged dependency guards. An initial six-file submission using the B36 interpreter refused before pytest (installed PrismaBuild `dc4803`, expected `95a590`); those endings are not counted as tests. No pin or worker environment was changed.
+The existing `/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python` passed unchanged dependency guards. Initial submissions of these six files using the B36 interpreter refused before pytest (installed PrismaBuild `dc4803`, expected `95a590`); those endings are not counted as tests. No pin or worker environment was changed.
 
 Real API smoke and four-module compilation action `c1305a1e887a3653aa4aa7daa40a8ca02f14a27eae9d4996635e81a08225c0dd` completed on dl380g10. Both constructor modes captured and replayed three probes / two invocations with threaded scatter O_DIRECT reads, asserted six ordered input/gradient observations, verified 768 checksum bytes per mode and closed their streams. Each captured layout was planned through both representations and its exact ordered fields/last-use digest matched. The CLI module `--help` executed without invoking profiling. Separate CPU allocations legitimately differ in pointer residue; earlier smoke attempts `4bdbd480` and `43bbea63` incorrectly compared digests across those layouts. Initial `40bb9050` had a command-quoting SyntaxError. These unsuccessful attempts are retained; the implementation was not changed to suppress them.
 
