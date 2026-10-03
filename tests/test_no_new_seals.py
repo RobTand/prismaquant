@@ -138,6 +138,14 @@ ALLOWLIST = {
     ("prismaquant/joint_adjoint_checkpoints.py", "_validated_checkpoint_stream_plane"): (
         1, STRUCTURE, "stored cotangent metadata reproduces its enclosing checkpoint's "
         "session, slot, kind and coordinates; not a comparison with the running campaign"),
+    ("prismaquant/joint_dispatch_pilot.py", "_authenticated_quantum_record"): (
+        2, INTEGRITY, "the PB producer original quantum bytes against the bound argv digest "
+        "and declared length, then decoded bytes against their digest; no running identity"),
+    ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_completion"): (
+        1, INTEGRITY, "supplied counters bytes against the authenticated PB producer reference"),
+    ("prismaquant/joint_dispatch_pilot.py", "validate_pilot_source_contract"): (
+        1, STRUCTURE, "the independently reviewed pilot implementation names the proposed "
+        "code; this is the explicitly overridable fanout qualification gate, not a resume seal"),
     ("prismaquant/joint_cost_quantum.py", "verify_quantum_identity"): (
         3, AMBIGUOUS, "record bytes, the record's own seal and each input file against its "
         "digest (integrity); the Stage A slice binding (ambiguous, #1147 report)"),
@@ -169,6 +177,10 @@ ALLOWLIST = {
         "the record measured (wall); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_layer_quanta.py", "covered_slices"): (
         1, WALL, "Stage A proofs from mixed runs cover no one chain"),
+    ("prismaquant/joint_layer_quanta.py", "check_checkpoint_incoming_readset"): (
+        1, AMBIGUOUS, "the authenticated incoming readset and its quantum record bind "
+        "the same Stage A slice, as in bind_quantum_executable; the existing slice "
+        "binding remains a refusal in both modes (#1147), not a running-code seal"),
     ("prismaquant/joint_layer_quanta.py", "bind_quantum_boundary_readset"): (
         2, AMBIGUOUS, "the readset wire against its digest (integrity); the Stage A slice "
         "binding (ambiguous, #1147 report)"),
@@ -230,8 +242,11 @@ ALLOWLIST = {
     ("prismaquant/tessera_joint_aura.py", "_read_wire_bytes"): (
         1, INTEGRITY, "staged wire bytes against the receipt digest"),
     ("tools/dispatch_joint_quanta.py", "_admit_dispatch_pilots"): (
-        1, INTEGRITY, "pilot counters bytes against the operator's bound receipt digest "
-        "(#1293); source/regime/shape admission is the explicitly overridable pilot gate"),
+        2, INTEGRITY, "pilot counters and independently reviewed source-contract bytes against "
+        "their operator-bound digests (#1293); source/regime/shape admission is explicitly overridable"),
+    ("tools/dispatch_joint_quanta.py", "_verify_pilot_result"): (
+        1, STRUCTURE, "authenticated PB counters and original quantum record name the same "
+        "producer identity; neither is compared with the running campaign"),
     ("tools/dispatch_joint_quanta.py", "_executable_prepared_input"): (
         5, AMBIGUOUS, "the manifest wire against its digest (integrity); the prepared "
         "payload, its render prerequisite, the bound prepared contract and the Stage A "
@@ -591,3 +606,18 @@ def test_converting_a_site_requires_lowering_its_entry():
     problems = violations(sources)
     assert problems == [f"{path} main: the allowlist names 1 site(s), 0 remain; "
                         "lower the entry"]
+
+
+def test_incoming_readset_classification_allows_only_its_existing_slice_check():
+    sources = _campaign_sources()
+    path = "prismaquant/joint_layer_quanta.py"
+    existing = (
+        '    if annotations.get("slice_sha256") != record["adjoint"].get("slice_sha256"):\n')
+    assert existing in sources[path]
+    extra = ("    if running_plan_sha256 != recorded_plan_sha256:\n"
+             "        raise ValueError('new run seal')\n")
+    sources[path] = sources[path].replace(existing, extra + existing, 1)
+    problems = violations(sources)
+    assert len(problems) == 1
+    assert ("check_checkpoint_incoming_readset: 2 identity check site(s), 1 allowed"
+            in problems[0])

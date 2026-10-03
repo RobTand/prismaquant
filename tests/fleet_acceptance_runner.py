@@ -996,12 +996,14 @@ def scenario_sdk_pending_ticket(world: World, snapshots: dict) -> dict:
     _, control = _open_scope(world, key=KEY, nonce=NONCE)
     try:
         begun = world.broker_request({"op": "container_begin",
-                                      "action_key": KEY, "nonce": NONCE,
-                                      "token": control["token"]})
+                                      "scope_id": control["scope_id"]})
     except (PermissionError, OSError, ValueError) as exc:
+        if "container creator is not in its scope" not in str(exc):
+            raise
         raise pins.NonQualified(
             "container ticket issuance needs cgroup membership",
-            detail={"refusal": f"{type(exc).__name__}: {exc}"})
+            detail={"scope_id": control["scope_id"],
+                    "refusal": f"{type(exc).__name__}: {exc}"})
     assert begun.get("ok") is True and begun.get("ticket"), begun
     ticket = begun["ticket"]
     world.broker_request({"op": "stop", "action_key": KEY, "nonce": NONCE,
@@ -1017,8 +1019,7 @@ def scenario_sdk_pending_ticket(world: World, snapshots: dict) -> dict:
     scope.token = control["token"]
     export = _export(world, scope, key=KEY, nonce=NONCE)
     assert export.get("tickets_pending") is True, export
-    world.broker_request({"op": "container_end", "action_key": KEY,
-                          "nonce": NONCE, "token": control["token"],
+    world.broker_request({"op": "container_end",
                           "scope_id": control["scope_id"], "ticket": ticket})
     settled = world.broker_request(
         {"op": "settle", "action_key": KEY, "nonce": NONCE,

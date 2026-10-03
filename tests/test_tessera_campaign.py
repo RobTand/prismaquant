@@ -57,12 +57,13 @@ def test_next_anchor_splits_the_worst_predicted_interval():
 
 def _anchor(qname, family, rung, dloss, *, bytes_=1000):
     from prismaquant.tessera_campaign import CampaignAnchor
+    from prismaquant.format_registry import get_format
 
     return CampaignAnchor(
         qname=qname, family=family, format_name=f"{family}_R{rung}",
         body_rate_q256=rung, dloss=dloss, dloss_stderr=0.0,
         memory_bytes=bytes_, bits_per_param=rung / 256.0,
-        activation_contract="w4a4-nvfp4-e2m1-group16-ue4m3",
+        activation_contract=str(get_format(f"{family}_R{rung}").act_dtype_name or "a16"),
         activation_quantized=True, wire_bytes=bytes_, seconds=1.0,
     )
 

@@ -86,7 +86,7 @@ def retire_main(args):
 
 
 def test_a_superseded_run_loses_its_checkpoints_and_the_entries_they_pin(
-        tmp_path, monkeypatch, capsys):
+        tmp_path, monkeypatch, capsys, installed_client_sdk):
     # The retirement runs through to PrismaBuild's lease release (PQ #886);
     # require_prismabuild_sdk only proves a distribution installed, which an
     # editable dev checkout with no fleet-injected helper root also passes
@@ -213,7 +213,8 @@ def test_zero_binding_roots_prove_nothing(tmp_path, monkeypatch, capsys):
     assert (space / "checkpoints").is_dir()
 
 
-def test_a_retirement_that_stops_partway_finishes_on_a_rerun(tmp_path, monkeypatch, capsys):
+def test_a_retirement_that_stops_partway_finishes_on_a_rerun(
+        tmp_path, monkeypatch, capsys, installed_client_sdk):
     # The retirement runs through to PrismaBuild's lease release (PQ #886);
     # require_prismabuild_sdk only proves a distribution installed, which an
     # editable dev checkout with no fleet-injected helper root also passes

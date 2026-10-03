@@ -29,7 +29,6 @@ import argparse
 from collections.abc import Mapping, Sequence
 import copy
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -41,6 +40,12 @@ import sys
 import tempfile
 import time
 from typing import Any
+
+if __package__:
+    from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex, text_sha256hex
+else:
+    # Local workers execute this file directly without importing PQ/torch.
+    from digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex, text_sha256hex
 
 
 CAMPAIGN_MANIFEST_SCHEMA_V2 = "prismaquant.cluster_campaign.manifest.v2"
@@ -223,19 +228,13 @@ def _sha256(value: object, *, where: str) -> str:
 
 def _canonical_bytes(value: object) -> bytes:
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
+        return DIRECT_UTF8_STRICT.encoded(value)
     except (TypeError, ValueError) as exc:
         raise CampaignContractError("value is not finite canonical JSON data") from exc
 
 
 def canonical_sha256(value: object) -> str:
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    return bytes_sha256hex(_canonical_bytes(value))
 
 
 def _safe_absolute_path(value: object, *, where: str) -> str:
@@ -569,10 +568,7 @@ def load_campaign_manifest_v2(path: str | os.PathLike[str]) -> dict[str, object]
 
 
 def _owner_token(campaign_identity: str, stage_id: str, attempt: int) -> str:
-    encoded = (
-        f"{campaign_identity}\0{stage_id}\0{int(attempt)}"
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return text_sha256hex(f"{campaign_identity}\0{stage_id}\0{int(attempt)}")
 
 
 def _state_body(
@@ -958,17 +954,6 @@ def _advance_state(
     )
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(8 * 1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _receipt_observation(
     receipts: Sequence[Mapping[str, object]],
 ) -> tuple[list[str], list[str]]:
@@ -988,7 +973,7 @@ def _receipt_observation(
             mismatched.append(str(path))
             continue
         try:
-            observed = _file_sha256(path)
+            observed = file_sha256hex(path)
         except OSError:
             mismatched.append(str(path))
             continue
@@ -1622,7 +1607,7 @@ def _probe_stage_receipts(
     owner_token: str,
     log_path: Path,
 ) -> int:
-    probe_owner = hashlib.sha256((owner_token + "\0probe").encode("utf-8")).hexdigest()
+    probe_owner = text_sha256hex(owner_token + "\0probe")
     request = _worker_request(
         manifest, host, stage, owner_token=probe_owner, verify_only=True
     )
@@ -2164,7 +2149,7 @@ def sealed_stage_receipt_bytes(token: str, child_argv: Sequence[str]) -> bytes:
 def sealed_stage_receipt_sha256(token: str, child_argv: Sequence[str]) -> str:
     """Return the manifest-known SHA-256 for a sealed-stage receipt."""
 
-    return hashlib.sha256(sealed_stage_receipt_bytes(token, child_argv)).hexdigest()
+    return bytes_sha256hex(sealed_stage_receipt_bytes(token, child_argv))
 
 
 def run_sealed_stage(

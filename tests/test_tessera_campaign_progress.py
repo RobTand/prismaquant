@@ -18,7 +18,7 @@ def fixture(monkeypatch, tmp_path):
     campaign, checkpoint, argv, model, inputs = _main_fixture(monkeypatch, tmp_path, priced=True)
     model.model.layers[0].proj2 = copy.deepcopy(model.model.layers[0].proj)
     inputs['menu'] = [SimpleNamespace(format_name=f'{FAMILY}_R{r}', family=FAMILY,
-        body_rate_q256=r, bpp=r/256, admission=SimpleNamespace(activation_contract='a8'))
+        body_rate_q256=r, bpp=r/256, admission=SimpleNamespace(activation_contract='fp8_e4m3'))
         for r in (1024, 1280, 1536)]
     monkeypatch.setattr(campaign, '_collect_activations', lambda *_a, **_k: (
         {n: inputs['rows'] for n in (UNIT, OTHER)}, {}, {n: 0 for n in (UNIT, OTHER)},
@@ -44,7 +44,7 @@ def fixture(monkeypatch, tmp_path):
         return campaign.CampaignAnchor(qname=qname, family=FAMILY,
             format_name=format_name, body_rate_q256=rate, dloss=1/rate,
             dloss_stderr=0., memory_bytes=32, bits_per_param=rate/256,
-            activation_contract='a8', activation_quantized=True, wire_bytes=32,
+            activation_contract='fp8_e4m3', activation_quantized=True, wire_bytes=32,
             seconds=float(len(calls)), hessian_applied=False)
     monkeypatch.setattr(campaign, '_measure_anchor', measure)
     # This test-only safety bound makes the unfixed loop finish and expose its

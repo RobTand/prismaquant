@@ -7,11 +7,12 @@ from types import ModuleType
 _PROFILE_OWNERS = {
     'digests': 'pq_profile_shared_digest_owner',
     'io_spans': 'pq_profile_shared_sampler_owner',
+    'file_identity': 'pq_profile_shared_file_identity_owner',
 }
 
 
 def profile_source_owner(source: str) -> ModuleType:
-    """Reuse only the profiler's two stdlib owners from this source snapshot."""
+    """Reuse only the profiler's three stdlib owners from this source snapshot."""
     owner_name = _PROFILE_OWNERS[source]
     if owner_name not in sys.modules:
         path = Path(__file__).resolve().parents[1] / 'prismaquant' / (source + '.py')

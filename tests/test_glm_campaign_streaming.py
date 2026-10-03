@@ -260,16 +260,8 @@ def test_streamed_campaign_publishes_original_layout_census_and_capture(
     config = type(config).from_dict(config.to_dict())
     source = tmp_path/"campaign-source"
     write_original_layout_checkpoint(_build_model(config).to(torch.bfloat16), source)
-    # Exercise the actual pinned producer. Resolve it the way
-    # test_tessera_packed_plan_handoff does: from TESSERA_REPO, falling back
-    # to the fleet's shared pinned checkout, and skip -- never fail -- where
-    # neither exists (GitHub CI has no /mnt/shared).
-    pinned = '/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97'
-    producer = Path(os.environ.get('TESSERA_REPO') or pinned)
-    if not producer.is_dir():
-        pytest.skip('TESSERA_REPO must name the pinned producer checkout '
-                    f'(unset, and {pinned} is absent)')
-    monkeypatch.setenv('TESSERA_REPO', str(producer))
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
     tokens = [torch.arange(257).remainder(126).add(2).reshape(1, -1)]
     monkeypatch.setattr(campaign, '_calibration_tokens', lambda *_: (tokens, 'tiny GLM frozen draw'))
     census = tmp_path/'census.json'

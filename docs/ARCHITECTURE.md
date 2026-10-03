@@ -1,5 +1,229 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-03 (Refs #2147; required source dependencies #2148/#2149):
+the existing routed capture CLI, GLM visitor and native boundary intake carry an
+exclusive current-original first-sequence contract, not canonical complete-v2
+authority. The source owner's public gate compares independently sealed inputs
+before material; original non-CPU material/directGPU/automatic refusers remain.
+The actual owning artifact generation is re-bound, never newly minted by capture.
+Four source tensors retain their pre-host-copy indexed device and original dtype;
+ordered I64 coordinates remain deterministic CPU bookkeeping. Prefix/full source
+initialization, actual delivery generations, completed source-copy fences and
+all pending one-ahead debt are independently joined before lossless I32/F32
+transport. Row zero supplies no full-draw H, counts/maxima, prices, MTP/vision or
+native/serving qualification. Legacy DEV/cache/LFM and the geometry-bound GLM
+bias repair remain. No runtime pin, menu, adoption or default changes occur.
+
+Re-stamped 2026-10-02 (Refs #2094, Tessera #856): shape-time conversion
+requires an explicit PB action/publication/attempt selector for each checker
+completion. The public SDK4 result reader and standard capture binder join
+the owned observation output to an independently reviewed checker config
+containing the exact snapshot selection (commit, parent, schema, subdirectory,
+refs and input), working directories, command and environment. Converted rows
+reference that proof; reload performs the same join and compares context,
+key, lane, warmups and samples. Bare panels and observations refuse. The
+checker config carries no automatic source approval. This CPU handoff keeps
+the immutable serving pin and the existing lane admission gate; it does not
+qualify a new price population, TP world, serving SLO or GPU measurement.
+The table declares exactly its measured M regimes. Artifact projection parses
+the held digest-bound panel, samples and routes through the shared strict JSON
+reader; canonical bytes use the existing direct ASCII strict digest profile.
+
+Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 drain correction):
+`_RollPipeline.drain` detaches its pending delivery before callbacks, as the
+original path did. If roll or durable callbacks fail after committing a
+prefix, subsequent drain/abandon cannot deliver consumed rows or report
+that prefix again. Unproven research DMA remains independently owned by
+the retained banks and exact stream ledger; detaching delivery releases
+no bank or credit before its submitting stream is proven complete.
+
+Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 failure ownership):
+a failed reusable `_RollPipeline` copy retains its actual banks and host-byte
+credit with the exact streams that submitted them. Event creation, recording
+or synchronization failures cannot release that ownership. The failed owner
+is held beyond caller/traceback lifetime, and CUDA roll construction/submission
+in this process refuses while it remains unresolved. Only that owner's
+`abandon` retries its captured streams; all outstanding bank copies, including
+the previous step, must be proven complete before any bank/credit is released.
+An unprovable or poisoned context retains ownership until process containment
+or exit. This is default-off research failure ownership, with no polling
+thread, alternate cache or production admission/default change.
+
+Re-stamped 2026-10-02 (`sol/pq-stageb-io-20261002`, PQ #2097 / Refs #1250):
+the existing `_RollPipeline` has a constructor-only, default-off research
+mode for two reusable banks of compact CUDA host rows. Only a consumer that
+cannot retain rows is admitted; the first group bounds layout and bank size,
+and subsequent larger or incompatible layouts refuse before copying.
+Public callers, sealed execution inputs and production admission are unchanged.
+CPU simulated-event checks qualify control flow and exact serialized entry
+bytes; CUDA lifetime, admission integration and representative before/after
+in-process plus both-Spark Netdata evidence remain required by #1250.
+
+Re-stamped 2026-10-02 (PQ #2109, Refs #1842): the existing campaign anchor
+resume guard checks the recorded activation contract against the same format
+declaration used by fresh pricing. Its activation-change observation must be
+a Boolean, and an identity-activation format cannot report changed input.
+Quantizing formats may report unchanged actual rows. Current-menu seed rows
+pass the same guard before wire linking; inactive unservable evidence retains
+its existing disposition. The bound input-identity template is built before
+scoring and validates its input/scale fields without inventing an activation
+observation; actual rows still use the full guard before producer identity
+derivation, including through a bound holder. Static-scale checks and arithmetic, wire/source/H
+integrity, menus, pins and native/export/serving admission remain independent
+and unchanged. This CPU metadata check establishes no original-source capture,
+H measurement, device qualification or served attention acceptance.
+
+Re-stamped 2026-10-02 (PQ #2118, Refs #1366, sealed checkpoint incoming):
+post-capture executable regeneration accepts the explicit
+`--checkpoint-incoming-mode stream_once_staged` selection. Absent selection
+preserves existing manifest bytes, phase topology and execution defaults.
+Checkpoint metadata/shared state stays in `checkpoint-load`; original cotangents
+move to bounded first-chain consumption order or chain-empty per-probe spill
+phases. The dispatcher excludes moved input entries from compute units and
+checks their membership against the hash-bound Stage A slice. The runtime derives
+selection from the immutable record, refuses conflicting execution settings,
+and authenticates mode/row/slice/probe/phase membership through the existing
+protected PB claim/CAS/public-SDK owner under strict residency policy. Exact-reader
+leases, digest checks, resource gates, destination planes and numerical/resume
+contracts remain with their existing owners. Research mode remains CPU-only.
+Staged first-chain batching/fusion and nondefault replay, capture/shadow profiles
+and handoffs refuse; chain-empty staged capture preserves its sealed grouped
+regime, and render-only profiling remains available. CPU context doubles qualify
+bitwise operands, final planes and costs/journals including partial and complete
+resume; they do not qualify staged lifetimes or GPU performance. No default,
+pin, serving gate or deployed runtime changes. The original GLM layer-7 two-arm
+GPU protocol remains a root-authorized gate under #1366; see
+[the sealed checkpoint contract and finite protocol](design/checkpoint_streaming_1366.md).
+
+Re-stamped 2026-10-02 (PQ #2106, Refs #1293, selected-result consumer):
+fan-out pilot admission uses the reviewed SDK4 public selected-action result
+reader and standard-capture binder. Explicit publication/attempt selectors
+and an independently digest-bound versioned source contract bind the exact
+PB snapshot input and complete selection (commit/parent/subdirectory/refs),
+reviewed package relation, known container/quantum entries,
+image and complete environments. Candidate counters cannot introduce an
+accepted source. The producer inlines the original bounded quantum wire from
+its shared owned read; the consumer authenticates those bytes and committed
+counters against the selected completion, validates record/adjoint identities,
+and derives actual plan/regime/shape/cotangent admission before publication.
+Equivalent byte-bound inputs and output namespaces retain their existing
+admission semantics. Legacy, foreign, substituted and ambiguous evidence
+refuses; the explicit unverified override remains stamped. The 1 MiB record
+cap precedes parsing/encoding/decoding; 8 MiB documents bound result/counter
+reads, with JSON overhead additional. This is CPU consumer/source qualification;
+worker activation and the genuine #1293 GPU pilot remain independent gates.
+No numerical, cache, pipeline-default, wire or serving change is introduced.
+See [pilot source contract and finite measurement protocol](design/joint_dispatch_pilot.md).
+
+Re-stamped 2026-10-02 (Refs PQ #1293, producer provenance prerequisite):
+the existing quantum output publisher records the exact SHA-256 and byte
+length of its committed counters in results.json. Its existing final stdout
+completion is a typed `prismaquant.joint_layer_quantum.completion.v1` object
+carrying the same counters reference and completed unit counts. PB's immutable
+result can therefore bind the counter bytes instead of a terminal action key
+alone. The shared pilot-domain reference validator refuses changed bytes,
+foreign quantum IDs, inconsistent/noncomplete units and malformed references;
+its caller must supply a completion from the chosen execution's authenticated
+CAS result. This publisher/validator prerequisite does not itself wire that
+public PB result reader or authenticate a sealed invocation/source closure.
+The selected-result consumer above supplies those bindings; the genuine GPU
+pilot remains open under #1293.
+Counter encoding, arithmetic, pipeline defaults and serving gates are unchanged.
+
+Reconciled PR #2114 with current main on 2026-10-02: the fresh producer and
+resume/active-seed guard retain the same registry declaration. Input templates
+remain explicitly unmeasured; genuine same-contract resumes retain their
+encoded wire and scores. This integration changes no format default or pin.
+Refs #1301 (2026-10-02): allocator measured-runtime cost admission, prefill
+frontier cost provenance and measured-runtime receipt authentication share
+`digests.file_digest_sha256hex` for the existing open-handle SHA-256 profile.
+All three identities are load-bearing, not ephemeral. Each caller keeps its
+own binary open, closure, path resolution, error handling and comparison;
+the owner calls the identical stdlib `hashlib.file_digest` primitive without
+reopening or changing bytes. No numerical, profile, pin or default changes.
+This completes only the measured-runtime/frontier open-handle family. The
+special page-releasing capture-source hash and unrelated JSON/raw-byte sites
+remain distinct or unconsolidated; #1301 and #1303 remain open.
+Re-stamped 2026-10-03 (Refs #2144, native MoE source replay): independent
+source qualification consumes GLM's FP32 `correction_bias` digest and derives
+its shape from the whole expert roster, including tensor-parallel panels.
+LFM continues to use `selection_bias`. The original tensor bytes, dtype,
+cardinality, source/runtime/calibration and backend joins remain required.
+CPU protocol acceptance is not original CUDA/provider, capture or serving
+qualification; no runtime cell, format menu, pin or ship gate is changed.
+
+Re-stamped 2026-10-02 (Refs #1589, root-approved comparison strengthening):
+the existing uniform-control contract loop additionally compares a new
+candidate's `measurement_fidelity`, `calibration_contract_sha256` and
+`teacher_evidence`. The control must carry each present candidate field at
+exact strict-JSON equality; absence, nonfinite values and typed differences
+refuse. Legacy candidates without these optional fields retain their original
+comparison. No corpus hash is repurposed and no new validator, format, pin,
+default or control override is introduced.
+
+Re-stamped 2026-10-02 (Refs #1589): the existing sealed-panel TR3 scorer can
+optionally publish `--gold-record-out` after a new complete measured panel.
+It records its actual all-position, full-vocabulary FP64 method, authenticated
+panel/teacher calibration context, clean source closure (including the
+fidelity helper), canonical shipcard model identity and observed no-spec
+execution. Existing digest-cache and entry/exit identity/engine fences remain
+the owners; no whole-weight rehash or parallel cache is added. The actual
+self-manifest requires a live engine descendant for this optional output and
+binds the model identity in its runtime context. The producer uses the existing
+slot constructor and atomic JSON writer. Raw retained results are not upgraded;
+qualification-only runs, reused output paths and failed fences cannot publish
+a gold record. Existing offline receipt ingestion consumes the producer record
+without changing the artifact or inventing a canonical manifest. This closes
+no independent PPL, compiled, census, control, quality or served-SLO gate.
+
+Refs #2174 / #1301: the remaining campaign identity constructors use the
+existing `DIRECT_UTF8_STRICT`, `bytes_sha256hex` and `text_sha256hex` owners.
+Manifest/state canonical bytes stay direct JSON, not normalization; domain
+errors and native causes stay campaign-owned. Attempt owners retain NUL
+framing and integer coercion; probe owners retain their NUL/probe suffix.
+Sealed receipts retain normalized child binding and their final LF. Every
+remaining raw campaign hash constructor is removed, without changing public
+signatures or stored identities. Direct workers retain stdlib sibling imports.
+Pylsp references were obtained for both exported digest functions before the
+implementation changes. Pretty persisted state and CLI presentation remain
+distinct from identity bytes; their existing formatting is not flattened.
+This actor-local slice follows #2169 and leaves the broader digest epic open.
+
+Refs #2169 / #1301: campaign receipt observations and Fisher dataset
+provenance share `digests.file_sha256hex`. The campaign retains its exact
+8 MiB read window and missing/mismatched/symlink classifications; its obsolete
+private digest copy is removed. Fisher retains its exact 1 MiB file window,
+optional-source policy, readable-file preference and historical read-failure
+fallback to `digests.text_sha256hex` over strict UTF-8 identifiers. These are
+load-bearing stored identities, with no byte/profile/default/numerical change.
+Runtime-source snapshot tooling remains stdlib-only: its bootstrap dependency
+contract is not changed merely to share this file loop. Broader #1301 stays open.
+
+Refs #2172 / #1303: shipcard full-content verification and offline export
+structure metadata reads share `source_read_plan.safetensors_prefix_length`
+without losing their decoded-length diagnostics. Its existing literal error
+contract also accepts a range-message factory, evaluated only after the
+unsigned length fails the existing bounds; literal strings stay literal.
+Shipcard keeps its fused prefix/body/tensor hashes and earlier exact-read
+truncation error. Metadata reads keep their stat fences, header-only IO and
+separate unprefixed JSON-index size gate. Bounds, output bytes and refusal text
+are unchanged. Before extending the exported helper, pylsp references mapped
+source_read_plan, residency_shard_reader and the accepted #2166 calibration
+and consumed-page callers; existing string callers need no migration.
+The unbounded model-profile/benchmark readers remain protocol-distinct, and
+this bounded slice does not close the broader domain-numerics epic.
+
+Refs #2177 / #1303: the native exporter no longer carries a test-only
+imperative Qwen naming copy, a compatibility profile instance or a per-expert
+regex alias. All live callers now exercise the existing declared Qwen
+structure naming and profile regex owners. Production already used those
+owners; mapping rules, native/wrapper variants, numerical formats and defaults
+are unchanged. Pylsp references mapped both removed symbols to their sole
+live exporter test consumer before the clean cutover. Historical archives
+remain historical. Literal dispatch-name and mixed-group catch-all checks
+remain; incidental source/docstring wording assertions are removed rather
+than repinned. This bounded copy/alias removal does not complete the epic.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
@@ -25,6 +249,22 @@ byte/kernel/runtime, export and serving gates remain unchanged. This CPU
 policy does not establish attention H capture, native wire qualification,
 per-unit AURA costs or served quality; those remain #1842 acceptance work.
 
+Re-stamped 2026-10-03 (PQ #2148, Refs #2008, original authority intake):
+the existing `CaptureSourceAuthentication`/`source_generation` owners validate
+the closed independently bound original authority before material/profile/
+device/output work. Same source, runtime, full calibration, native PB claim,
+finite resources and actual issued artifact session must agree. An acyclic
+static-authority/base-plan/session/root-admission/final-manifest DAG avoids
+self-referential hashes; #2149's existing-owner read-only session reader is a
+declared integration dependency. Missing/partial actual full64 or independent
+root matched-source admission remains a production refusal. Existing CPU-only,
+direct-GPU and automatic capture gates are unchanged. Receipt extensions retain
+all observed native delivery generations, retired/current aliases and existing
+copy fences/pending debt; they create no provider/cache/registry or new CUDA
+synchronization. CPU metadata controls are not original GLM/CUDA/source/wire/
+pricing/serving qualification. See the
+[concrete original-material contract](design/capture_original_material.md#independently-bound-authority-intake--2026-10-03).
+
 Re-stamped 2026-10-02 (PQ #2102, Refs #1301, branch
 `sol/pq-expert-calibration-digests-20261002`, base `693a38f3ae34`): empirical
 expert checkpoint and CLI calibration digests share only the final exact-byte
@@ -32,6 +272,42 @@ SHA-256 constructor through `digests.bytes_sha256hex`. Their distinct
 checkpoint detach/CPU/contiguous/uint8 view and CLI CPU/NumPy C-order extraction
 remain local, including native refusals. Identity fields, byte recipes and
 widths, checkpoint policy and provenance serialization retain their contracts.
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original identity intake): when the
+existing qualified original owner is explicitly selected, the existing model
+and source-checkpoint identity mechanisms consume its independently bound
+publisher descriptors and authenticated config/complete-index facts. Model
+resolution and the complete live/checkpoint shard roster must agree; missing
+proof, incomplete scopes and legacy stat-cache inputs refuse. Existing v1
+identity schemas and value meaning remain intact. Expected whole-file identity
+does not establish actual delivery: Stage A retains the owner's held-decoder/
+readset receipt separately. No logical-pool stat/index reopening or redundant
+bulk identity hash occurs on this path. Original CUDA/automatic admission and
+actual full-source GLM fresh-g6 acceptance remain separate closed gates.
+
+Re-stamped 2026-10-03 (PQ #2134, failed original copy ownership): the existing
+source owner registers each reader completion before H2D enqueue. Failed event
+proofs survive ordinary exception/traceback disposal without releasing native
+or converted host staging. Event failure first drains the exact stream while
+preserving the event error. Double-fence failure process-roots the existing
+charged owner, surviving loss of all external references and GC. Explicit
+close/recovery proves completion before unregistering/reaping; repeated drain
+failure retains the open owner/holds/FDs and blocks new copies. Active copies
+refuse close. No successful material enters that fatal-fence set; there is no
+cache, background retry or silent fallback. Original CUDA/automatic gates
+stay closed; the retained frozen56 protocol is a historical negative reference,
+not acceptance of this new source. CPU stand-ins cannot qualify outstanding DMA.
+
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original copy completion): the
+existing layer reader's copy-stream completion bookkeeping retains native
+original source aliases and converted/stacked host staging through a successful
+event record and synchronization. The dormant original layer/head/direct-scale
+paths use that same bookkeeping independently of the legacy source-page flag;
+head copies complete before installation and cancelled readers drain before
+refusing output. Failed completion proofs retain true owners and serialized
+material credit. Original CUDA and automatic-capture gates remain closed.
+CPU spies and an unrun real-CUDA harness establish no original GPU, GLM g6,
+complete-provider, performance or serving qualification.
+See [original material contract](design/capture_original_material.md).
 
 Re-stamped 2026-10-02 (Refs PQ #2010/#2008, selected-row diagnostic seam):
 the existing Stage A core can capture one explicitly bound global calibration
@@ -45,6 +321,34 @@ source/profile work; the CLI supplies geometry and constructs no authority.
 CPU selector/plumbing controls do not qualify original CUDA lifetimes, a complete
 provider, historical GLM primal/cotangent agreement, corrected prices or serving.
 See [selected-row diagnostic contract](design/stage_a_selected_row_diagnostic.md).
+
+Re-stamped 2026-10-02 (PQ #2111, Refs PrismaBuild #905): the opt-in CPU
+checkpoint-export component freezes twelve distinct 64-entry cohorts and six
+paced/unpaced pairs. It reads original archive bytes through the existing
+serial exact-entry scratch and staged checkpoint owners, then calls the
+existing produced-file writer, spool, PB export, origin commit and release.
+The experiment changes only the per-group `paced` argument. It adds no cache,
+dispatcher, production default or serving gate. Authentication can fan out
+through PB; the paired export remains one action. Component completion always
+reports `pb905_gate_qualified=False`: organic application mover contention and
+reviewed profiling/placement remain required for the PB #905 default gate.
+See `docs/design/pb905_checkpoint_export_component.md` for the finite input,
+retained-origin and launch-review contracts.
+
+Re-stamped 2026-10-02 (`sol/pq-spill-readplan-1086-20261002`, PQ #2115 / Refs #1086):
+constructor-only `StageBReplaySpill(packed_read_plan=True)` reuses the packed
+firing table and its common bounded uint64 row-storage abstraction for frozen chunk fields,
+record/offset views and the last-use index. Existing spill geometry caps the
+metadata; a probe-0 firing beyond that declaration refuses before another
+input or payload write. The chunk fields, direct-I/O offsets, record order,
+checksum gates and last-use semantics retain their existing contract.
+Per-probe IO-engine descriptors bind chunk indexes, resolving frozen metadata
+only on the existing reader. IO-engine scheduling and per-chunk state remain
+unchanged and O(chunks × probes); capture entries and transient per-chunk
+work still have their existing owners. Defaults, sealed phases, numerics,
+source lifetime, spool writers, formats and serving gates are unchanged.
+This CPU research increment does not establish constant total memory or
+close #1086's representative proxy/production acceptance.
 
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
@@ -330,8 +634,9 @@ declared baseline replay scope must agree. Real loss/time claims retain valid
 integer/float equivalence through the existing numeric validators.
 The choice uses sorted-unit binary64 loss/time sums, not
 full-gamut or full-model scalability, corrected quality, placement or served
-latency qualification. The Tessera #688 receipt converter remains a refusing
-stub; no prices, formats, pin, producer or production defaults change.
+latency qualification. Bare Tessera #688 panels still refuse; observation
+conversion requires a selected reviewed PB checker completion. No formats,
+serving pin or production defaults change.
 Re-stamped 2026-10-02 (PQ #2032, Refs #1962): the existing snapshot-only
 StreamingContext accepts exact declared body source tensor keys under an
 explicit layer allowlist, including non-Linear parameters and buffers needed
@@ -783,20 +1088,34 @@ remote-code execution, cold shard hashing or the broader worker header audit.
 No new cache, format, numerical method, export wire, runtime pin, pipeline
 default or serving gate; CPU regressions are not model/GPU qualification.
 
-Re-stamped 2026-10-01 (PQ #1888): the reviewed PrismaBuild reader and
-client SDK pin is `95a59051d48cda82eea7927f31870c6c862d7174` (PB #1402),
-with exact SDK version 3. The existing sealed-root resolver, test-only
+Re-stamped 2026-10-02 (Refs PQ #1293, PB #1453): the reviewed PrismaBuild
+reader and client SDK pin is `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`,
+with exact SDK version 4. The existing sealed-root resolver, test-only
 Git/RECORD-qualified installed injection, and same-package import checks
-remain authoritative; SDK1/2 and unknown versions refuse, with no shim.
-Produced-output fixtures use SDK3 source bundles through their existing
-pin schemas. Their pinned files match the staged
-`5aca8ee9323c-1790835144-b584825fe9d4` generation; staging/source equivalence
-is not runtime activation. Activation belongs to pb-sched at a row boundary
-after this PQ pin merges, independently of CPU reader/SDK receipts.
-No Tessera pin, numerical kernel, export wire, pipeline default or measured
-speed result changes. The paired DL380 CPU interpreter is
-`/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python`; old interpreters
-remain untouched. Commands and verification are in PR #1900.
+remain authoritative; SDK1/2/3 and unknown versions refuse, with no shim.
+SDK4 adds the public selected-action result reader and standard-capture
+command binder. Connected produced-output fixtures share the existing source-pin
+file with the complete SDK4 file union. Historical SDK3 bundles and receipts
+remain preserved; their results are not transferred to this source. The reviewed SDK4 source bundle is
+`/mnt/shared/prismabuild-fleet/qualification/pq-pb-sdk4-20261002/dc4803daaf09b6426083d2d36bd2a2da3d6832fe`.
+The separately provisioned DL380 CPU interpreter is
+`/home/rob/venvs/pq-pbdc4803da-tessera-b40c93cb/bin/python`, a non-editable
+Git install of that PB commit and the unchanged Tessera b40c93cb pin.
+SDK installation and source review do not establish fleet runtime activation;
+the published worker generation remains independent. This dependency move
+makes no numerical, wire, pipeline-default, serving or speed claim.
+
+Re-stamped 2026-10-03 (Refs PQ #2106, #1293): produced-output CPU
+fixtures explicitly supply SDK4 host capacity for their private queue claims,
+using the existing shared Stage A fixture capacity authority. Zero-window
+write-only templates still require CPU/memory admission; tier credit and an
+outer admitted test action do not grant an implicit executable claim. Render
+publication/write-plan, retirement, band handoff, resumed local readback and
+Stage B preparation checks retain the actual admitted producer/request and
+attempt binding. The obsolete test of a historical reader SDK commit literal
+is removed rather than repinned; strict serving/refusal behavior remains the
+consumer contract. No production admission, SDK pin, runtime, numerical,
+pipeline-default or serving gate changes.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
@@ -1132,6 +1451,13 @@ peak-memory or reader-wait acceptance. The coordinator's 2026-09-30 14:15Z
 GO conditionally approved the held GPU ask once its own prerequisites hold;
 before/after profiles and both-Spark Netdata still require completed evidence.
 
+Re-stamped 2026-10-03 (PQ #2159, Refs #1762): the installed-source identity
+test admits a qualified non-editable Git distribution shared through a base
+environment .pth; installation beneath the invoking interpreter's sys.prefix
+is not part of source-file identity. Git provenance, non-editability, actual
+imported encoder ownership and all legacy digest oracles remain required.
+Immutable dependency pins and package-byte qualification are unchanged;
+this does not qualify the failed B36 full-suite gate.
 Re-stamped 2026-09-30 (PQ #1762, `sol/source-domain-1762`): source-file
 provenance adds `prismaquant.source_tree.v2` beside the unchanged labelled
 `prismaquant.source_tree.v1` NUL transcript. v2 hashes its ASCII profile name
@@ -2199,9 +2525,11 @@ the existing trace constructor; body-only verdicts never substitute. All
 proposed records pass the unchanged verifier (including build/identity checks)
 before `--apply` uses the existing slot writer. Final verification still lists
 every missing slot. No serve, measurement, upload or manifest fabrication runs.
-Raw TR3 output is not gold-slot-shaped and lacks serialized shipcard identity
-and speculative-decoding observation; unsupported output remains a refusal,
-not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
+Legacy raw TR3 output is not gold-slot-shaped and lacks serialized shipcard
+identity and speculative-decoding observation; unsupported output remains a
+refusal, not an inferred pass. A newly measured TR3 run can explicitly publish
+an identity-bound `gold.kl.json` via `--gold-record-out`, for the existing
+`--records-dir` input. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 
@@ -4031,6 +4359,16 @@ identity or a resource ceiling (`max_*bytes`, `gpu_bytes`, `limits`), including
 field names carried by an enclosing loop over a literal. Each allowlist entry
 names its kind (integrity, structure, wall, resource or ambiguous) and its
 reason.
+Pilot admission preserves a separate qualification boundary (#2136): original
+quantum and counters bytes must match the authenticated PB producer, and source
+contract bytes must match the independently reviewed input. The source contract
+names the proposed implementation, and the counters name their original quantum
+record. These are byte-integrity/internal qualification checks, not resume
+comparisons with a running campaign. Their exact sites remain ratcheted; the
+existing explicit, recorded `--force-unverified-pilot` override is unchanged.
+Adaptive progress fixtures likewise carry the current `fp8_e4m3` scoring
+contract so rejection, durable partial-success resume, and hard-error tests
+exercise the scheduler rather than failing earlier on obsolete `a8` metadata.
 
 Dev mode also skips work that only a seal needed. A chain resume does not
 rebuild the source model identity; it records `not computed`. The catalog
@@ -16356,10 +16694,32 @@ Gate: `tests/test_tessera_expert_projection.py` (pre-fix:
 
 Re-stamped (2026-09-05, `claude/pq-183-packed-bridge`) for **the producer's
 expert projection, read in one place** (§4.10, §9.4; PrismaQuant #183).
+The projection requires a Tessera producer package containing Tessera #871;
+missing modules refuse during the producer CLI preflight before packed capture.
+Interpreter selection is explicit `python=` first, then `TESSERA_PRODUCER_PYTHON`,
+then the caller's interpreter. A newer public producer can therefore run beside
+an unchanged pinned serving/consumer package; the two interpreter roles are not
+interchangeable. This does not install a package, move an export/serving pin,
+requalify a cell, or activate the HELD #1549 split. Export keeps its exact-pin gates.
+The CPU test dependency is declared separately in
+`tests/projection_producer_environment.json`: named external executable and
+digest, landed producer commit/archive, complete installed package-code digest,
+and the public output schema. `projection_producer_fixture` authenticates those
+installed bytes before the ordinary campaign/MTP controls select the interpreter.
+The declaration travels in PB's source snapshot, so a closed worker environment
+does not rely on inheriting an arbitrary ambient variable. Missing or drifted
+declared producers fail rather than hiding behind a consumer-package import skip.
+This scoped producer dependency is not the serving/dev pin or a full-suite result.
+Admission is intentionally DL-host-specific: published PB fences the primary
+interpreter, while its documented indirect-input rule uses the owning host tag.
+The sealed test declaration and pre-execution byte checks bind this secondary
+dependency; this is not a portable secondary-interpreter capability/claim fence.
+
 `prismaquant/tessera_expert_projection.py` is the only reader of Tessera's
-`tessera.expert_projection.v1` answer (`experiments/tessera_producer_plan.py`,
-now the third declared `producer_tools` entry in `lane_specs/tessera.json`,
-located through `TESSERA_REPO` like the translator and the exporter). It binds
+`tessera.expert_projection.v1` answer (`python -m tessera.producer_plan`,
+declared as a public installed-package module plus output schema in the
+lane's `campaign_tools` roster). No `TESSERA_REPO` checkout resolution or
+safe-path relaxation is used for this projection request (Refs #2128). It binds
 the producer's per-stack unit records to the profile-declared per-expert units
 exactly -- schema, `unpacked_per_expert` layout, whole-tensor selector, source
 tensor in the hashed roster, `[rows, cols]` geometry, full expert coverage --
@@ -21165,7 +21525,7 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
   `kernel_lane` its launch ran on. It carries no weight identity.
 - **Context.** The table's context names the runtime image, Tessera commit,
   contract digest, tensor-parallel world, platform, execution mode, residency,
-  batch size 1 and the measured `M` regimes.
+  batch size 1 and exactly the measured `M` regimes.
 - **Fixed claims.** `claims` is always `operator_sum_proposal`,
   `certifies_placement: false` and `served_p95: not_claimed`. A table that
   states anything else is refused.
@@ -21177,8 +21537,8 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
     rate and must name the row's launch in `executes`.
   - The published predicate of that launch's lane must admit the rate
     (`lane_eligibility.cell_lane_admits`, asked about that one launch).
-  So the fused routed launch admits at R1024 and is refused at R896, where its
-  `column_rates` requirement fails.
+  Since contract v45, the fused routed E4M3 launch admits at R1024 and R896;
+  the earlier v44 `column_rates` predicate refused R896.
 - **Rate pools.** Rates are pooled only where the table declares a
   `rate_pools` entry, and all of the pool's rows must share one lane. Pooled
   samples are the source rows' samples concatenated in rate order. The pool
@@ -21196,9 +21556,28 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
   once per draw and weights it by its reader count. It uses
   `bootstrap_sum(multiplicities=...)`, and `None` keeps every earlier draw
   bit-identical.
-- **Receipt converter.** The converter for Tessera's
-  `tessera.shape_time_panel.v1` receipt is a named stub (`convert` exits 2)
-  until tessera#688 publishes that schema.
+- **Observation converter.** PQ consumes the versioned, input-bound handoff
+  Tessera publishes from its own validated check (`tessera.shape_time_observation.v1`,
+  RobTand/tessera#856), never the panel bytes and never `tessera.serving`.
+  `consume_shape_time_observation` reads each observation through the existing
+  `ArtifactReader` (path + SHA-256 + exact byte length), re-binds the panel,
+  request, expected runtime, contract, evidence, preflight, original producer
+  and replay-validator identity, checks the raw samples/count/lane
+  against the observation's own timing summary and route records, derives the
+  existing `ShapeRuntimeContext`/`ShapeKey`/`KernelLane`/`OperatorMeasurement`,
+  and then runs the unchanged `admit_shape_table` against PQ's own pinned
+  `EligibilityTable` when `--expected-scope` is given. It restates no Tessera
+  validator and deserializes no private token. A malformed, incomplete or
+  unsupported observation refuses the conversion as a whole. Each observation
+  requires an explicit PB checker completion selected by action, publication
+  and attempt and joined to the independently reviewed exact checker config;
+  bare panel and observation bytes refuse. Converted rows reference that
+  checker receipt. `convert` writes `--out` atomically only after every check
+  passes. `load_shape_table` rejoins the checker completion and compares each
+  row's context, key, lane, warmups and raw samples, so a table edited under a
+  still-valid receipt digest is refused. A TP1 observation
+  admits only a TP1 scope; no decoded-M row is invented, so `lookup` at M=1 is
+  a gap, never a fabricated decode price.
 
 CPU gates: `tests/test_shape_runtime_prices.py`.
 
@@ -23287,7 +23666,7 @@ Two properties make the numbers comparable with the rest of the menu:
   the stride's leftovers are recorded as omitted. After the menus exist the
   campaign asks the producer over every in-scope stack in each nominal-plan
   attempt (`_project_expert_population`:
-  `experiments/tessera_producer_plan.py`, never a subprocess per stack because
+  `python -m tessera.producer_plan`, never a subprocess per stack because
   the producer hashes the whole checkpoint), binds the
   answer exactly to the profile-declared units, reads each unit's source
   tensor from the shard the producer hashed and refuses, by name, a live view
@@ -27411,8 +27790,10 @@ These four are the canonical statement; §12 references them rather than restati
 | L4 | **FIXED 2026-07-30 (R27).** Both MiniMax hardcodes now go through profile accessors. `streaming_model.py`'s FP8-rewrite bypass was already half config-derived (`quant_method == "fp8"` and `weight_block_size`); the architecture half is a static property, so it became `staging.bypass_hf_fp8_module_rewrite` in the spec behind `profile.bypass_hf_fp8_module_rewrite()` (`base.py`), leaving the per-checkpoint half a config read where it belongs. `incremental_probe.py`'s `type(module).__name__ == "MiniMaxM2Experts"` became `profile.packed_expert_module_class_names()` (`base.py:235-245`) — the accessor that already existed for exactly this lookup — plus the structural shape test; the declared class stays **required**, because the replacement forward implements one specific expert-loop signature and applying it to a lookalike container would silently change a forward pass. `specs/minimax_m2.json` declares both, and `unpacked_expert_projection_names` with them. | closed |
 
 Cosmetic, listed so they are not re-discovered as leaks:
-`export_native_compressed.py:101,151-152` imports `Qwen3_5Profile` for `_COMPAT_QWEN_PROFILE`
-(verified test-only back-compat); `_fast_kernel_guard.py:86-90`'s Qwen substring list is a
+Historical exception: the exporter imported `Qwen3_5Profile` for a test-only
+`_COMPAT_QWEN_PROFILE`; #2177 removed that instance, naming copy and regex alias,
+and live tests now use the declared profile owners. Current cosmetic cases:
+`_fast_kernel_guard.py:86-90`'s Qwen substring list is a
 labelled fallback for remote HF IDs with no local `config.json`; `layer_streaming.py:1914-1920`
 imports an upstream transformers Gemma3 masking helper under config-driven selection;
 `gridbook/config.py:174-194` shared-prefix aliasing is HunYuan-motivated but written
@@ -29264,6 +29645,34 @@ of a backward is not that point, since the row rolls one backward later.
 
 Measured claims about the regime's speed and energy live in the PR and the
 PQ #997 record, not here; this section states only the contract.
+
+**Research host reuse (#2097, parent #1250).** Explicit constructor-only
+`reuse_host_buffers=True` requires `roll_may_keep=False`. Two banks cover
+the new copy and the previous backward's rows; every bank owns compact
+individual row storages, reused only after its event fence and roll return.
+The first group's row shape, dtype and count bound both banks. Smaller tail
+groups reuse the prefix; incompatible geometry refuses before allocating or
+copying another group. Window drains fence delivery and retain the banks;
+abandonment fences the pending copy before releasing them. A callback may
+borrow a row only during its invocation and may not reenter the pipeline.
+A partial copy failure fences already-submitted copies before abandonment;
+cleanup failures annotate the original exception. Default/public callers retain the
+existing allocating path. This mode is not wired into Stage A or Stage B
+execution and supplies no GPU speed, energy or peak-residency claim.
+
+On an unproven copy failure the same pipeline retains both banks and each
+bank's original copy stream. `held_host_bytes` continues to report the held
+row bytes. A bounded failed-owner retention set closes CUDA roll work in
+the process; it stores failure ownership, never reusable data for another
+consumer. Only the original owner can recover with `abandon`, which fences
+every captured stream before clearing ownership. A failed fence preserves
+all bank references and credit, even if exceptions/tracebacks are dropped.
+No background poll or guessed completion exists. A poisoned context stays
+retained until process containment or exit; production/default callers do
+not enter this state unless an explicit research owner was used first.
+Draining detaches the delivery step before invoking roll/durable callbacks.
+A failed callback's committed prefix is never retried by another drain;
+failed DMA still retains its banks/stream proof until original-owner cleanup.
 
 ### Stage A checkpoints written as the chain rolls (#1002)
 

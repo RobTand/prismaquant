@@ -137,6 +137,7 @@ def test_binder_carries_the_mode_and_refuses_the_other(tmp_path):
             render_prerequisite=dict(RENDER_PREREQ), prepared_inputs=prepared)
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_spill_manifest_passes_pb_phase_planner(tmp_path):
     from test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()

@@ -561,6 +561,60 @@ class StreamedBoundaryArtifacts:
             (self.directory / "entries").mkdir(exist_ok=True)
             self._publish_status()
 
+    def inspect_published_session(self, session, *, identity, pending=False,
+                                  owner_label=None, owner_fields=None):
+        """Read this existing generation without attaching, rebinding or writing it."""
+        from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
+        from .schemas import strict_json_loads
+
+        if not isinstance(session, dict) or set(session) != {"generation", "run_identity_sha256"}:
+            raise RuntimeError("a chain resume names no exact boundary session")
+        session = canonical_json(dict(session), where="resumed exact boundary session")
+        if canonical_json_sha256(identity, where="exact boundary source") != session["run_identity_sha256"]:
+            raise RuntimeError("the relaunch's bind identity is not the one the resumed session sealed")
+        directory = Path(self.config["directory"]) / str(session["generation"])
+        status_path = directory / "generation.json"
+
+        def read_status(path):
+            raw = path.read_bytes()
+            if not pending:
+                return json.loads(raw)
+            return strict_json_loads(raw,
+                duplicate=lambda key: RuntimeError(f"session duplicate key {key}"),
+                constant=lambda key: RuntimeError(f"session invalid constant {key}"))
+
+        try:
+            status = read_status(status_path)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError(f"the resumed generation has no readable status file at {status_path}") from exc
+        if status.get("session") != session:
+            raise RuntimeError(f"{status_path} names another session than the chain resume")
+        policy_refusal = RuntimeError(f"{status_path} was written under another boundary storage policy")
+        if boundary_storage_layout_differs(status.get("policy"), self.identity):
+            raise policy_refusal
+        if pending:
+            if status.get("policy") != self.identity:
+                raise policy_refusal
+        else:
+            seal_check("boundary storage policy", status.get("policy"), self.identity,
+                       where=str(status_path), refusal=policy_refusal)
+        if status.get("status") not in (("running",) if pending else ("running", "failed")):
+            raise RuntimeError(f"the resumed generation's status is {status.get('status')!r}; "
+                               "only an interrupted run (running or failed) resumes")
+        entries = directory / "entries"
+        if not entries.is_dir():
+            raise RuntimeError(f"the resumed generation has no entries at {directory}")
+        if pending and any(entries.iterdir()):
+            raise RuntimeError("diagnostic pending generation already contains source entries")
+        if owner_label is not None:
+            label = _checked_owner_label(owner_label)
+            owner_status = read_status(directory / "owners" / (label + ".json"))
+            if (owner_status.get("session") != session or owner_status.get("status") != "complete"
+                    or owner_status.get("policy") != self.identity
+                    or owner_status.get("owner") != {"label": label, **(owner_fields or {})}):
+                raise RuntimeError("diagnostic session was not issued by its actual metadata owner")
+        return session, directory
+
     def rebind(self, session, *, identity, n_probes, check_memory=None,
                owner_label=None):
         """Adopt this run's own published generation again (PQ #1001).
@@ -593,43 +647,9 @@ class StreamedBoundaryArtifacts:
         ``owners/<owner_label>.json`` beside ``generation.json``, which this
         owner never rewrites.
         """
-        from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
         if self.session is not None:
             raise RuntimeError("exact boundary generation is already bound")
-        if (not isinstance(session, dict)
-                or set(session) != {"generation", "run_identity_sha256"}):
-            raise RuntimeError("a chain resume names no exact boundary session")
-        session = canonical_json(dict(session), where="resumed exact boundary session")
-        # A wall in dev mode too (PQ #1147): the digest covers the calibration
-        # draw as well as the run seals. A dev chain resume compares the bind
-        # identity key by key first and then rebinds the stored one.
-        if canonical_json_sha256(identity, where="exact boundary source") != session[
-                "run_identity_sha256"]:
-            raise RuntimeError(
-                "the relaunch's bind identity is not the one the resumed session sealed")
-        directory = Path(self.config["directory"]) / str(session["generation"])
-        status_path = directory / "generation.json"
-        try:
-            status = json.loads(status_path.read_bytes())
-        except (OSError, ValueError) as exc:
-            raise RuntimeError(
-                f"the resumed generation has no readable status file at {status_path}"
-            ) from exc
-        if status.get("session") != session:
-            raise RuntimeError(
-                f"{status_path} names another session than the chain resume")
-        policy_refusal = RuntimeError(
-            f"{status_path} was written under another boundary storage policy")
-        if boundary_storage_layout_differs(status.get("policy"), self.identity):
-            raise policy_refusal
-        seal_check("boundary storage policy", status.get("policy"), self.identity,
-                   where=str(status_path), refusal=policy_refusal)
-        if status.get("status") not in ("running", "failed"):
-            raise RuntimeError(
-                f"the resumed generation's status is {status.get('status')!r}; "
-                "only an interrupted run (running or failed) resumes")
-        if not (directory / "entries").is_dir():
-            raise RuntimeError(f"the resumed generation has no entries at {directory}")
+        session, directory = self.inspect_published_session(session, identity=identity)
         if owner_label is not None:
             self._owner_label = _checked_owner_label(owner_label)
         self._n_probes = n_probes
@@ -6423,6 +6443,7 @@ def build_source_checkpoint_identity(
     *,
     extra_shard_paths: object = (),
     digest_cache_path: str | Path | None = None,
+    source_authentication=None,
 ) -> dict[str, object]:
     """Content identity of the exact safetensors byte set a run consumes.
 
@@ -6453,9 +6474,28 @@ def build_source_checkpoint_identity(
     digest instead of rereading that shard. Discovery, metadata hashing,
     digest-cache JSON handling and identity construction still run. Without
     this cache, every call hashes every shard.
+
+    An explicit qualified original ``source_authentication`` owner supplies
+    independently bound expected whole-file descriptors instead. Config/index
+    interpretation is authenticated by that owner; each actual tensor delivery
+    still verifies its held bytes and reports them separately. This keeps the
+    same identity schema/content meaning and accepts no legacy stat cache or
+    extra shard roster. It does not qualify original device/capture admission.
     """
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
 
+    if source_authentication is not None:
+        if digest_cache_path is not None or extra_shard_paths:
+            raise RuntimeError('original checkpoint identity accepts no stat cache or extra roster')
+        descriptor = _original_checkpoint_description(source_model, source_authentication)
+        shards = [{key: row[key] for key in ('name', 'size', 'sha256')}
+                  for row in descriptor['shards']]
+        metadata = [row for row in descriptor['metadata']
+                    if row['name'] in SOURCE_CHECKPOINT_METADATA_FILES or row['name'].endswith('.py')]
+        value = {'schema': SOURCE_CHECKPOINT_IDENTITY_SCHEMA,
+                 'shards': shards, 'metadata': sorted(metadata, key=lambda row: row['name'])}
+        return {**value, 'content_sha256': canonical_json_sha256(
+            value, where='source checkpoint content identity')}
     root = Path(source_model)
     _, indexed_shards = _local_checkpoint_shards(source_model)
     shard_paths = {Path(path).resolve() for path in (indexed_shards or ())}
@@ -6633,6 +6673,78 @@ def _read_streamed_model_identity_cache(
     return cached, identity
 
 
+def _streamed_identity_record(*, config_dict, mapping, shards, checkpoint_weight_map,
+                              source_model, resolved_commit):
+    """The existing v1 identity serialization, shared by admitted source intake."""
+    from .cost_stage_checkpoint import canonical_json, canonical_json_sha256
+
+    value_bearing = {
+        "config": canonical_json(config_dict, where="streamed model config"),
+        "weight_map": mapping,
+        "shards": shards,
+    }
+    if checkpoint_weight_map is not None:
+        value_bearing["checkpoint_weight_map"] = checkpoint_weight_map
+    return {
+        "schema": STREAMED_MODEL_IDENTITY_SCHEMA,
+        "source": str(source_model),
+        "resolved_commit": resolved_commit,
+        "content_sha256": canonical_json_sha256(
+            value_bearing, where="streamed model content identity"),
+        **value_bearing,
+    }
+
+
+def _original_checkpoint_description(source_model, owner):
+    from .tessera_calibration_cache import CaptureSourceAuthentication
+
+    if not isinstance(owner, CaptureSourceAuthentication) or not owner.is_qualified_original_material:
+        raise RuntimeError('original identity requires the qualified existing original owner')
+    if os.path.abspath(str(source_model)) != str(owner.root):
+        raise RuntimeError('original identity source root differs from its owner')
+    return owner.original_checkpoint_descriptor()
+
+
+def _original_streamed_identity(runner, source_model, config_dict, mapping, owner):
+    """Existing v1 identity from admitted expected descriptors and owned resolution."""
+    from .digests import indent2_json_file_bytes
+    from .layer_streaming import construction_multimodal
+    from .model_profiles import detect_profile
+    from .sensitivity_probe import text_only_stage_config
+    from .source_read_plan import live_weight_map
+    from .streaming_model import _streaming_auto_config_from_bytes, _skeleton_config_and_class
+
+    context = runner.context
+    if context.source_snapshot_only or context.source_scope is not None:
+        raise RuntimeError('original identity requires a complete body resolution')
+    descriptor = _original_checkpoint_description(source_model, owner)
+    original = descriptor['config']
+    profile = detect_profile(source_model, config=original)
+    profile._declare_checkpoint_index(descriptor['index'])
+    construction = construction_multimodal(profile, False)
+    derived = original if construction else text_only_stage_config(original, profile=profile)
+    derived = original if derived is None else derived
+    expected_config = _streaming_auto_config_from_bytes(
+        source_model, indent2_json_file_bytes(derived), resource_check=owner.resource_check)
+    expected_config, _ = _skeleton_config_and_class(
+        expected_config, multimodal=construction, log_prefix='[original-identity]')
+    if canonical_streamed_model_semantic_config(config_dict) != canonical_streamed_model_semantic_config(
+            expected_config.to_dict()):
+        raise RuntimeError('original identity resolved config differs from authenticated bootstrap')
+    expected_shards, expected_mapping = live_weight_map(
+        descriptor['index']['weight_map'], source_model,
+        lambda key: profile.checkpoint_to_live_name(key, multimodal=construction))
+    if (mapping != dict(sorted(expected_mapping.items()))
+            or dict(context.weight_shard) != expected_shards):
+        raise RuntimeError('original identity live/config/index/shard roster differs')
+    shards = [{key: row[key] for key in ('path', 'size', 'sha256')}
+              for row in descriptor['shards']]
+    return _streamed_identity_record(
+        config_dict=config_dict, mapping=mapping, shards=shards,
+        checkpoint_weight_map=descriptor['index']['weight_map'], source_model=source_model,
+        resolved_commit=getattr(runner.model.config, '_commit_hash', None))
+
+
 def build_streamed_model_identity(
     runner: StreamedCausalLM,
     source_model: str,
@@ -6662,6 +6774,14 @@ def build_streamed_model_identity(
     admits it. ``refuse_uncovered`` turns any shard still uncovered after
     both caches into a refusal before a byte is hashed; its text names the
     quantum that should have produced the proof.
+
+    With an explicitly selected qualified original owner on the context,
+    owned config/index resolution and the complete live/checkpoint shard roster
+    must agree with its independently authenticated publisher descriptors.
+    The existing v1 serializer binds those expected whole-file facts without
+    pool discovery, stat/cache reuse or redundant bulk hashing. Actual decoder
+    deliveries remain independently verified and separately receipted; legacy
+    identity/cache inputs refuse and original CUDA admission remains closed.
     """
     from prismaquant.cost_stage_checkpoint import (
         canonical_json,
@@ -6686,6 +6806,11 @@ def build_streamed_model_identity(
         str(live): str(checkpoint)
         for live, checkpoint in sorted(runner.context.weight_ckpt.items())
     }
+    owner = getattr(runner.context, 'source_authentication', None)
+    if getattr(owner, 'is_qualified_original_material', False):
+        if any(value is not None for value in (identity_cache_path, identity_cache_bytes, digest_cache_path)):
+            raise RuntimeError('original model identity accepts no legacy stat identity/cache inputs')
+        return _original_streamed_identity(runner, str(source_model), config_dict, mapping, owner)
     runner_shard_paths = {
         Path(path).resolve()
         for path in runner.context.weight_shard.values()
@@ -6851,22 +6976,10 @@ def build_streamed_model_identity(
             "size": int(fingerprint["size"]),
             "sha256": digest,
         })
-    value_bearing = {
-        "config": canonical_json(config_dict, where="streamed model config"),
-        "weight_map": mapping,
-        "shards": shards,
-    }
-    if checkpoint_weight_map is not None:
-        value_bearing["checkpoint_weight_map"] = checkpoint_weight_map
-    identity = {
-        "schema": STREAMED_MODEL_IDENTITY_SCHEMA,
-        "source": str(source_model),
-        "resolved_commit": getattr(config, "_commit_hash", None),
-        "content_sha256": canonical_json_sha256(
-            value_bearing, where="streamed model content identity"
-        ),
-        **value_bearing,
-    }
+    identity = _streamed_identity_record(
+        config_dict=config_dict, mapping=mapping, shards=shards,
+        checkpoint_weight_map=checkpoint_weight_map, source_model=source_model,
+        resolved_commit=getattr(config, "_commit_hash", None))
     if cache_path is not None:
         from prismaquant.cost_stage_checkpoint import atomic_write_bytes
 
