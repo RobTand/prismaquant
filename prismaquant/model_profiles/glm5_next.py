@@ -460,6 +460,13 @@ class Glm5NextProfile(ModelProfile):
     # ------------------------------------------------------------
     # Probe
     # ------------------------------------------------------------
+    def linear_requires_unquantized_activations(self, qname: str) -> bool:
+        # MLA absorbs this projection into BF16 W_UK/W_UV. Its activation
+        # arithmetic is BF16, so an A8/A4 candidate would price a different
+        # operation (#1842). This applies only after a scoped roster lifts
+        # the existing pin; it grants no native reader/kernel admission.
+        return bool(re.search(r"(?:^|\.)self_attn\.kv_b_proj(?:\.weight)?$", qname))
+
     def probe_linear_exclude_extra(self) -> str:
         # Every Linear outside the serving contract's quantizable set. The
         # exporter ships their source bytes on the immutable floor, so the

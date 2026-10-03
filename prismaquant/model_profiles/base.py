@@ -681,6 +681,15 @@ class ModelProfile(ABC):
         that no such carve-out exists."""
         return False
 
+    def linear_requires_unquantized_activations(self, qname: str) -> bool:
+        """Whether this Linear's operation requires identity input precision.
+
+        Lane adapters interpret this fact through the format registry's
+        activation contract. It grants no serving or export admission and
+        does not lift a profile pin. False preserves the ordinary menu.
+        """
+        return False
+
     def source_tensor_name(self, model_qname: str) -> str:
         """Rewrite an in-memory HF module qname (from `named_parameters`)
         to the name that should land on disk in the exported

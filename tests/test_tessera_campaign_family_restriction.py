@@ -118,31 +118,38 @@ def test_restricted_seed_keeps_compatible_in_band_candidates():
             structure_by_unit={"expert": "routed_moe"})
 
 
-def test_seed_scope_refuses_before_linking_any_wire_from_the_unit(tmp_path):
+@pytest.mark.parametrize("profile_only", [False, True])
+def test_seed_scope_refuses_before_linking_any_wire_from_the_unit(tmp_path, profile_only):
     from prismaquant.cost_stage_checkpoint import write_unit
+    from prismaquant.model_profiles.glm5_next import Glm5NextProfile
+    name = "model.layers.3.self_attn.kv_b_proj" if profile_only else "expert"
+    state = _seed_state(family="TESSERA_E4M3_K1" if profile_only else "TESSERA_BF16_K1")
+    state["anchors"][0]["qname"] = name
     seed = tmp_path / "seed"
     (seed / "cache/wire").mkdir(parents=True)
     (seed / "cache/wire/anchor.wire").write_bytes(b"historical wire")
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256
     seed_inputs = {'currency': 'output_mse', 'calibration': {},
         'input_global_scale_policy': 'fixture',
-        'units': {'expert': {'scoring_rows': {'sha256': 'rows'}, 'input_global_scale': 1.0}}}
+        'units': {name: {'scoring_rows': {'sha256': 'rows'}, 'input_global_scale': 1.0}}}
     seed_sha = canonical_json_sha256(seed_inputs, where='seed fixture')
     parts = seed / "cost.anchors.json.parts"
     parts.mkdir()
-    write_unit(parts, stage="Tessera campaign", qname="expert", identity_sha256=seed_sha,
-               state=_seed_state(family="TESSERA_BF16_K1"))
+    write_unit(parts, stage="Tessera campaign", qname=name, identity_sha256=seed_sha,
+               state=state)
     manifest = seed / "cost.anchors.json"
     manifest.write_text(json.dumps({"identity_sha256": seed_sha, "identity": seed_inputs}))
     output = tmp_path / "wire"
     output.mkdir()
     adopted = []
-    with pytest.raises(RuntimeError, match="family restriction"):
-        campaign._adopt_seed_checkpoint(manifest, None, targets=["expert"], wire_dir=output,
+    with pytest.raises(RuntimeError, match="activation precision" if profile_only else "family restriction"):
+        campaign._adopt_seed_checkpoint(manifest, None, targets=[name], wire_dir=output,
             adopt=lambda *args, **kw: adopted.append(args), admits=lambda *args: True,
             identity_sha256="new", expected_identity=seed_inputs, validate_state=lambda name, state:
-                campaign.require_seed_family_scope(name, state, family_restriction=POLICY,
-                    structure_by_unit={"expert": "routed_moe"}, rate_band=(832, 1088)))
+                campaign.require_seed_family_scope(name, state,
+                    family_restriction=None if profile_only else POLICY,
+                    structure_by_unit=None if profile_only else {name: "routed_moe"},
+                    profile=Glm5NextProfile() if profile_only else None, rate_band=(832, 1088)))
     assert not adopted and list(output.iterdir()) == []
 
 
@@ -247,6 +254,7 @@ def test_main_uses_projected_membership_and_persists_restriction(monkeypatch, tm
     seen = []
 
     def expanded(weights, targets, **kwargs):
+        assert kwargs["profile"].name == "lfm2_moe"
         seen.append((kwargs["family_restriction"], kwargs["structure_by_unit"]))
         return previous(weights, targets, **kwargs)
 

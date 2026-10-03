@@ -33,6 +33,51 @@ CAS result. This publisher/validator prerequisite does not itself wire that
 public PB result reader or authenticate a sealed invocation/source closure.
 Those consumer bindings and the genuine GPU pilot remain open under #1293.
 Counter encoding, arithmetic, pipeline defaults and serving gates are unchanged.
+Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
+base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
+measurements use `kl_fisher.forward_kl_per_token` for the existing
+exp/subtract/multiply/vocabulary-sum expression. FP32 log-softmax, teacher
+transfer, calibration batching, token/window normalization and weight
+restoration remain caller-owned. Lane replay also delegates the expression, preserving its teacher regrouping,
+row-count refusals and per-row position mean followed by row sum. CPU
+compatibility evidence does not qualify GPU arithmetic or served quality.
+
+Re-stamped 2026-10-02 (PQ #2096, Refs #1842, B32 lane-boundary repair): core
+profiles declare the generic per-Linear activation precision fact
+(`ModelProfile.linear_requires_unquantized_activations`). The existing Tessera
+menu interprets that fact through the format registry's single
+`act_bits_quantize_input` predicate on each route. GLM's
+absorbed MLA `kv_b_proj` offers TESSERA_BF16_K1 (T-16) only after a scoped
+roster lifts its existing pin; other attention units retain their ordinary
+menus. Shape/context/family/precision caching distinguishes the effective unit policy,
+and an empty intersection remains empty. Streamed capture, partition planning
+and encoding use the same policy. Incompatible active seed rows refuse before
+wire linking, including when no global family restriction was supplied.
+BF16 source fallback, all profile pins and independent original-source,
+byte/kernel/runtime, export and serving gates remain unchanged. This CPU
+policy does not establish attention H capture, native wire qualification,
+per-unit AURA costs or served quality; those remain #1842 acceptance work.
+
+Re-stamped 2026-10-02 (PQ #2102, Refs #1301, branch
+`sol/pq-expert-calibration-digests-20261002`, base `693a38f3ae34`): empirical
+expert checkpoint and CLI calibration digests share only the final exact-byte
+SHA-256 constructor through `digests.bytes_sha256hex`. Their distinct
+checkpoint detach/CPU/contiguous/uint8 view and CLI CPU/NumPy C-order extraction
+remain local, including native refusals. Identity fields, byte recipes and
+widths, checkpoint policy and provenance serialization retain their contracts.
+
+Re-stamped 2026-10-02 (Refs PQ #2010/#2008, selected-row diagnostic seam):
+the existing Stage A core can capture one explicitly bound global calibration
+row, generate one fresh tail and roll to a named boundary while preserving the
+full draw's tensor identity, global-row noise and token normalization. Diagnostic
+roots/receipts are distinct and cannot feed Stage B or resume as a campaign.
+The higher-level API accepts the existing qualified original-material owner,
+selects its profile through owned metadata and threads that same owner into
+the existing runner. The unchanged original CUDA gate refuses before device or
+source/profile work; the CLI supplies geometry and constructs no authority.
+CPU selector/plumbing controls do not qualify original CUDA lifetimes, a complete
+provider, historical GLM primal/cotangent agreement, corrected prices or serving.
+See [selected-row diagnostic contract](design/stage_a_selected_row_diagnostic.md).
 
 Re-stamped 2026-10-02 (PQ #2090, descriptor ownership): shared read windows serialize descriptor registration and kernel close plus
 ownership removal through the existing LeaseWindow. A descriptor number
@@ -7082,6 +7127,23 @@ body identities do not change. The GLM attention roster keeps the DSA indexer
 pinned: `Glm5NextTextIndexer.forward` is `@torch.no_grad` and only selects
 top-k indices, so it has no AURA cotangent. Gate:
 `tests/test_tessera_campaign_pinned_roster.py`.
+
+**Unit activation arithmetic (PQ #2096).** A lifted pin is still constrained
+by the operation being priced. The profile's generic
+`linear_requires_unquantized_activations(qname)` declares whether a Linear
+requires identity input precision; no lane or family names belong in that
+core fact. GLM's absorbed MLA `kv_b_proj`
+keeps BF16 activations, so its Tessera menu contains only TESSERA_BF16_K1;
+the source BF16 fallback is unchanged. The shared campaign expansion intersects
+that policy with any structural family restriction. The existing lane menu
+uses the registry's `act_bits_quantize_input` on every route before shape/byte
+accounting. Shape/context/family/precision caching distinguishes the fact
+and preserves empty intersections. Streamed capture and both encoding
+planning paths pass their profile. The same intersection checks stored active
+anchors before seed wire linking and on resume. It does not lift other pins,
+declare the DSA indexer priceable, or establish a native reader or kernel.
+Gate: `tests/test_glm_attention_unit_menus.py` and
+`tests/test_tessera_campaign_family_restriction.py`.
 
 Re-stamped (2026-09-25, `claude/dedup-gridbook-move-1304`) for **moving the
 live helpers out of the retired codebook lane's modules** (PQ #1304, P2, part
