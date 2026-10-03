@@ -11,6 +11,7 @@ from prismaquant.joint_aura import arithmetic_identity, identity_sha256, make_jo
 from prismaquant.native_moe_panel import (EXECUTION, FORMAT, INPUT_SCHEMA, ROLES, consume_moe_receipt,
     freeze_moe_panel, packed_reference, validate_routing, validate_transport, _validate_phase_tensors)
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity as tensor_id
+from test_native_moe_glm_geometry import glm_routing, glm_shape
 
 
 def routing():
@@ -207,6 +208,66 @@ def test_retained_boundary_requires_independent_exact_source_qualification(joine
     else:
         with pytest.raises(ValueError):
             freeze_moe_panel(inputs, preflight, rows, **kwargs)
+
+
+@pytest.mark.parametrize("change", [None, "bias_bytes", "bias_dtype", "bias_shape"])
+def test_glm_source_qualification_binds_original_correction_bias(tmp_path, change):
+    from prismaquant.native_moe_panel import _qualified_source_execution, validate_geometry
+
+    unit = "model.language_model.layers.3.mlp.experts"
+    shape = glm_shape(tensor_parallel=2, tensor_parallel_rank=1)
+    validate_geometry(shape)
+    bias = tensor_id(torch.arange(shape["n_routed_experts"], dtype=torch.float32))
+    route = glm_routing()
+    route["source_protocol"]["correction_bias"] = {
+        key: bias[key] for key in ("content_sha256", "dtype")}
+    validate_routing(route)
+    identities = {
+        "inputs": tensor_id(torch.ones(2, shape["hidden_size"], dtype=torch.bfloat16)),
+        "top_k_index": tensor_id(torch.arange(16, dtype=torch.int64).reshape(2, 8)),
+        "top_k_weights": tensor_id(torch.full((2, 8), .125, dtype=torch.bfloat16)),
+        "expert_bias": bias,
+        "coordinates": tensor_id(torch.tensor([[0, 0], [0, 1]], dtype=torch.int64)),
+    }
+    execution = {"schema": "prismaquant.joint_aura.source_execution.v1", "modules": {
+        "": {"attention": "eager", "experts": "grouped_mm"},
+        unit: {"attention": "eager", "experts": "grouped_mm"}}}
+    capture = {"unit": unit, "shape": shape, "profile_role_order": list(ROLES),
+        "calibration_sha256": "1" * 64, "calibration_shape": [1, 2],
+        "calibration_dtype": "torch.int64", "producer_source": {"fixture": True},
+        "runtime_config": {"model_type": "glm5_next"}, "capture_source_sha256": "2" * 64,
+        "model_load_contract": {"fixture": True}, "attention_implementation": "eager",
+        "capture_runtime": {"torch": "fixture-torch", "cuda": "fixture-cuda", "transformers": "fixture-transformers"}}
+    inputs = {"unit": unit, "shape": shape, "profile_role_order": list(ROLES), "routing": route,
+        "routing_capture": capture, "source_capture": {"routing_boundary_sha256": "3" * 64},
+        "calibration": {"artifact_sha256": "4" * 64, "shape": [1, 2], "dtype": "torch.int64", "calibration_sha256": "1" * 64},
+        "phases": {"prefill": {"m": 2, "input": identities["inputs"], "transport": {
+            "topk_ids": {"source": identities["top_k_index"]},
+            "topk_weights": {"source": identities["top_k_weights"]}}}}}
+    probe = {"source_model": {"source": "/fixture/original-glm"}}
+    proof = {"schema": "prismaquant.packed_source_boundary_qualification.v1", "unit_qname": unit,
+        "artifact_sha256": "3" * 64, "boundary_metadata": {**copy.deepcopy(capture), "tensors": identities},
+        "source_execution_identity": execution, "streamed_source_execution_identity": copy.deepcopy(execution),
+        "source_model_identity": copy.deepcopy(probe["source_model"]), "runtime": copy.deepcopy(capture["capture_runtime"]),
+        "calibration_subset": {"artifact_sha256": "4" * 64, "full_shape": [1, 2], "row": 0,
+            "shape": [1, 2], "dtype": "torch.int64", "subset_artifact_sha256": "4" * 64, "sha256": "1" * 64},
+        "tensor_comparisons": {name: {"equal": True, "shape": value["shape"], "dtype": value["dtype"],
+            "actual_sha256": value["content_sha256"], "captured_sha256": value["content_sha256"]}
+            for name, value in identities.items()}}
+    if change is not None:
+        key, value = {"bias_bytes": ("actual_sha256", "0" * 64),
+                      "bias_dtype": ("dtype", "torch.bfloat16"),
+                      "bias_shape": ("shape", [shape["n_routed_experts"] - 1])}[change]
+        proof["tensor_comparisons"]["expert_bias"][key] = value
+    path = tmp_path / "glm-source.json"
+    path.write_text(json.dumps({"schema": "prismaquant.packed_joint_screen.v1", "mode": "source",
+                               "passed": True, "retained_boundary_qualification": proof}))
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if change is None:
+        assert _qualified_source_execution(inputs, probe, path, digest) == execution
+    else:
+        with pytest.raises(ValueError):
+            _qualified_source_execution(inputs, probe, path, digest)
 
 
 @pytest.mark.parametrize("change", ["missing", "order", "format", "rows", "probe", "preclip", "wire", "source",
