@@ -1899,10 +1899,15 @@ class _SourceCopyCompletion:
         self.cuda_copied = False
         self.stream = None
         self.failed = False
+        self._original_sources = {}
+        self._original_fence = None
+        self._original_retained_aliases = 0
 
     def retain(self, tensor):
         if self.enabled and tensor.device.type == 'cpu':
             self.host_staging.append(tensor)
+            if self.source_owner is not None:
+                self.source_owner._observe_original_copy_sources(self, tensor)
 
     def observed(self, tensor):
         self.cuda_copied |= tensor.device.type == 'cuda'
@@ -1933,6 +1938,8 @@ class _SourceCopyCompletion:
                 event.record(self.stream if self.stream is not None
                              else torch.cuda.current_stream(self.device))
                 event.synchronize()
+                self._original_fence = 'cuda_event_synchronize'
+                self._original_retained_aliases = len(self.host_staging)
             except BaseException:
                 if self.source_owner is not None and self.stream is not None:
                     try:
@@ -1953,6 +1960,8 @@ class _SourceCopyCompletion:
         # No event proof survived. The exact owning stream is the fence;
         # failed synchronization must leave every host alias held.
         self.stream.synchronize()
+        self._original_fence = 'cuda_stream_synchronize_after_event_failure'
+        self._original_retained_aliases = len(self.host_staging)
         self.host_staging.clear()
 
 

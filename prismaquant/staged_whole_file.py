@@ -108,7 +108,8 @@ def read_staged_whole_file(path: Path, expected_sha256: str, *,
     return read_staged_entry(resolver, path, staged, label=label)
 
 
-def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=False):
+def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=False,
+                      delivery_receipt=None):
     """The whole of one resolved map entry, read under a lifetime-pinned window.
 
     ``staged`` is the resolver's answer for ``path``: a whole-file entry
@@ -125,6 +126,7 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
     if type(size) is not int or isinstance(size, bool) or size <= 0:
         raise refuse_pool_bulk_read(where, "readset-not-staged")
     window, key = acquire_entry_window(resolver, path, staged)
+    witness = None
     raw = None
     try:
         with window:
@@ -143,6 +145,12 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
             if first.st_size != size:
                 raise LeaseRefused(f"{label}-changed-under-pin",
                                    kind="integrity")
+            if delivery_receipt is not None:
+                from .file_identity import file_stat_signature
+
+                witness = window.read_receipt(fd, key, serving)
+                if witness['source_fd_stat'] != list(file_stat_signature(first)):
+                    raise LeaseRefused(f'{label}-changed-under-pin', kind='integrity')
             # One owned buffer, filled in place: the caller's digest hashes
             # these same bytes and the tensor below decodes from them, so one
             # staged read serves verification and decode alike.
@@ -186,6 +194,11 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
             finally:
                 if view is not None:
                     view.release()
+        if delivery_receipt is not None:
+            # Reaching this gap proves both the native descriptor close and
+            # exact-ref release succeeded. No receipt escapes a failed exit.
+            witness.update(descriptors_closed=True, lease_released=True)
+            delivery_receipt.update(witness)
         if tier == "ram":
             resolver.record_ram_read(path, len(raw))
         else:
@@ -197,7 +210,8 @@ def read_staged_entry(resolver, path: Path, staged: dict, *, label: str, sealed=
         raise
 
 
-def read_staged_sealed_file(path: Path, expected_sha256: str, expected_bytes: int, *, label: str):
+def read_staged_sealed_file(path: Path, expected_sha256: str, expected_bytes: int, *, label: str,
+                            delivery_receipt=None):
     """Return owned immutable whole-file material, pinned through acquisition.
 
     Always requires the independently bound PB entry, even with no global tier
@@ -217,5 +231,6 @@ def read_staged_sealed_file(path: Path, expected_sha256: str, expected_bytes: in
             staged.get("bytes") != expected_bytes or staged.get("offset", 0) != 0 or
             staged.get("sha256") != expected_sha256):
         raise LeaseRefused(f"{label}-whole-file-binding-mismatch", kind="integrity")
-    raw = read_staged_entry(resolver, path, staged, label=label, sealed=True)
+    raw = read_staged_entry(resolver, path, staged, label=label, sealed=True,
+                            delivery_receipt=delivery_receipt)
     return raw

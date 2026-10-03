@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **Original-source authority intake is strict and nonactivating** (#2148,
+  Refs #2008). The existing source owner joins independently bound
+  publisher/producer/map/readset, original runtime, full calibration,
+  acyclic base-plan/run/session, active native claim and finite resources.
+  Missing/partial actual full64 qualification or root matched-source
+  admission refuses before source/profile/device/output work. The existing
+  receipt preserves actual native delivery generations and completion/debt
+  witnesses without changing fences, retention or any CPU/direct-GPU/
+  automatic-capture refusal. Shared issued-session validation composes with
+  #2149 through the existing artifact owner; no new provider/cache/registry.
+
 - **PACT regression fixtures retain their declared synthetic standing after
   JSON receipt validation** (#2137). The shared constrained/hull/replay fixture
   now writes a JSON legacy digest-bound artifact rather than plain text. Real

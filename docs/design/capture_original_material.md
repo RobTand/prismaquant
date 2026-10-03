@@ -163,3 +163,121 @@ complete original capture and numerical qualification remain separate gates.
 The cache estimator still reads whole admitted shards for headers; it can
 reacquire released header-only material when tensors are later demanded. No
 single-pass, GPU-bound or cold-source performance claim follows.
+
+## Independently bound authority intake — 2026-10-03
+
+Refs #2148 and #2008. `require_original_source_authority(owner, authority_input,
+plan_input, admitted_execution)` is the existing source owner's control intake.
+`owner=None` performs gate-first control validation; an existing real CPU owner
+additionally joins its already-authenticated constructor/config/index/shard
+facts. Neither path constructs material, selects a profile, initializes a
+device or creates capture output. The return is an independent JSON snapshot,
+not a provider, cache, registry entry or eligibility flag. The unchanged
+`require_material_device`, direct-GPU `safe_open` refusal and unconditional
+automatic-capture refusal remain authoritative even if metadata proofs pass.
+
+The closed `prismaquant.original_source_authority.v1` fields are `schema`,
+`scope`, `publisher`, `producer`, `source_paths`, `readset`, `runtime`,
+`qualification`, `root_admission`, `calibration`, `source_model_identity`,
+`source_execution`, `session`, and `resources`. `publisher` has exactly
+`id`, full `revision`, and bound `input`; each bound input has absolute
+normalized `path` and lowercase `sha256`. Producer, complete physical map,
+whole-file readset, runtime, qualification, root admission and resources use
+those independently bound documents. Calibration, complete streamed model
+identity and strict source-execution v1 retain their existing schemas.
+Session retains the existing `generation`/`run_identity_sha256` pair.
+
+The final plan's `original_source` has exactly `authority`, `base_plan`,
+`prepared`, `read_manifest`, and `execution` bindings. Its independently
+bound `original_session_preparation` names the real metadata issuer receipt.
+The read-only issued-context reader in the existing selected-diagnostic and
+boundary-artifact owners verifies that actual published pending generation,
+completed metadata owner, exact policy, run identity and empty entry namespace.
+It does not attach/rebind/mint a replacement session or write status during
+intake. This is an explicit #2148/#2149 source-composition dependency, not a
+second session parser.
+
+The serialization DAG is deliberately acyclic:
+
+1. The static authority projection omits **only** `session` and
+   `root_admission`; the existing `canonical_json_sha256` seals all remaining
+   fields. Pure normalization of a pending projection is not admission.
+2. The independently bound base plan and render-free preparation bind that
+   static digest, static source manifest, complete calibration, implementation,
+   execution and resources. Their exact field sets and session-identity
+   factory live in `source_generation`, shared by the diagnostic issuer.
+3. The existing artifact owner binds that identity and mints its actual
+   generation. Root admission binds the static digest, issued session,
+   runtime/resources/qualification and matched-source protocol—not the full
+   authority file digest.
+4. The full authority contains the issued session and root-admission binding.
+   The enclosing final PB manifest independently binds its exact file bytes
+   and all source whole-file entries. Its additional control entries do not
+   make its digest equal the static source submanifest digest.
+
+The bound runtime has exactly `schema`, `prismaquant_source_sha256`,
+`tessera_source_sha256`, `modeling_source`, `model_class`, `profile`, `config`,
+`versions`, `container_content_sha256`, `arithmetic`, `material_pipeline`,
+and `prismabuild`. Versions retain Python/Torch/Torch-Git/CUDA/Transformers;
+arithmetic retains matmul precision, TF32 and BF16 reduced-precision policy.
+The material pipeline records the CPU stock decoder plus actual loader
+target dtype, model-declared tensor dtype map and scale/cast map.
+The PB tuple records SDK4, actual helper root/generation and complete package
+and sealed helper/worker/proxy tree digests. Existing installed-SDK test
+controls truthfully lack a shared-generation tree; that absence cannot satisfy
+public admission. Installed modeling paths must resolve inside stock
+Transformers before any path supplied by a control can be hashed.
+
+The resource document binds CPU/material/source-cache/copy/GPU/native/
+serialization/artifact bytes, exact existing 2-slot/1-ahead/1-worker prefetch,
+host floor/margin, finite run/stall deadlines and native claim demand. The
+current native SDK claim, active CAS manifest and same owning resource
+callback must agree. Runtime versions alone, caller flags, missing envelopes,
+partial controls and fabricated generations do not authorize material.
+
+The actual retained calibration provenance has ten fields:
+`fit_ids_sha256`, `fit_tokens`, `fit_tokens_min`, `model`, `nsamples`, `seed`,
+`seqlen`, `source`, `split_role`, `text_sha256`. No tokenizer field is inserted
+into the original draw. Its unchanged I64/artifact/fit-I32/text identities are
+joined with the original publisher/producer/readset tokenizer auxiliaries.
+
+Public admission requires a separately bound complete qualification record:
+one real selected native-reader proof and all 64 actual CUDA member tuples
+(16 cases × two page policies × FP32/BF16 source dtype), exact entered pytest
+call reports, controller endings, selected SDK4 receipt/CAS payload and all
+source-input payload bindings. Old-source members keep their original snapshot
+and receipts and require independently selected unchanged-family acceptance;
+they are never restamped as new-source executions. The root matched-source
+admission record independently joins the static tuple and owning session.
+No such complete actual full64/root record is supplied by this implementation.
+Null/pending bindings are visible only to internal control normalization;
+`require_original_source_authority` refuses them, with no partial/CPU override.
+
+### Actual acquisition and completion witnesses
+
+The same material receipt additionally records all actual delivery generations,
+not just the latest file or initialized prefix. Each `(name, delivery_index)`
+retains the already-computed whole-file SHA/length, native SDK claim/pin/ref,
+covering material generation, held-source portable identity, observed sealed
+descriptor stat/seals and successful native descriptor/ref retirement.
+Current windows/readers/storage aliases and retained whole-file bytes are
+separate from retired history. Native source stats are observed under the
+existing descriptor lock, never from a later pathname or recycled FD.
+
+Existing source-copy bookkeeping records the actual source storage/delivery
+join, indexed native stream/device, current retained aliases and its existing
+event or explicit failure-drain fence. It adds no query, event, wait,
+synchronization, payload pass or earlier release. Failed/pending debt remains
+owned; old installed head/prefix copies keep their true completed delivery
+generation even when the same SHA file is later reacquired for lookahead.
+Receipt snapshots deep-copy nested native witnesses by serialization, so a
+consumer cannot mutate the owner's proof. A later consumer keeps the captured
+producer's claim/session distinct from its own independent active claim/lease.
+
+The first-sequence producer separately records four actual CUDA source tensors
+(inputs, expert IDs, weights and live correction bias) before host copies.
+Coordinates are existing ordered CPU calibration bookkeeping, not a fifth
+CUDA source tensor. All five original tensor identities remain exact. These
+controls establish neither full-draw H/prices nor complete capture, native
+wire/serving qualification, a source adoption or a changed production gate.
+
