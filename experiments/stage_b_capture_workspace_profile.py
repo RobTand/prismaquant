@@ -144,7 +144,7 @@ def main(argv=None) -> int:
 
     quantum.require_dev_mode("stage_b_capture_workspace_profile")
     try:
-        record, adjoint_slice = quantum.verify_quantum_identity(
+        record, adjoint_slice, _record_bytes = quantum.verify_quantum_identity(
             quantum_path=args.quantum, quantum_sha256=args.quantum_sha256,
             plan_path=args.plan, plan_sha256=args.plan_sha256,
             prepared_path=args.prepared, prepared_sha256=args.prepared_sha256,

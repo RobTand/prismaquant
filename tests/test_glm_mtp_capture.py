@@ -420,27 +420,14 @@ def _runtime():
                 transformers=importlib.metadata.version("transformers"))
 
 
-#: The producer the MTP rows are encoded with (PQ #1271, Option B).
-PINNED_PRODUCER = "/mnt/shared/tessera-pins/07bfcc0e9b7da13276938cb722bc7dcd893e6c63"
 #: The nominal question the body census asked the producer for each stack.
 BODY_REQUEST = {"grid": "E4M3", "q256": 256, "source_layout": "unpacked_per_expert"}
 
 
 def _producer(monkeypatch):
-    """The pinned producer checkout, for its projection tool and source seal.
-
-    ``TESSERA_REPO`` names it, as it does for the campaign; otherwise the
-    fleet's pinned checkout. Skipped, never failed, where neither exists
-    (GitHub CI has no /mnt/shared). The tool runs in a subprocess, so the
-    checkout's ``src`` goes on ``PYTHONPATH`` as the campaign container puts it.
-    """
-    producer = Path(os.environ.get("TESSERA_REPO") or PINNED_PRODUCER)
-    if not (producer / "experiments" / "tessera_producer_plan.py").is_file():
-        pytest.skip(f"TESSERA_REPO must name the pinned producer checkout ({PINNED_PRODUCER})")
-    monkeypatch.setenv("TESSERA_REPO", str(producer))
-    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(
-        part for part in (str(producer / "src"), os.environ.get("PYTHONPATH")) if part))
-    return producer
+    """The explicitly declared public producer, not the serving interpreter."""
+    from projection_producer_fixture import require_projection_producer
+    return require_projection_producer(monkeypatch)
 
 
 def _meta_wrapper(text_config):

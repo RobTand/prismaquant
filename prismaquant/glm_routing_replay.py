@@ -14,7 +14,7 @@ import textwrap
 import torch
 
 
-def select_original_routes(module, args, kwargs, *, sequence_length):
+def select_original_routes(module, args, kwargs, *, sequence_length, expert_bias=None):
     """Select the complete first sequence without casting any routed tensor."""
     bound = inspect.signature(type(module).forward).bind(module, *args, **kwargs)
     tensors = [bound.arguments[k] for k in ("hidden_states", "top_k_index", "top_k_weights")]
@@ -33,11 +33,19 @@ def select_original_routes(module, args, kwargs, *, sequence_length):
     observed_device = str(x.device)
     if str(ids.device) != observed_device or str(weights.device) != observed_device:
         raise ValueError("routing replay requires the boundary tensors on one device")
+    if expert_bias is not None:
+        if (not isinstance(expert_bias, torch.Tensor) or expert_bias.dtype != torch.float32
+                or list(expert_bias.shape) != [module.num_experts]
+                or str(expert_bias.device) != observed_device):
+            raise ValueError("original routing requires all four source tensors on one observed device")
     coordinates = torch.stack((torch.zeros(sequence_length, dtype=torch.int64),
                                torch.arange(sequence_length, dtype=torch.int64)), dim=1)
-    return {"inputs": x.detach().cpu().contiguous(), "top_k_index": ids.detach().cpu().contiguous(),
-            "top_k_weights": weights.detach().cpu().contiguous(), "coordinates": coordinates,
-            "observed_device": observed_device}
+    result = {"inputs": x.detach().cpu().contiguous(), "top_k_index": ids.detach().cpu().contiguous(),
+              "top_k_weights": weights.detach().cpu().contiguous(), "coordinates": coordinates,
+              "observed_device": observed_device}
+    if expert_bias is not None:
+        result["expert_bias"] = expert_bias.detach().cpu().contiguous()
+    return result
 
 
 def router_normalization_epsilon(router):
@@ -120,7 +128,12 @@ def glm_route_record(runner, module, router, captured, *, layer, calibration,
     bias = router.e_score_correction_bias
     if bias.dtype != torch.float32 or list(bias.shape) != [module.num_experts] or not torch.isfinite(bias).all():
         raise ValueError("GLM routing capture requires the original finite FP32 correction bias")
-    captured["expert_bias"] = bias.detach().cpu().contiguous()
+    if "expert_bias" not in captured:
+        captured["expert_bias"] = bias.detach().cpu().contiguous()
+    elif (captured["expert_bias"].dtype != torch.float32
+          or list(captured["expert_bias"].shape) != [module.num_experts]
+          or not torch.isfinite(captured["expert_bias"]).all()):
+        raise ValueError("GLM routing capture must retain its original finite FP32 bias snapshot")
     # Pop the string field before the identity loop: every remaining captured
     # value must be a tensor, and the published record carries the device in
     # its routing metadata, not as a pseudo-tensor. The field is mandatory so

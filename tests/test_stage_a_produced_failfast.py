@@ -133,7 +133,7 @@ def test_real_spent_mover_is_terminal_and_fails_fast(tmp_path):
     mover = str(group["published"]["mover_key"])
     batch_id = str(group["batch_id"])
     claimed = q.claim(owner="w-failfast-spent",
-                      tags=[chain._tier_host(q)])
+                      tags=[chain._tier_host(q)], capacity=chain._FIXTURE_HOST_CAPACITY)
     assert claimed is not None and claimed["action_key"] == mover, claimed
     q.finish(mover, status="failed")
     state = publication.materialization_state(batch_id=batch_id)

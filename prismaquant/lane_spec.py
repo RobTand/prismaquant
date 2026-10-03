@@ -146,10 +146,8 @@ class LaneProducerTool:
     ``stability`` is the field that matters.  ``supported`` means the tool is
     a console entry point or a public module of its package.
     ``unsupported_experiments`` means it lives under that repository's
-    ``experiments/`` with no stability promise -- true today only of the
-    campaign-roster projection tool; the export arm calls nothing unstable
-    since #1587 -- and REQUIRES ``tracking_issue``, so the debt is named on
-    the artifact's own lane declaration rather than only in an issue tracker.
+    ``experiments/`` with no stability promise and REQUIRES ``tracking_issue``.
+    Campaign tools instead name installed public modules and output contracts.
     """
 
     repo_env: str
@@ -184,6 +182,26 @@ class LaneProducerTool:
             description=str(payload.get("description", "")),
             tracking_issue=tracking,
         )
+
+
+@dataclass(frozen=True)
+class LaneCampaignTool:
+    """A public installed-package CLI and the versioned JSON it publishes."""
+
+    module: str
+    output_schema: str
+    description: str = ""
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "LaneCampaignTool":
+        module = payload["module"]
+        schema = payload["output_schema"]
+        if not isinstance(module, str) or not all(
+                part.isidentifier() for part in module.split(".")):
+            raise ValueError("campaign tool requires a public dotted module name")
+        if not isinstance(schema, str) or not schema:
+            raise ValueError("campaign tool requires its versioned output_schema")
+        return cls(module, schema, str(payload.get("description", "")))
 
 
 @dataclass(frozen=True)
@@ -377,14 +395,8 @@ class LaneSpec:
     serve_command: tuple[str, ...] = ()
     gates: tuple[LaneGate, ...] = ()
     producer_tools: tuple[LaneProducerTool, ...] = ()
-    #: Campaign-side external tools: the same ``LaneProducerTool`` shape as
-    #: ``producer_tools``, but for dependencies the campaign shells out to
-    #: that the export arm does not call (PrismaQuant #1587: the producer's
-    #: expert projection, tracked by #183).  Splitting the roster is what
-    #: lets the arm's ``unsupported`` report stay truthful -- the arm calls
-    #: only supported entry points -- while the campaign dependency stays
-    #: named, resolved, and checked rather than becoming a bare path again.
-    campaign_tools: tuple[LaneProducerTool, ...] = ()
+    #: Public installed-package CLIs used by the campaign, not the export arm.
+    campaign_tools: tuple[LaneCampaignTool, ...] = ()
     serving_profiles: tuple[str, ...] = ()
     advisory_gates: bool = True
     notes: tuple[str, ...] = field(default=())
@@ -445,7 +457,7 @@ class LaneSpec:
                 LaneProducerTool.from_dict(t)
                 for t in payload.get("producer_tools", ())),
             campaign_tools=tuple(
-                LaneProducerTool.from_dict(t)
+                LaneCampaignTool.from_dict(t)
                 for t in payload.get("campaign_tools", ())),
             wired_architectures=_wired_architectures(payload),
             serving_profiles=tuple(
@@ -781,10 +793,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                   + (f" tracking={tool.tracking_issue}"
                      if tool.tracking_issue else ""))
         for tool in spec.campaign_tools:
-            print(f"    [campaign tool] ${{{tool.repo_env}}}/{tool.path} "
-                  f"stability={tool.stability}"
-                  + (f" tracking={tool.tracking_issue}"
-                     if tool.tracking_issue else ""))
+            print(f"    [campaign tool] python -m {tool.module} "
+                  f"output_schema={tool.output_schema}")
     return 0
 
 

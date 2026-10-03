@@ -130,7 +130,7 @@ from .allocator_candidates import (
     summarize_applicability_masks,
     reduce_continuous_menu,
 )
-from .digests import file_sha256hex
+from .digests import file_digest_sha256hex, file_sha256hex
 from .fixed_head import (
     allow_pinned_lifts_lm_head,
     is_lm_head_name,
@@ -2490,7 +2490,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         try:
             expected_runtime = load_runtime_context(args.measured_runtime_context)
             with open(args.costs, "rb") as cost_file:
-                expected_cost_sha256 = hashlib.file_digest(cost_file, "sha256").hexdigest()
+                expected_cost_sha256 = file_digest_sha256hex(cost_file)
             measured_runtime_table = load_measured_runtime_table(
                 args.measured_runtime_table, expected_context=expected_runtime,
                 expected_cost_sha256=expected_cost_sha256)
