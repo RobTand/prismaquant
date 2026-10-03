@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- **Checkpoint incoming readset slice agreement is explicitly classified by
+  the seal ratchet** (#2176). The exact one-site entry follows the existing
+  conservative Stage A slice-binding classification. Foreign slice references
+  still refuse in both dev and certified modes; a second identity check still
+  fails the ratchet. No runtime guard, scanner rule or existing control changes.
 - **PACT regression fixtures retain their declared synthetic standing after
   JSON receipt validation** (#2137). The shared constrained/hull/replay fixture
   now writes a JSON legacy digest-bound artifact rather than plain text. Real

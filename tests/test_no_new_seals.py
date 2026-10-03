@@ -177,6 +177,10 @@ ALLOWLIST = {
         "the record measured (wall); the Stage A slice binding (ambiguous, #1147 report)"),
     ("prismaquant/joint_layer_quanta.py", "covered_slices"): (
         1, WALL, "Stage A proofs from mixed runs cover no one chain"),
+    ("prismaquant/joint_layer_quanta.py", "check_checkpoint_incoming_readset"): (
+        1, AMBIGUOUS, "the authenticated incoming readset and its quantum record bind "
+        "the same Stage A slice, as in bind_quantum_executable; the existing slice "
+        "binding remains a refusal in both modes (#1147), not a running-code seal"),
     ("prismaquant/joint_layer_quanta.py", "bind_quantum_boundary_readset"): (
         2, AMBIGUOUS, "the readset wire against its digest (integrity); the Stage A slice "
         "binding (ambiguous, #1147 report)"),
@@ -602,3 +606,18 @@ def test_converting_a_site_requires_lowering_its_entry():
     problems = violations(sources)
     assert problems == [f"{path} main: the allowlist names 1 site(s), 0 remain; "
                         "lower the entry"]
+
+
+def test_incoming_readset_classification_allows_only_its_existing_slice_check():
+    sources = _campaign_sources()
+    path = "prismaquant/joint_layer_quanta.py"
+    existing = (
+        '    if annotations.get("slice_sha256") != record["adjoint"].get("slice_sha256"):\n')
+    assert existing in sources[path]
+    extra = ("    if running_plan_sha256 != recorded_plan_sha256:\n"
+             "        raise ValueError('new run seal')\n")
+    sources[path] = sources[path].replace(existing, extra + existing, 1)
+    problems = violations(sources)
+    assert len(problems) == 1
+    assert ("check_checkpoint_incoming_readset: 2 identity check site(s), 1 allowed"
+            in problems[0])
