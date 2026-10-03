@@ -329,3 +329,165 @@ def test_validate_glm_routing_names_the_failing_field():
     with pytest.raises(ValueError,
                        match=r"protocol: device='cuda' \(expected 'cuda:0'\)"):
         validate_glm_routing(glm_routing(device='cuda'))
+
+
+def test_actual_bias_snapshot_is_reused_and_coordinates_remain_cpu_bookkeeping():
+    from prismaquant.glm_routing_replay import glm_route_record, select_original_routes
+
+    model = Glm5NextForConditionalGeneration()
+    mlp = model.model.language_model.layers[3].mlp
+    captured = select_original_routes(mlp.experts,
+        (torch.ones(512, 4096, dtype=torch.bfloat16), torch.arange(8).expand(512, 8),
+         torch.full((512, 8), 2.5 / 8, dtype=torch.bfloat16)), {}, sequence_length=512,
+        expert_bias=mlp.gate.e_score_correction_bias)
+    snapshot = captured['expert_bias']
+    assert captured['observed_device'] == 'cpu'
+    assert captured['coordinates'].device.type == 'cpu'
+    assert captured['coordinates'].dtype == torch.int64
+    assert torch.equal(captured['coordinates'][:, 1], torch.arange(512))
+    record = glm_route_record(SimpleNamespace(model=model, device=torch.device('cuda')),
+        mlp.experts, mlp.gate, captured, layer=3,
+        calibration={'calibration_sha256': '0' * 64, 'shape': [512, 512], 'dtype': 'torch.int64'},
+        producer_source={'tensors': {}, 'files': []}, epsilon=1e-20,
+        model_load_contract={'fixture': True}, replay_source='synthetic_cpu_protocol_control')
+    assert record['tensors']['expert_bias'] is snapshot
+    assert record['metadata']['routing']['device'] == 'cpu'
+
+
+@pytest.mark.parametrize('change', ['dtype', 'shape', 'device', 'not_tensor'])
+def test_original_live_bias_must_match_actual_source_boundary(change):
+    from prismaquant.glm_routing_replay import select_original_routes
+
+    module = Glm5NextTextExperts()
+    bias = torch.zeros(288, dtype=torch.float32)
+    if change == 'dtype':
+        bias = bias.bfloat16()
+    elif change == 'shape':
+        bias = bias[:287]
+    elif change == 'device':
+        bias = torch.empty(288, dtype=torch.float32, device='meta')
+    else:
+        bias = [0.0] * 288
+    with pytest.raises(ValueError, match='four source tensors'):
+        select_original_routes(module,
+            (torch.zeros(512, 4096, dtype=torch.bfloat16), torch.zeros(512, 8, dtype=torch.int64),
+             torch.zeros(512, 8, dtype=torch.float32)), {}, sequence_length=512, expert_bias=bias)
+
+
+@pytest.mark.parametrize('change', ['missing_context', 'mixed_dev'])
+def test_original_producer_rejects_missing_or_mixed_independent_context_before_traversal(source, change):
+    runner, producer = source
+    kwargs = {'original_authority_input': {'path': '/synthetic-authority', 'sha256': '1' * 64}}
+    if change == 'mixed_dev':
+        kwargs['source_acquisition'] = {'dev_uncertified': True, 'dev_mode': {'PRISMAQUANT_DEV_MODE': '1'},
+                                      'source_cache_reuse': {}}
+    with pytest.raises(ValueError, match='independent|mutually exclusive'):
+        capture_streamed_glm_routes(runner, torch.zeros(512, 512, dtype=torch.int64),
+            calibration={'shape': [512, 512], 'dtype': 'torch.int64'},
+            producer_source=producer, consume=lambda *_: pytest.fail('unadmitted entry'), **kwargs)
+    assert runner.context.events == []
+    assert not hasattr(runner.context, 'audit')
+
+
+def capture_cli_arguments(tmp_path):
+    return ['--plan', str(tmp_path / 'plan.json'), '--plan-sha256', '1' * 64,
+            '--prepared', str(tmp_path / 'prepared.json'), '--prepared-sha256', '2' * 64,
+            '--output-root', str(tmp_path / 'output')]
+
+
+@pytest.mark.parametrize('extra', [
+    ['--original-authority', '/authority'],
+    ['--original-authority-sha256', '3' * 64],
+    ['--original-authority', '/authority', '--original-authority-sha256', '3' * 64],
+    ['--session-preparation', '/session', '--session-preparation-sha256', '4' * 64],
+])
+def test_original_cli_requires_independent_paired_authority_and_session_inputs(tmp_path, extra):
+    from tools.capture_glm_routed_layers import main
+
+    with pytest.raises(SystemExit) as error:
+        main(capture_cli_arguments(tmp_path) + extra)
+    assert error.value.code == 2
+    assert not (tmp_path / 'output').exists()
+
+
+def test_original_cli_refuses_effective_dev_mode_before_control_or_output(tmp_path, monkeypatch):
+    from tools.capture_glm_routed_layers import main
+
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
+    with pytest.raises(ValueError, match='mutually exclusive'):
+        main(capture_cli_arguments(tmp_path) + [
+            '--original-authority', '/missing-authority', '--original-authority-sha256', '3' * 64,
+            '--session-preparation', '/missing-session', '--session-preparation-sha256', '4' * 64])
+    assert not (tmp_path / 'output').exists()
+
+
+def test_original_cli_strict_control_decoder_rejects_duplicate_authority_before_output(tmp_path, monkeypatch):
+    import hashlib
+
+    from tools.capture_glm_routed_layers import main
+
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
+    authority = tmp_path / 'authority.json'
+    raw = b'{"schema":"first","schema":"second"}'
+    authority.write_bytes(raw)
+    with pytest.raises(RuntimeError, match='duplicate key'):
+        main(capture_cli_arguments(tmp_path) + [
+            '--original-authority', str(authority), '--original-authority-sha256', hashlib.sha256(raw).hexdigest(),
+            '--session-preparation', '/missing-session', '--session-preparation-sha256', '4' * 64])
+    assert not (tmp_path / 'output').exists()
+    assert not torch.cuda.is_initialized()
+
+
+def test_original_serialization_has_an_actual_bounded_torch_writer():
+    import io
+
+    from tools.capture_glm_routed_layers import _BoundedCaptureBuffer
+
+    value = {'tensor': torch.arange(32)}
+    with _BoundedCaptureBuffer(16384) as buffer:
+        torch.save(value, buffer)
+        assert torch.equal(torch.load(io.BytesIO(buffer.getvalue()), weights_only=True)['tensor'], value['tensor'])
+    with _BoundedCaptureBuffer(16) as buffer, pytest.raises(RuntimeError, match='serialization exceeds'):
+        torch.save(value, buffer)
+
+
+@pytest.mark.parametrize('allow', [False, True])
+def test_original_arithmetic_pins_only_sealed_process_flags_without_cuda_initialization(tmp_path, monkeypatch, allow):
+    from test_native_moe_panel import original_protocol_case
+    from tools.capture_glm_routed_layers import _pin_original_arithmetic
+
+    runtime = original_protocol_case(tmp_path)['payload']['boundary_metadata']['source_acquisition']['runtime']['source_runtime']
+    runtime['arithmetic']['allow_bf16_reduced_precision_reduction'] = allow
+    if allow:
+        monkeypatch.delenv('PRISMAQUANT_BF16_REDUCED_PRECISION_REDUCTION', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_BF16_REDUCED_PRECISION_REDUCTION', 'off')
+    before = (torch.get_float32_matmul_precision(), torch.backends.cuda.matmul.allow_tf32,
+              torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction)
+    initialized = torch.cuda.is_initialized()
+    try:
+        _pin_original_arithmetic(runtime)
+        assert torch.get_float32_matmul_precision() == 'highest'
+        assert torch.backends.cuda.matmul.allow_tf32 is False
+        assert torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction is allow
+        assert torch.cuda.is_initialized() is initialized is False
+    finally:
+        torch.set_float32_matmul_precision(before[0])
+        torch.backends.cuda.matmul.allow_tf32 = before[1]
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = before[2]
+
+
+def test_original_arithmetic_rejects_ambient_disagreement_before_changing_flags(tmp_path, monkeypatch):
+    from test_native_moe_panel import original_protocol_case
+    from tools.capture_glm_routed_layers import _pin_original_arithmetic
+
+    runtime = original_protocol_case(tmp_path)['payload']['boundary_metadata']['source_acquisition']['runtime']['source_runtime']
+    runtime['arithmetic']['allow_bf16_reduced_precision_reduction'] = True
+    monkeypatch.setenv('PRISMAQUANT_BF16_REDUCED_PRECISION_REDUCTION', 'off')
+    before = (torch.get_float32_matmul_precision(), torch.backends.cuda.matmul.allow_tf32,
+              torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction)
+    with pytest.raises(ValueError, match='independently sealed runtime'):
+        _pin_original_arithmetic(runtime)
+    assert before == (torch.get_float32_matmul_precision(), torch.backends.cuda.matmul.allow_tf32,
+                      torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction)
+    assert not torch.cuda.is_initialized()

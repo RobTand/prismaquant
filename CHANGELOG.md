@@ -4,6 +4,75 @@
 
 ### Fixed
 
+- **Original proper-prefix coverage compares its exact checkpoint roster**
+  (Refs #2147). Python set equality preserves the whole required head/layer
+  coverage and rejects missing or extra checkpoints without sending sets to
+  the JSON identity encoder. CPU copy-history controls distinguish unfinished
+  aliases, which must remain alive through their fence, from successfully
+  completed aliases that may be released; native fences and retention stay
+  unchanged. Superseded native claims retain their public lease-refusal type.
+- **Original authority resources use the native claimed reservation**
+  (Refs #2148, #2149). The strict join reads PrismaBuild's actual `resources`
+  field, not an invented `demand` alias; missing, changed and misleading alias
+  claims remain refused before source work. Synthetic native-panel controls
+  retain the existing complete full-calibration provenance grammar rather
+  than masking their intended refusal with an obsolete tokenizer field.
+  SDK installation pins and all original CUDA/adoption guards stay unchanged.
+- **Original render-free diagnostics use a real acyclic context and session**
+  (#2149). The shared strict original BASE/preparation/execution contracts bind
+  full calibration and current source/runtime/resources without borrowing
+  pricing PREPARED, old canonical captures, teachers or source caches. The
+  explicit PB CPU metadata issuer creates a genuine pending published artifact
+  generation; read-only inspection verifies its metadata owner, exact policy
+  and cold namespace before runtime rebinds that same session. The guarded
+  original entry keeps full-N row0/probe7000/boundary6 and one Fisher operation,
+  remains non-bandable and preserves every original CUDA/automatic refusal.
+  No source, GPU, numerical, pricing, wire or serving admission follows.
+- **Original authority proof sidecars bind to their selected CAS result**
+  (#2152, Refs #2148). The strict consumer requires the existing producer's
+  one canonical artifact publication and joins actual control/call/ending,
+  raw host/trace and native-reader artifacts by exact node, digest and length.
+  Independently rebound sidecars and old receipts without publication refuse.
+  Unchanged-family transfers bind the actual target package/runtime, not a
+  bare new-source commit string. No old16/full64 restamp or source gate waiver.
+- **Original copy lifecycle snapshots are atomic** (#2155, Refs #2148).
+  Actual stream registration and pending-to-completed fence/alias retirement
+  share the existing source-owner receipt lock. Hardware fences and fatal
+  recovery drains remain outside it, with charge retained on failure and no
+  new event/query/wait/copy/release. Legacy close remains serialized unchanged.
+
+- **Original copy receipts retain every observed completion** (#2154,
+  Refs #2148). A later completion or failure-drain on the same held file
+  generation and stream no longer overwrites an earlier successful witness.
+  Existing hardware fences, aliases, resource ownership and qualification
+  refusals remain unchanged; the history behavior control is CPU-spied only.
+
+- **Original-source authority intake is strict and nonactivating** (#2148,
+  Refs #2008). The existing source owner joins independently bound
+  publisher/producer/map/readset, original runtime, full calibration,
+  acyclic base-plan/run/session, active native claim and finite resources.
+  Missing/partial actual full64 qualification or root matched-source
+  admission refuses before source/profile/device/output work. The existing
+  receipt preserves actual native delivery generations and completion/debt
+  witnesses without changing fences, retention or any CPU/direct-GPU/
+  automatic-capture refusal. Shared issued-session validation composes with
+  #2149 through the existing artifact owner; no new provider/cache/registry.
+
+- **Current-original routed capture has an exclusive scoped intake** (#2147;
+  integration dependencies #2148 and #2149). The existing CLI/visitor/source
+  owner bind independent authority, issued artifact session, full calibration,
+  actual source/runtime/initialization and all five raw tensor identities before
+  lossless route transport. Layers 3–43 remain proper prefixes; layer 44 requires
+  full text-forward initialization. The four source tensors retain their observed
+  indexed device; ordered coordinates remain CPU bookkeeping. Required source
+  deliveries/copy fences and all pending lookahead debt stay distinct. Missing
+  real qualification/root admission and the unchanged original CUDA guard refuse;
+  legacy DEV/cache/complete-v2, LFM, bias, format, pricing and serving gates stay fixed.
+- **Original quantum source intake refuses before mutable profile discovery**
+  (#2143). An explicitly qualified original material owner applies its existing
+  device predicate first and supplies the same owned config/profile to the
+  streaming builder. Legacy capture behavior and original CUDA/automatic-source
+  admission remain unchanged; no provider or GPU qualification is implied.
 - **PACT regression fixtures retain their declared synthetic standing after
   JSON receipt validation** (#2137). The shared constrained/hull/replay fixture
   now writes a JSON legacy digest-bound artifact rather than plain text. Real
@@ -29,6 +98,11 @@
   Runtime, render, profile and shape-price lookups share their derived coverage;
   legal-domain reports use the same parser. This is compatibility preparation,
   not new native, compiled, TP2, quality, construction or release qualification.
+- **Native MoE source replay binds the geometry's original router bias** (#2144).
+  GLM's strict FP32 `correction_bias` identity is checked with the whole
+  expert-roster shape; LFM retains its existing `selection_bias` identity.
+  Independent source/runtime/calibration and exact tensor-byte checks remain
+  mandatory. This CPU protocol repair grants no GPU, capture or serving admission.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).

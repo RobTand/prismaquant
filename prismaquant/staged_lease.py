@@ -1279,6 +1279,7 @@ class LeaseWindow:
         self._ref_id: str | None = None
         self._consumer: str | None = None
         self._queue_root: str | None = None
+        self._context: dict | None = None
         self._pool_mod = None
         self._pid: int | None = None
         self._owner_pid: int | None = None
@@ -1383,6 +1384,7 @@ class LeaseWindow:
             self._ref_id = ref_id
             self._consumer = consumer
             self._queue_root = queue_root
+            self._context = dict(ctx)
             self._pool_mod = pool_mod
             self._pid = os.getpid()
             self._owner_pid = os.getpid()
@@ -1424,6 +1426,35 @@ class LeaseWindow:
             if isinstance(entry, dict) and entry.get("key") == key:
                 return str(entry.get("stage_path") or "")
         return None
+
+    def read_receipt(self, fd: int, key: str, serving: dict) -> dict:
+        """Snapshot actual acquired/opened native identity, not a lease claim.
+
+        The caller must still join descriptor close and successful exact-ref
+        release before describing acquisition as complete. This snapshot adds
+        no ownership and never authorizes a later open.
+        """
+        self._require_owner('read_receipt')
+        with self._fds_lock:
+            if (self._released or self._exited or self._fds.get(fd) != key
+                    or self._context is None or self._pin is None):
+                raise RuntimeError('lease read receipt requires the actually held descriptor')
+            entries = [entry for entry in self._pin['entries'] if entry['key'] == key]
+            if len(entries) != 1 or serving != {
+                    'tier_id': self._pin['tier_id'], 'epoch': self._pin['epoch'],
+                    'pin_id': self._pin_id, 'range_ref': key}:
+                raise RuntimeError('lease read receipt differs from native opened identity')
+            from .file_identity import file_stat_signature
+
+            signature = file_stat_signature(os.fstat(fd))
+            if entries[0]['file_id'] != dict(ino=signature[1], size=signature[2],
+                    mtime_ns=signature[3], ctime_ns=signature[4]):
+                raise RuntimeError('lease receipt descriptor differs from native pinned object')
+            return json.loads(json.dumps({
+                'claim': self._context, 'serving': serving,
+                'ref_id': self._ref_id, 'entry': entries[0],
+                'source_fd_stat': list(signature),
+            }, sort_keys=True, allow_nan=False))
 
     # -- open ----------------------------------------------------------
 

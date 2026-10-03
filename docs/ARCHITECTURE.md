@@ -1,5 +1,19 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-03 (Refs #2147; required source dependencies #2148/#2149):
+the existing routed capture CLI, GLM visitor and native boundary intake carry an
+exclusive current-original first-sequence contract, not canonical complete-v2
+authority. The source owner's public gate compares independently sealed inputs
+before material; original non-CPU material/directGPU/automatic refusers remain.
+The actual owning artifact generation is re-bound, never newly minted by capture.
+Four source tensors retain their pre-host-copy indexed device and original dtype;
+ordered I64 coordinates remain deterministic CPU bookkeeping. Prefix/full source
+initialization, actual delivery generations, completed source-copy fences and
+all pending one-ahead debt are independently joined before lossless I32/F32
+transport. Row zero supplies no full-draw H, counts/maxima, prices, MTP/vision or
+native/serving qualification. Legacy DEV/cache/LFM and the geometry-bound GLM
+bias repair remain. No runtime pin, menu, adoption or default changes occur.
+
 Re-stamped 2026-10-02 (Refs #2094, Tessera #856): shape-time conversion
 requires an explicit PB action/publication/attempt selector for each checker
 completion. The public SDK4 result reader and standard capture binder join
@@ -130,6 +144,13 @@ reopening or changing bytes. No numerical, profile, pin or default changes.
 This completes only the measured-runtime/frontier open-handle family. The
 special page-releasing capture-source hash and unrelated JSON/raw-byte sites
 remain distinct or unconsolidated; #1301 and #1303 remain open.
+Re-stamped 2026-10-03 (Refs #2144, native MoE source replay): independent
+source qualification consumes GLM's FP32 `correction_bias` digest and derives
+its shape from the whole expert roster, including tensor-parallel panels.
+LFM continues to use `selection_bias`. The original tensor bytes, dtype,
+cardinality, source/runtime/calibration and backend joins remain required.
+CPU protocol acceptance is not original CUDA/provider, capture or serving
+qualification; no runtime cell, format menu, pin or ship gate is changed.
 
 Re-stamped 2026-10-02 (Refs #1589, root-approved comparison strengthening):
 the existing uniform-control contract loop additionally compares a new
@@ -204,6 +225,22 @@ byte/kernel/runtime, export and serving gates remain unchanged. This CPU
 policy does not establish attention H capture, native wire qualification,
 per-unit AURA costs or served quality; those remain #1842 acceptance work.
 
+Re-stamped 2026-10-03 (PQ #2148, Refs #2008, original authority intake):
+the existing `CaptureSourceAuthentication`/`source_generation` owners validate
+the closed independently bound original authority before material/profile/
+device/output work. Same source, runtime, full calibration, native PB claim,
+finite resources and actual issued artifact session must agree. An acyclic
+static-authority/base-plan/session/root-admission/final-manifest DAG avoids
+self-referential hashes; #2149's existing-owner read-only session reader is a
+declared integration dependency. Missing/partial actual full64 or independent
+root matched-source admission remains a production refusal. Existing CPU-only,
+direct-GPU and automatic capture gates are unchanged. Receipt extensions retain
+all observed native delivery generations, retired/current aliases and existing
+copy fences/pending debt; they create no provider/cache/registry or new CUDA
+synchronization. CPU metadata controls are not original GLM/CUDA/source/wire/
+pricing/serving qualification. See the
+[concrete original-material contract](design/capture_original_material.md#independently-bound-authority-intake--2026-10-03).
+
 Re-stamped 2026-10-02 (PQ #2102, Refs #1301, branch
 `sol/pq-expert-calibration-digests-20261002`, base `693a38f3ae34`): empirical
 expert checkpoint and CLI calibration digests share only the final exact-byte
@@ -211,6 +248,42 @@ SHA-256 constructor through `digests.bytes_sha256hex`. Their distinct
 checkpoint detach/CPU/contiguous/uint8 view and CLI CPU/NumPy C-order extraction
 remain local, including native refusals. Identity fields, byte recipes and
 widths, checkpoint policy and provenance serialization retain their contracts.
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original identity intake): when the
+existing qualified original owner is explicitly selected, the existing model
+and source-checkpoint identity mechanisms consume its independently bound
+publisher descriptors and authenticated config/complete-index facts. Model
+resolution and the complete live/checkpoint shard roster must agree; missing
+proof, incomplete scopes and legacy stat-cache inputs refuse. Existing v1
+identity schemas and value meaning remain intact. Expected whole-file identity
+does not establish actual delivery: Stage A retains the owner's held-decoder/
+readset receipt separately. No logical-pool stat/index reopening or redundant
+bulk identity hash occurs on this path. Original CUDA/automatic admission and
+actual full-source GLM fresh-g6 acceptance remain separate closed gates.
+
+Re-stamped 2026-10-03 (PQ #2134, failed original copy ownership): the existing
+source owner registers each reader completion before H2D enqueue. Failed event
+proofs survive ordinary exception/traceback disposal without releasing native
+or converted host staging. Event failure first drains the exact stream while
+preserving the event error. Double-fence failure process-roots the existing
+charged owner, surviving loss of all external references and GC. Explicit
+close/recovery proves completion before unregistering/reaping; repeated drain
+failure retains the open owner/holds/FDs and blocks new copies. Active copies
+refuse close. No successful material enters that fatal-fence set; there is no
+cache, background retry or silent fallback. Original CUDA/automatic gates
+stay closed; the retained frozen56 protocol is a historical negative reference,
+not acceptance of this new source. CPU stand-ins cannot qualify outstanding DMA.
+
+Re-stamped 2026-10-02 (Refs PQ #2119/#2010, original copy completion): the
+existing layer reader's copy-stream completion bookkeeping retains native
+original source aliases and converted/stacked host staging through a successful
+event record and synchronization. The dormant original layer/head/direct-scale
+paths use that same bookkeeping independently of the legacy source-page flag;
+head copies complete before installation and cancelled readers drain before
+refusing output. Failed completion proofs retain true owners and serialized
+material credit. Original CUDA and automatic-capture gates remain closed.
+CPU spies and an unrun real-CUDA harness establish no original GPU, GLM g6,
+complete-provider, performance or serving qualification.
+See [original material contract](design/capture_original_material.md).
 
 Re-stamped 2026-10-02 (Refs PQ #2010/#2008, selected-row diagnostic seam):
 the existing Stage A core can capture one explicitly bound global calibration

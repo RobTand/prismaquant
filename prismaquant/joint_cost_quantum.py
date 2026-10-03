@@ -1553,15 +1553,27 @@ def build_quantum_source_runner(config, *, offload_folder,
     ``source_authentication`` is a capture source owner
     (``tessera_calibration_cache.authenticate_selected_capture_source``);
     given one, every shard the runner reads is authenticated through it.
+
+    An explicitly qualified original owner keeps its device predicate before
+    profile discovery; eligible intake uses that same owner's parsed metadata.
     """
     from .cost_streaming import build_streamed_causal_lm
     from .model_profiles import detect_profile
     from .stage_inputs import source_prefetch as _source_prefetch
     from .tessera_joint_aura import _planned_source_window
 
+    device = torch.device("cuda")
+    if getattr(source_authentication, "is_qualified_original_material", False):
+        source_authentication.require_material_device(device)
+        from .layer_streaming import _source_profile
+
+        profile = _source_profile(config["model"], source_authentication)
+    else:
+        profile = detect_profile(config["model"])
+
     return build_streamed_causal_lm(
-        config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
-        offload_folder=str(offload_folder), profile=detect_profile(config["model"]),
+        config["model"], device=device, dtype=torch.bfloat16,
+        offload_folder=str(offload_folder), profile=profile,
         attn_implementation="eager", source_authentication=source_authentication,
         source_derivative=config["execution"].get("source_derivative"),
         **({"sealed_head_tensors": sealed_head_tensors}
