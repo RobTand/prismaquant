@@ -198,8 +198,14 @@ Two-second average host CPU busy excludes idle/iowait:
 | sparky |1.946%|2.436%|
 | sparklina |1.493%|1.459%|
 
-Windows are1791054574..1791054718 and1791054832..1791054923. All six series
-have zero flagged/empty buckets. PB's own DL averages are11.764%/9.822% and
+Requested query windows were1791054574..1791054718 and1791054832..1791054923.
+Captured before response view is1791054575..1791054718, with data timestamps
+1791054576..1791054718 (72 buckets). Captured after view is1791054824..1791054923,
+with data timestamps1791054825..1791054923 (50 buckets), including about8s before
+the PB claim. The table above averages these full retained response buckets,
+not claim-only intervals. PB scope windows are1791054574.821892..1791054717.626143
+and1791054832.019614..1791054922.014710. All six series have zero flagged/empty
+buckets. PB's own DL averages are11.764%/9.822% and
 retain explicit missing-pqteld diagnostics. Raw receipts, inventories,
 resource records and Netdata are/home/rob/tmp/pq1929-routed-positive-evidence.json.
 No GPU/numeric acceptance, full-suite or line-coverage equality is claimed.
