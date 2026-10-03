@@ -184,12 +184,8 @@ def _chain_equals_the_monolith(tmp_path, monkeypatch, policy, ranges, *, device)
     from prismaquant import tessera_calibration_cache as qualification_store
     monkeypatch.setattr(qualification_store, 'require_automatic_capture_source_recording', lambda: None)
     from test_glm5_next_streamed_forward_parity import _build_model
-    pinned = '/mnt/shared/tessera-measurements/first-model-20260907/inputs/tessera-382a1a97'
-    producer = Path(os.environ.get('TESSERA_REPO') or pinned)
-    if not producer.is_dir():
-        pytest.skip('TESSERA_REPO must name the pinned producer checkout '
-                    f'(unset, and {pinned} is absent)')
-    monkeypatch.setenv('TESSERA_REPO', str(producer))
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
     monkeypatch.setenv("PRISMAQUANT_TMPDIR", str(tmp_path / "staging"))
     if device == "cpu":
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)

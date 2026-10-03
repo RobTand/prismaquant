@@ -736,7 +736,9 @@ class _FakeLLM:
 @pytest.fixture
 def fake_measure(tmp_path, monkeypatch):
     """measure() with every identity source and the engine replaced by fakes."""
-    windows = [{"window_id": f"w{i}"} for i in range(3)]
+    windows = [{"window_id": f"w{i}", "document_id": f"fixture-{i}", "domain": "fixture",
+                "tokens_sha256": "c" * 64, "attention_mask_sha256": "d" * 64,
+                "prediction_positions": exp.CONTEXT_LENGTH - 1} for i in range(3)]
     tokens = [(np.arange(exp.CONTEXT_LENGTH) + i,) for i in range(3)]
     teacher_value = {"tokenizer_identity": {"tok": 1}, "source_execution": {"teacher": 1},
                      "windows": [{"window_id": w["window_id"]} for w in windows]}
@@ -744,7 +746,11 @@ def fake_measure(tmp_path, monkeypatch):
     model.mkdir()
     teacher_path = tmp_path / "teacher.json"
     real_bound_json = served.bound_json
-    monkeypatch.setattr(served, "load_panel", lambda path, arrays_root=None: ({"windows": windows}, tokens))
+    panel = {"windows": windows, "dataset_revision": exp.DATASET_REVISION,
+             "reference_model": "zai-org/GLM-5.3-Flash-BF16",
+             "reference_revision": exp.REFERENCE_REVISION,
+             "tokenizer_sha256": exp.TOKENIZER_SHA256}
+    monkeypatch.setattr(served, "load_panel", lambda path, arrays_root=None: (panel, tokens))
     monkeypatch.setattr(served, "load_teacher", lambda path, digest, panel: teacher_value)
     monkeypatch.setattr(served, "bound_json", lambda path, digest: (
         teacher_value if Path(path) == teacher_path else real_bound_json(path, digest)))

@@ -36,7 +36,6 @@ no new backward machinery.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import pickle
 import time
@@ -44,6 +43,8 @@ from pathlib import Path
 from typing import Sequence
 
 import torch
+
+from .digests import file_sha256hex, text_sha256hex
 
 
 def _log(msg: str) -> None:
@@ -64,14 +65,10 @@ def _dataset_sha256(dataset: str | None) -> str | None:
     p = Path(dataset)
     try:
         if p.is_file():
-            h = hashlib.sha256()
-            with open(p, "rb") as fh:
-                for chunk in iter(lambda: fh.read(1 << 20), b""):
-                    h.update(chunk)
-            return h.hexdigest()
+            return file_sha256hex(p, block_size=1 << 20)
     except Exception:
         pass
-    return hashlib.sha256(str(dataset).encode()).hexdigest()
+    return text_sha256hex(str(dataset))
 
 
 # ---------------------------------------------------------------------------

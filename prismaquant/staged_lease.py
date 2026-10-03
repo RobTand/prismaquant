@@ -76,14 +76,21 @@ from .staged_tier_policy import TierPolicyRefused
 #: starts. PQ #1302 retired it as callerless; PQ #1929 restored it, sharing
 #: ``resolve_tessera_dev_pin.resolve_literal_pin``, after a stale interpreter
 #: ran the whole suite red instead of being refused.
-PB_READER_LEASE_PIN_COMMIT = "95a59051d48cda82eea7927f31870c6c862d7174"
+#: PQ #1293 re-pins to merged PB #1453 at dc4803 so the consumer can read a
+#: selected action generation's verified result through the public SDK4
+#: surface. The reader-lease names are unchanged; the version moves together
+#: below. Live fleet deployment remains separate and is never inferred.
+PB_READER_LEASE_PIN_COMMIT = "dc4803daaf09b6426083d2d36bd2a2da3d6832fe"
 PINNED_SDK_COMMIT = PB_READER_LEASE_PIN_COMMIT
 
 #: The PrismaBuild client SDK version this package is written against
 #: (``prismabuild.client.SDK_VERSION``, PB #1402 / PQ #1888). A tree that serves another
 #: version refuses as unsupported: the SDK's contract is pinned by version, so
 #: a mismatch is a different contract, never a subset to probe.
-PB_CLIENT_SDK_VERSION = 3
+#: SDK4 (PB #1453) adds the public ``read_verified_action_result`` and
+#: ``bind_standard_capture_command`` surface PQ #1293 consumes; SDK3 or
+#: anything else still refuses.
+PB_CLIENT_SDK_VERSION = 4
 
 #: The one PrismaBuild module PrismaQuant imports.
 _CLIENT_MODULE = "prismabuild.client"
@@ -695,6 +702,16 @@ def _load_sealed_payload(bound_manifest_sha256: str) -> dict:
     return payload
 
 
+def load_sealed_manifest(bound_manifest_sha256: str) -> dict:
+    """Owned manifest metadata, authenticated and decoded by the PB owner.
+
+    For consumers that must bind annotations to immutable phase membership.
+    This establishes input authority only; existing staged readers still
+    acquire and verify every payload range through their normal leases.
+    """
+    return _load_sealed_payload(bound_manifest_sha256)
+
+
 def load_sealed_readset(bound_manifest_sha256: str) -> dict[str, list[tuple[int, int]]]:
     """PB's sealed readset as ``{declared path: merged [start, end) spans}``.
 
@@ -1262,6 +1279,7 @@ class LeaseWindow:
         self._ref_id: str | None = None
         self._consumer: str | None = None
         self._queue_root: str | None = None
+        self._context: dict | None = None
         self._pool_mod = None
         self._pid: int | None = None
         self._owner_pid: int | None = None
@@ -1366,6 +1384,7 @@ class LeaseWindow:
             self._ref_id = ref_id
             self._consumer = consumer
             self._queue_root = queue_root
+            self._context = dict(ctx)
             self._pool_mod = pool_mod
             self._pid = os.getpid()
             self._owner_pid = os.getpid()
@@ -1407,6 +1426,35 @@ class LeaseWindow:
             if isinstance(entry, dict) and entry.get("key") == key:
                 return str(entry.get("stage_path") or "")
         return None
+
+    def read_receipt(self, fd: int, key: str, serving: dict) -> dict:
+        """Snapshot actual acquired/opened native identity, not a lease claim.
+
+        The caller must still join descriptor close and successful exact-ref
+        release before describing acquisition as complete. This snapshot adds
+        no ownership and never authorizes a later open.
+        """
+        self._require_owner('read_receipt')
+        with self._fds_lock:
+            if (self._released or self._exited or self._fds.get(fd) != key
+                    or self._context is None or self._pin is None):
+                raise RuntimeError('lease read receipt requires the actually held descriptor')
+            entries = [entry for entry in self._pin['entries'] if entry['key'] == key]
+            if len(entries) != 1 or serving != {
+                    'tier_id': self._pin['tier_id'], 'epoch': self._pin['epoch'],
+                    'pin_id': self._pin_id, 'range_ref': key}:
+                raise RuntimeError('lease read receipt differs from native opened identity')
+            from .file_identity import file_stat_signature
+
+            signature = file_stat_signature(os.fstat(fd))
+            if entries[0]['file_id'] != dict(ino=signature[1], size=signature[2],
+                    mtime_ns=signature[3], ctime_ns=signature[4]):
+                raise RuntimeError('lease receipt descriptor differs from native pinned object')
+            return json.loads(json.dumps({
+                'claim': self._context, 'serving': serving,
+                'ref_id': self._ref_id, 'entry': entries[0],
+                'source_fd_stat': list(signature),
+            }, sort_keys=True, allow_nan=False))
 
     # -- open ----------------------------------------------------------
 

@@ -551,7 +551,7 @@ def test_additive_catalog_binds_original_capture_without_relabelling(tmp_path, c
     from prismaquant.joint_cost_quantum import verify_quantum_identity
     first = produced['records'][0]
     quantum = _write(tmp_path, 'quantum.json', first)
-    loaded, adjoint_slice = verify_quantum_identity(
+    loaded, adjoint_slice, _record_bytes = verify_quantum_identity(
         quantum_path=Path(quantum['path']), quantum_sha256=quantum['sha256'],
         plan_path=Path(inputs['extended_plan']['path']), plan_sha256=args['plan_sha256'],
         prepared_path=Path(inputs['extended_prepared']['path']), prepared_sha256=args['prepared_sha256'],

@@ -10,6 +10,7 @@ import re
 import torch
 
 from .digests import bytes_sha256hex
+from .source_read_plan import safetensors_prefix_length
 
 
 def _read_calibration_payload(path: Path, expected_sha256: str) -> bytes:
@@ -42,11 +43,10 @@ def _decode_calibration_buffer(raw: bytes) -> tuple[torch.Tensor, dict]:
 
     from safetensors.torch import load
 
-    if len(raw) < 8:
-        raise ValueError("exact calibration input has no safetensors header length")
-    header_bytes = int.from_bytes(raw[:8], "little")
-    if not 0 < header_bytes <= min(MAX_HEADER_BYTES, len(raw) - 8):
-        raise ValueError("exact calibration input header length is out of range")
+    header_bytes = safetensors_prefix_length(
+        raw[:8], len(raw), max_bytes=MAX_HEADER_BYTES,
+        short_error="exact calibration input has no safetensors header length",
+        range_error="exact calibration input header length is out of range")
     try:
         header = json.loads(raw[8:8 + header_bytes])
     except ValueError as exc:

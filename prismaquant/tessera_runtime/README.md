@@ -39,6 +39,18 @@ git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha2
 The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
+Reader compatibility preparation can accept lane schema v11 while this live
+v2 pin remains unchanged. V11's window-rate rule covers a non-census rung only
+when its derived run table was censused in that exact cell. Census rungs stay
+separate in provenance; exclusions, rule wire stamps, runtime scope, plugin,
+native-decoder and evidence predicates remain enforced. The reviewed answer
+records the rule and cell coverage, so a v55 package still refuses the live
+v45 answer and serving digest. Parser support does not authorize a pin bump.
+Public b770727c and frozen 09cdb22f publish byte-identical v55 contracts, but
+their package source differs; equal contract bytes do not transfer serving or
+binary qualification. No release tag, future union digest or v3 activation is
+required or invented by this preparation. The v3 decision remains held.
+
 
 The current pin is Tessera `b40c93cb73745097e57a1ba4cf5b9eee166c759a`,
 master's merge of #730 on 2026-09-29 (tessera#729, PQ #1739). It fixes the

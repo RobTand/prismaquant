@@ -78,7 +78,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .cost_stage_checkpoint import atomic_write_bytes, publish_new_bytes
-from .digests import bytes_sha256hex, file_sha256hex
+from .digests import bytes_sha256hex, file_digest_sha256hex, file_sha256hex
 from .layer_config import LAYER_CONFIG_META_KEY
 from .measured_runtime_prices import (
     BOOTSTRAP_CONFIDENCE, BOOTSTRAP_DRAWS, BOOTSTRAP_SEED, identity_sha256)
@@ -615,7 +615,7 @@ def run_sweep(ctx, *, grid: tuple[str, object], assignments_dir: Path,
     from .aura_cost import _git_commit
     cost_path = Path(ctx.cost_path)
     with cost_path.open("rb") as stream:
-        cost_sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+        cost_sha256 = file_digest_sha256hex(stream)
     provenance = {
         "git_commit": _git_commit(),
         "table_identity": dict(ctx.table_identity),

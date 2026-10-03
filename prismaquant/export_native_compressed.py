@@ -102,7 +102,6 @@ from .layer_config import (
     canonicalize_assignment as _canonicalize_assignment,
     canonicalize_format,
 )
-from .model_profiles.qwen3_5 import Qwen3_5Profile
 from .layer_config import (
     is_layer_config_meta_key as _is_layer_config_meta_key,
     layer_config_metadata as _layer_config_metadata,
@@ -173,36 +172,6 @@ def _record_do_no_harm_failure(fmt: str, linear_name: str | None, exc: Exception
         f"[do-no-harm] WARN {name} {fmt} gate failed: {exc!r}",
         flush=True,
     )
-
-# Back-compat exports for unit tests that validate the Qwen3.5 naming
-# and per-expert catch-all contract via the historical helper symbols.
-_COMPAT_QWEN_PROFILE = Qwen3_5Profile()
-PER_EXPERT_MOE_REGEX = _COMPAT_QWEN_PROFILE.per_expert_moe_regex()
-
-
-def _to_vllm_internal_name(checkpoint_name: str) -> str:
-    """Compatibility helper kept for unit tests.
-
-    The production path is profile-driven via `profile.to_vllm_internal_name`;
-    this helper preserves the historical Qwen3.5/3.6 mapping semantics
-    without depending on a local vLLM install.
-    """
-    name = checkpoint_name
-    if name.startswith("mtp."):
-        return name
-    if name == "lm_head":
-        return "language_model.lm_head"
-    if name.startswith("model.visual."):
-        return name[len("model."):]
-    if name.startswith("model.language_model."):
-        return "language_model.model." + name[len("model.language_model."):]
-    if (name.startswith("model.layers.")
-            or name.startswith("model.embed_tokens")
-            or name.startswith("model.norm")
-            or name == "model"):
-        return "language_model.model." + name[len("model."):]
-    return name
-
 
 # The NVFP4 codebook is a CONSTANT -- the eight positive E2M1 levels -- but it
 # was being rebuilt from a Python list on every call, and the GPTQ render calls

@@ -48,15 +48,20 @@ header reader and existing footprint/artifact/pipeline/autoscale/tool callers.
 little-endian decoding and bounds for the stream and residency readers
 (#1803). Acquisition/stat/body/object/refusal policies remain local.
 
-Remaining prefix/parser sites inspected: `calibration_data._decode_calibration_buffer`
-(bounded metadata plus the public whole-buffer decoder), `shipcard._verify_open_safetensors_fd`
-(strict JSON and fused whole-file digest), `export_structure._read_metadata`
-(bounded metadata with stat fences), `model_profiles.validate._safetensors_header`
-(legacy unbounded diagnostic), `layer_streaming._advise_consumed_safetensors_pages`
-(best-effort page advice), and `tools/chain_roll_bench._safetensors_spans`
-(benchmark-local header parse). These have not been routed or qualified by
-this slice. Extending the existing prefix primitive is a future compatible
-candidate; using the whole owning reader would change their IO/refusals.
+The #2166 continuation routes `calibration_data._decode_calibration_buffer`
+and `layer_streaming._advise_consumed_safetensors_pages` to the existing
+`safetensors_prefix_length` owner. Both require exactly eight little-endian
+unsigned bytes and a positive length bounded by their existing cap and file
+extent. Calibration keeps its two refusal texts, provenance parsing and public
+whole-buffer decoder. Page release keeps its single refusal text, pread/stat
+fence, page alignment, selected-span merging and descriptor cleanup.
+
+Remaining inspected sites are `shipcard._verify_open_safetensors_fd` and
+`export_structure._read_metadata` (their diagnostics include the decoded
+length), `model_profiles.validate._safetensors_header` (legacy unbounded
+diagnostic), and `tools/chain_roll_bench._safetensors_spans` (unbounded benchmark
+reader). These intentional acquisition/refusal contracts are not silently
+flattened; they remain outside this bounded two-consumer slice.
 
 `qnames.py` is the shared grammar owner. Dotted-key work is separately owned
 under the coordinator's qname slice; no change is included here. Worktree

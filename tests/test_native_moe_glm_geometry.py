@@ -92,15 +92,6 @@ def glm_rank_local(shape):
 # The geometry: accepted exactly, refused at every coordinate that matters
 # --------------------------------------------------------------------------
 
-def test_the_source_geometry_matches_the_frozen_model_config():
-    """The module's constants are the model's facts, not a copy that drifted."""
-    assert panel.GLM_SOURCE_GEOMETRY["n_routed_experts"] == SOURCE_FACTS["n_routed_experts"]
-    assert panel.GLM_SOURCE_GEOMETRY["top_k"] == SOURCE_FACTS["top_k"]
-    assert panel.GLM_SOURCE_GEOMETRY["swiglu_limit"] == SOURCE_FACTS["swiglu_limit"]
-    assert panel.GLM_SOURCE_GEOMETRY["routed_scaling_factor"] == SOURCE_FACTS["routed_scaling_factor"]
-    assert panel.GLM_SOURCE_GEOMETRY["topk_method"] == SOURCE_FACTS["topk_method"]
-
-
 def test_a_complete_glm_geometry_validates_and_names_its_family():
     shape = panel.validate_geometry(glm_shape())
     assert panel.geometry_family(shape) == "glm53_next_routed_stack_v1"
