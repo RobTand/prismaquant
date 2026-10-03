@@ -2181,7 +2181,7 @@ def _verify_native_export_record(
 #
 # How the record gets here:
 #   1. Tessera builds and prices the control:
-#        python experiments/uniform_control.py plan --plan-json <candidate plan>
+#        python -m tessera.uniform_control plan <candidate plan> --model <source>
 #      then serves it, and `verify` re-asserts the byte match on the two
 #      exported manifests.
 #   2. The SAME KL tool that filled `gold.kl` is run on the control checkpoint

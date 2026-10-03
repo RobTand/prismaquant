@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Matched-byte control uses Tessera's public installed CLI** (#2168).
+  The standing plan/verify producer is `python -m tessera.uniform_control`,
+  emitting the existing versioned control handoff without experiment checkout
+  imports. The lane can name a separate `TESSERA_PRODUCER_PYTHON`; pinned
+  serving packages and all existing unserved/byte/KL/shipping refusals stay fixed.
+
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
   A v45 table was refused as an unknown requirement. The parser now reads the
