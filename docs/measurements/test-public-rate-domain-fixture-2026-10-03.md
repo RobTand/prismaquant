@@ -186,3 +186,99 @@ retained. Raw source/receipt/outcome/scope/profile/Netdata packet:
 measurement replay, GPU/numerical/energy/$ or full-suite qualification occurs.
 Designated-parent review, independent review and existing integration gates
 remain mandatory; P1 parent1929 stays OPEN.
+
+
+## Successor: remaining default source-report caller (Refs #1929)
+
+This separately measured concern starts at accepted PR2196 head
+b4f3b71d691caac33e304fc4c9f1028c26b872ff. Only one test caller changes:
+test_the_report_names_the_source_state_the_numbers_came_from uses the existing,
+unchanged _inventory() helper instead of a second default build_inventory().
+Both old calls use precisely the same no-argument source/pin/options contract.
+The real default derivation still executes for the per-rate table-width donor.
+All source-state, actual imported export digest, report ordering and every
+per-rate width assertion remain. No inventory helper/algorithm, prior public
+provider/transition fixture, pin or grammar guard changes. The moved-pin test
+still independently builds its own E4/dense/empty-extra-ledger inventory and
+requires PIN DRIFT before the counts; it is not supplied a cached answer.
+The public CLI and distinct process/deadline, H-bearing and resume controls
+remain independent. No scientific coverage or node is removed.
+
+Test commit:08a548be9cae1e7cb1d26da4d96489deb26cf3a9.
+Test-file SHA-256:9c6b173511cdc5c91e108741323c63d2e9c2d04fd49060711b23c0f7503fc802.
+Both arms select exactly test_every_candidate_carries_its_own_table_width,
+test_the_inventory_carries_its_drift_report, and the changed report node.
+Both collect and run the same3 IDs:3passed,0skipped,60deselected,14 existing
+Torch warnings; capture reconciliation has no missing files, never-ran,
+not-collected, duplicate-collection, extra-phase or outcome problems.
+These are a NEW3-node population, not replays or requalification of the earlier
+six provider/payload nodes or the three resolver-transition nodes.
+
+Published pbtest.py owns partitioning: one file shard, one pytest worker,
+explicit dl380g10, CPU2/mem4GiB/native1,600s deadline,priority-10, sample profile.
+The fixed target interpreter is pq-pb95a59051-tessera-b40c93cb/bin/python;
+both real preflights match PB95a59051 and verify44 files. Both use preferred
+cores[0,1]. All actions and py-spy0.4.2/100Hz backend returns are0.
+
+| New report population observation | Before | After |
+|---|---:|---:|
+| Pytest wall |58.16s|36.61s|
+| PB contained wall |65.461s|43.818s|
+| Cgroup CPU |72.956s|47.789s|
+| Cgroup peak memory |458530816 bytes|456978432 bytes|
+| Process observed writes |2462168 bytes|2687448 bytes|
+| Process observed reads |24576 bytes|49152 bytes|
+| build_inventory inclusive sampled time |52.97s|29.79s|
+| legal_rates inclusive sampled time |24.96s|14.05s|
+| resolver_transitions inclusive sampled time |27.24s|15.01s|
+| Unchanged default donor inclusive sampled time |23.82s|22.79s|
+| Independent moved-pin control inclusive sampled time |7.20s|7.00s|
+| Changed report node inclusive sampled time |21.95s|0 sampled seconds|
+| py-spy samples |6071|3736|
+
+Observed selected wall decreases21.55s (37.05%) and CPU decreases25.167s.
+Zero sampled report time is not a claim of zero execution: its original
+assertions and real format_report still run. The unchanged real donor and
+independent drift derivation remain in the after profile. Inclusive samples
+overlap and must not be added. This is one sequential profiled pair with lower
+after DL host load; no guaranteed or whole-suite saving is asserted.
+
+Before action:ec93a3ee58b2a353280c5256d2c1e71f41c6630bd5c08d64f3c6e39f176aeda1.
+Receipt:df17b03d9e714fbe7144a9777b46e41a2326f54ae125d60c425febc000cd8d6a.
+Snapshot:9c682a9aa648a04ac2bd592dccc18abfcbb6b5f1; parent exact accepted base.
+Input:bc535fadbc80ab8597482651c32a2170d5e6d90b753a174bd6b659f5ac3cac69.
+Profile:67f87d3ed49e101c66500108da68f3e25d157720f24ba09cdf6b3985fa10029d.
+After action:d946a7d356e8a158e5fae30d6ce38e4aff2471130a29c0bb7cf0c42f05cb7a73.
+Receipt:0ad0669fffced5c4a3e93ed35907e60610ba46f46467bdef5ba7688c7966fb68.
+Snapshot:cea9ab68036236fb7c7e32a655ac94a9684555d1; parent exact test commit.
+Input:16daafd977e13276cefeb511e09a6c1c8ee4ade54c21fd8ef4dfbb25f8d079df.
+Profile:2fbc582bc0537274df55de250b1f48d18213ee037d96a5da20f3bdb14ec1f090.
+Both extracted profile bytes hash to the actual CAS descriptors.
+
+Netdata requested1791065631..1791065698 and1791066104..1791066149. Before
+returned view AND actual data span22:13:51Z..22:14:58Z (2026-10-03),68one-second
+buckets; after view/data22:21:44Z..22:22:29Z,46buckets. These rounded windows
+slightly extend the exact PB scopes1791065631.9567518..1791065697.4175663 and
+1791066104.212592..1791066148.0301013. Full-response means below are not
+claim-only means; all six responses have zero empty/flagged buckets.
+
+| Host | Before full-response busy | After full-response busy |
+|---|---:|---:|
+| dl380g10 |13.849%|12.288%|
+| sparky |1.984%|4.217%|
+| sparklina |1.411%|1.449%|
+
+Busy excludes idle/iowait. PB's own DL scope means13.658%/12.724% and its
+missing-pqteld diagnostics are retained separately. Raw source/receipt/node
+capture/profile/CPUwallpeakIO/request/view/data packet:
+/home/rob/tmp/pq1929-report-evidence.json.
+
+Initial service-option and unsupported -q CLI refusals happened BEFORE
+publication, so no admitted baseline was replayed; the refusal log remains.
+An empty-dimension telemetry request was rejected locally; exact discovered
+dimensions then produced the retained successful captures. Read-only profile
+SSH extraction reported an agent-signing warning but completed successfully.
+No wait/poll loop, GPU/numerical/energy/$ qualification or frozen-cohort change
+occurs. Designated-parent, independent review and normal integration gates
+remain; P1 parent1929 stays OPEN.
+
