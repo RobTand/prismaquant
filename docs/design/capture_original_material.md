@@ -143,7 +143,7 @@ installation, so a later copy failure cannot expose a partially installed head.
 These dormant paths retain the original CPU-only device predicate. The CPU
 controls enter the actual source memfd/decoder/StorageWeakRef paths with explicit
 CPU CUDA spies. `tests/test_original_source_copy_completion_cuda.py` supplies
-real CUDA source-alias/event controls, but remains unrun. Retained frozen56
+real CUDA source-alias/event controls requiring explicit PB approval. Retained frozen56
 protocol698a0a0 is a historical negative reference: its harness drained streams
 while exception frames remained held and cannot qualify traceback-independent
 production ownership. New controls must catch/clear those frames while actual
@@ -152,6 +152,13 @@ prove no GPU behavior. A future explicitly reviewed PB
 action may temporarily override only a fixture owner's device predicate; the
 test-only environment is never read by production code. That fixture action
 cannot qualify actual original GLM primals/cotangents or a complete provider.
+
+The abandoned-owner controls use a longer bounded real CUDA delay to cover
+exception-frame disposal and garbage collection, followed by the same strict
+pending-stream, native-alias, held-FD and whole-credit assertions. The retained
+04 failures exhausted their 500M-cycle delay before the post-GC stream query;
+they remain failures, not ownership qualification. Increasing only the fatal
+control delay does not relax any assertion or enable a source/device gate.
 
 The fixture execution owner supervises the existing container adapter CLI as a
 child: its Docker `execvp` does not replace the owner that records the actual

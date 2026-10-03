@@ -336,7 +336,10 @@ def test_actual_double_fence_failure_survives_abandoned_owner(material, monkeypa
                     with torch.cuda.stream(stream):
                         with ls._SourceCopyCompletion(device, enabled=True, source_owner=owner) as copies:
                             copies.retain(native)
-                            torch.cuda._sleep(500_000_000)
+                            # The pending interval must span frame disposal and
+                            # GC, not just enqueue: 500M cycles expired before
+                            # the first post-GC query in the retained 04 controls.
+                            torch.cuda._sleep(10_000_000_000)
                             dependency = real_event()
                             dependency.record(stream)
                             control['outputs'].append(copies.copy(native.to(torch.bfloat16), non_blocking=True))
