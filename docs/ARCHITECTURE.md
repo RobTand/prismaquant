@@ -1284,6 +1284,13 @@ peak-memory or reader-wait acceptance. The coordinator's 2026-09-30 14:15Z
 GO conditionally approved the held GPU ask once its own prerequisites hold;
 before/after profiles and both-Spark Netdata still require completed evidence.
 
+Re-stamped 2026-10-03 (PQ #2159, Refs #1762): the installed-source identity
+test admits a qualified non-editable Git distribution shared through a base
+environment .pth; installation beneath the invoking interpreter's sys.prefix
+is not part of source-file identity. Git provenance, non-editability, actual
+imported encoder ownership and all legacy digest oracles remain required.
+Immutable dependency pins and package-byte qualification are unchanged;
+this does not qualify the failed B36 full-suite gate.
 Re-stamped 2026-09-30 (PQ #1762, `sol/source-domain-1762`): source-file
 provenance adds `prismaquant.source_tree.v2` beside the unchanged labelled
 `prismaquant.source_tree.v1` NUL transcript. v2 hashes its ASCII profile name
