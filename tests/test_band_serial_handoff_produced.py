@@ -419,10 +419,10 @@ def _consumer_executes(q, key):
     from prismabuild import client
     outcome = q.execute(claimed, timeout_s=120)
     assert outcome.get("returncode") == 0, outcome
-    q.finish(key, status="executed", detail=outcome)
+    ending = json.loads(q.finish(key, status="executed", detail=outcome).read_text())
     result = client.read_verified_action_result(
         q, key, published_unix=claimed["published_unix"],
-        attempt=claimed["attempts"], max_result_bytes=1024)
+        attempt=ending["attempts"], max_result_bytes=1024)
     assert client.bind_standard_capture_command(result["request"])
     assert result["payload"] == b""
 
