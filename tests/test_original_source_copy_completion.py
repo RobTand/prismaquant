@@ -370,3 +370,36 @@ def test_cuda_observation_without_original_copy_cannot_root_unregistered_complet
     assert not owner._original_copy_completions
     assert owner not in cc._FAILED_ORIGINAL_COPY_OWNERS
     owner.close()
+
+
+def test_same_generation_and_stream_preserve_success_before_failed_fence_recovery(
+        original_copy_spy, material):
+    from safetensors import safe_open
+
+    state = original_copy_spy
+    owner = state['owner']
+    path = owner.root / 'one.safetensors'
+    with owner.material_window([path]):
+        with owner.safe_open(safe_open, path, framework='pt') as reader:
+            native = reader.get_tensor('w')
+    # The real CPU native alias keeps one generation alive across both
+    # CPU-spied copy calls. Neither receipt is real CUDA qualification.
+    _layer(state)
+    first = owner.receipt()['copy_completions']
+    state['fault'] = 'sync'
+    with pytest.raises(RuntimeError, match='event sync failed') as failed:
+        _layer(state)
+    _clear_frames(failed.value)
+    second = owner.receipt()['copy_completions']
+    assert len(second) == len(first) + 1
+    assert second[:-1] == first
+    assert second[-2]['files'] == second[-1]['files']
+    assert second[-2]['stream_id'] == second[-1]['stream_id']
+    assert second[-2]['fence'] == 'cuda_event_synchronize'
+    assert second[-1]['fence'] == 'cuda_stream_synchronize_after_event_failure'
+    second[-2]['files'].clear()
+    assert owner.receipt()['copy_completions'][:-1] == first
+    assert owner.material_live_bytes == len(material['raws']['one.safetensors'])
+    del native
+    gc.collect()
+    assert owner.material_live_bytes == 0

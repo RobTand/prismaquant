@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Original copy receipts retain every observed completion** (#2154,
+  Refs #2148). A later completion or failure-drain on the same held file
+  generation and stream no longer overwrites an earlier successful witness.
+  Existing hardware fences, aliases, resource ownership and qualification
+  refusals remain unchanged; the history behavior control is CPU-spied only.
+
 - **Original-source authority intake is strict and nonactivating** (#2148,
   Refs #2008). The existing source owner joins independently bound
   publisher/producer/map/readset, original runtime, full calibration,

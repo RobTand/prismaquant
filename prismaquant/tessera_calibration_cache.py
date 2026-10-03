@@ -459,7 +459,7 @@ class CaptureSourceAuthentication:
                               publisher_revision=publisher_revision,
                               readset_sha256=readset_input['sha256'],
                               inputs_json=json.dumps(inputs, sort_keys=True, allow_nan=False),
-                              completed_copies={})
+                              completed_copies=[])
         try:
             # This bounded first lane checks the closed auxiliary bootstrap, not
             # just config/index. No model payload/header is read before it ends.
@@ -583,9 +583,7 @@ class CaptureSourceAuthentication:
         with self._lock:
             witness = self._original_copy_receipt(completion)
             if witness['fence'] is not None:
-                for name in witness['files']:
-                    rows = self._original['completed_copies'].setdefault(name, {})
-                    rows[(witness['files'][name], witness['stream_id'])] = witness
+                self._original['completed_copies'].append(witness)
             self._original_copy_completions.remove(completion)
             if not any(value.failed for value in self._original_copy_completions):
                 with _FAILED_ORIGINAL_COPY_LOCK:
@@ -1143,9 +1141,7 @@ class CaptureSourceAuthentication:
                     material_limit_bytes=self._original['limit'], deliveries=delivered,
                     pending_copy_completions=[self._original_copy_receipt(value)
                         for value in self._original_copy_completions],
-                    copy_completions=list({id(row): row
-                        for rows in self._original['completed_copies'].values()
-                        for row in rows.values()}.values()))
+                    copy_completions=list(self._original['completed_copies']))
                 # Nested lease/delivery rows are independent snapshots too.
                 return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
         if self.is_recording:

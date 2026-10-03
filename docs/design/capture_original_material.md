@@ -281,3 +281,10 @@ CUDA source tensor. All five original tensor identities remain exact. These
 controls establish neither full-draw H/prices nor complete capture, native
 wire/serving qualification, a source adoption or a changed production gate.
 
+
+The #2154 receipt correction retains every observed completed copy snapshot
+in the existing owner history. A later event/failure-drain completion on the
+same native stream and held file generation cannot replace the older successful
+initialized-file witness. These are actual completion snapshots, not minted
+receipt IDs or source qualification. CPU-spied history controls remain CPU-only.
+
