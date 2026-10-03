@@ -380,3 +380,20 @@ combined PB CPU/surface/compile check belongs after all source dependencies and
 the maintenance release. No mid-flight test/build/GPU execution, scientific
 capture, full-draw H/pricing, wire/kernel acceptance or serving admission is
 established by this source implementation.
+
+The #2154 receipt correction retains every observed completed copy snapshot
+in the existing owner history. A later event/failure-drain completion on the
+same native stream and held file generation cannot replace the older successful
+initialized-file witness. These are actual completion snapshots, not minted
+receipt IDs or source qualification. CPU-spied history controls remain CPU-only.
+
+The #2155 lifecycle correction publishes source retention/stream registration
+and pending-to-completed metadata/alias retirement atomically under the
+existing receipt lock. The actual Event/Stream hardware fence remains outside
+that lock, including explicit fatal recovery. During a failed-close drain,
+receipt inspection remains available while new material/copy consumers refuse;
+repeated failed drains retain all original aliases and credit. Legacy close
+keeps its original uninterrupted lock/exception behavior. No extra hardware
+query, wait, event, copy or release is added. Native-shaped CPU stream spies
+exercise deterministic registration and success/fallback transition windows;
+their synthetic stream identities are never CUDA qualification evidence.

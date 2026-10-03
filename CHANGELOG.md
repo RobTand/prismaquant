@@ -14,6 +14,17 @@
   original entry keeps full-N row0/probe7000/boundary6 and one Fisher operation,
   remains non-bandable and preserves every original CUDA/automatic refusal.
   No source, GPU, numerical, pricing, wire or serving admission follows.
+- **Original copy lifecycle snapshots are atomic** (#2155, Refs #2148).
+  Actual stream registration and pending-to-completed fence/alias retirement
+  share the existing source-owner receipt lock. Hardware fences and fatal
+  recovery drains remain outside it, with charge retained on failure and no
+  new event/query/wait/copy/release. Legacy close remains serialized unchanged.
+
+- **Original copy receipts retain every observed completion** (#2154,
+  Refs #2148). A later completion or failure-drain on the same held file
+  generation and stream no longer overwrites an earlier successful witness.
+  Existing hardware fences, aliases, resource ownership and qualification
+  refusals remain unchanged; the history behavior control is CPU-spied only.
 
 - **Original-source authority intake is strict and nonactivating** (#2148,
   Refs #2008). The existing source owner joins independently bound
