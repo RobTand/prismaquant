@@ -252,6 +252,8 @@ def test_actual_cas_publication_cannot_adopt_an_independently_rebound_artifact(
     """Real sealed action/CAS receipt bytes, not a stubbed result-reader echo."""
     from test_strict_reader_tier_enforcement import _pb
 
+    import subprocess
+
     sdk, _pool, _map = _pb()
     from prismabuild import core, movement_actions
 
@@ -268,6 +270,25 @@ def test_actual_cas_publication_cannot_adopt_an_independently_rebound_artifact(
     payload = sg.ORIGINAL_ARTIFACT_PUBLICATION_PREFIX + json.dumps(
         publication, sort_keys=True, separators=(',', ':'), allow_nan=False).encode() + b'\n'
     command = ['/bin/echo', node]
+    def git(*args):
+        return subprocess.run(['git', '-C', str(checkout), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+    # Same real Git/bundle/ingestion recipe as the selected-result owner
+    # fixture in test_pilot_verified_result_1293, not a partial descriptor.
+    git('init', '-q', '-b', 'master')
+    git('add', 'publication.py')
+    git('-c', 'user.name=CPU fixture', '-c', 'user.email=fixture@example.invalid',
+        'commit', '-q', '-m', 'foreign baseline source')
+    parent = git('rev-parse', 'HEAD')
+    (checkout / 'publication.py').write_text('# actual foreign CPU snapshot source\n')
+    git('add', 'publication.py')
+    git('-c', 'user.name=CPU fixture', '-c', 'user.email=fixture@example.invalid',
+        'commit', '-q', '-m', 'foreign selected source')
+    commit = git('rev-parse', 'HEAD')
+    bundle = tmp_path / 'actual-foreign-source.bundle'
+    git('bundle', 'create', str(bundle), '--all')
+    cas = core.PrismaBuildCAS(tmp_path / 'artifact-cas')
+    descriptor, _ = cas.ingest_input(bundle, input_id='pbrun.checkout-snapshot')
     action = core.seal_action({
         'schema': core.ACTION_SCHEMA_V2,
         'task': {'definition_id': 'tests/original-artifact-binding', 'definition_version': 'v1',
@@ -275,13 +296,13 @@ def test_actual_cas_publication_cannot_adopt_an_independently_rebound_artifact(
             'artifact_kind': 'generic', 'argv': movement_actions.standard_capture_argv(
                 command, 'result.txt', path_prefix='/opt/pb-tools'),
             'working_directory': '.', 'result_path': 'result.txt'},
-        'inputs': [], 'code_closure': core.build_code_closure(checkout, ['publication.py']),
-        'params': {'command': command, 'checkout_snapshot': {
-            'parent': '4d0a88e0057c7f01ff170fffb4744d0c5b5d29fe'}},
+        'inputs': [descriptor], 'code_closure': core.build_code_closure(checkout, ['publication.py']),
+        'params': {'command': command, 'cwd': '.', 'checkout_snapshot': {
+            'schema': 'prismaquant.prismabuild.pbrun_checkout_snapshot.v2',
+            'commit': commit, 'parent': parent, 'refs': {}, 'subdirectory': '.', 'input': descriptor}},
         'environment': {'variables': {'PATH': '/opt/pb-tools:/usr/bin:/bin'}, 'toolchain': {}},
         'execution_scope': {'portability': 'portable', 'platform_key': None, 'host_class': None},
     })
-    cas = core.PrismaBuildCAS(tmp_path / 'artifact-cas')
     cas.publish_action_request(action)
     output = tmp_path / 'actual-captured-payload.txt'
     output.write_bytes(payload)
