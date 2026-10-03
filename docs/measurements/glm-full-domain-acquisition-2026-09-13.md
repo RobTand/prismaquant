@@ -125,3 +125,34 @@ The 42 historical PACT gamut cells and native seven-rung subsets do not define
 the legal q256 domain. Missing native, quality, original-source CUDA and
 construction cells remain repair blockers; scalar screens, historical census
 restamps and the retained TP1 timing pilot cannot authorize production picks.
+
+## Explicit joint acquisition adapter (#2139)
+
+The existing command accepts `--cost-currency joint-aura` without scalar
+`--anchor-parts`. It calls the ordinary `require_run_currency` attestation and
+joint raw-row validator, then checks the exact v2 run/probe, cached rendered
+tensor, activation and per-unit source-weight bindings. Mixed/scalar-only
+tables, missing signed W/A/mixed samples and plausible misbound metadata refuse.
+Every selected joint measurement record is retained unchanged in the request.
+No scalar MSE-to-Fisher conversion or activation multiplier is performed.
+
+The current public writer provides byte estimates only for acquisition-bracket
+ranking, not measured-wire prices. `prices` remains null; the request cannot
+be an allocator payload, interpolation qualification, selected-assignment
+confirmation or production promotion. A wholly unmeasured family retains its
+legal domain and emits endpoint requests without invented joint rows.
+
+The shared shape adapter now retains producer-refused holes and chooses legal
+neighbors on both sides of table-width changes. Existing RD-hull brackets rank
+interior requests; their midpoint is projected to an unmeasured legal point
+inside the same bracket, with lower-q256 ties. Full-grid measurement is not a
+proposal prerequisite; every unknown legal rate remains visible. Exact shipped
+pick confirmation and held-out evaluation remain separate, and original-source
+CUDA/provider plus fresh-global diagnostic prerequisites are not bypassed.
+
+The actual adapter smoke exposed an existing BF16 footprint round-trip defect:
+the writer priced CHANNEL reach sigma, but its recorded footprint/reconstructed
+recipe discarded it, so revalidation differed by 23 bytes and refused the
+candidate. The shared recipe/footprint owners now retain window seed, window
+sigma and channel sigma rather than suppressing the mismatch or subtracting
+bytes. All size claims remain the public writer's; no native admission changes.
