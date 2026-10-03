@@ -134,6 +134,22 @@ byte/kernel/runtime, export and serving gates remain unchanged. This CPU
 policy does not establish attention H capture, native wire qualification,
 per-unit AURA costs or served quality; those remain #1842 acceptance work.
 
+Re-stamped 2026-10-03 (PQ #2148, Refs #2008, original authority intake):
+the existing `CaptureSourceAuthentication`/`source_generation` owners validate
+the closed independently bound original authority before material/profile/
+device/output work. Same source, runtime, full calibration, native PB claim,
+finite resources and actual issued artifact session must agree. An acyclic
+static-authority/base-plan/session/root-admission/final-manifest DAG avoids
+self-referential hashes; #2149's existing-owner read-only session reader is a
+declared integration dependency. Missing/partial actual full64 or independent
+root matched-source admission remains a production refusal. Existing CPU-only,
+direct-GPU and automatic capture gates are unchanged. Receipt extensions retain
+all observed native delivery generations, retired/current aliases and existing
+copy fences/pending debt; they create no provider/cache/registry or new CUDA
+synchronization. CPU metadata controls are not original GLM/CUDA/source/wire/
+pricing/serving qualification. See the
+[concrete original-material contract](design/capture_original_material.md#independently-bound-authority-intake--2026-10-03).
+
 Re-stamped 2026-10-02 (PQ #2102, Refs #1301, branch
 `sol/pq-expert-calibration-digests-20261002`, base `693a38f3ae34`): empirical
 expert checkpoint and CLI calibration digests share only the final exact-byte
