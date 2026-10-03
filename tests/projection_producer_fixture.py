@@ -38,7 +38,10 @@ def require_projection_producer(monkeypatch):
     declaration = json.loads(DECLARATION.read_text())
     assert declaration['schema'] == 'prismaquant.test_projection_producer.v1'
     interpreter = os.environ.get(PRODUCER_PYTHON_ENV) or declaration['interpreter']
-    probe = subprocess.run([interpreter, '-I', '-c', SOURCE_PROBE],
+    assert interpreter == declaration['interpreter'], 'selected producer path differs from sealed dependency'
+    # Probe the same inherited environment as the real CLI, not a sanitized
+    # interpreter whose import origin could differ from the subsequent request.
+    probe = subprocess.run([interpreter, '-c', SOURCE_PROBE],
                            check=True, capture_output=True, text=True)
     observed = json.loads(probe.stdout)
     for key in ('executable_sha256', 'module_sha256', 'package_payload_sha256'):

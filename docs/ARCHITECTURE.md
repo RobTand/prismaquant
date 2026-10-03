@@ -16372,6 +16372,10 @@ The declaration travels in PB's source snapshot, so a closed worker environment
 does not rely on inheriting an arbitrary ambient variable. Missing or drifted
 declared producers fail rather than hiding behind a consumer-package import skip.
 This scoped producer dependency is not the serving/dev pin or a full-suite result.
+Admission is intentionally DL-host-specific: published PB fences the primary
+interpreter, while its documented indirect-input rule uses the owning host tag.
+The sealed test declaration and pre-execution byte checks bind this secondary
+dependency; this is not a portable secondary-interpreter capability/claim fence.
 
 `prismaquant/tessera_expert_projection.py` is the only reader of Tessera's
 `tessera.expert_projection.v1` answer (`python -m tessera.producer_plan`,
