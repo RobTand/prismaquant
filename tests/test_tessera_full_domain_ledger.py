@@ -139,3 +139,97 @@ def test_stack_sample_measurements_count_as_measured():
     ledger = _ledger([_row("u", 960, source="tessera_campaign_measured_stack_sample")])
     entry = ledger["entries"]["u|" + FAMILY]
     assert entry["measured_q256"] == [960]
+
+
+@pytest.mark.parametrize("operation", [require_full_domain, missing_acquisition_work])
+@pytest.mark.parametrize("selection", [{"units": ["missing"]}, {"families": ["missing"]},
+                                      {"units": []}, {"families": []}])
+def test_absent_or_empty_selection_refuses(operation, selection):
+    with pytest.raises(FullDomainLedgerError, match="absent"):
+        operation(_ledger([_row("u", 960)]), **selection)
+
+
+def test_empty_ledger_is_not_complete():
+    with pytest.raises(FullDomainLedgerError, match="empty ledger"):
+        require_full_domain(_ledger([]))
+
+
+def test_census_retains_wholly_unmeasured_units_and_families():
+    ledger = build_full_domain_ledger(
+        [_row("u", 960)], families=[FAMILY, "TESSERA_BF16_K1"],
+        unit_shapes={"u": (256, 256), "fresh": (256, 256)})
+    assert len(ledger["entries"]) == 4
+    for key in ("fresh|" + FAMILY, "fresh|TESSERA_BF16_K1", "u|TESSERA_BF16_K1"):
+        entry = ledger["entries"][key]
+        assert entry["measured_q256"] == []
+        assert entry["missing_rate_count"] == entry["legal_rate_count"]
+        assert not entry["complete"]
+    with pytest.raises(FullDomainLedgerError, match="fresh"):
+        require_full_domain(ledger, units=["fresh"])
+
+
+def test_census_legality_uses_individual_shape(monkeypatch):
+    import prismaquant.tessera_full_domain_ledger as module
+    monkeypatch.setattr(module, "_cached_domain",
+                        lambda family, shapes: ((shapes[0][0],), {}))
+    monkeypatch.setattr(module, "_cached_transition_rates", lambda *args: ())
+    ledger = _ledger([], unit_shapes={"a": (256, 512), "b": (512, 256)})
+    assert ledger["entries"]["a|" + FAMILY]["legal_q256"] == [256]
+    assert ledger["entries"]["b|" + FAMILY]["legal_q256"] == [512]
+
+
+def test_cost_unit_outside_census_refuses():
+    with pytest.raises(FullDomainLedgerError, match="outside census"):
+        _ledger([_row("foreign", 960)], unit_shapes={"u": (256, 256)})
+
+
+def test_missing_cross_family_pair_refuses():
+    ledger = build_full_domain_ledger([_row("u", 960)],
+                                     families=[FAMILY, "TESSERA_BF16_K1"])
+    with pytest.raises(FullDomainLedgerError, match="pairs absent"):
+        require_full_domain(ledger)
+
+
+@pytest.mark.parametrize("roster", [{}, {"u": (0, 256)}, {"u": (True, 256)},
+                                    {"u": (256,)}, {"": (256, 256)}])
+def test_invalid_census_roster_refuses(roster):
+    with pytest.raises(FullDomainLedgerError, match="unit_shapes"):
+        _ledger([], unit_shapes=roster)
+
+
+def test_short_column_linear_retains_legal_rates_and_explicit_refusals():
+    ledger = _ledger([], unit_shapes={"kda": (8192, 128)})
+    entry = ledger["entries"]["kda|" + FAMILY]
+    assert entry["legal_rate_count"] == 897
+    assert len(entry["producer_refused_q256"]) == 896
+    assert entry["missing_rate_count"] == 897
+    assert "257" in entry["producer_refused_q256"]
+    assert 256 in entry["legal_q256"]
+    assert 257 not in entry["legal_q256"]
+    with pytest.raises(FullDomainLedgerError, match="outside the legal domain"):
+        _ledger([_row("kda", 257)], unit_shapes={"kda": (8192, 128)})
+
+
+@pytest.mark.parametrize("operation", [require_full_domain, missing_acquisition_work])
+def test_zero_producer_legal_domain_is_retained_but_never_complete(operation):
+    family = "TESSERA_E2M1_K2"
+    ledger = build_full_domain_ledger([], families=[family],
+                                     unit_shapes={"odd": (1, 32), "legal": (256, 256)})
+    key = "odd|" + family
+    entry = ledger["entries"][key]
+    assert entry["legal_q256"] == []
+    assert entry["legal_rate_count"] == 0
+    assert entry["producer_refused_q256"]
+    assert entry["missing_q256"] == {}
+    assert not entry["complete"]
+    assert key in ledger["incomplete_units"]
+    with pytest.raises(FullDomainLedgerError, match="no producer-legal rates.*odd"):
+        operation(ledger, units=["odd"])
+    with pytest.raises(FullDomainLedgerError, match="no producer-legal rates"):
+        operation(ledger)
+    # A structurally unsupported sibling does not erase a valid selection.
+    if operation is missing_acquisition_work:
+        assert operation(ledger, units=["legal"])
+    else:
+        with pytest.raises(FullDomainLedgerError, match="incomplete full-domain coverage"):
+            operation(ledger, units=["legal"])
