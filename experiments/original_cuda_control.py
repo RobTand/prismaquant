@@ -76,6 +76,37 @@ def collect(host,charts,after,before,out):
     (out/('netdata-'+host+'.json')).write_text(json.dumps(record,indent=2)+'\n')
     return dict(host=host,charts=len(series))
 
+def artifact_identity(path):
+    """Bind the exact regular artifact bytes, never a mutable path alone."""
+    path=Path(path)
+    fd=os.open(path,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW|os.O_NONBLOCK)
+    with os.fdopen(fd,'rb') as stream:
+        before=os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size<=0:
+            raise RuntimeError('published artifact is missing/empty/nonregular: '+str(path))
+        digest=hashlib.file_digest(stream,'sha256').hexdigest()
+        if (file_stat_signature(os.fstat(stream.fileno()))!=file_stat_signature(before)
+                or file_stat_signature(os.stat(path,follow_symlinks=False))!=file_stat_signature(before)):
+            raise RuntimeError('published artifact changed while binding: '+str(path))
+    return dict(path=str(path),bytes=before.st_size,sha256=digest)
+
+
+def publish_control_artifacts(node_id,out,profile_evidence):
+    """Make the selected stdout CAS result bind the actual node's sidecars."""
+    controls=list((out/'controls').glob('*.json'))
+    if len(controls)!=1:
+        raise RuntimeError('successful node requires exactly one actual control artifact')
+    paths=dict(control=controls[0],execution=out/'test-result.json',
+               action_result=out/'action-result.json',netdata_sparky=out/'netdata-sparky.json',
+               netdata_sparklina=out/'netdata-sparklina.json')
+    artifacts={role:artifact_identity(path) for role,path in paths.items()}
+    artifacts['torch_trace']=profile_evidence
+    publication=dict(schema='prismaquant.original_source_artifact_publication.v1',
+                     node_id=node_id,artifacts=artifacts)
+    print('ORIGINAL_SOURCE_ARTIFACTS '+json.dumps(publication,sort_keys=True,
+          separators=(',',':'),allow_nan=False),flush=True)
+
+
 
 def main():
     p=argparse.ArgumentParser()
@@ -154,16 +185,7 @@ def main():
         profile_errors=[]
         if not a.cpu_preflight:
             try:
-                fd=os.open(profile,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW|os.O_NONBLOCK)
-                with os.fdopen(fd,'rb') as trace:
-                    before=os.fstat(trace.fileno())
-                    if not stat.S_ISREG(before.st_mode) or before.st_size<=0:
-                        raise RuntimeError('granted Torch trace is missing/empty/nonregular')
-                    digest=hashlib.file_digest(trace,'sha256').hexdigest()
-                    if (file_stat_signature(os.fstat(trace.fileno()))!=file_stat_signature(before)
-                            or file_stat_signature(os.stat(profile,follow_symlinks=False))!=file_stat_signature(before)):
-                        raise RuntimeError('granted Torch trace changed while binding')
-                profile_evidence=dict(path=profile,bytes=before.st_size,sha256=digest)
+                profile_evidence=artifact_identity(profile)
             except BaseException as exc:
                 profile_errors.append(dict(path=profile,error=f'{type(exc).__name__}: {exc}'))
         if charts:
@@ -183,6 +205,8 @@ def main():
             actual_glm=False),indent=2)+'\n')
         if errors or profile_errors:
             raise RuntimeError('required raw Netdata/Torch trace evidence incomplete: '+repr(errors+profile_errors))
+        if code==0 and a.node_id:
+            publish_control_artifacts(a.node_id,a.out,profile_evidence)
     return code
 
 

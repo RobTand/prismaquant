@@ -175,6 +175,13 @@ is never shadowed by the application mount. A separately admitted bounded
 bytes and GPU profile events under those same bindings. It is an entry proof,
 not a source-lifetime or actual GLM qualification, and enables no production gate.
 
+Successful fixture nodes publish one canonical `ORIGINAL_SOURCE_ARTIFACTS` JSON
+line after the parent records the actual ending and binds its raw evidence. The
+selected stdout CAS result thereby binds SHA-256 and byte length for the actual
+control, counted execution, parent result, both host series and granted trace.
+Historical results without this publication remain unchanged and do not acquire
+the new selected-artifact binding merely because sidecars were later retained.
+
 This scope is the internal CPU context. The higher-level Stage A API now has an
 explicit dev-only [selected-row diagnostic seam](stage_a_selected_row_diagnostic.md)
 that accepts this existing owner and preserves the original CUDA refusal before
