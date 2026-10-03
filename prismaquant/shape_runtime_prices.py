@@ -530,7 +530,7 @@ def _launch_refusal(table: EligibilityTable, scope: ShapeTableScope, *, structur
                              scope.runtime_image_digest, scope.execution_mode)
     cells = [cell for cell in table.cells
              if cell.family == family and cell.regime == regime and cell.is_trellis
-             and rate in cell.rungs_q256
+             and cell.covers_rate(rate)
              and cell_matches_serving_context(cell, context, serving_source_sha256=None)]
     if not cells:
         return None, (f"no pinned lane cell covers {family} R{rate} {structure} in regime "

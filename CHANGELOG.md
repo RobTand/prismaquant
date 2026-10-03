@@ -18,6 +18,12 @@
   package containing Tessera #871. Export/serving pins and admission stay fixed.
   `TESSERA_PRODUCER_PYTHON` can select a separate installed producer without
   changing the pinned consumer/serving package; explicit `python=` overrides it.
+- Prepare Tessera lane-schema v11 readers without moving the live b40c93cb/v45
+  producer or serving pin. Window-rate rules and census-derived run tables are
+  validated once per family and retained separately from the census rungs.
+  Runtime, render, profile and shape-price lookups share their derived coverage;
+  legal-domain reports use the same parser. This is compatibility preparation,
+  not new native, compiled, TP2, quality, construction or release qualification.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
