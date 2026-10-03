@@ -18,7 +18,6 @@
   "hashlib:prismaquant/activation_fair_pricing.py::_rows_digest",
   "hashlib:prismaquant/allocator.py::main",
   "hashlib:prismaquant/autoscale.py::streamed_calibration_resources",
-  "hashlib:prismaquant/cluster_campaign.py::_file_sha256",
   "hashlib:prismaquant/cluster_campaign.py::_owner_token",
   "hashlib:prismaquant/cluster_campaign.py::_probe_stage_receipts",
   "hashlib:prismaquant/cluster_campaign.py::canonical_sha256",
@@ -29,7 +28,6 @@
   "hashlib:prismaquant/export_gguf.py::export_gguf",
   "hashlib:prismaquant/export_native_compressed.py::_export_resume_fingerprint",
   "hashlib:prismaquant/export_native_compressed.py::_write_shipcard._hash",
-  "hashlib:prismaquant/fisher_col_weights.py::_dataset_sha256",
   "hashlib:prismaquant/glm_kda_capture_kernel.py::AdmittedKdaKernel.__init__",
   "hashlib:prismaquant/glm_kda_capture_kernel.py::_qualification",
   "hashlib:prismaquant/glm_mtp_capture.py::publish_final_hidden",
@@ -601,10 +599,6 @@
    "prismaquant/schemas.py",
    "tools/dspark_memavailable_sampler.py",
    "tools/regenerate_joint_quanta.py"
-  ],
-  "_file_sha256": [
-   "prismaquant/cluster_campaign.py",
-   "tools/prismaquant_runtime_snapshot.py"
   ],
   "_finite": [
    "prismaquant/anchored_shape.py",
