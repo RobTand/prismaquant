@@ -26,6 +26,11 @@
   automatic-capture refusal. Shared issued-session validation composes with
   #2149 through the existing artifact owner; no new provider/cache/registry.
 
+- **Original quantum source intake refuses before mutable profile discovery**
+  (#2143). An explicitly qualified original material owner applies its existing
+  device predicate first and supplies the same owned config/profile to the
+  streaming builder. Legacy capture behavior and original CUDA/automatic-source
+  admission remain unchanged; no provider or GPU qualification is implied.
 - **PACT regression fixtures retain their declared synthetic standing after
   JSON receipt validation** (#2137). The shared constrained/hull/replay fixture
   now writes a JSON legacy digest-bound artifact rather than plain text. Real
