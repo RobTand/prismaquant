@@ -98,3 +98,87 @@ crash: it called a nonexistent `TesseraRateSurface.as_dict()`. A separate
 commit serializes the surface through its existing canonical identity. The
 pre-fix PB receipt `6574670092b2` reaches and records that AttributeError; the
 regression test then passes. No allocator objective or serving gate changed.
+
+## Census completeness repair (2026-10-02, #2132)
+
+The coverage ledger accepts `unit_shapes`, an explicit census mapping from
+Linear name to `(rows, columns)`. Supply it when auditing a model-wide request:
+the priced-row roster alone cannot reveal wholly unmeasured units or families.
+Each requested family retains every legal rate at that unit's actual shape.
+`producer_refused_q256` separately retains shape-illegal rates and their reasons;
+for a real KDA `(8192, 128)` E4M3 Linear, 897 rates remain legal and 896
+are explicitly refused rather than dropping the entire Linear or smoothing
+the odd-q256 quota holes. Priced rows at those refused rates still fail closed.
+Empty ledgers, absent selections and absent unit/family pairs now refuse
+instead of vacuously certifying complete coverage. `missing_acquisition_work`
+retains these missing cells in the existing v1 format. No missing cell receives
+a price, runtime admission, export qualification or quality certification.
+If the producer refuses every rate at a positive shape (for example arity-2
+E2M1 at `(1, 32)`), the ledger retains all refusal reasons but never marks the
+entry complete. Coverage and acquisition selections of such an entry refuse
+with `no producer-legal rates`; no fictional missing legal rate is invented.
+
+The near GLM milestone remains T8-only at the measured EXL3 serialized size.
+The final objective is an actual per-Linear T4/T8/T16 accuracy/size/prefill/decode
+frontier, not a uniform-format artifact or arbitrary weighted scalar default.
+The 42 historical PACT gamut cells and native seven-rung subsets do not define
+the legal q256 domain. Missing native, quality, original-source CUDA and
+construction cells remain repair blockers; scalar screens, historical census
+restamps and the retained TP1 timing pilot cannot authorize production picks.
+
+## Explicit joint acquisition adapter (#2139)
+
+The existing command accepts `--cost-currency joint-aura` without scalar
+`--anchor-parts`. It calls the ordinary `require_run_currency` attestation and
+joint raw-row validator, then checks the exact v2 run/probe, cached rendered
+tensor, activation and per-unit source-weight bindings. Mixed/scalar-only
+tables, missing signed W/A/mixed samples and plausible misbound metadata refuse.
+Every selected joint measurement record is retained unchanged in the request.
+No scalar MSE-to-Fisher conversion or activation multiplier is performed.
+
+The current public writer provides byte estimates only for acquisition-bracket
+ranking, not measured-wire prices. `prices` remains null; the request cannot
+be an allocator payload, interpolation qualification, selected-assignment
+confirmation or production promotion. A wholly unmeasured family retains its
+legal domain and emits endpoint requests without invented joint rows.
+
+The shared shape adapter now retains producer-refused holes and chooses legal
+neighbors on both sides of table-width changes. Existing RD-hull brackets rank
+interior requests; their midpoint is projected to an unmeasured legal point
+inside the same bracket, with lower-q256 ties. Full-grid measurement is not a
+proposal prerequisite; every unknown legal rate remains visible. Exact shipped
+pick confirmation and held-out evaluation remain separate, and original-source
+CUDA/provider plus fresh-global diagnostic prerequisites are not bypassed.
+
+The actual adapter smoke exposed an existing BF16 footprint round-trip defect:
+the writer priced CHANNEL reach sigma, but its recorded footprint/reconstructed
+recipe discarded it, so revalidation differed by 23 bytes and refused the
+candidate. The shared recipe/footprint owners now retain window seed, window
+sigma and channel sigma rather than suppressing the mismatch or subtracting
+bytes. All size claims remain the public writer's; no native admission changes.
+
+## Executing bounded joint requests (#2171)
+
+The existing anchor campaign accepts an explicit `--acquisition-request` and
+`--acquisition-request-sha256` pair. The request is the existing joint acquisition
+JSON, not an allocation, capture or export. Intake authenticates its actual cost
+pickle and revalidates ordinary raw-v2 joint currency, run/probe/source evidence
+and the complete legal domain. Duplicate, illegal, already measured, misbound or
+qualification-claiming proposals refuse before campaign input work.
+
+This explicit path requires research mode and one round, without a global rate
+band, exhaustive-grid mode, audit extras or partial expert-partition semantics.
+Both first-batch priming and round-one execution use the existing atomic groups
+and one exact requested-rate selector: group-member requests are unioned only
+within the actual shared legal grid. No rung is snapped, silently dropped or
+replaced by an endpoint/uniform anchor. Every actual member needs a bound source
+identity; the selected scope must be exactly the requested atomic expansion.
+Actual source bytes are checked before encoding, outside per-anchor failures.
+
+The output remains the normal source/H/recipe-bound scalar anchor journal and
+wire/render cache. These establish candidate bytes, not joint Fisher prices.
+Four-probe Stage B pricing, native prefill/decode context, selected assignment,
+immutable export and held-out quality/serving remain separate actual transitions.
+The original request keeps every deferred legal rate. This wiring does not adopt
+a provider, promote row-zero diagnostics to full-calibration H, move a public or
+private reader pin, or qualify any unsupported native cell.
