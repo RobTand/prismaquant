@@ -153,6 +153,15 @@ action may temporarily override only a fixture owner's device predicate; the
 test-only environment is never read by production code. That fixture action
 cannot qualify actual original GLM primals/cotangents or a complete provider.
 
+The fixture execution owner supervises the existing container adapter CLI as a
+child: its Docker `execvp` does not replace the owner that records the actual
+ending, exact granted Torch trace and both raw host telemetry windows. Application
+output, controls and temporary files use `/qualification`; runtime-owned `/run`
+is never shadowed by the application mount. A separately admitted bounded
+`--cuda-entry-preflight` exercises actual CUDA arithmetic, owner UID/GID, output
+bytes and GPU profile events under those same bindings. It is an entry proof,
+not a source-lifetime or actual GLM qualification, and enables no production gate.
+
 This scope is the internal CPU context. The higher-level Stage A API now has an
 explicit dev-only [selected-row diagnostic seam](stage_a_selected_row_diagnostic.md)
 that accepts this existing owner and preserves the original CUDA refusal before

@@ -84,9 +84,10 @@ def main():
     p.add_argument('--dependencies-sha256',required=True)
     p.add_argument('--node-id')
     p.add_argument('--cpu-preflight',action='store_true')
+    p.add_argument('--cuda-entry-preflight',action='store_true')
     a=p.parse_args()
-    if a.cpu_preflight == bool(a.node_id):
-        raise RuntimeError('exactly CPU preflight or one GPU control is required')
+    if sum((a.cpu_preflight,a.cuda_entry_preflight,bool(a.node_id)))!=1:
+        raise RuntimeError('exactly CPU preflight, CUDA entry proof or one GPU control is required')
     a.out.mkdir(parents=True,exist_ok=False)
     setup_start=time.time()
     charts={}
@@ -110,7 +111,8 @@ def main():
         if not a.cpu_preflight:
             if not profile or os.environ.get('CUDA_VISIBLE_DEVICES')=='':
                 raise RuntimeError('actual GPU scope/profile grant missing')
-            env['PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST']='1'
+            if not a.cuda_entry_preflight:
+                env['PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST']='1'
             env['PRISMABUILD_PROFILE_TORCH_OUT']='/profile/'+Path(profile).name
             mounts.append(dict(source=str(Path(profile).parent),target='/profile',readonly=False))
         (a.out/'tmp').mkdir()
@@ -119,7 +121,13 @@ def main():
         command=['python3','-P','/workspace/experiments/original_cuda_inner.py',
                  '--dependencies','/dependencies/'+a.dependencies.name,
                  '--dependencies-sha256',a.dependencies_sha256,'--out','/qualification']
-        command+=['--cpu-preflight'] if a.cpu_preflight else ['--node-id',a.node_id]
+        if a.cpu_preflight:
+            command+=['--cpu-preflight']
+        elif a.cuda_entry_preflight:
+            command+=['--cuda-entry-preflight','--expected-uid',str(os.getuid()),
+                      '--expected-gid',str(os.getgid())]
+        else:
+            command+=['--node-id',a.node_id]
     except BaseException as exc:
         (a.out/'action-result.json').write_text(json.dumps(dict(
             returncode=None,start_unix=setup_start,finish_unix=time.time(),

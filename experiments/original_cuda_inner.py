@@ -6,6 +6,58 @@ import os
 from pathlib import Path
 import sys
 import tarfile
+import gzip
+
+
+def cuda_entry_preflight(args, torch):
+    """Actual runtime entry/work/profile proof, never source-lifetime acceptance."""
+    profile=os.environ.get('PRISMABUILD_PROFILE_TORCH_OUT')
+    if (not profile or not torch.cuda.is_available()
+            or os.environ.get('PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST')=='1'):
+        raise RuntimeError('entry proof requires real CUDA/profile, not source-qualification override')
+    if (os.getuid(),os.getgid())!=(args.expected_uid,args.expected_gid):
+        raise RuntimeError('container entry UID/GID differs from declared owner')
+    if args.out!=Path('/qualification') or Path(os.environ.get('TMPDIR',''))!=args.out/'tmp':
+        raise RuntimeError('container entry output/temp binding differs')
+    if Path(profile).parent!=Path('/profile'):
+        raise RuntimeError('container entry profile binding differs')
+    properties=torch.cuda.get_device_properties(0)
+    torch.cuda.set_per_process_memory_fraction(min(1.0,1024**3/properties.total_memory),0)
+    with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CPU,
+                                           torch.profiler.ProfilerActivity.CUDA]) as profiler:
+        value=torch.arange(32,dtype=torch.float32,device='cuda:0')
+        result=value.square()+3
+        if value.device.type!='cuda' or result.device.type!='cuda':
+            raise RuntimeError('entry proof did not allocate/execute on CUDA')
+        torch.cuda.synchronize()
+        if not torch.equal(result.cpu(),torch.arange(32,dtype=torch.float32).square()+3):
+            raise RuntimeError('real CUDA entry work differs from independent CPU reference')
+    profiler.export_chrome_trace(profile)
+    opener=gzip.open if profile.endswith('.gz') else open
+    with opener(profile,'rt') as stream:
+        trace=json.load(stream)
+    events=trace.get('traceEvents',[])
+    gpu_events=sum(event.get('cat') in ('kernel','gpu_memcpy','gpu_memset') for event in events)
+    if not gpu_events:
+        raise RuntimeError('entry trace contains no actual GPU activity')
+    with open(profile,'rb') as stream:
+        profile_sha=hashlib.file_digest(stream,'sha256').hexdigest()
+    output=args.out/'entry-output.bin'
+    raw=b'original-cuda-entry-output-v1\n'
+    output.write_bytes(raw)
+    if output.read_bytes()!=raw:
+        raise RuntimeError('entry output mount does not preserve owner-written bytes')
+    record=dict(schema='prismaquant.original_cuda_container_entry.v1',passed=True,
+        uid=os.getuid(),gid=os.getgid(),device=str(value.device),gpu_events=gpu_events,
+        cuda_work_exact=True,profile_path=profile,profile_bytes=Path(profile).stat().st_size,
+        profile_sha256=profile_sha,output_sha256=hashlib.sha256(raw).hexdigest(),
+        output_path=str(output),source_lifetime_qualified=False,actual_glm=False,
+        automatic_capture_qualified=False,torch=str(torch.__version__),cuda=torch.version.cuda,
+        peak_cuda_allocated_bytes=torch.cuda.max_memory_allocated(0),
+        peak_cuda_reserved_bytes=torch.cuda.max_memory_reserved(0))
+    (args.out/'entry-proof.json').write_text(json.dumps(record,indent=2)+'\n')
+    print(json.dumps(record))
+    return 0
 
 
 def main():
@@ -15,9 +67,12 @@ def main():
     p.add_argument('--out',type=Path,required=True)
     p.add_argument('--node-id')
     p.add_argument('--cpu-preflight',action='store_true')
+    p.add_argument('--cuda-entry-preflight',action='store_true')
+    p.add_argument('--expected-uid',type=int)
+    p.add_argument('--expected-gid',type=int)
     a=p.parse_args()
-    if a.cpu_preflight == bool(a.node_id):
-        raise RuntimeError('exactly CPU preflight or one GPU control is required')
+    if sum((a.cpu_preflight,a.cuda_entry_preflight,bool(a.node_id)))!=1:
+        raise RuntimeError('exactly CPU preflight, CUDA entry proof or one GPU control is required')
     with a.dependencies.open('rb') as stream:
         if hashlib.file_digest(stream,'sha256').hexdigest()!=a.dependencies_sha256:
             raise RuntimeError('dependency artifact SHA256 differs')
@@ -40,6 +95,8 @@ def main():
         direct=json.loads(dist.read_text('direct_url.json') or '{}')
         if not Path(dist._path).resolve().is_relative_to(deps.resolve()) or direct.get('vcs_info',{}).get('commit_id')!=commit:
             raise RuntimeError('owned dependency resolution/provenance differs: '+name)
+    if a.cuda_entry_preflight:
+        return cuda_entry_preflight(a,torch)
     if a.cpu_preflight:
         if torch.cuda.is_available() or os.environ.get('PRISMAQUANT_ORIGINAL_CUDA_QUALIFICATION_TEST')=='1':
             raise RuntimeError('CPU prerequisite action unexpectedly has CUDA qualification')
