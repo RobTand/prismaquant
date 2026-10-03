@@ -18,6 +18,11 @@
   package containing Tessera #871. Export/serving pins and admission stay fixed.
   `TESSERA_PRODUCER_PYTHON` can select a separate installed producer without
   changing the pinned consumer/serving package; explicit `python=` overrides it.
+- **Native MoE source replay binds the geometry's original router bias** (#2144).
+  GLM's strict FP32 `correction_bias` identity is checked with the whole
+  expert-roster shape; LFM retains its existing `selection_bias` identity.
+  Independent source/runtime/calibration and exact tensor-byte checks remain
+  mandatory. This CPU protocol repair grants no GPU, capture or serving admission.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
