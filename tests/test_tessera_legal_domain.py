@@ -566,9 +566,26 @@ def test_the_provider_type_is_package_c_s_own_class():
     assert domain.RateDomain is population.RateDomain
 
 
+@pytest.fixture(scope="module")
+def public_domains():
+    """Derive each public result once; consumers own mutable payload dicts."""
+    results = {}
+
+    def get(family):
+        if family not in results:
+            # Both public entry points run independently, not from each other's
+            # stored answer. RateDomain and its tuple members are immutable.
+            results[family] = (domain.legal_rate_domain(family),
+                               domain.rate_domain_payload(family))
+        provided, payload = results[family]
+        return provided, dict(payload)
+
+    return get
+
+
 @pytest.mark.parametrize("family, count", [(E4, 1793), (BF, 3841)])
-def test_provider_returns_the_full_sorted_unique_domain(family, count):
-    provided = domain.legal_rate_domain(family)
+def test_provider_returns_the_full_sorted_unique_domain(family, count, public_domains):
+    provided, _payload = public_domains(family)
     assert provided.family == family
     assert len(provided.rates) == count
     assert tuple(sorted(set(provided.rates))) == provided.rates
@@ -595,14 +612,14 @@ def test_rate_domain_refuses_the_same_inputs_package_c_refuses(bad):
         domain.RateDomain(**bad)
 
 
-def test_rate_domain_refuses_a_payload_whose_arrays_arrived_as_lists():
+def test_rate_domain_refuses_a_payload_whose_arrays_arrived_as_lists(public_domains):
     """A JSON round trip hands back lists; an unequal domain is not a domain.
 
     ``rate_domain_payload`` produces tuples, so this only fires on a domain
     rebuilt from a document -- which is exactly where a silent inequality
     would be hardest to see.
     """
-    payload = dict(domain.rate_domain_payload(E4))
+    _provided, payload = public_domains(E4)
     payload["rates"] = list(payload["rates"])
     with pytest.raises(population.PopulationSelectionError):
         domain.RateDomain(**payload)
@@ -657,22 +674,22 @@ def test_the_schedule_signature_is_what_makes_a_256_multiple_a_transition(
         assert (len(distinct) == 1) is uniform, (rate, distinct)
 
 
-def test_boundary_witnesses_take_the_previous_legal_neighbour():
+def test_boundary_witnesses_take_the_previous_legal_neighbour(public_domains):
     """Not ``rate - 1``: the previous rate in the sorted legal domain."""
-    provided = domain.legal_rate_domain(BF)
+    provided, _payload = public_domains(BF)
     witnesses = set(domain.boundary_witnesses(BF, provided.rates))
     assert {provided.rates[0], provided.rates[-1]} <= witnesses
     assert {3584, 3585, 3840, 3841} <= witnesses
 
 
-def test_rate_domain_payload_constructs_the_dataclass():
-    payload = domain.rate_domain_payload(E4)
+def test_rate_domain_payload_constructs_the_dataclass(public_domains):
+    provided, payload = public_domains(E4)
     assert set(payload) == {"family", "rates", "transition_rates"}
     rebuilt = domain.RateDomain(**payload)
-    assert rebuilt == domain.legal_rate_domain(E4)
+    assert rebuilt == provided
 
 
-def test_payload_satisfies_package_c():
+def test_payload_satisfies_package_c(public_domains):
     """The real compatibility check: both packages are on one branch.
 
     The ``importorskip`` this used to open with dated from when work package C
@@ -680,8 +697,9 @@ def test_payload_satisfies_package_c():
     break, and it is now a plain import at the top of the file.
     """
     for family in domain.PRIMARY_FAMILIES:
-        theirs = population.RateDomain(**domain.rate_domain_payload(family))
-        assert theirs.rates == domain.legal_rate_domain(family).rates
+        provided, payload = public_domains(family)
+        theirs = population.RateDomain(**payload)
+        assert theirs.rates == provided.rates
         mandatory = population.mandatory_rates(theirs)
         assert {3584, 3585} <= set(mandatory) or family == E4
 
