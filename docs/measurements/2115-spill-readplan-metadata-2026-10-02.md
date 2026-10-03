@@ -20,6 +20,25 @@ preserved. Pipeline callers and sealed phases do not select this option.
 There are no changes to IO-engine scheduling, source-layer lifetime,
 produced-output/spool writers, numerics, formats or serving gates.
 
+## Successor integration qualification — 2026-10-03
+
+PR #2157 recovers frozen #2120 (`5a931f3ba4fc386ef417afee5851dc63909d4058`) onto main `736fd56`, preserving both additive architecture sections. Qualified implementation source: `de278b3faab6741964bb6802c5e9bb92a0c95d24`. The measurements below remain historical; no benchmark was rerun.
+
+Published PB on dl380g10 ran the original five contract files plus the existing one-pass spill suite: **101 passed, 23 skipped, zero failed**. The original mandatory selection remains **75 passed, zero skipped**. The extra one-pass suite has 26 passes and 23 explicit skips for unavailable statx direct-I/O discovery on an 8 KiB grid. These are not GPU or broader direct-I/O qualification. Metadata/integrity tests retain real O_DIRECT calls with their existing 4 KiB discovery fixture. Every outcome reconciles with no missing files or phases. Current actions:
+
+- Metadata (20): `90c9f4fc6b8c3c66631450ca19452d233455f04d401b55a197e2d6a838819f4c`.
+- Integrity (15): `eff347b2444a6fb6bfdf5817305125438152d0dfd8f9877a8dec56ec6aa4a83a`.
+- Packed firing records (21): `f6988690a6fa1b5380f4d53c5f8b1b913715619a2de4044f123067df27c9c270`.
+- One-pass integration (26 passed / 23 skipped): `8af8b04f6179e8eb5b7cd7026a60dfe006d618b6cf22cc7c6ca417992cb9dd63`.
+- Architecture (13): `e2b92b2b0cfb463a7f8e17beab0cf153f364a01f321d24c045e12ab46a59fde5`.
+- Staleness (6): `d0ae10f5b529c5a399f7f7f78f5b024c55b212a5f338e2b6a2128877c5e2f9f2`.
+
+The existing `/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python` passed unchanged dependency guards. An initial six-file submission using the B36 interpreter refused before pytest (installed PrismaBuild `dc4803`, expected `95a590`); those endings are not counted as tests. No pin or worker environment was changed.
+
+Real API smoke and four-module compilation action `c1305a1e887a3653aa4aa7daa40a8ca02f14a27eae9d4996635e81a08225c0dd` completed on dl380g10. Both constructor modes captured and replayed three probes / two invocations with threaded scatter O_DIRECT reads, asserted six ordered input/gradient observations, verified 768 checksum bytes per mode and closed their streams. Each captured layout was planned through both representations and its exact ordered fields/last-use digest matched. The CLI module `--help` executed without invoking profiling. Separate CPU allocations legitimately differ in pointer residue; earlier smoke attempts `4bdbd480` and `43bbea63` incorrectly compared digests across those layouts. Initial `40bb9050` had a command-quoting SyntaxError. These unsuccessful attempts are retained; the implementation was not changed to suppress them.
+
+Smoke CAS payload `22ad8bfd521a22bbf7061e8d605e824b701bb81d8a768592590a92406ce9ddd8` (1,373 bytes), receipt `2793b460d3e70e20b23b081be722125756318269d86fd902b62b3a557fca1737`, source bundle `335b8c78e792b1b4b6e4ee8d35182374618fb7d8ab41239ca99df3b5589bad9a`. This is source-bound CPU compatibility only. Required composed `pb-tests` remains a separate merge gate; defaults remain off and #1086 remains open.
+
 ## Measured memory and CPU tradeoff
 
 Workload: 867 synthetic targets, 512 invocations, four probes, 443,904 packed
