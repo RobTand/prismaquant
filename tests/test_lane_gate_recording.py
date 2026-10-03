@@ -194,12 +194,8 @@ def test_the_tessera_arm_names_the_supported_exporter_and_a_campaign_roster():
     for tool in spec.producer_tools:
         assert tool.repo_env == "TESSERA_REPO"
         assert tool.stability == "supported"
-    assert {t.path for t in spec.campaign_tools} == {
-        "experiments/tessera_producer_plan.py"}
-    for tool in spec.campaign_tools:
-        assert tool.repo_env == "TESSERA_REPO"
-        assert tool.stability == "unsupported_experiments"
-        assert "183" in tool.tracking_issue
+    assert {(t.module, t.output_schema) for t in spec.campaign_tools} == {
+        ("tessera.producer_plan", "tessera.expert_projection.v1")}
     from prismaquant.tessera_export_lane import unsupported_producer_tool_lines
     assert unsupported_producer_tool_lines(spec) == []
     # and the driver calls neither unsupported script and no private roster
@@ -229,13 +225,6 @@ def test_the_preflight_refuses_a_declared_tool_that_is_not_there(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# fixture\n")
     assert len(require_producer_tools(env={"TESSERA_REPO": str(tmp_path)})) == 1
-    # the campaign roster resolves through the same env var, on its own gate
-    from prismaquant.tessera_expert_projection import producer_plan_tool
-    campaign = load_lane_spec("tessera").campaign_tools[0]
-    campaign_path = tmp_path / campaign.path
-    campaign_path.parent.mkdir(parents=True, exist_ok=True)
-    campaign_path.write_text("# fixture\n")
-    assert producer_plan_tool(env={"TESSERA_REPO": str(tmp_path)}) == campaign_path
 
 
 # ---------------------------------------------------------------------------
@@ -446,9 +435,7 @@ def test_the_driver_exports_the_env_var_each_declaration_names(lane):
     naming a different repo env var is covered.
     """
     spec = lane_spec_for_container(lane)
-    # #1587: the campaign roster (``campaign_tools``) resolves through the
-    # same env vars, so its declarations carry the same export property.
-    for tool in (*spec.producer_tools, *getattr(spec, "campaign_tools", ())):
+    for tool in spec.producer_tools:
         assert f"export {tool.repo_env}" in DRIVER, (
             f"{lane}: {tool.repo_env} is read by the preflight but not "
             "exported by the driver")

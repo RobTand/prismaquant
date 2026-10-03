@@ -16356,10 +16356,32 @@ Gate: `tests/test_tessera_expert_projection.py` (pre-fix:
 
 Re-stamped (2026-09-05, `claude/pq-183-packed-bridge`) for **the producer's
 expert projection, read in one place** (§4.10, §9.4; PrismaQuant #183).
+The projection requires a Tessera producer package containing Tessera #871;
+missing modules refuse during the producer CLI preflight before packed capture.
+Interpreter selection is explicit `python=` first, then `TESSERA_PRODUCER_PYTHON`,
+then the caller's interpreter. A newer public producer can therefore run beside
+an unchanged pinned serving/consumer package; the two interpreter roles are not
+interchangeable. This does not install a package, move an export/serving pin,
+requalify a cell, or activate the HELD #1549 split. Export keeps its exact-pin gates.
+The CPU test dependency is declared separately in
+`tests/projection_producer_environment.json`: named external executable and
+digest, landed producer commit/archive, complete installed package-code digest,
+and the public output schema. `projection_producer_fixture` authenticates those
+installed bytes before the ordinary campaign/MTP controls select the interpreter.
+The declaration travels in PB's source snapshot, so a closed worker environment
+does not rely on inheriting an arbitrary ambient variable. Missing or drifted
+declared producers fail rather than hiding behind a consumer-package import skip.
+This scoped producer dependency is not the serving/dev pin or a full-suite result.
+Admission is intentionally DL-host-specific: published PB fences the primary
+interpreter, while its documented indirect-input rule uses the owning host tag.
+The sealed test declaration and pre-execution byte checks bind this secondary
+dependency; this is not a portable secondary-interpreter capability/claim fence.
+
 `prismaquant/tessera_expert_projection.py` is the only reader of Tessera's
-`tessera.expert_projection.v1` answer (`experiments/tessera_producer_plan.py`,
-now the third declared `producer_tools` entry in `lane_specs/tessera.json`,
-located through `TESSERA_REPO` like the translator and the exporter). It binds
+`tessera.expert_projection.v1` answer (`python -m tessera.producer_plan`,
+declared as a public installed-package module plus output schema in the
+lane's `campaign_tools` roster). No `TESSERA_REPO` checkout resolution or
+safe-path relaxation is used for this projection request (Refs #2128). It binds
 the producer's per-stack unit records to the profile-declared per-expert units
 exactly -- schema, `unpacked_per_expert` layout, whole-tensor selector, source
 tensor in the hashed roster, `[rows, cols]` geometry, full expert coverage --
@@ -23287,7 +23309,7 @@ Two properties make the numbers comparable with the rest of the menu:
   the stride's leftovers are recorded as omitted. After the menus exist the
   campaign asks the producer over every in-scope stack in each nominal-plan
   attempt (`_project_expert_population`:
-  `experiments/tessera_producer_plan.py`, never a subprocess per stack because
+  `python -m tessera.producer_plan`, never a subprocess per stack because
   the producer hashes the whole checkpoint), binds the
   answer exactly to the profile-declared units, reads each unit's source
   tensor from the shard the producer hashed and refuses, by name, a live view
