@@ -109,3 +109,11 @@ Empty ledgers, absent selections and absent unit/family pairs now refuse
 instead of vacuously certifying complete coverage. `missing_acquisition_work`
 retains these missing cells in the existing v1 format. No missing cell receives
 a price, runtime admission, export qualification or quality certification.
+
+The near GLM milestone remains T8-only at the measured EXL3 serialized size.
+The final objective is an actual per-Linear T4/T8/T16 accuracy/size/prefill/decode
+frontier, not a uniform-format artifact or arbitrary weighted scalar default.
+The 42 historical PACT gamut cells and native seven-rung subsets do not define
+the legal q256 domain. Missing native, quality, original-source CUDA and
+construction cells remain repair blockers; scalar screens, historical census
+restamps and the retained TP1 timing pilot cannot authorize production picks.
