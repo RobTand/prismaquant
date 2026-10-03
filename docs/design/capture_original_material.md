@@ -175,10 +175,14 @@ is never shadowed by the application mount. A separately admitted bounded
 bytes and GPU profile events under those same bindings. It is an entry proof,
 not a source-lifetime or actual GLM qualification, and enables no production gate.
 
-Successful fixture nodes publish one canonical `ORIGINAL_SOURCE_ARTIFACTS` JSON
-line after the parent records the actual ending and binds its raw evidence. The
-selected stdout CAS result thereby binds SHA-256 and byte length for the actual
-control, counted execution, parent result, both host series and granted trace.
+Successful fixture nodes use the exact launch-owned SDK4 helper and an explicitly
+sealed `--cas-root` to retain all six actual artifacts through PB's existing
+immutable input owner. The original granted trace is checked before retention;
+the parent ending and publication name the same durable trace bytes, whose digest
+also matches PB's retained profile. One canonical `ORIGINAL_SOURCE_ARTIFACTS`
+line binds the actual control, counted execution, complete parent result, both
+host series and trace SHA-256/lengths in the selected stdout CAS result. No local
+checkout path or private alias is needed by a later cross-host consumer.
 Historical results without this publication remain unchanged and do not acquire
 the new selected-artifact binding merely because sidecars were later retained.
 

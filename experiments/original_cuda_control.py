@@ -91,7 +91,37 @@ def artifact_identity(path):
     return dict(path=str(path),bytes=before.st_size,sha256=digest)
 
 
-def publish_control_artifacts(node_id,out,profile_evidence):
+def artifact_cas(root):
+    """Use the actual launch-owned SDK4 generation and explicitly sealed CAS."""
+    if root is None:
+        raise RuntimeError('actual control publication requires an explicit sealed CAS root')
+    from tools.tessera_campaign_container import reader_context_environment
+    context,_=reader_context_environment({},os.environ)
+    if not context:
+        raise RuntimeError('actual control publication requires the launch-owned reader context')
+    source=Path(context['PRISMABUILD_READER_HELPER_ROOT'])/'src'
+    sys.path.insert(0,str(source))
+    from prismabuild import client, core
+    if client.SDK_VERSION!=4:
+        raise RuntimeError('actual artifact publication requires the qualified SDK4 helper')
+    if any(not getattr(module,'__file__',None)
+           or not Path(module.__file__).resolve().is_relative_to(source)
+           for name,module in sys.modules.items()
+           if name=='prismabuild' or name.startswith('prismabuild.')):
+        raise RuntimeError('artifact publication imported a mixed or foreign helper generation')
+    return core.PrismaBuildCAS(root)
+
+
+def retain_artifact(cas,role,path,identity=None):
+    """Retain real bytes through PB's existing immutable input owner."""
+    identity=artifact_identity(path) if identity is None else identity
+    entry,_=cas.ingest_input(path,input_id='original-source-artifact.'+role,
+        expected_sha256=identity['sha256'],expected_bytes=identity['bytes'])
+    durable=cas.input_path(entry)
+    return dict(path=str(durable),sha256=entry['sha256'],bytes=entry['bytes'])
+
+
+def publish_control_artifacts(node_id,out,profile_evidence,cas):
     """Make the selected stdout CAS result bind the actual node's sidecars."""
     controls=list((out/'controls').glob('*.json'))
     if len(controls)!=1:
@@ -99,7 +129,7 @@ def publish_control_artifacts(node_id,out,profile_evidence):
     paths=dict(control=controls[0],execution=out/'test-result.json',
                action_result=out/'action-result.json',netdata_sparky=out/'netdata-sparky.json',
                netdata_sparklina=out/'netdata-sparklina.json')
-    artifacts={role:artifact_identity(path) for role,path in paths.items()}
+    artifacts={role:retain_artifact(cas,role,path) for role,path in paths.items()}
     artifacts['torch_trace']=profile_evidence
     publication=dict(schema='prismaquant.original_source_artifact_publication.v1',
                      node_id=node_id,artifacts=artifacts)
@@ -116,6 +146,7 @@ def main():
     p.add_argument('--node-id')
     p.add_argument('--cpu-preflight',action='store_true')
     p.add_argument('--cuda-entry-preflight',action='store_true')
+    p.add_argument('--cas-root',type=Path)
     a=p.parse_args()
     if sum((a.cpu_preflight,a.cuda_entry_preflight,bool(a.node_id)))!=1:
         raise RuntimeError('exactly CPU preflight, CUDA entry proof or one GPU control is required')
@@ -123,6 +154,7 @@ def main():
     setup_start=time.time()
     charts={}
     try:
+        cas=artifact_cas(a.cas_root) if a.node_id else None
         if not a.cpu_preflight:
             for host in ('sparky','sparklina'):
                 selected={key:value for key,value in netdata(host,'charts')['charts'].items()
@@ -186,6 +218,8 @@ def main():
         if not a.cpu_preflight:
             try:
                 profile_evidence=artifact_identity(profile)
+                if code==0 and a.node_id:
+                    profile_evidence=retain_artifact(cas,'torch_trace',profile,profile_evidence)
             except BaseException as exc:
                 profile_errors.append(dict(path=profile,error=f'{type(exc).__name__}: {exc}'))
         if charts:
@@ -206,7 +240,7 @@ def main():
         if errors or profile_errors:
             raise RuntimeError('required raw Netdata/Torch trace evidence incomplete: '+repr(errors+profile_errors))
         if code==0 and a.node_id:
-            publish_control_artifacts(a.node_id,a.out,profile_evidence)
+            publish_control_artifacts(a.node_id,a.out,profile_evidence,cas)
     return code
 
 
