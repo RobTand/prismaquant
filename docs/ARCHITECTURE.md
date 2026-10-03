@@ -1,5 +1,29 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-02 (Refs #1589, root-approved comparison strengthening):
+the existing uniform-control contract loop additionally compares a new
+candidate's `measurement_fidelity`, `calibration_contract_sha256` and
+`teacher_evidence`. The control must carry each present candidate field at
+exact strict-JSON equality; absence, nonfinite values and typed differences
+refuse. Legacy candidates without these optional fields retain their original
+comparison. No corpus hash is repurposed and no new validator, format, pin,
+default or control override is introduced.
+
+Re-stamped 2026-10-02 (Refs #1589): the existing sealed-panel TR3 scorer can
+optionally publish `--gold-record-out` after a new complete measured panel.
+It records its actual all-position, full-vocabulary FP64 method, authenticated
+panel/teacher calibration context, clean source closure (including the
+fidelity helper), canonical shipcard model identity and observed no-spec
+execution. Existing digest-cache and entry/exit identity/engine fences remain
+the owners; no whole-weight rehash or parallel cache is added. The actual
+self-manifest requires a live engine descendant for this optional output and
+binds the model identity in its runtime context. The producer uses the existing
+slot constructor and atomic JSON writer. Raw retained results are not upgraded;
+qualification-only runs, reused output paths and failed fences cannot publish
+a gold record. Existing offline receipt ingestion consumes the producer record
+without changing the artifact or inventing a canonical manifest. This closes
+no independent PPL, compiled, census, control, quality or served-SLO gate.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
@@ -2187,10 +2211,17 @@ changes.
 
 ## Offline release receipt ingestion (PQ #1487)
 
-The Tessera lane names its existing external `uniform_control.py verify` and
+The Tessera lane names its installed `python -m tessera.uniform_control verify` and
 `shipcard_cli fill-control` runner, closing the already required byte-matched
 control slot. The control family, integer-bit rule and byte slack are declared
 before measurement; uniform A4/A8 labels alone do not establish a byte match.
+The public producer CLI (Tessera #886, PrismaQuant #2168) reads its checkpoint
+through Tessera's own exporter classifier and emits `tessera.uniform_control.v1`;
+the gate no longer needs a sibling Tessera experiment checkout. An explicit
+`TESSERA_PRODUCER_PYTHON` may select a separately installed producer, leaving
+the consumer/serving interpreter and immutable runtime pins untouched. Unserved,
+unmatched, stale or failed control evidence remains a shipping refusal; packaging
+the CLI neither supplies served KL nor changes any gate/default/slack rule.
 
 `python -m prismaquant.release_receipts` is a dry-by-default, offline adapter.
 Producer slot records retain their exact artifact/provenance fields. U4's
@@ -2199,9 +2230,11 @@ the existing trace constructor; body-only verdicts never substitute. All
 proposed records pass the unchanged verifier (including build/identity checks)
 before `--apply` uses the existing slot writer. Final verification still lists
 every missing slot. No serve, measurement, upload or manifest fabrication runs.
-Raw TR3 output is not gold-slot-shaped and lacks serialized shipcard identity
-and speculative-decoding observation; unsupported output remains a refusal,
-not an inferred pass. PPL, graph, ship-gate, census and matched-byte control
+Legacy raw TR3 output is not gold-slot-shaped and lacks serialized shipcard
+identity and speculative-decoding observation; unsupported output remains a
+refusal, not an inferred pass. A newly measured TR3 run can explicitly publish
+an identity-bound `gold.kl.json` via `--gold-record-out`, for the existing
+`--records-dir` input. PPL, graph, ship-gate, census and matched-byte control
 measurements must come from their existing producers. See
 `docs/operations/release_receipts.md` for inputs and failure semantics.
 

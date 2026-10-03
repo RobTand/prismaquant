@@ -31,6 +31,7 @@ from prismaquant.shipcard import (
     ROUTE_SWEEP_SLOT,
     UNIFORM_CONTROL_METRIC_KEYS,
     UNIFORM_CONTROL_SLOT,
+    _strict_json_object,
     _verify_gold_record,
     assert_weight_stat_attestation,
     compute_model_sha,
@@ -282,7 +283,15 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
     card = load_shipcard(args.shipcard)
     model_dir = args.model_dir or str(Path(args.shipcard).resolve().parent)
     block = json.loads(Path(args.control_block).read_text())
-    payload = json.loads(Path(args.control_record).read_text())
+    raw = Path(args.control_record).read_bytes()
+    payload = json.loads(raw)
+    producer_record = "slot" in payload or "measurement_schema" in payload
+    if producer_record:
+        payload = dict(_strict_json_object(raw, where="control producer record"))
+        if (payload.get("slot") != "gold.kl"
+                or payload.get("measurement_schema") != "prismaquant.glm_tr3_gold_record.v1"):
+            print("[shipcard] REFUSED: unsupported control producer record schema", file=sys.stderr)
+            return 2
 
     verdict = (block.get("verdict") or {}) if isinstance(block, dict) else {}
     if not verdict.get("measured") and not args.allow_unserved:
@@ -290,7 +299,7 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
             f"[shipcard] REFUSED: {args.control_block} carries an UNSERVED "
             "verdict — the control was built and priced but neither arm was "
             "served. A built control is not a passed gate. Re-run Tessera's "
-            "`experiments/uniform_control.py verify` with both served KLs, or "
+            "`python -m tessera.uniform_control verify` with both served KLs, or "
             "pass --allow-unserved to record the absence (verify will still "
             "refuse).",
             file=sys.stderr)
@@ -298,7 +307,7 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
 
     control_model_dir = args.control_model_dir
     if control_model_dir is None:
-        candidate = payload.get("model")
+        candidate = payload.get("measured_model") if producer_record else payload.get("model")
         if candidate and Path(str(candidate)).is_dir():
             control_model_dir = str(candidate)
     if control_model_dir is None:
@@ -307,17 +316,31 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
               "--control-model-dir", file=sys.stderr)
         return 2
 
-    control_arm = {
-        "tool": args.tool or f"record:{Path(args.control_record).name}",
-        "model_sha": compute_model_sha(control_model_dir),
-        "git_commit": (payload.get("git_commit")
-                       or (payload.get("git") or {}).get("commit")),
-        "serve_fingerprint": payload.get("serve_fingerprint"),
-        "spec_decode_detected": payload.get("spec_decode_detected"),
-        "metrics": {k: payload[k] for k in CARRIED_METRIC_KEYS if k in payload},
-        "measured_model": payload.get("model"),
-        "record_path": str(Path(args.control_record).resolve()),
-    }
+    if producer_record:
+        if payload.get("model_sha") != compute_model_sha(control_model_dir):
+            print("[shipcard] REFUSED: control producer record artifact identity differs",
+                  file=sys.stderr)
+            return 2
+        problems = _verify_gold_record("gold.kl", payload, model_dir=control_model_dir,
+                                       require_current_artifact_path=False)
+        if payload.get("passed") is not True or payload.get("spec_decode_detected") is not False \
+                or problems:
+            print("[shipcard] REFUSED: control producer record did not replay as gold",
+                  file=sys.stderr)
+            return 2
+        control_arm = payload
+    else:
+        control_arm = {
+            "tool": args.tool or f"record:{Path(args.control_record).name}",
+            "model_sha": compute_model_sha(control_model_dir),
+            "git_commit": (payload.get("git_commit")
+                           or (payload.get("git") or {}).get("commit")),
+            "serve_fingerprint": payload.get("serve_fingerprint"),
+            "spec_decode_detected": payload.get("spec_decode_detected"),
+            "metrics": {k: payload[k] for k in CARRIED_METRIC_KEYS if k in payload},
+            "measured_model": payload.get("model"),
+            "record_path": str(Path(args.control_record).resolve()),
+        }
     record = make_uniform_control_record(
         tool=args.tool or f"uniform_control:{Path(args.control_block).name}",
         model_sha=compute_model_sha(model_dir),
@@ -524,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
     p_control.add_argument(
         "--control-block", required=True,
         help="JSON from tessera.control.control_block() / Tessera's "
-             "experiments/uniform_control.py verify")
+             "python -m tessera.uniform_control verify")
     p_control.add_argument(
         "--control-record", required=True,
         help="the CONTROL checkpoint's gold KL result JSON, written by the "
