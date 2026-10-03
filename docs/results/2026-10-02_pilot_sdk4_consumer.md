@@ -140,3 +140,55 @@ Architecture/docs checks passed 19 cases again in `sdk4-docs-final.json`.
 The source ledger retains all 24 action observations and source variants;
 current-file comparisons were refreshed after this follow-up. The final
 source-package hash and compile/admission byte matches are recorded above.
+
+
+## Current-main composition and production Gateway smoke
+
+Continuation composes current main `736fd56aa68` without duplicating the existing
+SDK4 implementation or producer prerequisite. Merge commit
+`63e8ebda5677c7720413db6cd7f1b53d6e656a77` preserves both additive architecture
+sections. Source commit `7a7f1bdc31de9b503944186506035da4180eb5ab` adds five
+production `Gateway` dry-run cases. The sealed SDK4 root resolver, public result
+reader and capture binder are unmodified; only the queue owner's default points
+to the private real CAS/queue fixture. Matching evidence emits three receipt
+stamps; foreign source, refs, wrapper and attempt refuse without dispatch state
+or fleet publication. Producer telemetry and source-review relations remain
+controlled CPU doubles, not a genuine GPU pilot. No pins, defaults or runtime
+activation changed in this continuation.
+
+Fresh PB results on dl380g10, SDK4 interpreter and d028 runtime as above:
+
+| Action | Outcome | Receipt SHA-256 |
+| --- | --- | --- |
+| `545407d96c266541ba49f6a8c865307dd915a9ffb01e3bd71b62e9c18611502d` | 5 passed, 0 skipped, 11 deselected | `e4299f2224bdcccd287fce3a46d39df13a42cf6be312231a613c6c60dd99a692` |
+| `0e7ced75b3a4dd045e8a87b581f15c4fce17ed29c6b795849ac3e5048204a577` | 13 architecture passed, 0 skipped | `6d484fe840d289e9940b04ed59bc5a35eb2203d7c033509b0008a02658c394a1` |
+| `a62b788119dd31d4a2709e47feb384e5a58912157f2e125b96648bb62f3abce2` | 6 docs passed, 0 skipped | `1445a5db16cf1fd1246e7c77210aed3a8f14fd1774dc1b77f9b360e2b49850f0` |
+| `354f70d27e216809bd029e6e37d00b7b3d8cf2187cd46705bd5dd0b29a121d4e` | targeted test compile rc 0 | `60908b06d34c3da3eb90fe820478bc2628f2abd5f2201eb40f122c6e2d0bf398` |
+
+All four actions are terminal executed/rc 0. Actual logs and CAS payloads were
+read, and each worker local-result claim passed payload hashing and receipt
+binding verification. New smoke source snapshot
+`cf38f949cef4cf996ec39ef210bbbaed15b59ed1` has parent equal to source commit
+`7a7f1bdc31de9b503944186506035da4180eb5ab`; its only added path is PB's generated
+`.pbrun-closure.f370bb0f1d4ae2fa.json`. The delivered test and snapshot have the
+same Git blob `456aaca287c5bf298f8aea9d7ac4fed20acdc9c2`. Raw source bundle
+SHA-256 is `2fefb105d1a9cf3bc1ce1b67a1bb43ab044c136e60aef05416d99cd24764f34f`
+(41045499 bytes). Exact requests, terminal records, log hashes, result/receipt
+hashes and successful claim checks are retained in
+`/home/rob/tmp/astra-resume-20261002/pq_spill/consumer-completion-evidence.json`.
+Reports are `consumer-production-gateway.json` and `consumer-composition-docs.json`.
+
+The smoke used the published `pbtest.py` command above with this isolated
+continuation checkout, `--pytest-args '["-k", "production_gateway"]'`,
+`--timeout-s 300 --wait-s 600`. Docs used the same admitted CPU envelope on
+`tests/test_architecture_doc.py tests/test_docs_staleness.py`. Targeted compile
+used published pbrun with one CPU, 2 GiB, native threads 1 and 120 seconds, on
+`tests/test_pilot_verified_result_1293.py`. An initial submission with non-JSON
+pytest arguments was rejected before publication and is not test evidence.
+
+Earlier complete qualification is reused under its original source identities,
+not rerun or relabelled. Root critical review/merge remains required. The genuine
+#1293 pilot and matched #1291 driver acceptance, original CUDA source/lifetime
+qualification, fleet activation and all energy/work-per-joule claims remain
+independent unopened gates. PR #2058's producer commits are already included in
+#2110; no second producer implementation or duplicate PR was created.
