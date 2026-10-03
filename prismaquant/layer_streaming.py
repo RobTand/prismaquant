@@ -966,15 +966,17 @@ def _apply_source_scale_values(out, fp8_scale_inv_map, device, *, source_authent
         out_blocks = out_dim // block_r
         in_blocks = in_dim // block_c
         E = len(names)
+        # Original-owned H2D copies stay queued on this completion stream;
+        # disabled/legacy scopes retain their blocking transfer policy.
         # Stack weights: (E, out, in) bf16 on the execution device.
         # Native FP8 source tensors stay compressed until this point so
         # CPU-side reads and H2D/UMA traffic remain 1 byte/element.
         w_stack = copies.copy(torch.stack([out[n] for n in names], dim=0),
-                              dtype=torch.bfloat16)
+                              dtype=torch.bfloat16, non_blocking=copies.enabled)
         # Stack scales: (E, out_blocks, in_blocks) bf16 on device
         s_stack = copies.copy(torch.stack(
             [loaded_scales[n] for n in names], dim=0
-        ), dtype=torch.bfloat16)
+        ), dtype=torch.bfloat16, non_blocking=copies.enabled)
         # Reshape to block-tile form:
         #   w: (E, out_blocks, block_r, in_blocks, block_c)
         #   s: (E, out_blocks, 1, in_blocks, 1)
@@ -1023,7 +1025,8 @@ def _apply_source_scale_values(out, fp8_scale_inv_map, device, *, source_authent
             for i0 in range(0, len(names), _MXFP4_DECODE_CHUNK):
                 chunk = names[i0:i0 + _MXFP4_DECODE_CHUNK]
                 E = len(chunk)
-                wp = copies.copy(torch.stack([out[n] for n in chunk], dim=0)).view(torch.uint8)
+                wp = copies.copy(torch.stack([out[n] for n in chunk], dim=0),
+                                 non_blocking=copies.enabled).view(torch.uint8)
                 # int32 gather indices: the index *values* are byte codes
                 # (0..255), so int32 is exact here and halves the index
                 # transient vs long (8 -> 4 B per packed byte).
@@ -1031,7 +1034,7 @@ def _apply_source_scale_values(out, fp8_scale_inv_map, device, *, source_authent
                     E, rows, logical_in // 32, 32)
                 sb = copies.copy(torch.stack(
                     [loaded_scales[n] for n in chunk], dim=0
-                )).view(torch.uint8)
+                ), non_blocking=copies.enabled).view(torch.uint8)
                 scale = torch.exp2((sb.to(torch.float32) - 127.0))
                 # E8M0 0xFF is NaN per the OCP MX v1.0 spec, not 2^128:
                 # exp2(128) yields +inf, which turned a 0xFF block into a
@@ -1052,7 +1055,7 @@ def _apply_source_scale_values(out, fp8_scale_inv_map, device, *, source_authent
     # Step 4: Fallback path for any shapes we didn't batch.
     for name in fallback:
         w = out[name]
-        scale_fp = copies.copy(loaded_scales[name])
+        scale_fp = copies.copy(loaded_scales[name], non_blocking=copies.enabled)
         out[name] = _dequant_fp8_block_weight(
             w, scale_fp, block=(block_r, block_c), name=name)
         dequanted += 1

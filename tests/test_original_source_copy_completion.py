@@ -32,7 +32,7 @@ class _ArithmeticCudaSpyTensor(FakeCudaTensor):
 def original_copy_spy(material, monkeypatch):
     owner = _owner(material)
     state = dict(owner=owner, copies=[], events=[], reads=[], installed=[], fault=None,
-                 cancel=None, decoded=[], local=threading.local())
+                 cancel=None, decoded=[], transfer_options=[], local=threading.local())
     # This explicitly exposes the dormant path for CPU call-order controls.
     # The actual production gate is unchanged and no real CUDA API executes.
     monkeypatch.setattr(owner, 'require_material_device', lambda device: None)
@@ -58,6 +58,7 @@ def original_copy_spy(material, monkeypatch):
         device = kwargs.get('device', target)
         if isinstance(device, torch.device) and device.type == 'cuda':
             state['copies'].append(weakref.ref(value))
+            state['transfer_options'].append(dict(kwargs))
             if state['cancel'] is not None:
                 state['cancel'].set()
             if state['fault'] == 'copy' and len(state['copies']) == 2:
@@ -258,6 +259,8 @@ def test_original_direct_dequant_keeps_native_scale_through_copy_completion(orig
     assert ls._apply_fp8_dequant_inplace(out, scales, torch.device('cuda'),
                                         source_authentication=s['owner']) == 1
     assert s['events'] == ['record', 'sync']
+    assert len(s['transfer_options']) == 2
+    assert all(options['non_blocking'] is True for options in s['transfer_options'])
     assert torch.equal(out['weight'], torch.arange(32).reshape(4, 8).to(torch.bfloat16))
     assert s['owner'].material_live_bytes == 0
 

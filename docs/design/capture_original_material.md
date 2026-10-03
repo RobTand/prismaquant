@@ -140,6 +140,12 @@ Launched readers drain on cancellation or failure; cancelled original output
 refuses installation. Original head copies all complete before the first
 installation, so a later copy failure cannot expose a partially installed head.
 
+Original-owned batched FP8, MXFP4 and fallback scale transfers explicitly use
+nonblocking copies through that same completion owner. Disabled/legacy scopes
+keep the existing blocking policy. Source aliases are retained before enqueue,
+the same stream event proves completion, and all cast/dequant arithmetic is
+unchanged; changing transfer policy does not qualify a source or device.
+
 These dormant paths retain the original CPU-only device predicate. The CPU
 controls enter the actual source memfd/decoder/StorageWeakRef paths with explicit
 CPU CUDA spies. `tests/test_original_source_copy_completion_cuda.py` supplies

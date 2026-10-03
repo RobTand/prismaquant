@@ -21,6 +21,7 @@ from safetensors.torch import save_file
 from prismaquant.layer_streaming import (
     Fp8ScaleInvMap,
     _apply_fp8_dequant_inplace,
+    _apply_source_scale_values,
     _build_fp8_scale_inv_map,
     _dequant_fp8_block_weight,
     _read_layer_to_device,
@@ -214,3 +215,48 @@ def test_mapped_fp8_tensor_passes_the_guard(tmp_path, monkeypatch):
         torch.bfloat16, CPU, fp8_scale_inv_map=fp8_map,
     )
     assert tensors[key].dtype == torch.bfloat16
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+@pytest.mark.parametrize('path_kind', ['batched-fp8', 'fallback-fp8', 'mxfp4'])
+def test_dequant_copy_policy_preserves_disabled_and_original_arithmetic(
+        tmp_path, enabled, path_kind):
+    """CPU policy/arithmetic control; no CUDA or original-provider acceptance."""
+    if path_kind == 'mxfp4':
+        weight = torch.full((4, 128), 0x22, dtype=torch.int8)
+        scales = torch.full((4, 8), 127, dtype=torch.uint8)
+        block = (1, 1)
+        declared = frozenset({'weight'})
+        expected = torch.ones((4, 256), dtype=torch.bfloat16)
+    else:
+        block = (3, 3) if path_kind == 'fallback-fp8' else (1, 1)
+        shape = (10, 22) if path_kind == 'fallback-fp8' else (4, 8)
+        weight = torch.ones(shape, dtype=torch.bfloat16)
+        scales = torch.arange(32, dtype=torch.float32).reshape(4, 8)
+        declared = frozenset()
+        expected = scales.repeat_interleave(block[0], 0).repeat_interleave(block[1], 1)
+        expected = expected[:shape[0], :shape[1]].to(torch.bfloat16)
+    shard = tmp_path / 'scale.safetensors'
+    save_file({'scale': scales}, str(shard))
+    mapping = Fp8ScaleInvMap({'weight': (str(shard), 'scale')},
+                            block=block, mxfp4_names=declared)
+    calls = []
+    retained = []
+
+    class Copies:
+        def retain(self, tensor):
+            retained.append(tensor)
+
+        def copy(self, tensor, **kwargs):
+            calls.append(dict(kwargs))
+            assert kwargs['non_blocking'] is enabled
+            return tensor.to(device=CPU, **kwargs)
+
+    copies = Copies()
+    copies.enabled = enabled
+    out = {'weight': weight}
+    assert _apply_source_scale_values(out, mapping, CPU,
+                                      source_authentication=None, copies=copies) == 1
+    assert len(calls) == (1 if path_kind == 'fallback-fp8' else 2)
+    assert retained and out['weight'].dtype == torch.bfloat16
+    assert torch.equal(out['weight'], expected)
