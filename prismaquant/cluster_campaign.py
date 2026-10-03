@@ -42,6 +42,8 @@ import tempfile
 import time
 from typing import Any
 
+from .digests import file_sha256hex
+
 
 CAMPAIGN_MANIFEST_SCHEMA_V2 = "prismaquant.cluster_campaign.manifest.v2"
 CAMPAIGN_STATE_SCHEMA_V2 = "prismaquant.cluster_campaign.state.v2"
@@ -958,17 +960,6 @@ def _advance_state(
     )
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(8 * 1024 * 1024)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _receipt_observation(
     receipts: Sequence[Mapping[str, object]],
 ) -> tuple[list[str], list[str]]:
@@ -988,7 +979,7 @@ def _receipt_observation(
             mismatched.append(str(path))
             continue
         try:
-            observed = _file_sha256(path)
+            observed = file_sha256hex(path)
         except OSError:
             mismatched.append(str(path))
             continue

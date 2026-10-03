@@ -1,5 +1,15 @@
 # PrismaQuant Architecture
 
+Refs #2169 / #1301: campaign receipt observations and Fisher dataset
+provenance share `digests.file_sha256hex`. The campaign retains its exact
+8 MiB read window and missing/mismatched/symlink classifications; its obsolete
+private digest copy is removed. Fisher retains its exact 1 MiB file window,
+optional-source policy, readable-file preference and historical read-failure
+fallback to `digests.text_sha256hex` over strict UTF-8 identifiers. These are
+load-bearing stored identities, with no byte/profile/default/numerical change.
+Runtime-source snapshot tooling remains stdlib-only: its bootstrap dependency
+contract is not changed merely to share this file loop. Broader #1301 stays open.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
