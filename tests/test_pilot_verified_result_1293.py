@@ -163,3 +163,43 @@ def test_real_selected_result_admits_only_the_reviewed_source_and_invocation(
     result = dispatch.main(_argv(records_dir, tmp_path / "out", receipt, extra=args), _gateway=gateway)
     assert result == (0 if fault is None else 3)
     assert bool(gateway.submitted) is (fault is None)
+
+
+@pytest.mark.parametrize("fault", [None, "source", "refs", "wrapper", "attempt"])
+def test_production_gateway_consumes_selected_results_from_the_sealed_sdk4_root(
+        tmp_path, campaign, records_dir, monkeypatch, capsys, fault):
+    """No result-reader/binder doubles or installed-SDK injection on this path."""
+    from fullstack_pb_generation import reader_sdk_bound, require_paths
+    from prismaquant.staged_lease import client_sdk
+
+    require_paths()
+    with reader_sdk_bound():
+        sdk = client_sdk()
+        receipt = _ready(tmp_path, campaign, records_dir)
+        canned = dispatch.FakeGateway()
+        args = _published_pilots(tmp_path, records_dir, monkeypatch, gateway=canned)
+        args, _, resealed = _selected_fixture(
+            tmp_path, monkeypatch, sdk, args, canned, fault)
+        from prismabuild import pool
+
+        # Redirect only the existing queue owner's default, not the reader,
+        # binder, resolver or production Gateway. Never touch the fleet queue.
+        monkeypatch.setattr(pool, "DEFAULT_POOL_ROOT", tmp_path / "private-pb" / "queue")
+        capsys.readouterr()
+        output = tmp_path / "consumer-dry-run"
+        result = dispatch.main(
+            _argv(records_dir, output, receipt, extra=[*args, "--dry-run"]),
+            _gateway=dispatch.Gateway())
+        captured = capsys.readouterr()
+        assert not output.exists()
+        assert result == (0 if fault is None else 3)
+        if fault is not None:
+            assert "refused" in captured.err
+            assert not captured.out
+        else:
+            rows = json.loads(captured.out)["rows"]
+            assert len(rows) == len(resealed) == 3
+            evidence = [row["pilot_admission"]["result"] for row in rows]
+            assert {item["action_key"] for item in evidence} == set(resealed)
+            assert all(item["attempt"] == 1 for item in evidence)
+            assert all(len(item["receipt_sha256"]) == 64 for item in evidence)
