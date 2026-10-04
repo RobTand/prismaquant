@@ -166,7 +166,7 @@ def test_real_selected_result_admits_only_the_reviewed_source_and_invocation(
 
 
 @pytest.mark.parametrize("fault", [None, "source", "refs", "wrapper", "attempt"])
-@pytest.mark.usefixtures("pinned_pb_source")
+
 def test_production_gateway_consumes_selected_results_from_the_sealed_sdk4_root(
         tmp_path, campaign, records_dir, monkeypatch, capsys, fault):
     """No result-reader/binder doubles or installed-SDK injection on this path."""

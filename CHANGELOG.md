@@ -40,6 +40,12 @@
   descriptor provenance and refusal vocabulary remain unchanged. CPU
   metadata tests do not establish original GLM/native/capture admission.
 
+- **Original CUDA fixture dependencies use the existing source-owned pins**
+  (#2188). The finite pure-Python packer resolves the authoritative PB and
+  Tessera pins through their existing stdlib owners, and the inner fixture
+  reuses that exact mapping instead of retaining a separate SDK3 literal.
+  Installed provenance, RECORD/digest and closed extraction checks remain;
+  no new pin, dependency artifact, CUDA qualification or deployment follows.
 - **Original proper-prefix coverage compares its exact checkpoint roster**
   (Refs #2147). Python set equality preserves the whole required head/layer
   coverage and rejects missing or extra checkpoints without sending sets to
@@ -144,6 +150,11 @@
   expert-roster shape; LFM retains its existing `selection_bias` identity.
   Independent source/runtime/calibration and exact tensor-byte checks remain
   mandatory. This CPU protocol repair grants no GPU, capture or serving admission.
+- **Matched-byte control uses Tessera's public installed CLI** (#2168).
+  The standing plan/verify producer is `python -m tessera.uniform_control`,
+  emitting the existing versioned control handoff without experiment checkout
+  imports. The lane can name a separate `TESSERA_PRODUCER_PYTHON`; pinned
+  serving packages and all existing unserved/byte/KL/shipping refusals stay fixed.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).

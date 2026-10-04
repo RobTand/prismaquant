@@ -190,7 +190,7 @@ def test_lane_declares_existing_uniform_producer_and_fill_path():
     gate = load_lane_spec("tessera").gate("uniform_control")
     assert gate is not None
     assert gate.shipcard_slot == "uniform_control"
-    assert "uniform_control.py verify" in gate.runner
+    assert "-m tessera.uniform_control verify" in gate.runner
     assert "fill-control" in gate.runner
     assert "--max-relative-slack" in gate.runner
     assert " && " in gate.runner  # Never fill from a stale report after producer failure.
