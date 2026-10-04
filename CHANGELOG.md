@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **Non-injective production cache filenames refuse at open** (#2219).
+  `_cache_weight_filename` mangles `.` → `_` and `/` → `__`, so distinct
+  qualified names can share one shard leaf while the stored payload is the
+  bare tensor. A shared `require_injective_cache_filenames` check now refuses
+  — naming both qnames and the colliding filename — wherever a cache
+  directory is opened for a model's selected qname set: the dense fill's
+  render-identity destination check (via delegation), the packed-expert
+  fill, the streaming dense fill, every residency read through
+  `ProductionWeightCache.prefetch`, and the joint aura head walk's per-owner
+  render reads. The mangled filename spelling is unchanged.
+
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing

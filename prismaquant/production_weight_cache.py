@@ -178,9 +178,54 @@ def _render_base_format(fmt: str) -> str:
     return str(fmt).strip().upper()
 
 
+def _cache_weight_leaf(qname: str) -> str:
+    """The mangled, filesystem-safe leaf body of a qualified name.
+
+    One home for the mangling (#2219): ``_cache_weight_filename`` spells the
+    shard leaf with it and ``require_injective_cache_filenames`` tests
+    injectivity against it, so the two can never disagree.
+    """
+    return str(qname).replace("/", "__").replace(".", "_")
+
+
 def _cache_weight_filename(qname: str, fmt: str) -> str:
-    safe = qname.replace("/", "__").replace(".", "_")
-    return f"{safe}__{fmt}.pt"
+    return f"{_cache_weight_leaf(qname)}__{fmt}.pt"
+
+
+def require_injective_cache_filenames(
+    qnames: Iterable[str],
+    formats: Iterable[str],
+    *,
+    where: str,
+) -> None:
+    """Refuse a qname set that is not injective under ``_cache_weight_filename``.
+
+    The leaf mangles ``.`` -> ``_`` and ``/`` -> ``__`` to stay
+    filesystem-safe, so distinct qualified names can share one shard leaf
+    (``a.b`` and ``a_b``; ``layer/a`` and ``layer__a``). The stored payload is
+    the bare tensor -- nothing in the file names the Linear it belongs to --
+    so a colliding pair would silently read and overwrite each other's shard.
+    The mangled spelling itself is load-bearing (archive names, existing
+    caches), so instead of changing it this fails closed on the whole SET:
+    call it where a cache directory is opened for a model's selected qname
+    set, before any shard is written or read -- that is what covers resumes,
+    pre-existing caches and concurrent producers (#2219). The aliasing is
+    format-independent (a qname collision collides for every format), so
+    ``formats`` only spells the refused filename: the first entry is used.
+    """
+    fmts = [str(fmt) for fmt in formats]
+    owners: dict[str, str] = {}
+    for qname in sorted({str(qname) for qname in qnames}):
+        previous = owners.setdefault(_cache_weight_leaf(qname), qname)
+        if previous != qname:
+            filename = _cache_weight_filename(
+                qname, fmts[0] if fmts else "BF16")
+            raise ValueError(
+                f"{where}: qualified names {previous!r} and {qname!r} share "
+                f"one cache filename {filename!r}; the mangled leaf is not "
+                f"injective and the rendered shards would silently overwrite "
+                f"each other"
+            )
 
 
 _UNCACHED_PACKED_EXPERT_RE = re.compile(
@@ -1497,6 +1542,15 @@ class ProductionWeightCache:
                     if not isinstance(self.weights.get(k), torch.Tensor)]
         if not keys:
             return 0
+        # #2219: the reader/residency open. A persisted cache (or a
+        # concurrent producer's directory) can hold two distinct qnames whose
+        # manifest entries share one shard leaf; refuse before either load
+        # installs a possibly-foreign tensor.
+        require_injective_cache_filenames(
+            (key[0] for key in keys),
+            (key[1] for key in keys),
+            where="production cache residency",
+        )
 
         def _load_one(key):
             value = self.weights.get(key)
@@ -4194,20 +4248,24 @@ def validate_pre_guard_admission(
 def _check_rendered_cache_destinations(
     rendered_pairs: Iterable[str], *, where: str
 ) -> None:
-    """Refuse distinct coordinates that share one legacy archive leaf."""
+    """Refuse distinct coordinates that share one legacy archive leaf (#2219).
+
+    The render-identity sidecars spell coordinates as ``"qname|FMT"`` pair
+    strings; this is the pair-shaped entry into the one shared check next to
+    ``_cache_weight_filename``, which owns the rule.
+    """
     from prismaquant import format_registry as fr
 
-    owners: dict[str, tuple[str, str]] = {}
-    for pair in rendered_pairs:
-        qname, fmt = pair.rsplit("|", 1)
-        coordinate = (qname, fr.canonical_format_name(fmt.strip().upper()))
-        filename = _cache_weight_filename(*coordinate)
-        previous = owners.setdefault(filename, coordinate)
-        if previous != coordinate:
-            raise ValueError(
-                f"{where}.rendered_pairs aliases rendered cache destination "
-                f"{filename!r}: {previous!r} and {coordinate!r}"
-            )
+    coordinates = [
+        (pair.rsplit("|", 1)[0],
+         fr.canonical_format_name(pair.rsplit("|", 1)[1].strip().upper()))
+        for pair in rendered_pairs
+    ]
+    require_injective_cache_filenames(
+        (qname for qname, _fmt in coordinates),
+        (fmt for _qname, fmt in coordinates),
+        where=where,
+    )
 
 
 def build_production_cache_render_identity(
@@ -7280,6 +7338,15 @@ def fill_packed_expert_cache_entries(
             print("[prod-cache/experts] no non-BF16 packed experts in scope",
                   flush=True)
         return coverage
+    # #2219: refuse a colliding packed full-name set at the directory open,
+    # before the append identity reads its sidecar or any shard is probed or
+    # written. The packed fill bypasses the dense fill's render-identity
+    # build, which is where the dense path's own refusal lives.
+    require_injective_cache_filenames(
+        (full for (_q, _m, _p, _pn, full, _fmt) in in_scope),
+        (fmt for (_q, _m, _p, _pn, _full, fmt) in in_scope),
+        where="packed expert production cache",
+    )
     if cache_dir_path is not None:
         from prismaquant.perturbed_x_cache import calibration_data_hash
 

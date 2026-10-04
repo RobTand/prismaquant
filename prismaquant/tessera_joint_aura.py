@@ -952,7 +952,10 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     contract under test, not the production prepare path, which passes
     nothing here.
     """
-    from .production_weight_cache import _cache_weight_filename
+    from .production_weight_cache import (
+        _cache_weight_filename,
+        require_injective_cache_filenames,
+    )
     from tools.dispatch_tessera_campaign import _require_receipts
 
     reuse_policy = normalize_historical_encoder_reuse(historical_encoder_reuse)
@@ -1092,6 +1095,19 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     # per cell, and the join reaches the same file the walk verifies.
     owner_roots = {str(directory): Path(directory).resolve()
                    for directory in set(map(str, owners.values()))}
+    # #2219: the walk reads each unit's renders from its owner row's cache
+    # directory under the mangled leaf, and the payload is the bare tensor, so
+    # a colliding roster would point two units' cells at one render. Refuse
+    # per owner root before the walk reads anything.
+    names_by_owner: dict[str, list[str]] = {}
+    for _name, _directory in owners.items():
+        names_by_owner.setdefault(str(_directory), []).append(_name)
+    for _directory, _owned in sorted(names_by_owner.items()):
+        require_injective_cache_filenames(
+            _owned,
+            (fmt for _name in _owned for fmt in payload["costs"][_name]),
+            where=f"joint aura render cache @ {_directory}",
+        )
     mirror_root = None if render_mirror_root is None else Path(render_mirror_root)
     roster = sorted(names)
     if unit_scope is not None:
