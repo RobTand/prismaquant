@@ -19,6 +19,15 @@
 
 ### Fixed
 
+- **Production pilot result fixtures use one real installed SDK5 helper**
+  (Refs #2152, #1293). The production Gateway, resolver, CAS, queue and capture
+  binder now consume the same Git/RECORD-qualified SDK5 package. The positive
+  and source/invocation/attempt negative controls no longer request admission
+  from the preserved SDK4 source archive. No installed-SDK injection fallback,
+  mixed package tree, runtime publication or GPU qualification is introduced;
+  the durable Python3.12+b40 pack and native helper adoption remain PB #1485
+  prerequisites.
+
 - **Original reader authority joins the selected native producer and outer
   target** (Refs #2152). The strict result request uses SDK5's existing public
   native-context owner. Published source controls, the reader's actual snapshot

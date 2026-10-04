@@ -16,7 +16,7 @@ bias repair remain. No runtime pin, menu, adoption or default changes occur.
 
 Re-stamped 2026-10-02 (Refs #2094, Tessera #856): shape-time conversion
 requires an explicit PB action/publication/attempt selector for each checker
-completion. The public SDK4 result reader and standard capture binder join
+completion. The source-pinned public result reader and standard capture binder join
 the owned observation output to an independently reviewed checker config
 containing the exact snapshot selection (commit, parent, schema, subdirectory,
 refs and input), working directories, command and environment. Converted rows
@@ -1009,9 +1009,19 @@ together — commit, version, runtime documents, fixture helper checks and the
 `original_cuda_control` launch-owned helper check; no dual-SDK probing, alias,
 editable install or fallback is added. The separately qualified exact SDK5
 install/fixture/portable identities and helper-runtime selection (PB #1485)
-remain coupled prerequisites for positive consumer exercise; the published
-c437 fleet generation and live deployment stay unchanged, and no numerical,
-wire, pipeline-default, serving or admission gate moves with this pin.
+remain coupled prerequisites for the full original native consumer exercise.
+This pin does not change the published fleet runtime or live deployment, and
+does not move numerical, wire, pipeline-default, serving or admission gates.
+
+Production-gateway pilot controls (#1293) now bind the actual non-editable
+SDK5 installation through an explicit private helper view. The published
+pbtest pin verifier proves its Git identity, RECORD bytes and import origin;
+client, CAS, pool and capture binder resolve from that same installed package,
+with no test-only SDK injection or SDK4 fallback. The unrelated produced-output
+source archive remains historical SDK4 and is still refused by this consumer.
+These CPU controls do not publish a helper generation or qualify native GPU
+pilots; PB #1485's durable Python3.12+b40 SDK5 pack and launch-owned helper
+selection remain separate prerequisites for the original native provider.
 
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,

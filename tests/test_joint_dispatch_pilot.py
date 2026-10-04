@@ -86,7 +86,7 @@ def _published_pilots(tmp_path, records_dir, monkeypatch, mutate=None, *,
 
     Returns ``extra`` argv (``--pilot-counters``/``--pilot-selector``). With a
     ``gateway`` the helper also publishes one canned verified result per pilot
-    on that gateway, so the real SDK4-bound admission path runs.
+    on that gateway, so the current SDK-bound admission path runs.
     """
     from tools import dispatch_joint_quanta as dispatch
     from prismaquant import joint_dispatch_pilot as pilot

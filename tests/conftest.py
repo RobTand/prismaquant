@@ -259,6 +259,33 @@ def installed_client_sdk(monkeypatch):
         yield module
 
 
+@pytest.fixture
+def installed_helper_sdk(tmp_path, monkeypatch):
+    """Production resolver over the actual, Git/RECORD-qualified SDK sources.
+
+    The published pbtest guard owns install verification. This private helper
+    view links those installed bytes, not an SDK4 archive or a copied package;
+    it is a CPU fixture, never a published runtime generation. No test-only
+    SDK injection supplies the production Gateway.
+    """
+    from fleet_sdk import require_prismabuild_sdk
+    from prismaquant import staged_lease
+
+    require_prismabuild_sdk()
+    from pbtest_pins import verify_install
+
+    evidence = verify_install("prismabuild", staged_lease.PB_READER_LEASE_PIN_COMMIT)
+    package = Path(evidence["origin"]).resolve().parent
+    helper = tmp_path / "installed-sdk-helper"
+    (helper / "src").mkdir(parents=True)
+    (helper / "src" / "prismabuild").symlink_to(package, target_is_directory=True)
+    assert staged_lease._INJECTED is None
+    monkeypatch.setattr(staged_lease, "_HELPER_ROOT", str(helper))
+    sdk = staged_lease.client_sdk()
+    assert Path(sdk.__file__).resolve() == package / "client.py"
+    yield sdk
+
+
 @pytest.fixture(autouse=True)
 def _restore_profile_detection_globals():
     """Snapshot and restore the process-global state ``detect_profile`` reads.
