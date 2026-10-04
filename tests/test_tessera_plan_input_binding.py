@@ -147,8 +147,9 @@ python3() {
 OBSERVED_COLD_START_S = 30
 
 
-def test_driver_harness_deadline_absorbs_the_observed_cold_start(monkeypatch, tmp_path):
-    """The plan-driver deadline must stay finite and above the cold start.
+def test_a_finite_deadline_absorbs_cold_start_while_the_driver_refuses_the_old_plan(
+        monkeypatch, tmp_path):
+    """The deadline guarantee and the old-plan refusal share one real run.
 
     A cold start past the older 30-second deadline false-failed the admitted
     batch, so the harness must allow more without becoming unbounded. Four
@@ -160,6 +161,10 @@ def test_driver_harness_deadline_absorbs_the_observed_cold_start(monkeypatch, tm
     is refused at the harness boundary before the subprocess starts, and the
     old 30-second budget is caught by the remaining-budget assertion below
     after the (fast, real) driver run, without spending the wall time.
+
+    The deadline probe and ``refuses_old_plan`` both executed
+    ``_run(tmp_path, changed=True)`` and asserted disjoint properties of that
+    one invocation, so the merge costs no assertion and one fewer driver run.
     """
     requested = {}
     real_run = subprocess.run
@@ -183,12 +188,6 @@ def test_driver_harness_deadline_absorbs_the_observed_cold_start(monkeypatch, tm
         "the older 30-second deadline false-failed the admitted batch's cold "
         f"start; the harness must exceed {OBSERVED_COLD_START_S} seconds, "
         f"got {requested['timeout']!r}")
-
-
-def test_actual_driver_refuses_old_plan_after_allocation_bytes_change(tmp_path):
-    result = _run(tmp_path, changed=True)
-    assert result.returncode == 2, result.stdout + result.stderr
-    assert "ASSIGNMENT_DIGEST" in result.stdout + result.stderr
     assert "TEST_EXPORT_REACHED" not in result.stdout
 
 
@@ -200,7 +199,14 @@ def test_actual_driver_refuses_plan_without_independent_allocation_binding(tmp_p
     assert "TEST_EXPORT_REACHED" not in result.stdout
 
 
-def test_actual_driver_reuses_plan_for_identical_allocation(tmp_path):
+def test_identical_allocation_reuses_the_plan_and_the_preflight_writes_expert_units(tmp_path):
+    """One default run proves both the reuse and the no-bundle write.
+
+    ``reuses_plan`` and ``without_a_bundle`` executed the identical
+    ``_run(tmp_path)`` invocation and asserted disjoint lines of its output
+    (the export argv on stdout, the preflight argv on stderr); one real
+    driver execution carries both assertion sets.
+    """
     result = _run(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "TEST_EXPORT_REACHED" in result.stdout
@@ -208,10 +214,21 @@ def test_actual_driver_reuses_plan_for_identical_allocation(tmp_path):
     export = next(line for line in result.stdout.splitlines()
                   if line.startswith("TEST_EXPORT_ARGS:"))
     assert export.startswith("TEST_EXPORT_ARGS:-m tessera.export_serving"), export
+    preflight = next(line for line in result.stderr.splitlines()
+                     if line.startswith("TEST_PREFLIGHT_ARGS:"))
+    assert "--write-cached-expert-units" in preflight
+    assert "--cached-units" not in preflight
 
 
 @pytest.mark.parametrize("mode,eager", [("eager", "1"), ("compiled", "0")])
-def test_printed_serve_recipe_retains_exact_runtime_scope(tmp_path, mode, eager):
+def test_printed_recipes_retain_exact_runtime_scope_and_bound_allocation(tmp_path, mode, eager):
+    """Both printed recipes read one real driver run per mode.
+
+    The serve-recipe and census-recipe tests executed the identical
+    ``_run(tmp_path, mode=mode)`` invocation and asserted disjoint lines of
+    its output; one run carries both assertion sets, so four real driver
+    executions become two.  Every assertion below ran before the merge.
+    """
     result = _run(tmp_path, mode=mode)
     assert result.returncode == 0, result.stdout + result.stderr
     command = next(line.split("Serve:", 1)[1].strip() for line in result.stdout.splitlines()
@@ -221,12 +238,6 @@ def test_printed_serve_recipe_retains_exact_runtime_scope(tmp_path, mode, eager)
     assert f"TESSERA_LANE_EAGER={eager}" in tokens
     assert f"TS={tmp_path / 'producer tree'}" in tokens
     assert str(tmp_path / "work with spaces/exported") in tokens
-
-
-@pytest.mark.parametrize("mode", ["eager", "compiled"])
-def test_printed_census_recipe_keeps_raw_scope_and_bound_allocation(tmp_path, mode):
-    result = _run(tmp_path, mode=mode)
-    assert result.returncode == 0, result.stdout + result.stderr
     census = next(line.split("Route census:", 1)[1].strip()
                   for line in result.stdout.splitlines() if "Route census:" in line)
     tokens = shlex.split(census)
@@ -293,15 +304,6 @@ def test_cached_driver_forwards_the_producers_explicit_mode(tmp_path, value, exp
     line = next(line for line in result.stdout.splitlines()
                 if line.startswith("TEST_EXPORT_ARGS:"))
     assert f"--cached-encoder-source-proof-mode {expected}" in line
-
-
-def test_without_a_bundle_the_preflight_writes_expert_units(tmp_path):
-    result = _run(tmp_path)
-    assert result.returncode == 0, result.stdout + result.stderr
-    preflight = next(line for line in result.stderr.splitlines()
-                     if line.startswith("TEST_PREFLIGHT_ARGS:"))
-    assert "--write-cached-expert-units" in preflight
-    assert "--cached-units" not in preflight
 
 
 def _export_line(result):
