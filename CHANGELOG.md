@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **The head-wait credit control holds the second launch's token** (#2039).
+  The control test for mid-wait credit reaping decided which launch's
+  completion token to hold after the event had already appended itself, so it
+  held the FIRST launch's token, stranded that credit for the whole test and
+  could never reach the mid-wait admission it exists to prove. The decision
+  now happens before the append. Control-only; production code and its
+  admission semantics are unchanged.
+
 - **The projected-preparation window prices its device reservation in bytes**
   (#2039). The opt-in window reserved device bytes for its staged unit copies
   from element counts instead of tensor bytes, understating the prospective

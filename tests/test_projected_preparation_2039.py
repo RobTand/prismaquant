@@ -267,8 +267,12 @@ def test_reaped_credit_reaches_readers_during_head_wait(monkeypatch, cpu_transpo
     original_event = torch.cuda.Event
     class SecondEventHeld(original_event):
         def __init__(self):
+            # Decide before super().__init__ appends this event: holding the
+            # FIRST launch's token strands its credit for the whole test, and
+            # the mid-wait completion below must be the second launch's.
+            second = len(cpu_transport.events) == 1
             super().__init__()
-            if not allow_new.is_set() and len(cpu_transport.events) == 1:
+            if not allow_new.is_set() and second:
                 self.done.clear()
     monkeypatch.setattr(torch.cuda, 'Event', SecondEventHeld)
     original_copy = torch.Tensor.copy_
