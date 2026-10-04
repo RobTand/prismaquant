@@ -65,8 +65,6 @@ import urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from prismaquant.source_read_plan import read_safetensors_header
-
 MARKER = "CHAIN-ROLL-BENCH "
 HEAD_EXCLUDE = ("model.visual.",)
 
@@ -116,6 +114,8 @@ def slice_records(slice_doc, *, layer, batches):
 
 def _safetensors_spans(model_dir: Path, names) -> list[dict]:
     """Byte ranges of ``names`` and each shard's header, adjacent ranges merged."""
+    from prismaquant.source_read_plan import read_safetensors_header
+
     index = json.loads((model_dir / "model.safetensors.index.json").read_text())
     by_shard = defaultdict(list)
     for name in names:

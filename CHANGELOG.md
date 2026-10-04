@@ -15,7 +15,11 @@
   are each stated once, and the fused kernel module's unused local
   `_FP4_E2M1_MAX` literal is removed in favor of the activation-contract
   constant. Regex acceptance, spans, wire, defaults and served paths are
-  unchanged; the broader domain-numerics census stays open.
+  unchanged; the broader domain-numerics census stays open. The benchmark
+  imports the header reader only for manifest spans, so historical child
+  trees need not provide it merely to import the standalone tool. Coverage
+  retains real bytes, spans, grammar results and malformed-header refusals,
+  not source-layout or forwarding assertions.
 
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,

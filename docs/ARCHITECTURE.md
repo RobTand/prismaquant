@@ -282,9 +282,14 @@ streaming prefix/layer grammar once
 in-file; the fused kernel module's unused local `_FP4_E2M1_MAX` literal is
 gone — the activation contract owns that constant. Regex acceptance, matches,
 header bytes, span arithmetic, wire, defaults, pins and served paths are
-otherwise unchanged. The remaining index/shard-resolution variants, RTN-screen
-tie rules, MX 448 literals and per-model layer-index grammars stay
-census-listed as distinct; this slice does not complete the epic.
+otherwise unchanged. `chain_roll_bench` loads the header reader only while
+building manifest spans; importing the standalone tool for a historical
+child tree does not require that tree to contain the reader. Consumer
+coverage checks real headers, span merging, name results and malformed
+prefix refusals, not source counts, AST structure or forwarding stubs.
+The remaining index/shard-resolution variants, RTN-screen tie rules, MX 448
+literals and per-model layer-index grammars stay census-listed as distinct;
+this slice does not complete the epic.
 
 Re-stamped 2026-10-02 (PQ #2096, Refs #1842, B32 lane-boundary repair): core
 profiles declare the generic per-Linear activation precision fact

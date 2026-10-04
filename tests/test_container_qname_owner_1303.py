@@ -9,14 +9,13 @@ Consumer behavior under test:
   the container grammar owner's named refusal
   (``prismaquant.source_read_plan.read_safetensors_header``) rather than a
   bare JSON decode error.
-* The streaming-initialization prefix/layer grammar is stated once.
-* The per-expert cost-name grammar is stated once in measure_quant_cost.
-* The fused NVFP4 kernel module does not grow a second E2M1 maximum.
+* The streaming-initialization prefix/layer grammar preserves its matches
+  and refusals.
+* The per-expert cost-name grammar preserves its name decomposition.
 """
 
 from __future__ import annotations
 
-import ast
 import json
 import struct
 import sys
@@ -134,39 +133,14 @@ class TestChainRollSpansRoutesThroughOwner:
             chain_roll_bench._safetensors_spans(tmp_path, ["w0", "w2"])
 
 
-class TestQnameGrammarsStatedOnce:
-    """Each shared name grammar is written once in its owning module."""
+class TestQnameGrammarBehavior:
+    """Name parsing preserves accepted components and layer indices."""
 
-    def test_per_expert_pattern_is_defined_once(self):
-        source = (ROOT / "prismaquant" / "measure_quant_cost.py").read_text()
-        assert source.count(r"^(.+\.experts)\.(\d+)\.([^.]+)$") == 1
-
-    def test_canonical_linear_name_uses_the_compiled_grammar(self):
+    def test_per_expert_name_decomposition(self):
         module = pytest.importorskip("prismaquant.measure_quant_cost")
-        tree = ast.parse(
-            (ROOT / "prismaquant" / "measure_quant_cost.py").read_text())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef) and node.name == (
-                "canonical_linear_name"
-            ):
-                called = [
-                    ast.unparse(n.func) for n in ast.walk(node)
-                    if isinstance(n, ast.Call)
-                ]
-                assert "_PER_EXPERT_NAME_RE.match" in called
-                break
-        else:
-            pytest.fail("canonical_linear_name not found")
-        # The compiled grammar is the one the function already used: a
-        # per-expert live name decomposes into (prefix, id, projection).
         assert module._PER_EXPERT_NAME_RE.match(
             "model.layers.3.mlp.experts.7.gate_proj"
         ).groups() == ("model.layers.3.mlp.experts", "7", "gate_proj")
-
-    def test_streaming_prefix_grammar_is_stated_once(self):
-        source = (
-            ROOT / "prismaquant" / "streaming_initialization.py").read_text()
-        assert source.count(r'r"(\d+)\..+"') == 1
 
     def test_prefix_layer_index_semantics_unchanged(self):
         from prismaquant.streaming_initialization import _prefix_layer_index
@@ -182,25 +156,3 @@ class TestQnameGrammarsStatedOnce:
         # The prefix is a literal, never a pattern: metacharacters are escaped.
         assert _prefix_layer_index(
             "model(1).layers.3.foo", "model(1).layers.") == 3
-
-
-class TestFusedKernelHasNoSecondE2M1Max:
-    """The E2M1 maximum is owned by the activation contract; the fused kernel
-    module re-declaring it locally is how a second convention grows."""
-
-    def test_no_local_e2m1_max(self):
-        source = (ROOT / "prismaquant" / "kernels" / "nvfp4_fused.py").read_text()
-        tree = ast.parse(source)
-        local_max_names = {
-            target.id
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Assign, ast.AnnAssign))
-            for target in (
-                node.targets if isinstance(node, ast.Assign) else [node.target]
-            )
-            if isinstance(target, ast.Name) and "E2M1" in target.id.upper()
-        }
-        assert not local_max_names, (
-            "the fused kernel module declares its own E2M1 constant: "
-            f"{sorted(local_max_names)}")
-        assert "_FP4_E2M1_MAX" not in source
