@@ -1,6 +1,7 @@
 """CPU control tests for ordered private preparation; no CUDA execution."""
 import inspect
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -249,6 +250,58 @@ def test_cancellation_stops_new_reads_and_joins_started_private_copies(monkeypat
     assert isinstance(result[0],CancelledError),repr(result[0])
     assert set(started) == {0,1}
     assert not cpu_transport.synchronized
+
+
+def test_reaped_credit_reaches_readers_during_head_wait(monkeypatch, cpu_transport):
+    """A launch completed during a head wait frees its credit inside that wait.
+
+    The coordinator sits in ``u2``'s staging wait while ``u1``'s completion
+    event turns done. The fifth read may start only if the wait itself reaps
+    the freed credit and admits; a loop top cannot, because every credit is
+    held until the wait ends.
+    """
+    reads = []
+    gate = threading.Event()
+    fifth = threading.Event()
+    allow_new = threading.Event()
+    original_event = torch.cuda.Event
+    class SecondEventHeld(original_event):
+        def __init__(self):
+            super().__init__()
+            if not allow_new.is_set() and len(cpu_transport.events) == 1:
+                self.done.clear()
+    monkeypatch.setattr(torch.cuda, 'Event', SecondEventHeld)
+    original_copy = torch.Tensor.copy_
+    def copy(target, source, *args, **kwargs):
+        if int(source[0, 0]) == 2:
+            assert gate.wait(5), 'head wait never admitted the reaped credit'
+        return original_copy(target, source, *args, **kwargs)
+    monkeypatch.setattr(torch.Tensor, 'copy_', copy)
+    values = [torch.full((2, 3), i, dtype=torch.bfloat16) for i in range(6)]
+    def read(name, unit, **kwargs):
+        reads.append(name)
+        if name == 'u5':
+            fifth.set()
+        return values[int(name[1:])].clone(), lambda:None
+    monkeypatch.setattr(campaign, '_read_projected_unit', read)
+    thread, done, result = _foreground(lambda: run_check(monkeypatch, values, read=read))
+    try:
+        deadline = time.monotonic() + 5
+        while len(reads) < 5 and time.monotonic() < deadline:
+            time.sleep(.005)
+        assert reads[:5] == ['u0', 'u1', 'u2', 'u3', 'u4'], reads
+        assert not fifth.is_set(), 'fifth read started before its credit existed'
+        cpu_transport.events[1].done.set()  # u1's H2D completes mid-wait
+        assert fifth.wait(2), 'no read started from the credit freed during the head wait'
+    finally:
+        gate.set()
+        allow_new.set()
+        for event in cpu_transport.events:
+            event.done.set()
+        thread.join(5)
+    assert done.is_set()
+    assert isinstance(result[0], dict), repr(result[0])
+    assert sorted(result[0]) == [f'u{i}' for i in range(6)]
 
 
 @pytest.mark.parametrize('exit_kind', ['mismatch','cancel','allocation','copy','success'])

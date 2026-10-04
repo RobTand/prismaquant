@@ -16,6 +16,16 @@
   comparisons, refusals and cancellation are unchanged; no GPU, campaign or
   qualification claim.
 
+- **Ordered projected preparation reaps freed credits during the head wait**
+  (#2039). The coordinator held all four credits until the ordered head's
+  staging wait returned at the loop top, so a launch whose completion event
+  fired mid-wait idled both read-pool workers instead of admitting the next
+  source read. The head wait now reaps completed events and admits through
+  the same finite-credit rule before each bounded result poll. Admission
+  order, the serial-fallback exclusion, private-buffer lifetimes through
+  asynchronous completion and cancellation drains are unchanged; the paired
+  device timing comparison is a separate measurement.
+
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing

@@ -5220,6 +5220,32 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
     def require_running():
         if cancelled():
             raise CancelledError('projected preparation cancelled')
+    def admit():
+        nonlocal index, held_bytes
+        while index < len(rows) and len(pending)+len(inflight) < 4:
+            name, unit = rows[index]
+            live, size = weights[name], sizes[index]
+            eligible = live.device.type == 'cuda' and _device_comparable(live.dtype)
+            # Serial fallbacks never coexist with pending private staging.
+            if not eligible and (pending or inflight):
+                break
+            if held_bytes + size > preparation_max_bytes:
+                break
+            resource_check(f'before_source_projection_check:{name}')
+            if eligible:
+                future = pool.submit(_prepare_device_projected_check, name, unit,
+                    live_shape=tuple(live.shape), live_dtype=live.dtype,
+                    model_path=model_path, source=source,
+                    release_source_pages=release_source_pages,
+                    source_authentication=source_authentication, cancelled=cancelled)
+                futures.append(future)
+            else:
+                future = None
+            pending.append((name, unit, future, size))
+            held_bytes += size
+            index += 1
+            if not eligible:
+                break
     def reap():
         nonlocal held_bytes
         while inflight and inflight[0][2].query():
@@ -5230,30 +5256,7 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
         while index < len(rows) or pending:
             require_running()
             reap()
-            while index < len(rows) and len(pending)+len(inflight) < 4:
-                name, unit = rows[index]
-                live, size = weights[name], sizes[index]
-                eligible = live.device.type == 'cuda' and _device_comparable(live.dtype)
-                # Serial fallbacks never coexist with pending private staging.
-                if not eligible and (pending or inflight):
-                    break
-                if held_bytes + size > preparation_max_bytes:
-                    break
-                resource_check(f'before_source_projection_check:{name}')
-                if eligible:
-                    future = pool.submit(_prepare_device_projected_check, name, unit,
-                        live_shape=tuple(live.shape), live_dtype=live.dtype,
-                        model_path=model_path, source=source,
-                        release_source_pages=release_source_pages,
-                        source_authentication=source_authentication, cancelled=cancelled)
-                    futures.append(future)
-                else:
-                    future = None
-                pending.append((name, unit, future, size))
-                held_bytes += size
-                index += 1
-                if not eligible:
-                    break
+            admit()
             if not pending:
                 # Event polling grants no progress and never reads a verdict.
                 stop.wait(.001)
@@ -5267,6 +5270,11 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
             else:
                 while True:
                     require_running()
+                    # A launch completed during this wait frees its credit
+                    # here, not at the next loop top: the readers must not
+                    # idle while the ordered head stages.
+                    reap()
+                    admit()
                     try:
                         check = future.result(timeout=.05)
                         break
