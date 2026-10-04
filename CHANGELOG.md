@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed
+
+- **Original consumer repins PrismaBuild to SDK5** (Refs #2152, PB #1481/#1482).
+  `staged_lease.PB_READER_LEASE_PIN_COMMIT` moves to merged PB #1482
+  `027103d9a8417e06c7f13356e58779a313cd7088` and `PB_CLIENT_SDK_VERSION` to 5 —
+  one exact commit/version contract, no dual-SDK probing, alias, editable
+  install or fallback. The strict original-source result read now requires the
+  selected immutable attempt's native producer context; runtime documents,
+  `original_cuda_control`'s launch-owned helper check and the fixture
+  provenance pins follow the same owner-resolved identities (Tessera stays at
+  its existing b40 pin). The separately qualified SDK5 install/fixture/portable
+  tuple (PB #1485), fleet helper-runtime selection and live deployment remain
+  separate and unchanged; no capability, admission or serving claim rides the
+  pin.
+
 ### Fixed
 
 - **Original reader authority joins the selected native producer and outer

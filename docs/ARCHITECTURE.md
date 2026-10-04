@@ -995,6 +995,24 @@ is removed rather than repinned; strict serving/refusal behavior remains the
 consumer contract. No production admission, SDK pin, runtime, numerical,
 pipeline-default or serving gate changes.
 
+Re-stamped 2026-10-04 (Refs PQ #2152, PB #1481/#1482): the reviewed PrismaBuild
+reader and client SDK pin moves to merged PB #1482
+`027103d9a8417e06c7f13356e58779a313cd7088` with exact SDK version 5; the
+literal `dc4803daaf09b6426083d2d36bd2a2da3d6832fe`/SDK4 stamp above is
+historical and no longer the consumer contract. SDK5 adds
+`require_native_producer_context` on the public selected-action result reader:
+the strict original-source qualification binds each verified result to the
+selected immutable attempt's authenticated native producer context (worker/
+incarnation, host, nonce, broker scope, helper root, sealed-demand resources)
+and refuses cache-hit, legacy or missing native evidence. One SDK moves
+together — commit, version, runtime documents, fixture helper checks and the
+`original_cuda_control` launch-owned helper check; no dual-SDK probing, alias,
+editable install or fallback is added. The separately qualified exact SDK5
+install/fixture/portable identities and helper-runtime selection (PB #1485)
+remain coupled prerequisites for positive consumer exercise; the published
+c437 fleet generation and live deployment stay unchanged, and no numerical,
+wire, pipeline-default, serving or admission gate moves with this pin.
+
 Re-stamped 2026-10-01 (PQ #1875, Refs #1663): Stage A records scoped
 consumer source-prefetch waits in a separate `source_exposed_wait` component,
 using the existing delivery owner and exposed-wait ledger/report. Ready
