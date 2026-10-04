@@ -238,6 +238,19 @@
   `io_engine.kernel_seal_bits`, so one home owns the seal grammar. No guard
   moved: a buffer still refuses unless the kernel reports all four seals; no
   default, pin, wire, GPU or serving claim.
+- **A joint plan that cannot name its campaign chain is refused by name, at
+  admission, before any device** (#1293). `load_joint_anchor_plan` admitted a
+  plan with no `inputs` block, and the `prepare` GPU action then died on a
+  bare `KeyError: 'inputs'` after the projection prewarm had already
+  allocated — preserved in the #1293 non-release pilot's run-01 S3. The plan
+  grammar now requires the campaign chain `inputs` mapping, shape-checks
+  every bound head-walk key without reading behind the binding, and requires
+  the canonical capture binding; the anchor intake names its missing chain
+  keys in one refusal; the standalone synthesis census read refuses a missing
+  binding by name. A Stage B quantum plan that binds a subset (#1024) still
+  loads in both modes. No gate weakened, no wire, codec, numerical or GPU
+  claim; the named refusal moves the run-01 S3 failure from minutes into a
+  GPU action to a plan-load ValueError naming the absent key.
 
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
 
