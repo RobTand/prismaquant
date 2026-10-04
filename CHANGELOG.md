@@ -4,6 +4,7 @@
 
 ### Fixed
 
+
 - **Connected PB fixtures own their authenticated import contexts** (#2192).
   Explicit source fixtures detach and restore the canonical PB graph, fleet
   tools and parent-package edges around their existing reviewed source pin.
@@ -144,6 +145,14 @@
   expert-roster shape; LFM retains its existing `selection_bias` identity.
   Independent source/runtime/calibration and exact tensor-byte checks remain
   mandatory. This CPU protocol repair grants no GPU, capture or serving admission.
+
+- **Authenticated shape-time tables refuse unmeasured admission** (#2094, PR #2112).
+  Conversion and reload compare the independently expected panel digest to
+  authenticated bytes. Nonempty rate pools and legacy or synthetic digest-only
+  receipts now refuse at `--pact-shape-table` intake; only checker-bound rows
+  price allocator/frontier options. Receipt reads reuse the bounded checker
+  envelope and malformed bindings refuse cleanly. The serving pin, SDK4 source
+  contract and independent native/serving qualification are unchanged.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).

@@ -451,10 +451,13 @@ def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
 
     A checker receipt is rejoined through the public PB reader and the
     independent reviewed source config, then its projection is compared to
-    the table. Bare panels and observations refuse. Other legacy artifacts
-    retain the digest-only check.
+    the table. Bare panels, observations and unrecognized receipt schemas
+    refuse; a matching digest alone cannot authenticate measurement rows.
     """
     table = parse_shape_table(_json(path), source_path=str(path))
+    if table.rate_pools:
+        raise ShapeRuntimeError(
+            "shape-time rate_pools are not authenticated by PB checker completions")
     for receipt, expected in sorted({(row.measurement.receipt_path, row.measurement.receipt_sha256)
                                      for row in table.rows}):
         receipt_path = Path(receipt)
@@ -463,7 +466,8 @@ def load_shape_table(path: str | Path) -> ShapeRuntimeTable:
         receipt_path = receipt_path.resolve()
         try:
             _, raw = ArtifactReader(Path()).bytes(
-                {"path": str(receipt_path), "sha256": expected}, "shape-time receipt")
+                {"path": str(receipt_path), "sha256": expected}, "shape-time receipt",
+                max_bytes=CHECKER_EVIDENCE_MAX_BYTES)
         except (OSError, RuntimePriceError) as exc:
             raise ShapeRuntimeError(f"cannot read shape-time receipt {receipt_path}: {exc}") from exc
         _rebind_shape_row_to_receipt(table, receipt_path, raw)
@@ -497,9 +501,7 @@ def _rebind_shape_row_to_receipt(table: ShapeRuntimeTable, receipt_path: Path, r
                     or row.measurement.warmup_iterations != projection["warmup_iterations"]):
                 raise ShapeRuntimeError("shape row measurement differs from its checker observation")
         return
-    if isinstance(panel, Mapping) and panel.get("schema") in (
-            SHAPE_TIME_PANEL_SCHEMA, SHAPE_TIME_OBSERVATION_SCHEMA):
-        raise ShapeRuntimeError("shape-time receipt requires an authenticated PB checker completion")
+    raise ShapeRuntimeError("shape-time receipt requires an authenticated PB checker completion")
 
 
 # --------------------------------------------------------------------------- #
@@ -1090,7 +1092,10 @@ def _observation_projection(observation: Mapping) -> dict:
         raise ShapeRuntimeError(f"shape-time observation claims must be exactly {_OBSERVATION_CLAIMS}")
     reader = ArtifactReader(Path())
     panel_path, panel_raw = reader.bytes(top["panel"], "observation.panel")
-    _observation_sha(top["expected_panel_sha256"], "observation.expected_panel_sha256")
+    expected_panel_sha256 = _observation_sha(
+        top["expected_panel_sha256"], "observation.expected_panel_sha256")
+    _equal_strict(top["panel"]["sha256"], expected_panel_sha256,
+                  "observation.expected_panel_sha256")
     panel = _parse_bound_json(panel_raw, panel_path, "observation.panel")
     _equal_strict(panel.get("schema"), SHAPE_TIME_PANEL_SCHEMA, "observation.panel schema")
     if panel.get("status") != "measured":
