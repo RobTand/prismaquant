@@ -144,6 +144,34 @@ _SEALS = (
     | getattr(fcntl, "F_SEAL_GROW", 0x0004)
     | getattr(fcntl, "F_SEAL_WRITE", 0x0008)
 )
+_MFD_CLOEXEC = getattr(os, "MFD_CLOEXEC", 0x0001)
+_MFD_ALLOW_SEALING = getattr(os, "MFD_ALLOW_SEALING", 0x0002)
+
+
+def _create_memfd(name: str, flags: int) -> int:
+    """One anon_inode memfd, sealing-capable, this process owns.
+
+    ``os.memfd_create`` exists only in interpreters whose build headers had
+    the syscall; a portable build (pq-cpu312, PB ded8698fa4d6) lacks it and
+    every stream read died on the missing attribute. The runtime libc on the
+    same box still wraps the syscall (glibc 2.27+, musl 1.1.20+), so fall
+    through to it. The MFD flag numbers are Linux UAPI, ABI-fixed.
+    """
+    if hasattr(os, "memfd_create"):
+        return os.memfd_create(name, flags)
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    try:
+        call = libc.memfd_create
+    except AttributeError:
+        raise OSError(
+            f"this runtime libc exposes no memfd_create; sealed io "
+            f"buffers cannot hold {name!r} here") from None
+    fd = call(name.encode(), flags)
+    if fd == -1:
+        raise OSError(ctypes.get_errno(), f"memfd_create({name!r}) failed")
+    return fd
 
 
 def kernel_seal_bits(fd: int) -> int:
@@ -181,7 +209,7 @@ class SealedBuffer:
     def __init__(self, size: int):
         self.size = int(size)
         self._map = None
-        self._fd = os.memfd_create("pq-io", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        self._fd = _create_memfd("pq-io", _MFD_CLOEXEC | _MFD_ALLOW_SEALING)
         try:
             os.ftruncate(self._fd, self.size)
             if self.size:

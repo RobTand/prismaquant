@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **Sealed io buffers open where this interpreter's os lacks
+  `memfd_create`** (#1896). A portable CPU venv (`pq-cpu312` on dl380g10)
+  has no `os.memfd_create`, and every io engine stream entry died on the
+  missing attribute (PrismaBuild action `ded8698fa4d6`). `SealedBuffer` now
+  opens through `io_engine._create_memfd`: `os.memfd_create` when present,
+  otherwise the runtime libc's `memfd_create` wrapper (glibc 2.27+,
+  musl 1.1.20+), with the MFD flags resolved from their ABI-fixed Linux
+  UAPI numbers and a named `OSError` when the runtime libc has no wrapper.
+  The seal-and-verify guard is unchanged; no default, pin, wire, GPU or
+  serving claim.
+
 - **The io engine resolves memfd seal constants without CPython build-time
   fcntl names** (#1896). Portable interpreters whose build headers predate
   glibc 2.27 expose only part of the fcntl seal surface, and reading
