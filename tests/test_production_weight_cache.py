@@ -1806,3 +1806,59 @@ def test_prefetch_refuses_a_colliding_manifest_pair(tmp_path):
     # Nothing was loaded: both entries still point at the manifest leaf.
     assert cache.weights[("a.b", "BF16")] == "a_b__BF16.pt"
     assert cache.weights[("a_b", "BF16")] == "a_b__BF16.pt"
+
+
+def test_prefetch_refuses_colliding_keys_across_separate_calls(tmp_path):
+    # The manifest check is whole-manifest and memoized, not per-call: two
+    # colliding keys handed to prefetch in SEPARATE calls must still refuse
+    # on the first call that opens the manifest, because the pair shares one
+    # leaf no matter which subset this call asked for.
+    torch.save(torch.ones((2, 2)), tmp_path / "a_b__BF16.pt")
+    cache = ProductionWeightCache(
+        weights={
+            ("a.b", "BF16"): "a_b__BF16.pt",
+            ("a_b", "BF16"): "a_b__BF16.pt",
+        },
+        levers={},
+        cache_dir=str(tmp_path),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        cache.prefetch([("a.b", "BF16")])
+
+    message = str(exc_info.value)
+    assert "a.b" in message
+    assert "a_b" in message
+    assert "a_b__BF16.pt" in message
+    assert cache.weights[("a.b", "BF16")] == "a_b__BF16.pt"
+    assert cache.weights[("a_b", "BF16")] == "a_b__BF16.pt"
+
+
+def test_get_refuses_colliding_pair_before_any_load(tmp_path, monkeypatch):
+    # The lazy get() -> _resolve_to_tensor -> _load_file_tensor path must run
+    # the manifest check before the first byte is read: a colliding pair read
+    # only through get() refuses with both qnames, and never reaches
+    # torch.load (asserted by the exploding stand-in below).
+    torch.save(torch.ones((2, 2)), tmp_path / "a_b__BF16.pt")
+    cache = ProductionWeightCache(
+        weights={
+            ("a.b", "BF16"): "a_b__BF16.pt",
+            ("a_b", "BF16"): "a_b__BF16.pt",
+        },
+        levers={},
+        cache_dir=str(tmp_path),
+    )
+
+    def _no_load(*args, **kwargs):
+        raise AssertionError("torch.load reached before the injectivity refusal")
+
+    monkeypatch.setattr(torch, "load", _no_load)
+
+    with pytest.raises(ValueError) as exc_info:
+        cache.get("a.b", "BF16")
+
+    message = str(exc_info.value)
+    assert "a.b" in message
+    assert "a_b" in message
+    assert "a_b__BF16.pt" in message
+    assert cache.weights[("a.b", "BF16")] == "a_b__BF16.pt"
