@@ -208,7 +208,10 @@ def git_commit(tree: str) -> str:
 #: repository root.
 PRODUCER_SOURCES = ("experiments/glm_data_manifests.py",
                     "experiments/glm_arc_prewarm.py",
-                    "prismaquant/tessera_campaign_selection.py")
+                    "prismaquant/tessera_campaign_selection.py",
+                    "prismaquant/tessera_acquisition_inputs.py",
+                    "prismaquant/digests.py", "prismaquant/file_identity.py",
+                    "prismaquant/schemas.py")
 
 
 def producer_source_sha256() -> str:
@@ -284,12 +287,11 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
                    argv: "list | None" = None) -> dict:
     """One row's read set, in the order the row consumes it.
 
-    Captures come first because ``prefetch_capture`` runs before the layer's
-    weights are touched; the seed wire the row re-verifies comes last, for the
-    same reason -- within each group the order is the consumer's own, and the
-    prewarm reader walks ``entries`` in order, so a warm cut short by ARC
-    headroom is cut at the end of the row's own read, not in the middle of its
-    captures.
+    Opt-in bound acquisition inputs come first: intake reads the whole request
+    and raw cost before model preparation. Captures then precede weights because
+    ``prefetch_capture`` runs before the layer's weights are touched; seed wire
+    re-verification comes last. Within each group the order is the consumer's
+    own, so a prewarm cut at its byte budget respects the row's actual readset.
 
     ``argv`` is the row's own command line.  It is what names
     ``--seed-wire-dir``, and reading the plan instead is what made every
@@ -297,7 +299,9 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
     9.4-19 GB of wire off cold spindles at 41 MB/s.
     """
     plan = campaign.row_plan(row_id, argv)
-    entries = []
+    acquisition = plan.get("_acquisition", [])
+    entries = [{"path": record["path"], "offset": 0,
+                "bytes": record["bytes"], "sha256": record["sha256"]} for record in acquisition]
     for path, size in plan["_captures"]:
         entries.append({"path": path, "offset": 0, "bytes": int(size), "sha256": None})
     for path, offset, length in plan["_extents"]:
@@ -307,6 +311,12 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
                "cumulative_bytes": plan["capture_bytes"]},
               {"name": "weight_extents", "bytes": plan["weight_bytes"],
                "cumulative_bytes": plan["capture_bytes"] + plan["weight_bytes"]}]
+    if acquisition:
+        acquisition_bytes = plan["acquisition_bytes"]
+        phases.insert(0, {"name": "acquisition_inputs", "bytes": acquisition_bytes,
+                          "cumulative_bytes": acquisition_bytes})
+        for phase in phases[1:]:
+            phase["cumulative_bytes"] += acquisition_bytes
     for path, size in plan["_seeds"]:
         entries.append({"path": path, "offset": 0, "bytes": int(size), "sha256": None})
     phases.append({"name": "seeds", "bytes": plan["seed_bytes"],
@@ -331,7 +341,9 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
             "readable file was found there; refusing to declare a read set "
             "that omits the row's seed wire")
     for e in entries:
-        if not e["path"].startswith(SHARED_MOUNT + "/"):
+        if (not e["path"].startswith(SHARED_MOUNT + "/")
+                or (e["sha256"] is not None and not os.path.realpath(e["path"]).startswith(
+                    os.path.realpath(SHARED_MOUNT) + "/"))):
             raise SystemExit(f"{row_id}: entry outside the shared mount: {e['path']}")
         if e["bytes"] <= 0:
             raise SystemExit(f"{row_id}: zero-length entry: {e['path']}")
@@ -345,7 +357,9 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
         "annotations": {
             "row_id": row_id,
             "group": plan["group"],
-            "sha256_present": False,
+            "sha256_present": bool(acquisition),
+            **({"sha256_present_scope": "original acquisition request and bound raw cost only"}
+               if acquisition else {}),
             "sha256_absent_reason": (
                 "hashing 1023 GB of capture bytes costs more than the prewarm "
                 "saves; the manifest file itself is content-addressed in the "
@@ -354,11 +368,13 @@ def build_manifest(campaign: Campaign, row_id: str, produced_by: dict,
                 "captures": plan["capture_files"],
                 "weight_extents": plan["weight_extents"],
                 "seeds": plan["seed_files"],
+                **({"acquisition_inputs": plan["acquisition_files"]} if acquisition else {}),
             },
             "bytes": {
                 "captures": plan["capture_bytes"],
                 "weight_extents": plan["weight_bytes"],
                 "seeds": plan["seed_bytes"],
+                **({"acquisition_inputs": plan["acquisition_bytes"]} if acquisition else {}),
             },
             # The directory the row's argv named, so a reader can tell a row
             # that declared no seeds from one whose seed directory was empty

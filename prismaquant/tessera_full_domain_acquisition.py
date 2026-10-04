@@ -322,20 +322,21 @@ def joint_acquisition_from_cost_data(cost_data, unit_shapes, families, *,
             "measurement_verification": "validated attested joint rows and bound raw run/operator/probe metadata; no tensor or wire payload reread"}
 
 
-def load_joint_campaign_acquisition(binding) -> dict:
+def load_joint_campaign_acquisition(binding: dict, *, units: Sequence[str] | None = None) -> dict:
     """Authenticate research requests before the existing renderer consumes them.
 
     The root SHA binds the small request document, whose cost SHA binds the
     original pickle. Ordinary currency and raw-v2 validation are rerun against
     that pickle, not the document's claims. This checks recorded identities
-    only, without rereading source tensors or rendered wire bodies. Atomic
-    member coverage and active campaign scope belong to the scheduler.
+    only, without rereading source tensors or rendered wire bodies. Explicit
+    units are projected only after validating the whole original request.
+    Atomic member coverage and active scope belong to the scheduler.
     """
     import pickle
 
     from .cost_stage_checkpoint import canonical_json_sha256
+    from .tessera_acquisition_inputs import read_joint_campaign_acquisition_document
     from .joint_aura import identity_sha256
-    from .schemas import strict_json_loads
     from .stage_inputs import read_bound, require
     from .tessera_formats import get_tessera_family
     from .tessera_legal_domain import live_pins as current_domain_pins, tessera_source_state
@@ -354,13 +355,7 @@ def load_joint_campaign_acquisition(binding) -> dict:
             if field in record:
                 require(record[field] is expected, f"joint acquisition refuses claimed {field}")
 
-    raw = read_bound(binding, "joint acquisition request")
-    document = strict_json_loads(
-        raw, duplicate=lambda key: ValueError(f"joint acquisition duplicate JSON key: {key}"),
-        constant=lambda value: ValueError(f"joint acquisition nonfinite JSON value: {value}"))
-    require(isinstance(document, dict) and document.get("schema") ==
-            "prismaquant.tessera_full_domain_campaign_acquisition.v1",
-            "joint acquisition requires the campaign request schema")
+    document, _ = read_joint_campaign_acquisition_document(binding, reader=read_bound)
     request_only(document)
     require(document.get("allocator_payload") is False and
             document.get("production_qualified") is False and
@@ -448,7 +443,40 @@ def load_joint_campaign_acquisition(binding) -> dict:
         total += len(proposed)
     require(total > 0, "joint acquisition has no requested measurement work")
     same(document.get("total_requested_quality_measurements"), total, "total requested measurements")
-    return {"requests": requests, "source_weights": source_weights,
-            "identity": {"request_sha256": binding["sha256"], "cost_sha256": cost_binding["sha256"],
-                         "joint_aura_identity_sha256": provenance["joint_aura_identity_sha256"],
-                         "probe_identity_sha256": probe_digest}}
+    acquisition = {"requests": requests, "source_weights": source_weights,
+                   "identity": {"request_sha256": binding["sha256"], "cost_sha256": cost_binding["sha256"],
+                                "joint_aura_identity_sha256": provenance["joint_aura_identity_sha256"],
+                                "probe_identity_sha256": probe_digest}}
+    return acquisition if units is None else project_joint_campaign_acquisition(acquisition, units=units)
+
+
+
+def project_joint_campaign_acquisition(acquisition: dict, *, units: Sequence[str]) -> dict:
+    """Project a fully validated intake onto explicit existing campaign units.
+
+    Callers must first obtain 'acquisition' from the authenticated loader.
+    This is whole-unit selection, not a new request or rate controller. It
+    deliberately knows no atomic groups: the runtime still requires every
+    actual member, including members whose requested families are deferred.
+    The coordinator must omit rows with no selected measurement work.
+    """
+    from copy import deepcopy
+    from .stage_inputs import require
+
+    require(isinstance(units, Sequence) and not isinstance(units, (str, bytes)),
+            "joint acquisition selected units must be a sequence of unit names")
+    require(bool(units) and all(isinstance(unit, str) and bool(unit) for unit in units),
+            "joint acquisition selected units must be nonempty unit names")
+    require(len(set(units)) == len(units), "joint acquisition duplicate selected unit")
+    selected = sorted(units)
+    require(set(selected) <= set(acquisition["requests"]),
+            "joint acquisition selected unit is outside authenticated request scope")
+    require(set(selected) <= set(acquisition["source_weights"]),
+            "joint acquisition selected unit lacks authenticated source identity")
+    requests = {unit: {family: list(rates) for family, rates in
+                       sorted(acquisition["requests"][unit].items())} for unit in selected}
+    require(any(rates for families in requests.values() for rates in families.values()),
+            "joint acquisition selected units have no requested measurement work")
+    return {"requests": requests,
+            "source_weights": {unit: deepcopy(acquisition["source_weights"][unit]) for unit in selected},
+            "identity": dict(acquisition["identity"])}

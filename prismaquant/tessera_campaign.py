@@ -923,7 +923,10 @@ def _load_campaign_acquisition(args, parser):
 def _campaign_acquisition_scope(acquisition, scope_groups, *, selected=None):
     """Require every real atomic member and exactly the requested scope."""
     requests, sources = acquisition["requests"], acquisition["source_weights"]
-    known = {name for members in scope_groups.values() for name in members}
+    flat = [name for members in scope_groups.values() for name in members]
+    known = set(flat)
+    if len(flat) != len(known):
+        raise ValueError("acquisition actual atomic scope overlaps or repeats members")
     if not requests or set(requests) - known:
         raise ValueError("acquisition names empty or unknown unit scope")
     keys = [key for key, members in sorted(scope_groups.items()) if set(members) & set(requests)]
@@ -933,6 +936,39 @@ def _campaign_acquisition_scope(acquisition, scope_groups, *, selected=None):
     if selected is not None and set(selected) != expanded:
         raise ValueError("acquisition selected scope differs from requested atomic-expanded scope")
     return keys, expanded
+
+
+def _campaign_acquisition_row_scope(acquisition, scope_groups, *, selected=None):
+    """Project only an explicit complete actual --units selection after full validation."""
+    keys, expanded = _campaign_acquisition_scope(acquisition, scope_groups)
+    if selected is None:
+        return acquisition, keys, expanded
+    if isinstance(selected, (str, bytes)):
+        raise ValueError("acquisition row selection requires explicit unit names, not a string")
+    listed = list(selected)
+    selected = set(listed)
+    if len(listed) != len(selected):
+        raise ValueError("acquisition row selection repeats a unit")
+    row_keys = [key for key in keys if selected.intersection(scope_groups[key])]
+    row_members = {name for key in row_keys for name in scope_groups[key]}
+    if not selected or row_members != selected or not selected <= expanded:
+        raise ValueError("acquisition row selection must contain complete requested actual atomic groups")
+    from .tessera_full_domain_acquisition import project_joint_campaign_acquisition
+    projected = project_joint_campaign_acquisition(acquisition, units=sorted(selected))
+    _campaign_acquisition_scope(projected, scope_groups, selected=selected)
+    return projected, row_keys, row_members
+
+
+def _requested_acquisition_schedule(groups, requests):
+    """Exact atomic-expanded requested work only, not an assertion of legal prices."""
+    result = {}
+    for _key, members in sorted(groups.items()):
+        families = sorted({family for name in members for family in requests[name]})
+        union = {family: sorted({q for name in members for q in requests[name].get(family, [])})
+                 for family in families}
+        for name in members:
+            result[name] = {family: list(qs) for family, qs in union.items()}
+    return dict(sorted(result.items()))
 
 
 def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap,
@@ -950,6 +986,7 @@ def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap
         if (audit_units or getattr(args, "rate_band", None) is not None
                 or args.exhaustive_rate_grid or args.max_rounds != 1):
             raise ValueError("acquisition schedule refuses audit, band, exhaustive or adaptive work")
+    requested_schedule = None if requests is None else _requested_acquisition_schedule(groups, requests)
     for key, members in sorted(groups.items()):
         if requests is None:
             families = group_rates[key]
@@ -971,7 +1008,7 @@ def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap
                     raise ValueError(f"acquisition family {family} has no actual atomic-member grid")
                 if any(type(q) is not int or q not in allowed for q in proposed):
                     raise ValueError(f"acquisition {key}:{family} requests illegal or route-refused q256")
-                want, extra = sorted(set(proposed)), None
+                want, extra = requested_schedule[members[0]][family], None
             for name in members:
                 rates = set(want)
                 if extra is not None and name in audit_units:
@@ -2326,6 +2363,7 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
     # flags leave the historical settings bytes unchanged.
     settings.pop("acquisition_request", None)
     settings.pop("acquisition_request_sha256", None)
+    settings.pop("acquisition_source_weights", None)
     restriction = parse_family_restriction(settings.get("family_restriction"))
     if settings.get("source_scope") is None:
         # Unset, the body's identity is byte-identical to before the flag.
@@ -2422,6 +2460,8 @@ def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
             }),
         "units": {
             name: {
+                **({"acquisition_source_weight": dict(args.acquisition_source_weights[name])}
+                   if getattr(args, "acquisition_source_weights", None) is not None else {}),
                 # A campaign hold creates this exact producer template once
                 # before journal admission.  The journal retains the same
                 # source/H records the former direct calls made, without a
@@ -6909,8 +6949,8 @@ def _main(argv, *, source_scope, waits) -> int:
         raise RuntimeError("--research-exact-member requires --units")
 
     if acquisition is not None:
-        selected_groups, keep = _campaign_acquisition_scope(acquisition, scope_groups,
-            selected=targets if args.units else None)
+        acquisition, selected_groups, keep = _campaign_acquisition_row_scope(
+            acquisition, scope_groups, selected=targets if args.units else None)
         dense_targets = [name for name in dense_targets if name in keep]
         expert_targets = [name for name in expert_targets if name in keep]
         expert_members = {name: member for name, member in expert_members.items() if name in keep}
@@ -7341,6 +7381,7 @@ def _main(argv, *, source_scope, waits) -> int:
             rates_by_unit=acquisition_rates)
         args.acquisition_schedule = acquisition_schedule
         args.acquisition_origin = _campaign_acquisition_origin(acquisition, acquisition_schedule, menus)
+        args.acquisition_source_weights = acquisition["source_weights"]
 
     if not streaming_head:
         close_source_authentication()
@@ -8520,7 +8561,8 @@ def _main(argv, *, source_scope, waits) -> int:
         "provenance": {
             "menu_mode": mode,
             **({"acquisition": args.acquisition_origin,
-                "acquisition_schedule": acquisition_schedule} if acquisition is not None else {}),
+                "acquisition_schedule": acquisition_schedule,
+                "acquisition_source_weights": acquisition["source_weights"]} if acquisition is not None else {}),
             # How the artifacts were written, and what that cost. Absent means
             # the default: every render and wire published on the encode
             # thread before the next batch started. Present means one bounded
@@ -8737,8 +8779,14 @@ def _main(argv, *, source_scope, waits) -> int:
             },
         },
     }
+    payload_menus = menus
+    if acquisition_schedule is not None:
+        # This acquisition prepares exactly requested measured wires; a dense
+        # surface must not turn their interior into additional scalar prices.
+        payload_menus = {name: [rung for rung in menus[name] if rung.body_rate_q256 in
+            acquisition_schedule[name].get(rung.family, [])] for name in targets}
     payload = campaign_cost_payload(
-        measured, menus, loo=loo, provenance=provenance,
+        measured, payload_menus, loo=loo, provenance=provenance,
         wire_backed=frozenset(projected_units), stack_samples=stack_samples)
     # Empty menus, failed anchors and interrupted work do not establish a
     # price. Publish coverage only after the cost rows have been constructed.

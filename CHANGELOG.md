@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **Authenticated acquisition requests reach complete per-row execution and
+  strict merge through the existing planner** (#2195). Each active atomic
+  cohort keeps the original request/cost/run/probe identity; deferred cohorts
+  remain explicit and produce no zero-work jobs. Whole request/cost bindings
+  precede captures in the torch-free staged readset, with a bounded fenced
+  metadata memo instead of repeated whole-cost reads. Submission and merge
+  require disjoint complete active coverage, exact requested scalar cells,
+  source proofs and common regime settings. The original raw joint evidence,
+  normal opt-out paths and production/scientific qualification gates remain;
+  no Fisher price, pin/default change or served artifact is inferred.
+
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
   A v45 table was refused as an unknown requirement. The parser now reads the
