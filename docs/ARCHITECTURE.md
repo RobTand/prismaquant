@@ -157,6 +157,12 @@ LFM continues to use `selection_bias`. The original tensor bytes, dtype,
 cardinality, source/runtime/calibration and backend joins remain required.
 CPU protocol acceptance is not original CUDA/provider, capture or serving
 qualification; no runtime cell, format menu, pin or ship gate is changed.
+Refs #2202: the stdlib GLM derivative image driver supplies and restores the
+direct-script sibling import context when loading the closed derivative
+contract. That contract selects its existing digest owner in package or
+sibling mode without initializing PrismaQuant/Torch for host CLI dispatch.
+Declared source/image identities, byte transform and fail-closed guards are
+unchanged. This bootstrap repair performs no image build or source adoption.
 
 Re-stamped 2026-10-02 (Refs #1589, root-approved comparison strengthening):
 the existing uniform-control contract loop additionally compares a new
