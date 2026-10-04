@@ -475,18 +475,25 @@ def load_multimodal_calibration(
     not by this loader.
 
     Returns `(triples, composition)` where `composition` is
-    `{"dataset", "requested", "real", "synthetic"}`: the counts the
-    probe passes must stamp into their meta (`calibration_source`) so
-    provenance cannot misread a blended capture as a real one.
+    `{"dataset", "requested", "real_loaded", "synthetic_loaded"}`: the
+    counts the probe passes must stamp into their meta
+    (`calibration_source`) so provenance cannot misread a blended capture
+    as a real one. The counts describe rows *loaded* — dataset rows
+    accepted plus stub rows built — not forwards that succeeded; the
+    passes' own `nsamples` reports forward successes separately.
     """
     triples: list[dict] = []
     if dataset_name == "synthetic":
-        return _synthetic_multimodal_calibration_samples(
-            processor, n_samples, max_text_len), {
+        synth = _synthetic_multimodal_calibration_samples(
+            processor, n_samples, max_text_len)
+        return synth, {
             "dataset": dataset_name,
             "requested": n_samples,
-            "real": 0,
-            "synthetic": n_samples,
+            "real_loaded": 0,
+            # Rows actually returned, never the requested count: the stub
+            # continues past rows whose processor calls fail (and returns
+            # [] when PIL is missing).
+            "synthetic_loaded": len(synth),
         }
     try:
         from datasets import load_dataset
@@ -533,8 +540,8 @@ def load_multimodal_calibration(
     return triples[:n_samples], {
         "dataset": dataset_name,
         "requested": n_samples,
-        "real": real_count,
-        "synthetic": synthetic_count,
+        "real_loaded": real_count,
+        "synthetic_loaded": synthetic_count,
     }
 
 
@@ -3611,8 +3618,9 @@ def run_multimodal_visual_probe_pass(
         processor, dataset_name, n_samples, max_text_len)
     print(f"[probe/mm] loaded {len(triples)} multimodal samples "
           f"(dataset={dataset_name!r}, "
-          f"real={calibration_composition['real']}, "
-          f"synthetic={calibration_composition['synthetic']})", flush=True)
+          f"real_loaded={calibration_composition['real_loaded']}, "
+          f"synthetic_loaded={calibration_composition['synthetic_loaded']})",
+          flush=True)
     if not triples:
         print("[probe/mm] load_multimodal_calibration returned 0 samples; "
               "skipping multimodal pass", flush=True)
@@ -3862,8 +3870,9 @@ def run_streaming_multimodal_visual_probe_pass(
         processor, dataset_name, n_samples, max_text_len)
     print(f"[probe/mm-stream] loaded {len(triples)} multimodal samples "
           f"(dataset={dataset_name!r}, "
-          f"real={calibration_composition['real']}, "
-          f"synthetic={calibration_composition['synthetic']})", flush=True)
+          f"real_loaded={calibration_composition['real_loaded']}, "
+          f"synthetic_loaded={calibration_composition['synthetic_loaded']})",
+          flush=True)
     if not triples:
         print("[probe/mm-stream] no calibration samples; skipping", flush=True)
         return False
