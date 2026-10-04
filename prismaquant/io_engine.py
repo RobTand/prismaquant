@@ -147,6 +147,12 @@ _SEALS = (
 _MFD_CLOEXEC = getattr(os, "MFD_CLOEXEC", 0x0001)
 _MFD_ALLOW_SEALING = getattr(os, "MFD_ALLOW_SEALING", 0x0002)
 
+#: The runtime libc's ``memfd_create``, bound once with explicit ctypes
+#: signatures (D5 review of b601b76b9b5: rebuilding the ``CDLL`` handle per
+#: call re-dlopened and re-resolved on every sealed buffer). ``None`` until
+#: the first portable call needs it.
+_LIBC_MEMFD_CREATE = None
+
 
 def _create_memfd(name: str, flags: int) -> int:
     """One anon_inode memfd, sealing-capable, this process owns.
@@ -157,18 +163,23 @@ def _create_memfd(name: str, flags: int) -> int:
     same box still wraps the syscall (glibc 2.27+, musl 1.1.20+), so fall
     through to it. The MFD flag numbers are Linux UAPI, ABI-fixed.
     """
+    global _LIBC_MEMFD_CREATE
     if hasattr(os, "memfd_create"):
         return os.memfd_create(name, flags)
     import ctypes
 
-    libc = ctypes.CDLL(None, use_errno=True)
-    try:
-        call = libc.memfd_create
-    except AttributeError:
-        raise OSError(
-            f"this runtime libc exposes no memfd_create; sealed io "
-            f"buffers cannot hold {name!r} here") from None
-    fd = call(name.encode(), flags)
+    if _LIBC_MEMFD_CREATE is None:
+        libc = ctypes.CDLL(None, use_errno=True)
+        try:
+            call = libc.memfd_create
+        except AttributeError:
+            raise OSError(
+                f"this runtime libc exposes no memfd_create; sealed io "
+                f"buffers cannot hold {name!r} here") from None
+        call.argtypes = (ctypes.c_char_p, ctypes.c_int)
+        call.restype = ctypes.c_int
+        _LIBC_MEMFD_CREATE = call
+    fd = _LIBC_MEMFD_CREATE(name.encode(), flags)
     if fd == -1:
         raise OSError(ctypes.get_errno(), f"memfd_create({name!r}) failed")
     return fd
