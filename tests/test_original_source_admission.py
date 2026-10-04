@@ -257,6 +257,7 @@ def _selected_reader_producer_fixtures(case):
     result = {'action_key': identity['action_key'], 'published_unix': context['published_unix'],
               'attempt': context['attempt'], 'generation': context['generation'],
               'host': identity['host'], 'worker_id': identity['worker'],
+              'producer_context': context,
               'receipt': {'receipt_sha256': context['receipt_sha256'],
                           'producer': {'runtime': {'runtime_sha256': context['runtime_sha256']}}}}
     return receipt, context, result
@@ -386,7 +387,11 @@ def test_reader_source_snapshot_cannot_bridge_family_acceptance(
         reader['node_id'] = 'tests/another-reader'
         expected = 'qualified member lacks independently selected source-family acceptance'
     elif damage == 'restamped-snapshot':
+        # The executed request and the reader row both claim the foreign
+        # snapshot; only the family's accepted old_source stays real, so the
+        # refusal that fires is the family restamp join.
         reader['source_snapshot'] = 'e' * 40
+        request['params']['checkout_snapshot']['parent'] = 'e' * 40
         expected = 'original executed member source is not restamped'
     elif damage == 'null-compatibility':
         reader['compatibility'] = None

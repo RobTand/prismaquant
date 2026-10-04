@@ -115,7 +115,7 @@ def test_held_producer_context_authenticates_and_joins(installed_client_sdk, tmp
     result = installed_client_sdk.read_verified_action_result(
         installed_client_sdk.PoolQueue(QUEUE_ROOT), ACTION_KEY,
         published_unix=PUBLISHED_UNIX, attempt=ATTEMPT,
-        max_result_bytes=64 * 1024, max_evidence_bytes=64 * 1024,
+        max_result_bytes=64 * 1024, max_evidence_bytes=1024 * 1024,
         require_native_producer_context=True)
     context = result["producer_context"]
     assert context["schema"] == "prismabuild.native_producer_context.v1"
