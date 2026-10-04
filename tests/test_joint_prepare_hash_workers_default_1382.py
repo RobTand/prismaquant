@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import inspect
 import os
+from pathlib import Path
 
 import pytest
 
+import prismaquant.tessera_joint_aura as bridge
 from prismaquant.tessera_joint_aura import (
     default_file_load_workers,
     prepare_cache,
@@ -52,3 +54,41 @@ def test_explicit_value_still_respects_the_affinity_gate():
 def test_non_positive_or_non_integer_explicit_value_refuses(bad):
     with pytest.raises(ValueError, match="positive file_hash_workers required"):
         resolve_file_hash_workers({"file_hash_workers": bad})
+
+
+def test_regenerate_tool_routes_the_plan_key_through_the_resolver(monkeypatch):
+    # tools/regenerate_joint_quanta.py feeds its one head intake from the same
+    # resolution: an omitted key takes prepare_cache's derivation, an explicit
+    # plan value wins.
+    import sys
+    from types import SimpleNamespace
+
+    import prismaquant.aura_cost as aura
+    import prismaquant.joint_stage_b_head as head_module
+    root = Path(__file__).resolve().parents[1]
+    if str(root / "tools") not in sys.path:
+        sys.path.insert(0, str(root / "tools"))
+    import regenerate_joint_quanta as tool
+
+    seen = {}
+
+    def intake(_inputs, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(formats_by_qname={}, cells={})
+
+    monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
+    monkeypatch.setattr(bridge, "load_declared_reader", lambda _reader: None)
+    monkeypatch.setattr(aura, "_aura_source_sha256", lambda: "0" * 64)
+    monkeypatch.setattr(head_module, "build_head_slices", lambda **_kwargs: {})
+
+    def build(plan):
+        return tool._build_head_slices(
+            plan, plan_sha256="0" * 64, prepared={}, prepared_binding={},
+            production_cache=None, layers=[], output_root="unused",
+            metadata_root="unused")
+
+    assert build({"inputs": {}}) == {}
+    assert seen["file_hash_workers"] == resolve_file_hash_workers({"inputs": {}})
+    seen.clear()
+    assert build({"inputs": {}, "file_hash_workers": 2}) == {}
+    assert seen["file_hash_workers"] == 2

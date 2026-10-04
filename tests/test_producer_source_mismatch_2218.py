@@ -99,6 +99,27 @@ def test_any_tree_mutation_names_the_first_differing_path(
     assert f"current={expected[2]}" in message
 
 
+def test_tree_changed_between_identity_and_manifest_write_is_named(
+        tmp_path, monkeypatch):
+    # The manifest write is one pass over the tree, later than the identity's
+    # digest: when that pass's per-file map still matches the executing tree
+    # but the identity aggregate differs, the refusal says when the tree moved.
+    root = _package(tmp_path)
+    _point_default_root_at(monkeypatch, root)
+    identity = _identity(pwc._production_cache_source_sha256())
+    (root / "profiles.json").write_bytes(b'{"format": "FP8"}\n')
+    checkpoint = tmp_path / "ckpt"
+    _write_manifest(checkpoint, identity["producer_source_sha256"])
+
+    with pytest.raises(RuntimeError) as refused:
+        aura._load_aura_checkpoint_manifest(
+            checkpoint, _identity(pwc._production_cache_source_sha256()))
+    message = str(refused.value)
+    assert "producer_source_sha256" in message
+    assert "the producer tree changed between identity and manifest write" in message
+    assert "first differing source file" not in message
+
+
 def test_manifest_without_the_listing_keeps_the_plain_refusal(tmp_path, monkeypatch):
     # A manifest written before the per-file listing existed still refuses with
     # exactly the old message: the diagnostic is additive, never a gate.
