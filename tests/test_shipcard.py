@@ -1507,10 +1507,14 @@ def _graph_receipt_metrics(root):
     """A tiny equality measurement, judged by Tessera, never a copied verdict."""
     from tessera import graph_receipt
 
+    config_path = root / "config.json"
+    if not config_path.exists():
+        config_path.write_bytes(b"{}")
+    config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
     receipt = graph_receipt.finish({
         "schema": graph_receipt.SCHEMA,
         "runtime": {"image": "registry/serve@sha256:" + "1" * 64},
-        "model": {"config_sha256": "2" * 64},
+        "model": {"config_sha256": config_sha256},
         "tessera": {"src_sha256": "3" * 64},
         "arms": [{
             "name": "graph", "compilation_config": {"mode": "NONE"},
@@ -1547,8 +1551,7 @@ def _graph_slot_record(tmp_path):
 def test_graph_receipt_matching_equal_verifies(tmp_path):
     from prismaquant.shipcard import _verify_native_export_record
 
-    assert _verify_native_export_record(
-        "native_export.graph", _graph_slot_record(tmp_path)) == []
+    assert _verify_native_export_record("native_export.graph", _graph_slot_record(tmp_path), model_dir=tmp_path) == []
 
 
 @pytest.mark.parametrize("field", [
@@ -1560,7 +1563,7 @@ def test_graph_receipt_other_scope_refuses(tmp_path, field):
 
     record = _graph_slot_record(tmp_path)
     record["metrics"]["serve_scope"][field] = "another serve"
-    problems = _verify_native_export_record("native_export.graph", record)
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
     assert any("no attested arm" in p and field in p for p in problems), problems
 
 
@@ -1578,7 +1581,7 @@ def test_graph_receipt_edited_not_equal_refuses(tmp_path):
     raw = json.dumps(receipt).encode()
     path.write_bytes(raw)
     record["metrics"]["graph_receipt_sha256"] = hashlib.sha256(raw).hexdigest()
-    problems = _verify_native_export_record("native_export.graph", record)
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
     assert any("not_equal" in p and "by the rule" in p for p in problems), problems
 
 
@@ -1588,7 +1591,7 @@ def test_graph_receipt_changed_bytes_refuses(tmp_path):
     record = _graph_slot_record(tmp_path)
     path = pathlib.Path(record["metrics"]["graph_receipt_path"])
     path.write_bytes(path.read_bytes() + b" ")
-    problems = _verify_native_export_record("native_export.graph", record)
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
     assert any("graph_receipt_sha256" in p for p in problems), problems
 
 
@@ -1602,7 +1605,7 @@ def test_graph_receipt_missing_refuses(tmp_path, missing):
         pathlib.Path(record["metrics"]["graph_receipt_path"]).unlink()
     else:
         del record["metrics"][missing]
-    problems = _verify_native_export_record("native_export.graph", record)
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
     assert any(("graph_receipt_path" if missing == "file" else missing) in p
                for p in problems), problems
 
@@ -1612,7 +1615,7 @@ def test_graph_receipt_missing_scope_field_names_reason(tmp_path):
 
     record = _graph_slot_record(tmp_path)
     del record["metrics"]["serve_scope"]["max_num_seqs"]
-    problems = _verify_native_export_record("native_export.graph", record)
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
     assert any("the serve does not name" in p and "max_num_seqs" in p
                for p in problems), problems
 
@@ -1631,7 +1634,7 @@ def test_graph_receipt_malformed_refuses(tmp_path, damage):
         raw = json.dumps(receipt).encode()
     path.write_bytes(raw)
     record["metrics"]["graph_receipt_sha256"] = hashlib.sha256(raw).hexdigest()
-    problems = _verify_native_export_record("native_export.graph", record)
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
     if damage == "not_object":
         assert any("malformed graph receipt" in p for p in problems), problems
     else:
@@ -1661,7 +1664,37 @@ def test_graph_receipt_bare_image_refuses(tmp_path):
     full = record["metrics"]["serve_scope"]["image"]
     assert "@sha256:" in full
     record["metrics"]["serve_scope"]["image"] = full.split("@", 1)[1]
-    problems = _verify_native_export_record("native_export.graph", record)
+    problems = _verify_native_export_record("native_export.graph", record, model_dir=tmp_path)
     assert any("graph equality receipt refused: no attested arm" in p
                and "image" in p for p in problems), problems
+
+
+
+def test_graph_receipt_other_artifact_config_refuses(tmp_path):
+    from tessera import graph_receipt
+
+    artifact = _artifact(tmp_path)
+    other = _artifact(tmp_path, name="other", model_type="llama")
+    path = _open_card(tmp_path, artifact)
+    metrics = {"arm": "graph", "enforce_eager": False, "generated_chars": 2,
+               **_graph_receipt_metrics(other)}
+    receipt = json.loads(pathlib.Path(metrics["graph_receipt_path"]).read_bytes())
+    # The borrowed receipt really matches the recorded scope. Only binding that
+    # scope to this card's actual artifact can detect this substitution.
+    assert graph_receipt.verify(receipt, metrics["serve_scope"]) is None
+    fill_slot(path, "native_export.graph", _native_record(
+        "native_export.graph", compute_model_sha(artifact), metrics))
+    problems = verify(load_shipcard(path), model_dir=artifact,
+                      required=["native_export.graph"])
+    assert any("serve_scope.model_config_sha256" in p
+               and "artifact config.json" in p for p in problems), problems
+
+
+def test_graph_receipt_without_artifact_context_refuses(tmp_path):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    problems = _verify_native_export_record(
+        "native_export.graph", _graph_slot_record(tmp_path))
+    assert any("model_config_sha256" in p and "model_dir" in p
+               for p in problems), problems
 

@@ -152,6 +152,7 @@ def _graph_arm_fixture(tmp_path, monkeypatch):
     from prismaquant import validate_native_export as owner
     from test_shipcard import _graph_receipt_metrics
 
+    (tmp_path / "config.json").write_bytes(b'{"model_type":"glm5next"}')
     metrics = _graph_receipt_metrics(tmp_path)
     config = types.SimpleNamespace(
         model_config=types.SimpleNamespace(model=str(tmp_path), max_model_len=8448),
@@ -176,7 +177,6 @@ def _graph_arm_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(owner, "_graph_tessera_source_sha256",
                         lambda: metrics["serve_scope"]["tessera_src_sha256"],
                         raising=False)
-    (tmp_path / "config.json").write_bytes(b'{"model_type":"glm5next"}')
     args = types.SimpleNamespace(
         graph_receipt=metrics["graph_receipt_path"], compilation_config='{"mode":"NONE"}',
         max_model_len=8448, max_num_seqs=4, tensor_parallel_size=2,
