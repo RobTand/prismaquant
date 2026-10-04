@@ -64,10 +64,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import contextmanager
-import hashlib
 import json
 import platform
 from pathlib import Path
+from .digests import bytes_sha256hex, text_sha256hex
 
 KDA_KERNEL_ENV = "PRISMAQUANT_STAGE_B_KDA_KERNEL"
 #: The key the identity occupies in ``statistics_arithmetic_identity``.
@@ -176,7 +176,7 @@ def _qualification():
     value = json.loads(raw)
     if value.get("schema") != QUALIFICATION_SCHEMA or value.get("status") != "qualified":
         raise KdaCaptureKernelRefused("the packaged KDA kernel qualification is not qualified")
-    return value, hashlib.sha256(raw).hexdigest()
+    return value, bytes_sha256hex(raw)
 
 
 #: The identity fields the qualification binds, compared as one run seal.
@@ -227,8 +227,8 @@ class AdmittedKdaKernel:
         # with (None without one), and whether the identities were equal.
         self.qualification_sha256 = qualification_sha256
         self.qualification_matched = bool(qualification_matched)
-        self.identity_sha256 = hashlib.sha256(json.dumps(
-            identity, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.identity_sha256 = text_sha256hex(json.dumps(
+            identity, sort_keys=True, separators=(",", ":")))
         self.passes = 0
         self.calls = 0
         self.chain = {"layers": [], "passes": 0, "calls": 0, "gram_backward": 0}

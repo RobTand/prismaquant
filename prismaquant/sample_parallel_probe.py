@@ -40,6 +40,7 @@ from prismaquant.sample_parallel_probe_contract import (
 from prismaquant.sensitivity_probe import load_calibration
 from .schemas import strict_json_loads
 from .digests import DIRECT_ASCII_STRICT, DIRECT_UTF8_STRICT, file_sha256hex
+from .digests import bytes_sha256hex
 
 
 CALIBRATION_SCHEMA = "prismaquant.sample_parallel_probe.calibration.v1"
@@ -168,7 +169,7 @@ def _canonical_sha256(value: object, *, where: str) -> str:
         raise SampleParallelProbeError(
             f"{where} is not canonical JSON data"
         ) from exc
-    return hashlib.sha256(encoded).hexdigest()
+    return bytes_sha256hex(encoded)
 
 
 def _fsync_directory(path: Path) -> None:
@@ -2706,7 +2707,7 @@ def publish_sample_parallel_merge_bundle(
             "probe": {
                 "path": MERGE_BUNDLE_PROBE,
                 "bytes": len(probe_bytes),
-                "sha256": hashlib.sha256(probe_bytes).hexdigest(),
+                "sha256": bytes_sha256hex(probe_bytes),
             },
             "activation_cache": {
                 "path": MERGE_BUNDLE_ACTIVATIONS,

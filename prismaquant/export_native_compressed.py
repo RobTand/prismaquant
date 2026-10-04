@@ -72,6 +72,7 @@ from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 import torch
 import torch.nn as nn
 from compressed_tensors.quantization.utils.mxfp_utils import generate_mx_scales
+from .digests import text_sha256hex
 try:
     from accelerate import init_empty_weights
 except ModuleNotFoundError:
@@ -3294,7 +3295,6 @@ def _gptq_obs_rounding_nvfp4_swept(
             best_w = w_q
             best_damp = damp
     if log_path:
-        import hashlib
         import json as _json
         entry = {
             "linear_name": linear_name,
@@ -8406,14 +8406,11 @@ def _export_resume_fingerprint(
     equality, and ``None == None`` admits. A source that cannot be identified
     raises instead.
     """
-    import hashlib
 
     from prismaquant.cost_streaming import build_source_checkpoint_identity
 
     fp_state = _render_lever_provenance()
-    fp_state["assignment_hash"] = hashlib.sha256(
-        json.dumps(assignment, sort_keys=True).encode()
-    ).hexdigest()[:16]
+    fp_state["assignment_hash"] = text_sha256hex(json.dumps(assignment, sort_keys=True))[:16]
     fp_state["source_identity"] = build_source_checkpoint_identity(
         model_path,
         extra_shard_paths=extra_shard_paths,
@@ -8563,16 +8560,13 @@ def _write_shipcard(
     serve-lane verdicts are still missing, so "we never ran the ship gate"
     becomes a refusal (`python -m prismaquant.shipcard_cli verify`) instead of an omission.
     """
-    import hashlib
 
     from . import read_traffic as _read_traffic
     from . import shipcard as _shipcard
 
     def _hash(payload) -> str | None:
         try:
-            return hashlib.sha256(
-                json.dumps(payload, sort_keys=True).encode()
-            ).hexdigest()[:16]
+            return text_sha256hex(json.dumps(payload, sort_keys=True))[:16]
         except Exception:
             return None
 

@@ -23,13 +23,13 @@ at zero cost and two bytes per parameter (principle 11: never synthesized).
 from __future__ import annotations
 
 import json
-import hashlib
 import math
 import pickle
 from pathlib import Path
 from typing import Mapping
 
 from .schemas import Contract
+from .digests import bytes_sha256hex
 
 SCHEMA = "prismaquant.glm_mtp_cost.v1"
 RECORD_SCHEMA = "prismaquant.glm_mtp_selection.v1"
@@ -480,7 +480,7 @@ def backfill_mtp_selection_wires(layer_config: Mapping, cost_path) -> dict:
     from . import mtp_rung_selection as canon
 
     cost_raw = Path(cost_path).read_bytes()
-    cost_sha256 = hashlib.sha256(cost_raw).hexdigest()
+    cost_sha256 = bytes_sha256hex(cost_raw)
     cost = pickle.loads(cost_raw) if not str(cost_path).endswith(".json") else json.loads(cost_raw)
     payload = enrich_mtp_cost_wires(cost)
     meta = layer_config.get("__prismaquant__", {})
@@ -553,7 +553,7 @@ def _main() -> None:
     raw = (json.dumps(result, separators=(",", ":"), allow_nan=False) + "\n").encode()
     if not publish_new_bytes(Path(args.output), raw):
         parser.error("output already exists; refusing overwrite")
-    print(json.dumps({"output": args.output, "sha256": hashlib.sha256(raw).hexdigest(),
+    print(json.dumps({"output": args.output, "sha256": bytes_sha256hex(raw),
                       "selected_expert_wires": len(result["__prismaquant__"]["mtp_selection"][
                           "mtp_expert_wires"])}))
 

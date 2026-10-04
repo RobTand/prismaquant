@@ -24,6 +24,7 @@ import re
 import sys
 import tempfile
 from typing import Any, Mapping, Sequence
+from .digests import bytes_sha256hex
 
 
 RUNTIME_IDENTITY_SCHEMA = "prismaquant.container_runtime_identity.v1"
@@ -78,7 +79,7 @@ def image_content_sha256(image: Mapping[str, Any]) -> str:
                "variant": variant, "rootfs": rootfs, "config": config}
     raw = json.dumps(content, sort_keys=True, separators=(",", ":"),
                      ensure_ascii=False, allow_nan=False).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
+    return bytes_sha256hex(raw)
 
 
 def _reject_duplicate_members(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
@@ -195,7 +196,7 @@ def _receipt_sha256(
     # that lane's archived drivers ever passed the flag. The image tag
     # itself is still fatal on its own: _validate_identity requires an
     # immutable digest-pinned image_ref, and verify_mounted_runtime compares it.
-    return hashlib.sha256(data).hexdigest()
+    return bytes_sha256hex(data)
 
 
 def _identity_diff(

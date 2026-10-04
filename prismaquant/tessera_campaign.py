@@ -74,6 +74,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from .digests import text_sha256hex
 
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
@@ -4105,9 +4106,7 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
         raise RuntimeError(f"stack {stack}: size weights must be finite")
     if any(value < 0.0 for value in sizes.values()):
         raise RuntimeError(f"stack {stack}: a size weight is negative")
-    digest = hashlib.sha256(
-        "|".join(f"{name}={sizes[name]!r}" for name in names).encode()
-    ).hexdigest()
+    digest = text_sha256hex("|".join(f"{name}={sizes[name]!r}" for name in names))
     want = int(n)
     if want < 1:
         raise RuntimeError(f"stack {stack}: --stack-sample must be at least 1")

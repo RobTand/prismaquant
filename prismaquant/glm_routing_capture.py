@@ -8,7 +8,6 @@ first-use authentication remain with StreamingContext and its capture owner.
 from __future__ import annotations
 
 import copy
-import hashlib
 from pathlib import Path
 
 import torch
@@ -18,6 +17,7 @@ from .glm_routing_replay import (
     router_normalization_epsilon,
     select_original_routes,
 )
+from .digests import bytes_sha256hex
 
 
 def visit_routed_boundaries(runner, tokens, consume, *, first_layer=3):
@@ -169,7 +169,7 @@ def capture_streamed_glm_routes(runner, calibration_ids, *, calibration,
             replay_source="fresh_streamed_bf16_source_pass",
             shape=glm_capture_geometry(runner, module, router))
         metadata = result["metadata"]
-        metadata["capture_source_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        metadata["capture_source_sha256"] = bytes_sha256hex(Path(__file__).read_bytes())
         if original:
             runtime = original_source_runtime(runner, owner)
             validate_original_source_runtime(runtime, authority["runtime"])

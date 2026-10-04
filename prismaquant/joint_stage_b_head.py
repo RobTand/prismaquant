@@ -25,13 +25,13 @@ staged whole-file reader. Nothing else under the campaign inputs is opened.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
+from .digests import bytes_sha256hex
 
 HEAD_SLICE_SCHEMA = "prismaquant.joint_stage_b_head_slice.v1"
 
@@ -84,7 +84,7 @@ def head_slice_bytes(head_slice) -> bytes:
 
 
 def head_slice_sha256(head_slice) -> str:
-    return hashlib.sha256(head_slice_bytes(head_slice)).hexdigest()
+    return bytes_sha256hex(head_slice_bytes(head_slice))
 
 
 def head_slice_directory(output_root: str, *, metadata_root: str | None = None) -> str:
@@ -315,7 +315,7 @@ def read_head_file(row, *, label):
         raw = read_staged_whole_file(path, row["sha256"], label=label)
     else:
         raw = path.read_bytes()
-    _refuse(hashlib.sha256(raw).hexdigest() == row["sha256"],
+    _refuse(bytes_sha256hex(raw) == row["sha256"],
             f"{label} at {path} does not hash to its bound digest")
     return raw
 

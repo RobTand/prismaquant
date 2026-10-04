@@ -8,7 +8,6 @@ worker environment. It neither reads declared data files nor warms them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,6 +20,7 @@ from .digests import bytes_sha256hex, is_sha256hex
 from .joint_retained_window_plan import RetainedWindowBudget
 from .qnames import LAYER_QNAME as _LAYER
 from .schemas import Contract, strict_json_loads
+from .digests import text_sha256hex
 
 
 SCHEMA = "prismaquant.prismabuild.data_manifest.v2"
@@ -332,8 +332,8 @@ def _bind_runtime(a: dict, phases: tuple[str, ...], retained_budget: RetainedWin
     binding = {
         "schema": COMPLETED_SCHEMA, "plan_sha256": plan_sha256,
         "prepared_sha256": prepared_sha256, "units": sorted(completed)}
-    binding_sha = hashlib.sha256(json.dumps(
-        binding, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    binding_sha = text_sha256hex(json.dumps(
+        binding, sort_keys=True, separators=(",", ":")))
     _require(type(a["validated_completed_units"]) is int
              and a["validated_completed_units"] == len(completed)
              and a["validated_completed_units_sha256"] in ((None, binding_sha) if not completed
@@ -384,8 +384,8 @@ def _bind_runtime(a: dict, phases: tuple[str, ...], retained_budget: RetainedWin
     _require([w.layer for w in windows] == sorted([w.layer for w in windows], reverse=True),
              "window annotations are not reverse-layer ordered")
     partition = [[w.layer, w.window_index, list(w.original_full_target_names)] for w in windows]
-    digest = hashlib.sha256(json.dumps(partition, separators=(",", ":"),
-                                       ensure_ascii=False).encode()).hexdigest()
+    digest = text_sha256hex(json.dumps(partition, separators=(",", ":"),
+                                       ensure_ascii=False))
     _require(a["window_partition_sha256"] == digest, "window partition SHA-256 differs")
     expected_phases = ["cost_setup", "cost_head"]
     expected_phases += [f"cost_capture_{layer:03d}" for layer in range(last_source + 1)]

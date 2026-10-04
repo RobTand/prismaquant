@@ -68,6 +68,7 @@ import torch.nn.functional as F
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
+from prismaquant.digests import bytes_sha256hex
 
 NAME = "kda_gram_v1"
 #: The derivative semantics this kernel computes (``glm_source_derivative``).
@@ -349,7 +350,7 @@ def counts() -> dict:
 
 
 def source_sha256() -> str:
-    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    return bytes_sha256hex(Path(__file__).read_bytes())
 
 
 def _code_sha256(cubin: bytes) -> str:

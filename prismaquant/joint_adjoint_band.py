@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 from functools import partial
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -81,6 +80,7 @@ from .stage_a_chain_resume import (
 )
 from .stage_a_chain_seed import seed_marker_path, seed_receipt_path
 from .digests import bytes_sha256hex, file_sha256hex
+from .digests import text_sha256hex
 
 BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
 BAND_RESULT_SCHEMA = "prismaquant.joint_adjoint_band.result.v1"
@@ -651,8 +651,8 @@ def band_from_request(request_path, *, boundary: int, request_sha256: str | None
         # A run that sealed no chain state: rebuild the bind identity from the
         # plan and the prepared completion, as before.
         bind_identity = stage_a_bind_identity(config, prepared)
-        roster = hashlib.sha256("".join(
-            f"{name}\n" for name in sorted(prepared["formats_by_qname"])).encode()).hexdigest()
+        roster = text_sha256hex("".join(
+            f"{name}\n" for name in sorted(prepared["formats_by_qname"])))
     return build_band_receipt(
         output_root=output_root, boundary=boundary,
         plan_sha256=plan_sha256, prepared_sha256=prepared_sha256,

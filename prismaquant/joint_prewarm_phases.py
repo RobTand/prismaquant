@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import gzip
-import hashlib
 import json
 from pathlib import Path
+from .digests import bytes_sha256hex
 
 
 # Smaller than the storage role's 192 GiB nominal ARC budget even when a
@@ -58,7 +58,7 @@ def load_prepare_read_set(
     announces it.
     """
     blob = Path(path).read_bytes()
-    if hashlib.sha256(blob).hexdigest() != sha256:
+    if bytes_sha256hex(blob) != sha256:
         raise RuntimeError("joint prepare data manifest changed after submission")
     decoded = gzip.decompress(blob) if path.endswith(".gz") else blob
     manifest = json.loads(decoded)

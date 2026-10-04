@@ -45,7 +45,6 @@ A Stage A data manifest declares none of the walk's reads
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +52,7 @@ from pathlib import Path
 from .digests import text_sha256hex
 from .stage_inputs import require as _require, same as _same
 from .tessera_joint_aura import head_walk_read_set, is_head_walk_read
+from .digests import bytes_sha256hex
 
 STAGE_A_HEAD_SCHEMA = "prismaquant.stage_a.head.v1"
 
@@ -194,7 +194,7 @@ def drop_source_head_walk_reads(manifest, plan) -> tuple[dict, dict]:
     another walk's reads.
     """
     raw = Path(plan["path"]).read_bytes()
-    _require(hashlib.sha256(raw).hexdigest() == plan["sha256"],
+    _require(bytes_sha256hex(raw) == plan["sha256"],
              f"the plan {plan['path']} does not have the pinned digest")
     _require((manifest.get("annotations") or {}).get("plan_sha256") == plan["sha256"],
              "the source manifest was built for another plan")

@@ -16,7 +16,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,6 +24,7 @@ import re
 import stat
 import sys
 from typing import Any
+from .digests import bytes_sha256hex, text_sha256hex
 
 
 RECEIPT_SCHEMA = "prismaquant.dsv4_aura_campaign_completion.v1"
@@ -80,7 +80,7 @@ def _canonical_bytes(value: object) -> bytes:
 
 
 def canonical_sha256(value: object) -> str:
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    return bytes_sha256hex(_canonical_bytes(value))
 
 
 def _reject_duplicate_members(
@@ -118,7 +118,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
+    return bytes_sha256hex(value)
 
 
 def _file_bytes(path: Path) -> bytes:
@@ -194,7 +194,7 @@ def _manifest_scope(
             raise CampaignCompletionError("AURA manifest unit is not an object")
         qname = str(row.get("qname", ""))
         expected_file = (
-            "units/" + hashlib.sha256(qname.encode("utf-8")).hexdigest() + ".pkl"
+            "units/" + text_sha256hex(qname) + ".pkl"
         )
         if (
             not qname
