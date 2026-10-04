@@ -2984,17 +2984,7 @@ def _production_cache_git_commit() -> str:
     return commit
 
 
-def _production_cache_source_sha256(
-    package_root: Path | None = None,
-) -> str:
-    """Hash every durable PrismaQuant package input used by the producer.
-
-    A hand-maintained import list is not fail-closed: a newly introduced
-    transitive renderer dependency could otherwise change bytes without
-    changing a resumable pair's identity.  Hash the complete installed
-    package tree instead, excluding only interpreter bytecode caches.  This
-    also binds packaged lattice/codebook data and model-profile JSON.
-    """
+def _production_cache_source_root(package_root: Path | None) -> Path:
     root = (
         Path(package_root)
         if package_root is not None
@@ -3004,22 +2994,7 @@ def _production_cache_source_sha256(
         raise RuntimeError(
             f"production source identity cannot read package root {root}"
         )
-    identity_paths = _production_cache_identity_paths(root)
-    if not identity_paths:
-        raise RuntimeError(
-            f"production source identity found no files under {root}"
-        )
-    digest = LengthFramedSourceSha256()
-    for path in identity_paths:
-        relative = path.relative_to(root).as_posix()
-        try:
-            payload = path.read_bytes()
-        except OSError as exc:
-            raise RuntimeError(
-                f"production source identity cannot read {relative}"
-            ) from exc
-        digest.update(relative, payload)
-    return digest.hexdigest()
+    return root
 
 
 def _production_cache_identity_paths(root: Path) -> list[Path]:
@@ -3035,6 +3010,52 @@ def _production_cache_identity_paths(root: Path) -> list[Path]:
         and "__pycache__" not in path.relative_to(root).parts
         and path.suffix not in {".pyc", ".pyo"}
     )
+
+
+def _production_cache_source_sha256(
+    package_root: Path | None = None,
+) -> str:
+    """Hash every durable PrismaQuant package input used by the producer.
+
+    A hand-maintained import list is not fail-closed: a newly introduced
+    transitive renderer dependency could otherwise change bytes without
+    changing a resumable pair's identity.  Hash the complete installed
+    package tree instead, excluding only interpreter bytecode caches.  This
+    also binds packaged lattice/codebook data and model-profile JSON.
+    """
+    return _production_cache_source_profile(package_root)[0]
+
+
+def _production_cache_source_profile(
+    package_root: Path | None = None,
+) -> tuple[str, dict[str, str]]:
+    """Aggregate digest and per-file digests from one read of the source tree.
+
+    The aggregate is byte-identical to ``_production_cache_source_sha256``'s
+    framing; the per-file map is what a checkpoint manifest stores beside it
+    so a later mismatch can name the first file whose bytes moved (#2218).
+    One walk, one read per file, so the map and its aggregate always describe
+    the same pass over the tree.
+    """
+    root = _production_cache_source_root(package_root)
+    identity_paths = _production_cache_identity_paths(root)
+    if not identity_paths:
+        raise RuntimeError(
+            f"production source identity found no files under {root}"
+        )
+    digest = LengthFramedSourceSha256()
+    digests: dict[str, str] = {}
+    for path in identity_paths:
+        relative = path.relative_to(root).as_posix()
+        try:
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise RuntimeError(
+                f"production source identity cannot read {relative}"
+            ) from exc
+        digest.update(relative, payload)
+        digests[relative] = bytes_sha256hex(payload)
+    return digest.hexdigest(), digests
 
 
 def _production_cache_recent_writes(

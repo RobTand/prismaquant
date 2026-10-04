@@ -21,6 +21,27 @@
   owning file's geometry are unchanged; line coverage and encode-regime
   coverage are not measured here and are left to the shared merged batch.
 
+- **The joint prepare's omitted `file_hash_workers` takes `prepare_cache`'s
+  own derivation** (#1382). One derivation for one knob:
+  `prepare_cache`'s `file_load_workers` default and the joint plan's omitted
+  key both resolve through `default_file_load_workers()` — the measured PWC
+  load curve (4 threads), bounded by the PB-assigned CPU affinity the same
+  way an explicit plan value is fenced — and the regeneration tool's one
+  head intake resolves the key through the same resolver. A plan without the
+  key no longer loads render files serially, and an explicit plan value
+  still wins with its existing refusals unchanged.
+
+- **A producer-source checkpoint mismatch names the first file that moved**
+  (#2218, option (c); the writer itself was fixed separately in #2226). The AURA checkpoint
+  manifest records one pass over the producer tree — its aggregate digest
+  and per-file digests — beside the sealed identity, and when a resume's
+  `producer_source_sha256` seal mismatches, the refusal names the first
+  differing relative path with both per-file digests; when the per-file
+  maps match but the aggregate differs, it says the tree changed between
+  the identity's digest and the manifest write. The record is diagnostic
+  only — no gate reads it — and manifests written before it existed keep
+  the plain refusal.
+
 - **The census caller hands the producer's projection a stat-bound digest
   cache** (#2229, Refs RobTand/tessera#790). `request_expert_projection`
   passes `--source-digest-cache` whenever the selected producer's CLI
