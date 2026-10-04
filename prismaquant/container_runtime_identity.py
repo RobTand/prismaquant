@@ -7,9 +7,10 @@ must therefore be stable across an interrupted campaign.  This helper writes
 one atomic identity before the first container starts and verifies, inside the
 container, that Python will import the exact mounted package bytes.
 
-It is intentionally stdlib-only and is invoked by path rather than through
-``python -m prismaquant``: checking which PrismaQuant would be imported must
-happen before importing PrismaQuant itself.
+The installed API and CLI live in ``prismaquant.container_runtime_identity``.
+The implementation remains stdlib-only. Bootstrap verification invokes this
+file directly, before importing PrismaQuant, to authenticate the mounted
+package rather than trusting whichever package Python would otherwise load.
 """
 from __future__ import annotations
 

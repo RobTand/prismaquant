@@ -1155,8 +1155,11 @@ def test_joint_submit_environment_reaches_launcher_argv(
                 if line.startswith("[dry-run] "))
     submitted = shlex.split(line[len("[dry-run] "):])
     launcher_args = submitted[submitted.index("tools.tessera_campaign_container") + 1:]
-    monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [{"Id": "sha256:" + "a" * 64}])
-    monkeypatch.setattr(launcher, "image_content_sha256", lambda _: "b" * 64)
+    monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [{
+        "Id": "sha256:" + "a" * 64, "Os": "linux", "Architecture": "arm64",
+        "RootFS": {"Type": "layers", "Layers": ["sha256:" + "2" * 64]},
+        "Config": {"Env": ["PATH=/bin"], "Entrypoint": ["/entry"], "Cmd": []},
+    }])
     monkeypatch.setattr(launcher, "verify_pinned_import", lambda *args, **kwargs: {})
     monkeypatch.setattr(launcher, "checkout_commit", lambda cwd: None)
     monkeypatch.setattr(launcher, "gpu_attachment", lambda *args, **kwargs: (False, "CPU test"))

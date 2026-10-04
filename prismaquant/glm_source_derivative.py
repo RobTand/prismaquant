@@ -17,7 +17,11 @@ from pathlib import Path
 import types
 import weakref
 
-from .digests import bytes_sha256hex, file_sha256hex
+if __package__:
+    from .digests import bytes_sha256hex, file_sha256hex
+else:
+    # The stdlib image driver loads this file without initializing PQ/Torch.
+    from digests import bytes_sha256hex, file_sha256hex
 
 VERSION = 'glm_kda_causal_exp_v1'
 SCHEMA = 'prismaquant.glm_source_derivative.v1'
@@ -78,7 +82,7 @@ def corrected_source(raw):
 
 
 def validate_image_build(build):
-    from tools.container_runtime_identity import image_content_sha256
+    from prismaquant.container_runtime_identity import image_content_sha256
     _require(build.get('schema') == 'prismaquant.glm_derivative_image_build.v1' and build.get('status') == 'complete',
              'complete corrected image build required')
     _require(build.get('original_image_content_sha256') == ORIGINAL_IMAGE_CONTENT_SHA256 and

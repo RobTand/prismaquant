@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **Real codec CPU fixtures retain their full acceptance at bounded geometry**
+  (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
+  private source/capture identities, full-width Hessians and every existing
+  byte/refusal/window assertion while encoding fewer output rows. The Hessian
+  predicate sweep still derives every family, wire recipe and scale plane,
+  with real encodes sized to complete arity/span groups rather than a model-sized
+  weight matrix. Production defaults, pins, guards and timeout/skip policy are
+  unchanged; this fixture change is not GPU or scientific qualification.
+
 - **Connected PB fixtures own their authenticated import contexts** (#2192).
   Explicit source fixtures detach and restore the canonical PB graph, fleet
   tools and parent-package edges around their existing reviewed source pin.
@@ -155,6 +164,15 @@
   emitting the existing versioned control handoff without experiment checkout
   imports. The lane can name a separate `TESSERA_PRODUCER_PYTHON`; pinned
   serving packages and all existing unserved/byte/KL/shipping refusals stay fixed.
+- **Installed GLM evidence consumers have their container identity owner**
+  (#2190). The sole stdlib implementation is shipped as
+  `prismaquant.container_runtime_identity`, rather than imported from an
+  absent checkout-only `tools` package. Live API and bootstrap paths migrate
+  together; direct-file bootstrap still authenticates the mount before
+  importing PrismaQuant. Image fingerprint bytes, runtime/source identity,
+  duplicate-JSON refusals and scientific gates are unchanged.
+  Launcher regression fixtures now supply complete Docker inspection metadata
+  to that owner instead of patching a removed launcher-level digest export.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).

@@ -11,14 +11,22 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import sys
 import shutil
 import tarfile
 import runpy
 
-from tools.container_runtime_identity import image_content_sha256
+_runtime_identity = runpy.run_path(str(
+    Path(__file__).resolve().parents[1] / "prismaquant/container_runtime_identity.py"))
 # This build driver is stdlib-only; the host need not install Torch merely to
 # read image metadata and apply the closed byte transform.
-_contract = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'prismaquant/glm_source_derivative.py'))
+_contract_path = Path(__file__).resolve().parents[1] / "prismaquant/glm_source_derivative.py"
+# Synthetic loads need the sibling search context supplied to direct scripts.
+sys.path.insert(0, str(_contract_path.parent))
+try:
+    _contract = runpy.run_path(str(_contract_path))
+finally:
+    sys.path.pop(0)
 ORIGINAL_IMAGE_CONTENT_SHA256 = _contract['ORIGINAL_IMAGE_CONTENT_SHA256']
 ORIGINAL_MODELING_SHA256 = _contract['ORIGINAL_MODELING_SHA256']
 CORRECTED_MODELING_SHA256 = _contract['CORRECTED_MODELING_SHA256']
@@ -39,7 +47,7 @@ def main():
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=False)
     before = inspect_image('prismaquant-glm-producer:content-qualified-20260908')
-    assert image_content_sha256(before) == ORIGINAL_IMAGE_CONTENT_SHA256
+    assert _runtime_identity["image_content_sha256"](before) == ORIGINAL_IMAGE_CONTENT_SHA256
     # Docker Size is compressed on one GB10 image store and uncompressed on
     # the other. This frozen source exports to 20.9 GB; cap either archive at
     # 32 GiB rather than treating the nonportable Size field as an authority.
@@ -126,10 +134,11 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
                 changed.append(path)
     assert changed == [path]
     # The original tag and immutable source remain independently checked.
-    assert image_content_sha256(inspect_image('prismaquant-glm-producer:content-qualified-20260908')) == ORIGINAL_IMAGE_CONTENT_SHA256
+    assert _runtime_identity["image_content_sha256"](inspect_image(
+        "prismaquant-glm-producer:content-qualified-20260908")) == ORIGINAL_IMAGE_CONTENT_SHA256
     result = dict(schema='prismaquant.glm_derivative_image_build.v1', status='complete',
         original_image_content_sha256=ORIGINAL_IMAGE_CONTENT_SHA256,
-        corrected_image_content_sha256=image_content_sha256(after),
+        corrected_image_content_sha256=_runtime_identity["image_content_sha256"](after),
         original_modeling_sha256=ORIGINAL_MODELING_SHA256,
         corrected_modeling_sha256=CORRECTED_MODELING_SHA256,
         hub_kernels_sha256=hashlib.sha256(base64.b64decode(read['hub'])).hexdigest(),
