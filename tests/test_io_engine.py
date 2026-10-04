@@ -315,6 +315,52 @@ def test_the_engine_pool_spans_the_whole_affinity():
     assert io_engine.IOEngine().width == max(1, len(os.sched_getaffinity(0)))
 
 
+def test_seal_constants_resolve_without_cpython_build_time_names(monkeypatch):
+    """The engine imports, seals and verifies where this fcntl lacks the names.
+
+    CPython defines ``fcntl``'s ``F_SEAL_*``/``F_ADD_SEALS``/``F_GET_SEALS``
+    only when its build headers had them. Portable interpreters built against
+    pre-glibc-2.27 headers lack the names, and the io engine import — the
+    capture seal's ``authenticate_complete_source`` and the #1887 engine hash
+    with it — crashed on them: PB ``be3dd1332259`` on main f085c4abd20,
+    ``AttributeError: module 'fcntl' has no attribute 'F_SEAL_SEAL'`` under
+    the qualified CPU venv's cpython-3.12.11. The numbers are Linux UAPI since
+    3.11 and ABI-fixed; the kernel stays the authority, because the seal is
+    attempted through ``fcntl`` and read back with ``F_GET_SEALS``.
+    """
+    import importlib
+    import fcntl
+
+    uapi = {'F_SEAL_SEAL': 0x0001, 'F_SEAL_SHRINK': 0x0002, 'F_SEAL_GROW': 0x0004,
+            'F_SEAL_WRITE': 0x0008, 'F_ADD_SEALS': 1033, 'F_GET_SEALS': 1034}
+    exposed = [name for name in uapi if hasattr(fcntl, name)]
+    for name in exposed:
+        monkeypatch.delattr(fcntl, name)
+    try:
+        resolved = importlib.reload(io_engine)
+        # The UAPI numbers, whether or not this interpreter exposed the names:
+        # an assert here fails if the pinned numbers ever drift from the ABI.
+        assert resolved._SEALS == 0b1111
+        assert resolved._F_ADD_SEALS == uapi['F_ADD_SEALS']
+        assert resolved._F_GET_SEALS == uapi['F_GET_SEALS']
+        for name in (name for name in uapi if name.startswith('F_SEAL')):
+            if name in exposed:
+                assert uapi[name] == getattr(fcntl, name)
+        buffer = resolved.SealedBuffer(16)
+        try:
+            buffer.fill_bytes(b'pq-io-sealed' + b'x' * 3)
+            digest = buffer.seal()
+            buffer.require_sealed()
+            assert len(digest) == 64
+            with buffer.readonly() as view:
+                assert bytes(view) == b'pq-io-sealed' + b'x' * 3
+        finally:
+            buffer.close()
+    finally:
+        monkeypatch.undo()
+        importlib.reload(io_engine)
+
+
 def test_a_closed_stream_refuses_and_holds_nothing(tmp_path):
     entries, _contents = _stream_files(tmp_path)
     stream = io_engine.read_stream(
