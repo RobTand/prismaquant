@@ -3021,6 +3021,7 @@ def _production_cache_source_sha256(
         digest.update(relative, payload)
     return digest.hexdigest()
 
+
 def _production_cache_identity_paths(root: Path) -> list[Path]:
     """Every file the package-tree digest hashes, in digest order.
 
