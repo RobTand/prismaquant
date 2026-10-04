@@ -25,6 +25,8 @@ membership assertion below refuses a seed no audit covers.
 
 from __future__ import annotations
 
+import functools
+
 import pytest
 
 from prismaquant import quality_prefill_population as population
@@ -48,8 +50,15 @@ REPORTED_TOTAL_LEGAL = 5634
 _DRAW_SEED = "f2545274c8e03534d040c64fb4fd1a02085de7b5eb106f80e8fb31b05454fac8"
 
 
+@functools.lru_cache(maxsize=None)
 def _mandatory_set(family: str):
-    """A's domain, through the payload, into C's builder."""
+    """A's domain, through the payload, into C's builder.
+
+    The build is pure -- keyword-only, seeded, side-effect-free -- and every
+    consumer below only reads counts and memberships, so one real build per
+    family serves all three tables instead of six identical builds.  The
+    digest-membership guard still runs on the first build of each family.
+    """
     theirs = population.RateDomain(**domain.rate_domain_payload(family))
     assert _DRAW_SEED in domain.TESSERA_GRAMMAR_DIGESTS
     return population.build_mandatory_rate_set(
@@ -59,13 +68,19 @@ def _mandatory_set(family: str):
     )
 
 
+@functools.lru_cache(maxsize=None)
+def _legal_domain(family: str):
+    """The grammar-derived domain, once per family instead of once per read."""
+    return domain.legal_rate_domain(family)
+
+
 @pytest.mark.parametrize("family", sorted(REPORTED))
 def test_the_reported_dry_run_row_is_what_the_code_produces(family):
     expected = REPORTED[family]
     built = _mandatory_set(family)
 
     assert built.family == family
-    assert len(domain.legal_rate_domain(family).rates) == expected["legal"]
+    assert len(_legal_domain(family).rates) == expected["legal"]
     assert len(built.mandatory) == expected["mandatory"]
     assert len(built.roster) == expected["roster"]
     assert len(built.strata) == expected["strata"]
@@ -76,7 +91,7 @@ def test_the_reported_dry_run_row_is_what_the_code_produces(family):
 def test_the_reported_total_and_its_percentage_add_up():
     """442 of 5,634 is the headline; both halves come from the same code."""
     rosters = {f: len(_mandatory_set(f).roster) for f in REPORTED}
-    legal = {f: len(domain.legal_rate_domain(f).rates) for f in REPORTED}
+    legal = {f: len(_legal_domain(f).rates) for f in REPORTED}
 
     assert sum(rosters.values()) == REPORTED_TOTAL_ROSTER
     assert sum(legal.values()) == REPORTED_TOTAL_LEGAL
@@ -89,7 +104,7 @@ def test_the_roster_is_a_superset_of_the_mandatory_set_and_stays_legal():
     """The interior draw adds to the mandatory set; it never replaces it."""
     for family in REPORTED:
         built = _mandatory_set(family)
-        legal = set(domain.legal_rate_domain(family).rates)
+        legal = set(_legal_domain(family).rates)
         assert set(built.mandatory) <= set(built.roster)
         assert set(built.roster) <= legal
 

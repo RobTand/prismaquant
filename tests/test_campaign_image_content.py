@@ -7,14 +7,9 @@ import json
 
 import pytest
 
+from container_inspection_fixture import inspection
 from prismaquant import container_runtime_identity as identity
 from tools import tessera_campaign_container as runner
-
-
-def inspection():
-    return {"Id": "sha256:" + "1" * 64, "Os": "linux", "Architecture": "arm64",
-            "RootFS": {"Type": "layers", "Layers": ["sha256:" + "2" * 64]},
-            "Config": {"Env": ["PATH=/bin"], "Entrypoint": ["/entry"], "Cmd": []}}
 
 
 def test_content_identity_survives_backend_ids_and_local_tags():

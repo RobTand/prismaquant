@@ -8,7 +8,8 @@ import torch
 
 from prismaquant import tessera_calibration_cache as cc
 from prismaquant.tessera_row_stream import RowStream
-from test_tessera_row_stream import COLUMNS, LOAD_POLICY, UNITS, stream_fixture
+from test_tessera_row_stream import (COLUMNS, LOAD_POLICY, OUTPUT_FEATURES,
+                                     UNITS, stream_fixture)
 
 
 def _stream(monkeypatch, tmp_path, *, check=None):
@@ -17,7 +18,8 @@ def _stream(monkeypatch, tmp_path, *, check=None):
     stream = RowStream(capture_path=manifest, expected_sha256=cc.sha256(manifest),
         expected_identity=state["canonical"], census=state["census"], names=UNITS,
         policy=LOAD_POLICY,
-        weights={name: torch.ones(32, COLUMNS, dtype=torch.bfloat16) for name in UNITS},
+        weights={name: torch.ones(OUTPUT_FEATURES, COLUMNS, dtype=torch.bfloat16)
+                 for name in UNITS},
         hessian_identity=state["calibration"],
         bind=lambda name, **kwargs: (None, {"weight": name}),
         threads=1, batch_size=1, device="cpu", memo_capacity=1, resource_check=check)

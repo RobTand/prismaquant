@@ -52,6 +52,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "tools") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools"))
 
+from container_inspection_fixture import inspection
 from experiments import glm_data_manifests  # noqa: E402
 
 #: The sealed replay frontier's own definitions, loaded the way the producer
@@ -1155,11 +1156,7 @@ def test_joint_submit_environment_reaches_launcher_argv(
                 if line.startswith("[dry-run] "))
     submitted = shlex.split(line[len("[dry-run] "):])
     launcher_args = submitted[submitted.index("tools.tessera_campaign_container") + 1:]
-    monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [{
-        "Id": "sha256:" + "a" * 64, "Os": "linux", "Architecture": "arm64",
-        "RootFS": {"Type": "layers", "Layers": ["sha256:" + "2" * 64]},
-        "Config": {"Env": ["PATH=/bin"], "Entrypoint": ["/entry"], "Cmd": []},
-    }])
+    monkeypatch.setattr(launcher, "inspect_or_load", lambda _: [inspection()])
     monkeypatch.setattr(launcher, "verify_pinned_import", lambda *args, **kwargs: {})
     monkeypatch.setattr(launcher, "checkout_commit", lambda cwd: None)
     monkeypatch.setattr(launcher, "gpu_attachment", lambda *args, **kwargs: (False, "CPU test"))

@@ -4,10 +4,32 @@
 
 ### Fixed
 
-- **Real codec CPU fixtures retain their full acceptance at bounded geometry**
+- **Test cost: repeated in-process work runs once; two stale consumer
+  fixtures move from 32 rows to the shared fixture's `OUTPUT_FEATURES`=8**
+  (#1929). The prefill dry-run tables memoize their pure seeded mandatory-set
+  build and legal-domain enumeration per family; three pairs of plan-driver
+  tests read one real driver run instead of two identical ones; the scalar
+  staged publication campaign is shared by its two read-only consumers behind
+  byte-digest guards; and the two stale row-startup consumer fixtures now
+  build `stream_fixture`'s `OUTPUT_FEATURES`=8 rows, with the wrong-shape
+  admission slice derived from `OUTPUT_FEATURES` so the refusal cell stays
+  live. The launcher contract tests share one stdlib-only inspection
+  fixture. Ten old test IDs become six merged or renamed IDs; every test
+  assertion and execution logic is unchanged, and every removed execution's
+  assertions survive on the execution that remains. Production defaults,
+  pins, guards, timeouts, markers, production geometry and the fixture-
+  owning file's geometry are unchanged; line coverage and encode-regime
+  coverage are not measured here and are left to the shared merged batch.
+
+- **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing
-  byte/refusal/window assertion while encoding fewer output rows. The Hessian
+  byte/refusal/window assertion while encoding fewer output rows. The preserved
+  acceptance is branch and assertion coverage, not encode-regime coverage: at
+  eight output rows several derived sweep reps stay inside the trellis start
+  transient taller fixtures passed through, while the row-stream window rep
+  (E4M3 K1 R1024, L=14 at 4 rows) still shifts past its window and reaches
+  steady state. The Hessian
   predicate sweep still derives every family, wire recipe and scale plane,
   with real encodes sized to complete arity/span groups rather than a model-sized
   weight matrix. Production defaults, pins, guards and timeout/skip policy are
