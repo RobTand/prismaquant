@@ -162,9 +162,9 @@
   "hashlib:tools/check_readset_coverage.py::_load_json",
   "hashlib:tools/check_t4_overlay_prepare.py::sha",
   "hashlib:tools/compose_tessera_cached_units.py::main",
-  "hashlib:tools/container_runtime_identity.py::_receipt_sha256",
-  "hashlib:tools/container_runtime_identity.py::image_content_sha256",
-  "hashlib:tools/container_runtime_identity.py::prismaquant_source_sha256",
+  "hashlib:prismaquant/container_runtime_identity.py::_receipt_sha256",
+  "hashlib:prismaquant/container_runtime_identity.py::image_content_sha256",
+  "hashlib:prismaquant/container_runtime_identity.py::prismaquant_source_sha256",
   "hashlib:tools/derive_tessera_progress_grace.py::sha256",
   "hashlib:tools/dispatch_joint_quanta.py::_executable_prepared_input",
   "hashlib:tools/dispatch_joint_quanta.py::quantum_argv",
@@ -411,9 +411,9 @@
   "sorted-json:tools/compare_joint_layer_gate.py::main",
   "sorted-json:tools/compare_stage_a_checkpoints.py::main",
   "sorted-json:tools/compose_tessera_cached_units.py::main",
-  "sorted-json:tools/container_runtime_identity.py::image_content_sha256",
-  "sorted-json:tools/container_runtime_identity.py::main",
-  "sorted-json:tools/container_runtime_identity.py::write_or_verify_identity",
+  "sorted-json:prismaquant/container_runtime_identity.py::image_content_sha256",
+  "sorted-json:prismaquant/container_runtime_identity.py::main",
+  "sorted-json:prismaquant/container_runtime_identity.py::write_or_verify_identity",
   "sorted-json:tools/derive_retained_window_budget.py::main",
   "sorted-json:tools/derive_tessera_progress_grace.py::main",
   "sorted-json:tools/device_envelope_probe.py::main",
@@ -759,7 +759,7 @@
   ],
   "_parser": [
    "tools/build_prismasnap_27b_campaign.py",
-   "tools/container_runtime_identity.py",
+   "prismaquant/container_runtime_identity.py",
    "tools/prismaquant_runtime_snapshot.py",
    "tools/prismaquant_source_bootstrap.py",
    "tools/wait_dsv4_aura_campaign.py"
@@ -830,7 +830,7 @@
   "_reject_duplicate_members": [
    "prismaquant/dsv4_campaign_completion.py",
    "prismaquant/tessera_serving_runtime_pin.py",
-   "tools/container_runtime_identity.py",
+   "prismaquant/container_runtime_identity.py",
    "tools/prismaquant_runtime_snapshot.py"
   ],
   "_replace_tensor_input": [
