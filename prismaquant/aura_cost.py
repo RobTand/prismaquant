@@ -275,6 +275,22 @@ def _load_aura_checkpoint_manifest(
     from prismaquant.dev_mode import seal_check
     from prismaquant.production_weight_cache import first_identity_difference
 
+    def attribution_surface(identity):
+        if not isinstance(identity, Mapping):
+            return None
+        extra = identity.get("extra", {})
+        joint = extra.get("joint_aura", {}) if isinstance(extra, Mapping) else {}
+        return joint.get("sequence_attribution") if isinstance(joint, Mapping) else None
+
+    # This is the requested measurement surface, not a producer-source seal:
+    # reusing a different selector would silently ignore the instrument request.
+    stored_attribution = attribution_surface(stored_identity)
+    expected_attribution = attribution_surface(expected_identity)
+    if stored_attribution != expected_attribution:
+        _raise_checkpoint_identity_mismatch(
+            field="extra.joint_aura.sequence_attribution",
+            stored=stored_attribution, expected=expected_attribution)
+
     difference = first_identity_difference(stored_identity, expected_identity)
     if difference is not None:
         field, stored, expected = difference
@@ -1948,7 +1964,8 @@ def compute_aura_cost_streamed(
         raise ValueError("joint_projection_backend requires joint_activation")
     if probe_microbatch and not joint_activation:
         raise ValueError("streamed probe_microbatch currently requires joint_activation")
-    from prismaquant.joint_aura import normalize_sequence_attribution
+    from prismaquant.joint_aura import (
+        normalize_sequence_attribution, sequence_attribution_candidates)
     attribution_config = normalize_sequence_attribution(sequence_attribution)
     if attribution_config is not None:
         if operator_windows is not None or retained_budget is not None:
@@ -2174,13 +2191,7 @@ def compute_aura_cost_streamed(
         )
         unit_formats[name] = tuple(planned)
         render_formats[name] = measured
-    attribution_keys = None
-    if attribution_config is not None and attribution_config["candidates"] != "all":
-        attribution_keys = {tuple(pair) for pair in attribution_config["candidates"]}
-        unknown = attribution_keys - {
-            (name, fmt) for name, formats in render_formats.items() for fmt in formats}
-        if unknown:
-            raise ValueError(f"sequence_attribution candidate outside measured roster: {sorted(unknown)}")
+    attribution_keys = sequence_attribution_candidates(attribution_config, render_formats)
     if operator_windows is not None and any(not render_formats[name] for name in names):
         raise ValueError('joint operator windows require a measured candidate for every target')
     joint_probe_identity = None

@@ -31249,12 +31249,14 @@ block mass and the stated relative gate; zero mass requires exact agreement.
 Integer block coordinates must exhaust the draw without gaps, and recorded
 calibration shape and selected-token geometry must match the priced probes.
 Each spill callback releases its borrowed source and delta; only scalar block
-components persist. The streamed selector instruments only requested measured
-candidates and refuses unknown candidates before capture. Selector, geometry
-and collector scope bind the run identity: requested rows cannot resume
-committed no-attribution rows and claim the instrument; unselected rows need
-no sidecar. Existing rows remain probe-only. This is not the #1962 estimator
-fix, a repricing, or an issue closure. Design:
+components persist. The normalized selector binds the run identity; probe
+identity separately binds calibration and token geometry, and each sidecar
+reports its own reconstruction scope and block membership. Both collectors
+reject unknown candidates before capture and require complete probe sidecars
+only for selected rows. Resume refuses a changed attribution selector, even
+in dev mode: requested output coverage is not a producer-source seal. Missing
+selected probes refuse before unit publication. Existing rows remain probe-only;
+this is not the #1962 estimator fix, a repricing, or an issue closure. Design:
 `docs/design/joint_aura_runtime_allocation.md`. Gate:
 `tests/test_joint_sequence_attribution.py` and the spill sidecar tests of
 `tests/test_stageb_one_pass_spill.py`.

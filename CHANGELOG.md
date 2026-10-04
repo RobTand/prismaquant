@@ -32,10 +32,11 @@
   Full block coverage, integer coordinates and recorded calibration/token
   geometry are validated before any reader uses the decomposition.
   Spill callbacks release their borrowed source and delta immediately and
-  retain scalar block components only. The streamed selector instruments only
-  requested measured candidates and refuses unknown candidates before capture.
-  The selector binds the run identity: requested rows cannot resume committed
-  no-attribution rows; unselected rows need no sidecar. Existing rows stay
+  retain scalar block components only. Both collectors reject unknown
+  candidates before capture and require complete sidecars only on selected
+  rows. The full normalized selector binds the run identity; resume refuses
+  a changed requested attribution surface even in dev mode. Missing selected
+  probes refuse before unit publication. Existing rows stay
   probe-only; this is not the #1962 estimator fix, a repricing, or an issue
   closure. Gates: `tests/test_joint_sequence_attribution.py`, the spill
   sidecar tests of `tests/test_stageb_one_pass_spill.py`.

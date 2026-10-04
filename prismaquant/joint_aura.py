@@ -1593,12 +1593,25 @@ def normalize_sequence_attribution(config):
             "gate_relative": float(gate_relative)}
 
 
+def sequence_attribution_candidates(normalized, render_formats):
+    """Resolve an enabled selector against the caller's exact measured roster."""
+    if normalized is None or normalized["candidates"] == "all":
+        return None
+    requested = {tuple(pair) for pair in normalized["candidates"]}
+    unknown = requested - {(name, fmt) for name, formats in render_formats.items()
+                           for fmt in formats}
+    if unknown:
+        raise ValueError(
+            f"sequence_attribution candidate outside measured roster: {sorted(unknown)}")
+    return requested
+
+
 def sequence_attribution_run_identity(normalized):
     """The run-identity block for an enabled instrument, or None.
 
     Bound into the run identity — never the priced probe identity — so the
-    selector, geometry and collector scope travel with the run while the
-    currency's Fisher and probe fields stay untouched.
+    normalized selector travels with the run while the currency's Fisher and
+    probe fields stay untouched. Probe identity separately binds draw geometry.
     """
     if normalized is None:
         return None

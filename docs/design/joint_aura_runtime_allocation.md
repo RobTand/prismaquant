@@ -161,12 +161,16 @@ reader lifecycle immediately after each single candidate's `project`, while
 that rendered delta is resident — one bounded, guard-charged read at a time,
 no second read stream, no per-sequence GW matrices. Each callback releases
 its borrowed source and delta immediately; only scalar block components
-persist. The streamed selector instruments only requested measured candidates
-and refuses unknown candidates before capture. The opt-in selector, geometry
-and collector scope bind the run identity (never the priced probe identity),
-so requested rows cannot resume committed no-attribution rows and claim the
-instrument. Unselected rows need no sidecar. Existing rows remain probe-only;
-this mechanism does not close #1962's estimator question or reprice a model.
+persist. The normalized selector binds the run identity (never the priced
+probe identity); the probe identity separately binds calibration and token
+geometry. Each sidecar reports its reconstruction scope and block membership.
+Both paths resolve the selector against the exact measured roster before
+capture. Resume refuses a changed attribution selector, even in dev mode,
+because reusing another requested measurement surface would ignore the
+instrument request, not merely waive a producer-source seal. Only selected
+rows require sidecars; missing selected probes refuse before unit publication.
+Existing rows remain probe-only. This mechanism does not close #1962's
+estimator question or reprice a model.
 
 ## Runtime input and search
 

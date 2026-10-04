@@ -218,18 +218,17 @@ class SpillSequenceAttribution:
                 reserve_bytes=bytes_to_admit)
 
     def row_sidecar(self, key, signed_totals):
-        """The sidecar for one row's authoritative totals, or None.
-
-        Every probe of the row's window has fired by the time its window
-        commits, so the per-probe scalar blocks are complete; a candidate observed by
-        no probe has no sidecar rather than a fabricated zero one.
-        """
+        """Require every requested probe; unselected rows have no sidecar."""
+        if self._wants is not None and key not in self._wants:
+            return None
         per_probe = [None] * self._n_probes
         for (probe_index, component_key), components in self._components.items():
             if component_key == key:
                 per_probe[probe_index] = [dict(value) for value in components]
-        if any(probe is None for probe in per_probe):
-            return None
+        missing = [index for index, probe in enumerate(per_probe) if probe is None]
+        if missing:
+            raise QuantumIdentityRefused(
+                f"sequence_attribution missing requested probes {missing} for {key[0]}@{key[1]}")
         from .joint_aura import sequence_attribution_sidecar
         return sequence_attribution_sidecar(
             blocks=self.blocks, components_per_probe=per_probe,
@@ -241,9 +240,6 @@ class SpillSequenceAttribution:
             n_sequences=self._n_samples,
             calibration_sha256=self._calibration_sha256)
 
-    def run_identity(self):
-        from .joint_aura import sequence_attribution_run_identity
-        return sequence_attribution_run_identity(self.config)
 
 
 def require_slice_bf16_reduction(adjoint_slice, allow: bool, *, where: str) -> None:
@@ -2006,6 +2002,9 @@ def run_layer_quantum_core(
     profile, linears, names = roster.profile, roster.linears, roster.names
     unit_formats, fmts, render_formats = (
         roster.unit_formats, roster.fmts, roster.render_formats)
+    from .joint_aura import (
+        sequence_attribution_candidates, sequence_attribution_run_identity)
+    attribution_keys = sequence_attribution_candidates(attribution_config, render_formats)
     packed_members = roster.packed_members
     unit_topology = roster.unit_topology
     served_quantizer = bind_joint_served_quantizer(unit_formats)
@@ -2177,6 +2176,9 @@ def run_layer_quantum_core(
     }
     if served_quantizer is not None:
         joint_run_identity["served_quantizer"] = served_quantizer
+    attribution_run = sequence_attribution_run_identity(attribution_config)
+    if attribution_run is not None:
+        joint_run_identity["sequence_attribution"] = attribution_run
 
     # ---- journal ---------------------------------------------------------
     checkpoint_git_commit = _checkpoint_git_commit()
@@ -2257,6 +2259,7 @@ def run_layer_quantum_core(
                 if not validate_joint_aura_entry(row):
                     raise ValueError("not a joint row")
                 if (attribution_config is not None
+                        and (attribution_keys is None or (name, fmt) in attribution_keys)
                         and "sequence_attribution" not in row
                         and fmt not in _ZERO_COST_FORMATS):
                     raise QuantumIdentityRefused(
@@ -2882,6 +2885,10 @@ def run_layer_quantum_core(
                 if attribution_collector is not None and fmt not in _ZERO_COST_FORMATS:
                     sidecar = attribution_collector.row_sidecar(
                         (name, fmt), [value["total"] for value in components])
+                    if sidecar is None and (attribution_keys is None
+                            or (name, fmt) in attribution_keys):
+                        raise QuantumIdentityRefused(
+                            f"sequence_attribution required sidecar missing for {name}@{fmt}")
                 row = make_joint_aura_entry(
                     operator_identity=joint_operators[(name, fmt)],
                     probe_identity=joint_probe,
@@ -3585,7 +3592,6 @@ def run_layer_quantum_core(
         if attribution_config is not None and spill is not None:
             # Built here, where the capture guard exists: the collector's
             # bounded record re-reads charge it per chunk.
-            from .joint_aura import sequence_attribution_run_identity
             attribution_collector = SpillSequenceAttribution(
                 config=attribution_config,
                 linears={name: linears[name] for name in spill_pending},
@@ -3598,7 +3604,7 @@ def run_layer_quantum_core(
                 capture_batch=capture_batch, token_scope=token_scope,
                 calibration_sha256=bytes_sha256hex(
                     calib_ids.detach().cpu().contiguous().numpy().tobytes()))
-            counters.replay["sequence_attribution"] = attribution_collector.run_identity()
+            counters.replay["sequence_attribution"] = joint_run_identity["sequence_attribution"]
         try:
             observe_and_project_retained_windows(
                 measured,
