@@ -293,7 +293,9 @@ def _load_aura_checkpoint_manifest(
         if not seal_check(
                 "AURA checkpoint identity", expected_identity, stored_identity,
                 where=str(checkpoint_dir),
-                refusal=_checkpoint_identity_mismatch(
+                # Lazy: the producer-source listing stats every package file, and
+                # dev mode never raises this refusal (#2218).
+                refusal=lambda: _checkpoint_identity_mismatch(
                     field=field, stored=stored, expected=expected)):
             expected_identity = stored_identity
     expected_digest = _canonical_json_sha256(
