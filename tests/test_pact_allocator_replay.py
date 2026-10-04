@@ -90,7 +90,7 @@ def _fixture(tmp_path, monkeypatch, *, units=None):
         route = {"BF16": "TESSERA_VALUE_W16", "E4M3": "TESSERA_FP8", "E2M1": "TESSERA_FP4"}[grid]
         binding = observation_fixture(
             tmp_path, agent=family, m=M, family=family, grid=grid, route=route,
-            rate_q256=int(rate), kernel_lane=cell.executes[0],
+            rate_q256=int(rate), kernel_lane=cell.executes[0], runtime_image=IMAGE,
             samples=(milliseconds, milliseconds * 1.01, milliseconds * 0.99))
         observations.append(Path(binding["path"]))
     table = _consume_observations(observations, table_id="pact-fixture")

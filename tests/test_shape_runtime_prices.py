@@ -599,14 +599,15 @@ def _obs_write(path, value, raw=False):
 
 def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0, 4.0),
                         agent="obs", mutate=None, family=OBS_FAMILY, grid="E4M3",
-                        route=OBS_ROUTE, rate_q256=896, kernel_lane=OBS_LANE):
+                        route=OBS_ROUTE, rate_q256=896, kernel_lane=OBS_LANE,
+                        runtime_image=OBS_IMAGE):
     """One internal-consistent bound observation, as Tessera#856 emits it."""
     import statistics
     scope = {"route": route, "grid": grid, "q256": rate_q256, "structure": "dense",
              "mode": "resident", "execution_mode": "eager", "regime": "batch",
              "tp_degree": tp_degree, "requested_platform": "sm_121",
              "shape": {"M": m, "N": 256, "K": 256}}
-    runtime = {"image": OBS_IMAGE, "tessera_commit": OBS_COMMIT, "serving_source_sha256": "c" * 64,
+    runtime = {"image": runtime_image, "tessera_commit": OBS_COMMIT, "serving_source_sha256": "c" * 64,
                "contract_sha256": OBS_CONTRACT, "platform": "sm_121", "torch": "2.13.0+cu130",
                "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904",
                "serve_flags": {"TESSERA_SERVE_MODE": "resident"}, "residency": "resident",
