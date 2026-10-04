@@ -11,7 +11,9 @@
   precede captures in the torch-free staged readset, with a bounded fenced
   metadata memo instead of repeated whole-cost reads. Submission and merge
   require disjoint complete active coverage, exact requested scalar cells,
-  source proofs and common regime settings. The original raw joint evidence,
+  source proofs and common regime settings. Both merges use authenticated
+  checkpoint menus to bind the exact deferred family domain, retaining real
+  unrequested families and refusing fabricated extras. The original raw joint evidence,
   normal opt-out paths and production/scientific qualification gates remain;
   no Fisher price, pin/default change or served artifact is inferred.
 

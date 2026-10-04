@@ -3582,7 +3582,8 @@ def _merge_acquisition_rows(records, *, acquisition, scope_groups):
         raise MergeRefused("acquisition merge requires the original authenticated request and actual scope")
     from prismaquant.tessera_campaign import (
         CURRENCY, _campaign_acquisition_scope, _campaign_acquisition_row_scope,
-        _requested_acquisition_schedule)
+        _campaign_acquisition_deferred_families, _requested_acquisition_schedule)
+    from prismaquant.tessera_formats import parse_tessera_format_name
     try:
         keys, _ = _campaign_acquisition_scope(acquisition, scope_groups)
     except (ValueError, KeyError, TypeError) as exc:
@@ -3622,23 +3623,30 @@ def _merge_acquisition_rows(records, *, acquisition, scope_groups):
         if not isinstance(domain, dict) or set(domain) != members:
             raise MergeRefused(f"{row_id}: acquisition deferred domain scope differs")
         for name, families in expected_schedule.items():
-            empty = {family for family, qs in families.items() if not qs}
-            nonempty = {family for family, qs in families.items() if qs}
-            held = domain[name]
-            if (not isinstance(held, list) or not all(isinstance(f, str) for f in held)
-                    or held != sorted(set(held)) or not empty <= set(held) or set(held) & nonempty):
-                raise MergeRefused(f"{row_id}: acquisition deferred families differ for {name}")
-            expected_formats = {f"{family}_R{q}" for family, qs in families.items() for q in qs}
             unit = record["units"][name]
-            if unit is not None:
-                source = unit.get("weight")
-                expected_source = projected["source_weights"][name]
-                if (unit.get("acquisition_source_weight") != expected_source
-                        or not isinstance(source, dict) or source.get("shape") != expected_source["shape"]
-                        or source.get("dtype") != expected_source["dtype"]):
-                    raise MergeRefused(f"{row_id}: acquisition checkpoint source proof differs for {name}")
-                if not expected_formats <= set(unit.get("menu", [])):
-                    raise MergeRefused(f"{row_id}: acquisition requested menu missing for {name}")
+            if not isinstance(unit, dict) or not isinstance(unit.get("menu"), list):
+                raise MergeRefused(f"{row_id}: acquisition requires bound checkpoint menu for {name}")
+            source = unit.get("weight")
+            expected_source = projected["source_weights"][name]
+            if (unit.get("acquisition_source_weight") != expected_source
+                    or not isinstance(source, dict) or source.get("shape") != expected_source["shape"]
+                    or source.get("dtype") != expected_source["dtype"]):
+                raise MergeRefused(f"{row_id}: acquisition checkpoint source proof differs for {name}")
+            menu_families = set()
+            try:
+                for fmt in unit["menu"]:
+                    parsed = parse_tessera_format_name(fmt)
+                    if parsed is None:
+                        raise ValueError("not a canonical Tessera menu format")
+                    menu_families.add(parsed[0].name)
+            except (ValueError, TypeError) as exc:
+                raise MergeRefused(f"{row_id}: acquisition checkpoint menu malformed for {name}") from exc
+            expected_deferred = _campaign_acquisition_deferred_families(families, menu_families)
+            if domain[name] != expected_deferred:
+                raise MergeRefused(f"{row_id}: acquisition exact deferred families differ for {name}")
+            expected_formats = {f"{family}_R{q}" for family, qs in families.items() for q in qs}
+            if not expected_formats <= set(unit["menu"]):
+                raise MergeRefused(f"{row_id}: acquisition requested menu missing for {name}")
             if "cells" in record and (set(record["cells"].get(name, [])) != expected_formats
                     or len(record["cells"].get(name, [])) != len(expected_formats)):
                 raise MergeRefused(f"{row_id}: acquisition missing/extra measured cells for {name}")
@@ -3655,8 +3663,15 @@ def _merge_acquisition_rows(records, *, acquisition, scope_groups):
             "schedule": dict(sorted(schedule.items())), "sources": dict(sorted(sources.items()))}
 
 
-def _payload_acquisition_records(payloads):
+def _payload_acquisition_records(payloads, *, unit_identities):
+    """Join payload rows to the existing authenticated checkpoint menu owner."""
     from prismaquant.tessera_campaign import CURRENCY, selection_priced_units
+    if not isinstance(unit_identities, dict):
+        raise MergeRefused("acquisition payload merge requires bound checkpoint unit identities")
+    selected = {row: selection_priced_units(payload["provenance"]["unit_selection"])[0]
+                for row, payload in payloads.items()}
+    if set(unit_identities) != {name for names in selected.values() for name in names}:
+        raise MergeRefused("acquisition checkpoint/payload unit scope differs")
     records = {}
     for row, payload in payloads.items():
         prov = payload["provenance"]
@@ -3672,7 +3687,7 @@ def _payload_acquisition_records(payloads):
                     raise MergeRefused(f"{row}: acquisition scalar render measurement missing/foreign for {name}@{fmt}")
         records[row] = {"origin": prov.get("acquisition"),
             "schedule": prov.get("acquisition_schedule"), "sources": prov.get("acquisition_source_weights"),
-            "units": dict.fromkeys(selection_priced_units(prov["unit_selection"])[0]),
+            "units": {name: unit_identities[name] for name in selected[row]},
             "cells": {name: list(formats) for name, formats in payload["costs"].items()}}
     return records
 
@@ -3862,7 +3877,8 @@ def expected_expert_partition_coverage(census: dict, plan_coverage, *, rate_band
 
 
 def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
-                   plan_coverage: dict | None = None, acquisition=None) -> dict:
+                   plan_coverage: dict | None = None, acquisition=None,
+                   acquisition_unit_identities=None) -> dict:
     """One cost payload from N rows, refusing anything they do not share.
 
     The merged table is the monolith's on every field the monolith's rows would
@@ -3875,6 +3891,10 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
     they must price exactly the groups the plan declares, and the merged table
     says which scope groups it leaves unpriced and why under
     ``provenance.coverage``, with ``unit_selection.selected`` True.
+
+    An acquisition also requires ``acquisition_unit_identities`` from the
+    authenticated checkpoint merge. Its existing full producer menus bind
+    exact deferred-domain claims; payload provenance alone cannot supply them.
     """
     from prismaquant.tessera_campaign import (
         SCHEMA, campaign_population_block, canonical_refusals, selection_stack_samples,
@@ -3896,7 +3916,8 @@ def merge_payloads(row_payloads: dict, *, census: dict, capture_sha256: str,
     acquisition_union = None
     if acquisition is not None or any(any(key in prov for key in (
             "acquisition", "acquisition_schedule", "acquisition_source_weights")) for prov in provenances.values()):
-        acquisition_union = _merge_acquisition_rows(_payload_acquisition_records(row_payloads),
+        acquisition_union = _merge_acquisition_rows(_payload_acquisition_records(
+            row_payloads, unit_identities=acquisition_unit_identities),
             acquisition=acquisition, scope_groups=census.get("anchor_groups"))
     for row_id, provenance in provenances.items():
         if provenance.get("research_exact_member_scope") is not None:
@@ -4593,9 +4614,10 @@ def cmd_merge(args) -> int:
 
     acquisition_manifest = None
     if acquisition is not None:
-        _merge_acquisition_rows(_payload_acquisition_records(payloads),
-            acquisition=acquisition, scope_groups=census["anchor_groups"])
         acquisition_manifest = merge_checkpoint(row_dirs, Path(args.out).with_suffix(".anchors.json"),
+            acquisition=acquisition, scope_groups=census["anchor_groups"])
+        _merge_acquisition_rows(_payload_acquisition_records(payloads,
+            unit_identities=acquisition_manifest["identity"]["units"]),
             acquisition=acquisition, scope_groups=census["anchor_groups"])
     reference = payloads[sorted(payloads)[0]]["provenance"]
     # Under a census every row calibrated the SCOPE's static scales, so this is
@@ -4612,7 +4634,8 @@ def cmd_merge(args) -> int:
         policy=reference["activation_static_scales"]["policy"],
         static_scales=static_scales, census=census)
     merged = merge_payloads(payloads, census=census, capture_sha256=capture_sha256,
-                            plan_coverage=coverage, acquisition=acquisition)
+        plan_coverage=coverage, acquisition=acquisition,
+        acquisition_unit_identities=None if acquisition_manifest is None else acquisition_manifest["identity"]["units"])
     if coverage is not None:
         block = merged["provenance"]["coverage"]
         print(f"[dispatch] coverage: {block['priced_groups']} of {block['scope_groups']} "

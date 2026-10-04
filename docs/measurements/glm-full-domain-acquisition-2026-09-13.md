@@ -198,6 +198,17 @@ Projection never rewrites the original request, creates another price currency,
 changes its global request/cost/run/probe identity, or snaps requested rates. The
 default `units=None` return remains unchanged.
 
+Both checkpoint and scalar-payload merges validate the exact deferred family
+domain against the producer's already authenticated checkpoint unit menus and
+the original requested schedule. Explicit empty requested families and legitimate
+unrequested menu families remain; unknown extras, active-family insertions and
+dropped unrequested families refuse. The existing merge command authenticates
+checkpoint identities before joining payload provenance. Direct acquisition
+`merge_payloads` callers must supply those `acquisition_unit_identities`; a payload
+alone cannot establish its producer menu. Ordinary non-acquisition merge behavior
+is unchanged, and the shared menu/request derivation introduces no new prices or
+independent domain controller.
+
 The torch-free `tessera_acquisition_inputs` owner provides
 `joint_campaign_acquisition_control_inputs(binding)`, reusing the same strict
 bound JSON owner and declaring the actual whole request and raw cost, in that

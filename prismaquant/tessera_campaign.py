@@ -1017,13 +1017,19 @@ def _campaign_round_one_schedule(groups, group_rates, *, args, audit_units, snap
     return schedule
 
 
+def _campaign_acquisition_deferred_families(schedule, menu_families):
+    """Exact deferred producer-menu/request families, never a price claim."""
+    return sorted((set(menu_families) | set(schedule))
+                  - {family for family, qs in schedule.items() if qs})
+
+
 def _campaign_acquisition_origin(acquisition, schedule, menus):
     return {**acquisition["identity"],
         "purpose": "actual_scalar_render_journal_and_wire_preparation",
         "currency": CURRENCY,
         "expanded_actual_work_count": sum(len(qs) for families in schedule.values() for qs in families.values()),
-        "deferred_domain": {name: sorted(({r.family for r in menus[name]} | set(schedule[name]))
-            - {family for family, qs in schedule[name].items() if qs}) for name in sorted(schedule)}}
+        "deferred_domain": {name: _campaign_acquisition_deferred_families(
+            schedule[name], (r.family for r in menus[name])) for name in sorted(schedule)}}
 
 
 def _require_campaign_acquisition_source(name, weight, expected, *, receipt=None):

@@ -240,22 +240,26 @@ def test_readset_refuses_controls_outside_shared_mount(handoff, monkeypatch):
     assert not (handoff.workspace / "manifest.json").exists()
 
 
-def records(handoff):
+def records(handoff, *, menu_families=None):
     result = {}
     from prismaquant.tessera_menu import expand_tessera_menu
     for index, name in enumerate(handoff.run.names[:2]):
         projected, keys, _ = campaign._campaign_acquisition_row_scope(handoff.acquisition,
             handoff.census["anchor_groups"], selected=[name])
-        menus = {name: expand_tessera_menu(tuple(handoff.run.shapes[name]), mode="research")}
+        menus = {name: expand_tessera_menu(tuple(handoff.run.shapes[name]), mode="research",
+                                         families=menu_families)}
         schedule = campaign._requested_acquisition_schedule({key: handoff.census["anchor_groups"][key]
             for key in keys}, projected["requests"])
+        unit = {"weight": campaign._checkpoint_identity_api().tensor_identity(handoff.run.weights[name]),
+                "acquisition_source_weight": projected["source_weights"][name],
+                "menu": sorted(rung.format_name for rung in menus[name])}
         result[f"row-{index:04d}"] = dict(origin=campaign._campaign_acquisition_origin(projected, schedule, menus),
-            schedule=schedule, sources=projected["source_weights"], units={name: None},
+            schedule=schedule, sources=projected["source_weights"], units={name: unit},
             cells={name: [f"{family}_R{q}" for family, qs in schedule[name].items() for q in qs]})
     return result
 
 
-@pytest.mark.parametrize("change", ["request", "cost", "probe", "source", "missing_q", "extra_q", "partial_scope", "overlap", "missing_row", "missing_cells", "extra_cells", "deferred_dropped"])
+@pytest.mark.parametrize("change", ["request", "cost", "probe", "source", "missing_q", "extra_q", "partial_scope", "overlap", "missing_row", "missing_cells", "extra_cells", "deferred_dropped", "deferred_unknown", "deferred_unrequested_dropped", "menu_missing"])
 def test_semantic_merge_refuses_wrong_global_identity_source_and_row_work(handoff, change):
     rows = records(handoff)
     first, second = list(rows)
@@ -279,9 +283,48 @@ def test_semantic_merge_refuses_wrong_global_identity_source_and_row_work(handof
         rows[first]["cells"][name] = []
     elif change == "extra_cells":
         rows[first]["cells"][name].append(FAMILY + "_R999999")
+    elif change == "deferred_unknown":
+        rows[first]["origin"]["deferred_domain"][name].append("UNREVIEWED_FAMILY")
+        rows[first]["origin"]["deferred_domain"][name].sort()
+    elif change == "deferred_unrequested_dropped":
+        extra = next(family for family in rows[first]["origin"]["deferred_domain"][name]
+                     if family not in rows[first]["schedule"][name])
+        rows[first]["origin"]["deferred_domain"][name].remove(extra)
+    elif change == "menu_missing":
+        rows[first]["units"][name].pop("menu")
     else:
         rows[first]["origin"]["deferred_domain"][name].remove(DEFERRED)
     with pytest.raises(dispatch.MergeRefused):
+        dispatch._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+            scope_groups=handoff.census["anchor_groups"])
+
+
+def test_exact_deferred_domain_keeps_real_unrequested_menu_families(handoff):
+    rows = records(handoff)
+    merged = dispatch._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+        scope_groups=handoff.census["anchor_groups"])
+    for record in rows.values():
+        for name, deferred in record["origin"]["deferred_domain"].items():
+            assert DEFERRED in deferred
+            assert any(family not in record["schedule"][name] for family in deferred)
+            assert merged["origin"]["deferred_domain"][name] == deferred
+
+
+def test_known_unrequested_family_outside_actual_restricted_menu_refuses(handoff):
+    from prismaquant.tessera_formats import get_tessera_family
+
+    full = records(handoff)
+    rows = records(handoff, menu_families=[get_tessera_family(FAMILY)])
+    first = next(iter(rows))
+    name = next(iter(rows[first]["schedule"]))
+    actual = dispatch._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
+        scope_groups=handoff.census["anchor_groups"])
+    assert actual["origin"]["deferred_domain"][name] == [DEFERRED]
+    excluded = next(family for family in full[first]["origin"]["deferred_domain"][name]
+                    if family not in rows[first]["schedule"][name])
+    rows[first]["origin"]["deferred_domain"][name].append(excluded)
+    rows[first]["origin"]["deferred_domain"][name].sort()
+    with pytest.raises(dispatch.MergeRefused, match="exact deferred families"):
         dispatch._merge_acquisition_rows(rows, acquisition=handoff.acquisition,
             scope_groups=handoff.census["anchor_groups"])
 
@@ -338,6 +381,7 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
         pinned=[], declared_stacks={}, packed_in_scope={}, packed_outside_layer_stride={},
         anchor_groups=handoff.census["anchor_groups"], calibration_census=None)
     payloads, directories, schedules = {}, {}, {}
+    row_identities, row_states = {}, {}
     for row, action in zip(planned["rows"], actions):
         members = campaign.selection_priced_units(campaign.load_unit_selection(row["units"]))[0]
         projected, keys, _ = campaign._campaign_acquisition_row_scope(handoff.acquisition,
@@ -395,10 +439,14 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
             static_scale_policy=static_policy)
         journal, identity_sha, _ = prepare_journal(checkpoint.with_name(checkpoint.name + ".parts"),
             stage="Tessera campaign", resume=False, identity=identity, qnames=sorted(members), manifest_path=checkpoint)
+        row_identities[row["row_id"]] = identity
+        row_states[row["row_id"]] = {}
         for name in sorted(members):
+            state = {"anchors": [vars(anchor) for anchors in measured[name].values() for anchor in anchors],
+                     "wire_records": wire_records[name]}
             write_unit(journal, stage="Tessera campaign", qname=name, identity_sha256=identity_sha,
-                state={"anchors": [vars(anchor) for anchors in measured[name].values() for anchor in anchors],
-                       "wire_records": wire_records[name]})
+                       state=state)
+            row_states[row["row_id"]][name] = state
         name = next(iter(members))
         capture_path, scale_path, capture_digest = campaign.write_export_inputs(row_dir / "cache",
             hessians={name: hessians[name] for name in members}, hessian_rows=counts,
@@ -424,10 +472,12 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
     _, _, merged_capture_digest = dispatch.merge_export_inputs(directories, payloads,
         out_cache=handoff.root / "merged-cache", identity=calibration, policy=static_policy,
         static_scales=static_scales, census=handoff.census)
-    merged = dispatch.merge_payloads(payloads, census=handoff.census, capture_sha256=merged_capture_digest,
-        plan_coverage=coverage, acquisition=handoff.acquisition)
     checkpoint = dispatch.merge_checkpoint(directories, handoff.root / "merged.anchors.json",
         acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
+    unit_identities = checkpoint["identity"]["units"]
+    merged = dispatch.merge_payloads(payloads, census=handoff.census, capture_sha256=merged_capture_digest,
+        plan_coverage=coverage, acquisition=handoff.acquisition,
+        acquisition_unit_identities=unit_identities)
     assert merged["provenance"]["acquisition_schedule"] == schedules
     assert checkpoint["identity"]["settings"]["acquisition_schedule"] == schedules
     assert set(merged["costs"]) == set(handoff.run.names[:2])
@@ -444,3 +494,30 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
             restored = pickle.loads(handoff.cost.read_bytes())["costs"][name][fmt]
             assert restored == original
             assert original["signed_components_per_probe"]
+    with pytest.raises(dispatch.MergeRefused, match="bound checkpoint unit identities"):
+        dispatch.merge_payloads(payloads, census=handoff.census, capture_sha256=merged_capture_digest,
+            plan_coverage=coverage, acquisition=handoff.acquisition)
+    first = next(iter(payloads))
+    name = next(iter(payloads[first]["provenance"]["acquisition_schedule"]))
+    for change in ("unknown", "active", "unrequested_dropped"):
+        def alter_domain(origin):
+            domain = origin["deferred_domain"][name]
+            if change == "unrequested_dropped":
+                extra = next(family for family in domain
+                             if family not in payloads[first]["provenance"]["acquisition_schedule"][name])
+                domain.remove(extra)
+            else:
+                domain.append("UNREVIEWED_FAMILY" if change == "unknown" else FAMILY)
+                domain.sort()
+
+        changed_payloads = copy.deepcopy(payloads)
+        alter_domain(changed_payloads[first]["provenance"]["acquisition"])
+        with pytest.raises(dispatch.MergeRefused, match="exact deferred families"):
+            dispatch.merge_payloads(changed_payloads, census=handoff.census,
+                capture_sha256=merged_capture_digest, plan_coverage=coverage,
+                acquisition=handoff.acquisition, acquisition_unit_identities=unit_identities)
+        changed_identities = copy.deepcopy(row_identities)
+        alter_domain(changed_identities[first]["settings"]["acquisition_origin"])
+        with pytest.raises(dispatch.MergeRefused, match="exact deferred families"):
+            dispatch._merge_acquisition_settings(changed_identities, row_states,
+                acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
