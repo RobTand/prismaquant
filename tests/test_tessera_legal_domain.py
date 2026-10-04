@@ -624,8 +624,15 @@ def test_rate_domain_refuses_a_payload_whose_arrays_arrived_as_lists(public_doma
     with pytest.raises(population.PopulationSelectionError):
         domain.RateDomain(**payload)
 
+@pytest.fixture(scope="module")
+def resolved_transitions():
+    """Share immutable results of the real resolver's default-rate path."""
+    from functools import lru_cache
 
-def test_a_transition_names_the_first_rate_of_the_new_regime():
+    return lru_cache(maxsize=None)(domain.resolver_transitions)
+
+
+def test_a_transition_names_the_first_rate_of_the_new_regime(resolved_transitions):
     """Pinned convention 1, checked against the resolver on both sides.
 
     R3585 is a transition and R3584 is not one *for the table width*: 3584/256
@@ -634,7 +641,7 @@ def test_a_transition_names_the_first_rate_of_the_new_regime():
     schedule becomes uniform at every 256-multiple -- two different regime
     changes that happen to be adjacent, and the ledger records both causes.
     """
-    transitions = set(domain.resolver_transitions(BF))
+    transitions = set(resolved_transitions(BF))
     assert {3585, 3841} <= transitions
     assert domain.table_width_bits(BF, 3584) == 14
     assert domain.table_width_bits(BF, 3585) == 15
@@ -644,7 +651,8 @@ def test_a_transition_names_the_first_rate_of_the_new_regime():
 
 
 @pytest.mark.parametrize("family", [E4, BF])
-def test_every_256_multiple_above_the_endpoint_is_a_resolver_transition(family):
+def test_every_256_multiple_above_the_endpoint_is_a_resolver_transition(
+        family, resolved_transitions):
     """Pinned convention 2: the resolver DOES change at every 256-multiple.
 
     At ``R = 256k`` over a column count divisible by 256 the Bresenham
@@ -655,7 +663,7 @@ def test_every_256_multiple_above_the_endpoint_is_a_resolver_transition(family):
     mandatory.
     """
     lo, hi = family_q256_bounds(family)
-    transitions = set(domain.resolver_transitions(family))
+    transitions = set(resolved_transitions(family))
     expected = {r for r in range(lo, hi + 1) if r % 256 == 0 and r != lo}
     expected |= {r for r in range(lo, hi + 1) if r % 256 == 1 and r != lo}
     assert transitions == expected
