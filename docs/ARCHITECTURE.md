@@ -101,6 +101,7 @@ resume; they do not qualify staged lifetimes or GPU performance. No default,
 pin, serving gate or deployed runtime changes. The original GLM layer-7 two-arm
 GPU protocol remains a root-authorized gate under #1366; see
 [the sealed checkpoint contract and finite protocol](design/checkpoint_streaming_1366.md).
+
 Re-stamped 2026-10-02 (PQ #2106, Refs #1293, selected-result consumer):
 fan-out pilot admission uses the reviewed SDK4 public selected-action result
 reader and standard-capture binder. Explicit publication/attempt selectors
@@ -235,6 +236,7 @@ live exporter test consumer before the clean cutover. Historical archives
 remain historical. Literal dispatch-name and mixed-group catch-all checks
 remain; incidental source/docstring wording assertions are removed rather
 than repinned. This bounded copy/alias removal does not complete the epic.
+
 Refs #2199/#1303: the immutable positive E2M1 magnitudes remain owned by
 `nvfp4_activation_contract._E2M1_POSITIVE`. Native and batched exporters,
 the format registry and the fused kernel Torch helpers consume that same
@@ -245,6 +247,7 @@ at code 8. Tie, range, scaling and packing arithmetic are unchanged. CPU
 equivalence checks do not qualify compiled CUDA or served quality. Exporter
 and cache controls remain CPU-compatible without optional Triton; kernel-only
 wire/tie controls follow the existing guarded fused-kernel test convention.
+
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
 measurements use `kl_fisher.forward_kl_per_token` for the existing
