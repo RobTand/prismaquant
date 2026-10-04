@@ -4,21 +4,19 @@
 
 ### Changed
 
-- **Raw byte-hash constructors route to the digest owners, with a full
-  remaining-site census** (Refs #1301). 87 raw `hashlib.sha256(...).hexdigest()`
-  constructor sites across 50 package modules now call the existing
-  `prismaquant.digests` byte/text owners; every replaced call had the exact
-  owner-equivalent AST shape, and the old bytes, refusals and refusal order
-  are unchanged (owner-vs-raw equivalence is pinned over binary, text, view,
-  empty and megabyte-scale inputs, plus str/non-str/surrogate refusals). The
-  primitive-site ratchet shrinks by exactly the 76 migrated scope rows and
-  grows nothing. `docs/audits/digest_site_census_pq1301_2026-10-04.json`
-  classifies all 485 remaining ratcheted digest sites at this base
-  (425 load-bearing / 51 ephemeral / 9 unresolved-scope) with each site's
-  exact owner route or distinct-identity recipe, so later slices migrate by
-  lookup instead of re-deriving the space. No encoding, wire, default, pin,
-  numerical or performance change; digests are compared against stored values
-  exactly as before, byte for byte.
+- **Raw byte-hash constructors route to the digest owners** (Refs #1301).
+  87 raw `hashlib.sha256(...).hexdigest()` constructor sites across 50
+  package modules now call the existing `prismaquant.digests` byte/text
+  owners (`bytes_sha256hex`, `text_sha256hex`), with the base-bound census
+  of 485 gated digest scopes (434 load-bearing, 51 ephemeral) recorded in
+  `docs/audits/digest_site_census_pq1301_2026-10-04.json`. The two modules
+  that direct file loads execute without a package context —
+  `container_runtime_identity.py` (bootstrap execution, the container
+  adapter's runpy load) and `dsv4_campaign_completion.py` (the campaign
+  waiter's file-spec load) — bind the same named owner functions by loading
+  the same tree's stdlib-only `digests.py` by file path whenever the module
+  runs without a package context; their five census rows carry that binding
+  note. No encoding, wire, default or pin change is part of this slice.
 
 ### Fixed
 

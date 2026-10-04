@@ -2,7 +2,7 @@
  "base_commit": "f085c4abd207d347de3a5515788017da2b6c271c",
  "generated": "2026-10-04",
  "issue": "https://github.com/RobTand/prismaquant/issues/1301",
- "method": "Every primitive digest site enumerated exactly as the ratchet gate tools/duplication_inventory.py digest_sites() enumerates them (alias-resolved hashlib.* calls; json.dumps/json.JSONEncoder with literal sort_keys=True; population prismaquant/ + tools/ minus vendored/archive/__pycache__/serving_runtime_patches; scope = dotted function/class chain). 485 gated scope rows at this base (235 hashlib + 250 sorted-json), matching the committed baseline. Each row then classified: load-bearing (digest value compared, persisted, returned, stored or keyed - conservative default) vs ephemeral (only print/log/warning display), by scope-local value flow, with 9 class-__init__/module-level rows read and judged by hand (their usage notes say \"manual\"); and mapped to the existing digests.py owner that reproduces its exact bytes, or recorded as a distinct identity with its recipe. Rows are scope-granular: one row per family:file::scope.",
+ "method": "Every primitive digest site enumerated exactly as the ratchet gate tools/duplication_inventory.py digest_sites() enumerates them (alias-resolved hashlib.* calls; json.dumps/json.JSONEncoder with literal sort_keys=True; population prismaquant/ + tools/ minus vendored/archive/__pycache__/serving_runtime_patches; scope = dotted function/class chain). 485 gated scope rows at this base (235 hashlib + 250 sorted-json), matching the committed baseline. Each row then classified: load-bearing (digest value compared, persisted, returned, stored or keyed - conservative default) vs ephemeral (only print/log/warning display), by scope-local value flow, with 9 class-__init__/module-level rows read and judged by hand (their usage notes say \"manual\"); and mapped to the existing digests.py owner that reproduces its exact bytes, or recorded as a distinct identity with its recipe. Rows are scope-granular: one row per family:file::scope. Population note: rows[] holds 501 rows - the 485 gated scope rows plus 16 destination-owner rows of prismaquant/digests.py itself, which sit outside the gated population and are not migration candidates; no unknowns remain, so all 501 rows classify (450 load-bearing, 51 ephemeral). The summary's 434 load-bearing / 51 ephemeral counts the 485 gated rows only.",
  "rows": [
   {
    "classification": "load-bearing",
@@ -57,6 +57,7 @@
     198
    ],
    "n_calls": 1,
+   "note": "same-tree stdlib direct-file binding required and preserved by this correction: the module loads without a package context, so the no-package branch binds the same named owner functions from this tree's digests.py by file path",
    "route_verdict": "bytes_sha256hex",
    "scope": "_receipt_sha256",
    "site": "hashlib:prismaquant/container_runtime_identity.py::_receipt_sha256",
@@ -71,6 +72,7 @@
     81
    ],
    "n_calls": 1,
+   "note": "same-tree stdlib direct-file binding required and preserved by this correction: the module loads without a package context, so the no-package branch binds the same named owner functions from this tree's digests.py by file path",
    "route_verdict": "bytes_sha256hex",
    "scope": "image_content_sha256",
    "site": "hashlib:prismaquant/container_runtime_identity.py::image_content_sha256",
@@ -105,7 +107,7 @@
    "usage": "arg:hexdigest"
   },
   {
-   "classification": "unknown",
+   "classification": "load-bearing",
    "disposition": "digest-owner (destination module, not ratcheted)",
    "family": "hashlib",
    "file": "prismaquant/digests.py",
@@ -116,10 +118,10 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "LegacyNulSourceSha256.__init__",
    "site": "hashlib:prismaquant/digests.py::LegacyNulSourceSha256.__init__",
-   "usage": "carried but unused in scope"
+   "usage": "manual: __init__ stores self._digest (434); update consumes it (436-441); hexdigest returns the identity (443-444)"
   },
   {
-   "classification": "unknown",
+   "classification": "load-bearing",
    "disposition": "digest-owner (destination module, not ratcheted)",
    "family": "hashlib",
    "file": "prismaquant/digests.py",
@@ -130,7 +132,7 @@
    "route_verdict": "distinct:non-hexdigest-shape",
    "scope": "LengthFramedSourceSha256.__init__",
    "site": "hashlib:prismaquant/digests.py::LengthFramedSourceSha256.__init__",
-   "usage": "carried but unused in scope"
+   "usage": "manual: __init__ stores self._digest (413); update consumes it (415-420); hexdigest returns the identity (422-423)"
   },
   {
    "classification": "load-bearing",
@@ -253,6 +255,7 @@
     197
    ],
    "n_calls": 1,
+   "note": "same-tree stdlib direct-file binding required and preserved by this correction: the module loads without a package context, so the no-package branch binds the same named owner functions from this tree's digests.py by file path",
    "route_verdict": "text_sha256hex",
    "scope": "_manifest_scope",
    "site": "hashlib:prismaquant/dsv4_campaign_completion.py::_manifest_scope",
@@ -267,6 +270,7 @@
     121
    ],
    "n_calls": 1,
+   "note": "same-tree stdlib direct-file binding required and preserved by this correction: the module loads without a package context, so the no-package branch binds the same named owner functions from this tree's digests.py by file path",
    "route_verdict": "bytes_sha256hex",
    "scope": "_sha256_bytes",
    "site": "hashlib:prismaquant/dsv4_campaign_completion.py::_sha256_bytes",
@@ -281,6 +285,7 @@
     83
    ],
    "n_calls": 1,
+   "note": "same-tree stdlib direct-file binding required and preserved by this correction: the module loads without a package context, so the no-package branch binds the same named owner functions from this tree's digests.py by file path",
    "route_verdict": "bytes_sha256hex",
    "scope": "canonical_sha256",
    "site": "hashlib:prismaquant/dsv4_campaign_completion.py::canonical_sha256",
@@ -3727,7 +3732,7 @@
    "usage": "arg:bytes_sha256hex;arg:encode"
   },
   {
-   "classification": "unknown",
+   "classification": "load-bearing",
    "disposition": "digest-owner (destination module, not ratcheted)",
    "family": "sorted-json",
    "file": "prismaquant/digests.py",
@@ -3735,10 +3740,10 @@
     161
    ],
    "n_calls": 1,
-   "route_verdict": "DIRECT_UTF8_STRICT",
+   "route_verdict": "canonical_json_sha256_normalized",
    "scope": "<module>",
    "site": "sorted-json:prismaquant/digests.py::<module>",
-   "usage": "scope not found"
+   "usage": "manual: encoder configuration for normalized identity - _CANONICAL_ENCODER (161) is consumed only by canonical_json_sha256_normalized (252-253) after _require_normalized_json"
   },
   {
    "classification": "load-bearing",
