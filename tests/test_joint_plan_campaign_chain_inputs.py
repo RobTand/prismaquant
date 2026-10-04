@@ -55,6 +55,14 @@ def test_plan_without_inputs_is_refused_at_admission_by_name(tmp_path):
 
 
 def test_plan_without_canonical_capture_is_refused_at_admission_by_name(tmp_path):
+    """Refused by name at load, not as a bare KeyError inside prepare.
+
+    This admits nothing new: every prepare arm reads
+    ``config["canonical_capture"]`` bare (``_prepare_source_owner``,
+    ``prepare_cache``), and a campaign scope's artifacts always name it
+    (``joint_catalog_extension.SCOPE_ARTIFACT_BINDINGS``), so a plan without
+    the binding never executed -- it died later, after the prewarm.
+    """
     from prismaquant.tessera_joint_aura import load_joint_anchor_plan
 
     config = _plan(tmp_path / "run")
@@ -117,6 +125,10 @@ def _pool_plan(tmp_path):
     pool = tmp_path / "pool"
     (pool / "boundaries").mkdir(parents=True)
     config = _plan(tmp_path / "run")
+    # The subset shape under test IS the empty binding: the fixture literal
+    # carries ``inputs: {}``. Pinned here so a fixture edit that populates
+    # ``inputs`` cannot silently turn this into a non-subset plan.
+    assert config["inputs"] == {}
     config["execution"]["boundary_storage"] = {
         "schema": "prismaquant.aura.boundary_storage.v1",
         "directory": str(pool / "boundaries"),

@@ -2403,18 +2403,31 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
     _require(isinstance(config.get("inputs"), dict),
              "joint anchor plan: the campaign chain ``inputs`` block is required; "
              f"it binds {', '.join(HEAD_WALK_INPUT_KEYS)}")
+    # Partial binding is legal here (a Stage B quantum plan binds a subset,
+    # PQ #1024, and a catalog extension binds keys beyond the head walk's);
+    # only the walk loader (``load_measured_anchor_input``) requires the
+    # complete chain. A binding's vocabulary is closed -- exactly
+    # ``{path, sha256}``, the shape the campaign scope compares
+    # (``SCOPE_ARTIFACT_BINDINGS``) -- so a binding with extra metadata keys
+    # is refused rather than silently carried.
     for key in HEAD_WALK_INPUT_KEYS:
         if key in config["inputs"]:
             binding = config["inputs"][key]
             _require(isinstance(binding, dict) and set(binding) == {"path", "sha256"}
                      and isinstance(binding["path"], str)
                      and isinstance(binding["sha256"], str),
-                     f"campaign chain input {key}: independently bound path/SHA256 required")
+                     f"campaign chain input {key}: exactly a bound path/SHA256 "
+                     "pair is required")
+    # Required, not newly: every prepare arm reads ``canonical_capture`` bare
+    # (``_prepare_source_owner``, ``prepare_cache``) and a campaign scope's
+    # artifact bindings always name it, so a plan without one never executed
+    # -- it died later, after the projection prewarm had allocated (PQ #1293,
+    # run-01 S3). Stating it at admission names the field the grammar owes.
     _require(isinstance(config.get("canonical_capture"), dict)
              and set(config["canonical_capture"]) == {"path", "sha256"}
              and isinstance(config["canonical_capture"]["path"], str)
              and isinstance(config["canonical_capture"]["sha256"], str),
-             "canonical capture: independently bound path/SHA256 required")
+             "canonical capture: exactly a bound path/SHA256 pair is required")
     _source_prefetch(config)
     execution = config["execution"]
     from .glm_source_derivative import normalize_source_derivative
