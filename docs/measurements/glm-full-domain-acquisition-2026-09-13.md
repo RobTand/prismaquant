@@ -156,3 +156,29 @@ recipe discarded it, so revalidation differed by 23 bytes and refused the
 candidate. The shared recipe/footprint owners now retain window seed, window
 sigma and channel sigma rather than suppressing the mismatch or subtracting
 bytes. All size claims remain the public writer's; no native admission changes.
+
+## Executing bounded joint requests (#2171)
+
+The existing anchor campaign accepts an explicit `--acquisition-request` and
+`--acquisition-request-sha256` pair. The request is the existing joint acquisition
+JSON, not an allocation, capture or export. Intake authenticates its actual cost
+pickle and revalidates ordinary raw-v2 joint currency, run/probe/source evidence
+and the complete legal domain. Duplicate, illegal, already measured, misbound or
+qualification-claiming proposals refuse before campaign input work.
+
+This explicit path requires research mode and one round, without a global rate
+band, exhaustive-grid mode, audit extras or partial expert-partition semantics.
+Both first-batch priming and round-one execution use the existing atomic groups
+and one exact requested-rate selector: group-member requests are unioned only
+within the actual shared legal grid. No rung is snapped, silently dropped or
+replaced by an endpoint/uniform anchor. Every actual member needs a bound source
+identity; the selected scope must be exactly the requested atomic expansion.
+Actual source bytes are checked before encoding, outside per-anchor failures.
+
+The output remains the normal source/H/recipe-bound scalar anchor journal and
+wire/render cache. These establish candidate bytes, not joint Fisher prices.
+Four-probe Stage B pricing, native prefill/decode context, selected assignment,
+immutable export and held-out quality/serving remain separate actual transitions.
+The original request keeps every deferred legal rate. This wiring does not adopt
+a provider, promote row-zero diagnostics to full-calibration H, move a public or
+private reader pin, or qualify any unsupported native cell.

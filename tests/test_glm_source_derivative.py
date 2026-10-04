@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 import sys
+import subprocess
 
 import pytest
 import torch
@@ -16,6 +17,53 @@ from prismaquant.model_profiles.glm5_next import Glm5NextProfile
 from prismaquant.model_profiles.default import DefaultProfile
 
 EVIDENCE = Path(__file__).resolve().parents[1] / 'experiments/measurements/glm-derivative-contract-20260908'
+DRIVER = Path(__file__).resolve().parents[1] / 'tools/build_glm_derivative_image.py'
+
+
+@pytest.mark.parametrize("mode", ["help", "contract"])
+def test_real_driver_bootstrap_works_without_package_or_torch(tmp_path, mode):
+    blocker = tmp_path / "blocked"
+    blocker.mkdir()
+    for name in ("torch", "digests"):
+        (blocker / (name + ".py")).write_text(
+            "raise RuntimeError('ambient dependency must not be imported')\n")
+    package = blocker / "prismaquant"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "raise RuntimeError('package initializer must not run')\n")
+    probe = '''
+import hashlib, json, runpy, sys
+from pathlib import Path
+scope = runpy.run_path(sys.argv[1])
+contract = scope["_contract"]
+assert "torch" not in sys.modules and "prismaquant" not in sys.modules
+path = Path(sys.argv[2])
+raw = path.read_bytes()
+build = json.loads(raw)
+assert scope["sha256"](path) == hashlib.sha256(raw).hexdigest()
+binding = {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest()}
+assert contract["bound_json"](binding, "actual image build") == build
+assert scope["ORIGINAL_MODELING_SHA256"] == build["original_modeling_sha256"]
+assert scope["CORRECTED_MODELING_SHA256"] == build["corrected_modeling_sha256"]
+assert scope["_runtime_identity"]["image_content_sha256"](build["original_image"]) == scope["ORIGINAL_IMAGE_CONTENT_SHA256"]
+try:
+    scope["corrected_source"](b"not reviewed modeling source")
+except ValueError as error:
+    assert str(error) == "GLM source derivative: original modeling source differs"
+else:
+    raise AssertionError("unreviewed source bytes accepted")
+
+'''
+    command = ([sys.executable, str(DRIVER), "--help"] if mode == "help"
+               else [sys.executable, "-c", probe, str(DRIVER),
+                     str(EVIDENCE / "image-build-result.json")])
+    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True,
+                            env={"PYTHONPATH": str(blocker), "PYTHONSAFEPATH": "1",
+                                 "PATH": "/usr/bin:/bin"})
+    assert result.returncode == 0, result.stderr
+    if mode == "help":
+        assert "--base-archive" in result.stdout
+
 
 
 def write_bound(path, value):

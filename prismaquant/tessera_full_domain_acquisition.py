@@ -320,3 +320,135 @@ def joint_acquisition_from_cost_data(cost_data, unit_shapes, families, *,
     return {"reports": reports, "cost_currency": currency,
             "joint_provenance_sha256": canonical_json_sha256(provenance, where="joint acquisition provenance"),
             "measurement_verification": "validated attested joint rows and bound raw run/operator/probe metadata; no tensor or wire payload reread"}
+
+
+def load_joint_campaign_acquisition(binding) -> dict:
+    """Authenticate research requests before the existing renderer consumes them.
+
+    The root SHA binds the small request document, whose cost SHA binds the
+    original pickle. Ordinary currency and raw-v2 validation are rerun against
+    that pickle, not the document's claims. This checks recorded identities
+    only, without rereading source tensors or rendered wire bodies. Atomic
+    member coverage and active campaign scope belong to the scheduler.
+    """
+    import pickle
+
+    from .cost_stage_checkpoint import canonical_json_sha256
+    from .joint_aura import identity_sha256
+    from .schemas import strict_json_loads
+    from .stage_inputs import read_bound, require
+    from .tessera_formats import get_tessera_family
+    from .tessera_legal_domain import live_pins as current_domain_pins, tessera_source_state
+
+    def same(actual, expected, label):
+        # Digests distinguish bools from integers and preserve raw signed samples.
+        require(canonical_json_sha256(actual, where=label) ==
+                canonical_json_sha256(expected, where=label),
+                f"joint acquisition {label} differs from actual cost/domain evidence")
+
+    def request_only(record):
+        for field, expected in (("prices", None), ("interpolation_error_bound", None),
+                                ("allocator_payload", False), ("production_qualified", False),
+                                ("interpolation_qualified", False),
+                                ("selected_assignment_confirmed", False)):
+            if field in record:
+                require(record[field] is expected, f"joint acquisition refuses claimed {field}")
+
+    raw = read_bound(binding, "joint acquisition request")
+    document = strict_json_loads(
+        raw, duplicate=lambda key: ValueError(f"joint acquisition duplicate JSON key: {key}"),
+        constant=lambda value: ValueError(f"joint acquisition nonfinite JSON value: {value}"))
+    require(isinstance(document, dict) and document.get("schema") ==
+            "prismaquant.tessera_full_domain_campaign_acquisition.v1",
+            "joint acquisition requires the campaign request schema")
+    request_only(document)
+    require(document.get("allocator_payload") is False and
+            document.get("production_qualified") is False and
+            document.get("atomic_serving_group_expansion_required") is True,
+            "joint acquisition requires request-only atomic expansion")
+    require(document.get("journal_bindings") == {} and
+            document.get("active_encoder_source_sha256") is None,
+            "joint acquisition refuses scalar anchor/encoder bindings")
+    same(document.get("domain_pins"), current_domain_pins().as_dict(), "domain_pins")
+    state = tessera_source_state()
+    claimed_state = document.get("producer_source_state")
+    require(isinstance(claimed_state, dict), "joint acquisition requires producer source state")
+    for field in ("schema", "export_sha256", "grammar_sha256"):
+        same(claimed_state.get(field), state[field], f"producer_source_state.{field}")
+
+    reports = document.get("reports")
+    require(isinstance(reports, list) and bool(reports), "joint acquisition requires reports")
+    shapes, families, pairs = {}, set(), set()
+    for report in reports:
+        require(isinstance(report, dict), "joint acquisition report must be a mapping")
+        unit, family, shape = report.get("unit_name"), report.get("family"), report.get("shape")
+        require(isinstance(unit, str) and bool(unit), "joint acquisition requires a unit name")
+        require(isinstance(family, str) and get_tessera_family(family).name == family,
+                "joint acquisition requires canonical families")
+        require(isinstance(shape, list) and len(shape) == 2 and
+                all(type(d) is int and d > 0 for d in shape),
+                "joint acquisition requires positive integer Linear shapes")
+        require((unit, family) not in pairs, "joint acquisition duplicate unit/family report")
+        if unit in shapes:
+            same(shape, shapes[unit], "shared source shape")
+        shapes[unit] = shape
+        families.add(family)
+        pairs.add((unit, family))
+
+    cost_binding = {"path": document.get("cost_path"), "sha256": document.get("cost_sha256")}
+    require(isinstance(cost_binding["path"], str) and bool(cost_binding["path"]),
+            "joint acquisition requires bound cost_path")
+    cost_data = pickle.loads(read_bound(cost_binding, "joint acquisition cost"))
+    actual = joint_acquisition_from_cost_data(cost_data, shapes, sorted(families), max_new_points=0)
+    for field in ("cost_currency", "joint_provenance_sha256", "measurement_verification"):
+        same(document.get(field), actual[field], field)
+    expected_reports = {(r["unit_name"], r["family"]): r for r in actual["reports"]}
+    provenance = cost_data["provenance"]
+    probe_digest = identity_sha256(provenance["joint_aura_identity"]["probe_identity"])
+    same(provenance.get("probe_identity_sha256"), probe_digest, "run probe digest")
+    # Currency permits a development seal override; this intake does not.
+    for rows in cost_data["costs"].values():
+        require(isinstance(rows, dict), "joint acquisition cost unit must be a row mapping")
+        for row in rows.values():
+            require(isinstance(row, dict), "joint acquisition requires raw row mappings")
+            if "error" not in row:
+                same(row.get("probe_identity_sha256"), probe_digest, "row/run probe digest")
+
+    proposal_fields = {"proposed_q256", "proposal_reasons", "max_new_points", "next_dependency",
+                       "boundary_policy", "deferred_boundary_q256", "alpha_loss_per_byte"}
+    requests, source_weights, total = {}, {}, 0
+    for report in reports:
+        unit, family = report["unit_name"], report["family"]
+        expected = expected_reports[unit, family]
+        request_only(report)
+        for field, value in expected.items():
+            if field not in proposal_fields:
+                require(field in report, f"joint acquisition report lacks {field}")
+                same(report[field], value, f"{unit}/{family}.{field}")
+        policy = report.get("boundary_policy")
+        require(policy in ("seed", "defer"), "joint acquisition boundary policy must be seed or defer")
+        same(report.get("deferred_boundary_q256"),
+             expected["missing_boundary_q256"] if policy == "defer" else [],
+             f"{unit}/{family}.deferred_boundary_q256")
+        proposed, cap = report.get("proposed_q256"), report.get("max_new_points")
+        require(type(cap) is int and cap >= 0, "joint acquisition cap must be a nonnegative integer")
+        require(isinstance(proposed, list) and all(type(q) is int for q in proposed),
+                "joint acquisition proposed rates must be integers")
+        require(len(set(proposed)) == len(proposed), "joint acquisition duplicate proposed rate")
+        require(len(proposed) <= cap, "joint acquisition proposed rates exceed cap")
+        require(set(proposed) <= set(expected["legal_q256"]),
+                "joint acquisition proposed rate outside producer-legal domain")
+        require(not set(proposed).intersection(expected["measured_q256"]),
+                "joint acquisition proposed rate is already measured")
+        reasons = report.get("proposal_reasons")
+        require(isinstance(reasons, dict) and set(reasons) == {str(q) for q in proposed},
+                "joint acquisition proposal reasons differ from requested rates")
+        requests.setdefault(unit, {})[family] = list(proposed)
+        source_weights[unit] = dict(expected["joint_source_weight"])
+        total += len(proposed)
+    require(total > 0, "joint acquisition has no requested measurement work")
+    same(document.get("total_requested_quality_measurements"), total, "total requested measurements")
+    return {"requests": requests, "source_weights": source_weights,
+            "identity": {"request_sha256": binding["sha256"], "cost_sha256": cost_binding["sha256"],
+                         "joint_aura_identity_sha256": provenance["joint_aura_identity_sha256"],
+                         "probe_identity_sha256": probe_digest}}

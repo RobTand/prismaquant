@@ -299,7 +299,7 @@ def _cmd_fill_control(args: argparse.Namespace) -> int:
             f"[shipcard] REFUSED: {args.control_block} carries an UNSERVED "
             "verdict — the control was built and priced but neither arm was "
             "served. A built control is not a passed gate. Re-run Tessera's "
-            "`experiments/uniform_control.py verify` with both served KLs, or "
+            "`python -m tessera.uniform_control verify` with both served KLs, or "
             "pass --allow-unserved to record the absence (verify will still "
             "refuse).",
             file=sys.stderr)
@@ -547,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
     p_control.add_argument(
         "--control-block", required=True,
         help="JSON from tessera.control.control_block() / Tessera's "
-             "experiments/uniform_control.py verify")
+             "python -m tessera.uniform_control verify")
     p_control.add_argument(
         "--control-record", required=True,
         help="the CONTROL checkpoint's gold KL result JSON, written by the "

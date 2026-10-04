@@ -40,9 +40,9 @@ from .export_native_compressed import (
     _nvfp4_quantize_dequantize_with_eff_scale,
     _rtn_dequant_nvfp4,
     _select_nvfp4_group_scales,
-    FLOAT_TO_E2M1,
     FP8_E4M3_MAX,
 )
+from .nvfp4_activation_contract import _E2M1_POSITIVE
 
 
 def _build_H_stack(
@@ -490,7 +490,7 @@ def scale_sweep_nvfp4_batched(
         # Chunk over the OUT dimension to bound the
         # ``[Ec, out_chunk, n_g, grid, gs, 15]`` intermediate.
         bytes_per_row = n_g * grid * group_size * (
-            2 * len(FLOAT_TO_E2M1) - 1
+            2 * len(_E2M1_POSITIVE) - 1
         ) * 4
         out_chunk = max(
             1, (2 * 1024 * 1024 * 1024) // max(1, Ec * bytes_per_row))

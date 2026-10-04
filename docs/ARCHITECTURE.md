@@ -167,6 +167,12 @@ LFM continues to use `selection_bias`. The original tensor bytes, dtype,
 cardinality, source/runtime/calibration and backend joins remain required.
 CPU protocol acceptance is not original CUDA/provider, capture or serving
 qualification; no runtime cell, format menu, pin or ship gate is changed.
+Refs #2202: the stdlib GLM derivative image driver supplies and restores the
+direct-script sibling import context when loading the closed derivative
+contract. That contract selects its existing digest owner in package or
+sibling mode without initializing PrismaQuant/Torch for host CLI dispatch.
+Declared source/image identities, byte transform and fail-closed guards are
+unchanged. This bootstrap repair performs no image build or source adoption.
 
 Re-stamped 2026-10-02 (Refs #1589, root-approved comparison strengthening):
 the existing uniform-control contract loop additionally compares a new
@@ -239,6 +245,17 @@ live exporter test consumer before the clean cutover. Historical archives
 remain historical. Literal dispatch-name and mixed-group catch-all checks
 remain; incidental source/docstring wording assertions are removed rather
 than repinned. This bounded copy/alias removal does not complete the epic.
+
+Refs #2199/#1303: the immutable positive E2M1 magnitudes remain owned by
+`nvfp4_activation_contract._E2M1_POSITIVE`. Native and batched exporters,
+the format registry and the fused kernel Torch helpers consume that same
+tuple instead of maintaining independent literals or exporter aliases.
+The sorted unique mathematical codebook still has fifteen entries; the
+packed wire still has sixteen sign/magnitude codes, including negative zero
+at code 8. Tie, range, scaling and packing arithmetic are unchanged. CPU
+equivalence checks do not qualify compiled CUDA or served quality. Exporter
+and cache controls remain CPU-compatible without optional Triton; kernel-only
+wire/tie controls follow the existing guarded fused-kernel test convention.
 
 Re-stamped 2026-10-02 (Refs #1303, branch `sol/pq-dedup-domain-20261002`,
 base `693a38f3ae34`): packed, unpacked and streamed-fork empirical expert
@@ -2541,10 +2558,17 @@ changes.
 
 ## Offline release receipt ingestion (PQ #1487)
 
-The Tessera lane names its existing external `uniform_control.py verify` and
+The Tessera lane names its installed `python -m tessera.uniform_control verify` and
 `shipcard_cli fill-control` runner, closing the already required byte-matched
 control slot. The control family, integer-bit rule and byte slack are declared
 before measurement; uniform A4/A8 labels alone do not establish a byte match.
+The public producer CLI (Tessera #886, PrismaQuant #2168) reads its checkpoint
+through Tessera's own exporter classifier and emits `tessera.uniform_control.v1`;
+the gate no longer needs a sibling Tessera experiment checkout. An explicit
+`TESSERA_PRODUCER_PYTHON` may select a separately installed producer, leaving
+the consumer/serving interpreter and immutable runtime pins untouched. Unserved,
+unmatched, stale or failed control evidence remains a shipping refusal; packaging
+the CLI neither supplies served KL nor changes any gate/default/slack rule.
 
 `python -m prismaquant.release_receipts` is a dry-by-default, offline adapter.
 Producer slot records retain their exact artifact/provenance fields. U4's
@@ -13101,7 +13125,7 @@ Before exec, the launcher replays the interpreter's module search over the
 launched environment and working directory, mapping container paths back
 through `/workspace` and the declared mounts, and refuses when the package that
 would be imported is not the pinned mount's, byte for byte, under
-`tools/container_runtime_identity.prismaquant_source_sha256` — the same digest
+`prismaquant.container_runtime_identity.prismaquant_source_sha256` — the same digest
 the row stamps as `prismaquant_source_sha256`. The refusal is narrow: it fires
 when a declared mount holds a PrismaQuant package and the import resolves
 elsewhere, which is #519 itself, and a `.` or `/workspace` entry written ahead
@@ -20832,15 +20856,26 @@ every tracked regular file and symlink, not only the importable package. The cac
 atomic and serialized; an existing entry is always re-hashed before reuse. The launcher verifies
 the complete closure on the host, mounts that standalone snapshot at `/pq:ro`, and passes its
 commit, tree, closure hash, and PrismaQuant package-source hash into the container. There the
-snapshot helper replays the complete closure check and `tools/container_runtime_identity.py`
+snapshot helper replays the complete closure check and `prismaquant/container_runtime_identity.py`
 proves both the package hash and Python import origin, with user-site/current-directory import
 fallbacks disabled, before the same shell process immediately execs the DSv4 producer. The
 dense path repeats that complete boundary immediately before each of its two producers and
 execs the terminal one. Thus neither a changing live worktree nor an old site-package install
 can enter the multi-hour measurement window.
 
+The identity owner is shipped as `prismaquant.container_runtime_identity` (#2190):
+installed GLM compatibility and derivative consumers use that sole public API,
+not a checkout-only `tools` import. Its `python -m` CLI is available in an installed
+environment. Pre-import bootstrap still executes the same stdlib source file
+directly at `prismaquant/container_runtime_identity.py`, so the package mount is
+authenticated before PrismaQuant is imported. The old tool path has no shim;
+transported snapshot and gold-producer closures name the new source member.
+Historical archives and already-sealed qualification records retain their
+observed source paths and digests. Fingerprint bytes and refusal vocabulary
+remain unchanged, with no image/source adoption or scientific-gate relaxation.
+
 The existing resumable identity semantics remain unchanged:
-`tools/container_runtime_identity.py` atomically binds the checkpoint tree to the image
+`prismaquant/container_runtime_identity.py` atomically binds the checkpoint tree to the image
 reference and ID, reviewed PrismaQuant commit and complete package-source hash, and external
 implementation-receipt hash. A nonempty legacy checkpoint tree with no identity is refused;
 an existing identity must match exactly. Replay, export, and gold measurement reuse the same
@@ -21567,10 +21602,11 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
     (`lane_eligibility.cell_lane_admits`, asked about that one launch).
   Since contract v45, the fused routed E4M3 launch admits at R1024 and R896;
   the earlier v44 `column_rates` predicate refused R896.
-- **Rate pools.** Rates are pooled only where the table declares a
-  `rate_pools` entry, and all of the pool's rows must share one lane. Pooled
-  samples are the source rows' samples concatenated in rate order. The pool
-  record states whether a spread across rates was measured.
+- **Rate pools.** A nonempty `rate_pools` list is refused at reload: pooled
+  rates are not authenticated by PB checker completions, so only checker-bound
+  rows price options. The pooling code (one lane per pool, samples concatenated
+  in rate order, a recorded spread flag) remains in the module but admits
+  nothing until a pool carries its own authenticated measurement.
 - **Unit time.** `build_shape_runtime_resources` derives each unit's one
   served operator with `served_operator`, through
   `measured_runtime_prices.rank_local_member_shapes`. Fused siblings form one

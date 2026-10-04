@@ -143,7 +143,7 @@ def test_a_mount_target_deeper_than_its_source_still_maps(tmp_path):
 
 def test_the_receipt_records_the_pinned_and_resolved_digests(tmp_path):
     module = runner()
-    identity = importlib.import_module("tools.container_runtime_identity")
+    identity = importlib.import_module("prismaquant.container_runtime_identity")
     pinned, checkout = trees(tmp_path)
     receipt = module.verify_pinned_import(spec(pinned), cwd=str(checkout))
     expected = identity.prismaquant_source_sha256(pinned / "prismaquant")
@@ -177,7 +177,7 @@ def test_a_mounted_tree_no_entry_reaches_stays_visible_in_the_receipt(tmp_path):
     """
 
     module = runner()
-    identity = importlib.import_module("tools.container_runtime_identity")
+    identity = importlib.import_module("prismaquant.container_runtime_identity")
     pinned, checkout = trees(tmp_path)
     data = spec(pinned, pythonpath=".")
     receipt = module.verify_pinned_import(data, cwd=str(checkout))
@@ -242,9 +242,12 @@ def test_main_refuses_a_shadowed_launch_before_it_execs(tmp_path, monkeypatch):
     module = runner()
     pinned, checkout = trees(tmp_path)
     launched = {}
-    monkeypatch.setattr(module, "inspect_or_load", lambda container: [
-        {"Id": "sha256:" + "c" * 64, "RepoDigests": [], "RootFS": {"Layers": []}}])
-    monkeypatch.setattr(module, "image_content_sha256", lambda inspected: "d" * 64)
+    # Exercise the real identity owner, not a fake digest attached to a retired
+    # imported alias. Only Docker inspection is replaced with retained bytes.
+    image = json.loads((Path(__file__).resolve().parents[1]
+        / "experiments/measurements/glm-derivative-contract-20260908"
+        / "image-build-result.json").read_text())["original_image"]
+    monkeypatch.setattr(module, "inspect_or_load", lambda container: [image])
     monkeypatch.setattr(module.os, "execvp",
                         lambda file, argv: launched.setdefault("argv", argv))
     monkeypatch.chdir(checkout)

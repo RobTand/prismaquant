@@ -22,18 +22,53 @@ from prismaquant import export_native_compressed as enc  # noqa: E402
 
 def _fresh(device, dtype=torch.float32):
     """What the function returned before it was memoized."""
-    return torch.tensor(enc.FLOAT_TO_E2M1, device=device, dtype=dtype)
+    return torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0],
+                        device=device, dtype=dtype)
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_cached_codebook_is_bit_identical_to_fresh(dtype):
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     cached = enc._nvfp4_codebook(torch.device(dev), dtype=dtype)
-    assert torch.equal(cached, _fresh(dev, dtype))
+    assert torch.equal(cached.view(torch.uint8), _fresh(dev, dtype).view(torch.uint8))
     assert cached.dtype == dtype
     # Second call must hand back the SAME object -- otherwise it is not caching
     # and the measured win silently disappears.
     assert enc._nvfp4_codebook(torch.device(dev), dtype=dtype) is cached
+
+def test_registry_math_codebook_keeps_fifteen_exact_values():
+    from prismaquant import format_registry as fr
+
+    expected = torch.tensor([-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5,
+                             0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0],
+                            dtype=torch.float32)
+    actual = fr._e2m1_codebook()
+    assert torch.equal(actual.view(torch.uint8), expected.view(torch.uint8))
+
+
+def test_all_packed_bytes_keep_signed_zero_and_nibble_order():
+
+    packed = torch.arange(256, dtype=torch.uint8).reshape(16, 16)
+    levels = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
+                          -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+                         dtype=torch.float32)
+    indices = torch.stack(((packed & 15).long(), (packed >> 4).long()),
+                          dim=-1).reshape(16, 32)
+    expected = levels[indices]
+    assert torch.equal(enc._round_to_codebook(expected), indices)
+    assert torch.equal(enc.pack_fp4_indices(indices, 32), packed)
+
+
+def test_export_keeps_ties_range_and_nonfinite_mapping():
+
+    values = torch.tensor([0.0, -0.0, 0.25, -0.25, 0.75, -0.75,
+                           1.25, -1.25, 1.75, -1.75, 2.5, -2.5,
+                           3.5, -3.5, 5.0, -5.0, 6.0, -6.0, 7.0, -7.0,
+                           float("inf"), float("-inf"), float("nan")],
+                          dtype=torch.float32)
+    expected = torch.tensor([0, 8, 0, 8, 1, 9, 2, 10, 3, 11, 4, 12,
+                             5, 13, 6, 14, 7, 15, 7, 15, 7, 15, 7])
+    assert torch.equal(enc._round_to_codebook(values), expected)
 
 
 def test_cache_is_keyed_by_device():

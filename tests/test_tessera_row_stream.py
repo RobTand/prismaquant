@@ -25,6 +25,9 @@ from test_tessera_hessian_reference_handoff import POLICY as REFERENCE_POLICY, h
 
 UNITS = ["model.layers.0.a", "model.layers.0.b", "model.layers.1.c"]
 COLUMNS = 256
+# Preserve full-width Hessians and multiple real output rows without pricing
+# model-sized encodes in streaming, resume and identity regressions.
+OUTPUT_FEATURES = 8
 ROWS = 4
 FORMAT = "TESSERA_E4M3_K1_R1024"
 LOAD_POLICY = dict(schema="prismaquant.verified_activation_load.v1",
@@ -50,9 +53,9 @@ def stream_fixture(monkeypatch, tmp_path):
     linears = {}
     for name in UNITS:
         _, _, layer, leaf = name.split(".")
-        linear = torch.nn.Linear(COLUMNS, 32, bias=False, dtype=torch.bfloat16)
+        linear = torch.nn.Linear(COLUMNS, OUTPUT_FEATURES, bias=False, dtype=torch.bfloat16)
         with torch.no_grad():
-            linear.weight.copy_(torch.randn(32, COLUMNS, generator=generator))
+            linear.weight.copy_(torch.randn(OUTPUT_FEATURES, COLUMNS, generator=generator))
         setattr(model.model.layers[int(layer)], leaf, linear)
         linears[name] = linear
     model.lm_head = torch.nn.Linear(COLUMNS, 32, bias=False, dtype=torch.bfloat16)
@@ -100,7 +103,7 @@ def stream_fixture(monkeypatch, tmp_path):
         dict.fromkeys(UNITS, ROWS), dict(zip(UNITS, (3.0, 5.0, 7.0))),
         args=SimpleNamespace(model=str(source), nsamples=32, seqlen=512, seed=0, layer_stride=1),
         groups=groups, dense_targets=UNITS, expert_targets=[],
-        shapes={name: [32, COLUMNS] for name in UNITS}, identity=calibration,
+        shapes={name: [OUTPUT_FEATURES, COLUMNS] for name in UNITS}, identity=calibration,
         model_load_contract=contract, attention_implementation="eager",
         capture_runtime=dict(torch=torch.__version__, cuda=torch.version.cuda,
                              transformers=version))
@@ -144,7 +147,7 @@ def stream_fixture(monkeypatch, tmp_path):
     def plan(*_args, **kwargs):
         plans.append(dict(kwargs))
         return dict(memory_bytes=1024 ** 3, stream_memory_bytes=1024 ** 3,
-                    selected_source_weight_bytes=2 * 32 * COLUMNS * len(UNITS),
+                    selected_source_weight_bytes=2 * OUTPUT_FEATURES * COLUMNS * len(UNITS),
                     encoder_memo_capacity=1,
                     phases={"resident_anchors": {"factorization_scratch_bytes": 8 * COLUMNS ** 2}})
 
@@ -705,7 +708,7 @@ def test_the_window_holds_two_batches_and_releases_x_and_h(monkeypatch, tmp_path
     from prismaquant.tessera_formats import parse_tessera_format_name, tessera_wire_recipe
     from prismaquant.tessera_row_stream import RowStream
     manifest, census = state["manifest"], state["census"]
-    weights = {name: torch.ones(32, COLUMNS, dtype=torch.bfloat16) for name in UNITS}
+    weights = {name: torch.ones(OUTPUT_FEATURES, COLUMNS, dtype=torch.bfloat16) for name in UNITS}
     stream = RowStream(capture_path=manifest, expected_sha256=cc.sha256(manifest),
         expected_identity=state["canonical"], census=census, names=UNITS, policy=LOAD_POLICY,
         weights=weights, hessian_identity=state["calibration"],
