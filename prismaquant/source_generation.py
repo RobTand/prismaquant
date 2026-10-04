@@ -236,9 +236,11 @@ def validate_original_source_runtime(value, expected):
         _contract.string(name, where='actual scale/cast name')
         _require(isinstance(coordinate, list) and len(coordinate) == 2 and
                  all(type(item) is str and item for item in coordinate), 'actual scale/cast coordinate malformed')
+    from .staged_lease import PB_CLIENT_SDK_VERSION
+
     pb = _exact(value['prismabuild'], {'sdk_version', 'helper_root', 'source_tree', 'runtime_generation'},
                 'original runtime PrismaBuild')
-    _same(pb['sdk_version'], 4, 'original runtime SDK version')
+    _same(pb['sdk_version'], PB_CLIENT_SDK_VERSION, 'original runtime SDK version')
     _contract.absolute_posix_path(pb['helper_root'], where='original runtime helper root')
     tree = _exact(pb['source_tree'], {'package_sha256', 'helper_tree_sha256'},
                   'original runtime complete shared tree')
@@ -774,7 +776,7 @@ def _normalize_original_source_authority(owner, authority_input, plan_input, adm
 
 
 def _verified_original_result(selection, resource_check):
-    """Use SDK4's selected receipt/CAS/source-input owner, never queue guesses."""
+    """Require SDK5's selected native producer owner, never queue/consumer guesses."""
     from .staged_lease import client_sdk
     from .digests import bytes_sha256hex
 
@@ -807,7 +809,8 @@ def _verified_original_result(selection, resource_check):
     result = sdk.read_verified_action_result(sdk.PoolQueue(selection['queue_root']), selection['action_key'],
         published_unix=selection['published_unix'], attempt=selection['attempt'],
         max_result_bytes=selection['max_result_bytes'], max_evidence_bytes=selection['max_evidence_bytes'],
-        input_limits={row['id']: row['bytes'] for row in inputs})
+        input_limits={row['id']: row['bytes'] for row in inputs},
+        require_native_producer_context=True)
     _same(result['request'], expected_request, 'selected original qualification request')
     _same(bytes_sha256hex(result['payload']), selection['payload_sha256'], 'selected original qualification payload')
     _same(result['inputs'], inputs, 'selected original qualification source-input roster')
@@ -887,15 +890,69 @@ def _require_original_qualified_source(row, request, accepted, target_runtime):
     snapshot = request['params']['checkout_snapshot']
     _same(snapshot['parent'], row['source_snapshot'], 'original actual qualified source snapshot')
     _require(row['compatibility'] is not None,
-             'every CUDA member requires independently bound executed-to-target source acceptance')
+             'every qualified member requires independently bound executed-to-target source acceptance')
     family = accepted.get(row['node_id'])
-    _require(family is not None, 'CUDA member lacks independently selected source-family acceptance')
+    _require(family is not None, 'qualified member lacks independently selected source-family acceptance')
     _same(row['compatibility'], family['compatibility'], 'original source-family proof binding')
     _same(row['source_snapshot'], family['old_source'], 'original executed member source is not restamped')
     _same(family['target_prismaquant_source_sha256'], target_runtime['prismaquant_source_sha256'],
           'qualified member actual target source implementation')
     _same(family['target_runtime_sha256'], _canonical_sha256(target_runtime, 'actual original target runtime'),
           'qualified member actual target runtime')
+
+
+def _require_original_reader_target(reader_authority, authority):
+    """A reader's own authority cannot substitute another target's source axes.
+
+    Runtime, resource and artifact-session identities belong to the producer
+    and may differ from the later consumer; they are joined separately below.
+    """
+    _exact(reader_authority, ORIGINAL_AUTHORITY_KEYS, 'reader proof source authority')
+    for key in ('schema', 'scope', 'publisher', 'producer', 'source_paths', 'readset',
+                'calibration', 'source_model_identity', 'source_execution'):
+        _same(reader_authority[key], authority[key], f'qualified reader target {key}')
+
+
+def _require_original_reader_producer(receipt, reader_authority, result):
+    """Join material observations to the SDK-owned selected producer context.
+
+    The SDK owns native provenance verification. This only joins its result
+    to Original domain controls; it never looks up a queue or a live claim.
+    """
+    context = result.get('producer_context')
+    _require(isinstance(context, dict), 'qualified reader requires selected native producer context')
+    _same(context['attempt_source'], 'selected-immutable-attempt', 'selected reader context provenance')
+    _same(context['resources_semantics'], 'selected-claim-sealed-demand', 'selected reader reservation semantics')
+    for key in ('action_key', 'published_unix', 'attempt', 'generation', 'host'):
+        _same(context[key], result[key], f'selected reader producer {key}')
+    _same(context['worker'], result['worker_id'], 'selected reader full worker identity')
+    _same(context['incarnation'], context['worker'], 'selected reader full incarnation')
+    _same(context['receipt_sha256'], result['receipt']['receipt_sha256'], 'selected reader execution receipt')
+    _same(context['runtime_sha256'], result['receipt']['producer']['runtime']['runtime_sha256'],
+          'selected reader attested runtime')
+    _, runtime = _control(reader_authority['runtime'], 'selected reader observed runtime')
+    runtime = validate_original_source_runtime(runtime, runtime)
+    _same(runtime['config'], reader_authority['source_model_identity']['config'],
+          'selected reader runtime source config')
+    _same(runtime['prismabuild']['helper_root'], context['helper_root'], 'selected reader actual helper root')
+    helper_root = Path(context['helper_root'])
+    _same(runtime['prismabuild']['runtime_generation'], helper_root.name, 'selected reader actual helper generation')
+    _, resources = _control(reader_authority['resources'], 'selected reader observed resources')
+    resources = _resources(resources)
+    _same(resources['claim_demand'], context['resources'], 'selected reader actual producer reservation')
+    identity_keys = ('queue_root', 'action_key', 'nonce', 'scope_id', 'worker', 'host',
+                     'incarnation', 'helper_root')
+    for row in receipt['deliveries']:
+        claim = row['native_delivery']['claim']
+        _same({key: claim[key] for key in identity_keys},
+              {key: context[key] for key in identity_keys}, 'actual reader delivery selected producer')
+        _same(claim['attempt_source'], 'launch-env', 'actual reader delivery launch provenance')
+    from .production_weight_cache import _production_cache_source_sha256
+
+    _same(runtime['prismabuild']['source_tree'], {
+        'package_sha256': _production_cache_source_sha256(helper_root / 'src' / 'prismabuild'),
+        'helper_tree_sha256': _production_cache_source_sha256(helper_root),
+    }, 'selected reader actual complete helper tree')
 
 
 _CUDA_CASES = frozenset({
@@ -1079,8 +1136,10 @@ def _require_original_source_proofs(authority, resource_check):
         _require_original_qualified_source(row, result['request'], accepted, target_runtime)
     _same(seen, {(case, pages, dtype) for case in _CUDA_CASES for pages in ('0', '1')
                  for dtype in ('torch.float32', 'torch.bfloat16')}, 'actual full64 CUDA coverage')
-    reader = _exact(qualification['reader'], {'node_id', 'result', 'receipt', 'authority'}, 'original qualified reader')
+    reader = _exact(qualification['reader'], {'node_id', 'result', 'receipt', 'authority',
+                    'source_snapshot', 'compatibility'}, 'original qualified reader')
     _contract.string(reader['node_id'], where='actual qualified reader node')
+    _contract.string(reader['source_snapshot'], where='actual reader source snapshot', pattern=_GIT_OBJECT_ID)
     reader_result = _verified_original_result(reader['result'], resource_check)
     _require(reader['node_id'] in reader_result['request']['params']['command'],
              'selected native reader request executed another proof')
@@ -1088,10 +1147,12 @@ def _require_original_source_proofs(authority, resource_check):
                                                roles={'receipt', 'authority'})
     receipt = _published_original_json(artifacts, 'receipt', reader['receipt'], reader['result'], resource_check)
     reader_authority = _published_original_json(artifacts, 'authority', reader['authority'], reader['result'], resource_check)
-    _exact(reader_authority, ORIGINAL_AUTHORITY_KEYS, 'reader proof source authority')
+    _require_original_reader_target(reader_authority, authority)
+    _require_original_qualified_source(reader, reader_result['request'], accepted, target_runtime)
     from .tessera_calibration_cache import validate_original_source_material_receipt
 
     validate_original_source_material_receipt(receipt, reader_authority)
+    _require_original_reader_producer(receipt, reader_authority, reader_result)
     _require(receipt['deliveries'] and receipt['material_live_bytes'] == 0
              and not receipt['pending_copy_completions'], 'qualified reader retains unproved material/copy debt')
     return _snapshot(authority)

@@ -445,3 +445,41 @@ evidence of same-source execution. Same-source acceptance may explicitly name
 the same old/new source, but still joins the selected snapshot, actual target
 package and complete runtime digests. No foreign forward64 can skip this
 requirement by setting a null compatibility binding.
+
+The strict selected-result call requests
+`require_native_producer_context=True` from the versioned SDK5 public owner
+(merged PB #1482, reviewed source `855032b1f3f2edcef0b6cc49c16078942ea1644e`).
+This is not a generic SDK4 result upgraded by the consumer. The SDK joins the
+same immutable publication/attempt/generation, full worker/incarnation, host,
+nonce, broker scope and actual helper root, and authenticates native execution,
+reservation and completion evidence before its last selected-ending recheck.
+The Original consumer never parses private queue state or substitutes its own
+later active claim.
+
+The reader record now also requires `source_snapshot` and `compatibility`.
+The same independently bound source-family owner used for CUDA members joins
+its actual selected snapshot to the target PrismaQuant package and complete
+runtime. The published reader authority must agree with the outer authority's
+publisher, producer, source paths, whole-file readset, full calibration, source
+model and dispatch selectors. Its runtime, reservation and artifact session are
+producer identities, not silently equated with the later consumer's identities.
+Every actual material delivery joins its queue/action/nonce/scope/full worker/
+host/incarnation/helper tuple to the selected producer. Material observations
+retain `attempt_source=launch-env`; the SDK result truthfully records
+`attempt_source=selected-immutable-attempt`. These provenance labels differ;
+the identity fields must agree. The producer's resource control joins the SDK's
+`selected-claim-sealed-demand` reservation, and its recorded package and full
+helper-tree digests join the actual selected helper tree through the existing
+source-digest owner. Existing descriptor, seal, pin/ref, completion and debt
+checks still apply independently.
+
+This source preparation does not move the current SDK4/DC480 pin, fixture
+bundle or published c437 helper. That one-root, exact-version production
+boundary cannot satisfy SDK5 merely because a portable SDK5 library can read an
+old completed result. A separately qualified exact SDK5 source/pin/helper tuple
+and explicitly authorized helper selection are coupled prerequisites for the
+complete positive consumer exercise. Whether that requires a bounded sealed
+generation selection or a global publication belongs to the existing PB
+compatibility/publication owner and Root review. No compatibility shim, mixed
+SDK namespace, test-only production fallback or new GPU/source admission is
+introduced by these joins.

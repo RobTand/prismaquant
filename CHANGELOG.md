@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **Original reader authority joins the selected native producer and outer
+  target** (Refs #2152). The strict result request uses SDK5's existing public
+  native-context owner. Published source controls, the reader's actual snapshot
+  and independently accepted target-family transfer, producer reservation,
+  complete helper tree and every native delivery identity must agree. A later
+  consumer's resource/session tuple and the distinct launch/selected-attempt
+  provenance labels are not substituted for those producer observations.
+  Runtime version validation reuses the existing exact SDK owner. This is
+  nonactivating source preparation: current SDK4/DC480 fixtures, c437 helpers,
+  deployment and GPU/source admission are unchanged; a qualified SDK5 helper
+  and coherent source/pin transition remain coupled prerequisites.
 - **Original proper-prefix coverage compares its exact checkpoint roster**
   (Refs #2147). Python set equality preserves the whole required head/layer
   coverage and rejects missing or extra checkpoints without sending sets to

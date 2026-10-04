@@ -143,6 +143,54 @@ def _forbid_source_work(case, monkeypatch):
     return before
 
 
+@pytest.mark.parametrize('axis', ['schema', 'scope', 'publisher', 'producer', 'source_paths',
+                                'readset', 'calibration', 'source_model_identity', 'source_execution'])
+def test_selected_reader_cannot_substitute_another_target_authority(authority_case, monkeypatch, axis):
+    """Real CPU control inputs; no selected result or qualified source is fabricated."""
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    reader_authority = copy.deepcopy(case['authority'])
+    if axis in ('schema', 'scope'):
+        reader_authority[axis] += '.other'
+    elif axis == 'publisher':
+        reader_authority[axis]['revision'] = '0' * 40
+    elif axis in ('producer', 'source_paths', 'readset'):
+        reader_authority[axis]['sha256'] = '0' * 64
+    elif axis == 'calibration':
+        reader_authority[axis]['artifact_sha256'] = '0' * 64
+    elif axis == 'source_model_identity':
+        reader_authority[axis]['content_sha256'] = '0' * 64
+    else:
+        reader_authority[axis]['modules']['']['attention'] = 'another_dispatch'
+    with pytest.raises(RuntimeError, match=f'qualified reader target {axis}'):
+        sg._require_original_reader_target(reader_authority, case['authority'])
+    assert case['owner'].receipt() == before
+
+
+def test_reader_target_agreement_is_not_producer_runtime_resource_or_session_equality(
+        authority_case, monkeypatch):
+    """Target agreement only, never a positive public reader qualification."""
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    reader_authority = copy.deepcopy(case['authority'])
+    reader_authority['runtime'] = _bound(case['tmp'] / 'different-reader-runtime.json',
+                                       {'separate_producer_control': 'not runtime qualification'})
+    reader_authority['resources'] = _bound(case['tmp'] / 'different-reader-resources.json',
+                                         {'separate_producer_control': 'not resource qualification'})
+    reader_authority['session'] = dict(case['session'], generation='different_reader_session')
+    assert sg._require_original_reader_target(reader_authority, case['authority']) is None
+    assert case['owner'].receipt() == before
+
+
+@pytest.mark.parametrize('missing', [None, {}])
+def test_reader_observations_without_sdk_selected_native_context_refuse(authority_case, missing):
+    """Absence is a refusal; an SDK4 result is not mock-upgraded to SDK5."""
+    result = {} if missing is None else {'producer_context': None}
+    with pytest.raises(RuntimeError, match='requires selected native producer context'):
+        sg._require_original_reader_producer(authority_case['owner'].receipt(),
+                                             authority_case['authority'], result)
+
+
 def test_owned_control_join_is_nonactivating_and_independently_frozen(authority_case, monkeypatch):
     case = authority_case
     before = _forbid_source_work(case, monkeypatch)
@@ -352,5 +400,5 @@ def test_actual_cas_publication_cannot_adopt_an_independently_rebound_artifact(
     # No accepted-family or positive CUDA record is fabricated here.
     member = dict(node_id=node, source_snapshot=action['params']['checkout_snapshot']['parent'],
                   compatibility=None)
-    with pytest.raises(RuntimeError, match='every CUDA member requires'):
+    with pytest.raises(RuntimeError, match='every qualified member requires'):
         sg._require_original_qualified_source(member, action, {}, authority_case['packet']['runtime'])
