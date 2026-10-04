@@ -4,6 +4,24 @@
 
 ### Fixed
 
+- **The joint prepare's omitted `file_hash_workers` takes `prepare_cache`'s
+  own derivation** (#1382). One derivation for one knob:
+  `prepare_cache`'s `file_load_workers` default and the joint plan's omitted
+  key both resolve through `default_file_load_workers()` — the measured PWC
+  load curve (4 threads), bounded by the PB-assigned CPU affinity the same
+  way an explicit plan value is fenced. A plan without the key no longer
+  loads render files serially, and an explicit plan value still wins with
+  its existing refusals unchanged.
+
+- **A producer-source checkpoint mismatch names the first file that moved**
+  (#2218, option (c); the root cause stays open). The AURA checkpoint
+  manifest now records the per-file digests of the producer tree that wrote
+  it, and when a resume's `producer_source_sha256` seal mismatches, the
+  refusal names the first differing relative path with both per-file
+  digests instead of two opaque tree digests. The map is diagnostic only —
+  no gate reads it — and manifests written before it existed keep the
+  plain refusal.
+
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing

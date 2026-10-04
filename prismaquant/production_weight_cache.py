@@ -2984,6 +2984,30 @@ def _production_cache_git_commit() -> str:
     return commit
 
 
+def _production_cache_source_root(package_root: Path | None) -> Path:
+    root = (
+        Path(package_root)
+        if package_root is not None
+        else Path(__file__).resolve().parent
+    )
+    if not root.is_dir():
+        raise RuntimeError(
+            f"production source identity cannot read package root {root}"
+        )
+    return root
+
+
+def _production_cache_identity_paths(root: Path) -> list[Path]:
+    """The durable source roster every producer source identity hashes."""
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.relative_to(root).parts
+        and path.suffix not in {".pyc", ".pyo"}
+    )
+
+
 def _production_cache_source_sha256(
     package_root: Path | None = None,
 ) -> str:
@@ -2995,22 +3019,8 @@ def _production_cache_source_sha256(
     package tree instead, excluding only interpreter bytecode caches.  This
     also binds packaged lattice/codebook data and model-profile JSON.
     """
-    root = (
-        Path(package_root)
-        if package_root is not None
-        else Path(__file__).resolve().parent
-    )
-    if not root.is_dir():
-        raise RuntimeError(
-            f"production source identity cannot read package root {root}"
-        )
-    identity_paths = sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.relative_to(root).parts
-        and path.suffix not in {".pyc", ".pyo"}
-    )
+    root = _production_cache_source_root(package_root)
+    identity_paths = _production_cache_identity_paths(root)
     if not identity_paths:
         raise RuntimeError(
             f"production source identity found no files under {root}"
@@ -3026,6 +3036,35 @@ def _production_cache_source_sha256(
             ) from exc
         digest.update(relative, payload)
     return digest.hexdigest()
+
+
+def _production_cache_source_file_digests(
+    package_root: Path | None = None,
+) -> dict[str, str]:
+    """Per-file sha256 over the exact roster ``_production_cache_source_sha256`` hashes.
+
+    Written beside an AURA checkpoint manifest's aggregate producer digest so
+    a later mismatch can name the first file whose bytes moved instead of two
+    opaque tree digests (#2218). A diagnostic record, never a gate input: the
+    gate stays the aggregate digest.
+    """
+    root = _production_cache_source_root(package_root)
+    identity_paths = _production_cache_identity_paths(root)
+    if not identity_paths:
+        raise RuntimeError(
+            f"production source identity found no files under {root}"
+        )
+    digests: dict[str, str] = {}
+    for path in identity_paths:
+        relative = path.relative_to(root).as_posix()
+        try:
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise RuntimeError(
+                f"production source identity cannot read {relative}"
+            ) from exc
+        digests[relative] = hashlib.sha256(payload).hexdigest()
+    return digests
 
 
 #: Feed width for host-tensor digests. ``hashlib`` releases the GIL for

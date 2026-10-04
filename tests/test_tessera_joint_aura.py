@@ -439,13 +439,17 @@ def test_explicit_source_prefetch_reaches_streamed_builder(tmp_path, monkeypatch
         # because that schedule declares `cost_setup`/`cost_head` instead and
         # the worker refuses a name the submission did not seal. The walk
         # banks its verified units under the command's own root and reuses
-        # them only when the submission said --resume (#754).
+        # them only when the submission said --resume (#754). The intake pool
+        # width is the plan's resolved default (#1382): absent from the call
+        # exactly when it is 1, as execute passes it.
+        width = bridge.resolve_file_hash_workers({})
         assert kwargs == {"reader": None, "synthesis_device": "cuda",
                           "progress_phase": "head",
                           "head_checkpoint": tmp_path / command / "head-walk",
                           "head_resume": False,
                           **({"verify_payloads": False} if command == "prepare" else
-                             {"verify_payloads": False, "require_existing_renders": True})}
+                             {"verify_payloads": False, "require_existing_renders": True}),
+                          **({} if width == 1 else {"file_hash_workers": width})}
         return SimpleNamespace(census={"model": "fixture", "attention_implementation": "eager"},
             cells={}, unit_scope=None, render_mirror_root=None, synthesized_now=0,
             progress_committed=0, encoder_source_reuse=None,
