@@ -83,6 +83,16 @@ POPULATION_SCHEMA = "prismaquant.tessera_campaign_population.v2"
 LEGACY_POPULATION_SCHEMA = "prismaquant.tessera_campaign_population.v1"
 #: The projection block's own envelope schema inside PrismaQuant artifacts.
 CARRIED_PROJECTION_SCHEMA = "prismaquant.tessera_expert_projection.v1"
+#: The producer CLI option that hands the projection a stat-bound cache of
+#: shard digests, so a repeated projection of unchanged checkpoint bytes does
+#: not re-hash the whole source (tessera#790; PQ #2229).
+SOURCE_DIGEST_CACHE_OPTION = "--source-digest-cache"
+#: What the bridge writes into the returned projection at
+#: ``source_digest_cache_use`` on EVERY call: the caller-side statement of
+#: whether ``SOURCE_DIGEST_CACHE_OPTION`` was passed and why, so a consumer
+#: never branches on the producer receipt's schema.  The producer's own
+#: ``source_digest_cache`` receipt key stays the producer's (PQ #2229).
+SOURCE_DIGEST_CACHE_USE_SCHEMA = "prismaquant.source_digest_cache_use.v1"
 
 
 # ---------------------------------------------------------------------------
@@ -93,13 +103,15 @@ def _producer_python(env: Mapping[str, str] | None, python: str | None) -> str:
     return python or supplied.get(PRODUCER_PYTHON_ENV) or sys.executable
 
 
-def producer_plan_tool(env: Mapping[str, str] | None = None, *, python: str | None = None) -> str:
-    """Require the declared public CLI before an expensive packed capture.
+def _probe_producer_plan_tool(env: Mapping[str, str] | None,
+                              python: str | None) -> tuple[str, str]:
+    """Run the declared public CLI's ``--help`` once; return ``(module, help)``.
 
     CLI availability is checked in the producer interpreter, not by importing
-    a serving runtime into PrismaQuant or locating a sibling checkout.
-    An explicit ``python=`` wins over ``TESSERA_PRODUCER_PYTHON``; absent both,
-    the caller's interpreter remains the standalone-install default.
+    a serving runtime into PrismaQuant or locating a sibling checkout.  The
+    one probe answers both callers: :func:`producer_plan_tool` needs the
+    module, and :func:`request_expert_projection` also reads the help text to
+    learn which options this installed producer carries (PQ #2229).
     """
     from .lane_spec import load_lane_spec
 
@@ -112,10 +124,20 @@ def producer_plan_tool(env: Mapping[str, str] | None = None, *, python: str | No
                 tail = "\n".join(completed.stderr.strip().splitlines()[-12:])
                 raise ExpertProjectionError(
                     f"public producer {tool.module} unavailable (exit {completed.returncode}): {tail}")
-            return tool.module
+            return tool.module, completed.stdout
     raise ExpertProjectionError(
         f"lane_specs/tessera.json campaign_tools does not declare {PRODUCER_PLAN_TOOL} "
         f"with {PROJECTION_SCHEMA}; the bridge needs the producer's explicit projection")
+
+
+def producer_plan_tool(env: Mapping[str, str] | None = None, *, python: str | None = None) -> str:
+    """Require the declared public CLI before an expensive packed capture.
+
+    An explicit ``python=`` wins over ``TESSERA_PRODUCER_PYTHON``; absent both,
+    the caller's interpreter remains the standalone-install default.
+    """
+    tool, _ = _probe_producer_plan_tool(env, python)
+    return tool
 
 
 def stack_plan_request(stacks: Mapping[str, tuple[str, int]]) -> dict:
@@ -138,26 +160,77 @@ def stack_plan_request(stacks: Mapping[str, tuple[str, int]]) -> dict:
     return plan
 
 
+def _source_digest_cache_directory(override: str | Path | None, out: Path,
+                                   model_path: str | Path) -> Path:
+    """The cache directory this projection hands the producer, created if absent.
+
+    Defaults beside the projection output -- a campaign-owned directory,
+    outside the model source tree -- and an explicit caller path wins.  The
+    producer's ``SourceDigestCache`` refuses to live inside the source it
+    seals; the bridge refuses first, by name, so a bad directory is a named
+    caller error instead of a producer traceback (PQ #2229).
+    """
+    cache = Path(override) if override is not None else out.parent / "source-digest-cache"
+    root = Path(model_path).resolve()
+    resolved = cache.resolve()
+    if resolved == root or root in resolved.parents:
+        raise ExpertProjectionError(
+            f"{resolved}: source digest cache lies inside the checkpoint {root} it would "
+            f"seal; pass a {SOURCE_DIGEST_CACHE_OPTION} directory outside the model source")
+    if cache.exists() and not cache.is_dir():
+        raise ExpertProjectionError(
+            f"{resolved}: source digest cache is an existing file, not a directory; "
+            "pass a directory the producer's SourceDigestCache can write entries into")
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache
+
+
 def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple[str, int]],
                               *, out_path: str | Path, env: Mapping[str, str] | None = None,
-                              python: str | None = None) -> dict:
+                              python: str | None = None,
+                              source_digest_cache: str | Path | None = None) -> dict:
     """Run the producer's projection tool ONCE for every requested stack.
 
     ``source_identity`` hashes every checkpoint file, so this is one subprocess
     per campaign (all stacks in scope), not one per stack.  The request is
     written beside the answer so a reader can see what was asked.
+
+    When the producer's ``--help`` advertises ``SOURCE_DIGEST_CACHE_OPTION``
+    (tessera#790), the command carries it with a stat-bound shard-digest cache
+    directory -- beside the projection output by default, or exactly the
+    caller's ``source_digest_cache`` -- so unchanged checkpoint bytes are not
+    re-hashed on the next call and the producer's ``source_digest_cache``
+    receipt in the answer says how every shard digest was established.  The
+    producer keeps invalidating on changed bytes; nothing here weakens that.
+
+    Every returned projection also carries the caller's own statement at its
+    own ``source_digest_cache_use`` key -- whether the option was passed, and
+    why or why not -- so a consumer never branches on the producer receipt's
+    schema.  A producer without the option runs as before and is named, never
+    silent.  A cache the caller asked for is never dropped silently either:
+    an explicit ``source_digest_cache`` with a producer that lacks the option
+    is refused by name, as is an override that is an existing file.
     """
     if not stacks:
         raise ExpertProjectionError("no stacks to project")
     child_env = dict(os.environ if env is None else env)
     producer_python = _producer_python(child_env, python)
-    tool = producer_plan_tool(env=child_env, python=producer_python)
+    tool, help_text = _probe_producer_plan_tool(env=child_env, python=producer_python)
+    carries_cache = SOURCE_DIGEST_CACHE_OPTION in help_text
+    if not carries_cache and source_digest_cache is not None:
+        raise ExpertProjectionError(
+            f"producer tool {tool} does not advertise {SOURCE_DIGEST_CACHE_OPTION}; refusing "
+            f"to drop the caller's source digest cache {source_digest_cache} silently (PQ #2229)")
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     request = out.with_name(out.name + ".request.json")
     request.write_text(json.dumps(stack_plan_request(stacks), indent=1, sort_keys=True))
     command = [producer_python, "-m", tool, str(model_path),
                "--stack-plan", str(request), "--out", str(out)]
+    cache = None
+    if carries_cache:
+        cache = _source_digest_cache_directory(source_digest_cache, out, model_path)
+        command += [SOURCE_DIGEST_CACHE_OPTION, str(cache)]
     completed = subprocess.run(
         command, env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -170,6 +243,17 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
         projection = json.loads(out.read_text())
     except (OSError, ValueError) as exc:
         raise ExpertProjectionError(f"producer projection unreadable at {out}: {exc}") from exc
+    # The producer's answer is kept verbatim: its ``source_digest_cache``
+    # receipt key stays the producer's.  The caller's statement rides under
+    # its own key on EVERY call, so a consumer never branches on the
+    # receipt's schema to learn whether a cache was used.
+    projection["source_digest_cache_use"] = {
+        "schema": SOURCE_DIGEST_CACHE_USE_SCHEMA, "used": carries_cache,
+        "reason": (f"producer tool {tool} advertises {SOURCE_DIGEST_CACHE_OPTION}; handed {cache}"
+                   if carries_cache else
+                   f"producer tool {tool} does not advertise {SOURCE_DIGEST_CACHE_OPTION}; "
+                   "every checkpoint file was hashed"),
+    }
     return projection
 
 
