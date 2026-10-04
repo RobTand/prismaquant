@@ -4,17 +4,22 @@
 
 ### Fixed
 
-- **Test cost: repeated in-process work runs once, and fixture consumers
-  match the shared fixture's geometry** (#1929). The prefill dry-run tables
-  memoize their pure seeded mandatory-set build and legal-domain enumeration
-  per family; three pairs of plan-driver tests read one real driver run
-  instead of two identical ones; the scalar staged publication campaign is
-  shared by its two read-only consumers behind byte-digest guards; and the
-  row-startup consumers build `stream_fixture`'s `OUTPUT_FEATURES` geometry
-  with the wrong-shape admission slice derived from it. The launcher contract
-  tests share one stdlib-only inspection fixture. Every deleted execution's
-  assertions survive on the execution that remains; no timeout, marker, pin,
-  default, guard, roster or geometry change.
+- **Test cost: repeated in-process work runs once; two stale consumer
+  fixtures move from 32 rows to the shared fixture's `OUTPUT_FEATURES`=8**
+  (#1929). The prefill dry-run tables memoize their pure seeded mandatory-set
+  build and legal-domain enumeration per family; three pairs of plan-driver
+  tests read one real driver run instead of two identical ones; the scalar
+  staged publication campaign is shared by its two read-only consumers behind
+  byte-digest guards; and the two stale row-startup consumer fixtures now
+  build `stream_fixture`'s `OUTPUT_FEATURES`=8 rows, with the wrong-shape
+  admission slice derived from `OUTPUT_FEATURES` so the refusal cell stays
+  live. The launcher contract tests share one stdlib-only inspection
+  fixture. Ten old test IDs become six merged or renamed IDs; every test
+  assertion and execution logic is unchanged, and every removed execution's
+  assertions survive on the execution that remains. Production defaults,
+  pins, guards, timeouts, markers, production geometry and the fixture-
+  owning file's geometry are unchanged; line coverage and encode-regime
+  coverage are not measured here and are left to the shared merged batch.
 
 - **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
