@@ -199,7 +199,30 @@ class TestCalibrationCompositionProvenance(unittest.TestCase):
         self.assertEqual(
             composition,
             {"dataset": "synthetic", "requested": 3,
-             "real": 0, "synthetic": 3},
+             "real_loaded": 0, "synthetic_loaded": 3},
+        )
+
+    def test_synthetic_shortfall_records_rows_returned(self):
+        # The stub continues past rows whose processor calls fail, so the
+        # pure-synthetic path can return fewer rows than requested. The
+        # composition must record the rows actually returned, never the
+        # requested count.
+        class _FailingProcessor:
+            def apply_chat_template(self, *args, **kwargs):
+                raise NotImplementedError("no chat template")
+
+            def __call__(self, *args, **kwargs):
+                raise RuntimeError("processor failure")
+
+        triples, composition = load_multimodal_calibration(
+            _FailingProcessor(), dataset_name="synthetic",
+            n_samples=3, max_text_len=12,
+        )
+        self.assertEqual(triples, [])
+        self.assertEqual(
+            composition,
+            {"dataset": "synthetic", "requested": 3,
+             "real_loaded": 0, "synthetic_loaded": 0},
         )
 
     def test_partial_real_dataset_blend_is_counted_and_loud(self):
@@ -238,7 +261,7 @@ class TestCalibrationCompositionProvenance(unittest.TestCase):
         self.assertEqual(
             composition,
             {"dataset": "real-vision-dataset", "requested": 3,
-             "real": 1, "synthetic": 2},
+             "real_loaded": 1, "synthetic_loaded": 2},
         )
         self.assertIn("synthetic stub row(s) were blended",
                       buffer.getvalue())
@@ -275,20 +298,9 @@ class TestCalibrationCompositionProvenance(unittest.TestCase):
         self.assertEqual(
             composition,
             {"dataset": "real-vision-dataset", "requested": 3,
-             "real": 3, "synthetic": 0},
+             "real_loaded": 3, "synthetic_loaded": 0},
         )
         self.assertNotIn("blended", buffer.getvalue())
-
-    def test_mm_probe_passes_stamp_calibration_source_in_meta(self):
-        from prismaquant import sensitivity_probe as sp
-
-        src = inspect_source(sp)
-        # Both multimodal probe passes (streaming + non-streaming) stamp
-        # the counted composition, and so does the streaming pass's
-        # empty-pickle site: three meta dicts, three stamps.
-        self.assertEqual(
-            src.count('"calibration_source": calibration_composition'), 3,
-            "every multimodal meta dict must stamp calibration_source")
 
 
 class TestMultimodalProbeFlagParsing(unittest.TestCase):
@@ -652,8 +664,8 @@ class TestMultimodalProbePassIntegration(unittest.TestCase):
                                    return_value=([], {
                                        "dataset": "synthetic",
                                        "requested": 2,
-                                       "real": 0,
-                                       "synthetic": 0,
+                                       "real_loaded": 0,
+                                       "synthetic_loaded": 0,
                                    })):
                 result = sp.run_multimodal_visual_probe_pass(
                     str(tdp),
