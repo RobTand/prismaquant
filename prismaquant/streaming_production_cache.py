@@ -59,6 +59,7 @@ from prismaquant.production_weight_cache import (
     _production_cache_source_sha256,
     fill_packed_expert_cache_entries,
     render_production_weight,
+    require_injective_cache_filenames,
 )
 from prismaquant.streaming_model import _build_streaming_context
 
@@ -1041,6 +1042,16 @@ def run_streaming_render(
         render_formats_by_qname = {
             qname: menu for qname in dense_modules if menu
         }
+    # #2219: the streaming fill writes dense shards under mangled leaves and
+    # bypasses the resident fill's render-identity build (where the dense
+    # path's own refusal lives), so refuse a colliding dense qname set here,
+    # before the first layer's shards are resumed or written. The packed
+    # streaming leg refuses per layer inside ``fill_packed_expert_cache_entries``.
+    require_injective_cache_filenames(
+        render_formats_by_qname.keys(),
+        (fmt for fmts in render_formats_by_qname.values() for fmt in fmts),
+        where="streaming production cache",
+    )
     per_layer_dense: dict[int | None, dict[str, nn.Module]] = defaultdict(dict)
     for qname, mod in dense_modules.items():
         per_layer_dense[_layer_index_of(qname, layers_prefix)][qname] = mod
