@@ -88,10 +88,11 @@ CARRIED_PROJECTION_SCHEMA = "prismaquant.tessera_expert_projection.v1"
 #: not re-hash the whole source (tessera#790; PQ #2229).
 SOURCE_DIGEST_CACHE_OPTION = "--source-digest-cache"
 #: What the bridge writes into the returned projection at
-#: ``source_digest_cache`` when the producer's CLI cannot carry
-#: ``SOURCE_DIGEST_CACHE_OPTION``: the caller-side statement that no producer
-#: receipt follows and why, never a silent drop (PQ #2229).
-NO_DIGEST_CACHE_SCHEMA = "prismaquant.source_digest_cache_use.v1"
+#: ``source_digest_cache_use`` on EVERY call: the caller-side statement of
+#: whether ``SOURCE_DIGEST_CACHE_OPTION`` was passed and why, so a consumer
+#: never branches on the producer receipt's schema.  The producer's own
+#: ``source_digest_cache`` receipt key stays the producer's (PQ #2229).
+SOURCE_DIGEST_CACHE_USE_SCHEMA = "prismaquant.source_digest_cache_use.v1"
 
 
 # ---------------------------------------------------------------------------
