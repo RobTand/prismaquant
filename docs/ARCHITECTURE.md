@@ -2532,10 +2532,17 @@ changes.
 
 ## Offline release receipt ingestion (PQ #1487)
 
-The Tessera lane names its existing external `uniform_control.py verify` and
+The Tessera lane names its installed `python -m tessera.uniform_control verify` and
 `shipcard_cli fill-control` runner, closing the already required byte-matched
 control slot. The control family, integer-bit rule and byte slack are declared
 before measurement; uniform A4/A8 labels alone do not establish a byte match.
+The public producer CLI (Tessera #886, PrismaQuant #2168) reads its checkpoint
+through Tessera's own exporter classifier and emits `tessera.uniform_control.v1`;
+the gate no longer needs a sibling Tessera experiment checkout. An explicit
+`TESSERA_PRODUCER_PYTHON` may select a separately installed producer, leaving
+the consumer/serving interpreter and immutable runtime pins untouched. Unserved,
+unmatched, stale or failed control evidence remains a shipping refusal; packaging
+the CLI neither supplies served KL nor changes any gate/default/slack rule.
 
 `python -m prismaquant.release_receipts` is a dry-by-default, offline adapter.
 Producer slot records retain their exact artifact/provenance fields. U4's
