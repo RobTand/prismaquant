@@ -219,6 +219,12 @@ class TestCalibrationCompositionProvenance(unittest.TestCase):
             "image_grid_thw": torch.tensor([[1, 1, 1]]),
         }
         proc = mock.Mock(return_value=enc)
+        # A real AutoProcessor without chat-template support raises from
+        # apply_chat_template; a bare Mock would return a Mock and the
+        # synthetic stub would then hand Mock tensors to
+        # _samples_from_encoding.
+        proc.apply_chat_template = mock.Mock(
+            side_effect=NotImplementedError("no chat template"))
         stub = mock.Mock()
         stub.load_dataset = mock.Mock(
             return_value=_FakeDataset(
@@ -254,6 +260,8 @@ class TestCalibrationCompositionProvenance(unittest.TestCase):
             "image_grid_thw": torch.tensor([[1, 1, 1]]),
         }
         proc = mock.Mock(return_value=enc)
+        proc.apply_chat_template = mock.Mock(
+            side_effect=NotImplementedError("no chat template"))
         stub = mock.Mock()
         stub.load_dataset = mock.Mock(
             return_value=_FakeDataset(
