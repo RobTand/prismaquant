@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- **Test cost: repeated in-process work runs once, and fixture consumers
+  match the shared fixture's geometry** (#1929). The prefill dry-run tables
+  memoize their pure seeded mandatory-set build and legal-domain enumeration
+  per family; three pairs of plan-driver tests read one real driver run
+  instead of two identical ones; the scalar staged publication campaign is
+  shared by its two read-only consumers behind byte-digest guards; and the
+  row-startup consumers build `stream_fixture`'s `OUTPUT_FEATURES` geometry
+  with the wrong-shape admission slice derived from it. The launcher contract
+  tests share one stdlib-only inspection fixture. Every deleted execution's
+  assertions survive on the execution that remains; no timeout, marker, pin,
+  default, guard, roster or geometry change.
+
 - **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing
