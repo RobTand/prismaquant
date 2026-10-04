@@ -4,6 +4,17 @@
   "_isa_why": "The ISA is a placement fact with a measured consequence: a Tessera Hessian-aware wire encoded on gfx1201 is NOT bit-comparable with one encoded on sm121. First divergence is torch.linalg.cholesky (cuSOLVER vs rocSOLVER, one fp32 epsilon); 53.78% of differing rendered elements are explained by ldl and a further 15.28% by the encoder's own consumption of it, and 54.0% of rendered elements differ overall with max |delta| 9.48e-3 -- a different quantization, not a rounding wobble (RobTand/tessera#472, docs/measurements/tessera-gfx1201-hessian-divergence-2026-09-13.md on Tessera master). Weights-only encodes ARE byte-identical across the two: the wire the reference Viterbi produced there matched GB10's on both of its paths, digest for digest. So a row class whose bytes must equal a GB10 campaign's may only carry tags of one ISA, and cross-ISA capacity is reachable only for weights-only work.",
   "_gpu_runtime_why": "How a container on this tag reaches its GPU. `nvidia` is `--gpus all`, which is what the NVIDIA container runtime consumes. `rocm-wsl` is `--device /dev/dxg` plus a read-only `/usr/lib/wsl/lib` mount: WSL2 has no amdgpu driver and no NVIDIA runtime, so `--gpus all` attaches nothing there and `/dev/dxg` does not exist on a GB10. The value is per tag because it is a property of the box, not of the image.",
   "tags": {
+    "dl380g10": {
+      "isa": "x86_64",
+      "gpu_runtime": "none",
+      "boxes": ["dl380g10"],
+      "interpreters": {
+        "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python": {
+          "attested_by": "7a04916aeba9efe77a01bea5717ca254b144c7ae8e2d4d8f4c3cae516bf2bbfa",
+          "observed": "PB action done, rc 0, on dl380g10. Isolated interpreter check asserts non-editable PrismaBuild 95a59051d48cda82eea7927f31870c6c862d7174, SDK_VERSION 3 and Tessera b40c93cb73745097e57a1ba4cf5b9eee166c759a; imports resolve inside this Python 3.14 environment. CPU-only host; no GPU runtime. This is a package-pin attestation, not binary or numerics equivalence with the Sparks."
+        }
+      }
+    },
     "gb10": {
       "isa": "sm121",
       "gpu_runtime": "nvidia",
@@ -15,13 +26,23 @@
       "isa": "sm121",
       "gpu_runtime": "nvidia",
       "boxes": ["sparky"],
-      "interpreters": {}
+      "interpreters": {
+        "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python": {
+          "attested_by": "2df7647146a0397e81c5cb210e96e743e6964ebbca3f6d3ef658d44d9e4e85ab",
+          "observed": "PB action done, rc 0, on sparky under --tag sparky, cpu=2,mem_gb=4. Isolated interpreter check asserts non-editable PrismaBuild 95a59051d48cda82eea7927f31870c6c862d7174, SDK_VERSION 3 and Tessera b40c93cb73745097e57a1ba4cf5b9eee166c759a; imports resolve inside this native aarch64 Python 3.12 environment. Copied from pq-pb059953bc-tessera-b40c93cb without modifying that parent; package pins match dl380g10, but interpreter binaries and Python minor versions do not."
+        }
+      }
     },
     "sparklina": {
       "isa": "sm121",
       "gpu_runtime": "nvidia",
-      "boxes": ["gx10-6b77"],
-      "interpreters": {}
+      "boxes": ["sparklina"],
+      "interpreters": {
+        "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python": {
+          "attested_by": "3b997e2020a4877c5b19c01116c4760d922e5d70b72a3c620a70f6a6c0c4e169",
+          "observed": "PB action done, rc 0, on sparklina under --tag sparklina, cpu=2,mem_gb=4. Isolated interpreter check asserts non-editable PrismaBuild 95a59051d48cda82eea7927f31870c6c862d7174, SDK_VERSION 3 and Tessera b40c93cb73745097e57a1ba4cf5b9eee166c759a; imports resolve inside this native aarch64 Python 3.12 environment. PB action 2f3c551bcd010b6f0c93d3ec2401df6a980ad3e55c6731b76fbc9e2643d20832 first fetched the missing source clone/commit; initial action ac071bc4c51f4e67d512fb591e3b91863b65a88e92790f20502484bc36dbc88d remains failed. Copied from pq-pb059953bc-tessera-b40c93cb without modifying that parent; no binary or numerics equivalence with dl380g10 is claimed."
+        }
+      }
     },
     "gx10-6b77": {
       "isa": "sm121",
