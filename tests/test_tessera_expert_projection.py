@@ -159,6 +159,206 @@ def test_projection_request_uses_real_public_producer_and_keeps_request(tmp_path
             source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "refused.json", env=env, **producer_args)
 
 
+# ---------------------------------------------------------------------------
+# The stat-bound source digest cache the caller hands the producer (#2229)
+# ---------------------------------------------------------------------------
+FAKE_PRODUCER_PLAN = '''
+"""Standalone fake of the producer CLI: records argv, answers the projection."""
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="tessera.producer_plan",
+                                     description="fake producer plan stub")
+    parser.add_argument("src", type=Path)
+    parser.add_argument("--stack-plan", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    if os.environ.get("FAKE_PRODUCER_ADVERTISES_CACHE"):
+        parser.add_argument("--source-digest-cache", type=Path,
+                            help="existing trusted shard-digest directory; record reuse in output")
+    args = parser.parse_args(argv)
+    dump = os.environ.get("FAKE_PRODUCER_ARGV_DUMP")
+    if dump:
+        Path(dump).write_text(json.dumps(list(sys.argv[1:])))
+    args.out.write_text(json.dumps(
+        {"schema": "tessera.expert_projection.v1", "stacks": {}, "source": {}}) + "\\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+
+def _fake_producer_env(monkeypatch, root: Path, *, advertises: bool, dump: Path) -> None:
+    """Run the bridge against a fake producer interpreter under the test python."""
+    package = root / "producer_lib" / "tessera"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "producer_plan.py").write_text(FAKE_PRODUCER_PLAN)
+    monkeypatch.setenv("PYTHONPATH", str(package.parent))
+    monkeypatch.delenv(tep.PRODUCER_PYTHON_ENV, raising=False)
+    if advertises:
+        monkeypatch.setenv("FAKE_PRODUCER_ADVERTISES_CACHE", "1")
+    else:
+        monkeypatch.delenv("FAKE_PRODUCER_ADVERTISES_CACHE", raising=False)
+    monkeypatch.setenv("FAKE_PRODUCER_ARGV_DUMP", str(dump))
+
+
+def _real_producer_env() -> dict:
+    env = {key: value for key, value in os.environ.items() if key != "TESSERA_REPO"}
+    env["PYTHONSAFEPATH"] = "1"
+    return env
+
+
+def _synthetic_checkpoint(source: Path) -> dict:
+    import torch
+    from safetensors.torch import save_file
+
+    source.mkdir(parents=True)
+    (source / "config.json").write_text(json.dumps({
+        "num_experts": 2, "hidden_size": 32, "moe_intermediate_size": 32}))
+    tensors = {f"{STACK}.{expert}.{role}.weight": torch.zeros(32, 32, dtype=torch.bfloat16)
+               for expert in range(2) for role in ("w1", "w2", "w3")}
+    save_file(tensors, str(source / SHARD))
+    return tensors
+
+
+def _seed_digest_entry(cache_dir: Path, shard: Path, digest: str) -> None:
+    """The entry a quiescent first read records, seeded for a fresh fixture shard.
+
+    The producer subprocess owns the 300 s quiescence clock, so a shard the
+    fixture wrote just now cannot be recorded by an earlier real call; this
+    writes the recorded-entry shape for the shard's current stat identity.
+    The producer validates that shape when it serves the entry, and the
+    changed-shard assertion below proves the seed is never served across a
+    moved stat identity, so a wrong replica cannot fake a pass.
+    """
+    with open(shard, "rb") as handle:
+        st = os.fstat(handle.fileno())
+    key = {"leaf": shard.name, "ino": int(st.st_ino), "size": int(st.st_size),
+           "mtime_ns": int(st.st_mtime_ns), "ctime_ns": int(st.st_ctime_ns)}
+    name = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
+    entry = {"schema": "tessera.source-digest-cache.v1", "algorithm": "sha256",
+             "key": key, "digest": digest,
+             "writer": {"kind": "prismaquant-2229-fixture-full-read"}}
+    (cache_dir / f"{name}.json").write_text(json.dumps(entry, indent=2, sort_keys=True))
+
+
+def test_projection_request_passes_the_default_digest_cache(tmp_path, monkeypatch):
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
+    source = tmp_path / "source"
+    _synthetic_checkpoint(source)
+    output = tmp_path / "projection.json"
+    answer = request_expert_projection(
+        source, {STACK: ("E4M3", 1024)}, out_path=output, env=_real_producer_env())
+    cache_dir = tmp_path / "source-digest-cache"
+    assert cache_dir.is_dir()
+    receipt = answer["source_digest_cache"]
+    assert receipt["schema"] == "tessera.source-digest-receipt.v1"
+    assert Path(receipt["cache"]) == cache_dir.resolve()
+    # Only shard bodies go through the cache; config and auxiliaries are
+    # always hashed and carry no receipt row.
+    assert [row["shard"] for row in receipt["shards"]] == [SHARD]
+    assert all(row["how"] == "hashed" for row in receipt["shards"])
+
+
+def test_projection_request_command_carries_the_digest_cache_option(tmp_path, monkeypatch):
+    dump = tmp_path / "argv.json"
+    _fake_producer_env(monkeypatch, tmp_path, advertises=True, dump=dump)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                              out_path=tmp_path / "projection.json")
+    argv = json.loads(dump.read_text())
+    index = argv.index(tep.SOURCE_DIGEST_CACHE_OPTION)
+    assert argv[index + 1] == str(tmp_path / "source-digest-cache")
+    assert (tmp_path / "source-digest-cache").is_dir()
+
+
+def test_projection_request_reuses_recorded_digests_until_bytes_change(tmp_path, monkeypatch):
+    from projection_producer_fixture import require_projection_producer
+    require_projection_producer(monkeypatch)
+    import torch
+    from safetensors.torch import save_file
+
+    source = tmp_path / "source"
+    tensors = _synthetic_checkpoint(source)
+    cache_dir = tmp_path / "digest-cache"
+    cache_dir.mkdir()
+    shard = source / SHARD
+    _seed_digest_entry(cache_dir, shard, hashlib.sha256(shard.read_bytes()).hexdigest())
+    first = request_expert_projection(
+        source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "first.json",
+        env=_real_producer_env(), source_digest_cache=cache_dir)
+    receipt = first["source_digest_cache"]
+    assert receipt["mode"] == "stat-bound"
+    assert receipt["cached_shards"] == 1
+    assert {row["shard"]: row["how"] for row in receipt["shards"]} == {SHARD: "cached"}
+    assert first["source"]["files"][SHARD] == hashlib.sha256(shard.read_bytes()).hexdigest()
+    # A changed shard moves its stat identity: the record is not served and
+    # the whole-source seal answers with the new bytes' digest.
+    tensors[f"{STACK}.0.w1.weight"] = torch.ones(32, 32, dtype=torch.bfloat16)
+    save_file(tensors, str(shard))
+    second = request_expert_projection(
+        source, {STACK: ("E4M3", 1024)}, out_path=tmp_path / "second.json",
+        env=_real_producer_env(), source_digest_cache=cache_dir)
+    receipt = second["source_digest_cache"]
+    assert receipt["cached_shards"] == 0
+    assert {row["shard"]: row["how"] for row in receipt["shards"]} == {SHARD: "hashed"}
+    assert second["source"]["files"][SHARD] == hashlib.sha256(shard.read_bytes()).hexdigest()
+    assert second["source"]["files"][SHARD] != first["source"]["files"][SHARD]
+
+
+def test_projection_request_names_a_producer_without_the_option(tmp_path, monkeypatch):
+    dump = tmp_path / "argv.json"
+    _fake_producer_env(monkeypatch, tmp_path, advertises=False, dump=dump)
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    answer = request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                       out_path=tmp_path / "projection.json")
+    assert tep.SOURCE_DIGEST_CACHE_OPTION not in json.loads(dump.read_text())
+    record = answer["source_digest_cache"]
+    assert record["schema"] == tep.NO_DIGEST_CACHE_SCHEMA
+    assert record["used"] is False
+    assert tep.SOURCE_DIGEST_CACHE_OPTION in record["reason"]
+    assert not (tmp_path / "source-digest-cache").exists()
+
+
+def test_projection_request_refuses_an_explicit_cache_the_producer_lacks(tmp_path, monkeypatch):
+    _fake_producer_env(monkeypatch, tmp_path, advertises=False, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    with pytest.raises(ExpertProjectionError, match="does not advertise"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=tmp_path / "projection.json",
+                                  source_digest_cache=tmp_path / "elsewhere")
+
+
+def test_projection_request_refuses_a_cache_inside_the_model_source(tmp_path, monkeypatch):
+    _fake_producer_env(monkeypatch, tmp_path, advertises=True, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    with pytest.raises(ExpertProjectionError, match="lies inside"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=tmp_path / "projection.json",
+                                  source_digest_cache=source / "digest-cache")
+    # The default directory beside an output placed inside the source is
+    # refused too: the cache must stay outside the tree it seals.
+    with pytest.raises(ExpertProjectionError, match="lies inside"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=source / "projection.json")
+
+
 def test_stack_plan_request_is_the_producers_exact_shape():
     assert stack_plan_request({STACK: ("E4M3", 1024)}) == {
         STACK: {"grid": "E4M3", "q256": 1024, "source_layout": tep.SOURCE_LAYOUT_UNPACKED}}
