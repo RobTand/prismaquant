@@ -343,9 +343,6 @@ def test_seal_constants_resolve_without_cpython_build_time_names(monkeypatch):
         assert resolved._SEALS == 0b1111
         assert resolved._F_ADD_SEALS == uapi['F_ADD_SEALS']
         assert resolved._F_GET_SEALS == uapi['F_GET_SEALS']
-        for name in (name for name in uapi if name.startswith('F_SEAL')):
-            if name in exposed:
-                assert uapi[name] == getattr(fcntl, name)
         buffer = resolved.SealedBuffer(16)
         try:
             buffer.fill_bytes(b'pq-io-sealed' + b'x' * 3)
@@ -356,9 +353,31 @@ def test_seal_constants_resolve_without_cpython_build_time_names(monkeypatch):
                 assert bytes(view) == b'pq-io-sealed' + b'x' * 3
         finally:
             buffer.close()
+        # And the same portability one layer down, where this interpreter's
+        # os lacks memfd_create itself (PB ded8698fa4d6: pq-cpu312, every
+        # stream entry died with ``AttributeError: module 'os' has no
+        # attribute 'memfd_create'``). The buffer still opens, seals and
+        # verifies through the runtime libc.
+        if hasattr(os, 'memfd_create'):
+            monkeypatch.delattr(os, 'memfd_create')
+        resolved = importlib.reload(io_engine)
+        buffer = resolved.SealedBuffer(16)
+        try:
+            buffer.fill_bytes(b'pq-io-memfd' + b'y' * 5)
+            assert len(buffer.seal()) == 64
+            buffer.require_sealed()
+            with buffer.readonly() as view:
+                assert bytes(view) == b'pq-io-memfd' + b'y' * 5
+        finally:
+            buffer.close()
     finally:
         monkeypatch.undo()
         importlib.reload(io_engine)
+    # After restore, every name this interpreter really exposes agrees with
+    # the pinned UAPI table, so a fallback can never disagree with it.
+    for name in (name for name in uapi if name.startswith('F_SEAL')):
+        if hasattr(fcntl, name):
+            assert uapi[name] == getattr(fcntl, name)
 
 
 def test_a_closed_stream_refuses_and_holds_nothing(tmp_path):
