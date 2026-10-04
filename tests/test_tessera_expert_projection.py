@@ -266,6 +266,11 @@ def test_projection_request_passes_the_default_digest_cache(tmp_path, monkeypatc
     # always hashed and carry no receipt row.
     assert [row["shard"] for row in receipt["shards"]] == [SHARD]
     assert all(row["how"] == "hashed" for row in receipt["shards"])
+    # The caller-side statement rides under its own key on every call.
+    use = answer["source_digest_cache_use"]
+    assert use["schema"] == tep.SOURCE_DIGEST_CACHE_USE_SCHEMA
+    assert use["used"] is True
+    assert tep.SOURCE_DIGEST_CACHE_OPTION in use["reason"]
 
 
 def test_projection_request_command_carries_the_digest_cache_option(tmp_path, monkeypatch):
@@ -280,6 +285,7 @@ def test_projection_request_command_carries_the_digest_cache_option(tmp_path, mo
     index = argv.index(tep.SOURCE_DIGEST_CACHE_OPTION)
     assert argv[index + 1] == str(tmp_path / "source-digest-cache")
     assert (tmp_path / "source-digest-cache").is_dir()
+    assert answer["source_digest_cache_use"]["used"] is True
 
 
 def test_projection_request_reuses_recorded_digests_until_bytes_change(tmp_path, monkeypatch):
@@ -301,6 +307,7 @@ def test_projection_request_reuses_recorded_digests_until_bytes_change(tmp_path,
     assert receipt["mode"] == "stat-bound"
     assert receipt["cached_shards"] == 1
     assert {row["shard"]: row["how"] for row in receipt["shards"]} == {SHARD: "cached"}
+    assert first["source_digest_cache_use"]["used"] is True
     assert first["source"]["files"][SHARD] == hashlib.sha256(shard.read_bytes()).hexdigest()
     # A changed shard moves its stat identity: the record is not served and
     # the whole-source seal answers with the new bytes' digest.
@@ -312,6 +319,7 @@ def test_projection_request_reuses_recorded_digests_until_bytes_change(tmp_path,
     receipt = second["source_digest_cache"]
     assert receipt["cached_shards"] == 0
     assert {row["shard"]: row["how"] for row in receipt["shards"]} == {SHARD: "hashed"}
+    assert second["source_digest_cache_use"]["used"] is True
     assert second["source"]["files"][SHARD] == hashlib.sha256(shard.read_bytes()).hexdigest()
     assert second["source"]["files"][SHARD] != first["source"]["files"][SHARD]
 
@@ -325,10 +333,13 @@ def test_projection_request_names_a_producer_without_the_option(tmp_path, monkey
     answer = request_expert_projection(source, {STACK: ("E4M3", 1024)},
                                        out_path=tmp_path / "projection.json")
     assert tep.SOURCE_DIGEST_CACHE_OPTION not in json.loads(dump.read_text())
-    record = answer["source_digest_cache"]
-    assert record["schema"] == tep.NO_DIGEST_CACHE_SCHEMA
+    record = answer["source_digest_cache_use"]
+    assert record["schema"] == tep.SOURCE_DIGEST_CACHE_USE_SCHEMA
     assert record["used"] is False
     assert tep.SOURCE_DIGEST_CACHE_OPTION in record["reason"]
+    # The producer's receipt key belongs to the producer; without the option
+    # no producer receipt exists and PrismaQuant must not write one.
+    assert "source_digest_cache" not in answer
     assert not (tmp_path / "source-digest-cache").exists()
 
 
@@ -341,6 +352,20 @@ def test_projection_request_refuses_an_explicit_cache_the_producer_lacks(tmp_pat
         request_expert_projection(source, {STACK: ("E4M3", 1024)},
                                   out_path=tmp_path / "projection.json",
                                   source_digest_cache=tmp_path / "elsewhere")
+
+
+def test_projection_request_refuses_an_override_that_is_an_existing_file(tmp_path, monkeypatch):
+    _fake_producer_env(monkeypatch, tmp_path, advertises=True, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    not_a_dir = tmp_path / "not-a-directory"
+    not_a_dir.write_text("occupied")
+    with pytest.raises(ExpertProjectionError, match="existing file"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=tmp_path / "projection.json",
+                                  source_digest_cache=not_a_dir)
+    assert not (tmp_path / "source-digest-cache").exists()
 
 
 def test_projection_request_refuses_a_cache_inside_the_model_source(tmp_path, monkeypatch):
