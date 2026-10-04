@@ -622,7 +622,10 @@ def test_the_hessian_applies_exactly_where_tessera_says_it_does():
     source = activation_source(
         {"q": hessian_from_rows(rows)},
         calibration_identity("corpus", [torch.arange(4)], fit_tokens=64))
-    weight = torch.randn(64, 256)
+    # Every derived wire still gets a real encode with at least two complete
+    # arity/span groups; activation draws and the full-width Hessian stay fixed.
+    weight_rows = 2 * math.lcm(*(spec.arity * wire.span for spec, _, wire in reps))
+    weight = torch.randn(weight_rows, 256)
 
     verdicts = {}
     for spec, rung, wire in reps:
