@@ -11,6 +11,8 @@
   together; direct-file bootstrap still authenticates the mount before
   importing PrismaQuant. Image fingerprint bytes, runtime/source identity,
   duplicate-JSON refusals and scientific gates are unchanged.
+  Launcher regression fixtures now supply complete Docker inspection metadata
+  to that owner instead of patching a removed launcher-level digest export.
 
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
