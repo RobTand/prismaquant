@@ -1950,8 +1950,8 @@ class StageBReplaySpill:
         caller: the plan walk, staging arithmetic and delivery order of
         :meth:`replay` with the io stream's prefetch replaced by one chunk
         buffer at a time, so no second pinned read stream is ever alive.
-        ``charge(bytes)`` admits each chunk's staging bytes to the caller's
-        guard before they are allocated; nothing outlives this call.
+        ``charge(host_bytes, device_bytes)`` admits the existing complete replay
+        buffer envelopes before allocation; nothing outlives this call.
         ``feed(name, x, gradient, capture_batch)`` runs once per record in
         capture order, with the block membership retained at capture time.
         """
@@ -1968,7 +1968,7 @@ class StageBReplaySpill:
             for item in window.plan:
                 owner, (records, new, gradients, used) = item
                 if charge is not None:
-                    charge(used)
+                    charge(self.replay_reserve_host_bytes, self.replay_reserve_device_bytes)
                 host = _aligned_buffer(self.read_bytes, self._block, self._cuda)
                 self._fill(window, probe_index, item, memoryview(host.numpy()))
                 staging = torch.empty(used + 2 * ADDRESS_ALIGNMENT, dtype=torch.uint8,

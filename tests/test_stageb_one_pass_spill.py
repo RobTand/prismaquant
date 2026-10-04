@@ -2157,3 +2157,46 @@ def test_spill_attribution_missing_probe_refuses_before_publication(campaign, mo
     assert not list((_checkpoint_dir(campaign, layer) / "units").glob("*.pkl"))
 
 
+@pytest.mark.parametrize("admit", [True, False])
+def test_spill_attribution_charges_device_staging_before_allocation(campaign, monkeypatch,
+                                                                  tmp_path, admit):
+    expected = {}
+    original = spill_mod.StageBReplaySpill.replay_records
+
+    def records(self, *args, **kwargs):
+        expected["reservation"] = (self.replay_reserve_host_bytes,
+                                   self.replay_reserve_device_bytes)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(spill_mod.StageBReplaySpill, "replay_records", records)
+
+    class DeviceGuard(_RecordingGuard):
+        def __init__(self, device):
+            super().__init__(device)
+            self.attribution_reservations = []
+
+        def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
+            if label == "sequence_attribution_record_replay":
+                assert reserve_device_bytes > 0, "device staging buffer was not reserved"
+                assert (reserve_bytes, reserve_device_bytes) == expected["reservation"]
+                self.attribution_reservations.append((reserve_bytes, reserve_device_bytes))
+                if not admit:
+                    raise RuntimeError("attribution device envelope boundary")
+            return super().check(label, reserve_bytes=reserve_bytes,
+                                 reserve_device_bytes=reserve_device_bytes)
+
+    _clear_output(campaign, 1)
+    guard = DeviceGuard(campaign.device)
+    payload, state = _quantum(campaign, monkeypatch, layer=1,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30, guard=guard,
+                              execution_patch={"sequence_attribution": {"candidates": "all"}})
+    if admit:
+        assert payload is not None, _chain(state.error)
+    else:
+        assert payload is None
+        assert "attribution device envelope boundary" in _chain(state.error)
+        assert not list((_checkpoint_dir(campaign, 1) / "units").glob("*.pkl"))
+    assert guard.attribution_reservations
+    assert all(host > 0 and device > 2 * spill_mod.ADDRESS_ALIGNMENT
+               for host, device in guard.attribution_reservations)
+

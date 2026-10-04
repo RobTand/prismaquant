@@ -32,7 +32,10 @@
   Full block coverage, integer coordinates and recorded calibration/token
   geometry are validated before any reader uses the decomposition.
   Spill callbacks release their borrowed source and delta immediately and
-  retain scalar block components only. Both collectors reject unknown
+  retain scalar block components only. Each read charges the existing complete
+  host and device replay buffer envelopes before allocation, including pinned
+  host capacity and aligned device staging; resource refusal prevents read
+  and publication. Both collectors reject unknown
   candidates before capture and require complete sidecars only on selected
   rows. The full normalized selector binds the run identity; resume refuses
   a changed requested attribution surface even in dev mode. Missing selected

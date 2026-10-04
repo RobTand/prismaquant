@@ -161,9 +161,12 @@ reader lifecycle immediately after each single candidate's `project`, while
 that rendered delta is resident — one bounded, guard-charged read at a time,
 no second read stream, no per-sequence GW matrices. Each callback releases
 its borrowed source and delta immediately; only scalar block components
-persist. The normalized selector binds the run identity (never the priced
-probe identity); the probe identity separately binds calibration and token
-geometry. Each sidecar reports its reconstruction scope and block membership.
+persist. Each read charges the spill owner's existing complete host and device
+replay envelopes before allocation, including pinned-buffer capacity and
+aligned device staging. An envelope refusal prevents read and unit publication.
+The normalized selector binds the run identity (never the priced probe
+identity); probe identity separately binds calibration and token geometry.
+Each sidecar reports its reconstruction scope and block membership.
 Both paths resolve the selector against the exact measured roster before
 capture. Resume refuses a changed attribution selector, even in dev mode,
 because reusing another requested measurement surface would ignore the

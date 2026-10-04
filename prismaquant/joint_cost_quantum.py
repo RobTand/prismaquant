@@ -210,12 +210,12 @@ class SpillSequenceAttribution:
                 for component, value in current.items():
                     accumulated[component] += value
 
-    def _charge(self, bytes_to_admit):
+    def _charge(self, host_bytes, device_bytes):
         if self._guard is not None:
             from .joint_statistics_replay import check_operator_allocation
             check_operator_allocation(
                 self._guard, "sequence_attribution_record_replay",
-                reserve_bytes=bytes_to_admit)
+                reserve_bytes=host_bytes, reserve_device_bytes=device_bytes)
 
     def row_sidecar(self, key, signed_totals):
         """Require every requested probe; unselected rows have no sidecar."""
