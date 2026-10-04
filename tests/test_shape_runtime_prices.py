@@ -702,15 +702,48 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
         "request": {"params": {"command": command, "checkout_snapshot": snapshot, "cwd": "."},
                     "environment": environment,
                     "task": {"argv": ["fixture-capture", *command], "working_directory": "."}}}
-    config = json.loads(srp.CHECKER_CONFIG_PATH.read_bytes())
+    # Never the packaged ``srp.CHECKER_CONFIG_PATH``: that file is a
+    # ``_production_cache_source_sha256`` input, so an in-place append here
+    # rewrites ``producer_source_sha256`` for every concurrent consumer and
+    # corrupts the checkout under test (PQ #2218).  The per-test config the
+    # autouse ``checker_sdk_fixture`` binds has this exact name; seeding it
+    # keeps callers without that fixture working too.
+    config_path = tmp_path / "checker-config.json"
+    try:
+        config = json.loads(config_path.read_bytes())
+    except FileNotFoundError:
+        config = {"schema": srp.CHECKER_CONFIG_SCHEMA, "checkers": []}
     config["checkers"].append({"snapshot": snapshot, "command": command, "cwd": ".",
                                "working_directory": ".",
                                "environment": environment, "observation_output": obs_b["path"]})
-    _obs_write(srp.CHECKER_CONFIG_PATH, config)
+    _obs_write(config_path, config)
     _obs_write(root / "checker-receipt.json", {
         "schema": srp.CHECKER_RECEIPT_SCHEMA, "observation": obs_b,
         "selector": {"action_key": key, "published_unix": 10.0, "attempt": 1}})
     return obs_b
+
+
+def test_observation_fixture_leaves_the_reviewed_checker_config_untouched(
+        tmp_path, monkeypatch):
+    """The packaged config is a producer-source digest input (PQ #2218).
+
+    ``observation_fixture`` used to append its checker entry to
+    ``srp.CHECKER_CONFIG_PATH`` in place.  Wherever that binding is the real
+    packaged file -- an importing module without the redirecting autouse
+    fixture, as the pact chain ran in the batch-11 shard -- every append
+    rewrote ``producer_source_sha256`` for concurrent consumers and left a
+    grown, torn-written file in the checkout under test.
+    """
+    packaged = tmp_path / "packaged-shape-time-checker-config.json"
+    packaged.write_bytes(json.dumps(
+        {"schema": srp.CHECKER_CONFIG_SCHEMA, "checkers": []}).encode() + b"\n")
+    before = packaged.read_bytes()
+    monkeypatch.setattr(srp, "CHECKER_CONFIG_PATH", packaged)
+    binding = observation_fixture(tmp_path)
+    assert packaged.read_bytes() == before
+    per_test = json.loads((tmp_path / "checker-config.json").read_bytes())
+    assert [entry["observation_output"] for entry in per_test["checkers"]] == [
+        binding["path"]]
 
 
 def _obs_scope(**overrides):

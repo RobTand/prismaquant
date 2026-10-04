@@ -3100,13 +3100,7 @@ def _production_cache_source_sha256(
         raise RuntimeError(
             f"production source identity cannot read package root {root}"
         )
-    identity_paths = sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file()
-        and "__pycache__" not in path.relative_to(root).parts
-        and path.suffix not in {".pyc", ".pyo"}
-    )
+    identity_paths = _production_cache_identity_paths(root)
     if not identity_paths:
         raise RuntimeError(
             f"production source identity found no files under {root}"
@@ -3122,6 +3116,57 @@ def _production_cache_source_sha256(
             ) from exc
         digest.update(relative, payload)
     return digest.hexdigest()
+
+
+def _production_cache_identity_paths(root: Path) -> list[Path]:
+    """Every file the package-tree digest hashes, in digest order.
+
+    One home for the filter: the digest, and any diagnosis of a digest
+    mismatch, must agree on what counts as a package input (PQ #2218).
+    """
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.relative_to(root).parts
+        and path.suffix not in {".pyc", ".pyo"}
+    )
+
+
+def _production_cache_recent_writes(
+    package_root: Path | None = None,
+    *,
+    limit: int = 8,
+) -> str:
+    """A digest-mismatch diagnosis: the newest hashed inputs, by name.
+
+    ``_production_cache_source_sha256`` collapses the whole tree into one
+    opaque string, so a refusal that prints only the two digests cannot say
+    which file moved (PQ #2218: a one-off ``producer_source_sha256``
+    mismatch stayed anonymous).  The stored side is unrecoverable, but the
+    writer is usually still present: the newest-modified files under the
+    same filter name it while its mtime is fresh.  Reads stat only, and
+    only runs when a seal already refused.
+    """
+    root = (
+        Path(package_root)
+        if package_root is not None
+        else Path(__file__).resolve().parent
+    )
+    stamped = []
+    for path in _production_cache_identity_paths(root):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        stamped.append((stat.st_mtime_ns, stat.st_size,
+                        path.relative_to(root).as_posix()))
+    stamped.sort(reverse=True)
+    newest = "; ".join(
+        f"{name} ({size}B, mtime {mtime_ns / 1_000_000_000:.3f})"
+        for mtime_ns, size, name in stamped[:limit]
+    )
+    return f"{len(stamped)} hashed files under {root}; newest: {newest}"
 
 
 #: Feed width for host-tensor digests. ``hashlib`` releases the GIL for

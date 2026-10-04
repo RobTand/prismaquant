@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 import struct
 
@@ -121,3 +122,17 @@ def test_package_source_preserves_strict_utf8_name_refusal(tmp_path):
     (root / "bad_\udcff.py").write_bytes(b"source")
     with pytest.raises(UnicodeEncodeError):
         cache._production_cache_source_sha256(root)
+
+
+def test_package_source_recent_writes_name_the_newest_hashed_inputs(tmp_path):
+    """A digest mismatch must be diagnosable by file, not only by digest (#2218)."""
+    root, _ = _fixture(tmp_path, b"binary")
+    os.utime(root / "lattice.tbl", (2_000_000_000, 2_000_000_000))
+    os.utime(root / "nested" / "é.bin", (1_999_999_999, 1_999_999_999))
+    report = cache._production_cache_recent_writes(root, limit=2)
+    assert report.startswith(f"5 hashed files under {root}; newest: ")
+    assert "lattice.tbl (3B, mtime 2000000000.000)" in report
+    assert "nested/é.bin (6B, mtime 1999999999.000)" in report
+    # The diagnosis and the digest share one filter: interpreter-only files
+    # are never named, so they can never masquerade as the writer.
+    assert "__pycache__" not in report and ".pyc" not in report and ".pyo" not in report
