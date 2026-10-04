@@ -11,9 +11,10 @@
   — naming both qnames and the colliding filename — wherever a cache
   directory is opened for a model's selected qname set: the dense fill's
   render-identity destination check (via delegation), the packed-expert
-  fill, the streaming dense fill, every residency read through
-  `ProductionWeightCache.prefetch`, and the joint aura head walk's per-owner
-  render reads. The mangled filename spelling is unchanged.
+  fill, the streaming dense fill, and every residency read — the
+  memoized whole-manifest check runs before the first file-backed load on
+  both the `prefetch` and the lazy `get()` path — plus the joint aura head
+  walk's per-owner render reads. The mangled filename spelling is unchanged.
 
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,

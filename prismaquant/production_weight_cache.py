@@ -389,6 +389,10 @@ class ProductionWeightCache:
     _file_load_max_bytes: int = 0
     _file_load_receipts: dict | None = None
     _expected_file_sha256: dict[tuple[str, str], str] | None = None
+    # Key count at the last successful cache-filename injectivity check
+    # (#2219); None until the first residency open. The class attribute backs
+    # caches unpickled from older pickles that predate the field.
+    _injectivity_checked_keys: int | None = None
 
     def __post_init__(self) -> None:
         # Normalize to ``activation_max_abs`` if a caller used the legacy
@@ -1352,6 +1356,10 @@ class ProductionWeightCache:
         the bounded branch requires the caller's digest binding.
         """
         from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
+        # #2219: the lazy get() -> _resolve_to_tensor -> here path must run
+        # the manifest check before the first byte of any shard is read, not
+        # only the prefetch open. Memoized: O(1) after the first clean check.
+        self._require_injective_filenames()
         path = Path(self._path_for_value(value)).absolute()
         limit = getattr(self, "_file_load_max_bytes", 0)
         window_files = getattr(self, '_resident_window_files', None)
@@ -1508,6 +1516,27 @@ class ProductionWeightCache:
             raise RuntimeError("PWC file receipt tensor or source file changed")
         return dict(receipt)
 
+    def _require_injective_filenames(self) -> None:
+        """Refuse a colliding manifest before the first file-backed load (#2219).
+
+        Whole-manifest and memoized: the check runs over ALL of
+        ``self.weights`` — not just the keys one call asked for — so a
+        colliding pair is refused no matter which subset a prefetch names or
+        whether the pair is read through ``get()`` alone. The memo is the key
+        count: loads replace values, never keys, so the set only grows (MTP
+        and packed-expert appends), which re-arms the check for the appended
+        names. Repeated opens after a clean check are an O(1) compare.
+        """
+        count = len(self.weights)
+        if getattr(self, "_injectivity_checked_keys", None) == count:
+            return
+        require_injective_cache_filenames(
+            (key[0] for key in self.weights),
+            (key[1] for key in self.weights),
+            where="production cache residency",
+        )
+        self._injectivity_checked_keys = count
+
     def prefetch(self, keys: Sequence[tuple[str, str]] | None = None,
                  max_workers: int = 4, *, executor=None) -> int:
         """Eagerly load (a subset of) cache entries via a thread pool.
@@ -1542,15 +1571,10 @@ class ProductionWeightCache:
                     if not isinstance(self.weights.get(k), torch.Tensor)]
         if not keys:
             return 0
-        # #2219: the reader/residency open. A persisted cache (or a
-        # concurrent producer's directory) can hold two distinct qnames whose
-        # manifest entries share one shard leaf; refuse before either load
-        # installs a possibly-foreign tensor.
-        require_injective_cache_filenames(
-            (key[0] for key in keys),
-            (key[1] for key in keys),
-            where="production cache residency",
-        )
+        # #2219: the reader/residency open — whole-manifest, memoized, so a
+        # colliding pair refuses even when this call names only one of the
+        # two keys (the other may arrive in a later call or via get()).
+        self._require_injective_filenames()
 
         def _load_one(key):
             value = self.weights.get(key)
