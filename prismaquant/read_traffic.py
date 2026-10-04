@@ -153,6 +153,7 @@ from typing import Any, Iterable, Mapping
 
 from . import format_registry as fr
 from . import footprint as fp
+from .source_read_plan import read_safetensors_header
 from .allocator_solver import _shape_from_stats
 from .name_projection import (
     DECLARED_OUT_OF_GRAPH,
@@ -789,7 +790,8 @@ def _header_meta(model_path: str) -> dict[str, tuple[str, tuple[int, ...]]]:
     """``{checkpoint key: (dtype, shape)}`` from the shards' own headers."""
     out: dict[str, tuple[str, tuple[int, ...]]] = {}
     for shard in sorted(Path(model_path).glob("*.safetensors")):
-        for name, meta in fp._read_safetensors_header(str(shard)).items():
+        header, _base, _size = read_safetensors_header(str(shard))
+        for name, meta in header.items():
             if name == "__metadata__":
                 continue
             out[name] = (
@@ -1202,7 +1204,7 @@ def _exported_codebook_sidecar_bytes(
             "the artifact is either incomplete or mis-declared."
         )
     try:
-        header = fp._read_safetensors_header(str(path))
+        header, _base, _size = read_safetensors_header(str(path))
         nbytes = sum(
             int(meta["data_offsets"][1]) - int(meta["data_offsets"][0])
             for name, meta in header.items() if name != "__metadata__"

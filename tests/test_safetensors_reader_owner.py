@@ -113,6 +113,8 @@ ROUTING_SITES = [
     ("prismaquant.artifact_completeness", "_read_safetensors_header"),
     ("prismaquant.pipeline", "_safetensors_parameter_count"),
     ("prismaquant.autoscale", "_shard_resident_bytes"),
+    ("prismaquant.model_profiles.validate", "_safetensors_header"),
+    ("prismaquant.read_traffic", "_header_meta"),
 ]
 
 
@@ -131,9 +133,22 @@ def test_prismaquant_sites_route_through_the_owner(
         "_read_safetensors_header": (str(shard),),
         "_safetensors_parameter_count": (str(directory),),
         "_shard_resident_bytes": (shard, 2),
+        "_safetensors_header": (shard,),
+        "_header_meta": (str(directory),),
     }[callable_name]
     with pytest.raises(AssertionError, match="routed through"):
         getattr(module, callable_name)(*arguments)
+
+
+def test_chain_roll_spans_route_through_the_owner(monkeypatch, checkpoint):
+    import chain_roll_bench
+    directory, shard, header = checkpoint
+    (directory / "model.safetensors.index.json").write_text(json.dumps({
+        "weight_map": {"tensor.a.weight": shard.name}}))
+    monkeypatch.setattr(chain_roll_bench, "read_safetensors_header",
+                        _raise, raising=False)
+    with pytest.raises(AssertionError, match="routed through"):
+        chain_roll_bench._safetensors_spans(directory, ["tensor.a.weight"])
 
 
 def test_tool_sites_route_through_the_owner(monkeypatch, checkpoint):

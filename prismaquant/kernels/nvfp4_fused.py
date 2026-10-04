@@ -18,7 +18,6 @@ from prismaquant.memory_management import (
 )
 
 
-_FP4_E2M1_MAX = 6.0
 _NVFP4_GROUP_SIZE = 16
 _NVFP4_FUSED_WARMUP_STATE = {
     "attempted": False,

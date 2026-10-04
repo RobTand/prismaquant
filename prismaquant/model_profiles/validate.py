@@ -68,6 +68,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from prismaquant.source_read_plan import read_safetensors_header
+
 
 class CheckResult:
     __slots__ = ("name", "ok", "detail")
@@ -309,10 +311,11 @@ def _check_source_passthrough(profile, model_path: str) -> CheckResult:
 def _safetensors_header(path: Path) -> dict:
     """Read a safetensors file's JSON header (8-byte little-endian length
     prefix, then the header itself). Nothing else in the file is touched, so
-    this is a few-hundred-KB read even for a 20 GB shard."""
-    with open(path, "rb") as f:
-        n = int.from_bytes(f.read(8), "little")
-        return json.loads(f.read(n))
+    this is a few-hundred-KB read even for a 20 GB shard. Decoding and the
+    bounded-prefix refusals are the container grammar owner's
+    (prismaquant.source_read_plan)."""
+    header, _base, _size = read_safetensors_header(str(path))
+    return header
 
 
 def _source_weight_map(model_path: str) -> tuple[dict[str, str], str]:
