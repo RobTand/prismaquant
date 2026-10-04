@@ -233,6 +233,175 @@ def test_current_consumer_and_independent_producer_sdk_policies_stay_exact(autho
         sg.validate_original_source_runtime(changed, changed)
 
 
+def _selected_reader_producer_fixtures(case):
+    """Real receipt claim rows beside the one identity a SDK5 result carries.
+
+    The claim rows are the fixture owner's actual launch-env delivery
+    observations; the context dict assembles only the identity fields the
+    consumer join reads, from those same real rows and the observed real
+    resources. It is not an SDK result, no queue is read, and nothing here
+    qualifies a producer or a source.
+    """
+    receipt = case['owner'].receipt()
+    claim = receipt['deliveries'][0]['native_delivery']['claim']
+    _, runtime = sg._control(case['authority']['runtime'], 'fixture runtime')
+    identity = {key: claim[key] for key in ('queue_root', 'action_key', 'nonce', 'scope_id',
+                                            'worker', 'host', 'incarnation', 'helper_root')}
+    _, resources = sg._control(case['authority']['resources'], 'fixture resources')
+    context = dict(identity,
+        schema='prismabuild.native_producer_context.v1', published_unix=1791000000.0,
+        attempt=1, generation='fixture-generation', receipt_sha256='a' * 64,
+        runtime_sha256='b' * 64, resources=resources['claim_demand'],
+        resources_semantics='selected-claim-sealed-demand',
+        attempt_source='selected-immutable-attempt')
+    result = {'action_key': identity['action_key'], 'published_unix': context['published_unix'],
+              'attempt': context['attempt'], 'generation': context['generation'],
+              'host': identity['host'], 'worker_id': identity['worker'],
+              'receipt': {'receipt_sha256': context['receipt_sha256'],
+                          'producer': {'runtime': {'runtime_sha256': context['runtime_sha256']}}}}
+    return receipt, context, result
+
+
+@pytest.mark.parametrize('axis', ['queue_root', 'action_key', 'nonce', 'scope_id',
+                                  'worker', 'host', 'helper_root'])
+def test_reader_delivery_cannot_substitute_another_selected_producer(
+        authority_case, monkeypatch, axis):
+    """Every delivery joins the actual selected producer, axis by axis.
+
+    Each mutation also satisfies the context/result mirrors that precede the
+    delivery join, so the refusal that fires is the delivery identity join
+    itself and not an earlier policy check.
+    """
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    receipt, context, result = _selected_reader_producer_fixtures(case)
+    authority = case['authority']
+    if axis == 'helper_root':
+        _, runtime = sg._control(authority['runtime'], 'fixture runtime')
+        runtime = copy.deepcopy(runtime)
+        context[axis] = '/foreign-selected-helper'
+        runtime['prismabuild']['helper_root'] = context['helper_root']
+        runtime['prismabuild']['runtime_generation'] = Path(context['helper_root']).name
+        authority = dict(authority, runtime=_bound(
+            case['tmp'] / 'foreign-helper-runtime.json', runtime))
+    elif axis == 'queue_root':
+        context[axis] = '/foreign-queue'
+    elif axis == 'action_key':
+        context[axis] = 'f' * 64
+        result['action_key'] = context['action_key']
+    elif axis in ('nonce', 'scope_id'):
+        context[axis] = 'f' * 32
+    elif axis == 'worker':
+        context['worker'] = context['incarnation'] = 'another-worker'
+        result['worker_id'] = 'another-worker'
+    else:
+        context['host'] = 'another-host'
+        result['host'] = 'another-host'
+    with pytest.raises(RuntimeError, match='actual reader delivery selected producer'):
+        sg._require_original_reader_producer(receipt, authority, result,
+                                             authority['runtime'])
+    assert case['owner'].receipt() == before
+
+
+@pytest.mark.parametrize('damage', ['provenance', 'semantics', 'reservation', 'worker',
+                                    'incarnation', 'receipt', 'runtime'])
+def test_reader_context_policy_fields_cannot_be_relabelled(
+        authority_case, monkeypatch, damage):
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    receipt, context, result = _selected_reader_producer_fixtures(case)
+    if damage == 'provenance':
+        context['attempt_source'] = 'launch-env'
+        expected = 'selected reader context provenance'
+    elif damage == 'semantics':
+        context['resources_semantics'] = 'ledger-allowance'
+        expected = 'selected reader reservation semantics'
+    elif damage == 'reservation':
+        context['resources'] = {**context['resources'], 'mem_gb': 99}
+        expected = 'selected reader actual producer reservation'
+    elif damage == 'worker':
+        context['worker'] = 'another-worker'
+        expected = 'selected reader full worker identity'
+    elif damage == 'incarnation':
+        context['incarnation'] = 'another-incarnation'
+        expected = 'selected reader full incarnation'
+    elif damage == 'receipt':
+        context['receipt_sha256'] = 'c' * 64
+        expected = 'selected reader execution receipt'
+    else:
+        context['runtime_sha256'] = 'd' * 64
+        expected = 'selected reader attested runtime'
+    with pytest.raises(RuntimeError, match=expected):
+        sg._require_original_reader_producer(receipt, case['authority'], result,
+                                             case['authority']['runtime'])
+    assert case['owner'].receipt() == before
+
+
+def test_reader_delivery_join_holds_until_the_unshared_helper_tree(authority_case, monkeypatch):
+    """The real claim rows satisfy every producer join this consumer owns.
+
+    The unmutated join runs to its final check and stops only at the sealed
+    helper-tree proof: the fixture's launch helper root is the fleet
+    generation while the SDK is the test-injected install, so the two never
+    share one root and the complete-tree digest cannot agree. That refusal
+    is the honest current boundary; a sealed SDK5 generation (PB #1485 and
+    the separately authorized helper selection) is the positive prerequisite.
+    """
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    receipt, context, result = _selected_reader_producer_fixtures(case)
+    with pytest.raises(RuntimeError, match='selected reader actual complete helper tree'):
+        sg._require_original_reader_producer(receipt, case['authority'], result,
+                                             case['authority']['runtime'])
+    assert case['owner'].receipt() == before
+
+
+@pytest.mark.parametrize('damage', [None, 'foreign-node', 'restamped-snapshot',
+                                    'null-compatibility', 'target-source', 'target-runtime'])
+def test_reader_source_snapshot_cannot_bridge_family_acceptance(
+        authority_case, monkeypatch, damage):
+    """The reader's executed snapshot binds through the same family owner."""
+    case = authority_case
+    before = _forbid_source_work(case, monkeypatch)
+    runtime = case['packet']['runtime']
+    snapshot_parent = 'b' * 40
+    request = {'params': {'checkout_snapshot': {
+        'schema': 'prismaquant.prismabuild.pbrun_checkout_snapshot.v2',
+        'commit': 'c' * 40, 'parent': snapshot_parent, 'refs': {},
+        'subdirectory': '.', 'input': {'id': 'fixture-snapshot'}}}}
+    family = {'schema': 'prismaquant.original_source_unchanged_family.v1',
+              'old_source': snapshot_parent, 'new_source': 'd' * 40,
+              'compatibility': _bound(case['tmp'] / 'reader-compat.json', {'accepted': True}),
+              'controls': ['tests/original-source-admission-reader'],
+              'target_prismaquant_source_sha256': runtime['prismaquant_source_sha256'],
+              'target_runtime_sha256': sg._canonical_sha256(runtime, 'fixture target runtime')}
+    accepted = {'tests/original-source-admission-reader': family}
+    reader = {'node_id': 'tests/original-source-admission-reader',
+              'source_snapshot': snapshot_parent, 'compatibility': family['compatibility']}
+    assert sg._require_original_qualified_source(reader, request, accepted, runtime) is None
+    if damage is None:
+        assert case['owner'].receipt() == before
+        return
+    if damage == 'foreign-node':
+        reader['node_id'] = 'tests/another-reader'
+        expected = 'qualified member lacks independently selected source-family acceptance'
+    elif damage == 'restamped-snapshot':
+        reader['source_snapshot'] = 'e' * 40
+        expected = 'original executed member source is not restamped'
+    elif damage == 'null-compatibility':
+        reader['compatibility'] = None
+        expected = 'every qualified member requires'
+    elif damage == 'target-source':
+        accepted[reader['node_id']] = dict(family, target_prismaquant_source_sha256='0' * 64)
+        expected = 'qualified member actual target source implementation'
+    else:
+        accepted[reader['node_id']] = dict(family, target_runtime_sha256='0' * 64)
+        expected = 'qualified member actual target runtime'
+    with pytest.raises(RuntimeError, match=expected):
+        sg._require_original_qualified_source(reader, request, accepted, runtime)
+    assert case['owner'].receipt() == before
+
+
 def test_owned_control_join_is_nonactivating_and_independently_frozen(authority_case, monkeypatch):
     case = authority_case
     before = _forbid_source_work(case, monkeypatch)
