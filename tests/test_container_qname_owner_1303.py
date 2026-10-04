@@ -139,7 +139,7 @@ class TestQnameGrammarsStatedOnce:
 
     def test_per_expert_pattern_is_defined_once(self):
         source = (ROOT / "prismaquant" / "measure_quant_cost.py").read_text()
-        assert source.count(r"r\"^(.+\.experts)\.(\d+)\.([^.]+)$\"") == 1
+        assert source.count(r"^(.+\.experts)\.(\d+)\.([^.]+)$") == 1
 
     def test_canonical_linear_name_uses_the_compiled_grammar(self):
         module = pytest.importorskip("prismaquant.measure_quant_cost")
@@ -177,7 +177,8 @@ class TestQnameGrammarsStatedOnce:
         ) == 45
         assert _prefix_layer_index("model.layers.x.foo", "model.layers.") is None
         assert _prefix_layer_index("model.layers.3", "model.layers.") is None
-        assert _prefix_layer_index("model.layers.3.other.4.z", "model.layers.") is None
+        # A deeper dotted tail is still one layer component: 3, not a refusal.
+        assert _prefix_layer_index("model.layers.3.other.4.z", "model.layers.") == 3
         # The prefix is a literal, never a pattern: metacharacters are escaped.
         assert _prefix_layer_index(
             "model(1).layers.3.foo", "model(1).layers.") == 3
