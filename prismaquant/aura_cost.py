@@ -161,13 +161,21 @@ def _checkpoint_identity_mismatch(
     stored: object,
     expected: object,
 ) -> RuntimeError:
-    from prismaquant.production_weight_cache import identity_value_for_error
+    from prismaquant.production_weight_cache import (
+        _production_cache_recent_writes,
+        identity_value_for_error,
+    )
 
+    detail = ""
+    if field == "producer_source_sha256":
+        # The two digests are opaque; name the package inputs themselves so
+        # the writer is identifiable while its mtime is still fresh (#2218).
+        detail = f"; {_production_cache_recent_writes()}"
     return RuntimeError(
         f"AURA checkpoint identity mismatch at {field}: "
         f"stored={identity_value_for_error(stored)} "
-        f"current={identity_value_for_error(expected)}; refusing reuse or "
-        "recompute"
+        f"current={identity_value_for_error(expected)}{detail}; refusing "
+        "reuse or recompute"
     )
 
 
