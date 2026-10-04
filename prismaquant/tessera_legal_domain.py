@@ -828,6 +828,12 @@ def attested_cells(payload: "Mapping[str, object] | None" = None
     """
     data = packaged_contract_payload() if payload is None else payload
     lanes = data.get("lane_eligibility") or {}
+    covered = {}
+    if lanes.get("schema") == "tessera.lane-eligibility.v11":
+        from .lane_eligibility import _parse_table
+        table = _parse_table(lanes, data["formats"], "", "", "",
+                             native_extensions=data["native_extensions"])
+        covered = {c.id: c.covered_rates for c in table.cells}
     rows: list[AttestedCell] = []
     for cell in lanes.get("cells", ()):
         runtime = cell.get("runtime") or {}
@@ -838,7 +844,7 @@ def attested_cells(payload: "Mapping[str, object] | None" = None
         evidence = cell.get("evidence") or {}
         artifact = evidence.get("artifact")
         smoke = evidence.get("smoke") or {}
-        for rate in cell.get("rungs_q256") or ():
+        for rate in covered.get(cell.get("id"), cell.get("rungs_q256") or ()):
             for residency in _residencies_from_flags(flags):
                 for mode in runtime.get("execution_modes") or ():
                     rows.append(AttestedCell(

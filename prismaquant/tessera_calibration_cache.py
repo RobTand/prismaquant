@@ -20,6 +20,8 @@ from types import MappingProxyType
 from .cost_stage_checkpoint import atomic_write_bytes, prepare_journal, write_unit
 from .digests import (
     DIRECT_ASCII_LAX,
+    DIRECT_ASCII_SPACED_LAX,
+    DIRECT_ASCII_SPACED_STRICT,
     DIRECT_ASCII_STRICT,
     SOURCE_HASH_BLOCK_BYTES,
     bytes_sha256hex,
@@ -40,6 +42,11 @@ MAX_CAPTURE_METADATA_BYTES = 16 * 1024**2
 MAX_CAPTURE_EXECUTION_POLICIES = 8
 #: The receipt of a streamed capture's recording source owner (PQ #1896).
 RECORDING_RECEIPT_SCHEMA = 'prismaquant.capture_source_recording.v1'
+# Fatal copy-fence containment only: source charges/FDs remain with these
+# existing owners until explicit close proves the exact streams completed.
+# No successful owner or reusable activation/weight enters this registry.
+_FAILED_ORIGINAL_COPY_OWNERS = set()
+_FAILED_ORIGINAL_COPY_LOCK = threading.Lock()
 
 
 #: The guarded source hash's read block is ``digests.SOURCE_HASH_BLOCK_BYTES``,
@@ -424,6 +431,17 @@ class CaptureSourceAuthentication:
         retained independently verified, kernel-sealed delivery, never the pool.
         """
         from .source_generation import original_generation_coordinates
+        from .stage_inputs import require_source_identity
+
+        inputs = json.loads(DIRECT_ASCII_SPACED_STRICT.text({
+            'publisher': {'id': publisher_id, 'revision': publisher_revision,
+                          'input': publisher_input},
+            'producer_source': require_source_identity(producer_source),
+            'readset': readset_input, 'source_paths': source_paths,
+        }))
+        publisher_input = inputs['publisher']['input']
+        readset_input, source_paths = inputs['readset'], inputs['source_paths']
+        producer_source = inputs['producer_source']
 
         if type(max_material_bytes) is not int or max_material_bytes <= 0 or not callable(resource_check):
             raise RuntimeError('original material requires finite admitted material bytes and resource check')
@@ -441,7 +459,9 @@ class CaptureSourceAuthentication:
         self._original = dict(coordinates=coordinates, limit=max_material_bytes,
                               windows={}, verified={}, publisher_id=publisher_id,
                               publisher_revision=publisher_revision,
-                              readset_sha256=readset_input['sha256'])
+                              readset_sha256=readset_input['sha256'],
+                              inputs_json=DIRECT_ASCII_SPACED_STRICT.text(inputs),
+                              completed_copies=[])
         try:
             # This bounded first lane checks the closed auxiliary bootstrap, not
             # just config/index. No model payload/header is read before it ends.
@@ -460,6 +480,14 @@ class CaptureSourceAuthentication:
                 value = self.read_json(self.root / 'config.json')
             if (not isinstance(value, dict) or value.get('configuration_files') or value.get('auto_map')):
                 raise RuntimeError('unsupported dynamic original bootstrap configuration')
+            # Keep the already authenticated metadata facts, not a pool/stat
+            # cache or a second source identity. Strings expose no mutable
+            # parsed object to later consumers; tensor delivery stays owned.
+            reserve_allocation(resource_check, 'before_original_identity_metadata',
+                               cpu_bytes=2 * (coordinates['config.json'].size
+                                              + coordinates['model.safetensors.index.json'].size))
+            self._original['bootstrap_json'] = DIRECT_ASCII_SPACED_STRICT.text(
+                {'config': value, 'index': index})
             return self
         except BaseException:
             self.close()
@@ -474,6 +502,125 @@ class CaptureSourceAuthentication:
         import torch
         if self._original is not None and torch.device(device).type != 'cpu':
             raise RuntimeError('original material GPU loads/transfers are not qualified')
+
+    def original_checkpoint_descriptor(self):
+        """Independently bound expected whole-file facts; not delivery completion.
+
+        The constructor authenticated all auxiliaries and interpreted config/
+        complete index from the actual sealed buffers. This method reuses those
+        immutable metadata facts. Every later tensor decoder still authenticates
+        its delivered whole file; the receipt, separately, names actual reads.
+        """
+        from .digests import is_sha256hex
+        from .source_generation import OriginalCoordinate
+
+        with self._lock:
+            self._require_open()
+            original = self._original
+            if (original is None or not is_sha256hex(self.manifest_sha256)
+                    or not is_sha256hex(original.get('readset_sha256'))
+                    or not original.get('bootstrap_json')):
+                raise RuntimeError('original identity requires bound publisher/readset/bootstrap proof')
+            coordinates = original['coordinates']
+            if (not coordinates or set(coordinates) != set(self._expected)
+                    or any(not isinstance(row, OriginalCoordinate) or row.sha256 != self._expected[name]
+                           for name, row in coordinates.items())):
+                raise RuntimeError('original identity coordinate/publisher roster differs')
+            for name, row in coordinates.items():
+                if name.endswith('.safetensors'):
+                    continue
+                proof = original['verified'].get(name)
+                if (not isinstance(proof, dict) or proof.get('sha256') != row.sha256
+                        or proof.get('bytes_hashed') != row.size):
+                    raise RuntimeError('original identity requires every authenticated auxiliary proof')
+            reserve_allocation(self.resource_check, 'before_original_identity_decode',
+                               cpu_bytes=2 * (coordinates['config.json'].size
+                                              + coordinates['model.safetensors.index.json'].size))
+            metadata = json.loads(original['bootstrap_json'])
+            index = metadata['index']['weight_map']
+            weights = {name for name in coordinates if name.endswith('.safetensors')}
+            if not index or set(index.values()) != weights:
+                raise RuntimeError('original identity incomplete checkpoint index/roster')
+            return {
+                'config': metadata['config'], 'index': metadata['index'],
+                'shards': [dict(name=name, path=str(self.root / name), size=coordinates[name].size,
+                                sha256=coordinates[name].sha256) for name in sorted(weights)],
+                'metadata': [dict(name=name, size=row.size, sha256=row.sha256)
+                             for name, row in sorted(coordinates.items()) if name not in weights],
+            }
+
+    def _retain_original_host_staging(self, completion, tensor):
+        # Alias retention and its native source join share the receipt lock.
+        key = tensor.untyped_storage()._cdata
+        with self._lock:
+            self._require_open()
+            if self._original_close_in_progress:
+                raise RuntimeError('original material close is draining source copies')
+            completion.host_staging.append(tensor)
+            for name, state in self._files.items():
+                if key in state.get('storages', {}):
+                    completion._original_sources[name] = self._original['verified'][name]['delivery_index']
+
+    @staticmethod
+    def _original_copy_receipt(completion):
+        stream = completion.stream
+        device = getattr(stream, 'device', None)
+        stream_id = getattr(stream, 'cuda_stream', None)
+        # CPU event spies retain their actual absence of native identity; they
+        # cannot become per-entry CUDA completion witnesses.
+        return dict(device=None if device is None else str(device),
+            stream_id=stream_id if type(stream_id) is int else None,
+            files=dict(sorted(completion._original_sources.items())),
+            fence=completion._original_fence, failed=bool(completion.failed),
+            retained_host_aliases=len(completion.host_staging),
+            host_aliases_at_fence=completion._original_retained_aliases)
+
+    def _retain_original_copy_completion(self, completion, stream):
+        with self._lock:
+            self._require_open()
+            if self._original is None:
+                raise RuntimeError('original copy completion requires the original source owner')
+            if self._original_close_in_progress:
+                raise RuntimeError('original material close is draining source copies')
+            if any(value.failed for value in self._original_copy_completions):
+                raise RuntimeError('original source has unproved CUDA completion; close/recover before more copies')
+            completion.stream = stream
+            self._original_copy_completions.add(completion)
+
+    def _release_original_copy_completion(self, completion, *, fence):
+        with self._lock:
+            # The hardware fence has already completed OUTSIDE this lock.
+            # No receipt can observe a half-retired pending completion.
+            completion._original_fence = fence
+            completion._original_retained_aliases = len(completion.host_staging)
+            completion.host_staging.clear()
+            witness = self._original_copy_receipt(completion)
+            self._original['completed_copies'].append(witness)
+            self._original_copy_completions.remove(completion)
+            if not any(value.failed for value in self._original_copy_completions):
+                with _FAILED_ORIGINAL_COPY_LOCK:
+                    _FAILED_ORIGINAL_COPY_OWNERS.discard(self)
+
+    def _root_failed_original_copy(self, completion):
+        with self._lock:
+            if completion not in self._original_copy_completions or completion.stream is None:
+                raise RuntimeError('failed original copy was not registered before enqueue')
+            completion.failed = True
+            with _FAILED_ORIGINAL_COPY_LOCK:
+                _FAILED_ORIGINAL_COPY_OWNERS.add(self)
+
+    @classmethod
+    def close_failed_original_copies(cls):
+        """Explicit fatal-fence recovery, including owners callers abandoned.
+
+        Failure preserves the process root and existing resource charges.
+        This is teardown, never background work or permission to retry capture.
+        """
+        with _FAILED_ORIGINAL_COPY_LOCK:
+            owners = tuple(_FAILED_ORIGINAL_COPY_OWNERS)
+        for owner in owners:
+            owner.close()
+        return len(owners)
 
     def _reap_original_material(self):
         """Called only under the owner lock; native storage aliases retain credit."""
@@ -504,6 +651,8 @@ class CaptureSourceAuthentication:
         names = sorted({self._name(path) for path in paths})
         with self._lock:
             self._require_open()
+            if self._original_close_in_progress:
+                raise RuntimeError('original material close is draining source copies')
             if self._original is None or not names:
                 raise RuntimeError('qualified original material window required')
             self._reap_original_material()
@@ -583,6 +732,8 @@ class CaptureSourceAuthentication:
         self._readers = 0
         self._closed = False
         self._original = None
+        self._original_copy_completions = set()
+        self._original_close_in_progress = False
 
     def __enter__(self):
         self._require_open()
@@ -605,6 +756,8 @@ class CaptureSourceAuthentication:
         name = self._name(path)
         with self._lock:
             self._require_open()
+            if self._original_close_in_progress:
+                raise RuntimeError('original material close is draining source copies')
             if self._original is not None and not self._original['windows'].get(name):
                 raise RuntimeError('original source read requires an active material window')
             if name not in self._files:
@@ -617,7 +770,9 @@ class CaptureSourceAuthentication:
             from .staged_whole_file import read_staged_sealed_file
 
             row = self._original['coordinates'][name]
-            buffer = read_staged_sealed_file(Path(row.path), row.sha256, row.size, label='original-material')
+            delivery = {}
+            buffer = read_staged_sealed_file(Path(row.path), row.sha256, row.size,
+                label='original-material', delivery_receipt=delivery)
             fd = None
             try:
                 buffer.require_sealed()
@@ -630,7 +785,22 @@ class CaptureSourceAuthentication:
                 state = dict(fd=fd, before=os.fstat(fd), buffer=buffer, sha256=row.sha256,
                              sha256_source='publisher_bound_kernel_sealed_delivery', payload_reads=0,
                              lock=threading.Lock(), readers=0, storages={})
-                self._original['verified'][name] = dict(name=name, sha256=row.sha256, bytes_hashed=row.size)
+                import fcntl
+
+                delivery.update(sealed_fd_stat=list(file_stat_signature(state['before'])),
+                                kernel_seals=fcntl.fcntl(fd, fcntl.F_GET_SEALS))
+                reserve_allocation(self.resource_check, 'before_original_delivery_witness',
+                                   cpu_bytes=2 * len(DIRECT_ASCII_SPACED_LAX.text(delivery)))
+                previous = self._original['verified'].get(name)
+                history = [] if previous is None else list(previous['prior_deliveries'])
+                if previous is not None:
+                    history.append({key: value for key, value in previous.items()
+                                    if key != 'prior_deliveries'})
+                proof = dict(name=name, sha256=row.sha256, bytes_hashed=row.size,
+                    delivery_index=1 if previous is None else previous['delivery_index'] + 1,
+                    native_delivery=delivery, payload_reads=0, prior_deliveries=history)
+                state['proof'] = proof
+                self._original['verified'][name] = proof
                 return state
             except BaseException:
                 if fd is not None:
@@ -660,6 +830,8 @@ class CaptureSourceAuthentication:
         os.close(state['fd'])
         if 'buffer' in state:
             state['buffer'].close()
+        if 'proof' in state:
+            state['proof']['payload_reads'] = state['payload_reads']
 
     def _check_fingerprint(self, name, observed):
         """Hold a recording owner's held object to the object its prep stat."""
@@ -958,17 +1130,37 @@ class CaptureSourceAuthentication:
     def receipt(self):
         self.require_unchanged()
         if self._original is not None:
-            return dict(schema='prismaquant.original_source_material.v1',
-                        publisher_control_sha256=self.manifest_sha256,
-                        publisher_id=self._original['publisher_id'],
-                        publisher_revision=self._original['publisher_revision'],
-                        readset_sha256=self._original['readset_sha256'],
-                        authentication='independent publisher/readset SHA256 and native Git auxiliary objects; kernel-sealed whole-file delivery',
-                        automatic_capture_qualified=False,
-                        verified_files=[dict(row) for name, row in sorted(self._original['verified'].items())
-                                        if name.endswith('.safetensors')],
-                        auxiliary_verified=sorted(name for name in self._original['verified'] if not name.endswith('.safetensors')),
-                        material_live_bytes=self.material_live_bytes)
+            with self._lock:
+                self._reap_original_material()
+                delivered = []
+                for name, row in sorted(self._original['verified'].items()):
+                    state = self._files.get(name)
+                    delivered.extend(dict(prior, held=False, material_windows=0, readers=0,
+                                          storage_aliases=0) for prior in row['prior_deliveries'])
+                    current = {key: item for key, item in row.items() if key != 'prior_deliveries'}
+                    delivered.append(dict(current, held=state is not None,
+                        payload_reads=row['payload_reads'] if state is None else state['payload_reads'],
+                        material_windows=self._original['windows'].get(name, 0),
+                        readers=0 if state is None else state['readers'],
+                        storage_aliases=0 if state is None else len(state['storages'])))
+                value = dict(schema='prismaquant.original_source_material.v1',
+                    publisher_control_sha256=self.manifest_sha256,
+                    publisher_id=self._original['publisher_id'],
+                    publisher_revision=self._original['publisher_revision'],
+                    readset_sha256=self._original['readset_sha256'],
+                    authentication='independent publisher/readset SHA256 and native Git auxiliary objects; kernel-sealed whole-file delivery',
+                    automatic_capture_qualified=False,
+                    verified_files=[{key: row[key] for key in ('name', 'sha256', 'bytes_hashed')}
+                        for name, row in sorted(self._original['verified'].items()) if name.endswith('.safetensors')],
+                    auxiliary_verified=sorted(name for name in self._original['verified']
+                                              if not name.endswith('.safetensors')),
+                    material_live_bytes=sum(state['before'].st_size for state in self._files.values()),
+                    material_limit_bytes=self._original['limit'], deliveries=delivered,
+                    pending_copy_completions=[self._original_copy_receipt(value)
+                        for value in self._original_copy_completions],
+                    copy_completions=list(self._original['completed_copies']))
+                # Nested lease/delivery rows are independent snapshots too.
+                return json.loads(DIRECT_ASCII_SPACED_STRICT.text(value))
         if self.is_recording:
             return self._recording_receipt()
         adopted = self.adopted_identity_cache_sha256 is not None
@@ -1050,31 +1242,57 @@ class CaptureSourceAuthentication:
             raise RuntimeError('complete capture source authentication omitted a file')
         return receipt
 
+    def _finish_close_locked(self):
+        try:
+            self.require_unchanged()
+        finally:
+            self._closed = True
+            for name, state in self._files.items():
+                if (self.is_recording and self.release_read_pages
+                        and name not in self._released):
+                    # The bounded page policy's last word: nothing this
+                    # owner retained outlives it. Advice only, so a
+                    # failure to advise never leaks a descriptor.
+                    try:
+                        os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
+                    except OSError:
+                        pass
+                self._close_source_state(state)
+
     def close(self):
         with self._lock:
             if self._closed:
                 return
-            if self._original is not None:
-                self._reap_original_material()
-                if self._files or any(self._original['windows'].values()):
-                    raise RuntimeError('cannot close original material with live readers or consumers')
             if self._readers:
                 raise RuntimeError('cannot close capture source with active readers')
-            try:
-                self.require_unchanged()
-            finally:
-                self._closed = True
-                for name, state in self._files.items():
-                    if (self.is_recording and self.release_read_pages
-                            and name not in self._released):
-                        # The bounded page policy's last word: nothing this
-                        # owner retained outlives it. Advice only, so a
-                        # failure to advise never leaks a descriptor.
-                        try:
-                            os.posix_fadvise(state['fd'], 0, 0, os.POSIX_FADV_DONTNEED)
-                        except OSError:
-                            pass
-                    self._close_source_state(state)
+            if self._original is None:
+                self._finish_close_locked()
+                return
+            completions = ()
+            if self._original is not None:
+                if self._original_close_in_progress:
+                    raise RuntimeError('original material close is already draining source copies')
+                if any(not value.failed for value in self._original_copy_completions):
+                    raise RuntimeError('cannot close original material with active source copies')
+                completions = tuple(self._original_copy_completions)
+                self._original_close_in_progress = True
+        try:
+            # Hardware drains never hold the receipt lock. Pending snapshots
+            # remain truthful while a fatal fence is outstanding; new material
+            # consumers cannot race this explicit close.
+            for completion in completions:
+                completion.drain_failed_copy()
+                self._release_original_copy_completion(completion,
+                    fence='cuda_stream_synchronize_after_event_failure')
+            with self._lock:
+                if self._original is not None:
+                    self._reap_original_material()
+                    if self._files or any(self._original['windows'].values()):
+                        raise RuntimeError('cannot close original material with live readers or consumers')
+                self._finish_close_locked()
+        finally:
+            with self._lock:
+                self._original_close_in_progress = False
 
 
 class _CaptureSourceSafeOpen:
@@ -2258,3 +2476,183 @@ def _parallel_prefetch_capture(path, *, manifest, expected_identity, census, nam
           f'0 misses, {min(threads, len(names))} active readers '
           f'({threads} configured maximum)',flush=True)
     return (acts,hessians,counts,maxima),dict(path=str(path.resolve()),sha256=digest)
+
+
+def require_original_source_authority(owner, authority_input, plan_input, admitted_execution):
+    """Require independently bound full proofs without changing source eligibility.
+
+    ``owner=None`` is the gate-first control-only path. A real existing CPU
+    owner additionally joins its immutable constructor and bootstrap facts.
+    Neither path constructs an owner, opens source material, selects a profile,
+    allocates a device or creates output. Missing actual full64/root admission
+    refuses; normalization is never a CPU substitute for these proofs.
+    """
+    from .source_generation import (
+        _normalize_original_source_authority, _require_original_source_proofs,
+    )
+
+    authority = _normalize_original_source_authority(owner, authority_input, plan_input, admitted_execution)
+    return _require_original_source_proofs(authority, admitted_execution['resource_check'])
+
+
+ORIGINAL_MATERIAL_RECEIPT_KEYS = frozenset({
+    'schema', 'publisher_control_sha256', 'publisher_id', 'publisher_revision', 'readset_sha256',
+    'authentication', 'automatic_capture_qualified', 'verified_files', 'auxiliary_verified',
+    'material_live_bytes', 'material_limit_bytes', 'deliveries', 'pending_copy_completions', 'copy_completions',
+})
+ORIGINAL_DELIVERY_KEYS = frozenset({
+    'name', 'sha256', 'bytes_hashed', 'delivery_index', 'native_delivery', 'held',
+    'material_windows', 'readers', 'storage_aliases', 'payload_reads',
+})
+ORIGINAL_NATIVE_DELIVERY_KEYS = frozenset({
+    'claim', 'serving', 'ref_id', 'entry', 'source_fd_stat', 'descriptors_closed',
+    'lease_released', 'sealed_fd_stat', 'kernel_seals',
+})
+ORIGINAL_NATIVE_CLAIM_KEYS = frozenset({
+    'queue_root', 'action_key', 'nonce', 'scope_id', 'worker', 'host', 'incarnation',
+    'attempt_source', 'map_path', 'helper_root',
+})
+ORIGINAL_COPY_RECEIPT_KEYS = frozenset({
+    'device', 'stream_id', 'files', 'fence', 'failed', 'retained_host_aliases', 'host_aliases_at_fence',
+})
+
+
+def validate_original_source_material_receipt(value, authority):
+    """Validate the captured producer's actual snapshot, not this consumer's lease.
+
+    All delivered/held/lookahead files remain in the snapshot. Installed
+    prefix/head coverage belongs to source_initialization, not this receipt.
+    Native claim nonces here are observations of the capture producer and are
+    deliberately not compared with a later consumer's active claim.
+    """
+    from .source_generation import _control, _exact, _same, _contract, _snapshot
+    from .residency_map import residency_map_key
+    from .io_engine import _SEALS
+
+    _exact(value, ORIGINAL_MATERIAL_RECEIPT_KEYS, 'original source material receipt')
+    _same(value['schema'], 'prismaquant.original_source_material.v1', 'original material receipt schema')
+    publisher = authority['publisher']
+    for actual, expected in (('publisher_control_sha256', publisher['input']['sha256']),
+        ('publisher_id', publisher['id']), ('publisher_revision', publisher['revision']),
+        ('readset_sha256', authority['readset']['sha256']), ('automatic_capture_qualified', False)):
+        _same(value[actual], expected, f'original material {actual}')
+    _contract.require(value['automatic_capture_qualified'] is False,
+                      'original material cannot claim automatic source qualification')
+    _same(value['authentication'],
+        'independent publisher/readset SHA256 and native Git auxiliary objects; kernel-sealed whole-file delivery',
+        'original material authentication')
+    _, producer = _control(authority['producer'], 'original expected material producer')
+    _, paths = _control(authority['source_paths'], 'original expected material paths')
+    _, readset = _control(authority['readset'], 'original expected material readset')
+    _, runtime = _control(authority['runtime'], 'original expected material runtime')
+    _, resources = _control(authority['resources'], 'original expected material resources')
+    expected = {**producer['files'], **producer['auxiliary_sha256'], 'config.json': producer['config_sha256']}
+    entries = {(row['path'], row['offset']): row for row in readset['entries']}
+    rows = value['deliveries']
+    _contract.require(isinstance(rows, list), 'original material deliveries must be actual rows')
+    generations, latest, live_bytes, claim = set(), {}, 0, None
+    for row in rows:
+        _exact(row, ORIGINAL_DELIVERY_KEYS, 'original actual delivered file')
+        name = row['name']
+        _contract.require(type(name) is str and name in expected,
+                          'original material delivery name is outside authority')
+        _contract.integer(row['delivery_index'], where='actual delivery generation', minimum=1)
+        generation = (name, row['delivery_index'])
+        _contract.require(generation not in generations, 'original material repeats a delivery generation')
+        generations.add(generation)
+        if name not in latest or latest[name]['delivery_index'] < row['delivery_index']:
+            latest[name] = row
+        _same(row['sha256'], expected[name], f'original delivered {name} digest')
+        entry = entries[(paths[name], 0)]
+        _same(row['bytes_hashed'], entry['bytes'], f'original delivered {name} whole-file length')
+        for key in ('bytes_hashed', 'delivery_index', 'material_windows', 'readers', 'storage_aliases', 'payload_reads'):
+            _contract.integer(row[key], where=f'original delivered {name} {key}',
+                              minimum=1 if key in ('bytes_hashed', 'delivery_index') else 0)
+        _contract.require(type(row['held']) is bool and (row['held'] or not any(
+            row[key] for key in ('material_windows', 'readers', 'storage_aliases'))),
+            'retired original delivery still claims a live consumer')
+        native = _exact(row['native_delivery'], ORIGINAL_NATIVE_DELIVERY_KEYS, 'actual native original delivery')
+        current_claim = _exact(native['claim'], ORIGINAL_NATIVE_CLAIM_KEYS, 'actual original producer claim')
+        _contract.sha256(current_claim['action_key'], where='actual original producer action key')
+        for key in ORIGINAL_NATIVE_CLAIM_KEYS - {'action_key'}:
+            _contract.string(current_claim[key], where=f'actual original producer {key}')
+        _same(current_claim['attempt_source'], 'launch-env', 'actual original launch identity')
+        _same(current_claim['worker'], current_claim['incarnation'], 'actual original worker incarnation')
+        _same(current_claim['helper_root'], runtime['prismabuild']['helper_root'], 'actual original producer SDK root')
+        if claim is None:
+            claim = current_claim
+        else:
+            _same(current_claim, claim, 'actual original same producer claim')
+        serving = _exact(native['serving'], {'tier_id', 'epoch', 'pin_id', 'range_ref'}, 'actual native serving record')
+        _same(serving['range_ref'], residency_map_key(paths[name], 0), 'actual native whole-file range')
+        for key in ('tier_id', 'pin_id'):
+            _contract.string(serving[key], where=f'actual native {key}')
+        _contract.require(type(serving['epoch']) is str, 'actual native epoch is absent')
+        _contract.string(native['ref_id'], where='actual acquired native ref')
+        native_entry = _exact(native['entry'], {'key', 'stage_path', 'bytes', 'sha256', 'file_id',
+                                               'mover_action_key', 'generation'}, 'actual native pinned entry')
+        _same(native_entry['key'], serving['range_ref'], 'actual native pin/open range')
+        _same(native_entry['sha256'], expected[name], 'actual native material digest')
+        _same(native_entry['bytes'], entry['bytes'], 'actual native material length')
+        _contract.absolute_posix_path(native_entry['stage_path'], where='actual staged descriptor path')
+        _contract.sha256(native_entry['mover_action_key'], where='actual native covering mover')
+        _contract.string(native_entry['generation'], where='actual native material generation')
+        for key in ('source_fd_stat', 'sealed_fd_stat'):
+            signature = native[key]
+            _contract.require(isinstance(signature, list) and len(signature) == 5 and
+                              all(type(item) is int and item >= 0 for item in signature),
+                              'actual descriptor stat identity is incomplete')
+            _same(signature[2], entry['bytes'], 'actual descriptor whole-file length')
+        source_stat = native['source_fd_stat']
+        _same(native_entry['file_id'], dict(ino=source_stat[1], size=source_stat[2],
+              mtime_ns=source_stat[3], ctime_ns=source_stat[4]), 'actual portable native descriptor identity')
+        _contract.require(type(native['kernel_seals']) is int and native['kernel_seals'] & _SEALS == _SEALS,
+                          'actual delivered material is not kernel sealed')
+        _contract.require(native['descriptors_closed'] is True and native['lease_released'] is True,
+                          'native acquisition descriptor/ref completion missing')
+        if row['held']:
+            live_bytes += row['bytes_hashed']
+    for name, current in latest.items():
+        indices = sorted(index for delivered_name, index in generations if delivered_name == name)
+        _contract.require(len(indices) == current['delivery_index'] and
+                          all(index == number for number, index in enumerate(indices, 1)),
+                          'original material omitted an observed delivery generation')
+    for row in rows:
+        _contract.require(not row['held'] or row is latest[row['name']],
+                          'retired original generation cannot claim current held material')
+    verified = [{key: row[key] for key in ('name', 'sha256', 'bytes_hashed')}
+                for name, row in latest.items() if name.endswith('.safetensors')]
+    auxiliary = [name for name in latest if not name.endswith('.safetensors')]
+    _same(value['verified_files'], sorted(verified, key=lambda row: row['name']), 'actual verified weight roster')
+    _same(value['auxiliary_verified'], sorted(auxiliary), 'actual verified auxiliary roster')
+    _contract.require(set(auxiliary) == set(expected) - set(producer['files']),
+                      'original material omitted an authenticated bootstrap auxiliary')
+    _same(value['material_live_bytes'], live_bytes, 'actual whole-file material debt')
+    _same(value['material_limit_bytes'], resources['material_bytes'], 'admitted original material cap')
+    _contract.require(live_bytes <= value['material_limit_bytes'], 'original material debt exceeds its cap')
+    delivery_by_generation = {(row['name'], row['delivery_index']): row for row in rows}
+    for field in ('pending_copy_completions', 'copy_completions'):
+        _contract.require(isinstance(value[field], list), 'original copy debt must be an actual list')
+        for copy in value[field]:
+            _exact(copy, ORIGINAL_COPY_RECEIPT_KEYS, 'actual original source copy completion')
+            _contract.require(type(copy['device']) is str and copy['device'].startswith('cuda:')
+                              and copy['device'][5:].isdigit(), 'copy completion needs actual indexed native device')
+            _contract.integer(copy['stream_id'], where='actual native copy stream', minimum=0)
+            _contract.require(isinstance(copy['files'], dict) and copy['files'], 'copy completion lacks native source alias join')
+            for name, index in copy['files'].items():
+                _contract.require((name, index) in delivery_by_generation,
+                                  'copy debt references an omitted actual delivery generation')
+                if field == 'pending_copy_completions':
+                    _contract.require(delivery_by_generation[(name, index)]['held'],
+                                      'pending copy retired its native material charge')
+            for key in ('retained_host_aliases', 'host_aliases_at_fence'):
+                _contract.integer(copy[key], where=f'actual source copy {key}', minimum=0)
+            _contract.require(type(copy['failed']) is bool, 'copy failure state missing')
+            if field == 'copy_completions':
+                _contract.require(copy['fence'] in ('cuda_event_synchronize',
+                    'cuda_stream_synchronize_after_event_failure') and copy['retained_host_aliases'] == 0,
+                    'source completion was not actually fenced and retired')
+            else:
+                _contract.require(copy['fence'] is None and copy['retained_host_aliases'] > 0,
+                                  'pending copy debt cannot claim completion')
+    return _snapshot(value)

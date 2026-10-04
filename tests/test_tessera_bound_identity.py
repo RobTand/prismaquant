@@ -10,6 +10,7 @@ import torch
 
 def fixture(*, projected=False):
     from prismaquant import tessera_campaign as tc, tessera_hessian as th
+    from prismaquant.format_registry import get_format
     from prismaquant.tessera_formats import parse_tessera_format_name
     name = "model.layers.0.proj"
     weight = torch.arange(32 * 256, dtype=torch.float32).reshape(32, 256).to(torch.bfloat16) / 1024
@@ -21,9 +22,11 @@ def fixture(*, projected=False):
     anchors = []
     for fmt in formats:
         family, rung = parse_tessera_format_name(fmt)
+        spec = get_format(fmt)
         anchors.append(tc.CampaignAnchor(qname=name, format_name=fmt, family=family.name,
             body_rate_q256=rung, dloss=0.1, dloss_stderr=0.0, memory_bytes=8192,
-            bits_per_param=4.0, activation_contract="fixture", activation_quantized=True,
+            bits_per_param=4.0, activation_contract=str(spec.act_dtype_name or "a16"),
+            activation_quantized=spec.act_quant_changes_input,
             wire_bytes=8192, seconds=0.1, hessian_applied=True,
             input_global_scale=0.125 if "E2M1" in fmt else None))
     projection = None if not projected else dict(tensor=name + ".weight", source_tensor="packed.weight",
@@ -100,6 +103,18 @@ def test_bound_unit_refuses_nonfinite_source():
     with pytest.raises(ValueError, match="nonfinite"):
         tc.bind_checkpoint_unit_identity(anchors, source_weight=weight,
             calibration_source=source, projected_unit=projection, static_scales=kwargs["static_scales"])
+
+
+@pytest.mark.parametrize("changes", [{"activation_contract": "fp8_e4m3"},
+    {"activation_quantized": True}, {"activation_quantized": "false"}])
+def test_bound_unit_still_refuses_invalid_measured_activation_metadata(changes):
+    tc, name, weight, _hessian, source, anchors, projection, kwargs = fixture()
+    assert anchors[0].family == "TESSERA_BF16_K1"
+    with tc.bind_checkpoint_unit_identity(anchors, source_weight=weight,
+            calibration_source=source, projected_unit=projection,
+            static_scales=kwargs["static_scales"]) as bound:
+        with pytest.raises(tc.ActivationScaleContractError, match="activation (contract|observation)"):
+            tc._checkpoint_anchor_identity(replace(anchors[0], **changes), **kwargs, bound_unit=bound)
 
 
 def test_campaign_hold_reuses_exact_run_receipts_and_survives_equivalent_owner_handoff(monkeypatch):

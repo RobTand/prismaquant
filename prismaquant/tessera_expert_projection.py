@@ -6,7 +6,7 @@ estimated from sampled experts. The source units
 declared packed split (``lfm2_moe.json`` ``projection_splits``). Tessera, the
 producer, executes those units as ONE stack per MoE block (``<block>.experts``),
 and publishes exactly which source tensor, which expert, which role and which
-geometry each executed unit is through ``experiments/tessera_producer_plan.py``
+geometry each executed unit is through ``python -m tessera.producer_plan``
 (schema ``tessera.expert_projection.v1``, ``tessera.serving_parts.source_identity``
 for the checkpoint binding).
 
@@ -52,7 +52,7 @@ from .stage_inputs import (
     SOURCE_IDENTITY_KEYS, ExpertProjectionError, require_source_identity,
 )
 
-#: The producer's projection schema (``export_tessera_serving.project_expert_plan``).
+#: The producer's public projection schema (``tessera.export_serving.project_expert_plan``).
 PROJECTION_SCHEMA = "tessera.expert_projection.v1"
 #: The only source layout this bridge executes: one whole per-expert 2-D source
 #: tensor per unit.  Pinned to ``tessera.serving.scheme.MOE_SOURCE_UNPACKED`` by
@@ -64,7 +64,9 @@ WHOLE_SELECTOR = "whole"
 #: The producer tool this bridge shells out to, as declared in
 #: ``lane_specs/tessera.json`` ``campaign_tools`` (#1587: a campaign
 #: dependency, not an export-arm call).
-PRODUCER_PLAN_TOOL = "experiments/tessera_producer_plan.py"
+PRODUCER_PLAN_TOOL = "tessera.producer_plan"
+#: Optional public producer interpreter; never the serving-runtime package pin.
+PRODUCER_PYTHON_ENV = "TESSERA_PRODUCER_PYTHON"
 #: The keys of a producer unit record that ``tessera.cached_unit.unit_input_identity``
 #: seals into the priced-wire receipt.  Pinned against the producer by test.
 UNIT_IDENTITY_KEYS = ("cols", "expert", "group", "projection", "rows",
@@ -86,36 +88,34 @@ CARRIED_PROJECTION_SCHEMA = "prismaquant.tessera_expert_projection.v1"
 # ---------------------------------------------------------------------------
 # Asking the producer
 # ---------------------------------------------------------------------------
-def producer_plan_tool(env: Mapping[str, str] | None = None) -> Path:
-    """The declared producer projection tool, located through the lane spec.
+def _producer_python(env: Mapping[str, str] | None, python: str | None) -> str:
+    supplied = os.environ if env is None else env
+    return python or supplied.get(PRODUCER_PYTHON_ENV) or sys.executable
 
-    The lane spec's ``campaign_tools`` roster (#1587) is the list of Tessera
-    files the campaign shells out to that the export arm does not call; a
-    tool absent from it is one nobody can check for.  ``TESSERA_REPO``
-    locates the pinned checkout, as it does for the plan writer and the
-    exporter.  Only the campaign roster is scanned: the export roster
-    refuses Tessera trees from before #687 (no
-    ``src/tessera/export_serving.py``), and the projection tool is a
-    campaign dependency that those trees still carry -- the recorded GLM
-    campaign spec mounts tessera-382a1a97, and a campaign re-run or resume
-    must not break at projection.
+
+def producer_plan_tool(env: Mapping[str, str] | None = None, *, python: str | None = None) -> str:
+    """Require the declared public CLI before an expensive packed capture.
+
+    CLI availability is checked in the producer interpreter, not by importing
+    a serving runtime into PrismaQuant or locating a sibling checkout.
+    An explicit ``python=`` wins over ``TESSERA_PRODUCER_PYTHON``; absent both,
+    the caller's interpreter remains the standalone-install default.
     """
-    from .tessera_export_lane import (
-        TesseraExportLaneError,
-        require_campaign_tools,
-    )
+    from .lane_spec import load_lane_spec
 
-    try:
-        resolved = require_campaign_tools(env=env)
-    except TesseraExportLaneError as exc:
-        raise ExpertProjectionError(str(exc)) from exc
-    for path in resolved:
-        if path.endswith("/" + PRODUCER_PLAN_TOOL):
-            return Path(path)
+    for tool in load_lane_spec("tessera").campaign_tools:
+        if tool.module == PRODUCER_PLAN_TOOL and tool.output_schema == PROJECTION_SCHEMA:
+            completed = subprocess.run(
+                [_producer_python(env, python), "-m", tool.module, "--help"],
+                env=None if env is None else dict(env), capture_output=True, text=True)
+            if completed.returncode:
+                tail = "\n".join(completed.stderr.strip().splitlines()[-12:])
+                raise ExpertProjectionError(
+                    f"public producer {tool.module} unavailable (exit {completed.returncode}): {tail}")
+            return tool.module
     raise ExpertProjectionError(
-        f"lane_specs/tessera.json campaign_tools does not declare {PRODUCER_PLAN_TOOL}; "
-        "the packed-expert bridge needs the producer's explicit projection and "
-        "will not derive one from tensor names")
+        f"lane_specs/tessera.json campaign_tools does not declare {PRODUCER_PLAN_TOOL} "
+        f"with {PROJECTION_SCHEMA}; the bridge needs the producer's explicit projection")
 
 
 def stack_plan_request(stacks: Mapping[str, tuple[str, int]]) -> dict:
@@ -149,21 +149,15 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
     """
     if not stacks:
         raise ExpertProjectionError("no stacks to project")
-    tool = producer_plan_tool(env=env)
+    child_env = dict(os.environ if env is None else env)
+    producer_python = _producer_python(child_env, python)
+    tool = producer_plan_tool(env=child_env, python=producer_python)
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     request = out.with_name(out.name + ".request.json")
     request.write_text(json.dumps(stack_plan_request(stacks), indent=1, sort_keys=True))
-    command = [python or sys.executable, str(tool), str(model_path),
+    command = [producer_python, "-m", tool, str(model_path),
                "--stack-plan", str(request), "--out", str(out)]
-    child_env = dict(os.environ if env is None else env)
-    # The tool is a script that imports its sibling ``export_tessera_serving``
-    # from its own directory. Python's safe-path mode drops that directory
-    # from ``sys.path``, and the campaign container sets PYTHONSAFEPATH=1 for
-    # its ``python -m`` entry point, where ``sys.path[0]`` would be the sealed
-    # checkout. A script's ``sys.path[0]`` is its own directory, never the
-    # working directory, so the child runs without the guard.
-    child_env.pop("PYTHONSAFEPATH", None)
     completed = subprocess.run(
         command, env=child_env,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

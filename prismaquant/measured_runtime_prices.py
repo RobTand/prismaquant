@@ -9,7 +9,6 @@ served validation remain independent gates. No measured table ships here.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import random
@@ -24,7 +23,7 @@ from typing import Any, Mapping, Sequence
 from .lane_eligibility import ServingContext
 from .serve_dispatch_table import DispatchTableError
 from .schemas import strict_json_loads
-from .digests import DIRECT_ASCII_STRICT, is_sha256hex
+from .digests import DIRECT_ASCII_STRICT, file_digest_sha256hex, is_sha256hex
 
 SCHEMA = "prismaquant.measured_runtime_prices.v1"
 CONTEXT_SCHEMA = "prismaquant.measured_runtime_context.v1"
@@ -899,7 +898,7 @@ def load_measured_runtime_table(path: str | Path, *, expected_context: RuntimeCo
             receipt_path = Path(path).parent / receipt_path
         try:
             with receipt_path.open("rb") as stream:
-                actual = hashlib.file_digest(stream, "sha256").hexdigest()
+                actual = file_digest_sha256hex(stream)
         except OSError as exc:
             raise RuntimePriceError(f"cannot read measurement receipt {receipt_path}: {exc}") from exc
         if actual != expected:

@@ -237,7 +237,7 @@ def test_the_resume_guard_follows_the_contract(fp8_gains_a_static_contract):
         qname="m.up", family="TESSERA_E4M3_K1", format_name=W8A8,
         body_rate_q256=1024, dloss=1e-3, dloss_stderr=0.0,
         memory_bytes=1000, bits_per_param=4.0,
-        activation_contract="w8a8-dynamic-e4m3-channel",
+        activation_contract=str(fr.get_format(W8A8).act_dtype_name or "a16"),
         activation_quantized=True, wire_bytes=1000, seconds=1.0)
     with pytest.raises(ActivationScaleContractError,
                        match="pre-served-.*contract"):

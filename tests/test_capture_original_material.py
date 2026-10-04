@@ -35,15 +35,17 @@ def _bound(path, value):
 
 
 @pytest.fixture
-def material(tmp_path, monkeypatch):
+def material(tmp_path, monkeypatch, request):
     root = tmp_path / 'logical'
     root.mkdir()
     delivered = tmp_path / 'publisher-exact'
     delivered.mkdir()
     (delivered / 'config.json').write_text('{"model_type":"fixture"}')
     (delivered / 'chat_template.jinja').write_text('original template')
+    source_dtype = getattr(request, 'param', torch.float32)
+    assert source_dtype in (torch.float32, torch.bfloat16)
     for name, key in [('one.safetensors', 'w'), ('two.safetensors', 'v')]:
-        save_file({key: torch.arange(32, dtype=torch.float32).reshape(4, 8)},
+        save_file({key: torch.arange(32, dtype=source_dtype).reshape(4, 8)},
                   str(delivered / name))
     weight_map = {'w': 'one.safetensors', 'v': 'two.safetensors'}
     (delivered / 'model.safetensors.index.json').write_text(json.dumps({'weight_map': weight_map}))

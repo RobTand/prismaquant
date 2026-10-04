@@ -190,6 +190,7 @@ def test_a_seed_without_a_compare_stages_no_reference(tmp_path, monkeypatch):
     assert all("boundary-002" not in path for paths in phases.values() for path in paths)
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_the_seed_manifest_passes_the_prismabuild_validator(tmp_path, monkeypatch):
     from test_quantum_executable_readset import _pb
     core, tiers, _plans = _pb()
