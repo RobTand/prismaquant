@@ -442,9 +442,9 @@ def load_multimodal_calibration(
     dataset_name: str,
     n_samples: int,
     max_text_len: int,
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """Build a list of forward-kwargs dicts for multimodal Fisher
-    calibration.
+    calibration, plus the real-vs-synthetic composition actually loaded.
 
     `processor` is an `AutoProcessor` — usually loaded via
     `AutoProcessor.from_pretrained(model_path, trust_remote_code=True)`.
@@ -459,6 +459,10 @@ def load_multimodal_calibration(
         image (+ a caption/text field). Falls back to the synthetic
         stub on any load failure (offline, rate-limited, schema
         mismatch, etc.) so the probe always makes forward progress.
+        When the dataset yields fewer usable rows than requested, the
+        remainder is blended from the synthetic stub and the blend is
+        printed loudly; a capture claiming real calibration must read
+        the returned composition and refuse a contaminated one.
 
     Each returned sample is a `dict` of tensors suitable for
     `model(**sample)`. Contains every tensor the processor emitted
@@ -469,11 +473,21 @@ def load_multimodal_calibration(
     joint image+text sequence). Processors that emit `-100` sentinel
     ids for masked positions are handled by the probe's CE backward —
     not by this loader.
+
+    Returns `(triples, composition)` where `composition` is
+    `{"dataset", "requested", "real", "synthetic"}`: the counts the
+    probe passes must stamp into their meta (`calibration_source`) so
+    provenance cannot misread a blended capture as a real one.
     """
     triples: list[dict] = []
     if dataset_name == "synthetic":
         return _synthetic_multimodal_calibration_samples(
-            processor, n_samples, max_text_len)
+            processor, n_samples, max_text_len), {
+            "dataset": dataset_name,
+            "requested": n_samples,
+            "real": 0,
+            "synthetic": n_samples,
+        }
     try:
         from datasets import load_dataset
         ds = load_dataset(dataset_name, split="train", streaming=True)
@@ -504,11 +518,24 @@ def load_multimodal_calibration(
     except Exception as e:
         print(f"[probe/mm] dataset {dataset_name!r} unreachable ({e}); "
               f"falling back to synthetic stub", flush=True)
+    real_count = len(triples)
+    synthetic_count = 0
     if len(triples) < n_samples:
         synth = _synthetic_multimodal_calibration_samples(
             processor, n_samples - len(triples), max_text_len)
+        synthetic_count = len(synth)
         triples.extend(synth)
-    return triples[:n_samples]
+        print(f"[probe/mm] calibration blend: dataset {dataset_name!r} "
+              f"supplied {real_count} real sample(s); {synthetic_count} "
+              f"synthetic stub row(s) were blended in to reach "
+              f"n_samples={n_samples}. A capture claiming real "
+              f"calibration must refuse this composition.", flush=True)
+    return triples[:n_samples], {
+        "dataset": dataset_name,
+        "requested": n_samples,
+        "real": real_count,
+        "synthetic": synthetic_count,
+    }
 
 
 _ALLOW_SUMSQ_PACKED_FISHER_ENV = "PRISMAQUANT_ALLOW_SUMSQ_PACKED_FISHER"
@@ -3580,10 +3607,12 @@ def run_multimodal_visual_probe_pass(
                   flush=True)
             return False
 
-    triples = load_multimodal_calibration(
+    triples, calibration_composition = load_multimodal_calibration(
         processor, dataset_name, n_samples, max_text_len)
     print(f"[probe/mm] loaded {len(triples)} multimodal samples "
-          f"(dataset={dataset_name!r})", flush=True)
+          f"(dataset={dataset_name!r}, "
+          f"real={calibration_composition['real']}, "
+          f"synthetic={calibration_composition['synthetic']})", flush=True)
     if not triples:
         print("[probe/mm] load_multimodal_calibration returned 0 samples; "
               "skipping multimodal pass", flush=True)
@@ -3741,6 +3770,7 @@ def run_multimodal_visual_probe_pass(
                 "linear_include": linear_include,
                 "linear_exclude": linear_exclude,
                 "calibration_modality": "multimodal",
+                "calibration_source": calibration_composition,
             },
         }, f)
     print(f"[probe/mm] wrote {out_path}", flush=True)
@@ -3828,10 +3858,12 @@ def run_streaming_multimodal_visual_probe_pass(
                   f"pass.", flush=True)
             return False
 
-    triples = load_multimodal_calibration(
+    triples, calibration_composition = load_multimodal_calibration(
         processor, dataset_name, n_samples, max_text_len)
     print(f"[probe/mm-stream] loaded {len(triples)} multimodal samples "
-          f"(dataset={dataset_name!r})", flush=True)
+          f"(dataset={dataset_name!r}, "
+          f"real={calibration_composition['real']}, "
+          f"synthetic={calibration_composition['synthetic']})", flush=True)
     if not triples:
         print("[probe/mm-stream] no calibration samples; skipping", flush=True)
         return False
@@ -3923,6 +3955,7 @@ def run_streaming_multimodal_visual_probe_pass(
                     "linear_include": linear_include,
                     "linear_exclude": linear_exclude,
                     "calibration_modality": "multimodal",
+                    "calibration_source": calibration_composition,
                     "streaming": True,
                 },
             }, f)
@@ -4191,6 +4224,7 @@ def run_streaming_multimodal_visual_probe_pass(
                 "linear_include": linear_include,
                 "linear_exclude": linear_exclude,
                 "calibration_modality": "multimodal",
+                "calibration_source": calibration_composition,
                 "streaming": True,
             },
         }, f)

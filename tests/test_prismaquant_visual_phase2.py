@@ -162,11 +162,16 @@ class TestSyntheticMultimodalCalibration(unittest.TestCase):
         # dataset_name="synthetic" never touches the datasets library
         # and always returns the offline stub — important for offline
         # tests.
-        triples = load_multimodal_calibration(
+        triples, composition = load_multimodal_calibration(
             processor=None, dataset_name="synthetic",
             n_samples=3, max_text_len=12,
         )
         self.assertEqual(len(triples), 3)
+        self.assertEqual(
+            composition,
+            {"dataset": "synthetic", "requested": 3,
+             "real": 0, "synthetic": 3},
+        )
 
     def test_synthetic_captions_rotate(self):
         # 12 samples with 8 built-in captions should wrap around cleanly.
@@ -636,7 +641,12 @@ class TestMultimodalProbePassIntegration(unittest.TestCase):
                     "transformers.AutoProcessor.from_pretrained",
                     return_value=fake_proc), \
                  mock.patch.object(sp, "load_multimodal_calibration",
-                                   return_value=[]):
+                                   return_value=([], {
+                                       "dataset": "synthetic",
+                                       "requested": 2,
+                                       "real": 0,
+                                       "synthetic": 0,
+                                   })):
                 result = sp.run_multimodal_visual_probe_pass(
                     str(tdp),
                     dataset_name="synthetic",
