@@ -38,10 +38,10 @@ GB10_PYTHON = "/home/rob/gb10-venvs/example/bin/python"
 def fleet() -> dict:
     """The tracked attestation table, plus one attested GB10 host interpreter.
 
-    The tracked table attests no bare host interpreter on ``gb10`` -- the live
-    campaign runs its rows in a container -- so a test that wants a
-    non-containerised default class supplies one rather than asserting the
-    tracked file has one.
+    The tracked table attests the fleet's canonical SDK4 interpreter on
+    ``gb10``; this fixture needs the spec's own example path instead, so a test
+    that wants a non-containerised default class injects the entry it needs
+    rather than borrowing the tracked one.
     """
     table = json.loads(json.dumps(dispatch.load_fleet_interpreters()))
     table["tags"]["gb10"]["interpreters"][GB10_PYTHON] = {
