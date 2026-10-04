@@ -15242,8 +15242,12 @@ and exact decoded-render comparison. The binding closes before source unload;
 it accepts no caller-supplied prehash and creates no tensor cache or dispatcher.
 Gate: `tests/test_tessera_bound_identity.py` plus original-wire qualification.
 Strict intake wire/render verification may use explicit `file_hash_workers`,
-bounded by PB-assigned CPU affinity. Preparation instead uses that worker bound
-for the existing PWC loader and its single-read receipts described above.
+bounded by PB-assigned CPU affinity. A plan that omits the key resolves it
+through one shared derivation — the prepare's 4-thread render-load width
+(`prepare_cache`'s own `file_load_workers` default) capped at the PB-assigned
+affinity — so an omitted key no longer loads renders serially, and an explicit
+plan value still wins (#1382). Preparation uses that resolved worker bound for
+the existing PWC loader and its single-read receipts described above.
 Exact content hashes and consumption lifetime guards remain mandatory; placement
 stays PB's.
 

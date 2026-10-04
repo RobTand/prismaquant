@@ -136,3 +136,16 @@ def test_package_source_recent_writes_name_the_newest_hashed_inputs(tmp_path):
     # The diagnosis and the digest share one filter: interpreter-only files
     # are never named, so they can never masquerade as the writer.
     assert "__pycache__" not in report and ".pyc" not in report and ".pyo" not in report
+
+
+@pytest.mark.parametrize("payload", (b"", b"\x00\xff\r\nUTF-8:\xc3\xa9"))
+def test_one_pass_profile_aggregate_is_the_source_digest(tmp_path, payload):
+    # The checkpoint manifest's write pass returns (aggregate, per-file) from
+    # one read of the tree; its aggregate must be byte-identical to the
+    # producer digest the identity seals (#2218).
+    root, rows = _fixture(tmp_path, payload)
+    aggregate, files = cache._production_cache_source_profile(root)
+    assert aggregate == cache._production_cache_source_sha256(root)
+    assert set(files) == {name for name, _ in rows}
+    for name, raw in rows:
+        assert files[name] == hashlib.sha256(raw).hexdigest()

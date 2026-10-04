@@ -1795,7 +1795,38 @@ def _qualification_cells_sha256(cells):
         rows(), prefix=QUALIFICATION_CELLS_SCHEMA.encode() + b"\n")
 
 
-def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=4,
+def default_file_load_workers() -> int:
+    """The prepare's render-file load pool width, bounded by assigned CPUs.
+
+    One derivation for one knob: ``prepare_cache``'s own ``file_load_workers``
+    default and the joint plan's omitted ``file_hash_workers`` (which sizes the
+    prepare's render loads and, under ``verify_payloads``, the anchor file-hash
+    pool). Four threads is the measured PWC load curve
+    (``ProductionWeightCache.prefetch``: 496 entries, ~25 s serial -> ~6 s at
+    4); the width never exceeds the CPUs PrismaBuild assigned, the same bound
+    an explicit plan value must pass (RobTand/prismaquant#1382). No
+    storage-derived default is claimed.
+    """
+    return max(1, min(4, len(os.sched_getaffinity(0))))
+
+
+def resolve_file_hash_workers(config: Mapping) -> int:
+    """The joint prepare's render-file/hash pool width for one plan.
+
+    An explicit ``file_hash_workers`` wins and keeps the refusals it always
+    had; an omitted key takes ``prepare_cache``'s own default derivation
+    instead of loading renders serially (RobTand/prismaquant#1382).
+    """
+    if "file_hash_workers" not in config:
+        return default_file_load_workers()
+    value = config["file_hash_workers"]
+    _require(type(value) is int and value > 0, "positive file_hash_workers required")
+    _require(value <= len(os.sched_getaffinity(0)),
+             "file_hash_workers exceeds PB-assigned CPU affinity")
+    return value
+
+
+def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_load_workers=None,
                   qualification_window=None, capture_load_policy=None,
                   source_capture_compatibility=None, source_authentication=None,
                   qualification_guard=None, qualification_journal=None,
@@ -1824,6 +1855,11 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
     from . import format_registry as fr
 
     _require(type(max_render_bytes) is int and max_render_bytes > 0, "positive PWC residency budget required")
+    _require(file_load_workers is None or
+             (type(file_load_workers) is int and file_load_workers > 0),
+             "positive file_load_workers required")
+    if file_load_workers is None:
+        file_load_workers = default_file_load_workers()
     _require(type(progress_base) is int and progress_base >= 0,
              "progress_base must be the non-negative count the run already reported")
     policy = normalize_qualification_window(qualification_window)
@@ -2356,8 +2392,9 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
                  'diagnostic joint boundaries must be owned by pilot output root')
     if config.get("head_walk_workers") is not None:
         _head_walk_worker_count(config["head_walk_workers"])
-    _require(type(config.get("file_hash_workers", 1)) is int and config.get("file_hash_workers", 1) > 0,
-             "positive file_hash_workers required")
+    if "file_hash_workers" in config:
+        _require(type(config["file_hash_workers"]) is int and config["file_hash_workers"] > 0,
+                 "positive file_hash_workers required")
     for name, minimum in (("n_calib_samples", 1), ("calib_seqlen", 1),
                           ("probe_microbatch", 1), ("n_probes", 2)):
         _require(type(execution.get(name)) is int and execution[name] >= minimum,
@@ -2808,9 +2845,7 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
     if profiler is not None:
         profiler.enable()
     try:
-        file_hash_workers = config.get("file_hash_workers", 1)
-        _require(type(file_hash_workers) is int and 0 < file_hash_workers <= len(os.sched_getaffinity(0)),
-                 "file_hash_workers exceeds PB-assigned CPU affinity")
+        file_hash_workers = resolve_file_hash_workers(config)
         # Every capture-free identity gate runs first: an unqualified runtime,
         # kernel source digest, build flag or binary sha256 is refused in
         # seconds rather than after hours of measured anchor input (#553).
