@@ -2173,6 +2173,8 @@ def test_spill_attribution_charges_device_staging_before_allocation(campaign, mo
     class DeviceGuard(_RecordingGuard):
         def __init__(self, device):
             super().__init__(device)
+            # Exercise the split host/device envelope, not the aggregate fallback.
+            self.device_bytes = self.physical_cap_bytes
             self.attribution_reservations = []
 
         def check(self, label, *, reserve_bytes=0, reserve_device_bytes=0):
