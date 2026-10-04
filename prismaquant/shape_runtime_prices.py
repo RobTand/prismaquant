@@ -64,15 +64,11 @@ zero (design §3.3).
 
 Rate pools
 ----------
-Pooling across rates is never a default. A table may declare a
-``rate_pools`` entry: these rates of one ``(structure, shape, family)``
-execute on one kernel lane, and their samples are one distribution. Admission
-refuses a pool whose source rows disagree about the lane, and checks every
-pooled rate against the contract as it would a row. The pooled samples are
-the concatenation of the source rows' own samples, so the spread across rates
-flows into :func:`operator_sum_bootstrap` instead of a tolerance deciding
-anything. A pool whose rows sit at one rate measured no cross-rate spread,
-and its record says so.
+Proposal parsing retains declared same-lane pools for analysis. An authenticated
+runtime table cannot carry one: :func:`load_shape_table` refuses every nonempty
+``rate_pools`` entry because no reviewed checker emits a pool. Reload therefore
+cannot lend one rate's samples to an unmeasured rate. Every runtime price needs
+its own checker-bound row; a declared proposal pool is not measured coverage.
 
 Tessera's checker emits ``tessera.shape_time_observation.v1``. Conversion
 requires its explicitly selected PB completion and the independently reviewed
