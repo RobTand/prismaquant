@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-04 (`v6/pq2112-parent-panel-reload-20261004`, PQ #2094,
+PR #2112 parent correction): shape-time conversion and reload compare the
+independently expected panel digest with the authenticated panel bytes.
+Reload requires checker-bound rows; synthetic/legacy digest-only receipts and
+nonempty unauthenticated rate pools refuse. Receipt reads use the existing
+checker evidence byte envelope, and malformed artifact bindings fail cleanly.
+The immutable serving pin, SDK4 source contract and native/energy/serving
+qualification remain unchanged. CPU controls do not establish new GPU prices.
+
 Refs #2174/#2169: the PrismaSnap campaign builder establishes the direct
 worker's sibling module search context temporarily while synthetically loading
 `cluster_campaign`; the consolidated `digests` owner stays stdlib-only and
@@ -21593,10 +21602,11 @@ PACT's time input. It sits beside the unit-keyed v2 table and does not extend it
     (`lane_eligibility.cell_lane_admits`, asked about that one launch).
   Since contract v45, the fused routed E4M3 launch admits at R1024 and R896;
   the earlier v44 `column_rates` predicate refused R896.
-- **Rate pools.** Rates are pooled only where the table declares a
-  `rate_pools` entry, and all of the pool's rows must share one lane. Pooled
-  samples are the source rows' samples concatenated in rate order. The pool
-  record states whether a spread across rates was measured.
+- **Rate pools.** A nonempty `rate_pools` list is refused at reload: pooled
+  rates are not authenticated by PB checker completions, so only checker-bound
+  rows price options. The pooling code (one lane per pool, samples concatenated
+  in rate order, a recorded spread flag) remains in the module but admits
+  nothing until a pool carries its own authenticated measurement.
 - **Unit time.** `build_shape_runtime_resources` derives each unit's one
   served operator with `served_operator`, through
   `measured_runtime_prices.rank_local_member_shapes`. Fused siblings form one

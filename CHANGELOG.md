@@ -174,6 +174,14 @@
   Launcher regression fixtures now supply complete Docker inspection metadata
   to that owner instead of patching a removed launcher-level digest export.
 
+- **Authenticated shape-time tables refuse unmeasured admission** (#2094, PR #2112).
+  Conversion and reload compare the independently expected panel digest to
+  authenticated bytes. Nonempty rate pools and legacy or synthetic digest-only
+  receipts now refuse at `--pact-shape-table` intake; only checker-bound rows
+  price allocator/frontier options. Receipt reads reuse the bounded checker
+  envelope and malformed bindings refuse cleanly. The serving pin, SDK4 source
+  contract and independent native/serving qualification are unchanged.
+
 - **Lane roster mirror learns Tessera v45's structure-scoped
   `column_rates_routed_moe`** (#1618; `lane_eligibility`, `tessera_render`).
   A v45 table was refused as an unknown requirement. The parser now reads the

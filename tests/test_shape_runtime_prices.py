@@ -206,14 +206,13 @@ def test_a_declared_but_unmeasured_regime_is_refused():
 
 
 def test_load_verifies_every_receipt_digest(tmp_path):
-    receipt = tmp_path / "bench.json"
-    receipt.write_bytes(b"{}")
-    doc = _doc([_row("dense", "4096x1024", E4M3, 1024, 2048, DENSE_E4M3, (1.5, 1.6, 1.4))])
-    doc["rows"][0]["measurement"]["receipt_sha256"] = hashlib.sha256(b"{}").hexdigest()
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="digest")
     path = tmp_path / "table.json"
-    path.write_text(json.dumps(doc))
+    srp.write_shape_table(table, path)
     assert srp.load_shape_table(path).identity()["n_rows"] == 1
-    receipt.write_bytes(b"{} ")
+    receipt = tmp_path / "obs" / "checker-receipt.json"
+    receipt.write_bytes(receipt.read_bytes() + b" ")
     with pytest.raises(srp.ShapeRuntimeError, match="SHA-256"):
         srp.load_shape_table(path)
 
@@ -599,14 +598,16 @@ def _obs_write(path, value, raw=False):
 
 
 def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0, 4.0),
-                        agent="obs", mutate=None):
+                        agent="obs", mutate=None, family=OBS_FAMILY, grid="E4M3",
+                        route=OBS_ROUTE, rate_q256=896, kernel_lane=OBS_LANE,
+                        runtime_image=OBS_IMAGE):
     """One internal-consistent bound observation, as Tessera#856 emits it."""
     import statistics
-    scope = {"route": OBS_ROUTE, "grid": "E4M3", "q256": 896, "structure": "dense",
+    scope = {"route": route, "grid": grid, "q256": rate_q256, "structure": "dense",
              "mode": "resident", "execution_mode": "eager", "regime": "batch",
              "tp_degree": tp_degree, "requested_platform": "sm_121",
              "shape": {"M": m, "N": 256, "K": 256}}
-    runtime = {"image": OBS_IMAGE, "tessera_commit": OBS_COMMIT, "serving_source_sha256": "c" * 64,
+    runtime = {"image": runtime_image, "tessera_commit": OBS_COMMIT, "serving_source_sha256": "c" * 64,
                "contract_sha256": OBS_CONTRACT, "platform": "sm_121", "torch": "2.13.0+cu130",
                "vllm": "0.28.1rc1.dev397+gfd4a15126.d20260904",
                "serve_flags": {"TESSERA_SERVE_MODE": "resident"}, "residency": "resident",
@@ -617,7 +618,7 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
     root.mkdir(parents=True)
     samples_doc = {"samples_ms": list(samples), "warmup_iterations": 5,
                    "interval_unix": [10.0, 11.0]}
-    routes = {"records": [{"symbol": OBS_LANE[0], "decoder": OBS_LANE[1]} for _ in samples]}
+    routes = {"records": [{"symbol": kernel_lane[0], "decoder": kernel_lane[1]} for _ in samples]}
     samples_b = _obs_write(root / "samples.json", samples_doc)
     routes_b = _obs_write(root / "routes.json", routes)
     contract_b = _obs_write(root / "contract.bin", b"raw b40 contract bytes", raw=True)
@@ -639,7 +640,7 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
                                   {"builder": "tessera.serving.lane.build_tessera_method",
                                    "wire_sha256": wire_b["sha256"], "roles": [],
                                    "shape": scope["shape"], "tp_rank": 0, "tp_degree": 1,
-                                   "grid": "E4M3", "native_packed_bytes": 1}),
+                                   "grid": grid, "native_packed_bytes": 1}),
         "samples": samples_b, "routes": routes_b, "trace": trace_b,
         "telemetry": _obs_write(root / "telemetry.json",
                                 {"interval_unix": [10.0, 11.0], "fast_power_samples": [[10.5, 40.0]],
@@ -674,9 +675,9 @@ def observation_fixture(tmp_path, *, m=512, tp_degree=1, samples=(1.0, 2.0, 3.0,
                    "tool_source_sha256": OBS_REPLAY_TOOL, "tool": replay_b},
         "invocation": {"command": command, "phase": "runtime-preflight", "returncode": 0},
         "scope": scope, "scope_id": "ffa460d8" * 8,
-        "cell_id": "dense-e4m3-sm121-batch-resident", "kernel_lane": list(OBS_LANE),
-        "structure": "dense", "rank_local_shape": "256x256", "family": OBS_FAMILY,
-        "payload": {"route": OBS_ROUTE, "grid": "E4M3", "q256": 896, "rows": 256, "columns": 256},
+        "cell_id": f"dense-{grid.lower()}-sm121-batch-resident", "kernel_lane": list(kernel_lane),
+        "structure": "dense", "rank_local_shape": "256x256", "family": family,
+        "payload": {"route": route, "grid": grid, "q256": rate_q256, "rows": 256, "columns": 256},
         "timing": timing,
         "sampling": {"method": "cuda_events", "sample_unit": "single_apply", "warmup_iterations": 5,
                      "n": len(samples), "samples_ms": list(samples), "interval_unix": [10.0, 11.0]},
@@ -954,6 +955,36 @@ def test_checker_result_requires_exact_output_and_a_bounded_observation(tmp_path
         _consume_observations([path], table_id="oversized")
 
 
+def test_load_refuses_a_rate_pool_that_lends_samples_to_an_unmeasured_rate(tmp_path):
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    doc = table.as_dict()
+    row = doc["rows"][0]
+    doc["rate_pools"] = [{"structure": row["structure"],
+                          "rank_local_shape": row["rank_local_shape"],
+                          "family": row["family"], "kernel_lane": row["kernel_lane"],
+                          "rates_q256": [896, 1024]}]
+    path = tmp_path / "tampered-table.json"
+    _obs_write(path, doc)
+    with pytest.raises(srp.ShapeRuntimeError, match="rate_pools"):
+        srp.load_shape_table(path)
+
+
+def test_null_checker_observation_binding_refuses_cleanly(tmp_path):
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    receipt_path = tmp_path / "obs" / "checker-receipt.json"
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt["observation"] = None
+    binding = _obs_write(receipt_path, receipt)
+    doc = table.as_dict()
+    doc["rows"][0]["measurement"]["receipt_sha256"] = binding["sha256"]
+    path = tmp_path / "tampered-table.json"
+    _obs_write(path, doc)
+    with pytest.raises(srp.ShapeRuntimeError, match="expected an object"):
+        srp.load_shape_table(path)
+
+
 @pytest.mark.parametrize("field", ["key", "lane", "context"])
 def test_load_compares_the_table_to_the_checker_projection(tmp_path, field):
     observation_fixture(tmp_path)
@@ -968,6 +999,58 @@ def test_load_compares_the_table_to_the_checker_projection(tmp_path, field):
     path = tmp_path / "tampered-table.json"
     _obs_write(path, doc)
     with pytest.raises(srp.ShapeRuntimeError, match="checker observation"):
+        srp.load_shape_table(path)
+
+
+def test_expected_panel_digest_matches_authenticated_panel_at_convert_and_load(tmp_path, capsys):
+    observation_fixture(tmp_path)
+    observation_path = tmp_path / "obs" / "observation.json"
+    table = _consume_observations([observation_path], table_id="pilot")
+    document = json.loads(observation_path.read_bytes())
+    document["expected_panel_sha256"] = "0" * 64
+    observation_binding = _obs_write(observation_path, document)
+    # Keep the selected source, wrapper and every other artifact binding valid.
+    # The domain double now owns the same malformed observation bytes, so the
+    # panel comparison, not output authentication, must refuse.
+    next(iter(_CHECKER_RESULTS.values()))["payload"] = observation_path.read_bytes()
+    receipt_path = tmp_path / "obs" / "checker-receipt.json"
+    receipt = json.loads(receipt_path.read_bytes())
+    receipt["observation"] = observation_binding
+    receipt_binding = _obs_write(receipt_path, receipt)
+    table_document = table.as_dict()
+    table_document["rows"][0]["measurement"]["receipt_sha256"] = receipt_binding["sha256"]
+    table_path = tmp_path / "table.json"
+    _obs_write(table_path, table_document)
+    output = tmp_path / "refused-table.json"
+    assert srp.main(["convert", "--out", str(output), "--table-id", "wrong-panel",
+                    "--checker-receipts", str(receipt_path),
+                    "--observations", str(observation_path)]) == 2
+    assert "expected_panel_sha256" in capsys.readouterr().err
+    assert not output.exists()
+    with pytest.raises(srp.ShapeRuntimeError, match="expected_panel_sha256"):
+        srp.load_shape_table(table_path)
+
+
+@pytest.mark.parametrize("receipt", [{}, {"schema": "tessera.shape_time_receipt.v999"}, [], None])
+@pytest.mark.parametrize("field", ["samples", "key", "lane", "context"])
+def test_unknown_receipt_cannot_restore_digest_only_reload(tmp_path, receipt, field):
+    observation_fixture(tmp_path)
+    table = _consume_observations([tmp_path / "obs" / "observation.json"], table_id="pilot")
+    document = table.as_dict()
+    replacement = _obs_write(tmp_path / "unknown-receipt.json", receipt)
+    document["rows"][0]["measurement"].update(
+        receipt_path=replacement["path"], receipt_sha256=replacement["sha256"])
+    if field == "samples":
+        document["rows"][0]["measurement"]["samples_ms"] = [10.0, 20.0, 30.0, 40.0]
+    elif field == "key":
+        document["rows"][0]["family"] = "TESSERA_E2M1_K2"
+    elif field == "lane":
+        document["rows"][0]["kernel_lane"]["decoder"] = "other"
+    else:
+        document["context"]["tensor_parallel"] = 2
+    path = tmp_path / "tampered-table.json"
+    _obs_write(path, document)
+    with pytest.raises(srp.ShapeRuntimeError, match="authenticated PB checker completion"):
         srp.load_shape_table(path)
 
 

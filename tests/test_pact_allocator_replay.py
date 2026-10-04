@@ -19,6 +19,9 @@ import json
 import math
 import sys
 from types import SimpleNamespace
+from pathlib import Path
+
+from test_shape_runtime_prices import checker_sdk_fixture  # noqa: F401
 
 import pytest
 
@@ -76,38 +79,23 @@ def _fixture(tmp_path, monkeypatch, *, units=None):
     published = {row["family"]: row for row in payload["formats"]}
     monkeypatch.setattr(tessera_render, "_pinned_serving_table", lambda: (eligibility, published))
 
-    import hashlib
+    from test_shape_runtime_prices import observation_fixture, _consume_observations
 
-    receipt = tmp_path / "bench.json"
-    # The shape reader parses every receipt as JSON, even legacy digest-only
-    # artifacts. This is deliberately NOT a checker receipt or observation:
-    # synthetic prices test allocation mechanics, never measurement authority.
-    receipt.write_text(json.dumps({"synthetic_cpu_fixture": True,
-                                   "gpu_measurement_evidence": False}))
-    receipt_sha = hashlib.sha256(receipt.read_bytes()).hexdigest()
     regime = srp.regime_for_m(M)
-    rows = []
+    observations = []
     for fmt, milliseconds in TIMES.items():
         family, rate = fmt.rsplit("_R", 1)
         cell = next(c for c in eligibility.cells if c.family == family and c.regime == regime)
-        symbol, decoder = cell.executes[0]
-        rows.append({"structure": "dense", "rank_local_shape": "256x256", "family": family,
-                     "rate_q256": int(rate), "m": M,
-                     "kernel_lane": {"symbol": symbol, "decoder": decoder},
-                     "measurement": {"method": "cuda_events",
-                                     "samples_ms": [milliseconds, milliseconds * 1.01,
-                                                    milliseconds * 0.99],
-                                     "warmup_iterations": 10, "receipt_path": receipt.name,
-                                     "receipt_sha256": receipt_sha}})
-    table = {"schema": srp.SCHEMA, "table_id": "pact-fixture", "status": "proposal_data",
-             "composition": "sequential_operator_sum", "claims": dict(srp.CLAIMS),
-             "context": {"runtime_image_digest": IMAGE, "tessera_commit": pin.serving_commit,
-                         "contract_sha256": pin.contract_sha256, "tensor_parallel": 1, "platform": "sm_121",
-                         "execution_mode": "eager", "residency": "resident", "batch_size": 1,
-                         "regimes": [M]},
-             "rows": rows, "rate_pools": []}
+        grid = family.split("_")[1]
+        route = {"BF16": "TESSERA_VALUE_W16", "E4M3": "TESSERA_FP8", "E2M1": "TESSERA_FP4"}[grid]
+        binding = observation_fixture(
+            tmp_path, agent=family, m=M, family=family, grid=grid, route=route,
+            rate_q256=int(rate), kernel_lane=cell.executes[0], runtime_image=IMAGE,
+            samples=(milliseconds, milliseconds * 1.01, milliseconds * 0.99))
+        observations.append(Path(binding["path"]))
+    table = _consume_observations(observations, table_id="pact-fixture")
     table_path = tmp_path / "shape_table.json"
-    table_path.write_text(json.dumps(table))
+    srp.write_shape_table(table, table_path)
 
     chosen_units = tuple(units or (DENSE,))
     capture, scales, digest = (_campaign_outputs(tmp_path) if units is None
@@ -143,17 +131,19 @@ def _replay(frontier, digest, output):
                                   "--assignment-sha256", digest, "--layer-config", str(output)])
 
 
-@pytest.mark.parametrize("mutation", ["digest", "invalid_json", "bare_observation"])
+@pytest.mark.parametrize("mutation", ["digest", "invalid_json", "bare_observation", "unknown_schema"])
 def test_receipt_refuses_before_frontier_publication(tmp_path, monkeypatch, mutation):
     import hashlib
     from prismaquant import shape_runtime_prices as srp
 
     case = _fixture(tmp_path, monkeypatch)
-    receipt = tmp_path / "bench.json"
+    receipt = Path(json.loads(case.table_path.read_text())["rows"][0]["measurement"]["receipt_path"])
     if mutation == "invalid_json":
         receipt.write_bytes(b"not JSON")
     elif mutation == "bare_observation":
         receipt.write_text(json.dumps({"schema": srp.SHAPE_TIME_OBSERVATION_SCHEMA}))
+    elif mutation == "unknown_schema":
+        receipt.write_text(json.dumps({"schema": "foreign.fixture.v1"}))
     else:
         receipt.write_text(json.dumps({"changed": True}))
     # A matching digest is not checker authority, nor does it make malformed
@@ -161,7 +151,8 @@ def test_receipt_refuses_before_frontier_publication(tmp_path, monkeypatch, muta
     if mutation != "digest":
         table = json.loads(case.table_path.read_text())
         for row in table["rows"]:
-            row["measurement"]["receipt_sha256"] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+            if Path(row["measurement"]["receipt_path"]).resolve() == receipt.resolve():
+                row["measurement"]["receipt_sha256"] = hashlib.sha256(receipt.read_bytes()).hexdigest()
         case.table_path.write_text(json.dumps(table))
     output = tmp_path / "refused.json"
     with pytest.raises(SystemExit):
