@@ -1862,3 +1862,35 @@ def test_get_refuses_colliding_pair_before_any_load(tmp_path, monkeypatch):
     assert "a_b" in message
     assert "a_b__BF16.pt" in message
     assert cache.weights[("a.b", "BF16")] == "a_b__BF16.pt"
+
+
+def test_prefetch_rechecks_after_a_same_size_pop_and_add(tmp_path):
+    # Keys are popped from the manifest after fill (export stream
+    # `export_native_compressed.py`, MTP stripe pruning
+    # `mtp_production_cache.py`, per-layer streaming
+    # `streaming_production_cache.py`), so a size memo can miss a same-size
+    # swap: pop one key, add a colliding key at the same size, and the next
+    # prefetch must still refuse. The prefetch open therefore rechecks
+    # unconditionally; only the lazy per-file path keeps the count memo.
+    torch.save(torch.ones((2, 2)), tmp_path / "c__BF16.pt")
+    torch.save(torch.ones((2, 2)), tmp_path / "a_b__BF16.pt")
+    cache = ProductionWeightCache(
+        weights={
+            ("c", "BF16"): "c__BF16.pt",
+            ("a.b", "BF16"): "a_b__BF16.pt",
+        },
+        levers={},
+        cache_dir=str(tmp_path),
+    )
+    cache.prefetch([("c", "BF16")])  # clean manifest: arms any size memo
+    cache.weights.pop(("c", "BF16"))
+    cache.weights[("a_b", "BF16")] = "a_b__BF16.pt"  # same size, now colliding
+
+    with pytest.raises(ValueError) as exc_info:
+        cache.prefetch([("a.b", "BF16")])
+
+    message = str(exc_info.value)
+    assert "a.b" in message
+    assert "a_b" in message
+    assert "a_b__BF16.pt" in message
+    assert cache.weights[("a.b", "BF16")] == "a_b__BF16.pt"
