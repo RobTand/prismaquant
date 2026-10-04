@@ -1681,3 +1681,128 @@ def test_the_mixed_case_registry_row_renders_through_the_cache_entry_point():
         )
         assert rendered.shape == weight.shape
         assert torch.isfinite(rendered).all()
+
+
+# ------------------------------------------------------------------ #2219 --
+# ``_cache_weight_filename`` is not injective in the qualified name: the
+# mangled leaf aliases ``.`` with ``_`` (and ``/`` with ``__``), and the
+# stored payload is the bare tensor, so a colliding pair reads and overwrites
+# each other's shard with no refusal anywhere. These tests pin the
+# fail-closed contract: a cache opened for a qname set containing a colliding
+# pair refuses before any shard is written or read, naming both qnames and
+# the shared filename. They run against the shared check
+# (``require_injective_cache_filenames``) and the reader/residency open
+# (``ProductionWeightCache.prefetch``); both refuse only after the fix, so
+# every test in this section fails on the unfixed code (pre-fix failure
+# recorded in the PR).
+
+
+def test_require_injective_cache_filenames_refuses_colliding_pair():
+    # The issue's own example pair: `a.b` and `a_b` mangle to one leaf.
+    from prismaquant.production_weight_cache import (
+        require_injective_cache_filenames,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        require_injective_cache_filenames(
+            ["model.layers.0.a", "model.layers.0_a"],
+            ["BF16"],
+            where="unit test open",
+        )
+    message = str(exc_info.value)
+    assert "model.layers.0.a" in message
+    assert "model.layers.0_a" in message
+    assert "model_layers_0_a__BF16.pt" in message
+
+
+def test_require_injective_cache_filenames_refuses_slash_alias_pair():
+    from prismaquant.production_weight_cache import (
+        require_injective_cache_filenames,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        require_injective_cache_filenames(
+            ["layer/a", "layer__a"],
+            ["NVFP4"],
+            where="unit test open",
+        )
+    message = str(exc_info.value)
+    assert "layer/a" in message
+    assert "layer__a" in message
+    assert "layer__a__NVFP4.pt" in message
+
+
+def test_require_injective_cache_filenames_allows_one_qname_two_formats():
+    from prismaquant.production_weight_cache import (
+        require_injective_cache_filenames,
+    )
+
+    # One qname at two formats is two filenames (`...__BF16.pt` vs
+    # `...__NVFP4.pt`), not a collision; only distinct qnames refuse.
+    require_injective_cache_filenames(
+        ["model.layers.0.mlp.down_proj", "model.layers.0.mlp.down_proj"],
+        ["BF16", "NVFP4"],
+        where="unit test open",
+    )
+
+
+def test_require_injective_cache_filenames_accepts_realistic_roster():
+    from prismaquant.production_weight_cache import (
+        require_injective_cache_filenames,
+    )
+
+    # A GLM-5.3-shaped dense + packed-expert roster: every real model the
+    # issue checked (GLM-5.3-Flash, DeepSeek-V4.1-Flash, Qwen3.8-Flash-Next)
+    # has zero collisions, so the realistic set must pass untouched.
+    roster = (
+        ["model.embed_tokens.weight", "model.norm.weight", "lm_head.weight"]
+        + [
+            f"model.layers.{layer}.{part}"
+            for layer in range(4)
+            for part in (
+                "self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj",
+                "self_attn.o_proj", "mlp.gate_proj", "mlp.up_proj",
+                "mlp.down_proj",
+            )
+        ]
+        + [
+            f"model.layers.{layer}.mlp.experts.{expert}.{proj}"
+            for layer in range(4)
+            for expert in range(8)
+            for proj in ("gate_up_proj", "down_proj")
+        ]
+    )
+    assert len(roster) > 50
+    require_injective_cache_filenames(
+        roster,
+        ["BF16", "NVFP4"],
+        where="unit test open",
+    )
+
+
+def test_prefetch_refuses_a_colliding_manifest_pair(tmp_path):
+    # The reader/residency open: two distinct qnames whose manifest entries
+    # share one shard leaf must refuse before either file-backed load, with
+    # both qnames and the colliding filename in the message. On the unfixed
+    # code this prefetch silently installs the same (last-writer) tensor for
+    # both Linears -- the exact wrong-tensor install #2219 closes.
+    torch.save(torch.ones((2, 2)), tmp_path / "a_b__BF16.pt")
+    cache = ProductionWeightCache(
+        weights={
+            ("a.b", "BF16"): "a_b__BF16.pt",
+            ("a_b", "BF16"): "a_b__BF16.pt",
+        },
+        levers={},
+        cache_dir=str(tmp_path),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        cache.prefetch([("a.b", "BF16"), ("a_b", "BF16")])
+
+    message = str(exc_info.value)
+    assert "a.b" in message
+    assert "a_b" in message
+    assert "a_b__BF16.pt" in message
+    # Nothing was loaded: both entries still point at the manifest leaf.
+    assert cache.weights[("a.b", "BF16")] == "a_b__BF16.pt"
+    assert cache.weights[("a_b", "BF16")] == "a_b__BF16.pt"
