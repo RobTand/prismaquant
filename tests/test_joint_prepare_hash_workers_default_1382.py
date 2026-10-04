@@ -76,8 +76,11 @@ def test_regenerate_tool_routes_the_plan_key_through_the_resolver(monkeypatch):
         seen.update(kwargs)
         return SimpleNamespace(formats_by_qname={}, cells={})
 
+    # The tool imports load_declared_reader from prismaquant.tessera_reader and
+    # these plans declare no reader, so load_declared_reader(None) returns None
+    # untouched; the intake itself is intercepted on the module the tool
+    # imports it from at call time.
     monkeypatch.setattr(bridge, "load_measured_anchor_input", intake)
-    monkeypatch.setattr(bridge, "load_declared_reader", lambda _reader: None)
     monkeypatch.setattr(aura, "_aura_source_sha256", lambda: "0" * 64)
     monkeypatch.setattr(head_module, "build_head_slices", lambda **_kwargs: {})
 
