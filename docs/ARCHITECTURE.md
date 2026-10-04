@@ -7,10 +7,14 @@ advertises `--source-digest-cache`. The directory defaults beside the
 projection output -- outside the model source tree -- a caller may override
 it, and a cache inside the checkpoint it would seal refuses by name. The
 producer keeps invalidating on changed bytes, and its `source_digest_cache`
-receipt rides in the answer; a producer without the option runs as before and
-the answer names that no digest cache was used and why, while an explicitly
-requested cache with such a producer refuses rather than being dropped
-silently. No real census row or idle-GPU measurement is claimed; the
+receipt stays the producer's own; every answer also carries the caller's
+`source_digest_cache_use` record (schema
+`prismaquant.source_digest_cache_use.v1`) saying whether the option was
+passed and why, so a consumer never branches on the receipt's schema and a
+producer without the option is named, never silent. An explicitly requested
+cache with such a producer refuses rather than being dropped, and an
+override that is an existing file refuses by name. No real census row or
+idle-GPU measurement is claimed; the
 tessera#790 acceptance evidence (process input/output and idle GPU time on a
 census row) remains open. No pin, menu, format or serving change.
 
@@ -16792,10 +16796,12 @@ shard-digest cache directory beside the projection output -- caller
 overridable, created if absent, refused inside the model source -- so a
 repeated projection of unchanged checkpoint bytes reuses recorded digests
 and the producer's `source_digest_cache` receipt in the answer says how
-every shard digest was established. A producer without the option runs
-unchanged and the returned projection names that no digest cache was used
-and why at the same key; an explicit `source_digest_cache` with such a
-producer refuses rather than dropping it silently. It binds
+every shard digest was established. Every answer also carries the
+caller-side `source_digest_cache_use` record -- used true when the option
+was passed, named why when not -- so a consumer never branches on the
+receipt's schema; an explicit `source_digest_cache` with such a producer
+refuses rather than dropping it silently, and an override that is an
+existing file refuses by name. It binds
 the producer's per-stack unit records to the profile-declared per-expert units
 exactly -- schema, `unpacked_per_expert` layout, whole-tensor selector, source
 tensor in the hashed roster, `[rows, cols]` geometry, full expert coverage --

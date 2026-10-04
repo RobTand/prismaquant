@@ -8,15 +8,17 @@
   cache** (#2229, Refs RobTand/tessera#790). `request_expert_projection`
   passes `--source-digest-cache` whenever the selected producer's CLI
   advertises it, using a stable directory beside the projection output
-  (caller-overridable, created if absent, refused inside the model source),
-  so a repeated projection of unchanged checkpoint bytes reuses the
-  producer's recorded shard digests instead of re-hashing the whole
-  checkpoint; the producer's `source_digest_cache` receipt rides in the
-  answer and invalidation on changed bytes is unchanged. A producer without
-  the option runs as before and the answer names that no digest cache was
-  used and why; an explicitly requested cache with such a producer refuses
-  by name. No real census row or idle-GPU measurement is claimed; the
-  tessera#790 acceptance evidence stays open.
+  (caller-overridable, created if absent, refused inside the model source
+  and when the override is an existing file), so a repeated projection of
+  unchanged checkpoint bytes reuses the producer's recorded shard digests
+  instead of re-hashing the whole checkpoint. The producer's
+  `source_digest_cache` receipt stays the producer's own in the answer and
+  invalidation on changed bytes is unchanged; every answer also carries the
+  caller's `source_digest_cache_use` record (`used`, `reason`), so a
+  producer without the option is named and a consumer never branches on the
+  receipt's schema. An explicitly requested cache with such a producer
+  refuses by name. No real census row or idle-GPU measurement is claimed;
+  the tessera#790 acceptance evidence stays open.
 
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,

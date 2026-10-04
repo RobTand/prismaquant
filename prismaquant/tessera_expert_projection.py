@@ -176,6 +176,10 @@ def _source_digest_cache_directory(override: str | Path | None, out: Path,
         raise ExpertProjectionError(
             f"{resolved}: source digest cache lies inside the checkpoint {root} it would "
             f"seal; pass a {SOURCE_DIGEST_CACHE_OPTION} directory outside the model source")
+    if cache.exists() and not cache.is_dir():
+        raise ExpertProjectionError(
+            f"{resolved}: source digest cache is an existing file, not a directory; "
+            "pass a directory the producer's SourceDigestCache can write entries into")
     cache.mkdir(parents=True, exist_ok=True)
     return cache
 
@@ -198,11 +202,13 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
     receipt in the answer says how every shard digest was established.  The
     producer keeps invalidating on changed bytes; nothing here weakens that.
 
-    A producer without the option runs as before, and the returned projection
-    names that no digest cache was used and why at the same
-    ``source_digest_cache`` key.  A cache the caller asked for is never
-    dropped silently: an explicit ``source_digest_cache`` with a producer that
-    lacks the option is refused by name.
+    Every returned projection also carries the caller's own statement at its
+    own ``source_digest_cache_use`` key -- whether the option was passed, and
+    why or why not -- so a consumer never branches on the producer receipt's
+    schema.  A producer without the option runs as before and is named, never
+    silent.  A cache the caller asked for is never dropped silently either:
+    an explicit ``source_digest_cache`` with a producer that lacks the option
+    is refused by name, as is an override that is an existing file.
     """
     if not stacks:
         raise ExpertProjectionError("no stacks to project")
@@ -220,6 +226,7 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
     request.write_text(json.dumps(stack_plan_request(stacks), indent=1, sort_keys=True))
     command = [producer_python, "-m", tool, str(model_path),
                "--stack-plan", str(request), "--out", str(out)]
+    cache = None
     if carries_cache:
         cache = _source_digest_cache_directory(source_digest_cache, out, model_path)
         command += [SOURCE_DIGEST_CACHE_OPTION, str(cache)]
@@ -235,14 +242,17 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
         projection = json.loads(out.read_text())
     except (OSError, ValueError) as exc:
         raise ExpertProjectionError(f"producer projection unreadable at {out}: {exc}") from exc
-    if not carries_cache:
-        # The producer's answer is kept verbatim; this one key is PrismaQuant's
-        # caller-side statement about the call, not a producer receipt.
-        projection["source_digest_cache"] = {
-            "schema": NO_DIGEST_CACHE_SCHEMA, "used": False,
-            "reason": f"producer tool {tool} does not advertise "
-                      f"{SOURCE_DIGEST_CACHE_OPTION}; every checkpoint file was hashed",
-        }
+    # The producer's answer is kept verbatim: its ``source_digest_cache``
+    # receipt key stays the producer's.  The caller's statement rides under
+    # its own key on EVERY call, so a consumer never branches on the
+    # receipt's schema to learn whether a cache was used.
+    projection["source_digest_cache_use"] = {
+        "schema": SOURCE_DIGEST_CACHE_USE_SCHEMA, "used": carries_cache,
+        "reason": (f"producer tool {tool} advertises {SOURCE_DIGEST_CACHE_OPTION}; handed {cache}"
+                   if carries_cache else
+                   f"producer tool {tool} does not advertise {SOURCE_DIGEST_CACHE_OPTION}; "
+                   "every checkpoint file was hashed"),
+    }
     return projection
 
 
