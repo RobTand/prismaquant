@@ -3019,34 +3019,19 @@ def _production_cache_source_sha256(
     package tree instead, excluding only interpreter bytecode caches.  This
     also binds packaged lattice/codebook data and model-profile JSON.
     """
-    root = _production_cache_source_root(package_root)
-    identity_paths = _production_cache_identity_paths(root)
-    if not identity_paths:
-        raise RuntimeError(
-            f"production source identity found no files under {root}"
-        )
-    digest = LengthFramedSourceSha256()
-    for path in identity_paths:
-        relative = path.relative_to(root).as_posix()
-        try:
-            payload = path.read_bytes()
-        except OSError as exc:
-            raise RuntimeError(
-                f"production source identity cannot read {relative}"
-            ) from exc
-        digest.update(relative, payload)
-    return digest.hexdigest()
+    return _production_cache_source_profile(package_root)[0]
 
 
-def _production_cache_source_file_digests(
+def _production_cache_source_profile(
     package_root: Path | None = None,
-) -> dict[str, str]:
-    """Per-file sha256 over the exact roster ``_production_cache_source_sha256`` hashes.
+) -> tuple[str, dict[str, str]]:
+    """Aggregate digest and per-file digests from one read of the source tree.
 
-    Written beside an AURA checkpoint manifest's aggregate producer digest so
-    a later mismatch can name the first file whose bytes moved instead of two
-    opaque tree digests (#2218). A diagnostic record, never a gate input: the
-    gate stays the aggregate digest.
+    The aggregate is byte-identical to ``_production_cache_source_sha256``'s
+    framing; the per-file map is what a checkpoint manifest stores beside it
+    so a later mismatch can name the first file whose bytes moved (#2218).
+    One walk, one read per file, so the map and its aggregate always describe
+    the same pass over the tree.
     """
     root = _production_cache_source_root(package_root)
     identity_paths = _production_cache_identity_paths(root)
@@ -3054,6 +3039,7 @@ def _production_cache_source_file_digests(
         raise RuntimeError(
             f"production source identity found no files under {root}"
         )
+    digest = LengthFramedSourceSha256()
     digests: dict[str, str] = {}
     for path in identity_paths:
         relative = path.relative_to(root).as_posix()
@@ -3063,8 +3049,9 @@ def _production_cache_source_file_digests(
             raise RuntimeError(
                 f"production source identity cannot read {relative}"
             ) from exc
+        digest.update(relative, payload)
         digests[relative] = hashlib.sha256(payload).hexdigest()
-    return digests
+    return digest.hexdigest(), digests
 
 
 #: Feed width for host-tensor digests. ``hashlib`` releases the GIL for

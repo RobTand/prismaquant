@@ -190,9 +190,11 @@ def _write_aura_checkpoint_manifest(
         where="AURA checkpoint identity",
     )
     from prismaquant.production_weight_cache import (
-        _production_cache_source_file_digests,
+        _production_cache_source_profile,
     )
 
+    manifest_source_sha256, manifest_source_files = (
+        _production_cache_source_profile())
     manifest = {
         "schema": AURA_CHECKPOINT_MANIFEST_SCHEMA,
         "identity_sha256": identity_sha256,
@@ -208,11 +210,13 @@ def _write_aura_checkpoint_manifest(
             }
             for name in names
         ],
-        # Diagnostic only (#2218): the per-file digests of the producer tree
-        # that wrote this manifest, so a later producer_source_sha256 mismatch
-        # can name the first file that moved. No gate reads this map; the seal
-        # stays the aggregate digest in the identity.
-        "producer_source_files_sha256": _production_cache_source_file_digests(),
+        # Diagnostic only (#2218): one pass over the producer tree at manifest
+        # write -- its aggregate digest and per-file digests -- so a later
+        # producer_source_sha256 mismatch can name the first file that moved,
+        # or say when the tree changed between the identity's digest and this
+        # write. No gate reads these; the seal stays the identity's aggregate.
+        "producer_source_sha256": manifest_source_sha256,
+        "producer_source_files_sha256": manifest_source_files,
     }
     encoded = json.dumps(
         manifest,
@@ -257,36 +261,47 @@ def _dev_archive_checkpoint_lineage(root: Path, reason: str) -> Path:
 def _name_first_differing_source_file(
     refusal: RuntimeError,
     manifest: Mapping[str, object],
+    stored_digest: object,
+    expected_digest: object,
 ) -> RuntimeError:
     """Name the first moved producer file in a source-digest refusal (#2218).
 
-    The manifest's ``producer_source_files_sha256`` map -- written with it --
-    against the executing tree's own per-file digests: a recurrence of the
+    The manifest's write pass -- one aggregate plus per-file digests, recorded
+    with it -- against one pass over the executing tree: a recurrence of the
     xdist producer_source_sha256 flake is then diagnosable from the refusal
-    alone, which file moved and both of its digests. Best effort: a manifest
-    written before the map existed, or an unreadable executing tree, leaves
-    ``refusal`` unchanged.
+    alone. When a file moved, the refusal names the first differing relative
+    path with both of its digests; when the per-file maps agree but the
+    aggregates differ, the tree changed between the identity's digest and the
+    manifest write. Best effort: a manifest written before the map existed, or
+    an unreadable executing tree, leaves ``refusal`` unchanged.
     """
     stored_files = manifest.get("producer_source_files_sha256")
     if not isinstance(stored_files, Mapping):
         return refusal
     try:
         from prismaquant.production_weight_cache import (
-            _production_cache_source_file_digests,
+            _production_cache_source_profile,
         )
 
-        current_files = _production_cache_source_file_digests()
-    except Exception:
+        _current_sha256, current_files = _production_cache_source_profile()
+    except (OSError, RuntimeError):
         return refusal
     for relative in sorted(set(stored_files) | set(current_files)):
-        stored_digest = stored_files.get(relative)
-        current_digest = current_files.get(relative)
-        if stored_digest != current_digest:
+        stored_file_digest = stored_files.get(relative)
+        current_file_digest = current_files.get(relative)
+        if stored_file_digest != current_file_digest:
             return RuntimeError(
                 f"{refusal}; first differing source file {relative!r}: "
-                f"stored={stored_digest if isinstance(stored_digest, str) else '<missing>'} "
-                f"current={current_digest if isinstance(current_digest, str) else '<missing>'}"
+                f"stored={stored_file_digest if isinstance(stored_file_digest, str) else '<missing>'} "
+                f"current={current_file_digest if isinstance(current_file_digest, str) else '<missing>'}"
             )
+    if stored_digest != expected_digest:
+        manifest_sha256 = manifest.get("producer_source_sha256")
+        return RuntimeError(
+            f"{refusal}; the producer tree changed between identity and "
+            "manifest write (per-file digests all match; manifest pass "
+            f"sha256={manifest_sha256 if isinstance(manifest_sha256, str) else '<unrecorded>'})"
+        )
     return refusal
 
 
@@ -326,7 +341,8 @@ def _load_aura_checkpoint_manifest(
         refusal = _checkpoint_identity_mismatch(
             field=field, stored=stored, expected=expected)
         if field == "producer_source_sha256":
-            refusal = _name_first_differing_source_file(refusal, manifest)
+            refusal = _name_first_differing_source_file(
+                refusal, manifest, stored, expected)
         # The checkpoint identity binds the producer source and the run's
         # inputs: a run seal (PQ #1147). Dev mode prints the difference and
         # reuses the lineage under its own recorded identity -- no archive,

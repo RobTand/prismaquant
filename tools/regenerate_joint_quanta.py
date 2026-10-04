@@ -757,7 +757,8 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
     from prismaquant.joint_layer_quanta import qname_layer
     from prismaquant.joint_stage_b_head import (
         HEAD_SLICE_SCHEMA, build_head_slices, head_slice_bytes, head_slice_path)
-    from prismaquant.tessera_joint_aura import load_measured_anchor_input
+    from prismaquant.tessera_joint_aura import (
+        load_measured_anchor_input, resolve_file_hash_workers)
     from prismaquant.tessera_reader import load_declared_reader
 
     started = time.monotonic()
@@ -766,7 +767,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
         synthesis_device="cpu", progress_phase=None,
         require_existing_renders=True, verify_payloads=False,
         historical_encoder_reuse=plan.get("historical_encoder_reuse"),
-        file_hash_workers=plan.get("file_hash_workers", 1))
+        file_hash_workers=resolve_file_hash_workers(plan))
     slices = build_head_slices(
         config=plan, plan_sha256=plan_sha256, prepared=prepared_binding,
         completion=prepared, production_cache=production_cache, data=data,
