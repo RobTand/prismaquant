@@ -4,10 +4,15 @@
 
 ### Fixed
 
-- **Real codec CPU fixtures retain their full acceptance at bounded geometry**
+- **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing
-  byte/refusal/window assertion while encoding fewer output rows. The Hessian
+  byte/refusal/window assertion while encoding fewer output rows. The preserved
+  acceptance is branch and assertion coverage, not encode-regime coverage: at
+  eight output rows several derived sweep reps stay inside the trellis start
+  transient taller fixtures passed through, while the row-stream window rep
+  (E4M3 K1 R1024, L=14 at 4 rows) still shifts past its window and reaches
+  steady state. The Hessian
   predicate sweep still derives every family, wire recipe and scale plane,
   with real encodes sized to complete arity/span groups rather than a model-sized
   weight matrix. Production defaults, pins, guards and timeout/skip policy are
