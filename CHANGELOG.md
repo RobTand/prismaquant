@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **Real codec CPU fixtures retain their full acceptance at bounded geometry**
+  (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
+  private source/capture identities, full-width Hessians and every existing
+  byte/refusal/window assertion while encoding fewer output rows. The Hessian
+  predicate sweep still derives every family, wire recipe and scale plane,
+  with real encodes sized to complete arity/span groups rather than a model-sized
+  weight matrix. Production defaults, pins, guards and timeout/skip policy are
+  unchanged; this fixture change is not GPU or scientific qualification.
+
 - **Connected PB fixtures own their authenticated import contexts** (#2192).
   Explicit source fixtures detach and restore the canonical PB graph, fleet
   tools and parent-package edges around their existing reviewed source pin.
