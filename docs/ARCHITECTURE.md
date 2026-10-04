@@ -31248,10 +31248,12 @@ reconciles against its original whole-draw component on its own absolute
 block mass and the stated relative gate; zero mass requires exact agreement.
 Integer block coordinates must exhaust the draw without gaps, and recorded
 calibration shape and selected-token geometry must match the priced probes.
-The opt-in selector, geometry and collector scope bind the run identity, so
-requested rows cannot resume
-committed no-attribution rows and claim the instrument. Existing rows remain
-probe-only and never claim the instrument; this is not the #1962 estimator
+Each spill callback releases its borrowed source and delta; only scalar block
+components persist. The streamed selector instruments only requested measured
+candidates and refuses unknown candidates before capture. Selector, geometry
+and collector scope bind the run identity: requested rows cannot resume
+committed no-attribution rows and claim the instrument; unselected rows need
+no sidecar. Existing rows remain probe-only. This is not the #1962 estimator
 fix, a repricing, or an issue closure. Design:
 `docs/design/joint_aura_runtime_allocation.md`. Gate:
 `tests/test_joint_sequence_attribution.py` and the spill sidecar tests of

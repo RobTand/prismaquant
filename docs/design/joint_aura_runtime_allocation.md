@@ -159,12 +159,14 @@ retains the caller's capture-batch id per spill record at capture time, and
 re-reads a window's captured rows synchronously through the spill's own
 reader lifecycle immediately after each single candidate's `project`, while
 that rendered delta is resident — one bounded, guard-charged read at a time,
-no second read stream, no per-sequence GW matrices. The opt-in selector,
-geometry and collector scope bind the run identity (never the priced probe
-identity), so requested rows cannot resume committed no-attribution rows and
-claim the instrument. Existing rows remain probe-only and never claim the
-instrument; this mechanism does not close #1962's estimator question or
-reprice a model.
+no second read stream, no per-sequence GW matrices. Each callback releases
+its borrowed source and delta immediately; only scalar block components
+persist. The streamed selector instruments only requested measured candidates
+and refuses unknown candidates before capture. The opt-in selector, geometry
+and collector scope bind the run identity (never the priced probe identity),
+so requested rows cannot resume committed no-attribution rows and claim the
+instrument. Unselected rows need no sidecar. Existing rows remain probe-only;
+this mechanism does not close #1962's estimator question or reprice a model.
 
 ## Runtime input and search
 

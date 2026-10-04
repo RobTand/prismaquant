@@ -406,10 +406,11 @@ class SignedJointProjectionLease:
     """
 
     def __init__(self, modules, specs_by_qname, delta_weights, *, activation_max_abs=None,
-                 projection_backend=None, attribution=False):
+                 projection_backend=None, attribution=False, attribution_keys=None):
         if type(attribution) is not bool:
             raise TypeError("joint AURA block attribution flag must be boolean")
         self.attribution_enabled = attribution
+        self._attribution_keys = attribution_keys
         self._attribution_blocks = []
         self._attribution_components = {}
         self._attribution_block = None
@@ -661,7 +662,8 @@ class SignedJointProjectionLease:
                              else torch.zeros((), device=x.device))
                     components = torch.stack((weight, activation, mixed))
                     key = (name, fmt)
-                    if self.attribution_enabled:
+                    if (self.attribution_enabled and (self._attribution_keys is None
+                            or key in self._attribution_keys)):
                         if self._attribution_block is None:
                             raise RuntimeError(
                                 "joint AURA attribution invocation outside a noted block")

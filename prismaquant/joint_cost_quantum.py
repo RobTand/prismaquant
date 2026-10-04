@@ -177,7 +177,7 @@ class SpillSequenceAttribution:
         self._selected_tokens_per_row = {"all": int(seqlen), "last": 1,
                                          "causal": int(seqlen) - 1}[token_scope]
         self._calibration_sha256 = calibration_sha256
-        self._leases: dict[tuple[int, tuple[str, str]], object] = {}
+        self._components: dict[tuple[int, tuple[str, str]], list[dict]] = {}
 
     def __call__(self, *, key, delta, window_index, probe_index):
         if probe_index is None:
@@ -187,14 +187,12 @@ class SpillSequenceAttribution:
         if self._wants is not None and (key[0], key[1]) not in self._wants:
             return
         name, fmt = key
-        lease = self._leases.get((probe_index, key))
-        if lease is None:
-            from .joint_aura import JointBlockAttributionLease
-            lease = self._leases[(probe_index, key)] = JointBlockAttributionLease(
-                name=name, source_weight=self._linears[name].weight, delta=delta,
-                spec=self._formats_by_qname[name][fmt],
-                activation_max_abs=self._maxima,
-                projection_backend=self._backend, blocks=self.blocks)
+        from .joint_aura import JointBlockAttributionLease
+        lease = JointBlockAttributionLease(
+            name=name, source_weight=self._linears[name].weight, delta=delta,
+            spec=self._formats_by_qname[name][fmt],
+            activation_max_abs=self._maxima,
+            projection_backend=self._backend, blocks=self.blocks)
 
         def feed(feed_name, x, gradient, capture_batch):
             if feed_name == name:
@@ -202,6 +200,15 @@ class SpillSequenceAttribution:
                                          x, gradient, capture_batch)
 
         self._spill.replay_records(window_index, probe_index, feed, charge=self._charge)
+        # Persist scalars only: the lease borrows the current candidate delta
+        # and source weight, so retaining it would retain every candidate.
+        components = self._components.get((probe_index, key))
+        if components is None:
+            self._components[(probe_index, key)] = lease.components
+        else:
+            for accumulated, current in zip(components, lease.components):
+                for component, value in current.items():
+                    accumulated[component] += value
 
     def _charge(self, bytes_to_admit):
         if self._guard is not None:
@@ -214,14 +221,13 @@ class SpillSequenceAttribution:
         """The sidecar for one row's authoritative totals, or None.
 
         Every probe of the row's window has fired by the time its window
-        commits, so the per-probe leases are complete; a candidate observed by
+        commits, so the per-probe scalar blocks are complete; a candidate observed by
         no probe has no sidecar rather than a fabricated zero one.
         """
         per_probe = [None] * self._n_probes
-        for (probe_index, lease_key), lease in self._leases.items():
-            if lease_key == key:
-                per_probe[probe_index] = [
-                    dict(value) for value in lease.components]
+        for (probe_index, component_key), components in self._components.items():
+            if component_key == key:
+                per_probe[probe_index] = [dict(value) for value in components]
         if any(probe is None for probe in per_probe):
             return None
         from .joint_aura import sequence_attribution_sidecar

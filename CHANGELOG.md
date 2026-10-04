@@ -31,8 +31,11 @@
   component; a matching total cannot hide projection redistribution.
   Full block coverage, integer coordinates and recorded calibration/token
   geometry are validated before any reader uses the decomposition.
-  The opt-in selector binds the run identity, so requested rows cannot resume
-  committed no-attribution rows and claim the instrument. Existing rows stay
+  Spill callbacks release their borrowed source and delta immediately and
+  retain scalar block components only. The streamed selector instruments only
+  requested measured candidates and refuses unknown candidates before capture.
+  The selector binds the run identity: requested rows cannot resume committed
+  no-attribution rows; unselected rows need no sidecar. Existing rows stay
   probe-only; this is not the #1962 estimator fix, a repricing, or an issue
   closure. Gates: `tests/test_joint_sequence_attribution.py`, the spill
   sidecar tests of `tests/test_stageb_one_pass_spill.py`.

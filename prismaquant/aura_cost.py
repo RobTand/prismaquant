@@ -2174,6 +2174,13 @@ def compute_aura_cost_streamed(
         )
         unit_formats[name] = tuple(planned)
         render_formats[name] = measured
+    attribution_keys = None
+    if attribution_config is not None and attribution_config["candidates"] != "all":
+        attribution_keys = {tuple(pair) for pair in attribution_config["candidates"]}
+        unknown = attribution_keys - {
+            (name, fmt) for name, formats in render_formats.items() for fmt in formats}
+        if unknown:
+            raise ValueError(f"sequence_attribution candidate outside measured roster: {sorted(unknown)}")
     if operator_windows is not None and any(not render_formats[name] for name in names):
         raise ValueError('joint operator windows require a measured candidate for every target')
     joint_probe_identity = None
@@ -2556,6 +2563,7 @@ def compute_aura_cost_streamed(
                         if not validate_joint_aura_entry(row):
                             raise ValueError("not a joint row")
                         if (attribution_config is not None
+                                and (attribution_keys is None or (name, fmt) in attribution_keys)
                                 and "sequence_attribution" not in row
                                 and fmt not in _ZERO_COST_FORMATS):
                             # A zero-cost passthrough row's price is exact by
@@ -3416,6 +3424,7 @@ def compute_aura_cost_streamed(
                         d_weights, activation_max_abs=getattr(cache_owner, "activation_max_abs", None),
                         projection_backend=joint_projection_backend,
                         attribution=attribution_config is not None,
+                        attribution_keys=attribution_keys,
                     )
                 try:
                     if joint_lease is not None:
