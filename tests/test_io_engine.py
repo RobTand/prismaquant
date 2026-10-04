@@ -345,12 +345,12 @@ def test_seal_constants_resolve_without_cpython_build_time_names(monkeypatch):
         assert resolved._F_GET_SEALS == uapi['F_GET_SEALS']
         buffer = resolved.SealedBuffer(16)
         try:
-            buffer.fill_bytes(b'pq-io-sealed' + b'x' * 3)
+            buffer.fill_bytes(b'pq-io-sealed' + b'x' * 4)
             digest = buffer.seal()
             buffer.require_sealed()
             assert len(digest) == 64
             with buffer.readonly() as view:
-                assert bytes(view) == b'pq-io-sealed' + b'x' * 3
+                assert bytes(view) == b'pq-io-sealed' + b'x' * 4
         finally:
             buffer.close()
         # And the same portability one layer down, where this interpreter's
