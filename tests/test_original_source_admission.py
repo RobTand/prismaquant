@@ -351,7 +351,12 @@ def test_reader_delivery_join_holds_until_the_unshared_helper_tree(authority_cas
     case = authority_case
     before = _forbid_source_work(case, monkeypatch)
     receipt, context, result = _selected_reader_producer_fixtures(case)
-    with pytest.raises(RuntimeError, match='selected reader actual complete helper tree'):
+    # The launch helper root in a pool action is the serving interpreter
+    # environment, not a sealed src/ generation, so the source-digest owner
+    # refuses to read it; on a sealed generation the digest join itself
+    # refuses instead. Either named refusal is the honest boundary.
+    with pytest.raises(RuntimeError, match='selected reader actual complete helper tree|'
+                                            'cannot read package root'):
         sg._require_original_reader_producer(receipt, case['authority'], result,
                                              case['authority']['runtime'])
     assert case['owner'].receipt() == before
