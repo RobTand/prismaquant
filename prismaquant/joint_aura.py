@@ -603,6 +603,8 @@ class SignedJointProjectionLease:
 
         components = {}
         for key in self.deltas:
+            if self._attribution_keys is not None and key not in self._attribution_keys:
+                continue
             per_block = self._attribution_components.get(key)
             components[key] = ([dict(value) for value in per_block] if per_block is not None
                                else [zero() for _ in blocks])
