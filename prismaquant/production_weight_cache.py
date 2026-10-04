@@ -1356,9 +1356,10 @@ class ProductionWeightCache:
         the bounded branch requires the caller's digest binding.
         """
         from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
-        # #2219: the lazy get() -> _resolve_to_tensor -> here path must run
-        # the manifest check before the first byte of any shard is read, not
-        # only the prefetch open. Memoized: O(1) after the first clean check.
+        # #2219: the lazy get() -> _resolve_to_tensor -> here path runs the
+        # whole-manifest check behind the count memo (per-file O(n) would
+        # cost too much); the prefetch open rechecks unconditionally, so a
+        # same-size pop/add swap is caught there.
         self._require_injective_filenames()
         path = Path(self._path_for_value(value)).absolute()
         limit = getattr(self, "_file_load_max_bytes", 0)
@@ -1516,26 +1517,41 @@ class ProductionWeightCache:
             raise RuntimeError("PWC file receipt tensor or source file changed")
         return dict(receipt)
 
-    def _require_injective_filenames(self) -> None:
-        """Refuse a colliding manifest before the first file-backed load (#2219).
-
-        Whole-manifest and memoized: the check runs over ALL of
-        ``self.weights`` — not just the keys one call asked for — so a
-        colliding pair is refused no matter which subset a prefetch names or
-        whether the pair is read through ``get()`` alone. The memo is the key
-        count: loads replace values, never keys, so the set only grows (MTP
-        and packed-expert appends), which re-arms the check for the appended
-        names. Repeated opens after a clean check are an O(1) compare.
-        """
+    def _check_injective_filenames(self) -> None:
+        """Run the whole-manifest filename check and arm the size memo."""
         count = len(self.weights)
-        if getattr(self, "_injectivity_checked_keys", None) == count:
-            return
         require_injective_cache_filenames(
             (key[0] for key in self.weights),
             (key[1] for key in self.weights),
             where="production cache residency",
         )
         self._injectivity_checked_keys = count
+
+    def _require_injective_filenames(self) -> None:
+        """Refuse a colliding manifest before a lazy file-backed load (#2219).
+
+        Whole-manifest: the check runs over ALL of ``self.weights`` — not
+        just the keys one call asked for — so a colliding pair is refused no
+        matter which subset a prefetch names or whether the pair is read
+        through ``get()`` alone.
+
+        Keys can be POPPED from the manifest after fill
+        (``export_native_compressed.py`` export stream,
+        ``mtp_production_cache.py`` stripe pruning,
+        ``streaming_production_cache.py`` per-layer pop), so a size memo can
+        miss a same-size pop/add swap. The two residency paths therefore
+        differ: ``prefetch`` calls :meth:`_check_injective_filenames`
+        UNCONDITIONALLY on every call (O(n) string work next to the
+        ``torch.load``s it precedes), while this lazy per-file path keeps the
+        count memo — it can miss a same-size swap until the next ``prefetch``
+        or key-set growth. No method of this class pops from
+        ``self.weights`` (they only swap values between tensors and paths),
+        so the memo's own blind spot is exactly the external pop sites above.
+        """
+        count = len(self.weights)
+        if getattr(self, "_injectivity_checked_keys", None) == count:
+            return
+        self._check_injective_filenames()
 
     def prefetch(self, keys: Sequence[tuple[str, str]] | None = None,
                  max_workers: int = 4, *, executor=None) -> int:
@@ -1571,10 +1587,12 @@ class ProductionWeightCache:
                     if not isinstance(self.weights.get(k), torch.Tensor)]
         if not keys:
             return 0
-        # #2219: the reader/residency open — whole-manifest, memoized, so a
-        # colliding pair refuses even when this call names only one of the
-        # two keys (the other may arrive in a later call or via get()).
-        self._require_injective_filenames()
+        # #2219: the reader/residency open — whole-manifest, UNCONDITIONAL on
+        # every call: keys can be popped elsewhere (export stream, MTP stripe
+        # pruning, streaming per-layer pop), so a size memo could miss a
+        # same-size swap; O(n) next to the loads this precedes. Also arms the
+        # memo the lazy _load_file_tensor path relies on.
+        self._check_injective_filenames()
 
         def _load_one(key):
             value = self.weights.get(key)

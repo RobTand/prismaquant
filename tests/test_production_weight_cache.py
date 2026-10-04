@@ -1809,10 +1809,10 @@ def test_prefetch_refuses_a_colliding_manifest_pair(tmp_path):
 
 
 def test_prefetch_refuses_colliding_keys_across_separate_calls(tmp_path):
-    # The manifest check is whole-manifest and memoized, not per-call: two
-    # colliding keys handed to prefetch in SEPARATE calls must still refuse
-    # on the first call that opens the manifest, because the pair shares one
-    # leaf no matter which subset this call asked for.
+    # The manifest check is whole-manifest: two colliding keys handed to
+    # prefetch in SEPARATE calls must still refuse on the first call that
+    # opens the manifest, because the pair shares one leaf no matter which
+    # subset this call asked for.
     torch.save(torch.ones((2, 2)), tmp_path / "a_b__BF16.pt")
     cache = ProductionWeightCache(
         weights={
