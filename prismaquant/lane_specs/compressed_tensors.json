@@ -72,9 +72,9 @@
     },
     {
       "id": "load_generate.graph",
-      "runner": "prismaquant.validate_native_export --shipcard --no-enforce-eager",
+      "runner": "prismaquant.validate_native_export --shipcard --no-enforce-eager --graph-receipt <receipt.json>",
       "shipcard_slot": "native_export.graph",
-      "description": "Same, with CUDA-graph capture on (a format may load eager and fail capture)."
+      "description": "CUDA-graph load + greedy generate, with a hash-bound Tessera graph-equals-eager receipt matching the exact serve scope."
     },
     {
       "id": "route.sweep",

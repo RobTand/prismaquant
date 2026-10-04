@@ -89,6 +89,18 @@
 
 ### Fixed
 
+- **Graph ship slots require equality receipts for their own serve** (#1586).
+  The native graph arm requires `--graph-receipt` and records its path,
+  byte SHA-256 and observed image/model/Tessera/configuration scope. Ship-card
+  verification authenticates those bytes and calls Tessera's stdlib-only
+  `graph_receipt.verify`, refusing edited verdicts and any scope mismatch
+  by name. Malformed receipts refuse whether Tessera returns a reason or
+  raises; the verify-call-only catch names the exception type and message.
+  Eager verification is unchanged; no eager-only waiver is added.
+  This change must land with or after the D13 Tessera pin bump carrying the
+  receipt module. Pre-pin CPU evidence is non-qualifying, not a GLM release.
+
+
 - **Test cost: repeated in-process work runs once; two stale consumer
   fixtures move from 32 rows to the shared fixture's `OUTPUT_FEATURES`=8**
   (#1929). The prefill dry-run tables memoize their pure seeded mandatory-set

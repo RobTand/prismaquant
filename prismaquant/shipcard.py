@@ -21,7 +21,7 @@ Base slots (required for every artifact):
 | Slot | Filled by |
 |---|---|
 | `native_export.eager` | `validate_native_export.py --shipcard` (eager arm) |
-| `native_export.graph` | `validate_native_export.py --shipcard --no-enforce-eager` |
+| `native_export.graph` | `validate_native_export.py --shipcard --no-enforce-eager --graph-receipt <receipt.json>` |
 | `ship_gate` | `validate_quantized_model.py --shipcard` |
 | `gold.kl` | `python -m prismaquant.shipcard_cli fill --slot gold.kl --record <full_kl json>` |
 | `gold.ppl` | `python -m prismaquant.shipcard_cli fill --slot gold.ppl --record <ppl json>` |
@@ -2084,6 +2084,47 @@ def _verify_gold_record(
     return problems
 
 
+def _verify_graph_receipt(metrics: Mapping[str, Any]) -> list[str]:
+    """Authenticate the saved bytes; Tessera alone judges their equality rule."""
+    slot = "native_export.graph"
+    path = metrics.get("graph_receipt_path")
+    if not isinstance(path, str) or not path:
+        return [f"{slot}: missing graph_receipt_path"]
+    digest = metrics.get("graph_receipt_sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return [f"{slot}: missing or malformed graph_receipt_sha256"]
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as exc:
+        return [f"{slot}: graph_receipt_path cannot be read: {exc}"]
+    from .digests import bytes_sha256hex
+
+    if bytes_sha256hex(raw) != digest:
+        return [f"{slot}: graph_receipt_sha256 differs from the current receipt bytes"]
+    serve = metrics.get("serve_scope")
+    if not isinstance(serve, Mapping):
+        return [f"{slot}: missing structured serve_scope"]
+    try:
+        from tessera import graph_receipt
+    except ImportError as exc:
+        return [f"{slot}: tessera.graph_receipt is unavailable from the installed "
+                f"Tessera; the serving pin must carry it: {exc}"]
+    try:
+        receipt = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        return [f"{slot}: malformed graph receipt: {exc}"]
+    if not isinstance(receipt, dict):
+        return [f"{slot}: malformed graph receipt: expected a JSON object"]
+    scope = dict(serve)
+    try:
+        reason = graph_receipt.verify(receipt, scope)
+    except Exception as exc:
+        return [f"{slot}: graph receipt unreadable: {type(exc).__name__}: {exc}"]
+    return ([f"{slot}: graph equality receipt refused: {reason}"]
+            if reason is not None else [])
+
+
+
 def _verify_native_export_record(
     slot: str,
     record: Mapping[str, Any],
@@ -2149,6 +2190,8 @@ def _verify_native_export_record(
             f"{slot}: max_new_tokens={max_new_tokens!r} is not a positive "
             "integer"
         )
+    if arm == "graph":
+        problems.extend(_verify_graph_receipt(metrics))
     return problems
 
 

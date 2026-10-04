@@ -264,6 +264,118 @@ def _route_sweep_path(args, arm: str) -> Path | None:
     return Path(args.route_sweep_out)
 
 
+def _graph_image() -> str:
+    """Observe this Docker container, not an image supplied by the operator.
+
+    Kernel cgroups or Docker's bind-mount roots identify the actual container.
+    Docker inspection supplies its image and manifest digest. Without access
+    to that evidence the graph arm refuses, including outside a container.
+
+    Return the full resolved repo@sha256 reference, never a bare digest or local
+    image ID. Tessera PR 930 review (a3e2814e) requires this exact spelling:
+    https://github.com/RobTand/tessera/pull/930#issuecomment-5985243792
+    Do not normalize either the served reference or the receipt to match.
+    """
+    import re
+
+    try:
+        observed = (Path("/proc/self/cgroup").read_text()
+                    + Path("/proc/self/mountinfo").read_text())
+        containers = set(re.findall(r"/docker(?:/containers/|/|-)([0-9a-f]{64})(?:/|\.scope|$)",
+                                    observed, re.MULTILINE))
+        if len(containers) != 1:
+            raise ValueError("cannot identify this process's Docker container")
+        container_id = containers.pop()
+        container = json.loads(subprocess.check_output(
+            ["docker", "container", "inspect", container_id], text=True))[0]
+        if container["Id"] != container_id or not container["State"]["Running"]:
+            raise ValueError("observed container is not running")
+        image = json.loads(subprocess.check_output(
+            ["docker", "image", "inspect", container["Image"]], text=True))[0]
+        if image["Id"] != container["Image"]:
+            raise ValueError("container and inspected image IDs differ")
+        digests = {ref for ref in image.get("RepoDigests", [])
+                   if re.fullmatch(r".+@sha256:[0-9a-f]{64}", ref)}
+        reference = container["Config"]["Image"]
+        if reference in digests:
+            return reference
+        if len(digests) == 1:
+            return digests.pop()
+        raise ValueError("container image has no unique observed manifest digest")
+    except (OSError, ValueError, KeyError, IndexError, TypeError,
+            subprocess.CalledProcessError) as exc:
+        raise ValueError(f"cannot derive image: {exc}") from exc
+
+
+def _graph_tessera_source_sha256() -> str:
+    """Hash installed Python sources using Tessera #702's sha256sum recipe.
+
+    The installed receipt module locates the package, including editable and
+    wheel installs. Logical names remain src/tessera/... in either case, as
+    in the equality producer's sorted src/**/*.py sha256sum output. Read the
+    packaged pin evidence as bytes, without importing tessera.serving.
+    """
+    from .digests import bytes_sha256hex, file_sha256hex
+    from .tessera_serving_runtime_pin import (
+        load_tessera_serving_runtime_pin, require_exact_tessera_runtime_pin,
+    )
+
+    try:
+        from tessera import graph_receipt
+
+        package = Path(graph_receipt.__file__).resolve().parent
+        require_exact_tessera_runtime_pin(
+            load_tessera_serving_runtime_pin(),
+            installed_contract_sha256=file_sha256hex(
+                package / "serving" / "runtime_contract.json"))
+        sources = sorted(package.rglob("*.py"),
+                         key=lambda p: p.relative_to(package).as_posix())
+        if not sources:
+            raise ValueError("installed Tessera has no Python source files")
+        lines = (f"{file_sha256hex(p)}  src/tessera/{p.relative_to(package).as_posix()}\n"
+                 for p in sources)
+        return bytes_sha256hex("".join(lines).encode())
+    except (ImportError, OSError, ValueError, TypeError, AttributeError) as exc:
+        raise ValueError(f"cannot derive tessera_src_sha256: {exc}") from exc
+
+
+def _graph_serve_scope(llm, model_dir: Path, compilation_config: dict,
+                       *, image: str, source_sha256: str,
+                       config_sha256: str) -> dict:
+    """Read resolved engine sizes and speculation, not requested CLI values."""
+    from .digests import file_sha256hex
+
+    config = getattr(getattr(llm, "llm_engine", None), "vllm_config", None)
+    model = getattr(config, "model_config", None)
+    loaded_model = getattr(model, "model", None)
+    try:
+        same_config = file_sha256hex(model_dir / "config.json") == config_sha256
+    except OSError as exc:
+        raise ValueError(f"cannot derive model_config_sha256: {exc}") from exc
+    if (not isinstance(loaded_model, str)
+            or Path(loaded_model).resolve() != model_dir.resolve() or not same_config):
+        raise ValueError("cannot derive model_config_sha256: loaded model/config differs")
+    scope = {"image": image, "model_config_sha256": config_sha256,
+             "tessera_src_sha256": source_sha256,
+             "compilation_config": compilation_config}
+    for name, parent, attribute in (
+        ("max_model_len", "model_config", "max_model_len"),
+        ("max_num_seqs", "scheduler_config", "max_num_seqs"),
+        ("tensor_parallel_size", "parallel_config", "tensor_parallel_size"),
+        ("speculative_tokens", "speculative_config", "num_speculative_tokens"),
+    ):
+        resolved = getattr(config, parent, None)
+        value = (0 if name == "speculative_tokens" and config is not None
+                 and hasattr(config, parent) and resolved is None
+                 else getattr(resolved, attribute, None))
+        if (isinstance(value, bool) or not isinstance(value, int)
+                or value < (0 if name == "speculative_tokens" else 1)):
+            raise ValueError(f"cannot derive {name} from the served vLLM config")
+        scope[name] = value
+    return scope
+
+
+
 def _run_arm(args, model_dir: Path, spec: dict | None, *,
              enforce_eager: bool) -> dict:
     """One load+generate smoke. Returns a shipcard-shaped verdict block."""
@@ -276,10 +388,38 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
         # archived Gridbook probe learned to do and it keeps the sweep's
         # objects the same objects the generate ran on.
         os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
-    from vllm import LLM, SamplingParams
+    from .digests import bytes_sha256hex, file_sha256hex
 
     llm = None
     try:
+        graph_metrics = {}
+        compilation = None
+        if not enforce_eager:
+            receipt_path = getattr(args, "graph_receipt", None)
+            if not receipt_path:
+                raise ValueError("graph_receipt_path is required (--graph-receipt)")
+            try:
+                path = Path(receipt_path).resolve(strict=True)
+                raw = path.read_bytes()
+            except OSError as exc:
+                raise ValueError(f"graph_receipt_path cannot be read: {exc}") from exc
+            graph_metrics = {"graph_receipt_path": str(path),
+                             "graph_receipt_sha256": bytes_sha256hex(raw)}
+            try:
+                compilation = json.loads(args.compilation_config)
+            except (ValueError, TypeError, AttributeError) as exc:
+                raise ValueError(f"cannot derive compilation_config: {exc}") from exc
+            if not isinstance(compilation, dict):
+                raise ValueError("cannot derive compilation_config: expected a JSON object")
+            # Preserve exactly what is passed even if vLLM mutates its input.
+            compilation = json.loads(json.dumps(compilation, sort_keys=True))
+            image = _graph_image()
+            source_sha256 = _graph_tessera_source_sha256()
+            try:
+                config_sha256 = file_sha256hex(model_dir / "config.json")
+            except OSError as exc:
+                raise ValueError(f"cannot derive model_config_sha256: {exc}") from exc
+        from vllm import LLM, SamplingParams
         llm = LLM(
             model=str(model_dir),
             quantization=NATIVE_QUANTIZATION,
@@ -287,9 +427,16 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             enforce_eager=enforce_eager,
             gpu_memory_utilization=args.gpu_memory_utilization,
             max_model_len=args.max_model_len,
-            max_num_seqs=1,
+            max_num_seqs=args.max_num_seqs,
+            tensor_parallel_size=args.tensor_parallel_size,
             speculative_config=spec,
+            **({"compilation_config": json.loads(json.dumps(compilation))}
+               if not enforce_eager else {}),
         )
+        if not enforce_eager:
+            graph_metrics["serve_scope"] = _graph_serve_scope(
+                llm, model_dir, compilation, image=image,
+                source_sha256=source_sha256, config_sha256=config_sha256)
         hooks = _install_route_sweep_hooks(llm, sweep_path)
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new_tokens)
         out = llm.generate([args.prompt], sp)
@@ -308,6 +455,7 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
         metrics = {"arm": arm, "generated_chars": produced,
                    "enforce_eager": enforce_eager,
                    "max_new_tokens": args.max_new_tokens}
+        metrics.update(graph_metrics)
         if sweep_written is not None:
             metrics["route_sweep"] = str(sweep_written)
         return {
@@ -377,6 +525,14 @@ def main():
     ap.add_argument("--max-new-tokens", type=int, default=16)
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.55)
     ap.add_argument("--max-model-len", type=int, default=2048)
+    ap.add_argument("--max-num-seqs", type=int, default=1)
+    ap.add_argument("--tensor-parallel-size", type=int, default=1)
+    ap.add_argument("--compilation-config", default="{}",
+                    help="vLLM compilation config JSON passed to the graph arm; "
+                         "the receipt matches this exact input, not resolved defaults.")
+    ap.add_argument("--graph-receipt", default=None,
+                    help="Tessera graph-equals-eager receipt for this serve; "
+                         "required with --no-enforce-eager or --both-arms.")
     ap.add_argument("--target-profile", default=None,
                     choices=serving_profile_names(),
                     help="Serving profile whose runtime package pins should "
@@ -416,6 +572,8 @@ def main():
                          "verdict is appended to native_export.<arm> "
                          "(see python -m prismaquant.shipcard_cli).")
     args = ap.parse_args()
+    if (args.no_enforce_eager or args.both_arms) and not args.graph_receipt:
+        ap.error("--graph-receipt is required when the graph arm runs")
 
     model_dir = Path(args.model)
     target_profile = _resolve_validation_target_profile(

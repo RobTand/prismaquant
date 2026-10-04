@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-04 (PQ #1586, graph equality receipt verification):
+`native_export.graph` now consumes Tessera's graph-equals-eager receipt for
+its own serve, not merely a load/generation smoke. The native producer stamps
+observed image/model/source identity and resolved serving sizes; the ship-card
+reader authenticates the saved receipt bytes and delegates equality to
+`tessera.graph_receipt.verify`. No eager-only waiver, pin bump or serving
+qualification is implied. The D13 serving pin must carry that module before
+this change can qualify or land; see §7.1.
+
 Re-stamped 2026-10-05 (`kernels/d13-public-master-pin-20261005`, PQ #2262):
 the immutable serving/development candidate names fetched public Tessera
 master `2dbac1910c88254d9c6391f02a34c4b07e516803`, packaged contract
@@ -2478,7 +2487,8 @@ build block carries `research_only: true` — the stamp
 (§4.5, research replay) — naming the field and its source, and the only
 path past it is the recorded `--force-unverified` override. Research
 standing was previously stamped and read by nothing that refuses. The
-`native_export.graph` half of #1586 is unchanged and still open.
+`native_export.graph` half is described by the 2026-10-04 stamp and §7.1;
+it still needs the D13 pin and artifact-scope serving qualification.
 
 Re-stamped 2026-09-28 (PQ #1274, `claude/tessera-pin-v42-1274`): the exact
 Tessera pin is `38e960127478b651e42c14d52acf2274b54bca38`, Tessera master
@@ -25852,6 +25862,53 @@ prerequisite source-integrity/fold-fidelity transition completed before `run-pip
 quantized-artifact promotion result. Once its `VERIFIED` record exists, the build pipeline only
 replays that record and the current source bytes. The ordinary build/serve boundary remains
 physical, so its contract is a **record**, not CI.
+
+**Graph equality receipt (#1586).** Every `native_export.graph` record must
+carry `metrics.graph_receipt_path`, `metrics.graph_receipt_sha256`, and
+`metrics.serve_scope`. The verifier reads the named bytes once, checks that
+SHA-256, then calls only `tessera.graph_receipt.verify(receipt, serve_scope)`.
+Tessera re-applies its equality rule; a changed file, edited verdict, missing
+receipt or scope mismatch refuses by name, including Tessera's exact reason.
+Only a None result admits the slot. Any exception from the verify call itself
+also refuses as `graph receipt unreadable`, naming its type and message; the
+catch is limited to that call, so both raising and reason-returning Tessera
+receipt owners fail closed on structurally malformed receipts.
+The eager slot's existing generation/arm checks are unchanged.
+
+`validate_native_export --no-enforce-eager` (or `--both-arms`) requires
+`--graph-receipt PATH` before preflight. Its graph arm takes
+`--compilation-config JSON`, `--max-num-seqs` and `--tensor-parallel-size`
+alongside the existing model, length and speculative configuration. Receipt
+scope is never copied from the receipt or supplied as an identity override:
+
+- `image` comes from the running container identified by kernel cgroup or
+  mount roots, inspected through Docker; its actual image's `RepoDigests`
+  supplies the manifest reference, never a tag, local image ID or caller env.
+  The process needs access to Docker inspection; missing/ambiguous evidence
+  refuses `image` instead of substituting the serving image pin.
+- `model_config_sha256` hashes the model's `config.json` bytes before
+  load and checks the resolved engine model path and those bytes after load.
+- `tessera_src_sha256` hashes the installed package located by
+  `tessera.graph_receipt`, after checking its packaged contract against the
+  immutable serving pin. The recipe is Tessera #702's sorted Python source
+  `sha256sum` lines, with logical `src/tessera/...` names, then SHA-256 of
+  those lines. The producer reads JSON/source bytes, never imports serving.
+- `compilation_config` is the exact JSON object passed to the graph LLM,
+  independently retained before vLLM can mutate it; the receipt owner compares
+  canonical JSON, not vLLM's expanded defaults.
+- `speculative_tokens`, `max_model_len`, `max_num_seqs` and
+  `tensor_parallel_size` are read from the loaded engine's resolved
+  speculative/model/scheduler/parallel configs, not copied from CLI wishes.
+  An explicitly absent resolved speculative config derives zero tokens.
+
+Unavailable values refuse with their scope field name. This does not change
+which artifact lane `validate_native_export` loads: it still refuses a
+Tessera checkpoint instead of forcing compressed-tensors quantization onto it.
+A GLM Tessera release still owes its own artifact-scope graph equality serve,
+compiled cells and all independent ship gates. This change depends on Tessera
+PR #930 and the D13 serving pin bump carrying `tessera.graph_receipt`; the
+pre-pin CPU smoke with that PR's source is non-qualifying evidence only.
+
 
 **Sampled whole-stack proposal validation is deliberately narrower than an
 artifact gate.** The adapter supplies complete per-sequence held-out losses

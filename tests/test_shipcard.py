@@ -433,7 +433,8 @@ def test_shipcard_fixed_reservation_survives_every_slot_fill(tmp_path):
                 model_sha=model_sha,
                 metrics={"arm": arm, "generated_chars": 128,
                          "enforce_eager": arm == "eager",
-                         "max_new_tokens": 16},
+                         "max_new_tokens": 16,
+                         **(_graph_receipt_metrics(model_dir) if arm == "graph" else {})},
                 detail="x" * 4096,
                 git_commit=_FAKE_COMMIT,
             )
@@ -1523,7 +1524,9 @@ def _graph_receipt_metrics(root):
                        for name in ("first", "second")],
         }],
     })
-    path = root / "graph-equals-eager.json"
+    # validate_native_export consumes an existing external measurement; placing
+    # it beside the artifact must not change the sealed artifact's model_sha.
+    path = root.parent / f"{root.name}-graph-equals-eager.json"
     raw = json.dumps(receipt).encode()
     path.write_bytes(raw)
     return {
@@ -1614,15 +1617,28 @@ def test_graph_receipt_missing_scope_field_names_reason(tmp_path):
                for p in problems), problems
 
 
-def test_graph_receipt_malformed_refuses(tmp_path):
+@pytest.mark.parametrize("damage", ["not_object", "missing_graph"])
+def test_graph_receipt_malformed_refuses(tmp_path, damage):
     from prismaquant.shipcard import _verify_native_export_record
 
     record = _graph_slot_record(tmp_path)
     path = pathlib.Path(record["metrics"]["graph_receipt_path"])
-    path.write_bytes(b"[]")
-    record["metrics"]["graph_receipt_sha256"] = hashlib.sha256(b"[]").hexdigest()
+    if damage == "not_object":
+        raw = b"[]"
+    else:
+        receipt = json.loads(path.read_bytes())
+        del receipt["arms"][0]["graph"]
+        raw = json.dumps(receipt).encode()
+    path.write_bytes(raw)
+    record["metrics"]["graph_receipt_sha256"] = hashlib.sha256(raw).hexdigest()
     problems = _verify_native_export_record("native_export.graph", record)
-    assert any("malformed graph receipt" in p for p in problems), problems
+    if damage == "not_object":
+        assert any("malformed graph receipt" in p for p in problems), problems
+    else:
+        # PR 930's pushed owner raises; its next head returns the named reason.
+        assert any("graph receipt unreadable: KeyError" in p
+                   or "graph equality receipt refused: malformed receipt" in p
+                   for p in problems), problems
 
 
 def test_eager_slot_needs_no_graph_receipt_or_tessera(monkeypatch):
@@ -1635,4 +1651,17 @@ def test_eager_slot_needs_no_graph_receipt_or_tessera(monkeypatch):
         "passed": True, "metrics": {"arm": "eager", "enforce_eager": True,
                                      "generated_chars": 2},
     }) == []
+
+
+
+def test_graph_receipt_bare_image_refuses(tmp_path):
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    full = record["metrics"]["serve_scope"]["image"]
+    assert "@sha256:" in full
+    record["metrics"]["serve_scope"]["image"] = full.split("@", 1)[1]
+    problems = _verify_native_export_record("native_export.graph", record)
+    assert any("graph equality receipt refused: no attested arm" in p
+               and "image" in p for p in problems), problems
 
