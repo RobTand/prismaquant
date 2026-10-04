@@ -4096,8 +4096,6 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
     ``permutation``, ``start``, ``size``, ``size_sha256``, ``frame_size``,
     ``random_draws`` and ``method``.
     """
-    import hashlib
-
     names = sorted(weights)
     if not names:
         raise RuntimeError(f"stack {stack}: no unit to sample")
