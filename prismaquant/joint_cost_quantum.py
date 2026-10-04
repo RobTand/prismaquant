@@ -102,7 +102,6 @@ from .joint_quantum_handoff import (
     load_quantum_handoff,
     require_band_serial_readset,
 )
-from .digests import bytes_sha256hex
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).

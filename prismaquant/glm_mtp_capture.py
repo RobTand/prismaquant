@@ -40,8 +40,7 @@ from pathlib import Path
 import torch
 
 from . import glm_mtp
-from .digests import DIRECT_ASCII_STRICT
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
 
 FINAL_HIDDEN_SCHEMA = "prismaquant.glm_mtp.final_hidden.v1"
 CENSUS_EXTENSION_SCHEMA = "prismaquant.glm_mtp.census_extension.v1"

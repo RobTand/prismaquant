@@ -79,8 +79,7 @@ from .stage_a_chain_resume import (
     resume_declarations,
 )
 from .stage_a_chain_seed import seed_marker_path, seed_receipt_path
-from .digests import bytes_sha256hex, file_sha256hex
-from .digests import text_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex, text_sha256hex
 
 BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
 BAND_RESULT_SCHEMA = "prismaquant.joint_adjoint_band.result.v1"

@@ -43,8 +43,7 @@ import re
 import sys
 
 from .cost_stage_checkpoint import atomic_write_bytes
-from .digests import file_sha256hex
-from .digests import bytes_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex
 
 SPLIT_SCHEMA = "prismaquant.stage_a.chain_split.v1"
 PREP_RECEIPT_SCHEMA = "prismaquant.stage_a.chain_split_prep.v1"

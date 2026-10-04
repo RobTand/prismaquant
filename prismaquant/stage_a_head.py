@@ -49,10 +49,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .digests import text_sha256hex
+from .digests import bytes_sha256hex, text_sha256hex
 from .stage_inputs import require as _require, same as _same
 from .tessera_joint_aura import head_walk_read_set, is_head_walk_read
-from .digests import bytes_sha256hex
 
 STAGE_A_HEAD_SCHEMA = "prismaquant.stage_a.head.v1"
 

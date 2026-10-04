@@ -81,7 +81,6 @@ from .digests import bytes_sha256hex, file_digest_sha256hex, file_sha256hex
 from .layer_config import LAYER_CONFIG_META_KEY
 from .measured_runtime_prices import (
     BOOTSTRAP_CONFIDENCE, BOOTSTRAP_DRAWS, BOOTSTRAP_SEED, identity_sha256)
-from .digests import bytes_sha256hex
 
 SCHEMA = "prismaquant.prefill_frontier.v1"
 ASSIGNMENT_SCHEMA = "prismaquant.prefill_frontier.assignment.v1"

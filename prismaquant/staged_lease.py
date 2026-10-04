@@ -63,9 +63,8 @@ import time
 import uuid
 from pathlib import Path
 
-from .digests import DIRECT_ASCII_SPACED_STRICT
+from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
 from .staged_tier_policy import TierPolicyRefused
-from .digests import bytes_sha256hex
 
 #: Reviewed PB source pin for the reader lease and the client SDK
 #: (``prismabuild.client``, PB #1254); the initial SDK pin replaced

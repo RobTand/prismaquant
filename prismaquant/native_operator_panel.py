@@ -16,8 +16,7 @@ from typing import Mapping
 from . import record_fields
 from .joint_aura import identity_sha256, validate_joint_aura_entry
 from .measured_runtime_prices import OperatorMeasurement
-from .digests import DIRECT_ASCII_STRICT, is_sha256hex
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex, is_sha256hex
 
 INPUT_SCHEMA = "prismaquant.native_dense_inputs.v1"
 PANEL_SCHEMA = "tessera.native_dense_panel.v1"

@@ -16,11 +16,10 @@ import stat
 from typing import Callable, Mapping
 import zlib
 
-from .digests import bytes_sha256hex, is_sha256hex
+from .digests import bytes_sha256hex, is_sha256hex, text_sha256hex
 from .joint_retained_window_plan import RetainedWindowBudget
 from .qnames import LAYER_QNAME as _LAYER
 from .schemas import Contract, strict_json_loads
-from .digests import text_sha256hex
 
 
 SCHEMA = "prismaquant.prismabuild.data_manifest.v2"

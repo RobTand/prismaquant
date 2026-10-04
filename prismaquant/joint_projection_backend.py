@@ -22,8 +22,7 @@ import torch
 
 from .dev_mode import dev_mode_enabled, seal_check
 from .kernels import joint_projection_reduce as kernel
-from .digests import file_sha256hex
-from .digests import bytes_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex
 
 SCHEMA = 'prismaquant.joint_projection_backend.v1'
 FUSED_NAME = 'fused_fp32_v1'

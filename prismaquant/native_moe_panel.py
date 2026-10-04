@@ -13,14 +13,13 @@ import math
 from pathlib import Path
 import re
 
-from .digests import DIRECT_ASCII_SPACED_STRICT
+from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
 from .joint_aura import identity_sha256, require_native_source_execution, validate_joint_aura_entry
 from .measured_runtime_prices import RuntimeBinding
 from .native_operator_panel import (PHASES, ROUTE_FIELDS, ROUTE_OPTIONAL_FIELDS, RUNTIME_FIELDS,
                                     RUNTIME_OPTIONAL_FIELDS, _admit, _bytes, _equal, _executed,
                                     _number, _sha, operator_route_identity)
 from .tessera_formats import parse_tessera_format_name
-from .digests import bytes_sha256hex
 
 INPUT_SCHEMA = "prismaquant.native_moe_inputs.v1"
 PANEL_SCHEMA = "tessera.native_moe_panel.v1"

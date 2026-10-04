@@ -23,8 +23,7 @@ from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, canonical_json_sha256, unit_path,
 )
 from .schemas import Contract
-from .digests import file_sha256hex
-from .digests import bytes_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex
 
 PLAN_SCHEMA = "prismaquant.tessera_anchored_replay.plan.v1"
 REPORT_SCHEMA = "prismaquant.tessera_anchored_replay.report.v1"

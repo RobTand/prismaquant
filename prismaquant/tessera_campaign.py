@@ -74,7 +74,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-from .digests import text_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes, text_sha256hex
 
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
@@ -86,7 +86,6 @@ from .nvfp4_activation_contract import (
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
-from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes
 from .schemas import strict_json_loads
 
 __all__ = [
