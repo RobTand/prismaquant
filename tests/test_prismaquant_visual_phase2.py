@@ -170,7 +170,7 @@ class TestSyntheticMultimodalCalibration(unittest.TestCase):
         self.assertEqual(
             composition,
             {"dataset": "synthetic", "requested": 3,
-             "real": 0, "synthetic": 3},
+             "real_loaded": 0, "synthetic_loaded": 3},
         )
 
     def test_synthetic_captions_rotate(self):
