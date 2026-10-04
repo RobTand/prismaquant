@@ -1,5 +1,23 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-04 (`issues/pq-2229-source-digest-cache`, PQ #2229, Refs
+RobTand/tessera#790): the census caller's expert-projection request hands the
+producer a stat-bound source-digest cache when the selected producer's CLI
+advertises `--source-digest-cache`. The directory defaults beside the
+projection output -- outside the model source tree -- a caller may override
+it, and a cache inside the checkpoint it would seal refuses by name. The
+producer keeps invalidating on changed bytes, and its `source_digest_cache`
+receipt stays the producer's own; every answer also carries the caller's
+`source_digest_cache_use` record (schema
+`prismaquant.source_digest_cache_use.v1`) saying whether the option was
+passed and why, so a consumer never branches on the receipt's schema and a
+producer without the option is named, never silent. An explicitly requested
+cache with such a producer refuses rather than being dropped, and an
+override that is an existing file refuses by name. No real census row or
+idle-GPU measurement is claimed; the
+tessera#790 acceptance evidence (process input/output and idle GPU time on a
+census row) remains open. No pin, menu, format or serving change.
+
 Re-stamped 2026-10-04 (`v6/pq2112-parent-panel-reload-20261004`, PQ #2094,
 PR #2112 parent correction): shape-time conversion and reload compare the
 independently expected panel digest with the authenticated panel bytes.
@@ -16771,7 +16789,19 @@ dependency; this is not a portable secondary-interpreter capability/claim fence.
 `tessera.expert_projection.v1` answer (`python -m tessera.producer_plan`,
 declared as a public installed-package module plus output schema in the
 lane's `campaign_tools` roster). No `TESSERA_REPO` checkout resolution or
-safe-path relaxation is used for this projection request (Refs #2128). It binds
+safe-path relaxation is used for this projection request (Refs #2128). The
+request reuses the producer's one `--help` preflight and, when it advertises
+`--source-digest-cache` (tessera#790; PQ #2229), passes a stat-bound
+shard-digest cache directory beside the projection output -- caller
+overridable, created if absent, refused inside the model source -- so a
+repeated projection of unchanged checkpoint bytes reuses recorded digests
+and the producer's `source_digest_cache` receipt in the answer says how
+every shard digest was established. Every answer also carries the
+caller-side `source_digest_cache_use` record -- used true when the option
+was passed, named why when not -- so a consumer never branches on the
+receipt's schema; an explicit `source_digest_cache` with such a producer
+refuses rather than dropping it silently, and an override that is an
+existing file refuses by name. It binds
 the producer's per-stack unit records to the profile-declared per-expert units
 exactly -- schema, `unpacked_per_expert` layout, whole-tensor selector, source
 tensor in the hashed roster, `[rows, cols]` geometry, full expert coverage --
