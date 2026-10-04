@@ -127,7 +127,28 @@ class EntryError(RuntimeError):
 # One file, read once
 # --------------------------------------------------------------------------
 
-_SEALS = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
+# The memfd seal numbers are Linux UAPI and ABI-fixed since kernel 3.11
+# (uapi/asm-generic/fcntl.h, uapi/linux/memfd.h). CPython defines the
+# ``fcntl`` names only when its build headers had them, so a portable
+# interpreter built against pre-glibc-2.27 headers lacks them and the module
+# must not read them at import (PB be3dd1332259: the capture qualification set
+# failed collection there with ``AttributeError: module 'fcntl' has no
+# attribute 'F_SEAL_SEAL'``). The kernel stays the authority: the seal is
+# attempted through fcntl and read back with ``F_GET_SEALS`` (tests/
+# test_io_engine.py::test_seal_constants_resolve_without_cpython_build_time_names).
+_F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
+_F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
+_SEALS = (
+    getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+    | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+    | getattr(fcntl, "F_SEAL_GROW", 0x0004)
+    | getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+)
+
+
+def kernel_seal_bits(fd: int) -> int:
+    """The kernel's actual seal bits on an open memfd (``F_GET_SEALS``)."""
+    return fcntl.fcntl(fd, _F_GET_SEALS)
 
 
 class SealedBuffer:
@@ -207,12 +228,12 @@ class SealedBuffer:
                 view.release()
             self._map.close()
             self._map = None
-        fcntl.fcntl(self._fd, fcntl.F_ADD_SEALS, _SEALS)
+        fcntl.fcntl(self._fd, _F_ADD_SEALS, _SEALS)
         return digest.hexdigest()
 
     def require_sealed(self) -> None:
         """Require actual kernel write/grow/shrink/seal protection, not a flag."""
-        if self._fd is None or fcntl.fcntl(self._fd, fcntl.F_GET_SEALS) & _SEALS != _SEALS:
+        if self._fd is None or kernel_seal_bits(self._fd) & _SEALS != _SEALS:
             raise RuntimeError("original material lacks required kernel seals")
 
     @property

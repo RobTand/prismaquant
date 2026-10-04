@@ -785,10 +785,10 @@ class CaptureSourceAuthentication:
                 state = dict(fd=fd, before=os.fstat(fd), buffer=buffer, sha256=row.sha256,
                              sha256_source='publisher_bound_kernel_sealed_delivery', payload_reads=0,
                              lock=threading.Lock(), readers=0, storages={})
-                import fcntl
+                from .io_engine import kernel_seal_bits
 
                 delivery.update(sealed_fd_stat=list(file_stat_signature(state['before'])),
-                                kernel_seals=fcntl.fcntl(fd, fcntl.F_GET_SEALS))
+                                kernel_seals=kernel_seal_bits(fd))
                 reserve_allocation(self.resource_check, 'before_original_delivery_witness',
                                    cpu_bytes=2 * len(DIRECT_ASCII_SPACED_LAX.text(delivery)))
                 previous = self._original['verified'].get(name)
