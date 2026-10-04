@@ -279,13 +279,13 @@ def test_projection_request_command_carries_the_digest_cache_option(tmp_path, mo
     source = tmp_path / "source"
     source.mkdir()
     (source / "config.json").write_text("{}")
-    request_expert_projection(source, {STACK: ("E4M3", 1024)},
-                              out_path=tmp_path / "projection.json")
+    request = request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                        out_path=tmp_path / "projection.json")
     argv = json.loads(dump.read_text())
     index = argv.index(tep.SOURCE_DIGEST_CACHE_OPTION)
     assert argv[index + 1] == str(tmp_path / "source-digest-cache")
     assert (tmp_path / "source-digest-cache").is_dir()
-    assert answer["source_digest_cache_use"]["used"] is True
+    assert request["source_digest_cache_use"]["used"] is True
 
 
 def test_projection_request_reuses_recorded_digests_until_bytes_change(tmp_path, monkeypatch):
