@@ -192,8 +192,8 @@ def _full_calibration(value):
     return value
 
 
-def validate_original_source_runtime(value, expected):
-    """Join an observed installed runtime to its independently bound expectation."""
+def _validate_original_source_runtime(value, expected, *, sdk_version):
+    """Validate one runtime against its independently selected exact SDK policy."""
     if isinstance(expected, dict) and set(expected) == {'path', 'sha256'}:
         _, expected = _control(expected, 'original expected runtime')
     _exact(value, ORIGINAL_RUNTIME_KEYS, 'original runtime')
@@ -236,11 +236,9 @@ def validate_original_source_runtime(value, expected):
         _contract.string(name, where='actual scale/cast name')
         _require(isinstance(coordinate, list) and len(coordinate) == 2 and
                  all(type(item) is str and item for item in coordinate), 'actual scale/cast coordinate malformed')
-    from .staged_lease import PB_CLIENT_SDK_VERSION
-
     pb = _exact(value['prismabuild'], {'sdk_version', 'helper_root', 'source_tree', 'runtime_generation'},
                 'original runtime PrismaBuild')
-    _same(pb['sdk_version'], PB_CLIENT_SDK_VERSION, 'original runtime SDK version')
+    _same(pb['sdk_version'], sdk_version, 'original runtime SDK version')
     _contract.absolute_posix_path(pb['helper_root'], where='original runtime helper root')
     tree = _exact(pb['source_tree'], {'package_sha256', 'helper_tree_sha256'},
                   'original runtime complete shared tree')
@@ -250,6 +248,13 @@ def validate_original_source_runtime(value, expected):
     _contract.string(pb['runtime_generation'], where='original published runtime generation')
     _same(value, expected, 'observed original source runtime')
     return _snapshot(value)
+
+
+def validate_original_source_runtime(value, expected):
+    """The current consumer's installed runtime retains its exact SDK boundary."""
+    from .staged_lease import PB_CLIENT_SDK_VERSION
+
+    return _validate_original_source_runtime(value, expected, sdk_version=PB_CLIENT_SDK_VERSION)
 
 
 def _resources(value):
@@ -913,7 +918,7 @@ def _require_original_reader_target(reader_authority, authority):
         _same(reader_authority[key], authority[key], f'qualified reader target {key}')
 
 
-def _require_original_reader_producer(receipt, reader_authority, result):
+def _require_original_reader_producer(receipt, reader_authority, result, expected_runtime_input):
     """Join material observations to the SDK-owned selected producer context.
 
     The SDK owns native provenance verification. This only joins its result
@@ -931,7 +936,12 @@ def _require_original_reader_producer(receipt, reader_authority, result):
     _same(context['runtime_sha256'], result['receipt']['producer']['runtime']['runtime_sha256'],
           'selected reader attested runtime')
     _, runtime = _control(reader_authority['runtime'], 'selected reader observed runtime')
-    runtime = validate_original_source_runtime(runtime, runtime)
+    _, expected_runtime = _control(expected_runtime_input, 'independent selected reader runtime')
+    _exact(expected_runtime, ORIGINAL_RUNTIME_KEYS, 'independent selected reader runtime')
+    expected_pb = _exact(expected_runtime['prismabuild'],
+        {'sdk_version', 'helper_root', 'source_tree', 'runtime_generation'}, 'independent selected reader SDK policy')
+    _contract.integer(expected_pb['sdk_version'], where='independent selected reader SDK version', minimum=1)
+    runtime = _validate_original_source_runtime(runtime, expected_runtime, sdk_version=expected_pb['sdk_version'])
     _same(runtime['config'], reader_authority['source_model_identity']['config'],
           'selected reader runtime source config')
     _same(runtime['prismabuild']['helper_root'], context['helper_root'], 'selected reader actual helper root')
@@ -1137,7 +1147,7 @@ def _require_original_source_proofs(authority, resource_check):
     _same(seen, {(case, pages, dtype) for case in _CUDA_CASES for pages in ('0', '1')
                  for dtype in ('torch.float32', 'torch.bfloat16')}, 'actual full64 CUDA coverage')
     reader = _exact(qualification['reader'], {'node_id', 'result', 'receipt', 'authority',
-                    'source_snapshot', 'compatibility'}, 'original qualified reader')
+                    'source_snapshot', 'compatibility', 'runtime'}, 'original qualified reader')
     _contract.string(reader['node_id'], where='actual qualified reader node')
     _contract.string(reader['source_snapshot'], where='actual reader source snapshot', pattern=_GIT_OBJECT_ID)
     reader_result = _verified_original_result(reader['result'], resource_check)
@@ -1152,7 +1162,7 @@ def _require_original_source_proofs(authority, resource_check):
     from .tessera_calibration_cache import validate_original_source_material_receipt
 
     validate_original_source_material_receipt(receipt, reader_authority)
-    _require_original_reader_producer(receipt, reader_authority, reader_result)
+    _require_original_reader_producer(receipt, reader_authority, reader_result, reader['runtime'])
     _require(receipt['deliveries'] and receipt['material_live_bytes'] == 0
              and not receipt['pending_copy_completions'], 'qualified reader retains unproved material/copy debt')
     return _snapshot(authority)

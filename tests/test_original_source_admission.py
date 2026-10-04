@@ -174,9 +174,9 @@ def test_reader_target_agreement_is_not_producer_runtime_resource_or_session_equ
     before = _forbid_source_work(case, monkeypatch)
     reader_authority = copy.deepcopy(case['authority'])
     reader_authority['runtime'] = _bound(case['tmp'] / 'different-reader-runtime.json',
-                                       {'separate_producer_control': 'not runtime qualification'})
+                                       copy.deepcopy(case['packet']['runtime']))
     reader_authority['resources'] = _bound(case['tmp'] / 'different-reader-resources.json',
-                                         {'separate_producer_control': 'not resource qualification'})
+                                         copy.deepcopy(case['packet']['resources']))
     reader_authority['session'] = dict(case['session'], generation='different_reader_session')
     assert sg._require_original_reader_target(reader_authority, case['authority']) is None
     assert case['owner'].receipt() == before
@@ -188,7 +188,49 @@ def test_reader_observations_without_sdk_selected_native_context_refuse(authorit
     result = {} if missing is None else {'producer_context': None}
     with pytest.raises(RuntimeError, match='requires selected native producer context'):
         sg._require_original_reader_producer(authority_case['owner'].receipt(),
-                                             authority_case['authority'], result)
+            authority_case['authority'], result, authority_case['authority']['runtime'])
+
+
+@pytest.mark.parametrize('axis', ['prismaquant_source_sha256', 'tessera_source_sha256',
+    'container_content_sha256', 'modeling_source', 'model_class', 'profile', 'config',
+    'versions', 'arithmetic', 'material_pipeline', 'prismabuild'])
+def test_producer_runtime_requires_its_independently_bound_complete_expectation(authority_case, axis):
+    """Actual CPU runtime metadata, not a mock selected producer/source qualification."""
+    observed = authority_case['packet']['runtime']
+    expected = copy.deepcopy(observed)
+    if axis in ('prismaquant_source_sha256', 'tessera_source_sha256', 'container_content_sha256'):
+        expected[axis] = '0' * 64
+    elif axis in ('model_class', 'profile'):
+        expected[axis] += '.other'
+    elif axis == 'modeling_source':
+        expected[axis]['sha256'] = '0' * 64
+    elif axis == 'config':
+        expected[axis]['independent_other_config'] = True
+    elif axis == 'versions':
+        expected[axis]['python'] = '0.0.0'
+    elif axis == 'arithmetic':
+        expected[axis]['allow_tf32'] = not expected[axis]['allow_tf32']
+    elif axis == 'material_pipeline':
+        expected[axis]['target_dtype'] = 'another_loader_dtype'
+    else:
+        expected[axis]['runtime_generation'] += '.other'
+    binding = _bound(authority_case['tmp'] / f'independent-runtime-{axis}.json', expected)
+    with pytest.raises(RuntimeError, match='observed original source runtime'):
+        sg._validate_original_source_runtime(observed, binding,
+            sdk_version=observed['prismabuild']['sdk_version'])
+
+
+def test_current_consumer_and_independent_producer_sdk_policies_stay_exact(authority_case):
+    observed = authority_case['packet']['runtime']
+    binding = _bound(authority_case['tmp'] / 'independent-producer-runtime.json', copy.deepcopy(observed))
+    version = observed['prismabuild']['sdk_version']
+    assert sg._validate_original_source_runtime(observed, binding, sdk_version=version) == observed
+    with pytest.raises(RuntimeError, match='original runtime SDK version'):
+        sg._validate_original_source_runtime(observed, binding, sdk_version=version + 1)
+    changed = copy.deepcopy(observed)
+    changed['prismabuild']['sdk_version'] += 1
+    with pytest.raises(RuntimeError, match='original runtime SDK version'):
+        sg.validate_original_source_runtime(changed, changed)
 
 
 def test_owned_control_join_is_nonactivating_and_independently_frozen(authority_case, monkeypatch):
