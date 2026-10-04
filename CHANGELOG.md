@@ -5,18 +5,32 @@
 ### Changed
 
 - **Raw byte-hash constructors route to the digest owners** (Refs #1301).
-  87 raw `hashlib.sha256(...).hexdigest()` constructor sites across 50
+  83 raw `hashlib.sha256(...).hexdigest()` constructor sites across 47
   package modules now call the existing `prismaquant.digests` byte/text
   owners (`bytes_sha256hex`, `text_sha256hex`), with the base-bound census
   of 485 gated digest scopes (434 load-bearing, 51 ephemeral) recorded in
-  `docs/audits/digest_site_census_pq1301_2026-10-04.json`. The two modules
-  that direct file loads execute without a package context —
-  `container_runtime_identity.py` (bootstrap execution, the container
-  adapter's runpy load) and `dsv4_campaign_completion.py` (the campaign
-  waiter's file-spec load) — bind the same named owner functions by loading
-  the same tree's stdlib-only `digests.py` by file path whenever the module
-  runs without a package context; their five census rows carry that binding
-  note. No encoding, wire, default or pin change is part of this slice.
+  `docs/audits/digest_site_census_pq1301_2026-10-04.json`. The slice leaves
+  413 gated scopes as explicit remaining work. One migrated module loads
+  without a package context — `dsv4_campaign_completion.py` (the campaign
+  waiter's file-spec load) — and binds the same named owner functions by
+  loading the same tree's stdlib-only `digests.py` by file path; its three
+  census rows carry that binding note.
+
+- **Three protected digest contracts stay on raw `hashlib` and are
+  excluded from owner routing** (Refs #1301). The packaged KDA capture
+  kernel self-source identity (`kernels/kda_chunk.py` `source_sha256`,
+  sealed as `identity.source_sha256` in
+  `kernels/kda_chunk_qualification.json` and seal-checked by
+  `glm_kda_capture_kernel` admission), the deployed single-file
+  `container_runtime_identity.py` contract (no-package bootstrap and runpy
+  loads; the gold producer byte set lists the file without `digests.py`),
+  and `joint_prewarm_phases.py` (executed by file path without a package
+  by `experiments/glm_data_manifests.py`) keep raw `hashlib`; their four
+  census rows are reclassified as retained protected contracts with
+  file:line witnesses, and their four ratchet rows return to the baseline.
+  Editing any of these files is an identity or contract change, not a
+  mechanical route. No encoding, wire, default or pin change is part of
+  this slice.
 
 ### Fixed
 

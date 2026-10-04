@@ -25,31 +25,6 @@ import sys
 import tempfile
 from typing import Any, Mapping, Sequence
 
-if __package__:
-    from .digests import bytes_sha256hex
-else:
-    # Direct file loads (bootstrap verification, the container adapter's
-    # runpy) run without a parent package; a package-mode import error
-    # propagates, and only no-package mode binds from the file. digests.py
-    # is stdlib-only: bind the same tree's owner by file path, registered
-    # under a name carrying that path's exact bytes so two checkouts in one
-    # process never share a cache entry, popping the registration if
-    # execution fails (the reseal convention).
-    _owner_path = Path(__file__).resolve().parent / "digests.py"
-    _owner_name = ("_prismaquant_standalone_digest_owner_"
-                   + os.fsencode(_owner_path).hex())
-    if _owner_name not in sys.modules:
-        _owner_spec = importlib.util.spec_from_file_location(
-            _owner_name, _owner_path)
-        _owner_module = importlib.util.module_from_spec(_owner_spec)
-        sys.modules[_owner_name] = _owner_module
-        try:
-            _owner_spec.loader.exec_module(_owner_module)
-        except BaseException:
-            del sys.modules[_owner_name]
-            raise
-    bytes_sha256hex = sys.modules[_owner_name].bytes_sha256hex
-
 
 RUNTIME_IDENTITY_SCHEMA = "prismaquant.container_runtime_identity.v1"
 _IDENTITY_KEYS = {
@@ -103,7 +78,7 @@ def image_content_sha256(image: Mapping[str, Any]) -> str:
                "variant": variant, "rootfs": rootfs, "config": config}
     raw = json.dumps(content, sort_keys=True, separators=(",", ":"),
                      ensure_ascii=False, allow_nan=False).encode("utf-8")
-    return bytes_sha256hex(raw)
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _reject_duplicate_members(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
@@ -220,7 +195,7 @@ def _receipt_sha256(
     # that lane's archived drivers ever passed the flag. The image tag
     # itself is still fatal on its own: _validate_identity requires an
     # immutable digest-pinned image_ref, and verify_mounted_runtime compares it.
-    return bytes_sha256hex(data)
+    return hashlib.sha256(data).hexdigest()
 
 
 def _identity_diff(

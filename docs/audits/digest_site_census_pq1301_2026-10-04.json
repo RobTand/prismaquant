@@ -50,30 +50,30 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "migrated-by-pq1301-2026-10-04",
+   "disposition": "retained protected single-file contract: the deployed module loads without a package context; raw hashlib stays (excluded from owner routing)",
    "family": "hashlib",
    "file": "prismaquant/container_runtime_identity.py",
    "linenos": [
     198
    ],
    "n_calls": 1,
-   "note": "same-tree stdlib direct-file binding required and preserved by this correction: the module loads without a package context, so the no-package branch binds the same named owner functions from this tree's digests.py by file path",
-   "route_verdict": "bytes_sha256hex",
+   "note": "protected single-file witness: tests/test_stdlib_tools_no_package_1605.py:192-200 stages and executes this file alone and :203-226 runs the deployed launchers with only this file and the public stdlib owner present; the runpy launchers (experiments/stageb_a4_quantizer_launch.py, experiments/glm_native_moe_launch.py, tools/build_glm_derivative_image.py, tools/tessera_campaign_container.py) and the gold producer byte set (tools/serve_fingerprint.py:97-101 _GOLD_PRODUCER_TOOL_FILES lists prismaquant/container_runtime_identity.py without digests.py) pin the same single-file layout; retained on raw hashlib",
+   "route_verdict": "retained:protected-single-file",
    "scope": "_receipt_sha256",
    "site": "hashlib:prismaquant/container_runtime_identity.py::_receipt_sha256",
    "usage": "arg:hexdigest"
   },
   {
    "classification": "load-bearing",
-   "disposition": "migrated-by-pq1301-2026-10-04",
+   "disposition": "retained protected single-file contract: the deployed module loads without a package context; raw hashlib stays (excluded from owner routing)",
    "family": "hashlib",
    "file": "prismaquant/container_runtime_identity.py",
    "linenos": [
     81
    ],
    "n_calls": 1,
-   "note": "same-tree stdlib direct-file binding required and preserved by this correction: the module loads without a package context, so the no-package branch binds the same named owner functions from this tree's digests.py by file path",
-   "route_verdict": "bytes_sha256hex",
+   "note": "protected single-file witness: tests/test_stdlib_tools_no_package_1605.py:192-200 stages and executes this file alone and :203-226 runs the deployed launchers with only this file and the public stdlib owner present; the runpy launchers (experiments/stageb_a4_quantizer_launch.py, experiments/glm_native_moe_launch.py, tools/build_glm_derivative_image.py, tools/tessera_campaign_container.py) and the gold producer byte set (tools/serve_fingerprint.py:97-101 _GOLD_PRODUCER_TOOL_FILES lists prismaquant/container_runtime_identity.py without digests.py) pin the same single-file layout; retained on raw hashlib",
+   "route_verdict": "retained:protected-single-file",
    "scope": "image_content_sha256",
    "site": "hashlib:prismaquant/container_runtime_identity.py::image_content_sha256",
    "usage": "arg:hexdigest"
@@ -635,14 +635,15 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "migrated-by-pq1301-2026-10-04",
+   "disposition": "retained protected direct-file contract: loaded by file path with no package via spec_from_file_location; raw hashlib stays (excluded from owner routing)",
    "family": "hashlib",
    "file": "prismaquant/joint_prewarm_phases.py",
    "linenos": [
     61
    ],
    "n_calls": 1,
-   "route_verdict": "bytes_sha256hex",
+   "note": "protected direct-file witness: experiments/glm_data_manifests.py:71-76 executes this file via spec_from_file_location(\"joint_prewarm_phases\", ...) at module import so the CPU manifest build never imports the package; importing experiments.glm_data_manifests reaches this module from tools/dispatch_tessera_campaign.py:2539, so a package-relative owner import here breaks the direct-file load; retained on raw hashlib",
+   "route_verdict": "retained:protected-direct-file",
    "scope": "load_prepare_read_set",
    "site": "hashlib:prismaquant/joint_prewarm_phases.py::load_prepare_read_set",
    "usage": "arg:hexdigest"
@@ -833,14 +834,15 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "migrated-by-pq1301-2026-10-04",
+   "disposition": "retained protected packaged-source contract: qualified self-source binding; editing the file invalidates kernels/kda_chunk_qualification.json identity.source_sha256 (excluded from owner routing)",
    "family": "hashlib",
    "file": "prismaquant/kernels/kda_chunk.py",
    "linenos": [
     352
    ],
    "n_calls": 1,
-   "route_verdict": "bytes_sha256hex",
+   "note": "protected packaged-source witness: prismaquant/kernels/kda_chunk_qualification.json identity.source_sha256 = ec9d3339e5badb9e2c412a53be30effba419697e723100754639f22853eb195f, the sha256 of this file's exact bytes at base f085c4abd207d347de3a5515788017da2b6c271c; prismaquant/glm_kda_capture_kernel.py:339 feeds source_sha256() into the admission identity and :186-200 _require_qualified seal-checks it against the qualification, so any byte edit to this file de-qualifies the packaged kernel; retained on raw hashlib",
+   "route_verdict": "retained:protected-packaged-source",
    "scope": "source_sha256",
    "site": "hashlib:prismaquant/kernels/kda_chunk.py::source_sha256",
    "usage": "arg:hexdigest"
@@ -7170,14 +7172,27 @@
    "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools": 88,
    "eligible: mechanical byte-identical routing to the named owner": 176,
    "load-bearing distinct JSON identity: needs a new named JsonProfile decision before migration": 46,
-   "migrated-by-pq1301-2026-10-04": 76,
-   "mixed scope: split per call; route each call individually": 40
+   "migrated-by-pq1301-2026-10-04": 72,
+   "mixed scope: split per call; route each call individually": 40,
+   "retained protected direct-file contract: loaded by file path with no package via spec_from_file_location; raw hashlib stays (excluded from owner routing)": 1,
+   "retained protected packaged-source contract: qualified self-source binding; editing the file invalidates kernels/kda_chunk_qualification.json identity.source_sha256 (excluded from owner routing)": 1,
+   "retained protected single-file contract: the deployed module loads without a package context; raw hashlib stays (excluded from owner routing)": 2
   },
   "by_family": {
    "hashlib": 235,
    "sorted-json": 250
   },
   "gated_rows": 485,
-  "migrated_by_this_pr": 76
+  "migrated_by_this_pr": 72,
+  "remaining_gated_scopes": 413,
+  "remaining_gated_scopes_breakdown": {
+   "distinct identity: not byte-identical to any owner route; keep or migrate only under an explicit identity migration": 57,
+   "eligible-byte-route: deferred from this slice (sibling-lane file; coordinate via parent)": 2,
+   "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools": 88,
+   "eligible: mechanical byte-identical routing to the named owner": 176,
+   "load-bearing distinct JSON identity: needs a new named JsonProfile decision before migration": 46,
+   "mixed scope: split per call; route each call individually": 40,
+   "retained protected contracts (excluded from owner routing; see per-row witnesses)": 4
+  }
  }
 }
