@@ -508,3 +508,26 @@ def test_aura_guard_fails_closed_when_profile_cannot_classify_experts():
 
     with pytest.raises(RuntimeError, match="could not determine routed-expert"):
         _guard_packed_expert_coverage(_Dsv4UnpackedModel(), BrokenProfile())
+
+
+def test_source_digest_mismatch_names_the_package_inputs():
+    """A ``producer_source_sha256`` refusal must name files, not just digests (#2218)."""
+    from pathlib import Path
+
+    from prismaquant.aura_cost import _checkpoint_identity_mismatch
+
+    from prismaquant import production_weight_cache as cache
+
+    error = _checkpoint_identity_mismatch(
+        field="producer_source_sha256", stored="0" * 64, expected="1" * 64)
+    text = str(error)
+    assert "AURA checkpoint identity mismatch at producer_source_sha256" in text
+    assert "refusing reuse or recompute" in text
+    assert f"hashed files under {Path(cache.__file__).resolve().parent}" in text
+    assert "newest:" in text
+
+    # Only the source digest is opaque enough to need the listing: every
+    # other field's refusal message stays exactly as it was.
+    untouched = _checkpoint_identity_mismatch(
+        field="manifest.schema", stored="old", expected="new")
+    assert "hashed files under" not in str(untouched)
