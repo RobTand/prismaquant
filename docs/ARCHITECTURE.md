@@ -4,8 +4,9 @@ Re-stamped 2026-10-04 (PQ #1586, graph equality receipt verification):
 `native_export.graph` now consumes Tessera's graph-equals-eager receipt for
 its own serve, not merely a load/generation smoke. The native producer stamps
 observed image/model/source identity and resolved serving sizes; the ship-card
-reader authenticates the saved receipt bytes and delegates equality to
-`tessera.graph_receipt.verify`. No eager-only waiver, pin bump or serving
+reader authenticates the saved receipt bytes, binds the recorded model-config
+SHA-256 to the card's actual artifact config.json bytes, and delegates equality
+to `tessera.graph_receipt.verify`. No eager-only waiver, pin bump or serving
 qualification is implied. The D13 serving pin must carry that module before
 this change can qualify or land; see §7.1.
 
@@ -25873,6 +25874,12 @@ Only a None result admits the slot. Any exception from the verify call itself
 also refuses as `graph receipt unreadable`, naming its type and message; the
 catch is limited to that call, so both raising and reason-returning Tessera
 receipt owners fail closed on structurally malformed receipts.
+The graph slot also re-hashes the artifact's `config.json` bytes, using the
+same file-SHA-256 recipe as the producer, and requires that digest to equal
+`serve_scope.model_config_sha256`. A matching receipt and recorded scope from
+another artifact's config cannot close this card, even when the record's
+separate `model_sha` names this artifact. Missing artifact context or an
+unreadable config refuses the configuration binding by name.
 The eager slot's existing generation/arm checks are unchanged.
 
 `validate_native_export --no-enforce-eager` (or `--both-arms`) requires

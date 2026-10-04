@@ -1828,7 +1828,8 @@ def verify(
             # The slot-name check above compares `record["slot"]` to the slot
             # key; nothing compared `metrics.arm` to the slot suffix, so a
             # fabricated or mislabeled arm record passed. Replay it here.
-            problems.extend(_verify_native_export_record(slot, record))
+            problems.extend(_verify_native_export_record(
+                slot, record, model_dir=model_dir))
         # Lane-scoped slots whose replay core owns run through the verifier
         # the slot names in LANE_SLOT_VERIFIERS (#162): a fourth lane's novel
         # slot is replayed the moment its verifier is registered, and a
@@ -2128,6 +2129,8 @@ def _verify_graph_receipt(metrics: Mapping[str, Any]) -> list[str]:
 def _verify_native_export_record(
     slot: str,
     record: Mapping[str, Any],
+    *,
+    model_dir: str | os.PathLike | None = None,
 ) -> list[str]:
     """Replay the smoke arm's own stamped metrics against the slot it closes.
 
@@ -2192,6 +2195,26 @@ def _verify_native_export_record(
         )
     if arm == "graph":
         problems.extend(_verify_graph_receipt(metrics))
+        if model_dir is None:
+            problems.append(
+                f"{slot}: cannot verify serve_scope.model_config_sha256 "
+                "without the artifact model_dir")
+        else:
+            from .digests import file_sha256hex
+
+            try:
+                config_sha256 = file_sha256hex(Path(model_dir) / "config.json")
+            except (OSError, ValueError) as exc:
+                problems.append(
+                    f"{slot}: cannot read artifact config.json for "
+                    f"serve_scope.model_config_sha256: {exc}")
+            else:
+                scope = metrics.get("serve_scope")
+                if isinstance(scope, Mapping) and scope.get(
+                    "model_config_sha256") != config_sha256:
+                    problems.append(
+                        f"{slot}: serve_scope.model_config_sha256 differs "
+                        "from the artifact config.json sha256")
     return problems
 
 

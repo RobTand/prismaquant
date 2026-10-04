@@ -96,6 +96,10 @@
   `graph_receipt.verify`, refusing edited verdicts and any scope mismatch
   by name. Malformed receipts refuse whether Tessera returns a reason or
   raises; the verify-call-only catch names the exception type and message.
+  Verification re-hashes the card artifact's config.json and binds it to
+  `serve_scope.model_config_sha256`, so a mutually matching receipt and scope
+  borrowed from another artifact cannot verify; missing artifact context
+  refuses by name.
   Eager verification is unchanged; no eager-only waiver is added.
   This change must land with or after the D13 Tessera pin bump carrying the
   receipt module. Pre-pin CPU evidence is non-qualifying, not a GLM release.
