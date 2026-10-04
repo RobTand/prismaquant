@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- **The projected-preparation window prices its device reservation in bytes**
+  (#2039). The opt-in window reserved device bytes for its staged unit copies
+  from element counts instead of tensor bytes, understating the prospective
+  device bound for every sub-four-byte dtype and admitting work whose real
+  device residency could exceed the guarded reservation, and priced no
+  storage for the verdict flags each check holds until the ordered settle
+  reads them. The bound now prices the staged copies' bytes plus one byte per
+  unit for each flag and the same again for the settle's stacked copy beside
+  the originals. Four credits, the finite private-byte cap, source reads,
+  comparisons, refusals and cancellation are unchanged; no GPU, campaign or
+  qualification claim.
+
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing

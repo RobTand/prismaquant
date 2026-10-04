@@ -5198,11 +5198,15 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
         raise RuntimeError('parallel projected preparation requires the shared two-thread read pool')
     rows = list(units.items())
     sizes = [weights[n].numel()*weights[n].element_size() for n,_u in rows]
-    elements = [weights[n].numel() for n,_u in rows]
     if any(size > preparation_max_bytes for size in sizes):
         raise RuntimeError('one projected unit exceeds the private preparation byte cap')
     pin_bound = min(preparation_max_bytes, sum(sorted(sizes, reverse=True)[:4]))
-    gpu_bound = pin_bound + min(pin_bound, sum(sorted(elements, reverse=True)[:4]))
+    # Device pricing is bytes, not element counts: at most four staged unit
+    # copies are resident at once, and every check's 0-d verdict flag lives
+    # until the ordered settle reads it, with the settle's stacked copy beside
+    # the originals.
+    staged_bound = min(pin_bound, sum(sorted(sizes, reverse=True)[:4]))
+    gpu_bound = staged_bound + 2 * len(rows)
     reserve_allocation(resource_check, 'before_parallel_projected_preparation',
                        cpu_bytes=pin_bound, device_bytes=gpu_bound)
     pool = layer_streaming._layer_read_pool(2, allow_resize=False)

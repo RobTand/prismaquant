@@ -165,7 +165,7 @@ def test_four_credits_retain_pins_until_completion_before_fifth_read(monkeypatch
         assert len(reads) == 4
         assert sum(ref().numel()*ref().element_size() for ref in pins if ref() is not None) == 48
         assert not done.is_set()
-        assert reserves == [dict(reserve_bytes=120)]  # 48 CPU + 72 device bytes
+        assert reserves == [dict(reserve_bytes=112)]  # 48 CPU + 48 staged + 16 flag device bytes
     finally:
         allow_new.set()
         for event in cpu_transport.events:
