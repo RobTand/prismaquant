@@ -27,7 +27,8 @@ import torch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
 
-from test_tessera_row_stream import (COLUMNS, LOAD_POLICY, UNITS,  # noqa: E402
+from test_tessera_row_stream import (COLUMNS, LOAD_POLICY, OUTPUT_FEATURES,
+                                     UNITS,  # noqa: E402
                                      stream_fixture)
 
 
@@ -298,7 +299,8 @@ def test_the_stream_heads_read_is_the_serial_checks_source_tensor(tmp_path):
                                           source=source) is None
 
 
-REAL = dict(zip(UNITS, (torch.full((32, COLUMNS), float(i + 1), dtype=torch.bfloat16)
+REAL = dict(zip(UNITS, (torch.full((OUTPUT_FEATURES, COLUMNS), float(i + 1),
+                                   dtype=torch.bfloat16)
                         for i in range(len(UNITS)))))
 
 
@@ -399,7 +401,7 @@ def test_a_source_read_that_is_not_the_planned_tensor_is_refused(monkeypatch, tm
     _campaign, _argv, state = stream_fixture(monkeypatch, tmp_path)
     weights = _placeholders({UNITS[0]})
     real = REAL[UNITS[0]]
-    bad = {"shape": real[:16].clone(), "dtype": real.to(torch.float32),
+    bad = {"shape": real[:OUTPUT_FEATURES // 2].clone(), "dtype": real.to(torch.float32),
            "meta": torch.empty(real.shape, dtype=real.dtype, device="meta")}[wrong]
     stream = _loading_stream(state, weights, lambda _name: bad)
     stream.plan([[UNITS[0]]])
