@@ -18,6 +18,8 @@ GPTQ/scale-sweep/AR treatment at export. Covers:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import pickle
 import sys
@@ -28,6 +30,7 @@ from unittest import mock
 
 import torch
 import torch.nn as nn
+from PIL import Image
 
 from prismaquant.sensitivity_probe import (
     _streaming_visual_layer_kwargs,
@@ -171,6 +174,108 @@ class TestSyntheticMultimodalCalibration(unittest.TestCase):
             processor=None, n_samples=12, max_text_len=16,
         )
         self.assertEqual(len(triples), 12)
+
+
+class TestCalibrationCompositionProvenance(unittest.TestCase):
+    """The real-vs-synthetic composition of multimodal calibration must be
+    counted, printed and stamped into probe provenance (#1921 visual
+    capture gate). A partial real `--mm-dataset` yield currently blends
+    synthetic stub rows silently, so a capture's meta would carry
+    `"dataset": <real>` indistinguishable from a fully real capture.
+    Whether blending should refuse outright stays the filed coordinator
+    decision; this gate only makes the composition unmissable."""
+
+    def test_synthetic_dataset_reports_stub_composition(self):
+        triples, composition = load_multimodal_calibration(
+            processor=None, dataset_name="synthetic",
+            n_samples=3, max_text_len=12,
+        )
+        self.assertEqual(len(triples), 3)
+        self.assertEqual(
+            composition,
+            {"dataset": "synthetic", "requested": 3,
+             "real": 0, "synthetic": 3},
+        )
+
+    def test_partial_real_dataset_blend_is_counted_and_loud(self):
+        from prismaquant import sensitivity_probe as sp
+
+        class _FakeDataset:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def __iter__(self):
+                return iter(self._rows)
+
+        img = Image.new("RGB", (4, 4))
+        enc = {
+            "pixel_values": torch.zeros(1, 3, 4, 4),
+            "input_ids": torch.tensor([[1, 2, 3]]),
+            "image_grid_thw": torch.tensor([[1, 1, 1]]),
+        }
+        proc = mock.Mock(return_value=enc)
+        stub = mock.Mock()
+        stub.load_dataset = mock.Mock(
+            return_value=_FakeDataset(
+                [{"image": img, "caption": "a real photo"}]))
+        buffer = io.StringIO()
+        with mock.patch.dict(sys.modules, {"datasets": stub}), \
+                contextlib.redirect_stdout(buffer):
+            triples, composition = sp.load_multimodal_calibration(
+                proc, "real-vision-dataset", n_samples=3, max_text_len=12)
+        self.assertEqual(len(triples), 3)
+        self.assertEqual(
+            composition,
+            {"dataset": "real-vision-dataset", "requested": 3,
+             "real": 1, "synthetic": 2},
+        )
+        self.assertIn("synthetic stub row(s) were blended",
+                      buffer.getvalue())
+
+    def test_fully_real_dataset_reports_zero_synthetic(self):
+        from prismaquant import sensitivity_probe as sp
+
+        class _FakeDataset:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def __iter__(self):
+                return iter(self._rows)
+
+        img = Image.new("RGB", (4, 4))
+        enc = {
+            "pixel_values": torch.zeros(1, 3, 4, 4),
+            "input_ids": torch.tensor([[1, 2, 3]]),
+            "image_grid_thw": torch.tensor([[1, 1, 1]]),
+        }
+        proc = mock.Mock(return_value=enc)
+        stub = mock.Mock()
+        stub.load_dataset = mock.Mock(
+            return_value=_FakeDataset(
+                [{"image": img, "caption": f"photo {i}"} for i in range(5)]))
+        buffer = io.StringIO()
+        with mock.patch.dict(sys.modules, {"datasets": stub}), \
+                contextlib.redirect_stdout(buffer):
+            triples, composition = sp.load_multimodal_calibration(
+                proc, "real-vision-dataset", n_samples=3, max_text_len=12)
+        self.assertEqual(len(triples), 3)
+        self.assertEqual(
+            composition,
+            {"dataset": "real-vision-dataset", "requested": 3,
+             "real": 3, "synthetic": 0},
+        )
+        self.assertNotIn("blended", buffer.getvalue())
+
+    def test_mm_probe_passes_stamp_calibration_source_in_meta(self):
+        from prismaquant import sensitivity_probe as sp
+
+        src = inspect_source(sp)
+        # Both multimodal probe passes (streaming + non-streaming) stamp
+        # the counted composition, and so does the streaming pass's
+        # empty-pickle site: three meta dicts, three stamps.
+        self.assertEqual(
+            src.count('"calibration_source": calibration_composition'), 3,
+            "every multimodal meta dict must stamp calibration_source")
 
 
 class TestMultimodalProbeFlagParsing(unittest.TestCase):
