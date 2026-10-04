@@ -31212,3 +31212,47 @@ an entry; source hashing through the prep roster; the `finish` regression),
 manifest, and each quantum hashes exactly its consumed shards),
 `tests/test_dispatch_capture_chain.py`. These are CPU tests. The GB10 parity
 row against a monolithic GLM-5.3 capture has not run.
+
+### Per-sequence/per-block signed attribution sidecar (#1962, 2026-10-04)
+
+A joint AURA cost row can now carry an opt-in
+`sequence_attribution` sidecar: a descriptive decomposition of each
+projection over whole caller-owned blocks of the calibration draw, published
+beside the untouched authoritative whole-draw fields — bitwise, including
+the flag-off controls, and the price stays `0.5 mean_p(total_p**2)` over the
+whole draw. The sidecar's arithmetic is a separate reconstruction scope
+(per-invocation contractions against the resident rendered delta), its
+residual against the authoritative totals is published with the gate it must
+satisfy and the method string that states the denominator (default: the
+issue's 1e-3 relative against `fsum |w|+|a|+|m|`; zero scale must reconcile
+exactly), and the attribution `c_i = .5 mean_p a_pi*total_p` is computed
+against the authoritative totals without claiming to equal the price unless
+the reconstruction does. Blocks come from genuine caller geometry only — the
+streamed dense lease notes each streamed partition's whole batch block, and
+the Stage B quantum retains the caller's capture-batch id per spill record
+at capture time and re-reads one window's captured rows synchronously
+through the spill's own reader lifecycle immediately after each single
+candidate's `project`, while that delta is resident (guard-charged, no
+second read stream, no per-sequence GW matrices, no coordinates invented
+inside routed flattened calls). `per_sequence` scope is derived from blocks
+that are each exactly one complete sequence; equal whole blocks covering the
+draw publish block-delete-one leaveout prices `Nseq/(Nseq-k) * .5
+mean_p((t_p-a_pi)**2)` with their jackknife standard error under a stated
+exchangeability assumption, and a one-block or unequal-block scope publishes
+no standard error rather than a fabricated one. Every reader funnels through
+`validate_joint_aura_entry`, which recomputes the sidecar from its own
+parts, refuses any foreign `uncertainty_scope` a row publishes (a missing
+field keeps the legacy conditional reading), and refuses cohorts that cut a
+block or bind a foreign calibration. Each W/A/mixed projection separately
+reconciles against its original whole-draw component on its own absolute
+block mass and the stated relative gate; zero mass requires exact agreement.
+Integer block coordinates must exhaust the draw without gaps, and recorded
+calibration shape and selected-token geometry must match the priced probes.
+The opt-in selector, geometry and collector scope bind the run identity, so
+requested rows cannot resume
+committed no-attribution rows and claim the instrument. Existing rows remain
+probe-only and never claim the instrument; this is not the #1962 estimator
+fix, a repricing, or an issue closure. Design:
+`docs/design/joint_aura_runtime_allocation.md`. Gate:
+`tests/test_joint_sequence_attribution.py` and the spill sidecar tests of
+`tests/test_stageb_one_pass_spill.py`.

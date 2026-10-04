@@ -137,6 +137,109 @@ class QuantumIdentityRefused(RuntimeError):
     """A digest, schema or binding mismatch: refuse before writing anything."""
 
 
+class SpillSequenceAttribution:
+    """The #1962 sidecar collector for one quantum's Stage B spill replay.
+
+    Owns the opt-in candidate selector, the caller-owned capture-block
+    geometry and the per-probe per-block components. Its callback runs
+    immediately after each single candidate's ``project`` while that rendered
+    delta is resident: one bounded synchronous re-read of that window's
+    already-captured rows through the spill's own reader lifecycle
+    (``replay_records`` — no second read stream is ever opened), charged to
+    the capture guard, feeding one :class:`JointBlockAttributionLease` per
+    probe and candidate. Nothing here holds a second candidate, a matrix, or
+    the rows themselves; the authoritative totals stay the statistics lease's.
+    """
+
+    def __init__(self, *, config, linears, formats_by_qname, activation_maxima,
+                 projection_backend, spill, guard, n_probes, n_samples, seqlen,
+                 probe_microbatch, capture_batch, token_scope,
+                 calibration_sha256):
+        from .joint_replay_spill import spill_capture_batch_blocks
+
+        self.config = config
+        roster = config["candidates"]
+        self._wants = (None if roster == "all"
+                       else {(name, fmt) for name, fmt in roster})
+        self.gate_relative = config["gate_relative"]
+        self._linears = linears
+        self._formats_by_qname = formats_by_qname
+        self._maxima = activation_maxima
+        self._backend = projection_backend
+        self._spill = spill
+        self._guard = guard
+        self._n_probes = int(n_probes)
+        self._seqlen = int(seqlen)
+        self._n_samples = int(n_samples)
+        self.blocks = spill_capture_batch_blocks(
+            n_samples, seqlen, probe_microbatch=probe_microbatch,
+            capture_batch=capture_batch)
+        self._selected_tokens_per_row = {"all": int(seqlen), "last": 1,
+                                         "causal": int(seqlen) - 1}[token_scope]
+        self._calibration_sha256 = calibration_sha256
+        self._leases: dict[tuple[int, tuple[str, str]], object] = {}
+
+    def __call__(self, *, key, delta, window_index, probe_index):
+        if probe_index is None:
+            raise QuantumIdentityRefused(
+                "sequence attribution requires the one-pass spill reader; the "
+                "windowed replay retains no captured rows to re-read")
+        if self._wants is not None and (key[0], key[1]) not in self._wants:
+            return
+        name, fmt = key
+        lease = self._leases.get((probe_index, key))
+        if lease is None:
+            from .joint_aura import JointBlockAttributionLease
+            lease = self._leases[(probe_index, key)] = JointBlockAttributionLease(
+                name=name, source_weight=self._linears[name].weight, delta=delta,
+                spec=self._formats_by_qname[name][fmt],
+                activation_max_abs=self._maxima,
+                projection_backend=self._backend, blocks=self.blocks)
+
+        def feed(feed_name, x, gradient, capture_batch):
+            if feed_name == name:
+                lease.observe_invocation(feed_name, self._linears[name].weight,
+                                         x, gradient, capture_batch)
+
+        self._spill.replay_records(window_index, probe_index, feed, charge=self._charge)
+
+    def _charge(self, bytes_to_admit):
+        if self._guard is not None:
+            from .joint_statistics_replay import check_operator_allocation
+            check_operator_allocation(
+                self._guard, "sequence_attribution_record_replay",
+                reserve_bytes=bytes_to_admit)
+
+    def row_sidecar(self, key, signed_totals):
+        """The sidecar for one row's authoritative totals, or None.
+
+        Every probe of the row's window has fired by the time its window
+        commits, so the per-probe leases are complete; a candidate observed by
+        no probe has no sidecar rather than a fabricated zero one.
+        """
+        per_probe = [None] * self._n_probes
+        for (probe_index, lease_key), lease in self._leases.items():
+            if lease_key == key:
+                per_probe[probe_index] = [
+                    dict(value) for value in lease.components]
+        if any(probe is None for probe in per_probe):
+            return None
+        from .joint_aura import sequence_attribution_sidecar
+        return sequence_attribution_sidecar(
+            blocks=self.blocks, components_per_probe=per_probe,
+            authoritative_totals=signed_totals,
+            gate_relative=self.gate_relative,
+            arithmetic_scope="stage_b_spill_replay_records_per_invocation_contractions",
+            sequence_length=self._seqlen,
+            selected_tokens_per_row=self._selected_tokens_per_row,
+            n_sequences=self._n_samples,
+            calibration_sha256=self._calibration_sha256)
+
+    def run_identity(self):
+        from .joint_aura import sequence_attribution_run_identity
+        return sequence_attribution_run_identity(self.config)
+
+
 def require_slice_bf16_reduction(adjoint_slice, allow: bool, *, where: str) -> None:
     """Refuse a quantum whose bf16 reduction flag differs from Stage A's (#1065).
 
@@ -1684,6 +1787,7 @@ def run_layer_quantum_core(
         activation_identity,
         identity_sha256,
         make_joint_aura_entry,
+        normalize_sequence_attribution,
         source_execution_identity,
         squared_signed,
         validate_joint_aura_entry,
@@ -1710,6 +1814,18 @@ def run_layer_quantum_core(
     from .production_weight_cache import PWC_WINDOW_LEASE_COUNTERS
     from .routed_experts import refresh_packed_expert_projections
     from .sensitivity_probe import SharedStateCotangents, kv_cotangent_path_enabled
+
+    # The #1962 opt-in instrument: normalize once; a requested attribution
+    # binds the run identity and refuses to resume committed no-attribution
+    # rows, and its collector needs the one-pass spill's captured rows.
+    from .joint_replay_spill import stage_b_spill_config
+    attribution_config = normalize_sequence_attribution(
+        execution.get("sequence_attribution"))
+    if attribution_config is not None and stage_b_spill_config() is None:
+        raise QuantumIdentityRefused(
+            f"quantum {record.get('quantum_id', '?')}: sequence_attribution "
+            "requires the one-pass spill reader's captured X/G rows; declare "
+            "PRISMAQUANT_STAGE_B_SPILL_ROOT and PRISMAQUANT_STAGE_B_SPILL_MAX_BYTES")
 
     from .joint_layer_quanta import (
         CHECKPOINT_INCOMING_STAGED,
@@ -2134,6 +2250,12 @@ def run_layer_quantum_core(
             try:
                 if not validate_joint_aura_entry(row):
                     raise ValueError("not a joint row")
+                if (attribution_config is not None
+                        and "sequence_attribution" not in row
+                        and fmt not in _ZERO_COST_FORMATS):
+                    raise QuantumIdentityRefused(
+                        f"quantum {quantum_id}: sequence_attribution cannot "
+                        f"resume committed no-attribution rows for {name}@{fmt}")
                 operator = row["joint_operator_identity"]
                 if operator["qname"] != name or operator["format"] != fmt:
                     raise ValueError("probe/operator alignment mismatch")
@@ -2274,6 +2396,8 @@ def run_layer_quantum_core(
         counters.replay.update(mode=REPLAY_SPILL, spill_geometry=spill_bound.as_dict())
         if capture_batch > 1:
             counters.replay["capture_groups"] = len(capture_groups)
+
+    attribution_collector = None
 
     # Band-serial (PQ #996): the handoff is the plane this quantum's chain
     # would end on, so the chain below walks no layers.
@@ -2748,10 +2872,15 @@ def run_layer_quantum_core(
                                   for _ in range(n_probes)]
                 else:
                     components = joint_components[(name, fmt)]
+                sidecar = None
+                if attribution_collector is not None and fmt not in _ZERO_COST_FORMATS:
+                    sidecar = attribution_collector.row_sidecar(
+                        (name, fmt), [value["total"] for value in components])
                 row = make_joint_aura_entry(
                     operator_identity=joint_operators[(name, fmt)],
                     probe_identity=joint_probe,
                     signed_components=components,
+                    sequence_attribution=sidecar,
                 )
                 row["probe_identity"] = joint_probe_identity
                 rows[fmt] = row
@@ -3447,6 +3576,23 @@ def run_layer_quantum_core(
             handoff_exit.enter_context(handoff_stream)
 
         counters.open()
+        if attribution_config is not None and spill is not None:
+            # Built here, where the capture guard exists: the collector's
+            # bounded record re-reads charge it per chunk.
+            from .joint_aura import sequence_attribution_run_identity
+            attribution_collector = SpillSequenceAttribution(
+                config=attribution_config,
+                linears={name: linears[name] for name in spill_pending},
+                formats_by_qname={name: {fmt: fr.get_format(fmt) for fmt in render_formats[name]}
+                                  for name in spill_pending},
+                activation_maxima=joint_activation_maxima(production_cache),
+                projection_backend=projection_backend, spill=spill, guard=guard,
+                n_probes=n_probes, n_samples=len(calib_ids),
+                seqlen=int(calib_ids.shape[1]), probe_microbatch=probe_microbatch,
+                capture_batch=capture_batch, token_scope=token_scope,
+                calibration_sha256=bytes_sha256hex(
+                    calib_ids.detach().cpu().contiguous().numpy().tobytes()))
+            counters.replay["sequence_attribution"] = attribution_collector.run_identity()
         try:
             observe_and_project_retained_windows(
                 measured,
@@ -3465,6 +3611,7 @@ def run_layer_quantum_core(
                 before_window=before_window,
                 after_window=after_window,
                 spill=spill_driver,
+                attribution=attribution_collector,
                 # The loader threads hash each render as they load it, so
                 # _record_joint_operator reads a hash (PQ #1192).
                 render_identities=True,

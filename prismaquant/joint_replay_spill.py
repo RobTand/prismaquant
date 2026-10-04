@@ -439,6 +439,29 @@ def spill_capture_batch_tokens(n_samples, seqlen, *, probe_microbatch, capture_b
             for start in range(0, len(batches), capture_batch)]
 
 
+def spill_capture_batch_blocks(n_samples, seqlen, *, probe_microbatch, capture_batch):
+    """The caller-owned block each capture group covers, in whole sequences.
+
+    The quantum groups ``probe_microbatch``-row batches ``capture_batch`` at
+    a time, exactly as :func:`spill_capture_batch_tokens` groups tokens. A
+    group is exactly one complete calibration sequence only when it holds one
+    batch of one row; nothing here ever splits a sequence, so coarse groups
+    carry batch-block scope.
+    """
+    for label, value in (("sample count", n_samples), ("sequence length", seqlen),
+                         ("capture batch", capture_batch)):
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"Stage B spill {label} must be a positive integer")
+    if type(probe_microbatch) is not int or probe_microbatch < 0:
+        raise ValueError("Stage B spill probe microbatch must be a nonnegative integer")
+    batch_rows = min(probe_microbatch or n_samples, n_samples)
+    blocks = []
+    for index, start in enumerate(range(0, n_samples, batch_rows * capture_batch)):
+        blocks.append({"block_index": index, "first_sequence": start,
+                       "sequences": min(batch_rows * capture_batch, n_samples - start)})
+    return blocks
+
+
 def spill_reservation_bytes(total_bytes, max_parts, *, block):
     """The spill file's reservation for a geometry on a ``block`` grid.
 
@@ -859,6 +882,10 @@ class _Window:
         self.x_source: dict[str, str] = {}
         # (name, owner, entry, g_logical, g_bytes, g_layout) in firing order
         self.records = [] if records is None else records
+        # The caller-owned capture batch (end_batch count) each probe-0 record
+        # belongs to, parallel to ``records``: the #1962 instrument's block
+        # membership, compactly retained at capture time.
+        self.capture_batches: list[int] = []
         self.g_logical: dict[str, int] = {}
         self.g_runs: dict[tuple[str, int], list[tuple[int, int, int]]] = {}
         self.g_starts: dict[tuple[str, int], list[int]] = {}
@@ -917,6 +944,9 @@ class _SpillObserver(SignedJointProjectionLease):
                          for name, module in self.modules.items()}
         self._pending = 0
         self.observed = 0
+        # The caller-owned capture batch currently being observed: the count
+        # of completed ``end_batch`` calls. The instrument's block id.
+        self.capture_batch = 0
 
     def _validate_delta_coverage(self, name, module):
         if name not in self.specs or not self.specs[name]:
@@ -943,7 +973,8 @@ class _SpillObserver(SignedJointProjectionLease):
                     selected = select_invocation_gradient(
                         name, weight, x_held, gradient,
                         output_slice=output_slice, row_slice=row_slice)
-                    self._session._record(name, x_held, selected)
+                    self._session._record(name, x_held, selected,
+                                          capture_batch=self.capture_batch)
                 self._pending -= 1
                 self.observed += 1
             except BaseException:
@@ -961,6 +992,7 @@ class _SpillObserver(SignedJointProjectionLease):
         if self._pending:
             raise RuntimeError("Stage B spill has pending backward observations")
         self._session._end_batch()
+        self.capture_batch += 1
 
     def finish_probe(self):
         raise RuntimeError("Stage B spill observer projects nothing")
@@ -1325,7 +1357,7 @@ class StageBReplaySpill:
                                             name="stage-b-spill-writer", daemon=True)
             self._writer.start()
 
-    def _record(self, name, x, selected):
+    def _record(self, name, x, selected, *, capture_batch=0):
         """Runs inside a backward hook: stage one invocation's operands."""
         self._require_healthy()
         index = self._window_of.get(name)
@@ -1389,6 +1421,7 @@ class StageBReplaySpill:
                 array("Q", [0]) * len(window.records))
         if self._probe == 0:
             window.records.append((name, owner, entry, logical, g_bytes, g_layout))
+            window.capture_batches.append(int(capture_batch))
             # Publish the slot before _stage can flush to the writer thread.
             checksums.append(0)
             g_residue = g_layout[2]
@@ -1907,6 +1940,66 @@ class StageBReplaySpill:
         finally:
             live.clear()
             blocks.clear()
+        self.telemetry["replay_wall_s"] += time.time() - started
+
+    def replay_records(self, window_index, probe_index, feed, *, charge=None):
+        """Redeliver one window+probe's captured invocations, synchronously.
+
+        The #1962 instrument's bounded second read of the SAME captured X/G
+        rows, for one candidate whose rendered delta is resident at its
+        caller: the plan walk, staging arithmetic and delivery order of
+        :meth:`replay` with the io stream's prefetch replaced by one chunk
+        buffer at a time, so no second pinned read stream is ever alive.
+        ``charge(bytes)`` admits each chunk's staging bytes to the caller's
+        guard before they are allocated; nothing outlives this call.
+        ``feed(name, x, gradient, capture_batch)`` runs once per record in
+        capture order, with the block membership retained at capture time.
+        """
+        self._require_healthy()
+        if probe_index >= self._captured:
+            raise RuntimeError("Stage B spill record replay precedes its capture")
+        window = self._windows[window_index]
+        if window.names and len(window.capture_batches) != len(window.records):
+            raise RuntimeError("Stage B spill record block membership is incomplete")
+        started = time.time()
+        live: dict[tuple[str, int], torch.Tensor] = {}
+        es = self.element_size
+        try:
+            for item in window.plan:
+                owner, (records, new, gradients, used) = item
+                if charge is not None:
+                    charge(used)
+                host = _aligned_buffer(self.read_bytes, self._block, self._cuda)
+                self._fill(window, probe_index, item, memoryview(host.numpy()))
+                staging = torch.empty(used + 2 * ADDRESS_ALIGNMENT, dtype=torch.uint8,
+                                      device=self.device)
+                shift = (-staging.data_ptr()) % ADDRESS_ALIGNMENT
+                staging.narrow(0, shift, used).copy_(host.narrow(0, 0, used),
+                                                     non_blocking=self._cuda)
+                del host
+                typed = staging.narrow(0, 0, (staging.numel() // es) * es).view(self.dtype)
+                entries = window.entries[owner]
+                for entry, offset in new:
+                    shape, stride, _ = entries[entry].layout
+                    live[(owner, entry)] = torch.as_strided(
+                        typed, shape, stride, (shift + offset) // es)
+                gradient_at = dict(gradients)
+                for position in records:
+                    name, _, entry, _, _, (shape, stride, _) = window.records[position]
+                    gradient = torch.as_strided(typed, shape, stride,
+                                                (shift + gradient_at[position]) // es)
+                    feed(name, live[(owner, entry)], gradient,
+                         window.capture_batches[position])
+                    if window.last_ref[(owner, entry)] == position:
+                        del live[(owner, entry)]
+                del staging, typed
+            if live:
+                raise RuntimeError("Stage B spill record replay left an input unconsumed")
+        except BaseException:
+            self._failed = True
+            raise
+        finally:
+            live.clear()
         self.telemetry["replay_wall_s"] += time.time() - started
 
     def _append_rows(self, window, blocks, lease, name, x, gradient):

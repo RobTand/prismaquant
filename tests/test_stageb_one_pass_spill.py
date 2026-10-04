@@ -248,7 +248,7 @@ def campaign(tmp_path_factory):
 
 def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
              resume=False, label=None, regime=None, emit_handoff=False,
-             guard=None):
+             guard=None, execution_patch=None):
     from prismaquant.joint_cost_quantum import (
         ChunkFrontier, QuantumCounters, QuantumProgress, quantum_layer_roster,
         quantum_retained_state, resolve_quantum_windows, run_layer_quantum_core)
@@ -280,6 +280,8 @@ def _quantum(campaign, monkeypatch, *, layer, spill_root=None, ceiling=None,
     execution = _execution(campaign.root / "exec")
     if regime is not None:
         execution["replay_regime"] = regime
+    if execution_patch:
+        execution.update(execution_patch)
     try:
         # The plan's retained budget is read here, as ``run_layer_quantum``
         # reads it, so a plan the runtime refuses is the run's error.
@@ -1997,3 +1999,57 @@ def test_container_forwards_the_spill_through_an_identity_bind():
         stage_b_spill_environment({"container": {"mounts": []}, "env": {}}, environ)
     with pytest.raises(RuntimeError, match="positive byte ceiling"):
         stage_b_spill_environment(spec, {STAGE_B_SPILL_ENV[0]: "/nvme/scratch/spill"})
+
+
+# ---- #1962 sequence/block attribution sidecar ------------------------------
+
+def test_spill_quantum_sidecar_is_collected_per_sequence(campaign, monkeypatch, tmp_path):
+    from prismaquant import joint_aura as joint_aura_mod
+    _clear_output(campaign, 0)
+
+    payload, state = _quantum(campaign, monkeypatch, layer=0,
+                              spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                              execution_patch={
+                                  "sequence_attribution": {"candidates": "all"}})
+    assert getattr(state, "error", None) is None
+    for name, rows in payload["costs"].items():
+        for fmt, row in rows.items():
+            assert joint_aura_mod.validate_joint_aura_entry(row)
+            if fmt in ("BF16",):
+                assert "sequence_attribution" not in row
+                continue
+            sidecar = row["sequence_attribution"]
+            assert sidecar["scope"] == "per_sequence"
+            assert sidecar["block_geometry"]["n_sequences"] == 4
+            assert len(sidecar["block_geometry"]["blocks"]) == 4
+            assert sidecar["leaveout"]["jackknife_standard_error"] >= 0.0
+
+
+def test_spill_quantum_sidecar_keeps_authoritative_fields_bitwise(campaign, monkeypatch, tmp_path):
+    _clear_output(campaign, 0)
+    off, state = _quantum(campaign, monkeypatch, layer=0,
+                          spill_root=_spill_root(tmp_path), ceiling=1 << 30)
+    assert getattr(state, "error", None) is None
+    _clear_output(campaign, 0)
+    on, state = _quantum(campaign, monkeypatch, layer=0,
+                         spill_root=_spill_root(tmp_path), ceiling=1 << 30,
+                         execution_patch={
+                             "sequence_attribution": {"candidates": "all"}})
+    assert getattr(state, "error", None) is None
+    _clear_output(campaign, 0)
+    for name, rows in on["costs"].items():
+        for fmt, row in rows.items():
+            off_row = off["costs"][name][fmt]
+            for field in ("signed_per_probe", "x2_per_probe",
+                          "predicted_dloss", "predicted_dloss_stderr"):
+                assert row[field] == off_row[field], (name, fmt, field)
+            assert "sequence_attribution" not in off_row
+
+
+def test_spill_quantum_attribution_requires_the_spill_reader(campaign, monkeypatch):
+    _clear_output(campaign, 0)
+    _payload, state = _quantum(campaign, monkeypatch, layer=0,
+                               execution_patch={
+                                   "sequence_attribution": {"candidates": "all"}})
+    assert state.error is not None
+    assert "sequence_attribution" in str(state.error)

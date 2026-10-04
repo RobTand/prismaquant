@@ -130,13 +130,18 @@ def resident_candidates(cache, keys, policy, *, guard=None):
 
 
 def observe_and_project_windows(modules, specs, cache, policy, *, backward,
-                                record_operator, collect_col_energy, backend, guard=None, source_fingerprints=None):
+                                record_operator, collect_col_energy, backend, guard=None, source_fingerprints=None,
+                                attribution=None):
     """Run all batches before contracting a target, committing backward once.
 
     ``backward`` receives final=True only for the last window; the caller owns
     exact incoming boundaries and forks shared cotangents for earlier windows.
     No source install or checkpoint read occurs here. Modules stay installed
     throughout every window of this probe. A fresh lease owns each matrix set.
+    ``attribution``, when given, runs immediately after each single
+    candidate's ``project`` while that rendered delta is still resident
+    (``key``, ``delta``, ``window_index``, ``probe_index=None``); this mode
+    retains no spilled rows, so an instrument that needs them refuses.
     """
     plan = plan_joint_statistics_target_windows(modules, specs,
         max_statistics_bytes=policy['max_statistics_bytes'],
@@ -183,6 +188,9 @@ def observe_and_project_windows(modules, specs, cache, policy, *, backward,
                             delta = rendered.to(device=source.device, dtype=torch.float32, copy=True)
                             delta.sub_(source)
                             lease.project({(name, fmt): delta})
+                            if attribution is not None:
+                                attribution(key=(name, fmt), delta=delta,
+                                            window_index=index, probe_index=None)
                         finally:
                             rendered = source = delta = None
                     receipts.append(dict(receipt))
@@ -522,7 +530,8 @@ def observe_and_project_retained_windows(
         source_bytes, backward, record_operator, consume_probe,
         collect_col_energy, backend, guard=None, source_fingerprints=None,
         completed_names=(), sealed_windows=None, before_window=None, after_window=None,
-        spill=None, render_identities=False, render_stream=None, render_cache=None):
+        spill=None, render_identities=False, render_stream=None, render_cache=None,
+        attribution=None):
     """Replay all probes inside each admitted target's retained PWC lifetime.
 
     The selected-key-only PWC preflight and scalar target planner run before
@@ -757,6 +766,14 @@ def observe_and_project_retained_windows(
                                          partial(cache.get_resident, name, fmt)),
                                         source, keep=keep)
                                 lease.project({(name, fmt): delta})
+                                if attribution is not None:
+                                    # The rendered delta is resident right
+                                    # here; the callback's own bounded read
+                                    # must be done with it before ``finally``
+                                    # releases it.
+                                    attribution(key=(name, fmt), delta=delta,
+                                                window_index=window_index,
+                                                probe_index=probe_index)
                             finally:
                                 rendered = source = delta = None
                         terms = lease.finish_projections()

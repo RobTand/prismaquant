@@ -109,6 +109,63 @@ z-score is descriptive and assumes independent probe and sequence errors;
 this helper does not certify the supplied held-out dataset or estimate
 generalization from probe variance.
 
+## Per-sequence/per-block signed attribution (descriptive, #1962)
+
+The cost row can carry an opt-in `sequence_attribution` sidecar: a
+descriptive decomposition of each projection over whole caller-owned blocks
+of the calibration draw (capture batches; a block is per-sequence only when
+the caller's own geometry proves it is exactly one complete sequence). The
+authoritative whole-draw fields are untouched — bitwise, including the
+flag-off controls — and the price stays `0.5 mean_p(total_p**2)` over the
+whole draw, never a sum of per-block squares.
+
+The sidecar's arithmetic is a separate reconstruction scope: per-invocation
+(or per-record) contractions of the same genuine X/G the leases consumed,
+against the candidate delta while it is resident. Its per-probe residual
+against the authoritative totals is published with the gate it must satisfy
+(default: the issue's 1e-3 relative, denominator `fsum |w|+|a|+|m|` over the
+probe's blocks; a zero-scale probe must reconcile exactly) and with the
+method string that states both. The residual is never distributed onto the
+price, and the attribution `c_i = .5 mean_p a_pi*total_p` — computed against
+the authoritative totals — is not claimed to equal `predicted_dloss` unless
+the reconstruction equals it.
+
+Each signed W, A and mixed projection must also reconcile separately against
+its original whole-draw component, using the stated relative gate on that
+component's own sum of absolute block contributions (zero mass requires an
+exact zero residual). Matching only the combined total cannot hide a transfer
+of price between W and A. Published block coverage and token geometry must
+match the priced probe's calibration shape and token scope when recorded.
+
+Honesty rules, enforced by `validate_joint_aura_entry` for every reader:
+blocks must cover the complete draw, in order without gaps or overlap, using
+integer caller coordinates and whole units. Coordinates inside routed
+flattened calls are never invented; `per_sequence` scope is derived from the
+blocks, never asserted; a cohort binds whole blocks only,
+with its renormalization stated in selected tokens per row for the row's
+token scope. For at least two equal whole blocks covering the draw, the
+sidecar publishes delete-one leaveout prices
+`Nseq/(Nseq-k) * .5 mean_p((t_p - a_pi)**2)` (per-sequence is `k=1`) with
+their jackknife standard error under an explicit exchangeability assumption —
+descriptive and conditional on the fixed calibration probes. A one-block or
+unequal-block scope publishes no standard error rather than a fabricated or
+zeroed one. The probe standard error keeps its existing conditional scope;
+rows published under any other uncertainty label refuse, and legacy rows
+without the field keep their historical reading.
+
+The dense streamed collector notes blocks from the streamed partition's own
+offsets and contracts the resident deltas inline. The Stage B collector
+retains the caller's capture-batch id per spill record at capture time, and
+re-reads a window's captured rows synchronously through the spill's own
+reader lifecycle immediately after each single candidate's `project`, while
+that rendered delta is resident — one bounded, guard-charged read at a time,
+no second read stream, no per-sequence GW matrices. The opt-in selector,
+geometry and collector scope bind the run identity (never the priced probe
+identity), so requested rows cannot resume committed no-attribution rows and
+claim the instrument. Existing rows remain probe-only and never claim the
+instrument; this mechanism does not close #1962's estimator question or
+reprice a model.
+
 ## Runtime input and search
 
 `--measured-runtime-table` opts the allocator into measured-resource search.

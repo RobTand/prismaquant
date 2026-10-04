@@ -1852,6 +1852,7 @@ def compute_aura_cost_streamed(
     cost_read_schedule=None,
     progress_base: int = 0,
     profile=None,
+    sequence_attribution: Mapping[str, object] | None = None,
 ) -> dict:
     """Layer-streamed KL-adjoint with identity-bound per-Linear shards.
 
@@ -1947,6 +1948,15 @@ def compute_aura_cost_streamed(
         raise ValueError("joint_projection_backend requires joint_activation")
     if probe_microbatch and not joint_activation:
         raise ValueError("streamed probe_microbatch currently requires joint_activation")
+    from prismaquant.joint_aura import normalize_sequence_attribution
+    attribution_config = normalize_sequence_attribution(sequence_attribution)
+    if attribution_config is not None:
+        if operator_windows is not None or retained_budget is not None:
+            raise ValueError(
+                "sequence attribution requires the streamed dense joint path; "
+                "the operator-window replay retains no captured rows to re-read")
+        if not joint_activation:
+            raise ValueError("sequence attribution requires joint_activation")
     batch_rows = min(probe_microbatch or len(calib_ids), len(calib_ids))
     row_offsets = list(range(0, len(calib_ids), batch_rows))
     probe_layout = None
@@ -2170,6 +2180,8 @@ def compute_aura_cost_streamed(
     joint_run_identity = None
     joint_rows: dict[str, dict[str, dict]] = {}
     joint_components: dict[tuple[str, str], list[dict]] = {}
+    attribution_components: dict[tuple[str, str], list[dict]] = {}
+    attribution_blocks: list[dict] | None = None
     joint_operators: dict[tuple[str, str], dict] = {}
     joint_source_tensors: dict[str, dict] = {}
     joint_cache_renders: dict[str, dict[str, dict]] = {}
@@ -2199,6 +2211,7 @@ def compute_aura_cost_streamed(
             identity_sha256, make_joint_aura_entry, prefetch_joint_cache, squared_signed,
             source_execution_identity,
             validate_joint_aura_entry,
+            sequence_attribution_run_identity, sequence_attribution_sidecar,
         )
         from prismaquant.production_weight_cache import _cb_cache_tensor_identity
 
@@ -2295,6 +2308,12 @@ def compute_aura_cost_streamed(
                 for name in names
             } if production_cache is not None else None),
         }
+        attribution_run = sequence_attribution_run_identity(attribution_config)
+        if attribution_run is not None:
+            # The opt-in selector, geometry and collector scope bind the RUN
+            # identity, never the priced probe identity: a resume across the
+            # attribution boundary refuses at the rows it reloads.
+            joint_run_identity["sequence_attribution"] = attribution_run
 
     anchor_identity: Mapping[str, object] | None = None
     if anchor_renderer is not None:
@@ -2536,6 +2555,14 @@ def compute_aura_cost_streamed(
                     try:
                         if not validate_joint_aura_entry(row):
                             raise ValueError("not a joint row")
+                        if (attribution_config is not None
+                                and "sequence_attribution" not in row
+                                and fmt not in _ZERO_COST_FORMATS):
+                            # A zero-cost passthrough row's price is exact by
+                            # rule; it carries no sidecar and claims none.
+                            raise ValueError(
+                                f"sequence_attribution cannot resume committed "
+                                f"no-attribution rows for {name}@{fmt}")
                         operator = row["joint_operator_identity"]
                         if row["probe_identity"] != joint_probe_identity or operator["qname"] != name or operator["format"] != fmt:
                             raise ValueError("probe/operator alignment mismatch")
@@ -2576,10 +2603,30 @@ def compute_aura_cost_streamed(
                     components = joint_components[key]
                     if fmt in _ZERO_COST_FORMATS:
                         components = [{"weight": 0.0, "activation": 0.0, "mixed": 0.0, "total": 0.0} for _ in range(n_probes)]
+                    sidecar = None
+                    if attribution_config is not None and key in attribution_components:
+                        # Descriptive per-block reconstruction of the SAME
+                        # probes, published beside the untouched authoritative
+                        # fields with its own gated residual.
+                        sidecar = sequence_attribution_sidecar(
+                            blocks=attribution_blocks,
+                            components_per_probe=attribution_components[key],
+                            authoritative_totals=[value["total"] for value in components],
+                            gate_relative=attribution_config["gate_relative"],
+                            arithmetic_scope="streamed_dense_lease_per_invocation_contractions",
+                            sequence_length=int(calib_ids.shape[1]),
+                            selected_tokens_per_row={
+                                "all": int(calib_ids.shape[1]), "last": 1,
+                                "causal": int(calib_ids.shape[1]) - 1,
+                            }[token_scope],
+                            n_sequences=len(calib_ids),
+                            calibration_sha256=joint_probe_identity["calibration_sha256"],
+                        )
                     joint_rows[name][fmt] = make_joint_aura_entry(
                         operator_identity=joint_operators[key],
                         probe_identity=joint_probe_identity,
                         signed_components=components,
+                        sequence_attribution=sidecar,
                     )
     
         if checkpoint_root is not None:
@@ -3368,6 +3415,7 @@ def compute_aura_cost_streamed(
                         {name: {fmt: fr.get_format(fmt) for fmt in render_formats[name]} for name in pending},
                         d_weights, activation_max_abs=getattr(cache_owner, "activation_max_abs", None),
                         projection_backend=joint_projection_backend,
+                        attribution=attribution_config is not None,
                     )
                 try:
                     if joint_lease is not None:
@@ -3386,6 +3434,14 @@ def compute_aura_cost_streamed(
                         with prefetched_boundary_batches(boundary_storage, batches, layer,
                                 grad_outs[probe_index]) as reverse_batches:
                             for batch_index, batch, boundary_cpu, incoming_cpu in reverse_batches:
+                                if attribution_config is not None:
+                                    # Whole caller-owned batch blocks from the
+                                    # streamed partition's own offsets; never a
+                                    # split of flattened rows.
+                                    joint_lease.note_block(
+                                        batch_index,
+                                        first_sequence=row_offsets[batch_index],
+                                        sequences=len(batch.input_ids))
                                 try:
                                     available_gib = _free_gib()
                                     if available_gib < min_free_gib:
@@ -3467,6 +3523,14 @@ def compute_aura_cost_streamed(
                                 s2[key] += value
                                 s4[key] += value * value
                                 x2_probe[key].append(value)
+                            if attribution_config is not None:
+                                # The descriptive sidecar probe: per-invocation
+                                # contractions, a separate arithmetic from the
+                                # authoritative totals above.
+                                captured = joint_lease.finish_attribution()
+                                attribution_blocks = captured["blocks"]
+                                for key, per_block in captured["components"].items():
+                                    attribution_components.setdefault(key, []).append(per_block)
                 finally:
                     accumulated_gradients.clear()
                     if joint_lease is not None:
