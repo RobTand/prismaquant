@@ -3054,7 +3054,7 @@ def _production_cache_source_profile(
                 f"production source identity cannot read {relative}"
             ) from exc
         digest.update(relative, payload)
-        digests[relative] = hashlib.sha256(payload).hexdigest()
+        digests[relative] = bytes_sha256hex(payload)
     return digest.hexdigest(), digests
 
 
