@@ -101,13 +101,17 @@
 
 ### Fixed
 
-- **Retired interpreter receipts no longer admit explicit campaign row
-  classes** (#2222). The SDK3 entries on `dl380g10`, `sparky` and `sparklina`
-  are preserved under `retired_interpreters`, separate from active placement
-  attestations. The existing inventory reader validates both mappings and
-  refuses active/retired overlap; the existing placement refusal names retired
-  paths as history. Active SDK4 and ROCm entries, container and instruction-set
-  refusals, independent package pins and version guards are unchanged.
+- **Retired interpreter receipts remain history, not active attestation**
+  (#2222). The SDK3 entries on `dl380g10`, `sparky` and `sparklina` stay under
+  `retired_interpreters`, separate from active placement attestations. The
+  inventory reader validates both mappings and refuses active/retired overlap.
+  Following D32, missing or retired host attestation now uses the existing
+  `dev_mode.seal_check`: default dev mode stamps `[DEV-MODE]` and continues with
+  the spec; only `PRISMAQUANT_DEV_MODE=0` keeps the certified refusal. Continuing
+  never marks a retired receipt active or qualifies its runtime. Active SDK4
+  and ROCm entries, inventory shape, container/device and instruction-set
+  checks, actual runtime compatibility and safety remain distinct; no runtime
+  probe, re-pin or new identity gate is added.
 
 - **The real DeepSeek V4 model-walk export gate owns its import process**
   (#2276). It uses the existing `own_process` marker when sharing a pytest

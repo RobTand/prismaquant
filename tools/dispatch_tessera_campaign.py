@@ -368,7 +368,7 @@ def _class_isa(resolved: dict, fleet: dict) -> str:
 
 
 def _attest_placement(resolved: dict, fleet: dict) -> None:
-    """Refuse a class this fleet cannot actually run where it is sent."""
+    """Check device capability; stamp or refuse recorded host attestation."""
 
     tags = fleet["tags"]
     container = resolved.get("container")
@@ -384,17 +384,22 @@ def _attest_placement(resolved: dict, fleet: dict) -> None:
                     "without the device it was admitted for")
             continue
         if resolved["python"] not in shape["interpreters"]:
+            from prismaquant.dev_mode import seal_check
+
             attested = sorted(shape["interpreters"])
             history = (" This interpreter is retired; its retained receipt is history, "
                        "not placement admission."
                        if resolved["python"] in shape.get("retired_interpreters", {})
                        else "")
-            raise RowClassRefused(
-                f"row class {resolved['name']!r} runs {resolved['python']}, "
-                f"which is not attested on tag {tag!r}; that tag attests "
-                f"{attested or 'no host interpreter'}. Run it there once and "
-                f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
-                f"action key, or give the class a container.{history}")
+            seal_check(
+                "host interpreter placement attestation", attested, resolved["python"],
+                where=f"row class {resolved['name']!r} on tag {tag!r}", same=False,
+                refusal=lambda: RowClassRefused(
+                    f"row class {resolved['name']!r} runs {resolved['python']}, "
+                    f"which is not attested on tag {tag!r}; that tag attests "
+                    f"{attested or 'no host interpreter'}. Run it there once and "
+                    f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
+                    f"action key, or give the class a container.{history}"))
 
 
 def validate_row_classes(spec: dict, *, fleet=None, where="spec") -> list[dict]:
