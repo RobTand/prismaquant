@@ -527,6 +527,35 @@ def test_finalize_refuses_original_capture_count_drift(selection, monkeypatch):
     assert not selection.output.exists()
 
 
+def test_finalize_refuses_a_misnamed_seed_wire_before_reading_or_linking_it(selection, monkeypatch):
+    """#2310: the filename refusal precedes the source read, not just the link."""
+    from prismaquant.cost_stage_checkpoint import unit_path, write_unit
+    path, root = _completed(selection, monkeypatch)
+    data = tm._inputs(path)[0]
+    *_, identity, _group = tm._inputs(path, 0)
+    _root, (journal, digest, _done) = tm._journal(data, identity, 0, sorted(_units()))
+    record = copy.deepcopy(selection.case.receipts[selection.missing])
+    (root / 'wire' / 'misnamed.tessera').write_bytes(
+        (root / 'wire' / record['file']).read_bytes())
+    record['file'] = 'misnamed.tessera'
+    unit_path(journal, selection.missing).unlink()
+    write_unit(journal, stage=tm.STAGE, qname=selection.missing, identity_sha256=digest,
+               state=dict(format=FMT, record=record, anchor=None))
+    reads = []
+    verify = ReceiptAPI.verify_cached_unit
+
+    def spy(self, blob, record, identity):
+        reads.append(record['file'])
+        return verify(self, blob, record, identity)
+
+    monkeypatch.setattr(ReceiptAPI, 'verify_cached_unit', spy)
+    with pytest.raises(RuntimeError, match='seed wire filename differs'):
+        tm.finalize(path)
+    assert 'misnamed.tessera' not in reads
+    assert not (selection.workspace / 'final' / 'wire' / 'misnamed.tessera').exists()
+    assert not selection.output.exists()
+
+
 def test_materialization_refuses_unbound_producer_source(selection, monkeypatch):
     s = selection
     s.cost[tep.EXPERT_WIRES_KEY] = {}

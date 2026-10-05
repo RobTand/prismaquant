@@ -132,6 +132,14 @@
 
 ### Fixed
 
+- **The seed wire filename refusal in `tessera_materialization.finalize()`
+  precedes the source read** (#2310). The check that a seed receipt names its
+  unit/rung destination is now one helper, `_require_seed_wire_filename`, which
+  `_link_seed_wire` and `finalize()` both call; `finalize()` runs it before
+  locating or reading the source wire, so a misnamed receipt is refused without
+  touching its bytes. A regression builds a misnamed seed receipt and checks that
+  nothing reads or links it. No bytes, formats or gates change.
+
 - **Retired interpreter receipts remain history, not active attestation**
   (#2222). The SDK3 entries on `dl380g10`, `sparky` and `sparklina` stay under
   `retired_interpreters`, separate from active placement attestations. The
