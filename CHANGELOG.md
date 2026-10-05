@@ -20,6 +20,16 @@
   files and is admitted (#1859); the same pair at one format refuses.
   The mangled filename spelling is unchanged.
 
+- **Campaign, wire and source snapshot writes refuse filename collisions**
+  (Refs #2231). Campaign publication checks both existing filename families
+  against the current manifest before writing; batch admission checks before
+  its first publication. Packed expert appends include existing dense keys.
+  Disk-backed weight sessions check the complete snapshot roster before
+  capture or reuse and share the existing cache leaf helper. Every refusal
+  names both coordinates and their shared filename. Cross-format name aliases
+  remain legal when they name distinct files; all on-disk spellings are
+  unchanged.
+
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing

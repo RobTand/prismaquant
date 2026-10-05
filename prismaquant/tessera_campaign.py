@@ -710,6 +710,10 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
     wire_path = _wire_path(wire_dir, qname, format_name)
 
     def _publish():
+        # Check on the writer thread as well as at batch admission, so queued
+        # publications see every earlier durable coordinate before any write.
+        _require_injective_anchor_filenames(
+            cache, wire_dir, ((qname, format_name),))
         _store_rendered_weight_entry(
             weights=cache.weights,
             qname=qname,
@@ -799,6 +803,8 @@ def _measure_anchor_batch(*, qnames, weights, activations, format_name,
             raise ValueError(
                 f"anchor batch {format_name}: {name} prepares a different wire "
                 f"recipe or Hessian requirement than {qnames[0]}")
+    _require_injective_anchor_filenames(
+        cache, wire_dir, ((name, format_name) for name in qnames))
     started = time.time()
     encoded = encode_tessera_units(
         weights, format_name, recipe=prepared[0]["wire"],
@@ -2261,6 +2267,27 @@ def campaign_cost_payload(
 
 def _wire_path(wire_dir: Path, qname: str, format_name: str) -> Path:
     return wire_dir / f"{qname.replace('.', '__')}__{format_name}.tessera"
+
+
+def _require_injective_anchor_filenames(cache, wire_dir, coordinates):
+    """Check both unchanged filename families at the campaign write open."""
+    from .production_weight_cache import require_injective_cache_filenames
+
+    coordinates = set(cache.weights).union(coordinates)
+    if cache.cache_dir:
+        require_injective_cache_filenames(
+            coordinates, where="campaign rendered weights")
+    # Resume and export consume _wire_path: its legacy dot-to-double-
+    # underscore spelling is different from the rendered-weight leaf.
+    owners = {}
+    for coordinate in sorted(coordinates):
+        filename = str(_wire_path(wire_dir, *coordinate).relative_to(wire_dir))
+        previous = owners.setdefault(filename, coordinate)
+        if previous != coordinate:
+            raise ValueError(
+                f"campaign wire shards: coordinates {previous!r} and "
+                f"{coordinate!r} map to one wire destination {filename!r}; "
+                "the wire shards would silently overwrite each other")
 
 
 def _checkpoint_identity_api():

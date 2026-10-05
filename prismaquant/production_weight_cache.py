@@ -69,6 +69,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
+from itertools import chain
 import hashlib
 import io
 import json
@@ -7378,12 +7379,11 @@ def fill_packed_expert_cache_entries(
             print("[prod-cache/experts] no non-BF16 packed experts in scope",
                   flush=True)
         return coverage
-    # #2219: refuse a colliding packed full-name set at the directory open,
-    # before the append identity reads its sidecar or any shard is probed or
-    # written. The packed fill bypasses the dense fill's render-identity
-    # build, which is where the dense path's own refusal lives.
+    # Refuse the union before the append writes any sidecar or shard: a dense
+    # entry already in the manifest can alias a packed entry in this scope.
     require_injective_cache_filenames(
-        ((full, fmt) for (_q, _m, _p, _pn, full, fmt) in in_scope),
+        chain(cache.weights,
+              ((full, fmt) for (_q, _m, _p, _pn, full, fmt) in in_scope)),
         where="packed expert production cache",
     )
     if cache_dir_path is not None:
