@@ -93,6 +93,46 @@ def test_autoscale_resident_bytes_matches_the_inline_parse(checkpoint):
     assert autoscale._shard_resident_bytes(shard, dtype_bytes=2) == old_bytes
 
 
+# Real malformed containers, not mocks: a file shorter than the u64 length
+# prefix, and a real 8-byte prefix naming an impossible header length.
+_MALFORMED_PREFIXES = [
+    (b"\x01\x02\x03", "is too short to be a safetensors file"),
+    (struct.pack("<Q", 1 << 40) + b"junk",
+     "has an invalid safetensors header length"),
+]
+
+
+@pytest.mark.parametrize("consumer", [
+    "footprint", "artifact_completeness", "pipeline", "autoscale",
+])
+@pytest.mark.parametrize("malformed,owner_refusal", _MALFORMED_PREFIXES)
+def test_malformed_header_prefix_is_the_owner_refusal(
+        checkpoint, consumer, malformed, owner_refusal):
+    """Each consumer surfaces the container grammar owner's named refusal on
+    a genuinely malformed shard — the error boundary a caller actually sees,
+    never a bare JSON decode error, a silent raw-size fallback, or a
+    swallowed header problem."""
+    directory, shard, _header = checkpoint
+    shard.write_bytes(malformed)
+    expected = owner_refusal
+    if consumer == "pipeline":
+        # the parameter counter wraps the owner's refusal and names the shard
+        expected = "cannot inspect safetensors shard .*" + owner_refusal
+    with pytest.raises(ValueError, match=expected):
+        if consumer == "footprint":
+            from prismaquant import footprint
+            footprint._read_safetensors_header(str(shard))
+        elif consumer == "artifact_completeness":
+            from prismaquant import artifact_completeness
+            artifact_completeness._read_safetensors_header(shard)
+        elif consumer == "pipeline":
+            from prismaquant import pipeline
+            pipeline._safetensors_parameter_count(directory)
+        else:
+            from prismaquant import autoscale
+            autoscale._shard_resident_bytes(shard, dtype_bytes=2)
+
+
 def test_tp2_header_is_the_inline_parse(checkpoint):
     import tp2_budget_plan
     _dir, shard, _header = checkpoint

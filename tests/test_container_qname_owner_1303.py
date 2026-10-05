@@ -137,8 +137,11 @@ class TestQnameGrammarBehavior:
     """Name parsing preserves accepted components and layer indices."""
 
     def test_per_expert_name_decomposition(self):
-        module = pytest.importorskip("prismaquant.measure_quant_cost")
-        assert module._PER_EXPERT_NAME_RE.match(
+        # A required domain import: a broken module must fail this suite,
+        # never silently skip it.
+        from prismaquant import measure_quant_cost
+
+        assert measure_quant_cost._PER_EXPERT_NAME_RE.match(
             "model.layers.3.mlp.experts.7.gate_proj"
         ).groups() == ("model.layers.3.mlp.experts", "7", "gate_proj")
 
