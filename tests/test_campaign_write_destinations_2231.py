@@ -313,3 +313,66 @@ def test_queued_campaign_collision_preserves_first_publication(
         first_render, first_wire,
     }
 
+
+def test_producer_bootstrap_cannot_drop_a_concurrently_published_wire(
+        anchor_inputs, tmp_path, monkeypatch):
+    from pathlib import Path
+    from threading import Event, Thread, current_thread
+    from prismaquant.tessera_publication import BoundedPublisher
+
+    cache, wire_dir, weight, prepare = anchor_inputs
+    first, alias = "layer.a", "layer__a"
+    cache.weights[(first, FORMAT)] = weight
+    first_wire = campaign._wire_path(wire_dir, first, FORMAT)
+    producer_paused, release_producer = Event(), Event()
+    outcomes = []
+    exists = Path.exists
+
+    def pause_bootstrap(path):
+        present = exists(path)
+        if path == first_wire and current_thread().name == "paused-producer":
+            assert not present
+            producer_paused.set()
+            assert release_producer.wait(timeout=30), "producer bootstrap not released"
+        return present
+
+    monkeypatch.setattr(Path, "exists", pause_bootstrap)
+
+    def produce():
+        try:
+            campaign._measure_anchor_batch(
+                qnames=[alias, "other"], weights=[weight, weight],
+                activations=[weight, weight], format_name=FORMAT, cache=cache,
+                wire_dir=wire_dir, hessian_required=False)
+        except BaseException as error:
+            outcomes.append(error)
+        else:
+            outcomes.append(None)
+
+    producer = Thread(target=produce, name="paused-producer")
+    with BoundedPublisher(budget_bytes=64) as publisher:
+        producer.start()
+        try:
+            assert producer_paused.wait(timeout=30), "producer did not pause in bootstrap"
+            campaign._finish_anchor(
+                qname=first, weight=weight, activations=weight, format_name=FORMAT,
+                cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+                render=weight * 0.75, blob=b"first wire", elapsed=0.0,
+                publisher=publisher)
+            publisher.drain()
+            assert first_wire.read_bytes() == b"first wire"
+            assert cache._campaign_wire_coordinates == {(first, FORMAT)}
+        finally:
+            release_producer.set()
+            producer.join(timeout=30)
+    assert not producer.is_alive(), "producer thread did not stop"
+    assert len(outcomes) == 1
+    assert isinstance(outcomes[0], ValueError), "producer discarded the published wire owner"
+    assert_refusal(SimpleNamespace(value=outcomes[0]), first, alias, first_wire.name)
+    assert first_wire.read_bytes() == b"first wire"
+    assert cache._campaign_wire_coordinates == {(first, FORMAT)}
+    assert set(cache.weights) == {(first, FORMAT)}
+    assert {path for path in tmp_path.rglob("*") if path.is_file()} == {
+        tmp_path / cache.weights[(first, FORMAT)], first_wire,
+    }
+
