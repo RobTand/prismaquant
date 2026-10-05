@@ -427,10 +427,17 @@ def _no_prismabuild_import_carried_between_modules():
     ``tests/test_fullstack_real_chain.py``'s ``pb`` fixtures import from a
     sealed generation that way. An autouse fixture is set up before the other
     fixtures of its scope, so this snapshot comes first and the module's
-    teardown puts the imports back.
+    teardown puts the imports back. This module explicitly owns a detached,
+    initially unbound graph: collection or a public pytest plugin may have
+    imported the installed package before setup. Clearing only those cached
+    entries lets each resolver choose and authenticate its own source; it
+    neither pins a default nor weakens an origin assertion. Installed-build
+    tests still import from their original paths, and teardown restores the
+    exact pre-existing module objects and parent edges. Test imports themselves
+    must remain inside a test or fixture (PQ #2265).
     """
     from fleet_sdk import prismabuild_imports_restored
-    with prismabuild_imports_restored():
+    with prismabuild_imports_restored(detach=True):
         yield
 
 

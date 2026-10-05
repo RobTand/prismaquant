@@ -58,37 +58,38 @@ pytestmark = pytest.mark.skipif(
     ),
 )
 
-#: Wall clock just before the first import out of the #518 checkout, so a test
-#: can tell a bytecode file this process wrote from one that was already there.
-_IMPORT_EPOCH = time.time()
+@pytest.fixture(autouse=True, scope="module")
+def _pb_imports(_no_prismabuild_import_carried_between_modules):
+    """Import the candidate only after this module owns its restore scope."""
+    from fleet_sdk import prismabuild_imports_restored
 
-if not _missing:
-    # The #518 checkout is another agent's worktree and this harness is a
-    # reader of it.  Importing a module normally writes a ``__pycache__``
-    # alongside its source, which would be this process modifying that
-    # worktree; refuse to, before the first import from it.
-    sys.dont_write_bytecode = True
+    global pb, dc, pool, pbcampaign, pbrun, _IMPORT_EPOCH
 
-    for entry in (PB517_ROOT / "src", PB517_ROOT / "tools" / "fleet",
-                  PB517_ROOT / "tests"):
-        if str(entry) in sys.path:
-            sys.path.remove(str(entry))
-        sys.path.insert(0, str(entry))
-    from prismabuild import core as pb            # noqa: E402
-    from prismabuild import decomposition as dc   # noqa: E402
-    from prismabuild import pool                  # noqa: E402
-    import pbcampaign                             # noqa: E402
-    import pbrun                                  # noqa: E402
+    # The bytecode control measures only writes made by these owned imports.
+    _IMPORT_EPOCH = time.time()
+    with (pytest.MonkeyPatch.context() as owned,
+          prismabuild_imports_restored(source_root=PB517_ROOT)):
+        # The candidate is another agent's worktree: never write bytecode there.
+        owned.setattr(sys, "dont_write_bytecode", True)
+        for entry in (PB517_ROOT / "src", PB517_ROOT / "tools" / "fleet",
+                      PB517_ROOT / "tests"):
+            if str(entry) in sys.path:
+                sys.path.remove(str(entry))
+            sys.path.insert(0, str(entry))
+        from prismabuild import core as pb
+        from prismabuild import decomposition as dc
+        from prismabuild import pool
+        import pbcampaign
+        import pbrun
 
-    # The deployed runtime also ships ``prismabuild`` and ``pbcampaign``, and an
-    # earlier import in the same process would shadow these with a generation
-    # that has no decomposer at all.  Saying so here beats a mystifying
-    # AttributeError three tests later.
-    for module in (pb, dc, pool, pbcampaign, pbrun):
-        assert str(PB517_ROOT) in str(Path(module.__file__).resolve()), (
-            f"{module.__name__} resolved to {module.__file__}, not to the "
-            f"PB #518 checkout at {PB517_ROOT}"
-        )
+        # Keep the same origin refusal; an installed or deployed SDK is not
+        # the candidate this harness exercises.
+        for module in (pb, dc, pool, pbcampaign, pbrun):
+            assert str(PB517_ROOT) in str(Path(module.__file__).resolve()), (
+                f"{module.__name__} resolved to {module.__file__}, not to the "
+                f"PB #518 checkout at {PB517_ROOT}"
+            )
+        yield
 
 
 # --------------------------------------------------------------------------

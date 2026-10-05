@@ -123,6 +123,20 @@
   the native-import refusal control together. Production registration and
   its native-module refusal are unchanged.
 
+- **PrismaBuild test imports are owned by tests or fixtures, not collection**
+  (#2265). The control-artifact tests import their installed CAS inside the
+  two tests that use it; the optional prefill decomposer harness imports its
+  candidate inside an explicit graph-detaching module scope. The three readset
+  source consumers also own pinned source scopes, including when pytest
+  preloads the installed package through its public PrismaBuild bound plugin.
+  Every test module now explicitly owns an initially detached import graph,
+  which also covers candidate, published-runtime and imported helper families
+  without adding source prerequisites to unrelated tests. The old graph and
+  parent edges return at module teardown. A syntax-tree regression discovers
+  origin-refusing resolvers across tests, follows imports, fixture parameters
+  and named calls, and runs a representative of every family with the real
+  public plugin preloaded. All origin assertions remain unchanged.
+
 - **Required domain imports and malformed-header consumer refusals stay
   visible** (Refs #2260, bounded child of #1303).
   `tests/test_container_qname_owner_1303.py` imports

@@ -82,7 +82,7 @@ def _reader_sdk_bound():
 
 @pytest.fixture(scope="module")
 def pb():
-    """The module's movers use one reviewed SDK3 source tree."""
+    """The module's movers use one authenticated source package."""
     with published.source_bound():
         yield _pb()
 

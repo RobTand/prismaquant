@@ -88,7 +88,7 @@ def _reader_sdk_bound():
 
 @pytest.fixture(scope="module")
 def pb():
-    """One pinned SDK3 package for the module's real mover fixtures."""
+    """One authenticated source package for the module's real mover fixtures."""
     require_prismabuild_sdk()
     with pbgen.source_bound():
         info = pbgen.require_paths()
