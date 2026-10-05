@@ -122,28 +122,36 @@ primitive scopes, 508 to 503; no new scope is admitted.
 
 ## Tools spaced-JSON bundle (Refs #1301, 2026-10-05)
 
-The reviewed `DIRECT_ASCII_SPACED_LAX-tools-47-sites` bundle routes 45 of the
-47 selected scopes — 58 `json.dumps(value, sort_keys=True)` calls across 35
-`tools/` files — through the existing `DIRECT_ASCII_SPACED_LAX` owner: `.text`
-where the call fed print, `write_text`, argv, comparisons or set/Counter keys,
-`.encoded` where it fed bytes (the GLM derivative image's manifest member and
-the render-window identity digest stream), and `.sha256` where it hashed its
-own encoding (chain_roll_bench's plane digest). Imports follow each file's own
-convention: module-level where the file already imports prismaquant at module
-level, function-local otherwise. Identity bytes are unchanged at every routed
-site; `tests/test_spaced_lax_tools_routing_1301.py` pins the
-recipe-to-profile byte equivalence per site and fails before the edit.
+The source inventory contains 58 changed serialization calls in 45 scopes
+across 36 tool files. Calls use the existing profile for text, encoded bytes
+or the digest of those bytes; callers still own argument construction, final
+line feeds, error order, comparisons and publication. This is a source
+inventory, not an end-to-end consumer qualification count.
 
-The bundle keeps its reviewed exclusions. Nine other-exact and four
-new-recipe neighbor calls inside the ten mixed scopes keep their compact,
-indent and strict spellings, and their rows stay in the primitive ratchet.
-`tools/tessera_fleet/model_worker.py` (both its selected scopes) is not
-routed: `tools.tessera_fleet.dispatch_model` copies that file alone into
-sealed workspaces and pinned producer images and runs it with the standard
-library alone, where the digest owner cannot be imported; its bytes are
-unchanged and pinned by test. The ratchet shrinks exactly 36 rows (35
-non-mixed sorted-JSON scopes plus the one raw hashlib site whose hash moved
-onto `.sha256`), 334 to 298; no new raw site is admitted. No new profile, and
-no error/publication/LF/encoding semantics change at any site; the three
-`prismaquant/` `json.dump` file writers are a different reviewed bundle and
-are untouched.
+The original routing assertions and generic recipe/profile comparisons did
+not prove each consumer. They have been removed. Their pre-change failures
+were style/source failures, not behavioral regressions. The historical
+`b2cb7017` run failed nine declared-dependency cases for missing `xxhash` and
+remains failed; agreement with an equally broken baseline did not make it green.
+
+`tests/test_spaced_lax_tools_routing_1301.py` now exercises actual state
+append/refusal, calculated benchmark summaries, spec construction, checkpoint
+parsing, container submissions, analysis publication and worker file bytes.
+Its frozen outcomes were recorded from original commit `99a578e0`, not from
+the replacement profile. Actual lightweight launch tests run outside the
+repository without `PYTHONPATH` and without site packages. The image driver,
+chain spec, wire reader, metadata audit and render analysis retain their
+standard-library dependency boundary; other help and argument parsing still
+precede scientific imports.
+
+The separately attached correction packet records all changed boundaries,
+their exact original/candidate source locations, retained input paths/keys,
+observed output types/bytes/errors and any producer computation omitted.
+An isolated boundary comparison is explicitly not a producer rerun. No model
+roll, capture, CUDA benchmark or image rebuild is part of that proof.
+
+Mixed compact, indented and strict recipes remain outside this migration.
+The separately staged `tools/tessera_fleet/model_worker.py` keeps its original
+standard-library serialization; its actual publication bytes are tested.
+The existing duplication ratchet retains syntactic policy. The three package
+`json.dump` file writers remain a different bundle; #1301 stays open.
