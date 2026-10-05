@@ -8,7 +8,6 @@ the neutral numerical core never turns that quantity into AURA.
 from __future__ import annotations
 
 from functools import partial
-import hashlib
 import json
 import math
 import pickle
@@ -24,7 +23,7 @@ from .cost_stage_checkpoint import (
     MANIFEST_SCHEMA, _load_unit, canonical_json_sha256, unit_path,
 )
 from .schemas import Contract
-from .digests import file_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex
 
 PLAN_SCHEMA = "prismaquant.tessera_anchored_replay.plan.v1"
 REPORT_SCHEMA = "prismaquant.tessera_anchored_replay.report.v1"
@@ -79,7 +78,7 @@ def load_campaign_measurements(cost_path, checkpoint_path, plan):
     cost_path, checkpoint_path = Path(cost_path), Path(checkpoint_path)
     binding = plan["input"]
     payload_bytes = cost_path.read_bytes()
-    _require(hashlib.sha256(payload_bytes).hexdigest() == binding["payload_sha256"], "payload hash mismatch")
+    _require(bytes_sha256hex(payload_bytes) == binding["payload_sha256"], "payload hash mismatch")
     manifest = json.loads(checkpoint_path.read_text())
     _require(manifest.get("schema") == MANIFEST_SCHEMA
              and manifest.get("stage") == "Tessera campaign", "unsupported checkpoint")

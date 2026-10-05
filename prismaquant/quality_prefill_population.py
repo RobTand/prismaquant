@@ -40,6 +40,7 @@ from dataclasses import dataclass
 import re
 
 from prismaquant.cost_stage_checkpoint import canonical_json, canonical_json_sha256
+from .digests import bytes_sha256hex
 
 
 # --------------------------------------------------------------------------
@@ -1093,12 +1094,11 @@ def load_census_counts(path, *, expected_sha256: str) -> dict[str, int]:
     the run's census audit record. Bytes are hashed before the JSON is
     trusted, so a silently edited or truncated census refuses.
     """
-    import hashlib
     import json
     from pathlib import Path
 
     payload = Path(path).read_bytes()
-    digest = hashlib.sha256(payload).hexdigest()
+    digest = bytes_sha256hex(payload)
     if digest != expected_sha256:
         raise PopulationSelectionError(
             f"census at {path} hashes to {digest}, not the expected "

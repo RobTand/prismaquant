@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import json
 import os
 import re
@@ -287,7 +286,7 @@ def require_slice_bf16_reduction(adjoint_slice, allow: bool, *, where: str) -> N
 
 
 def _digest_of(path: Path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return bytes_sha256hex(Path(path).read_bytes())
 
 
 def _require_hex(value: object, label: str) -> str:
@@ -2103,8 +2102,7 @@ def run_layer_quantum_core(
     joint_probe_identity = {
         "schema": "prismaquant.joint_aura.probes.v2",
         "source_model": model_identity,
-        "calibration_sha256": hashlib.sha256(
-            calib_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
+        "calibration_sha256": bytes_sha256hex(calib_ids.detach().cpu().contiguous().numpy().tobytes()),
         "calibration_shape": list(calib_ids.shape),
         "calibration_dtype": str(calib_ids.dtype),
         "n_probes": n_probes, "seed_base": seed_base,
@@ -3848,7 +3846,7 @@ def publish_quantum_outputs(record, *, payload, result, counters,
             cost_path, pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
         result["cost"] = {
             "path": str(cost_path),
-            "sha256": hashlib.sha256(cost_path.read_bytes()).hexdigest(),
+            "sha256": bytes_sha256hex(cost_path.read_bytes()),
         }
     result["status"] = status
     result["units_done"] = units_done
@@ -3860,7 +3858,7 @@ def publish_quantum_outputs(record, *, payload, result, counters,
         json.dumps(counters, sort_keys=True, indent=2, allow_nan=False) + "\n").encode()
     atomic_write_bytes(counters_path, counters_bytes)
     result["counters"] = {"path": str(counters_path),
-                          "sha256": hashlib.sha256(counters_bytes).hexdigest(),
+                          "sha256": bytes_sha256hex(counters_bytes),
                           "bytes": len(counters_bytes)}
     atomic_write_bytes(
         Path(record["output_space"]["results"]),

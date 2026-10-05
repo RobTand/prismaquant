@@ -6,6 +6,7 @@ consequences (CB exporters, inventory gate) live in
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -126,6 +127,11 @@ def test_the_payload_identity_depends_on_tensors_and_nothing_else():
     assert identity["schema"] == TENSOR_PAYLOAD_IDENTITY_SCHEMA
     assert identity["algorithm"] == "sha256"
     assert identity["tensors"] == 2
+    # The routed text owner digests the old recipe's exact bytes: sorted
+    # compact JSON, UTF-8, no spaces (PQ #1301 keeps the served value).
+    assert identity["payload_sha256"] == hashlib.sha256(json.dumps(
+        dict(sorted(rows.items())), sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False).encode("utf-8")).hexdigest()
     # Insertion order is not part of the identity; the tensor set is.
     assert tensor_payload_identity(dict(sorted(rows.items()))) == identity
     assert tensor_payload_identity(

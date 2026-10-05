@@ -133,6 +133,7 @@ import json
 from pathlib import Path
 import re
 from typing import Any
+from .digests import bytes_sha256hex
 
 
 #: v2 (2026-09-04) added ``contract_sha256`` and demoted ``version_is_release``
@@ -919,12 +920,11 @@ def installed_tessera_contract_sha256() -> str:
     refuse; neither may read as "fine".
     """
     from importlib.resources import as_file
-    import hashlib
 
     try:
         from .tessera_runtime_contract import contract_path
         with as_file(contract_path()) as path:
-            return hashlib.sha256(path.read_bytes()).hexdigest()
+            return bytes_sha256hex(path.read_bytes())
     except TesseraServingRuntimePinError:
         raise
     except Exception as exc:  # ImportError, OSError, ModuleNotFoundError...

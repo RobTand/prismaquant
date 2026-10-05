@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import random
@@ -12,13 +11,14 @@ from .calibration_data import load_calibration_input
 from .cluster_campaign import _atomic_write_new_bytes
 
 from .joint_eval_observation import STATUS, observation_status  # noqa: F401  (re-exported)
+from .digests import bytes_sha256hex
 
 SCHEMA = 'prismaquant.tessera_joint_eval_panel.v1'
 ALGORITHM = 'python_random_permutation_prefix_v1'
 
 
 def _sha_ids(ids):
-    return hashlib.sha256(ids.contiguous().numpy().tobytes()).hexdigest()
+    return bytes_sha256hex(ids.contiguous().numpy().tobytes())
 
 
 def _indices(total, seed, size):

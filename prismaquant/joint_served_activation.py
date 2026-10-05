@@ -14,6 +14,7 @@ import json
 import pickle
 from pathlib import Path
 from .schemas import Contract
+from .digests import bytes_sha256hex
 
 FORMAT = "TESSERA_E2M1_K2_R896"
 SCHEMA = "prismaquant.joint_served_activation_policy.v1"
@@ -30,9 +31,8 @@ def _policy_bytes(bound, label, read_bound):
     if read_bound is None:
         from .stage_inputs import read_bound as _read_bound
         return _read_bound(bound,label)
-    import hashlib
     raw=read_bound(bound)
-    _require(isinstance(raw,(bytes,bytearray)) and hashlib.sha256(raw).hexdigest()==bound["sha256"],
+    _require(isinstance(raw,(bytes,bytearray)) and bytes_sha256hex(raw)==bound["sha256"],
              "alternate pinned reader changed bound content: "+label)
     return raw
 

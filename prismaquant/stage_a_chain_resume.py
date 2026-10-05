@@ -63,7 +63,6 @@ That dispatcher contract is not exercised by the fixture tests.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -73,6 +72,7 @@ from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publis
 from .dev_mode import NOT_COMPUTED, seal_check
 from .joint_adjoint_slices import checkpoint_cotangent_plane, checkpoint_is_referenced
 from .matmul_arithmetic import BF16_REDUCTION_FIELD
+from .digests import bytes_sha256hex
 
 CHAIN_STATE_SCHEMA = "prismaquant.stage_a.chain_state.v1"
 CHAIN_ARITHMETIC_SCHEMA = "prismaquant.stage_a.chain_arithmetic.v1"
@@ -208,7 +208,7 @@ def write_chain_state(space, document) -> dict:
         raise ChainResumeRefused(
             f"{path} already exists: a run's chain state is written once, at its "
             "tail checkpoint")
-    return {"path": str(path), "sha256": hashlib.sha256(payload).hexdigest()}
+    return {"path": str(path), "sha256": bytes_sha256hex(payload)}
 
 
 def load_chain_state(space, sha256) -> dict:
@@ -220,7 +220,7 @@ def load_chain_state(space, sha256) -> dict:
         raise ChainResumeRefused(
             f"the run has no chain state at {path}: only a run that sealed its "
             "tail checkpoint under #1001 can resume its chain") from exc
-    if hashlib.sha256(raw).hexdigest() != str(sha256):
+    if bytes_sha256hex(raw) != str(sha256):
         raise ChainResumeRefused(f"{path} does not have the pinned digest {sha256}")
     document = json.loads(raw)
     if (not isinstance(document, dict) or document.get("schema") != CHAIN_STATE_SCHEMA

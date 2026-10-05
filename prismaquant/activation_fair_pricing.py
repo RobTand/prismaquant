@@ -132,12 +132,12 @@ Documented in ``docs/design/runtime_flags.md`` §1.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from .digests import text_sha256hex
 
 SCHEMA = "prismaquant.activation_fair_pricing.v1"
 
@@ -383,7 +383,7 @@ def _rows_digest(rows: Sequence[CalibrationRow]) -> str:
         separators=(",", ":"),
         sort_keys=False,
     )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return text_sha256hex(payload)
 
 
 def _fit_family(family: str,

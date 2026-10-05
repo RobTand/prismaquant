@@ -77,7 +77,6 @@ shipcard records which table admitted its units.
 from __future__ import annotations
 
 import fnmatch
-import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -105,6 +104,7 @@ from .lane_eligibility import (
 )
 from . import record_fields
 from .tessera_serving_runtime_pin import native_extension_contract_row
+from .digests import bytes_sha256hex
 
 __all__ = [
     "FUSED_MODULE_FIELD_LICENCES",
@@ -3988,7 +3988,7 @@ def packaged_activation_quantizers() -> tuple[str, dict]:
 
     with as_file(contract_path()) as path:
         raw = Path(path).read_bytes()
-    sha = hashlib.sha256(raw).hexdigest()
+    sha = bytes_sha256hex(raw)
     from .tessera_serving_runtime_pin import (
         load_tessera_serving_runtime_pin,
         require_exact_tessera_runtime_pin,
@@ -4561,7 +4561,7 @@ def _published_tensor_parallel(
     path: str, sha: str,
 ) -> tuple[Mapping[str, int], Mapping[str, Mapping[str, str]]]:
     raw = Path(path).read_bytes()
-    if hashlib.sha256(raw).hexdigest() != sha:
+    if bytes_sha256hex(raw) != sha:
         raise TesseraContractError(
             f"{path}: tensor-parallel metadata digest differs from attesting table")
     return _parse_tensor_parallel(json.loads(raw), path)
@@ -4743,7 +4743,7 @@ def load_tessera_contract() -> "TesseraContract | None":
             raise TesseraContractError(
                 f"cannot read the packaged Tessera contract at {path}: {exc}"
             ) from exc
-        sha = hashlib.sha256(raw).hexdigest()
+        sha = bytes_sha256hex(raw)
         contract = _load_at(str(path), sha, TESSERA_DEV_PIN_COMMIT)
         drift = _answer_drift(TESSERA_DEV_PIN_ANSWER, contract_answer(contract))
         if drift:

@@ -23,10 +23,10 @@ records the model, the profile and the per-source and per-structure counts.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import pickle
+from .digests import bytes_sha256hex
 
 RECEIPT_SCHEMA = "prismaquant.unit_topology_restamp.receipt.v1"
 
@@ -45,7 +45,7 @@ def restamp_table(*, table: str, table_sha256: str, output: str,
     if target.resolve() == source.resolve():
         raise ValueError("restamp output must be a new table, not its input")
     raw = source.read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     if digest != table_sha256:
         raise ValueError(f"{source}: sha256 {digest} differs from the bound {table_sha256}")
     payload = pickle.loads(raw)
@@ -62,7 +62,7 @@ def restamp_table(*, table: str, table_sha256: str, output: str,
     receipt = {
         "schema": RECEIPT_SCHEMA,
         "input": {"path": str(source.resolve()), "sha256": digest},
-        "output": {"path": str(target.resolve()), "sha256": hashlib.sha256(encoded).hexdigest()},
+        "output": {"path": str(target.resolve()), "sha256": bytes_sha256hex(encoded)},
         "model": str(model_path),
         "summary": summary,
         "units": len(result["stats"]),

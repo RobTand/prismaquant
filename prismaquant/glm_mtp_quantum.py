@@ -31,13 +31,13 @@ run.
 """
 from __future__ import annotations
 
-import hashlib
 import time
 from typing import Callable, Mapping
 
 import torch
 
 from . import glm_mtp
+from .digests import bytes_sha256hex
 
 SCHEMA = "prismaquant.glm_mtp_cost.v1"
 SCOPE = "mtp"
@@ -98,8 +98,7 @@ def mtp_probe_identity(*, source_model, calibration_ids, n_probes, seed_base, ar
     probe = {
         "schema": "prismaquant.joint_aura.probes.v2",
         "source_model": source_model,
-        "calibration_sha256": hashlib.sha256(
-            calibration_ids.detach().cpu().contiguous().numpy().tobytes()).hexdigest(),
+        "calibration_sha256": bytes_sha256hex(calibration_ids.detach().cpu().contiguous().numpy().tobytes()),
         "calibration_shape": [n, length],
         "calibration_dtype": str(calibration_ids.dtype),
         "n_probes": int(n_probes), "seed_base": int(seed_base),

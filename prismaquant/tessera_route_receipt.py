@@ -46,11 +46,11 @@ measured serve, not an argument.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
+from .digests import text_sha256hex
 
 
 class TesseraRouteReceiptError(ValueError):
@@ -227,7 +227,7 @@ def parse_census_json(text, *, where):
 
 
 def _text_sha(text):
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return text_sha256hex(text)
 
 
 def _current_scoped_contract():
