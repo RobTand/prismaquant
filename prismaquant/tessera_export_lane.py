@@ -87,7 +87,10 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .digests import (
-    bytes_sha256hex, indent2_json_file_bytes, text_sha256hex,
+    DIRECT_ASCII_SPACED_LAX,
+    bytes_sha256hex,
+    indent2_json_file_bytes,
+    text_sha256hex,
 )
 
 
@@ -306,9 +309,9 @@ def require_platform_executes_derived_from_contract(declared=None) -> dict:
     if stated != derived:
         raise TesseraExportLaneError(
             "PRINCIPLE 14: lane_specs/tessera.json declares "
-            f"executes_by_platform={json.dumps(stated, sort_keys=True)} but the "
+            f"executes_by_platform={DIRECT_ASCII_SPACED_LAX.text(stated)} but the "
             "pinned runtime's packaged contract publishes "
-            f"{json.dumps(derived, sort_keys=True)}.\n"
+            f"{DIRECT_ASCII_SPACED_LAX.text(derived)}.\n"
             "  What a platform executes is a claim about another runtime, so "
             "it is DERIVED from that runtime's own table or it is refused. "
             "Re-read the table; never edit the map to silence this."
@@ -2379,7 +2382,7 @@ def read_cached_unit_bundle(manifest, directory, expected_units, source):
         encoder_source_proof_mode=cached_unit_encoder_source_proof_mode(),
         authority=PRODUCER_AUTHORITY)
     for warning in bundle.warnings:
-        print('[cached-unit warning] ' + json.dumps(warning, sort_keys=True),
+        print('[cached-unit warning] ' + DIRECT_ASCII_SPACED_LAX.text(warning),
               file=sys.stderr)
     return bundle
 

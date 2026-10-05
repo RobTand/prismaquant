@@ -14,7 +14,12 @@ from .glm_source_derivative import (
     CORRECTED_MODELING_SHA256, ORIGINAL_EXPRESSION, CORRECTED_EXPRESSION,
     bound_json, _require, source_derivative_identity,
 )
-from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, indent2_json_file_bytes
+from .digests import (
+    DIRECT_ASCII_SPACED_STRICT,
+    DIRECT_UTF8_STRICT,
+    bytes_sha256hex,
+    indent2_json_file_bytes,
+)
 from .staged_lease import client_sdk
 
 SCHEMA = 'prismaquant.glm_capture_derivative_compatibility.v1'
@@ -383,7 +388,7 @@ def main(argv=None):
     parser.add_argument('--plan-sha256', required=True)
     args = parser.parse_args(argv)
     result = execute_issuance_plan(dict(path=args.plan, sha256=args.plan_sha256), issue=args.command == 'issue')
-    print(json.dumps(result, sort_keys=True, allow_nan=False), flush=True)
+    print(DIRECT_ASCII_SPACED_STRICT.text(result), flush=True)
     return result
 
 

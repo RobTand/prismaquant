@@ -25,7 +25,7 @@ from .tessera_joint_aura import (
     HISTORICAL_WIRE_VALIDATION, PREPARED_SCHEMA, RENDER_COMPARISON_BY_ORIGIN, SCHEMA,
     cell_render_census, render_origin_census,
 )
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex
 
 HANDOFF_SCHEMA = 'prismaquant.tessera_joint_allocation.v1'
 ROW_FIELDS = ('hessian_identity', 'tessera_family', 'tessera_body_rate_q256',
@@ -299,7 +299,7 @@ def handoff(*, joint_binding, plan_binding, output_path):
                'units': len(result['costs']), 'joint_fields_unchanged': True, 'research_only': True}
     atomic_write_bytes(output, raw)
     atomic_write_bytes(receipt_path,
-                       (json.dumps(receipt, indent=2, sort_keys=True) + '\n').encode())
+                       DIRECT_ASCII_INDENT2_LAX.encoded(receipt) + b'\n')
     return receipt
 
 

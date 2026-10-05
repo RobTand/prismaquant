@@ -63,10 +63,16 @@ def assert_no_files(tmp_path):
     ("layer.a", "layer__a", f"layer__a__{FORMAT}.tessera"),
 ])
 def test_campaign_publication_checks_existing_manifest(
-        anchor_inputs, tmp_path, first, second, filename):
+        anchor_inputs, tmp_path, monkeypatch, first, second, filename):
     cache, wire_dir, weight, prepare = anchor_inputs
     cache.weights[(first, FORMAT)] = weight
     before = dict(cache.weights)
+    existing_wire = None
+    if filename.endswith(".tessera"):
+        existing_wire = campaign._wire_path(wire_dir, first, FORMAT)
+        existing_wire.write_bytes(b"existing wire")
+    monkeypatch.setattr(pwc, "_store_rendered_weight_entry",
+                        lambda **_kwargs: pytest.fail("collision reached the rendered write"))
 
     with pytest.raises(ValueError) as error:
         campaign._finish_anchor(
@@ -77,7 +83,81 @@ def test_campaign_publication_checks_existing_manifest(
 
     assert_refusal(error, first, second, filename)
     assert cache.weights == before
-    assert_no_files(tmp_path)
+    if existing_wire is None:
+        assert_no_files(tmp_path)
+    else:
+        assert existing_wire.read_bytes() == b"existing wire"
+        assert {path for path in tmp_path.rglob("*") if path.is_file()} == {existing_wire}
+
+
+def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path):
+    cache, wire_dir, weight, prepare = anchor_inputs
+    dense, new = "layer.a", "layer__a"
+    dense_filename = pwc._cache_weight_filename(dense, FORMAT)
+    dense_path = tmp_path / dense_filename
+    torch.save(weight, dense_path)
+    dense_bytes = dense_path.read_bytes()
+    cache.weights[(dense, FORMAT)] = dense_filename
+    assert not campaign._wire_path(wire_dir, dense, FORMAT).exists()
+
+    campaign._finish_anchor(
+        qname=new, weight=weight, activations=weight, format_name=FORMAT,
+        cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+        render=weight * 0.75, blob=b"new wire", elapsed=0.0,
+    )
+
+    assert dense_path.read_bytes() == dense_bytes
+    assert cache.weights[(dense, FORMAT)] == dense_filename
+    assert set(cache.weights) == {(dense, FORMAT), (new, FORMAT)}
+    new_render = tmp_path / cache.weights[(new, FORMAT)]
+    torch.testing.assert_close(torch.load(new_render, weights_only=True),
+                               (weight * 0.75).to(torch.bfloat16))
+    new_wire = campaign._wire_path(wire_dir, new, FORMAT)
+    assert new_wire.read_bytes() == b"new wire"
+    assert {path for path in tmp_path.rglob("*") if path.is_file()} == {
+        dense_path, new_render, new_wire,
+    }
+    # Once the alias's real wire exists, it must not retroactively turn the
+    # dense-only coordinate into a wire owner on the next publication.
+    campaign._finish_anchor(
+        qname="other", weight=weight, activations=weight, format_name=FORMAT,
+        cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+        render=weight * 0.5, blob=b"other wire", elapsed=0.0,
+    )
+    assert dense_path.read_bytes() == dense_bytes
+    assert new_wire.read_bytes() == b"new wire"
+    assert campaign._wire_path(wire_dir, "other", FORMAT).read_bytes() == b"other wire"
+    assert cache._campaign_wire_coordinates == {(new, FORMAT), ("other", FORMAT)}
+
+
+@pytest.mark.parametrize("existing_wire", [False, True])
+def test_campaign_preserves_resume_wire_coordinates_without_render_manifest(
+        anchor_inputs, tmp_path, monkeypatch, existing_wire):
+    cache, wire_dir, weight, prepare = anchor_inputs
+    first, second = "layer.a", "layer__a"
+    # Resume and seed adoption read priced wires, but do not reconstruct the
+    # render manifest. Their explicit roster must survive that distinction.
+    cache._campaign_wire_coordinates = {(first, FORMAT)}
+    first_wire = campaign._wire_path(wire_dir, first, FORMAT)
+    if existing_wire:
+        first_wire.write_bytes(b"resumed wire")
+    monkeypatch.setattr(pwc, "_store_rendered_weight_entry",
+                        lambda **_kwargs: pytest.fail("wire collision reached a write"))
+
+    with pytest.raises(ValueError) as error:
+        campaign._finish_anchor(
+            qname=second, weight=weight, activations=weight, format_name=FORMAT,
+            cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+            render=weight * 0.75, blob=b"new wire", elapsed=0.0,
+        )
+
+    assert_refusal(error, first, second, first_wire.name)
+    assert cache.weights == {}
+    if existing_wire:
+        assert first_wire.read_bytes() == b"resumed wire"
+        assert {path for path in tmp_path.rglob("*") if path.is_file()} == {first_wire}
+    else:
+        assert_no_files(tmp_path)
 
 
 @pytest.mark.parametrize("first,second,filename", [
@@ -231,5 +311,68 @@ def test_queued_campaign_collision_preserves_first_publication(
     assert first_wire.read_bytes() == b"first wire"
     assert {path for path in tmp_path.rglob("*") if path.is_file()} == {
         first_render, first_wire,
+    }
+
+
+def test_producer_bootstrap_cannot_drop_a_concurrently_published_wire(
+        anchor_inputs, tmp_path, monkeypatch):
+    from pathlib import Path
+    from threading import Event, Thread, current_thread
+    from prismaquant.tessera_publication import BoundedPublisher
+
+    cache, wire_dir, weight, prepare = anchor_inputs
+    first, alias = "layer.a", "layer__a"
+    cache.weights[(first, FORMAT)] = weight
+    first_wire = campaign._wire_path(wire_dir, first, FORMAT)
+    producer_paused, release_producer = Event(), Event()
+    outcomes = []
+    exists = Path.exists
+
+    def pause_bootstrap(path):
+        present = exists(path)
+        if path == first_wire and current_thread().name == "paused-producer":
+            assert not present
+            producer_paused.set()
+            assert release_producer.wait(timeout=30), "producer bootstrap not released"
+        return present
+
+    monkeypatch.setattr(Path, "exists", pause_bootstrap)
+
+    def produce():
+        try:
+            campaign._measure_anchor_batch(
+                qnames=[alias, "other"], weights=[weight, weight],
+                activations=[weight, weight], format_name=FORMAT, cache=cache,
+                wire_dir=wire_dir, hessian_required=False)
+        except BaseException as error:
+            outcomes.append(error)
+        else:
+            outcomes.append(None)
+
+    producer = Thread(target=produce, name="paused-producer")
+    with BoundedPublisher(budget_bytes=64) as publisher:
+        producer.start()
+        try:
+            assert producer_paused.wait(timeout=30), "producer did not pause in bootstrap"
+            campaign._finish_anchor(
+                qname=first, weight=weight, activations=weight, format_name=FORMAT,
+                cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+                render=weight * 0.75, blob=b"first wire", elapsed=0.0,
+                publisher=publisher)
+            publisher.drain()
+            assert first_wire.read_bytes() == b"first wire"
+            assert cache._campaign_wire_coordinates == {(first, FORMAT)}
+        finally:
+            release_producer.set()
+            producer.join(timeout=30)
+    assert not producer.is_alive(), "producer thread did not stop"
+    assert len(outcomes) == 1
+    assert isinstance(outcomes[0], ValueError), "producer discarded the published wire owner"
+    assert_refusal(SimpleNamespace(value=outcomes[0]), first, alias, first_wire.name)
+    assert first_wire.read_bytes() == b"first wire"
+    assert cache._campaign_wire_coordinates == {(first, FORMAT)}
+    assert set(cache.weights) == {(first, FORMAT)}
+    assert {path for path in tmp_path.rglob("*") if path.is_file()} == {
+        tmp_path / cache.weights[(first, FORMAT)], first_wire,
     }
 

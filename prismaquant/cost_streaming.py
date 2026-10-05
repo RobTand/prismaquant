@@ -29,7 +29,12 @@ from prismaquant.layer_streaming import (
     _compute_position_embeddings,
     _get_final_norm,
 )
-from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_LAX,
+    DIRECT_UTF8_INDENT2_STRICT,
+    bytes_sha256hex,
+    file_sha256hex,
+)
 from .joint_stageb_resources import cotangent_scratch
 
 
@@ -6628,16 +6633,12 @@ def build_source_checkpoint_identity(
         try:
             atomic_write_bytes(
                 Path(digest_cache_path),
-                json.dumps(
+                DIRECT_UTF8_INDENT2_STRICT.encoded(
                     {
                         "schema": SOURCE_CHECKPOINT_DIGEST_CACHE_SCHEMA,
                         "entries": entries,
-                    },
-                    indent=2,
-                    sort_keys=True,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                ).encode("utf-8"),
+                    }
+                ),
             )
         except OSError:
             # The digest cache is an optimization. A read-only or full cache
@@ -6981,18 +6982,14 @@ def build_streamed_model_identity(
 
         atomic_write_bytes(
             cache_path,
-            json.dumps(
+            DIRECT_UTF8_INDENT2_STRICT.encoded(
                 {
                     "schema": STREAMED_MODEL_IDENTITY_CACHE_SCHEMA,
                     "source": str(source_model),
                     "fingerprints": fingerprints,
                     "identity": identity,
-                },
-                indent=2,
-                sort_keys=True,
-                ensure_ascii=False,
-                allow_nan=False,
-            ).encode("utf-8"),
+                }
+            ),
         )
     return identity
 

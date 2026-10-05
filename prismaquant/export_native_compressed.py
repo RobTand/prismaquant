@@ -72,7 +72,7 @@ from typing import Any, Callable, Iterable, Mapping, NamedTuple, Sequence
 import torch
 import torch.nn as nn
 from compressed_tensors.quantization.utils.mxfp_utils import generate_mx_scales
-from .digests import text_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX
 try:
     from accelerate import init_empty_weights
 except ModuleNotFoundError:
@@ -8410,7 +8410,7 @@ def _export_resume_fingerprint(
     from prismaquant.cost_streaming import build_source_checkpoint_identity
 
     fp_state = _render_lever_provenance()
-    fp_state["assignment_hash"] = text_sha256hex(json.dumps(assignment, sort_keys=True))[:16]
+    fp_state["assignment_hash"] = DIRECT_ASCII_SPACED_LAX.sha256(assignment)[:16]
     fp_state["source_identity"] = build_source_checkpoint_identity(
         model_path,
         extra_shard_paths=extra_shard_paths,
@@ -8566,7 +8566,7 @@ def _write_shipcard(
 
     def _hash(payload) -> str | None:
         try:
-            return text_sha256hex(json.dumps(payload, sort_keys=True))[:16]
+            return DIRECT_ASCII_SPACED_LAX.sha256(payload)[:16]
         except Exception:
             return None
 

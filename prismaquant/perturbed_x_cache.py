@@ -46,7 +46,7 @@ from prismaquant.memory_management import (
 from prismaquant.nvfp4_activation_contract import (
     require_matching_input_global_scale,
 )
-from .digests import DIRECT_ASCII_STRICT
+from .digests import DIRECT_ASCII_LAX, DIRECT_ASCII_STRICT
 from .file_identity import file_stat_signature
 from .tensor_digests import tensor_hash_update as _tensor_hash_update
 
@@ -978,10 +978,9 @@ def load_verified_activation_cache_entry(path, *, expected_sha256, policy,
         storage_cap_bytes=max_storage_bytes, archive_storage_bytes=archive_storage,
         source_page_cache_reserve_bytes=source_page_cache_bytes,
         file_signature=signature, source_read_bytes=consumed, live_buffer_bytes=0)
-    execution['identity_sha256'] = hashlib.sha256(json.dumps(
+    execution['identity_sha256'] = DIRECT_ASCII_LAX.sha256(
         {key: execution[key] for key in ('schema', 'policy', 'artifact_sha256', 'file_bytes',
-                                         'storage_cap_bytes')},
-        sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+                                         'storage_cap_bytes')})
     return payload, execution
 
 

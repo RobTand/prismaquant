@@ -15,6 +15,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .digests import DIRECT_ASCII_INDENT2_LAX
+
 from .layer_config import is_layer_config_meta_key
 from .artifact_registry import (
     DEFAULT_REGISTRY_PATH,
@@ -983,7 +985,7 @@ def _main_validate(argv: list[str]) -> int:
         ArtifactRegistry(args.registry).add(record)
         output["record_id"] = record.record_id
         output["registry"] = args.registry
-    print(json.dumps(output, indent=2, sort_keys=True))
+    print(DIRECT_ASCII_INDENT2_LAX.text(output))
     return 0
 
 
@@ -994,7 +996,7 @@ def _main_compare(argv: list[str]) -> int:
     ap.add_argument("--baseline-id", required=True)
     args = ap.parse_args(argv)
     result = ArtifactRegistry(args.registry).compare(args.candidate_id, args.baseline_id)
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print(DIRECT_ASCII_INDENT2_LAX.text(result))
     return 0 if result["pass"] else 1
 
 
@@ -1004,7 +1006,7 @@ def _main_list(argv: list[str]) -> int:
     ap.add_argument("--model", required=True)
     args = ap.parse_args(argv)
     records = [record.to_dict() for record in ArtifactRegistry(args.registry).find_by_model(args.model)]
-    print(json.dumps(records, indent=2, sort_keys=True))
+    print(DIRECT_ASCII_INDENT2_LAX.text(records))
     return 0
 
 
