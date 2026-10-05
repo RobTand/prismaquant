@@ -4507,11 +4507,14 @@ reread, archive, regenerate, or re-seal the snapshot. Newly read capture bytes
 still match their own manifest/entry digests. Source identity caches reuse
 stored shard digests across stat drift rather than rehashing existing data;
 semantic model configuration and executable tensor maps remain separate.
-Paired trades retain stored signed/squared samples and their original metadata
-when producer, source-weight digest, seed, capture, or normalizer labels differ.
-They do not invent samples, rescale prices, or relabel an old row as new evidence.
-Own-record digests, finite moments, complete equal sample dimensions, currency,
-operator coordinates, and actual tensor/wire/kernel/resource safety still refuse.
+Paired trades retain stored samples when producer/arithmetic/source provenance
+differs. Row-to-row probe ids, seed, calibration draw/shape/dtype, token scope,
+noise layout, temperature, normalization and distribution must still align in
+both modes: they identify the same vectors, tokens and KL units. Source
+provenance stamps cannot pair independent vectors or rescale a currency.
+No samples are invented, prices rescaled or old rows relabeled as new evidence.
+Own-record digests, finite moments, complete numeric dimensions, actual tensor/
+wire/kernel semantics and live resource safety remain required.
 The result and selected-capture receipts carry `dev_uncertified`; certified
 `PRISMAQUANT_DEV_MODE=0` retains the original metadata refusal. These CPU
 consumer tests do not establish served quality or runtime qualification.
@@ -4543,11 +4546,11 @@ These still refuse in both modes:
 - Byte integrity: bytes that do not hash to their stored digest, a record that
   does not reproduce its own seal, and a missing unit.
 - Actual stored tensor/sample dimensions and executable storage layout still
-  determine how data is read. D32 probe/capture/producer/seed/source labels
-  are metadata seals, not fresh-measurement barriers; the repaired selected
-  cache, cost-table, join and paired consumers retain stored data (PQ #2302).
-  A different objective currency (body KL versus MTP KL), malformed samples
-  or mismatched actual operator coordinates are not provenance differences.
+  determine how data is read. Producer/source/arithmetic provenance is a D32
+  stamp; row-to-row probe coordinates, seed, draw, tokens, noise and KL units
+  are mathematical contracts in both modes, not provenance comparisons. A
+  different objective currency (body KL versus MTP KL), malformed samples or
+  mismatched actual operator coordinates still refuse.
 - Ownership: a chain resume reopens only a boundary generation that stopped
   partway (`running` or `failed`). A `complete`, `attached` or `retained`
   generation belongs to another reader or owner and refuses.
@@ -20488,9 +20491,11 @@ Rob, 2026-09-24: "All sealing should be disabled until further notice."
   missing units, corrupt/partial payloads and malformed numeric dimensions.
   Currency, operator coordinates, actual tensor/wire/kernel semantics and
   live resource guards remain separate from provenance comparisons.
-  Recorded-versus-running draw, probe, producer, pin and stat metadata are
-  seals, not additional evidence barriers (CEO D32, PQ #2302). Existing
-  storage layout and ownership grammars still determine how bytes are read.
+  Recorded-versus-running producer, source, pin and run metadata are D32
+  seals. Comparing two stored rows' vectors/tokens/units is mathematical
+  admission: probe ids, seed, draw/shape/dtype, noise layout, token scope,
+  temperature, normalization and distribution still align in both modes.
+  Existing storage layout and ownership grammars determine how bytes are read.
 - **Reuse, not recompute.** A mismatched AURA checkpoint lineage is reused
   with a `[DEV-MODE]` line, not archived or recomputed; corrupt or incomplete
   checkpoint data still refuses. A chain resume adopts stored run/bind

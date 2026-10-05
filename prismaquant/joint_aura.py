@@ -1191,14 +1191,8 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
                 raise ValueError(f"invalid {field}")
         if type(probe["n_probes"]) is not int or probe["n_probes"] < 1 or type(probe["seed_base"]) is not int:
             raise ValueError("invalid probe indices")
-        if any(not isinstance(probe[field], str) or not probe[field]
-               for field in ('distribution', 'normalization')):
+        if probe['distribution'] != 'rademacher' or probe['normalization'] != 'global_kl_fisher':
             raise ValueError('invalid probe distribution/normalization')
-        seal_check('probe distribution/normalization',
-                   ('rademacher', 'global_kl_fisher'),
-                   (probe['distribution'], probe['normalization']),
-                   where='joint AURA row',
-                   refusal=lambda: ValueError('invalid probe distribution/normalization'))
         if not math.isfinite(float(probe["temperature"])) or probe["temperature"] <= 0:
             raise ValueError("invalid probe temperature")
         if not isinstance(operator["qname"], str) or not operator["qname"] or not isinstance(operator["format"], str) or not operator["format"]:
@@ -1702,14 +1696,14 @@ def paired_squared_probe_summary(squared_a, squared_b) -> dict:
 
 def _require_probe_alignment(left: Mapping, right: Mapping, *, where: str, message: str) -> None:
     """Separate usable sample dimensions from recorded probe metadata (D32)."""
-    from .cost_currency import probe_identity_walls_differ
-    if (len(left['probe_ids']) != len(right['probe_ids'])
+    from .cost_currency import probe_identity_seals, probe_identity_walls_differ
+    if (identity_sha256(left['probe_ids']) != identity_sha256(right['probe_ids'])
             or probe_identity_walls_differ(left['probe_identity'], right['probe_identity'])):
         raise ValueError(message)
-    seal_check('probe identity',
-               {'probe_identity_sha256': left['probe_identity_sha256'], 'probe_ids': left['probe_ids']},
-               {'probe_identity_sha256': right['probe_identity_sha256'], 'probe_ids': right['probe_ids']},
-               where=where, refusal=lambda: ValueError(message))
+    seal_check('probe identity', probe_identity_seals(left['probe_identity']),
+               probe_identity_seals(right['probe_identity']), where=where,
+               same=left['probe_identity_sha256'] == right['probe_identity_sha256'],
+               refusal=lambda: ValueError(message))
 
 
 
@@ -1827,6 +1821,7 @@ def paired_assignment_difference(
                 raise ValueError(f'paired joint AURA source weight geometry mismatch: {name}')
         seal_check('source weight identity', operator_a['source_weight'], operator_b['source_weight'],
             where=f'paired assignment {name}',
+            same=identity_sha256(operator_a['source_weight']) == identity_sha256(operator_b['source_weight']),
             refusal=lambda: ValueError(f'paired joint AURA source weight identity mismatch: {name}'))
         if operator_a['format'] == operator_b['format']:
             seal_check('operator identity', left['joint_operator_identity_sha256'],

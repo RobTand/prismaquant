@@ -826,9 +826,9 @@ def _preserve_allocation_payload(joined, payloads, records):
             raise JoinRefused(f"allocation {quantum}: complete joint currency required")
         probe = first_joint_probe_identity(payload["costs"])
         if shared is not None:
-            # Actual wire/sample dimensions still agree. Recorded draw, probe,
-            # source, token-scope and producer metadata are central D32 seals.
-            shape = ('schema', 'n_probes')
+            # Row-to-row vectors, tokens and KL units are mathematical data.
+            # Only source/producer/arithmetic provenance is a D32 stamp.
+            shape = ('schema', 'n_probes', 'token_scope')
             if (any(identity[key] != shared[key] for key in shape)
                     or probe_identity_walls_differ(shared_probe, probe)):
                 raise JoinRefused(f"allocation {quantum}: probe or measurement identity differs")

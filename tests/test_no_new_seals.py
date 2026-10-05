@@ -506,8 +506,8 @@ def test_every_campaign_seal_goes_through_seal_check():
 
 def test_d32_consumers_add_no_run_identity_refusals():
     # Reuse the campaign ratchet at the newly repaired consumers. These counts
-    # admit only read bytes against their own SHA256 and malformed record shapes,
-    # never recorded-versus-running producer, probe, source or stat metadata.
+    # admit own-byte digests, complete numeric structure and same-vector probe
+    # coordinates, never recorded-versus-running provenance refusal.
     scopes = {
         'prismaquant/tessera_calibration_cache.py': {
             'CaptureMetadataOwner.__init__': 1,
@@ -517,7 +517,7 @@ def test_d32_consumers_add_no_run_identity_refusals():
         'prismaquant/joint_aura.py': {
             'paired_assignment_difference': 0,
             '_validated_assignment': 1,  # operator coordinate against the row's own unit
-            '_require_probe_alignment': 0,
+            '_require_probe_alignment': 1,  # same mathematical probe coordinates
         },
     }
     for path, expected in scopes.items():

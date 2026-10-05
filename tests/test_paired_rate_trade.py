@@ -13,8 +13,8 @@ HIGH = "FP8_E5M2"
 
 
 @pytest.mark.parametrize('value', [None, '', '1', 'true', '00'])
-@pytest.mark.parametrize('field', ['seed_base', 'producer_source_sha256',
-                                  'calibration_sha256', 'normalization', 'source'])
+@pytest.mark.parametrize('field', ['producer_source_sha256', 'source_model',
+                                  'source_execution', 'arithmetic', 'source'])
 def test_dev_trade_metadata_drift_prices_stored_samples(monkeypatch, capsys, value, field):
     if value is None:
         monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
@@ -25,12 +25,20 @@ def test_dev_trade_metadata_drift_prices_stored_samples(monkeypatch, capsys, val
     expected = ac.price_paired_rate_trade(costs, assignment, baseline,
                                         profile=DefaultProfile(), ucb_z=1)
     row = costs[name][HIGH]
+    def change(probe):
+        if field == 'producer_source_sha256':
+            probe[field] = 'e'*64
+        elif field == 'source_model':
+            probe[field]['source'] = 'another source label'
+        elif field == 'source_execution':
+            probe[field] = {'label': 'another execution producer'}
+        else:
+            probe[field]['measurement_dtype'] = 'torch.bfloat16'
+
     if field == 'source':
         row = _rebuild(row, operator_change=lambda o: o['source_weight'].update(content_sha256='f'*64))
     else:
-        changed = {'seed_base': 100, 'producer_source_sha256': 'e'*64,
-                   'calibration_sha256': 'b'*64, 'normalization': 'stored-normalizer'}[field]
-        row = _rebuild(row, probe_change=lambda p: p.update({field: changed}))
+        row = _rebuild(row, probe_change=change)
     costs[name][HIGH] = row
     result = ac.price_paired_rate_trade(costs, assignment, baseline,
                                       profile=DefaultProfile(), ucb_z=1)
@@ -40,6 +48,40 @@ def test_dev_trade_metadata_drift_prices_stored_samples(monkeypatch, capsys, val
     assert costs[name][HIGH] is row
     assert result['dev_uncertified'] is True
     assert '[DEV-MODE]' in capsys.readouterr().out
+
+
+
+@pytest.mark.parametrize('mode', [None, '1', '0'])
+@pytest.mark.parametrize('field,value', [
+    ('seed_base', 100), ('calibration_sha256', 'b'*64), ('token_scope', 'last'),
+    ('temperature', 2.0), ('normalization', 'stored-normalizer'),
+    ('distribution', 'gaussian'), ('noise_layout', {'rows': 7}),
+])
+def test_sample_coordinate_and_unit_contracts_refuse_in_both_modes(monkeypatch, mode, field, value):
+    if mode is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    name = 'model.layers.5.self_attn.q_proj'
+    costs, assignment, baseline = _trade_rows({name: ([1, 2], [2, 3])})
+    with pytest.raises(ValueError):
+        costs[name][HIGH] = _rebuild(costs[name][HIGH], probe_change=lambda p: p.update({field: value}))
+        ac.price_paired_rate_trade(costs, assignment, baseline, profile=DefaultProfile(), ucb_z=1)
+
+
+@pytest.mark.parametrize('mode', [None, '1', '0'])
+def test_probe_coordinate_json_types_are_not_conflated(monkeypatch, mode):
+    if mode is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    name = 'model.layers.5.self_attn.q_proj'
+    costs, assignment, baseline = _trade_rows({name: ([1, 2], [2, 3])})
+    for fmt in (LOW, HIGH):
+        costs[name][fmt] = _rebuild(costs[name][fmt], probe_change=lambda p: p.update(seed_base=0))
+    costs[name][HIGH]['probe_ids'] = [False, True]
+    with pytest.raises(ValueError):
+        ac.price_paired_rate_trade(costs, assignment, baseline, profile=DefaultProfile(), ucb_z=1)
 
 
 def test_dev_trade_still_refuses_corrupt_or_partial_samples(monkeypatch):
@@ -294,8 +336,7 @@ def test_real_cli_dev_metadata_drift_or_certified_refusal(tmp_path, monkeypatch,
     baseline.write_text(json.dumps({name: HIGH}))
     payload = pickle.loads((tmp_path/'costs.pkl').read_bytes())
     payload['costs'][name][HIGH] = _rebuild(payload['costs'][name][HIGH],
-        probe_change=lambda p: p.update(producer_source_sha256='e'*64, seed_base=100,
-                                         calibration_sha256='b'*64))
+        probe_change=lambda p: p.update(producer_source_sha256='e'*64))
     (tmp_path/'costs.pkl').write_bytes(pickle.dumps(payload))
     if value is None:
         monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)

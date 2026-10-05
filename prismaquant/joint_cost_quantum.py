@@ -2266,8 +2266,8 @@ def run_layer_quantum_core(
                 operator = row["joint_operator_identity"]
                 if operator["qname"] != name or operator["format"] != fmt:
                     raise ValueError("probe/operator alignment mismatch")
-                # Stored sample dimensions remain usable; recorded draw, probe
-                # and execution metadata stamp and reuse in dev mode (D32).
+                # Stored row coordinates, tokens and units must align. Only
+                # producer/arithmetic/source provenance is a D32 stamp.
                 if probe_identity_walls_differ(joint_probe_identity, row["probe_identity"]):
                     raise ValueError("probe/operator alignment mismatch")
                 seal_check("joint probe identity", probe_identity_seals(joint_probe_identity),

@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from .digests import DIRECT_ASCII_STRICT
 
 #: COST_MODE -> the objective currency the run's DP ranks in, read off the
 #: COST_RENDER x COST_OBJECTIVE decomposition `run-pipeline.sh` resolves
@@ -62,28 +63,28 @@ class CostCurrencyError(RuntimeError):
     """A cost table cannot be ranked in this run's objective currency."""
 
 
-#: Structural probe schema and sample-column count are data dimensions. The
-#: objective kind remains a real currency distinction (body KL versus MTP KL).
-#: Draw, seed, source, producer, normalization and execution labels are seals.
-PROBE_DIMENSION_FIELDS = frozenset({'schema', 'n_probes'})
+#: Probe coordinates, draw, token selection, noise layout and KL units are
+#: mathematical data contracts. Only the producer/arithmetic/source remainder
+#: is recorded-versus-running provenance (D32); unknown fields fail closed.
+PROBE_IDENTITY_SEAL_FIELDS = frozenset({
+    'producer_source_sha256', 'arithmetic', 'source_model', 'source_execution'})
 
 
 def probe_identity_walls_differ(left, right) -> bool:
-    """Whether stored sample dimensions or objective currency are incompatible."""
+    """Whether two rows describe different vectors, tokens or mathematical units."""
     if not isinstance(left, Mapping) or not isinstance(right, Mapping):
         return left != right
-    left_objective, right_objective = left.get('objective'), right.get('objective')
-    left_kind = left_objective.get('objective') if isinstance(left_objective, Mapping) else left_objective
-    right_kind = right_objective.get('objective') if isinstance(right_objective, Mapping) else right_objective
-    return (left_kind != right_kind
-            or any(left.get(name) != right.get(name) for name in PROBE_DIMENSION_FIELDS))
+    left_math = {name: left[name] for name in left if name not in PROBE_IDENTITY_SEAL_FIELDS}
+    right_math = {name: right[name] for name in right if name not in PROBE_IDENTITY_SEAL_FIELDS}
+    return DIRECT_ASCII_STRICT.sha256(left_math) != DIRECT_ASCII_STRICT.sha256(right_math)
 
 
 def probe_identity_seals(identity) -> dict:
-    """Recorded probe metadata for a central stamp, never a second policy."""
+    """Only the D32 source/producer/arithmetic provenance remainder."""
     if not isinstance(identity, Mapping):
         return {}
-    return {name: identity[name] for name in sorted(set(identity) - PROBE_DIMENSION_FIELDS)}
+    return {name: identity.get(name) for name in sorted(PROBE_IDENTITY_SEAL_FIELDS)}
+
 
 
 
