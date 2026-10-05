@@ -74,7 +74,7 @@
       "id": "load_generate.graph",
       "runner": "prismaquant.validate_native_export --shipcard --no-enforce-eager --graph-receipt <receipt.json>",
       "shipcard_slot": "native_export.graph",
-      "description": "CUDA-graph load + greedy generate with a byte-bound Tessera graph-equals-eager receipt matching serve correctness settings; identity differences stamp in dev mode."
+      "description": "CUDA-graph load + greedy generate with a byte-bound Tessera graph-equals-eager receipt matching the image, model and numerical serve conditions; Tessera source-pin differences stamp in dev mode."
     },
     {
       "id": "route.sweep",

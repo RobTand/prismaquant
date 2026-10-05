@@ -1604,7 +1604,7 @@ def test_graph_receipt_v1_refuses_before_equality_verification(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("field", [
-    "compilation_config",
+    "image", "model_config_sha256", "compilation_config",
     "speculative_tokens", "max_model_len", "max_num_seqs", "tensor_parallel_size",
 ])
 def test_graph_receipt_other_scope_refuses(tmp_path, field):
@@ -1616,19 +1616,18 @@ def test_graph_receipt_other_scope_refuses(tmp_path, field):
     assert any("no attested arm" in p and field in p for p in problems), problems
 
 
-@pytest.mark.parametrize("field", ["image", "model_config_sha256", "tessera_src_sha256"])
-def test_graph_receipt_other_identity_stamps_and_continues(
-        tmp_path, monkeypatch, capsys, field):
+def test_graph_receipt_other_source_stamps_and_continues(tmp_path, monkeypatch, capsys):
     from prismaquant.shipcard import _verify_native_export_record
 
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     record = _graph_slot_record(tmp_path)
-    record["metrics"]["serve_scope"][field] = "another serve"
+    record["metrics"]["serve_scope"]["tessera_src_sha256"] = "another source"
     assert _verify_native_export_record(
         "native_export.graph", record, model_dir=tmp_path) == []
     stamps = capsys.readouterr().out
-    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps and field in stamps
-    assert record["metrics"]["serve_scope"][field] == "another serve"
+    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
+    assert "tessera_src_sha256" in stamps
+    assert record["metrics"]["serve_scope"]["tessera_src_sha256"] == "another source"
 
 
 def test_graph_receipt_edited_not_equal_refuses(tmp_path):
@@ -1721,7 +1720,7 @@ def test_eager_slot_needs_no_graph_receipt_or_tessera(monkeypatch):
 
 
 
-def test_graph_receipt_bare_image_stamps_and_continues(tmp_path, monkeypatch, capsys):
+def test_graph_receipt_bare_image_refuses(tmp_path, monkeypatch):
     from prismaquant.shipcard import _verify_native_export_record
 
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
@@ -1729,14 +1728,13 @@ def test_graph_receipt_bare_image_stamps_and_continues(tmp_path, monkeypatch, ca
     full = record["metrics"]["serve_scope"]["image"]
     assert "@sha256:" in full
     record["metrics"]["serve_scope"]["image"] = full.split("@", 1)[1]
-    assert _verify_native_export_record(
-        "native_export.graph", record, model_dir=tmp_path) == []
-    stamps = capsys.readouterr().out
-    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps and "image" in stamps
+    problems = _verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path)
+    assert any("graph equality receipt refused: no attested arm" in p
+               and "image" in p for p in problems), problems
 
 
-def test_graph_receipt_other_artifact_config_stamps_and_continues(
-        tmp_path, monkeypatch, capsys):
+def test_graph_receipt_other_artifact_config_refuses(tmp_path, monkeypatch):
     from tessera import graph_receipt
 
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
@@ -1746,32 +1744,28 @@ def test_graph_receipt_other_artifact_config_stamps_and_continues(
     metrics = {"arm": "graph", "enforce_eager": False, "generated_chars": 2,
                **_graph_receipt_metrics(other)}
     receipt = json.loads(pathlib.Path(metrics["graph_receipt_path"]).read_bytes())
-    # Config provenance stamps in dev mode; numeric equality and serving
-    # correctness still belong to Tessera's receipt verifier.
+    # The matching receipt and scope must still bind to this card's own
+    # config bytes; borrowing both cannot bypass the integrity check.
     assert graph_receipt.verify(receipt, metrics["serve_scope"]) is None
     fill_slot(path, "native_export.graph", _native_record(
         "native_export.graph", compute_model_sha(artifact), metrics))
-    assert verify(load_shipcard(path), model_dir=artifact,
-                  required=["native_export.graph"]) == []
-    stamps = capsys.readouterr().out
-    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
-    assert "model_config_sha256" in stamps and "artifact config.json" in stamps
+    problems = verify(load_shipcard(path), model_dir=artifact,
+                      required=["native_export.graph"])
+    assert any("serve_scope.model_config_sha256" in p
+               and "artifact config.json" in p for p in problems), problems
 
 
-def test_graph_receipt_without_artifact_context_stamps_and_continues(
-        tmp_path, monkeypatch, capsys):
+def test_graph_receipt_without_artifact_context_refuses(tmp_path, monkeypatch):
     from prismaquant.shipcard import _verify_native_export_record
 
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
-    assert _verify_native_export_record(
-        "native_export.graph", _graph_slot_record(tmp_path)) == []
-    stamps = capsys.readouterr().out
-    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
-    assert "model_dir" in stamps
+    problems = _verify_native_export_record(
+        "native_export.graph", _graph_slot_record(tmp_path))
+    assert any("cannot verify serve_scope.model_config_sha256" in p
+               and "without the artifact model_dir" in p for p in problems), problems
 
 
-def test_graph_receipt_unreadable_artifact_config_stamps_and_continues(
-        tmp_path, monkeypatch, capsys):
+def test_graph_receipt_unreadable_artifact_config_refuses(tmp_path, monkeypatch):
     from prismaquant import shipcard, digests
 
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
@@ -1781,7 +1775,7 @@ def test_graph_receipt_unreadable_artifact_config_stamps_and_continues(
         raise OSError("config unavailable")
 
     monkeypatch.setattr(digests, "file_sha256hex", unreadable)
-    assert shipcard._verify_native_export_record(
-        "native_export.graph", record, model_dir=tmp_path) == []
-    stamps = capsys.readouterr().out
-    assert "[DEV-MODE]" in stamps and "artifact config.json" in stamps
+    problems = shipcard._verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path)
+    assert any("cannot read artifact config.json" in p
+               and "serve_scope.model_config_sha256" in p for p in problems), problems

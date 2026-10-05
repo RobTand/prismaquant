@@ -89,20 +89,22 @@
 
 ### Fixed
 
-- **Graph ship slots keep equality gates and stamp identity drift** (#1586, D32).
+- **Graph ship slots preserve the D32 correctness boundary** (#1586).
   The native graph arm requires `--graph-receipt` and records its path,
   byte SHA-256 and observed image/model/Tessera/configuration scope. Ship-card
   verification keeps receipt-byte integrity, v2 schema, malformed-format and
-  edited-verdict refusals. `compilation_config`, `speculative_tokens`,
-  `max_model_len`, `max_num_seqs`, `tensor_parallel_size` and `fabric`
-  still match the receipt's measured correctness scope or refuse by name.
-  PrismaQuant compares image, Tessera source and model-config identities
-  through `seal_check`, then supplies the receipt's own identity values to
-  Tessera's numeric equality verifier, without rewriting the recorded scope.
-  Dev mode is on unless `PRISMAQUANT_DEV_MODE` is exactly `0`: identity
-  differences, re-pins, config drift, missing artifact context and unreadable
-  identity evidence stamp `[DEV-MODE]` and continue with stored data.
-  Artifact config re-hashing is a provenance stamp, not a ship refusal.
+  edited-verdict refusals. Receipt/serve image and model-config mismatches
+  refuse as different measurement conditions, alongside
+  `compilation_config`, `speculative_tokens`, `max_model_len`,
+  `max_num_seqs`, `tensor_parallel_size` and `fabric` mismatches.
+  Artifact `config.json` is re-hashed against its recorded scope digest;
+  mismatched bytes, missing artifact context and unreadable config refuse
+  by the original messages rather than bypassing integrity.
+  Only the receipt's Tessera source digest is substituted for numeric replay
+  after `seal_check`: this pin comparison is an identity seal, not a
+  measurement-condition check. Producer identity drift and re-pins continue
+  to stamp `[DEV-MODE]` with stored data. Dev mode is on unless
+  `PRISMAQUANT_DEV_MODE` is exactly `0`.
   The v2 fabric is `none` at one resolved rank; above one rank the launch
   environment maps `NCCL_IB_DISABLE=1` to `socket` and `0` to `roce`.
   Missing or other values still refuse. Tessera observes NCCL banners, so an
