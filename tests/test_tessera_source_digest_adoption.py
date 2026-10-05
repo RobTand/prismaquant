@@ -100,4 +100,9 @@ def test_main_prints_the_published_adoption_receipt(authority,tmp_path,capsys,mo
     receipt=json.loads((out/'adoption-receipt.json').read_text())
     assert stdout==receipt
     assert receipt['shards']==len(identity['shards'])
-    assert real(out,source=root).receipt()['cached_shards']==len(identity['shards'])
+    # The lazy cache's receipt() reports the keys this instance served, not
+    # every disk entry (same contract the first test in this file follows):
+    # warm each identity shard through cache.sha256 before reading it.
+    cache=real(out,source=root)
+    for row in identity['shards']:assert cache.sha256(Path(row['path']))==row['sha256']
+    assert cache.receipt()['cached_shards']==len(identity['shards'])
