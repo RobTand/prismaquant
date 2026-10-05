@@ -164,6 +164,23 @@
   not source-layout or forwarding assertions.
 
 
+- **Non-injective production cache filenames refuse at open** (#2219).
+  `_cache_weight_filename` mangles `.` → `_` and `/` → `__`, so distinct
+  qualified names can share one shard leaf while the stored payload is the
+  bare tensor. A shared `require_injective_cache_filenames` check now refuses
+  — naming both coordinates and the colliding filename — wherever a cache
+  directory is opened for a model's rendered coordinate set: the dense fill's
+  render-identity destination check (via delegation), the packed-expert
+  fill, the streaming dense fill, and every residency read — `prefetch`
+  rechecks the whole manifest on every call (keys can be popped after
+  fill), and the lazy `get()` load path carries the same check behind a
+  size memo — plus the joint aura head walk's per-owner render reads.
+  Injectivity is filename-level over `(qname, canonical format)`
+  coordinates: an alias pair at two different formats names two different
+  files and is admitted (#1859); the same pair at one format refuses.
+  The mangled filename spelling is unchanged.
+
+
 - **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing
