@@ -115,6 +115,12 @@
 
 ### Fixed
 
+- **Restore the shared owned-byte digest comparison after the #2283 port.**
+  `read_bound` again routes the acquired-byte hash through the hard `same`
+  comparison before memoizing, preserving `owned bytes: identity mismatch`.
+  A stat-fence drift cannot adopt changed bytes; dev-mode provenance stamps
+  never waive this byte-integrity check. Existing consumer tests stay unchanged.
+
 - **Retired interpreter receipts remain history, not active attestation**
   (#2222). The SDK3 entries on `dl380g10`, `sparky` and `sparklina` stay under
   `retired_interpreters`, separate from active placement attestations. The

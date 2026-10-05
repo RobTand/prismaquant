@@ -87,8 +87,7 @@ def read_bound(record, label):
             return hit[1]
     raw = (path.read_bytes() if BOUND_READER is None
            else BOUND_READER(path, record['sha256'], label))
-    require(bytes_sha256hex(raw) == record["sha256"],
-            f"{label}: owned bytes: artifact checksum changed")
+    same(bytes_sha256hex(raw), record['sha256'], f'{label}: owned bytes')
     if fence is not None and len(raw) == fence[3]:
         _BOUND_BYTES[key] = (fence, raw)
     return raw
