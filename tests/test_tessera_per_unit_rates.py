@@ -679,7 +679,26 @@ def _synthetic_two_rung_contract(monkeypatch):
 
 # ---------------------------------------------------------------------------
 # The allocator CLI hook: the user-runnable per-unit entrypoint
-# ---------------------------------------------------------------------------
+def _write_cli_source(root):
+    import torch
+    from safetensors.torch import save_file
+    from test_allocator_expert_projection import N
+    save_file({name + ".weight": torch.zeros((N, N), dtype=torch.bfloat16)
+               for name in (ALLOC_DENSE, *_alloc_units())},
+              str(root / "model" / "model.safetensors"))
+
+def _pin_legal_baseline_body(monkeypatch):
+    from prismaquant import allocator
+    original = allocator.solve_with_promotion
+    def proposal(stats, candidates, target_bits, *args, **kwargs):
+        if target_bits < 4:
+            return None, float("nan")
+        assert all(any(option.fmt == ALLOC_FMT for option in menu)
+                   for menu in candidates.values())
+        return {unit: ALLOC_FMT for unit in candidates}, 4.0
+    monkeypatch.setattr(allocator, "solve_with_promotion", proposal)
+    return original
+
 def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     """``--routed-unit-rates`` is the runnable allocation entrypoint.
 
@@ -710,6 +729,7 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
 
     def _disk_argv(root, payload, *extra):
         argv = _alloc_argv(root, payload)
+        _write_cli_source(root)
         bits = argv.index("--target-bits")
         del argv[bits:bits + 2]
         argv += ["--target-disk-gb", "16",
@@ -737,8 +757,8 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
             predicted_dloss=0.5, wire_bytes=4608)
     # A priced third rung no menu ever admitted: profile-ineligible by
     # construction, and never bought even with exact price fields.
-    payload["costs"][ineligible]["TESSERA_E4M3_K1_R896"] = {
-        "predicted_dloss": -1.0, "wire_bytes": 4096}
+    payload["costs"][ineligible]["TESSERA_E4M3_K1_R896"] = dict(
+        payload["costs"][ineligible][ALLOC_FMT], predicted_dloss=-1.0, wire_bytes=4096)
     payload[tep.EXPERT_WIRES_KEY][ineligible]["TESSERA_E4M3_K1_R896"] = \
         payload[tep.EXPERT_WIRES_KEY][ineligible][ALLOC_FMT]
     monkeypatch.setattr(sys, "argv", _disk_argv(noop, payload, "--routed-unit-rates"))
@@ -765,6 +785,7 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     # (SYNTHETIC ELIGIBILITY, NO SERVED QUALIFICATION -- see
     # _synthetic_two_rung_contract).
     _synthetic_two_rung_contract(monkeypatch)
+    body_solver = _pin_legal_baseline_body(monkeypatch)
     mixed = tmp_path / "mixed"
     mixed.mkdir()
     up = "TESSERA_E4M3_K1_R1088"
@@ -773,8 +794,8 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     for name in _alloc_units():
         payload["costs"][name][ALLOC_FMT].update(predicted_dloss=1.0, wire_bytes=4096)
         payload["costs"][name][up].update(
-            predicted_dloss=1.5, wire_bytes=4096 if name == stays else 4608,
-            output_mse=4e-3)
+            predicted_dloss=0.5, wire_bytes=4096 if name == stays else 4608,
+            output_mse=1e-4)
     monkeypatch.setattr(sys, "argv", _disk_argv(mixed, payload, "--routed-unit-rates"))
     allocator.main()
     placed = load_assignment(mixed / "layer.json")
@@ -797,7 +818,13 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     assert record["byte_budget"] >= record["spent_wire_delta_bytes"]
     assert record["reserve_bytes"] == 1_048_576
     assert record["whole_artifact_bytes_claimed"] is False
+    from prismaquant.footprint import whole_artifact_budget_from_assignment_payload
+    stamp = whole_artifact_budget_from_assignment_payload(
+        json.loads((mixed / "layer.json").read_text()), where="mixed CLI export",
+        assignment=placed)
+    assert stamp["selection_tensor_payload_bytes"] == record["whole_artifact_upper_bound_bytes_after"] - record["reserve_bytes"]
 
+    monkeypatch.setattr(allocator, "solve_with_promotion", body_solver)
     # 4. Without the flag: the noop run minus the record block, byte for byte.
     off = tmp_path / "off"
     off.mkdir()
@@ -819,6 +846,39 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     assert tep.UNIT_RUNGS_KEY not in plain
     assert "tessera_routed_unit_rates" not in plain
 
+
+def test_routed_unit_rate_final_footprint_overflow_refuses_before_emission(tmp_path, monkeypatch):
+    from prismaquant import allocator, footprint
+    _synthetic_two_rung_contract(monkeypatch)
+    _pin_legal_baseline_body(monkeypatch)
+    monkeypatch.setattr(trc, "packaged_routed_unit_capability",
+                        lambda: ("d" * 64, dict(trc.ROUTED_UNIT_ASSIGNMENT_BLOCK)))
+    up = "TESSERA_E4M3_K1_R1088"
+    payload = _alloc_cost_payload(tmp_path, formats=(ALLOC_FMT, up))
+    stays = f"{ALLOC_STACK}.0.w2"
+    for name in _alloc_units():
+        payload["costs"][name][ALLOC_FMT].update(predicted_dloss=1.0, wire_bytes=4096)
+        payload["costs"][name][up].update(predicted_dloss=0.5,
+            wire_bytes=4096 if name == stays else 4608, output_mse=1e-4)
+    original = footprint.assignment_artifact_bytes
+    def priced(assignment, *args, **kwargs):
+        result = original(assignment, *args, **kwargs)
+        chosen = {assignment.get(name) for name in _alloc_units()}
+        if chosen == {ALLOC_FMT, up}:
+            # The authoritative final footprint is larger than the row-delta estimate.
+            result = dict(result, artifact_payload_bytes=16 * footprint.GB)
+        return result
+    monkeypatch.setattr(footprint, "assignment_artifact_bytes", priced)
+    argv = _alloc_argv(tmp_path, payload)
+    _write_cli_source(tmp_path)
+    index = argv.index("--target-bits")
+    del argv[index:index + 2]
+    argv += ["--target-disk-gb", "16", "--artifact-overhead-reserve-bytes",
+             "1048576", "--routed-unit-rates"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit, match="whole-artifact upper bound.*hard budget"):
+        allocator.main()
+    assert not (tmp_path / "layer.json").exists()
 
 # ---------------------------------------------------------------------------
 # The allocator record is the export accounting's price-row leg, honestly

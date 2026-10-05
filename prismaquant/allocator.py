@@ -4421,6 +4421,22 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 reserve_bytes=int(args.artifact_overhead_reserve_bytes or 0),
                 artifact_size_for=_artifact_size_for,
             )
+            try:
+                final_assignment = _stamped_assignment(assignment_expanded)
+                final_size = _artifact_size_for(final_assignment)
+                if final_size is None or selected_whole_artifact_budget_stamp is None:
+                    raise ValueError("routed unit rates require a final whole-artifact price and budget stamp")
+                selected_whole_artifact_budget_stamp = whole_artifact_budget_stamp(
+                    budget_bytes=int(selected_whole_artifact_budget_stamp["budget_bytes"]),
+                    selection_tensor_payload_bytes=int(final_size["artifact_tensor_payload_bytes"]),
+                    selection_non_tensor_reserve_bytes=int(
+                        selected_whole_artifact_budget_stamp["selection_non_tensor_reserve_bytes"]),
+                    selection_assignment=final_assignment,
+                    excluded_source_prefixes=selected_whole_artifact_budget_stamp.get(
+                        "excluded_source_prefixes", ()),
+                )
+            except (ValueError, TypeError) as exc:
+                raise SystemExit(f"[alloc] ERROR: routed unit rates final budget: {exc}") from exc
 
         # Only unmeasured/explicit-uniform visual Linears are auxiliary.
         # Measured visual/merger units keep the solver's per-Linear decision.
