@@ -1,8 +1,8 @@
 # PrismaQuant Architecture
 
 Re-stamped 2026-10-05 (PR #2317 correction, PQ #2320, Refs #1301):
-host-only image metadata, chain-spec construction, wire rehashing and render
-analysis load the existing standard-library digest owner through their sibling
+host-only render metadata audits, image metadata, chain-spec construction, wire
+rehashing and render analysis load the existing standard-library digest owner through their sibling
 module context, without initializing PrismaQuant or Torch. Checkpoint, Stage B
 head and band-handoff command-line parsing still precedes scientific imports.
 The correction preserves the existing serializer profile and output interfaces;

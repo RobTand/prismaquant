@@ -4,13 +4,17 @@ Runs only as a script; nothing executes at import. The output path (render-paths
 campaign root when it was first written) is an argument and must not exist.
 """
 import argparse
-import json,hashlib,concurrent.futures,os
+import json,hashlib,concurrent.futures,os,sys
 from pathlib import Path
 
 
 def main():
- from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('--out',required=True);args=p.parse_args()
+ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
+ try:
+  from digests import DIRECT_ASCII_SPACED_LAX
+ finally:
+  sys.path.pop(0)
  root=Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-e2m1-01/workspace')
  p=json.loads((root/'plan.json').read_text());tasks=[(q,Path(row['dir'])/'cache'/(q.replace('/','__').replace('.','_')+'__TESSERA_E2M1_K2_R896.pt')) for row in p['rows'] for q in row['members']]
  def entry(item):
