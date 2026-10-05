@@ -11,6 +11,7 @@ sidecar means a pre-guard directory: warn, do not refuse.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -510,3 +511,37 @@ def test_a_fresh_directory_under_the_full_range_policy_prices_at_that_policy(
 
 
 from priced_model_screen import priced_model_screen  # noqa: F401  (module-scoped model screen)
+
+
+# ---------------------------------------------------------------------------
+# #2231: the dense fill's render-identity build refuses a colliding qname
+# pair under the shared rule's message -- both qnames and the shared shard
+# filename -- before any sidecar or shard is written.
+# ---------------------------------------------------------------------------
+
+
+def test_dense_fill_refuses_a_colliding_pair_before_any_write(tmp_path):
+    model = nn.Module()
+    model.block = nn.Module()
+    model.block.a = nn.Linear(2, 2, bias=False)
+    model.block_a = nn.Linear(2, 2, bias=False)
+
+    with pytest.raises(ValueError) as exc_info:
+        fill_production_weight_cache(
+            model,
+            torch.zeros((1, 2), dtype=torch.long),
+            ["block.a", "block_a"],
+            formats=["FP8_E4M3"],
+            levers={"gptq": False},
+            cache_dir=tmp_path,
+            recache_profile=SimpleNamespace(),
+            progress=False,
+        )
+
+    message = str(exc_info.value)
+    assert "block.a" in message
+    assert "block_a" in message
+    assert "block_a__FP8_E4M3.pt" in message
+    # The render-identity build refuses before the cache open writes
+    # anything: no sidecar, no shard.
+    assert list(tmp_path.iterdir()) == []

@@ -1542,9 +1542,11 @@ class ProductionWeightCache:
         ``mtp_production_cache.py`` stripe pruning,
         ``streaming_production_cache.py`` per-layer pop), so a size memo can
         miss a same-size pop/add swap. The two residency paths therefore
-        differ: ``prefetch`` calls :meth:`_check_injective_filenames`
-        UNCONDITIONALLY on every call (O(n) string work next to the
-        ``torch.load``s it precedes), while this lazy per-file path keeps the
+        differ: ``prefetch`` calls :meth:`_check_injective_filenames` on
+        every call that has something to load (the ``if not keys: return 0``
+        early return skips the check when every key it names is already
+        resident), so a same-size swap is caught at the next prefetch that
+        loads anything, while this lazy per-file path keeps the
         count memo — it can miss a same-size swap until the next ``prefetch``
         or key-set growth. No method of this class pops from
         ``self.weights`` (they only swap values between tensors and paths),
@@ -1589,10 +1591,12 @@ class ProductionWeightCache:
                     if not isinstance(self.weights.get(k), torch.Tensor)]
         if not keys:
             return 0
-        # #2219: the reader/residency open — whole-manifest, UNCONDITIONAL on
-        # every call: keys can be popped elsewhere (export stream, MTP stripe
-        # pruning, streaming per-layer pop), so a size memo could miss a
-        # same-size swap; O(n) next to the loads this precedes. Also arms the
+        # #2219: the reader/residency open — whole-manifest, on every call
+        # that has something to load (the ``if not keys: return 0`` early
+        # return above skips it when every key is already resident): keys
+        # can be popped elsewhere (export stream, MTP stripe pruning,
+        # streaming per-layer pop), so a size memo could miss a same-size
+        # swap; O(n) next to the loads this precedes. Also arms the
         # memo the lazy _load_file_tensor path relies on.
         self._check_injective_filenames()
 
