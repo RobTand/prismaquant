@@ -1394,6 +1394,7 @@ def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_
             expected_dropped.append("TESSERA_E4M3_K1_R512")
         assert menu == [*expected, "BF16"], menu
         assert sorted(dropped) == sorted(expected_dropped), dropped
+        fr.require_producer_formats(menu, where="test", context_by_unit=scope)
 
 
 def test_an_explicitly_named_unattested_rung_still_refuses(dev_pin):
