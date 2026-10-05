@@ -4,7 +4,11 @@ Re-stamped 2026-10-05 (`issues/pq-687-journal-seal-fields`, base `4afbb861e0a`,
 PQ #687, CEO dec-1005-212354-dc9d, D32): `prepare_journal` accepts an empty-by-default
 caller-declared set of top-level producer seal fields. The campaign checkpoint
 and stream journal declare only `prismaquant_source_sha256` and
-`encoder_source_sha256`. A producer-only mismatch goes through `seal_check`,
+`encoder_source_sha256`. The existing campaign wire-reader wrapper also defers
+only that encoder source seal, supplying its stored value to the real
+`verify_cached_unit` call. The verifier still checks wire bytes and every other
+identity field; filename and measured-length checks run before the stamp.
+A producer-only mismatch goes through `seal_check`,
 prints one `[DEV-MODE]` line naming all moved fields and both values, and reuses
 stored shards. The manifest stays byte-unchanged, and its original digest binds
 reused and newly published shards; later resumes compare against that same

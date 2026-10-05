@@ -3205,12 +3205,28 @@ def _checkpoint_wire_record(anchor, wire_dir, identity, *, existing=None):
             record = api.make_unit_record(blob, identity, filename=path.name)
         else:
             record = existing
-            api.verify_cached_unit(blob, record, identity)
+            verification_identity = identity
+            producer_field = "encoder_source_sha256"
+            observed = record.get("identity") if isinstance(record, dict) else None
+            if (producer_field in CAMPAIGN_CHECKPOINT_SEAL_FIELDS
+                    and isinstance(observed, dict)
+                    and producer_field in observed and producer_field in identity
+                    and observed[producer_field] != identity[producer_field]):
+                # Defer only this declared producer seal. The real reader still
+                # verifies own bytes, grammar and every comparability field.
+                verification_identity = {**identity, producer_field: observed[producer_field]}
+            api.verify_cached_unit(blob, record, verification_identity)
             if record.get("file") != path.name:
                 raise ValueError("cached wire filename differs from the priced unit/rung")
         # CampaignAnchor.wire_bytes means the full blob, not plane-region bytes.
         if anchor.wire_bytes != record["blob_bytes"]:
             raise ValueError("cached wire length differs from the measured anchor")
+        if existing is not None and verification_identity is not identity:
+            from .dev_mode import seal_check
+
+            seal_check(f"campaign wire {producer_field}", observed[producer_field], identity[producer_field],
+                       where=f"{anchor.qname}@{anchor.format_name}",
+                       refusal=ValueError(f"cached unit {producer_field} identity mismatch"))
         return record
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise RuntimeError(

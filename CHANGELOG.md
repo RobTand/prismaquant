@@ -51,6 +51,9 @@
   the campaign checkpoint and stream journal declare only the PrismaQuant and
   encoder source hashes. Producer-only drift stamps one `[DEV-MODE]` line
   and reuses stored shards without rewriting their manifest or digest.
+  The campaign wire-reader wrapper defers only `encoder_source_sha256` and
+  still calls the real cached-unit verifier with that stored field; wire bytes,
+  every other identity field, filename and measured length remain checked.
   Mixed mismatches, every comparability field and byte-integrity checks still
   refuse, as does certified mode (`PRISMAQUANT_DEV_MODE=0`). This retires
   the freeze-the-tree / `--seed-checkpoint` workaround for producer-hash moves
