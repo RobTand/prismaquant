@@ -12796,12 +12796,13 @@ the only thing keeping a row off a box it cannot run on was the `["gb10"]`
 default — the moment a second tag was added to a spec, every row in it became
 eligible for that box. A class now owns `python` / `env` / `tags` / `cpus` /
 `container`, `tools/fleet_interpreters.json` says what each tag means (ISA,
-container GPU runtime, and the host interpreters observed there with the
-PrismaBuild key that ran them), and a class whose interpreter is not attested
-on its tags, or whose container's GPU runtime is not the one its tags attach
-with, is refused at spec load. The `default` class resolves to exactly the
-spec-level values and nothing about a class is written into the row, so every
-campaign in flight builds the same row dict under the same action key.
+container GPU runtime, and the active host interpreters observed there with the
+PrismaBuild key that ran them). Missing host attestation stamps and continues
+in default dev mode; explicit certified mode refuses it. A container whose GPU
+runtime is not the one its tags attach with is still refused at spec load. The
+`default` class resolves to exactly the spec-level values and nothing about a
+class is written into the row, so every campaign in flight builds the same row
+dict under the same action key.
 
 The cross-ISA rule is the measured one: a Hessian-aware Tessera wire is not
 bit-comparable between gfx1201 and sm121 while a weights-only encode is
@@ -23687,12 +23688,33 @@ own plan entry when it lands.
 boxes execute, the GPU runtime a container there attaches with (`nvidia` is
 `--gpus all`; `rocm-wsl` is `--device /dev/dxg` plus a read-only
 `/usr/lib/wsl/lib` mount, which is what a WSL2 ROCm box needs and what a GB10
-does not have), and the host interpreters observed running work there, each
-naming the PrismaBuild action key that ran it. A declared class is refused
-when its interpreter is not attested on one of its tags, when a tag is not in
-the table at all, or when its container's GPU runtime is not the one its tags
-attach with. A spec that declares no classes is not checked: it is the shape
-every campaign in flight already has.
+does not have), and the active host interpreters observed running work there,
+each naming the PrismaBuild action key that ran it. A declared class is refused
+when its tag is not in the table or its container's GPU runtime does not match
+the device runtime its tags attach with. Host interpreter attestation is a
+recorded provenance check, not an observation of the running interpreter's
+Software Development Kit or application programming interface compatibility.
+A spec that declares no classes is not checked: it is the shape every campaign
+in flight already has.
+
+Retired interpreter receipts are history, not active attestation (2026-10-05,
+#2222). Each tag's required `interpreters` mapping holds only active
+attestations; its optional `retired_interpreters` mapping preserves historical
+action keys and observations separately. `load_fleet_interpreters` validates
+both mappings and refuses a path listed as both active and retired on one tag.
+The SDK3 entries on `dl380g10`, `sparky` and `sparklina` remain history without
+changing their receipts. Active SDK4 and ROCm attestations do not move.
+
+The existing host-attestation check goes through `prismaquant.dev_mode.seal_check`
+(D32): with `PRISMAQUANT_DEV_MODE` unset or anything except exactly `0`, missing
+or retired membership prints `[DEV-MODE]` and continues with the stored spec.
+Only explicit `0` retains the certified `RowClassRefused` refusal, including
+the path, tag and retirement diagnostic. Continuing does not add the path to
+active attestations or qualify its runtime. Inventory shape and overlap,
+container/device compatibility, instruction-set rules, actual runtime
+Software Development Kit and application programming interface failures, and
+safety checks stay distinct. This change adds no runtime probe, package re-pin,
+source or producer identity comparison, or custom dev-mode switch.
 
 Two refusals carry a measurement rather than a preference. A Tessera
 **Hessian-aware** wire is not bit-comparable across instruction sets — the

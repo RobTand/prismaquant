@@ -7,10 +7,10 @@ Three properties, in the order they matter.
     key, loses one or changes a value re-runs work that is already done. The
     first test pins the whole row dict for a spec with no ``classes`` block and
     for a spec whose ``classes`` block declares the default explicitly.
-*   **A class this fleet cannot run where it is sent is refused at load.** An
-    interpreter that is not attested on a tag, a tag nothing attests, a class
-    spanning two instruction sets, and a container whose GPU runtime does not
-    match the box's, all refuse before a row is built.
+*   **Recorded host attestation follows the existing dev-mode policy.** A
+    missing or retired interpreter stamps and continues by default; explicit
+    certified mode refuses. Malformed inventory, unknown tags, mixed instruction
+    sets and incompatible container device runtimes still refuse in either mode.
 *   **A weights-only class cannot be handed Hessian-aware work.** That is the
     gfx1201/sm121 wire divergence (RobTand/tessera#472) expressed as a gate
     rather than a comment.
@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -33,6 +35,8 @@ import tessera_campaign_container as container_tool  # noqa: E402
 
 ROCM_PYTHON = "/home/rob/ml-venvs/torch-rocm7/bin/python"
 GB10_PYTHON = "/home/rob/gb10-venvs/example/bin/python"
+SDK3_PYTHON = "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python"
+SDK4_PYTHON = "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python"
 
 
 def fleet() -> dict:
@@ -186,7 +190,8 @@ def test_a_tag_the_fleet_does_not_attest_is_refused():
         raise AssertionError("an unknown tag placed a row")
 
 
-def test_a_class_spanning_two_instruction_sets_is_refused():
+def test_a_class_spanning_two_instruction_sets_is_refused(monkeypatch):
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     spec = base_spec(classes={
         "rocm-encode": {"python": ROCM_PYTHON, "tags": ["gfx1201", "gb10"],
                         "wire_shared": False, "weights_only": True}})
@@ -235,7 +240,8 @@ def test_the_rocm_encode_class_this_issue_exists_for_is_accepted():
     assert records["rocm-encode"]["wire_shared"] is False
 
 
-def test_a_container_class_is_refused_the_wrong_gpu_runtime():
+def test_a_container_class_is_refused_the_wrong_gpu_runtime(monkeypatch):
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     spec = base_spec(python="python3", container={
         "image": "prismaquant-example:pinned"}, classes={
         "rocm-encode": {"tags": ["gfx1201"], "wire_shared": False,
@@ -379,6 +385,71 @@ def test_the_runtime_s_own_mount_may_not_be_declared_twice():
 # The tracked attestation table
 # --------------------------------------------------------------------------
 
+@pytest.mark.parametrize("tag", ["dl380g10", "sparky", "sparklina"])
+@pytest.mark.parametrize("class_name", ["default", "retired"])
+def test_retired_interpreters_refuse_in_certified_mode(tag, class_name, monkeypatch):
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    spec = base_spec(python=SDK4_PYTHON, tags=[tag], classes={
+        class_name: {"python": SDK3_PYTHON}})
+    with pytest.raises(dispatch.RowClassRefused):
+        dispatch.validate_row_classes(spec)
+    shape = dispatch.load_fleet_interpreters()["tags"][tag]
+    assert SDK3_PYTHON not in shape["interpreters"]
+
+
+@pytest.mark.parametrize("tag", ["dl380g10", "sparky", "sparklina"])
+@pytest.mark.parametrize("class_name", ["default", "history-probe"])
+def test_retired_interpreters_continue_in_default_dev_mode(
+        tag, class_name, monkeypatch, capsys):
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    spec = base_spec(python=SDK4_PYTHON, tags=[tag], classes={
+        class_name: {"python": SDK3_PYTHON}})
+    records = dispatch.validate_row_classes(spec)
+    record = next(record for record in records if record["class"] == class_name)
+    assert record["python"] == SDK3_PYTHON
+    assert "[DEV-MODE]" in capsys.readouterr().out
+    assert SDK3_PYTHON not in dispatch.load_fleet_interpreters()["tags"][tag][
+        "interpreters"]
+
+
+def test_unattested_interpreter_continues_in_default_dev_mode(monkeypatch, capsys):
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    python = "/home/rob/no/such/python"
+    spec = base_spec(python=SDK4_PYTHON, classes={"probe": {"python": python}})
+    records = dispatch.validate_row_classes(spec)
+    assert records[0]["python"] == python
+    assert "[DEV-MODE]" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("tag", ["dl380g10", "gb10", "sparky", "sparklina"])
+def test_active_sdk4_interpreters_validate_explicit_classes(tag):
+    spec = base_spec(python=SDK4_PYTHON, tags=[tag], classes={"default": {}})
+    records = dispatch.validate_row_classes(spec)
+    assert records == [{"class": "default", "isa": dispatch.load_fleet_interpreters()[
+        "tags"][tag]["isa"], "tags": [tag], "python": SDK4_PYTHON, "cpus": 4,
+        "containerized": False, "wire_shared": True, "weights_only": False}]
+
+
+@pytest.mark.parametrize("dev_env", [None, "0"])
+@pytest.mark.parametrize("history, message", [
+    (None, "retired_interpreters mapping"),
+    ({SDK3_PYTHON: {}}, "names no PrismaBuild action key"),
+    ({SDK4_PYTHON: {"attested_by": "0" * 64}}, "both active and retired"),
+])
+def test_invalid_retired_inventory_is_refused(
+        tmp_path, history, message, dev_env, monkeypatch):
+    if dev_env is None:
+        monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    else:
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_env)
+    table = dispatch.load_fleet_interpreters()
+    table["tags"]["dl380g10"]["retired_interpreters"] = history
+    source = tmp_path / "fleet.json"
+    source.write_text(json.dumps(table))
+    with pytest.raises(dispatch.RowClassRefused, match=message):
+        dispatch.load_fleet_interpreters(source)
+
+
 def test_the_tracked_table_attests_the_rocm_interpreter_with_a_receipt():
     table = dispatch.load_fleet_interpreters()
     for tag in ("wsl-gpu", "gfx1201"):
@@ -387,6 +458,10 @@ def test_the_tracked_table_attests_the_rocm_interpreter_with_a_receipt():
         assert shape["gpu_runtime"] == "rocm-wsl"
         record = shape["interpreters"][ROCM_PYTHON]
         assert len(record["attested_by"]) == 64
+        records = dispatch.validate_row_classes(base_spec(
+            python=ROCM_PYTHON, tags=[tag], classes={"default": {}}))
+        assert records[0]["isa"] == "gfx1201"
+        assert records[0]["python"] == ROCM_PYTHON
     for tag in ("gb10", "sparky", "sparklina", "gx10-6b77"):
         assert table["tags"][tag]["isa"] == "sm121"
         assert table["tags"][tag]["gpu_runtime"] == "nvidia"
