@@ -795,6 +795,8 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
         # Renamed 2026-09-29 for the v45 pin b40c93cb73: export.py did
         # not move.
         "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
+        # Public v56: the cap delegates to the same WINDOW payload width.
+        "2dbac1910c88254d9c6391f02a34c4b07e516803",
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -852,6 +854,7 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
         "reader-pin-387eda36", "study-producer-d403cc5a",
         "reader-pin-cc739a55", "reader-pin-09d6559d", "reader-pin-f94929de",
         "reader-pin-38e96012", "reader-pin-a5f3b232", "reader-pin-b40c93cb",
+        "reader-pin-2dbac191",
     }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)

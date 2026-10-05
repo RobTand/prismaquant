@@ -20,6 +20,9 @@ explains the diff: PQ #1274 (Tessera 38e96012, contract v42) moved only the
 pin's commit, contract digest and extension rows, the reviewed answer's two
 new extensions and four routed cells' launches, and the four q256 1024 routed
 units' recorded launches.
+At PQ #2262 the snapshot is re-taken on public 2dbac191/v56: v11 rule
+coverage, four extensions and 22 eager cells move the expected answer.
+This is an admission snapshot, never compiled/model/performance qualification.
 
 Run as ``python -m tests.tessera_serving_identity_snapshot`` to print it.
 """

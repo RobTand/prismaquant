@@ -1,8 +1,6 @@
-"""V11 reader preparation is not activation of the frozen v45 pin."""
+"""V11 rule coverage at the exact public v56 pin, with unchanged refusals."""
 import hashlib
 import json
-import os
-from pathlib import Path
 
 import pytest
 
@@ -15,15 +13,17 @@ def _parse(payload):
     return runtime._parse(payload, commit="fixture", sha="fixture", path="fixture")
 
 
-def test_active_v45_answer_and_pin_are_unchanged():
+def test_active_v56_answer_and_pin_match_the_installed_contract():
     payload = json.loads(runtime.contract_path().read_bytes())
-    assert payload["contract_version"] == 45
+    assert payload["contract_version"] == 56
     assert runtime._answer_drift(runtime.TESSERA_DEV_PIN_ANSWER,
                                 runtime.contract_answer(_parse(payload))) == []
 
 
 def _payload():
     payload = json.loads(runtime.contract_path().read_bytes())
+    for family in payload["formats"]:
+        family.pop("allowable_rungs", None)
     payload["lane_eligibility"]["schema"] = "tessera.lane-eligibility.v11"
     row = next(e for e in payload["formats"] if e["family"] == "TESSERA_E4M3_K1")
     row["allowable_rungs"] = {
@@ -128,9 +128,9 @@ def test_v11_coverage_keeps_exact_context_and_compiled_refusal():
     assert parsed.native_cells(cell.family, 897, serving_context=compiled) == ()
 
 
-def test_v11_packaged_contract_still_refuses_active_serving_pin():
+def test_v11_still_refuses_a_foreign_installed_contract():
     candidate = _parse(_payload())
-    assert runtime.TESSERA_DEV_PIN_COMMIT == "b40c93cb73745097e57a1ba4cf5b9eee166c759a"
+    assert runtime.TESSERA_DEV_PIN_COMMIT == "2dbac1910c88254d9c6391f02a34c4b07e516803"
     assert pin.load_tessera_serving_runtime_pin().commit == runtime.TESSERA_DEV_PIN_COMMIT
     with pytest.raises(pin.TesseraServingRuntimePinError):
         pin.require_exact_tessera_runtime_pin(pin.load_tessera_serving_runtime_pin(),
@@ -138,16 +138,13 @@ def test_v11_packaged_contract_still_refuses_active_serving_pin():
     assert candidate.lane_schema == "tessera.lane-eligibility.v11"
 
 
-def test_explicit_immutable_v55_package_scope():
-    path = os.environ.get("PRISMAQUANT_TEST_TESSERA_V11_CONTRACT")
-    if path is None:
-        pytest.skip("explicit immutable publisher v55 package not supplied")
-    raw = Path(path).read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == "b5ac31b7a0b5578d56e9ae213472478217aabc4408c536555030b8d349d702c2"
+def test_installed_immutable_v56_package_scope():
+    raw = runtime.contract_path().read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == "47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78"
     payload = json.loads(raw)
     parsed = _parse(payload)
-    assert parsed.contract_version == 55
+    assert parsed.contract_version == 56
     assert len(parsed.cells) == 22
     assert all("compiled" not in c.execution_modes for c in parsed.cells)
     assert all(c.requires_plugin == "tessera" for c in parsed.cells)
-    assert runtime._answer_drift(runtime.TESSERA_DEV_PIN_ANSWER, runtime.contract_answer(parsed))
+    assert runtime._answer_drift(runtime.TESSERA_DEV_PIN_ANSWER, runtime.contract_answer(parsed)) == []

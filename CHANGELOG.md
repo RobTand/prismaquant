@@ -46,6 +46,16 @@
 
 ### Changed
 
+- **Stage the exact public Tessera master D13 pin** (#2262): serving JSON,
+  all serving/development constants and the complete reviewed answer bind
+  `2dbac1910c88254d9c6391f02a34c4b07e516803` / contract v56
+  (`47f180ef…d0aed78`), v11 run-table coverage and four extension rows.
+  Root graph-receipt v2 retains all nine scope fields. The existing
+  fingerprint, provisioning, lane, export and release refusals do not change.
+  Isolated installed-package evidence is not performance, compiled-cell
+  or ship-card qualification; D13 landing still needs the fresh public-source
+  packet and CEO review. No private `608bb` result is transferred.
+
 - **Raw byte-hash constructors route to the digest owners** (Refs #1301).
   83 raw `hashlib.sha256(...).hexdigest()` constructor sites across 47
   package modules now call the existing `prismaquant.digests` byte/text

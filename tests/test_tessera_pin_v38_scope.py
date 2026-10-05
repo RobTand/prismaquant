@@ -58,16 +58,11 @@ def _resolve(facts, image):
         runtime_image=image, execution_mode="eager")
 
 
-def test_the_installed_contract_is_the_v45_pin():
-    # v40 (Tessera #675) adds only the producer_interface block, v41 optional
-    # serving-code fields no cell stamps, v42 the fused routed launches, v43
-    # the fused dense second launch in the six dense cells, v44 the
-    # supported exporter move, and v45 the fused routed lanes' full rate set
-    # with its routed-expert subset; the admission scopes this module pins
-    # are v39's and do not move.
+def test_the_installed_contract_is_the_v56_pin():
+    # The inherited v39 scopes remain; v56 adds separately image-scoped cells.
     raw = _packaged_bytes()
     assert hashlib.sha256(raw).hexdigest() == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256
-    assert json.loads(raw)["contract_version"] == 45
+    assert json.loads(raw)["contract_version"] == 56
 
 
 @pytest.mark.parametrize("rung", [832, 864, 896, 928, 944, 960, 1024, 1088])
@@ -111,10 +106,15 @@ def test_glm_image_carries_all_six_family_structure_combinations():
             assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
             assert cell["id"] in {r.cell_id for r in route.regimes}
     for cell in cells:
-        if cell not in glm:
-            assert cell["runtime"]["image"] == VANILLA_IMAGE
+        if cell["runtime"]["image"] == VANILLA_IMAGE:
             assert (cell["family"], cell["structure"], cell["rungs_q256"]) == (
                 "TESSERA_E4M3_K1", "dense", [1024])
+        elif cell not in glm:
+            assert cell["runtime"]["image"] == (
+                "localhost/prismaquant/spark-vllm-nccl230@sha256:"
+                "5be13705acaecc7b4aaf342a84f80d67844c9970ff8375bf9fbeecc9c98ce84a")
+            assert cell["family"] in {"TESSERA_E4M3_K1", "TESSERA_BF16_K1"}
+            assert cell["runtime"]["execution_modes"] == ["eager"]
 
 
 def test_answer_drift_reports_a_reused_id_whose_scope_moved():

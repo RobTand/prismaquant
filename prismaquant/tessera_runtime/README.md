@@ -39,20 +39,40 @@ git -C "$TS" cat-file -p "$SHA:src/tessera/serving/runtime_contract.json" | sha2
 The commands name the canonical remote rather than somebody's checkout,
 because a digest bound from a working tree records what that tree happened to
 contain, which nobody else can re-derive.
-Reader compatibility preparation can accept lane schema v11 while this live
-v2 pin remains unchanged. V11's window-rate rule covers a non-census rung only
-when its derived run table was censused in that exact cell. Census rungs stay
-separate in provenance; exclusions, rule wire stamps, runtime scope, plugin,
-native-decoder and evidence predicates remain enforced. The reviewed answer
-records the rule and cell coverage, so a v55 package still refuses the live
-v45 answer and serving digest. Parser support does not authorize a pin bump.
-Public b770727c and frozen 09cdb22f publish byte-identical v55 contracts, but
-their package source differs; equal contract bytes do not transfer serving or
-binary qualification. No release tag, future union digest or v3 activation is
-required or invented by this preparation. The v3 decision remains held.
+The staged public-master candidate is Tessera
+`2dbac1910c88254d9c6391f02a34c4b07e516803` (fetched master, 2026-10-05;
+PQ #2262), contract v56 / raw SHA-256
+`47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78`.
+The v11 rule covers a non-census rung only when its derived run table was
+censused in that exact cell. Census rungs remain separate. The complete
+answer, four native-extension rows, runtime scope, plugin, lane and
+evidence predicates are retained; 22 cells remain eager and none compiled.
+The previous v45 package still refuses by digest and reviewed-answer drift.
 
+PB action `bb2911530f0390c7ede9504761d620e8e35468fe766fcaf3902ce4ea62352f2c`
+installed the exact source in isolated DL380 overlay
+`/home/rob/venvs/pq-d13-candidate-2dbac191/bin/python`, without replacing
+any shared default interpreter. Under `-I`, the installed package and
+source both hash to `322d21bc03f7e936f836da098cd202b0b9d9d5db869422dd0f2cf0bef985fbe8`
+over 118 shipped files. Root `tessera.graph_receipt` imports v2 with
+`verify(receipt, serve) -> str | None` and all nine fields including fabric;
+TP1 uses `none`, TP2+ uses `socket` or `roce`, and v1 card verification refuses.
+This is Python/install availability, not native binary or model qualification.
+Raw log: `/home/rob/fleet/inventory/kernels-d13-preparation-20261005.log`;
+identities and full old-answer drift:
+`/mnt/shared/tessera-measurements/d13-public-master-2dbac191/preparation.json`.
 
-The current pin is Tessera `b40c93cb73745097e57a1ba4cf5b9eee166c759a`,
+D13 still requires fresh exact-source performance/profiles/both-Spark power
+and CEO review before landing/promotion. CEO approved Option A in
+`dec-1005-023421-75cf`: qualify and review this exact candidate first,
+then measure only that candidate in the controlled window. Main and
+promotion stay held. Private `608bb`/1770 receipts do not transfer.
+Neither zero compiled cells nor a missing future artifact is invented as
+a module-availability prerequisite; both keep their real independent
+release gates. Pin schema v2 and the advisory release label do not change.
+No serving-runtime code is imported or vendored into PrismaQuant.
+
+The previous pin was Tessera `b40c93cb73745097e57a1ba4cf5b9eee166c759a`,
 master's merge of #730 on 2026-09-29 (tessera#729, PQ #1739). It fixes the
 routed MoE loader, which stored the tensor-parallel row-cut start state in the
 original column order and so corrupted rank-1 gate/up weights on mixed-rate
