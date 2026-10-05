@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### Added
+
+- **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
+  rows** (#1962). `make_joint_aura_entry` can publish a
+  `sequence_attribution` block decomposing each projection over whole
+  caller-owned blocks of the calibration draw — the streamed dense lease
+  notes each streamed partition's batch block; the Stage B quantum retains
+  the caller's capture-batch id per spill record and re-reads one window's
+  captured rows through the spill's own reader lifecycle right after each
+  single candidate's `project`, while that rendered delta is resident. The
+  authoritative whole-draw fields and the stats contraction total stay
+  bitwise authoritative (flag-off controls byte-identical); the price stays
+  `0.5 mean_p(total_p**2)` over the whole draw, never a sum of per-block
+  squares. The sidecar reports its own residual against the authoritative
+  totals with a stated gate and denominator (default the issue's 1e-3
+  relative against `fsum |w|+|a|+|m|`; zero scale must reconcile exactly),
+  the attribution `c_i = .5 mean_p a_pi*total_p` against those totals, and —
+  for at least two equal whole blocks covering the draw — delete-one
+  leaveout prices `Nseq/(Nseq-k) * .5 mean_p((t_p-a_pi)**2)` with their
+  jackknife standard error under a stated exchangeability assumption; a
+  one-block or unequal-block scope publishes no standard error rather than a
+  fabricated one. `validate_joint_aura_entry` recomputes the sidecar from
+  its own parts for every reader, refuses any foreign `uncertainty_scope` a
+  row publishes (a missing field keeps the legacy conditional reading), and
+  refuses cohorts that cut a block or bind a foreign calibration.
+  Each W/A/mixed projection separately reconciles with its authoritative
+  component; a matching total cannot hide projection redistribution.
+  Full block coverage, integer coordinates and recorded calibration/token
+  geometry are validated before any reader uses the decomposition.
+  Spill callbacks release their borrowed source and delta immediately and
+  retain scalar block components only. Each read charges the existing complete
+  host and device replay buffer envelopes before allocation, including pinned
+  host capacity and aligned device staging; resource refusal prevents read
+  and publication. Both collectors reject unknown
+  candidates before capture and require complete sidecars only on selected
+  rows. The full normalized selector binds the run identity; resume refuses
+  a changed requested attribution surface even in dev mode. Missing selected
+  probes refuse before unit publication. Existing rows stay
+  probe-only; this is not the #1962 estimator fix, a repricing, or an issue
+  closure. Gates: `tests/test_joint_sequence_attribution.py`, the spill
+  sidecar tests of `tests/test_stageb_one_pass_spill.py`.
+
 ### Fixed
 
 - **Test cost: repeated in-process work runs once; two stale consumer
