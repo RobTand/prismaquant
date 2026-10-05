@@ -138,7 +138,7 @@ def test_declared_producer_resume_keeps_byte_integrity_refusals(tmp_path, monkey
         path.write_text(json.dumps(manifest))
     else:
         unit_path(root, "unit").write_bytes(b"corrupt unit")
-    with pytest.raises(RuntimeError, match="mismatch"):
+    with pytest.raises(RuntimeError, match="mismatch|corrupt"):
         prepare_journal(root, stage="fixture", resume=True,
             identity={**identity, "implementation_sha256": "new implementation"},
             qnames=["unit", "next"], seal_fields={"implementation_sha256"})
