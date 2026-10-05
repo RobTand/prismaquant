@@ -76,6 +76,27 @@
 
 ### Fixed
 
+- **Required domain imports and malformed-header consumer refusals stay
+  visible** (Refs #2260, bounded child of #1303).
+  `tests/test_container_qname_owner_1303.py` imports
+  `prismaquant.measure_quant_cost` directly instead of
+  `pytest.importorskip`, so a broken required module now fails the suite
+  instead of silently skipping the per-expert name-decomposition check;
+  that test's assertion is unchanged. `tests/test_safetensors_reader_owner.py`
+  adds one parametrised consumer test that overwrites its small real
+  checkpoint shard with genuinely malformed containers — a file shorter
+  than the u64 length prefix, and a real 8-byte prefix naming an impossible
+  header length — and asserts each consumer's actual visible error
+  boundary: `footprint._read_safetensors_header`,
+  `artifact_completeness._read_safetensors_header` and
+  `autoscale._shard_resident_bytes` propagate the container grammar owner's
+  named `ValueError` from `prismaquant.source_read_plan`, and
+  `pipeline._safetensors_parameter_count` wraps it as
+  `cannot inspect safetensors shard ...` with the owner's reason intact.
+  Test-only: no production behavior, guard, default, format, pin or
+  geometry change; the added coverage does not claim these readers were
+  broken before.
+
 - **Test cost: repeated in-process work runs once; two stale consumer
   fixtures move from 32 rows to the shared fixture's `OUTPUT_FEATURES`=8**
   (#1929). The prefill dry-run tables memoize their pure seeded mandatory-set
