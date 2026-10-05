@@ -274,7 +274,7 @@ def test_native_batch_entrypoint_runs_its_real_tiny_cuda_checker(name):
         policy = Path("/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/served-activation-policy.json")
         args = ["--policy", str(policy), "--policy-sha256", hashlib.sha256(policy.read_bytes()).hexdigest()]
     result = subprocess.run([sys.executable, str(ROOT / "tools" / name), *args],
-        cwd=ROOT, capture_output=True, check=False)
+        cwd=ROOT, env=_scientific_environment(), capture_output=True, check=False)
     assert result.returncode == 0, result.stderr.decode()
     assert json.loads(result.stdout.splitlines()[-1])["status"] == "passed"
 
