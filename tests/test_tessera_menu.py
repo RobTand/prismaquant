@@ -428,7 +428,8 @@ def test_the_dev_pin_attests_exactly_the_rungs_the_contract_publishes(dev_pin):
 
     v39 attests several rates per family on the GLM image. That is not the
     full writable axis: a rate is admitted only when a matching cell names
-    it. Widening the set is a contract change, not an inferred interpolation.
+    it or covers its run table under the family's published allowable rule.
+    The attested-rung census alone is not the admission axis in v11.
 
     **Derived, not typed.**  This test asserted the literal two-element list
     ``[E2M1_K2_R896, E4M3_K1_R1024]`` and went red the day the runtime attested
@@ -443,7 +444,10 @@ def test_the_dev_pin_attests_exactly_the_rungs_the_contract_publishes(dev_pin):
     expected = {
         f"{family}_R{rung}"
         for family in contract.reader_rate_range
-        for rung in sorted(contract.attested_rungs.get(family, ()))
+        for rung in sorted({
+            rate for cell in contract.cells if cell.family == family
+            for rate in set(cell.rungs_q256) | set(cell.covered_rungs_q256)
+        })
         if contract.native_cells(family, rung, serving_context=context)
     }
     rungs = tm.expand_tessera_menu(SHAPE, mode=tm.MENU_ATTESTED, serving_context=context)
@@ -490,23 +494,24 @@ def test_the_scoped_table_answers_nothing_without_a_scope(dev_pin):
     assert "no cell covering" not in bare.detail
 
 
-def test_a_rate_the_contract_does_not_publish_is_unattested_not_backed(dev_pin):
-    """One q256 step off the published rung is absence of a claim.
+def test_routed_admission_requires_scope_and_run_table_coverage(dev_pin):
+    """Census neighbours can be covered, but a census rate need not be.
 
-    The routed E4M3 cells publish q896 since contract v38 (q1024 before)."""
+    These routed E4M3 cells cover R897's [3, 4] table, not R768's [3]."""
     context = _routed_context("TESSERA_E4M3_K1")
     on = tm.route_admission("TESSERA_E4M3_K1_R896", serving_context=context)
-    off = tm.route_admission("TESSERA_E4M3_K1_R897", serving_context=context)
+    covered = tm.route_admission("TESSERA_E4M3_K1_R897", serving_context=context)
+    off = tm.route_admission("TESSERA_E4M3_K1_R768", serving_context=context)
     assert on.route_status == tm.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
+    assert covered.route_status == tm.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG
     assert off.route_status == tm.ROUTE_STATUS_UNATTESTED
-    # The detail names the family's published rungs (the formats row), a
-    # union over structures and images, which includes 896.
+    # The family census is a union over scopes, not each scope's coverage.
     import json as _json
     rows = _json.loads(trc.contract_path().read_text(encoding="utf-8"))["formats"]
     published = next(r["attested_rungs_q256"] for r in rows
                      if r["family"] == "TESSERA_E4M3_K1")
-    assert 896 in published
-    assert "R897" in off.detail and str(published) in off.detail
+    assert 896 in published and 768 in published
+    assert "R768" in off.detail and "no native cell" in off.detail
 
 
 def test_a_prose_only_tessera_edit_does_not_re_stale_the_pin(dev_pin, monkeypatch, tmp_path):
@@ -782,10 +787,19 @@ def test_the_answer_excludes_every_field_a_gate_does_not_read(dev_pin):
     # ``tessera_menu.tessera_tp_axis_legal`` subtracts a rung on a published
     # ``refused`` status, so the statuses are values an admission decision is
     # made of.  The publisher's per-axis reason is prose and stays out.
+    import json as _json
+    published = {row["family"]: row for row in _json.loads(
+        trc.contract_path().read_text(encoding="utf-8"))["formats"]}
     for family in ("TESSERA_E2M1_K2", "TESSERA_E4M3_K1", "TESSERA_BF16_K1"):
-        assert set(answer["families"][family]) == {
-            "reader_rate_range_q256", "attested_rungs_q256", "max_world_size",
-            "loader_axes"}
+        keys = {"reader_rate_range_q256", "attested_rungs_q256",
+                "max_world_size", "loader_axes"}
+        if family != "TESSERA_E2M1_K2":
+            keys.add("allowable_rungs")
+            assert answer["families"][family]["allowable_rungs"] == {
+                key: value for key, value in published[family]["allowable_rungs"].items()
+                if key != "evidence"
+            }
+        assert set(answer["families"][family]) == keys
 
 
 def test_the_fused_module_answer_is_the_values_a_gate_reads(dev_pin):
@@ -1357,26 +1371,29 @@ PRICED = [
     "TESSERA_E2M1_K2_R640",     # serialisable, unattested rate
     "TESSERA_E4M3_K1_R1024",    # attested (dense, default image)
     "TESSERA_E4M3_K1_R896",     # attested (routed, GLM image, contract v38)
-    "TESSERA_E4M3_K1_R512",     # serialisable, unattested rate
+    "TESSERA_E4M3_K1_R512",     # covered dense rate, not covered routed
     "TESSERA_E2M1_K1_R256",     # family the contract does not publish
 ]
 
 
 def test_the_menu_token_expands_to_the_attested_subset_and_reports_the_rest(dev_pin):
     """The default path allocates over the backed axis, not over nothing."""
-    # At v39 the GLM image covers dense and routed A4/A8/A16; E2M1 q640
-    # lost its cell, while routed E4M3 q1024 regained one on this image.
-    for context in (_dense_context(), _routed_context("TESSERA_E4M3_K1"),
-                    _routed_context("TESSERA_E2M1_K2")):
+    # v11 coverage admits E4M3 R512 only at the dense scope.
+    for context, covers_r512 in ((_dense_context(), True),
+                                 (_routed_context("TESSERA_E4M3_K1"), False),
+                                 (_routed_context("TESSERA_E2M1_K2"), False)):
         scope = {"unit": context}
         menu, dropped = tm.expand_menu_tokens_report(
             ["NVFP4", tm.MENU_TOKEN, "BF16"], PRICED, context_by_unit=scope)
-        assert menu == ["NVFP4", "TESSERA_E2M1_K2_R896",
-                        "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896", "BF16"], menu
-        assert sorted(dropped) == sorted([
-            "TESSERA_E2M1_K2_R640", "TESSERA_E4M3_K1_R512",
-            "TESSERA_E2M1_K1_R256"]), dropped
-        fr.require_producer_formats(menu, where="test", context_by_unit=scope)
+        expected = ["NVFP4", "TESSERA_E2M1_K2_R896",
+                    "TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"]
+        expected_dropped = ["TESSERA_E2M1_K2_R640", "TESSERA_E2M1_K1_R256"]
+        if covers_r512:
+            expected.append("TESSERA_E4M3_K1_R512")
+        else:
+            expected_dropped.append("TESSERA_E4M3_K1_R512")
+        assert menu == [*expected, "BF16"], menu
+        assert sorted(dropped) == sorted(expected_dropped), dropped
 
 
 def test_an_explicitly_named_unattested_rung_still_refuses(dev_pin):
