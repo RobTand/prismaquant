@@ -250,8 +250,10 @@ separate unprefixed JSON-index size gate. Bounds, output bytes and refusal text
 are unchanged. Before extending the exported helper, pylsp references mapped
 source_read_plan, residency_shard_reader and the accepted #2166 calibration
 and consumed-page callers; existing string callers need no migration.
-The unbounded model-profile/benchmark readers remain protocol-distinct, and
-this bounded slice does not close the broader domain-numerics epic.
+Within that slice the unbounded model-profile/benchmark readers remained
+protocol-distinct; the later #1303 slice below routes them through the same
+owner, so that scope statement no longer describes current callers. This
+bounded slice does not close the broader domain-numerics epic.
 
 Refs #2177 / #1303: the native exporter no longer carries a test-only
 imperative Qwen naming copy, a compatibility profile instance or a per-expert
@@ -283,6 +285,29 @@ transfer, calibration batching, token/window normalization and weight
 restoration remain caller-owned. Lane replay also delegates the expression, preserving its teacher regrouping,
 row-count refusals and per-row position mean followed by row sum. CPU
 compatibility evidence does not qualify GPU arithmetic or served quality.
+
+Refs #1303 (2026-10-04, branch `flash/pq1303-domain-consolidation-20261004`,
+base `f085c4abd207`): the remaining unbounded safetensors header decoders read
+through the container grammar owner `source_read_plan.read_safetensors_header`
+— the model-profile validator's header check and the host tools
+`chain_roll_bench` (manifest spans) and `stage_fed_demonstration`. Well-formed
+files return the same header bytes and the same span arithmetic; a corrupt or
+short prefix now refuses with the owner's named bound messages instead of a
+bare JSON decode error, which no consumer pinned. The per-expert cost-name
+grammar is stated once (`measure_quant_cost._PER_EXPERT_NAME_RE`) and the
+streaming prefix/layer grammar once
+(`streaming_initialization._prefix_layer_index`), each previously restated
+in-file; the fused kernel module's unused local `_FP4_E2M1_MAX` literal is
+gone — the activation contract owns that constant. Regex acceptance, matches,
+header bytes, span arithmetic, wire, defaults, pins and served paths are
+otherwise unchanged. `chain_roll_bench` loads the header reader only while
+building manifest spans; importing the standalone tool for a historical
+child tree does not require that tree to contain the reader. Consumer
+coverage checks real headers, span merging, name results and malformed
+prefix refusals, not source counts, AST structure or forwarding stubs.
+The remaining index/shard-resolution variants, RTN-screen tie rules, MX 448
+literals and per-model layer-index grammars stay census-listed as distinct;
+this slice does not complete the epic.
 
 Re-stamped 2026-10-02 (PQ #2096, Refs #1842, B32 lane-boundary repair): core
 profiles declare the generic per-Linear activation precision fact

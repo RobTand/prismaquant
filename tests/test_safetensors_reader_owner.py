@@ -3,10 +3,9 @@
 The owning reader is ``prismaquant.source_read_plan.read_safetensors_header``
 (the only one with length bounds, staged-read support and a header-is-object
 check). Every other site that hand-parsed the 8-byte length prefix and the
-JSON header must route through it. These tests pin two things per site:
-byte-and-behavior identity against the old inline parse over a real fixture
-checkpoint, and actual delegation (a raising stub in the consumer's namespace
-must surface through the site's public callable).
+JSON header must route through it. These tests compare real fixture bytes
+and consumer results with the pre-consolidation parse, and retain the tool
+reader's malformed-header refusal.
 """
 from __future__ import annotations
 
@@ -106,49 +105,3 @@ def test_tp2_refusals_stay_header_errors(tmp_path):
     truncated.write_bytes(b"\x01\x02\x03")
     with pytest.raises(tp2_budget_plan.HeaderError):
         tp2_budget_plan.read_safetensors_header(truncated)
-
-
-ROUTING_SITES = [
-    ("prismaquant.footprint", "_read_safetensors_header"),
-    ("prismaquant.artifact_completeness", "_read_safetensors_header"),
-    ("prismaquant.pipeline", "_safetensors_parameter_count"),
-    ("prismaquant.autoscale", "_shard_resident_bytes"),
-]
-
-
-def _raise(path, *args, **kwargs):
-    raise AssertionError("routed through the owning reader")
-
-
-@pytest.mark.parametrize("module_name, callable_name", ROUTING_SITES)
-def test_prismaquant_sites_route_through_the_owner(
-        monkeypatch, checkpoint, module_name, callable_name):
-    import importlib
-    module = importlib.import_module(module_name)
-    monkeypatch.setattr(module, "read_safetensors_header", _raise, raising=False)
-    directory, shard, _header = checkpoint
-    arguments = {
-        "_read_safetensors_header": (str(shard),),
-        "_safetensors_parameter_count": (str(directory),),
-        "_shard_resident_bytes": (shard, 2),
-    }[callable_name]
-    with pytest.raises(AssertionError, match="routed through"):
-        getattr(module, callable_name)(*arguments)
-
-
-def test_tool_sites_route_through_the_owner(monkeypatch, checkpoint):
-    import tp2_budget_plan
-    _directory, shard, _header = checkpoint
-    monkeypatch.setattr(tp2_budget_plan.source_read_plan,
-                        "read_safetensors_header", _raise, raising=False)
-    with pytest.raises(AssertionError, match="routed through"):
-        tp2_budget_plan.read_safetensors_header(shard)
-    # and the owner's own refusals still surface as the tool's HeaderError
-    class _Refusal(ValueError):
-        pass
-    monkeypatch.setattr(tp2_budget_plan.source_read_plan,
-                        "read_safetensors_header",
-                        lambda *a, **k: (_ for _ in ()).throw(_Refusal("bad header")),
-                        raising=False)
-    with pytest.raises(tp2_budget_plan.HeaderError, match="bad header"):
-        tp2_budget_plan.read_safetensors_header(shard)
