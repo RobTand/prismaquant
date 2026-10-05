@@ -117,6 +117,17 @@ def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path)
     assert {path for path in tmp_path.rglob("*") if path.is_file()} == {
         dense_path, new_render, new_wire,
     }
+    # Once the alias's real wire exists, it must not retroactively turn the
+    # dense-only coordinate into a wire owner on the next publication.
+    campaign._finish_anchor(
+        qname="other", weight=weight, activations=weight, format_name=FORMAT,
+        cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+        render=weight * 0.5, blob=b"other wire", elapsed=0.0,
+    )
+    assert dense_path.read_bytes() == dense_bytes
+    assert new_wire.read_bytes() == b"new wire"
+    assert campaign._wire_path(wire_dir, "other", FORMAT).read_bytes() == b"other wire"
+    assert cache._campaign_wire_coordinates == {(new, FORMAT), ("other", FORMAT)}
 
 
 @pytest.mark.parametrize("existing_wire", [False, True])
@@ -147,7 +158,6 @@ def test_campaign_preserves_resume_wire_coordinates_without_render_manifest(
         assert {path for path in tmp_path.rglob("*") if path.is_file()} == {first_wire}
     else:
         assert_no_files(tmp_path)
-
 
 
 @pytest.mark.parametrize("first,second,filename", [
