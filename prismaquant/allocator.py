@@ -133,7 +133,12 @@ from .allocator_candidates import (
     price_paired_rate_trade,
     reprice_paired_candidates,
 )
-from .digests import DIRECT_UTF8_STRICT, file_digest_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_SPACED_LAX,
+    DIRECT_UTF8_STRICT,
+    file_digest_sha256hex,
+    file_sha256hex,
+)
 from .fixed_head import (
     allow_pinned_lifts_lm_head,
     is_lm_head_name,
@@ -4402,7 +4407,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             refusals = {layer: row for layer, row in paired_trade["routed_layers"].items()
                         if row["refused"]}
             raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
-                             + json.dumps(refusals, sort_keys=True))
+                             + DIRECT_ASCII_SPACED_LAX.text(refusals))
         final_body_payload = _assignment_payload_totals(
             final_body_assignment,
             require_all_stats=True,
@@ -6277,7 +6282,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             trade = d["exact_filter_trace"][-1]["paired_rate_trade"]
             refusals = {layer: row for layer, row in trade["routed_layers"].items() if row["refused"]}
             raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
-                             + json.dumps(refusals, sort_keys=True))
+                             + DIRECT_ASCII_SPACED_LAX.text(refusals))
         if measured_runtime_table is not None:
             raise SystemExit(
                 f"[alloc] measured runtime proposal infeasible at target_bits={args.target_bits}: "
