@@ -169,20 +169,25 @@ def _full_calibration(value):
     _exact(value, {'schema', 'artifact_sha256', 'calibration_sha256', 'shape', 'dtype',
                    'provenance'}, 'original full calibration')
     _same(value['schema'], 'prismaquant.calibration_input.v1', 'full calibration schema')
-    _require(isinstance(value['shape'], list) and all(type(dim) is int for dim in value['shape']),
-             'full calibration shape must retain integer dimensions')
-    _same(value['shape'], [512, 512], 'full calibration shape')
-    _same(value['dtype'], 'torch.int64', 'full calibration dtype')
+    _require(isinstance(value["shape"], list) and len(value["shape"]) == 2
+             and all(type(dim) is int and dim > 0 for dim in value["shape"]),
+             "full calibration shape must retain two positive integer dimensions")
+    rows, seqlen = value["shape"]
+    _same(value["dtype"], "torch.int64", "full calibration dtype")
     for key in ('artifact_sha256', 'calibration_sha256'):
         _contract.sha256(value[key], where=f'full calibration {key}')
-    provenance = _exact(value['provenance'], {'fit_ids_sha256', 'fit_tokens', 'fit_tokens_min', 'model',
-        'nsamples', 'seed', 'seqlen', 'source', 'split_role', 'text_sha256'}, 'full calibration provenance')
-    for key, expected in (('nsamples', 512), ('seqlen', 512), ('fit_tokens', 262144)):
+    required = {"fit_ids_sha256", "fit_tokens", "model", "nsamples", "seed",
+                "seqlen", "source", "split_role", "text_sha256"}
+    provenance = value["provenance"]
+    _require(isinstance(provenance, dict) and set(provenance) in
+             (required, required | {"fit_tokens_min"}), "full calibration provenance fields differ")
+    for key, expected in (("nsamples", rows), ("seqlen", seqlen), ("fit_tokens", rows * seqlen)):
         _require(type(provenance.get(key)) is int and provenance[key] == expected,
-                 f'full calibration provenance {key} differs')
+                 f"full calibration provenance {key} differs from the actual tensor shape")
     for key in ('fit_ids_sha256', 'text_sha256'):
         _contract.sha256(provenance.get(key), where=f'full calibration provenance {key}')
-    _contract.integer(provenance['fit_tokens_min'], where='full calibration minimum fit tokens', minimum=1)
+    if "fit_tokens_min" in provenance:
+        _contract.integer(provenance["fit_tokens_min"], where="full calibration minimum fit tokens", minimum=1)
     _contract.integer(provenance['seed'], where='full calibration draw seed', minimum=0)
     for key in ('model', 'source', 'split_role'):
         _contract.string(provenance[key], where=f'full calibration provenance {key}')
@@ -591,6 +596,29 @@ def normalize_original_diagnostic_execution(document):
     _require(isinstance(policy, dict) and policy['schema'] == LAYER_MAJOR_BOUNDARY_STORAGE_SCHEMA,
              'original execution requires the existing layer-major exact boundary owner')
     _contract.absolute_posix_path(policy['directory'], where='original exact boundary directory')
+    return _snapshot(document)
+
+
+def normalize_original_fisher_execution(document, calibration):
+    """Generate the full Fisher execution from its real, independently loaded draw.
+
+    This is not the selected-row diagnostic: its one-probe scope remains
+    unchanged. Native Stage A/B execute these returned row/context/probe
+    fields on the actual tensor, never an old draw relabelled as a new one.
+    """
+    draw = _full_calibration(calibration)
+    rows, seqlen = draw["shape"]
+    for key, expected in (("n_calib_samples", rows), ("calib_seqlen", seqlen)):
+        _require(type(document.get(key)) is int and document[key] == expected,
+                 f"Fisher execution {key} differs from the actual calibration tensor")
+    _contract.integer(document.get("n_probes"), where="Fisher execution n_probes", minimum=2)
+    _contract.integer(document.get("seed_base"), where="Fisher execution seed_base", minimum=0)
+    _contract.integer(document.get("probe_microbatch"), where="Fisher execution probe_microbatch", minimum=1)
+    _same(document.get("token_scope"), "all", "Fisher execution token scope")
+    _require(type(document.get("temperature")) in (int, float) and document["temperature"] == 1,
+             "Fisher execution temperature differs from the defined objective")
+    _require(draw["provenance"]["split_role"] == "calibration",
+             "Fisher execution cannot tune on held-out or final benchmark tokens")
     return _snapshot(document)
 
 

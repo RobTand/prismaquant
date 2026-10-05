@@ -200,8 +200,11 @@ def select_evaluation(ids, encoding_calibration, config):
         if 'joint_eval' in config:
             raise ValueError('joint evaluation draw and diagnostic panel are '
                              'mutually exclusive plans')
-        return load_eval_draw(config['joint_eval_draw'],
-                              encoding_calibration=encoding_calibration)
+        ids, calibration, descriptor = load_eval_draw(config["joint_eval_draw"],
+                                                      encoding_calibration=encoding_calibration)
+        from .source_generation import normalize_original_fisher_execution
+        normalize_original_fisher_execution(evaluation_execution(config), calibration)
+        return ids, calibration, descriptor
     selected, panel = select_panel(ids, encoding_calibration, config.get('joint_eval'))
     return selected, encoding_calibration, panel
 

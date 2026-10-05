@@ -196,8 +196,10 @@ def _plan_config(tmp_path, encoding):
     return {'schema': 'prismaquant.tessera_joint_aura.plan.v1',
             'calibration_input': {'path': str(tmp_path / 'encoding.safetensors'),
                                   'sha256': encoding['artifact_sha256']},
-            'execution': {'n_calib_samples': 4, 'calib_seqlen': 8,
-                          'boundary_storage': {'directory': '/boundaries'}}}
+            "execution": {"n_calib_samples": 4, "calib_seqlen": 8,
+                          "n_probes": 5, "seed_base": 17000, "probe_microbatch": 1,
+                          "token_scope": "all", "temperature": 1.0,
+                          "boundary_storage": {"directory": "/boundaries"}}}
 
 
 def test_fresh_draw_descriptor_and_load_round_trip(tmp_path, monkeypatch, capsys):
@@ -468,3 +470,46 @@ def test_evaluation_formats_refuse_malformed_or_unknown_targets(field):
         config = {**owner, 'joint_eval_targets': {'a.weight': ['MXFP8']}}
     with pytest.raises(ValueError, match='joint evaluation'):
         evaluation_formats(config, available)
+
+
+@pytest.mark.parametrize("probes", [5, 8, 16])
+def test_source_generation_executes_the_real_128_by_2048_fisher_basis(tmp_path, probes):
+    from prismaquant.calibration_data import load_calibration_input
+    from prismaquant import source_generation as generation
+    path, digest, expected_ids, _provenance = _calibration_artifact(
+        tmp_path, "real-fisher-128x2048.safetensors", rows=128, seqlen=2048, seed=0)
+    ids, calibration = load_calibration_input(path, expected_sha256=digest,
+                                             n_samples=128, seqlen=2048)
+    generation._full_calibration(calibration)
+    execution = {"n_calib_samples": 128, "calib_seqlen": 2048, "n_probes": probes,
+                 "seed_base": 17000, "probe_microbatch": 1,
+                 "token_scope": "all", "temperature": 1.0}
+    normalized = generation.normalize_original_fisher_execution(execution, calibration)
+    assert normalized == execution and torch.equal(ids, expected_ids)
+    assert list(ids.shape) == [normalized["n_calib_samples"], normalized["calib_seqlen"]]
+    assert normalized["n_probes"] > 4
+    assert calibration["provenance"]["fit_tokens"] == 128 * 2048
+    assert "fit_tokens_min" not in calibration["provenance"]
+
+
+@pytest.mark.parametrize("dev", ["1", "0"])
+@pytest.mark.parametrize("field,value", [
+    ("n_calib_samples", 512), ("calib_seqlen", 512), ("n_probes", 1),
+    ("n_probes", True), ("n_probes", 5.0), ("token_scope", "last"),
+    ("temperature", 2.0),
+])
+def test_source_generation_refuses_actual_fisher_basis_disagreement(
+        tmp_path, monkeypatch, dev, field, value):
+    from prismaquant.calibration_data import load_calibration_input
+    from prismaquant.source_generation import normalize_original_fisher_execution
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev)
+    path, digest, _ids, _provenance = _calibration_artifact(
+        tmp_path, "fisher-basis.safetensors", rows=128, seqlen=2048, seed=0)
+    _ids, calibration = load_calibration_input(path, expected_sha256=digest,
+                                              n_samples=128, seqlen=2048)
+    execution = {"n_calib_samples": 128, "calib_seqlen": 2048, "n_probes": 5,
+                 "seed_base": 17000, "probe_microbatch": 1,
+                 "token_scope": "all", "temperature": 1.0}
+    execution[field] = value
+    with pytest.raises(RuntimeError, match="Fisher execution"):
+        normalize_original_fisher_execution(execution, calibration)
