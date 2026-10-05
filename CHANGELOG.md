@@ -46,6 +46,20 @@
 
 ### Changed
 
+- **Mixed-rate COST_UCB_Z and paired rate-trade validity** (#2282, Refs #2281).
+  The existing allocator accepts an explicit `--cost-baseline-assignment`;
+  mixed-rate UCB requires it and matched joint AURA source/probe/currency
+  evidence instead of raising NotImplementedError or dropping uncertainty.
+  The exact group fold retains complete combinations through common-probe
+  paired pricing. One paired arithmetic owner also aggregates projections by
+  routed expert and refuses changes exceeding half the signed layer delta;
+  exactly half is allowed and nonzero cancellation to zero is refused.
+  Signed differences keep their global KL Fisher normalization and are not
+  clipped or rescaled; final candidate totals alone clamp nonnegative.
+  Legacy unpaired stock/uniform paths and zero-z prices are unchanged,
+  apart from the guard on explicitly compared trades. This source correction
+  does not establish corrected campaign prices or close measured P0 #2281.
+
 - **Bounded sorted-JSON consumers route to their existing exact
   `JsonProfile` recipes** (Refs #1301, follow-up to the byte-hash routing).
   79 selected scopes / 86 sorted-`json.dumps` calls across 56 package

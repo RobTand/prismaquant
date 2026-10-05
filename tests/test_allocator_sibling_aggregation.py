@@ -1001,18 +1001,15 @@ def test_the_group_knapsack_beats_one_shared_rung_where_it_should():
     assert options[40].member_formats["m.k_proj"].endswith("_R100")
 
 
-def test_group_options_refuse_a_ucb_hedge_rather_than_price_it_wrong():
-    """``z*sqrt(sum stderr^2)`` is not additive, so the fold cannot carry it
-    on two coordinates. Refuse, do not approximate."""
-    import pytest
-
+def test_group_options_require_explicit_paired_baseline_for_ucb():
+    """An enabled mixed-rate hedge may not guess its starting assignment."""
     from prismaquant.allocator_candidates import tessera_group_composites
 
     members = ["m.q_proj", "m.k_proj"]
     candidates = {
         m: _tessera_member_candidates([(10, 2.0), (20, 1.0)]) for m in members
     }
-    with pytest.raises(NotImplementedError, match="do not support UCB pricing"):
+    with pytest.raises(ValueError, match="baseline_assignment"):
         tessera_group_composites(
             members, candidates, n_params=1000,
             licence=_installed_fused_licence(), ucb_z=1.0)

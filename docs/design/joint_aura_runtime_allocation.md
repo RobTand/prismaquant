@@ -90,7 +90,38 @@ conditional on the fixed calibration. Unchanged units cancel from additive
 differences, but remain in the cross terms of `joint_quadratic`. Neither
 objective measures a new background forward pass or fixes background-dependent
 unary ordering. There is no automatic allocator refinement or admission from
-these diagnostics.
+these diagnostics by themselves.
+
+### Explicit paired rate-trade pricing (#2282, Refs #2281)
+
+The allocator's `--cost-baseline-assignment` is the actual caller-owned
+starting assignment, never an inferred menu endpoint. It enables common-probe
+candidate-minus-baseline UCB on the existing additive decision units; mixed-rate
+`PRISMAQUANT_COST_UCB_Z > 0` requires this explicit baseline and matched joint
+rows. The exact mixed-rung fold keeps all combinations until their paired
+statistics are priced, because scalar intermediate dominance can discard a
+combination whose correlated delta uncertainty is lower. Missing baseline,
+matched source/probe/currency, or per-expert attribution refuses by name.
+
+`paired_assignment_difference` owns both the difference hedge and named
+subgroup samples. Prices keep the existing `global_kl_fisher` normalization:
+no additional h-trace, gain, activation correction, token divisor or signed
+sample clipping. The final candidate price is its unhedged unary sum plus
+`z * paired_standard_error`, clamped nonnegative; at zero z the previous
+candidate sum is kept bitwise. Summing decision-unit hedges is conservative
+across units, not an independence assumption; full-assignment paired covariance
+is separately reported and does not silently replace that DP objective.
+
+The profile supplies each projection's routed layer and expert identity.
+Projections aggregate before testing `abs(expert delta) > .5 * abs(layer delta)`.
+Exactly half is allowed, with no tolerance. Nonzero expert deltas cancelling to
+zero net layer change refuse as indeterminate; unchanged assignments and all-zero
+expert terms have no dominance. The menu retains rejected-option provenance,
+and proposal acceptance and final emission check the expanded assignment,
+including aggregation opt-outs. The baseline and selected paired report travel
+in allocator metadata. Legacy unpaired stock/uniform pricing stays unchanged.
+This source policy is not calibration, corrected campaign prices, held-out KL,
+GPU qualification, or closure of the measured #2281 defect.
 
 The existing `aura_additivity_gate` CLI accepts `--comparison-assignment` and
 `--paired-objective` to append this paired report. Its additivity prediction
