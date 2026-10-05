@@ -384,6 +384,44 @@ def test_projection_request_refuses_a_cache_inside_the_model_source(tmp_path, mo
                                   out_path=source / "projection.json")
 
 
+def test_projection_request_refuses_an_output_inside_the_model_source(tmp_path, monkeypatch):
+    """#2243: a refused call leaves the model source tree exactly as it was.
+
+    With an out path inside the checkpoint the call is refused -- and the
+    refusal must precede every write, so no request file, output directory
+    or digest cache is left behind in the tree every later source identity
+    hashes.
+    """
+    _fake_producer_env(monkeypatch, tmp_path, advertises=True, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    before = sorted(str(path.relative_to(source)) for path in source.rglob("*"))
+    with pytest.raises(ExpertProjectionError, match="lies inside"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=source / "projection.json")
+    after = sorted(str(path.relative_to(source)) for path in source.rglob("*"))
+    assert before == after == ["config.json"]
+
+
+def test_projection_request_refuses_an_output_inside_the_source_without_the_cache(tmp_path, monkeypatch):
+    """#2243: the out parent is refused inside the source with no cache at all.
+
+    A producer without ``--source-digest-cache`` takes no cache directory, so
+    the output path itself must carry the inside-source refusal.
+    """
+    _fake_producer_env(monkeypatch, tmp_path, advertises=False, dump=tmp_path / "argv.json")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "config.json").write_text("{}")
+    before = sorted(str(path.relative_to(source)) for path in source.rglob("*"))
+    with pytest.raises(ExpertProjectionError, match="lies inside"):
+        request_expert_projection(source, {STACK: ("E4M3", 1024)},
+                                  out_path=source / "nested" / "projection.json")
+    after = sorted(str(path.relative_to(source)) for path in source.rglob("*"))
+    assert before == after == ["config.json"]
+
+
 def test_stack_plan_request_is_the_producers_exact_shape():
     assert stack_plan_request({STACK: ("E4M3", 1024)}) == {
         STACK: {"grid": "E4M3", "q256": 1024, "source_layout": tep.SOURCE_LAYOUT_UNPACKED}}

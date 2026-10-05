@@ -16828,7 +16828,12 @@ and the producer's `source_digest_cache` receipt in the answer says how
 every shard digest was established. Every answer also carries the
 caller-side `source_digest_cache_use` record -- used true when the option
 was passed, named why when not -- so a consumer never branches on the
-receipt's schema; an explicit `source_digest_cache` with such a producer
+receipt's schema; because `carried_projection` embeds the answer verbatim
+under `producer`, that one caller-side record rides inside the carried
+block's producer entry (#2243) and the entry is otherwise the producer's
+own. An out path or digest cache inside the model source refuses before
+any write, so a refused call leaves the source tree untouched. An
+explicit `source_digest_cache` with such a producer
 refuses rather than dropping it silently, and an override that is an
 existing file refuses by name. It binds
 the producer's per-stack unit records to the profile-declared per-expert units
