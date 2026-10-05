@@ -21,6 +21,8 @@ import json
 from pathlib import Path
 import sys
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -33,6 +35,8 @@ import tessera_campaign_container as container_tool  # noqa: E402
 
 ROCM_PYTHON = "/home/rob/ml-venvs/torch-rocm7/bin/python"
 GB10_PYTHON = "/home/rob/gb10-venvs/example/bin/python"
+SDK3_PYTHON = "/home/rob/venvs/pq-pb95a59051-tessera-b40c93cb/bin/python"
+SDK4_PYTHON = "/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python"
 
 
 def fleet() -> dict:
@@ -379,6 +383,43 @@ def test_the_runtime_s_own_mount_may_not_be_declared_twice():
 # The tracked attestation table
 # --------------------------------------------------------------------------
 
+@pytest.mark.parametrize("tag", ["dl380g10", "sparky", "sparklina"])
+@pytest.mark.parametrize("class_name", ["default", "retired"])
+def test_retired_interpreters_cannot_validate_explicit_classes(tag, class_name):
+    spec = base_spec(python=SDK4_PYTHON, tags=[tag], classes={
+        class_name: {"python": SDK3_PYTHON}})
+    with pytest.raises(dispatch.RowClassRefused, match=f"not attested on tag {tag!r}"):
+        dispatch.validate_row_classes(spec)
+    shape = dispatch.load_fleet_interpreters()["tags"][tag]
+    assert SDK3_PYTHON not in shape["interpreters"]
+    history = shape["retired_interpreters"][SDK3_PYTHON]
+    assert len(history["attested_by"]) == 64
+    assert "SDK_VERSION 3" in history["observed"]
+
+
+@pytest.mark.parametrize("tag", ["dl380g10", "gb10", "sparky", "sparklina"])
+def test_active_sdk4_interpreters_validate_explicit_classes(tag):
+    spec = base_spec(python=SDK4_PYTHON, tags=[tag], classes={"default": {}})
+    records = dispatch.validate_row_classes(spec)
+    assert records == [{"class": "default", "isa": dispatch.load_fleet_interpreters()[
+        "tags"][tag]["isa"], "tags": [tag], "python": SDK4_PYTHON, "cpus": 4,
+        "containerized": False, "wire_shared": True, "weights_only": False}]
+
+
+@pytest.mark.parametrize("history, message", [
+    (None, "retired_interpreters mapping"),
+    ({SDK3_PYTHON: {}}, "names no PrismaBuild action key"),
+    ({SDK4_PYTHON: {"attested_by": "0" * 64}}, "both active and retired"),
+])
+def test_invalid_retired_inventory_is_refused(tmp_path, history, message):
+    table = dispatch.load_fleet_interpreters()
+    table["tags"]["dl380g10"]["retired_interpreters"] = history
+    source = tmp_path / "fleet.json"
+    source.write_text(json.dumps(table))
+    with pytest.raises(dispatch.RowClassRefused, match=message):
+        dispatch.load_fleet_interpreters(source)
+
+
 def test_the_tracked_table_attests_the_rocm_interpreter_with_a_receipt():
     table = dispatch.load_fleet_interpreters()
     for tag in ("wsl-gpu", "gfx1201"):
@@ -387,6 +428,10 @@ def test_the_tracked_table_attests_the_rocm_interpreter_with_a_receipt():
         assert shape["gpu_runtime"] == "rocm-wsl"
         record = shape["interpreters"][ROCM_PYTHON]
         assert len(record["attested_by"]) == 64
+        records = dispatch.validate_row_classes(base_spec(
+            python=ROCM_PYTHON, tags=[tag], classes={"default": {}}))
+        assert records[0]["isa"] == "gfx1201"
+        assert records[0]["python"] == ROCM_PYTHON
     for tag in ("gb10", "sparky", "sparklina", "gx10-6b77"):
         assert table["tags"][tag]["isa"] == "sm121"
         assert table["tags"][tag]["gpu_runtime"] == "nvidia"
