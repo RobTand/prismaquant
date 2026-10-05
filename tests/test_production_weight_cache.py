@@ -1746,6 +1746,21 @@ def test_require_injective_cache_filenames_allows_one_qname_two_formats():
     )
 
 
+def test_require_injective_cache_filenames_admits_cross_format_alias_pair():
+    # The #1859 contract: an alias qname pair at two different formats names
+    # two different files (`...__BF16.pt` vs `...__FP8_E4M3.pt`), so the
+    # coordinate set is admitted; the same pair at one format refuses (the
+    # colliding-pair tests above).
+    from prismaquant.production_weight_cache import (
+        require_injective_cache_filenames,
+    )
+
+    require_injective_cache_filenames(
+        [("layer.a", "BF16"), ("layer_a", "FP8_E4M3")],
+        where="unit test open",
+    )
+
+
 def test_require_injective_cache_filenames_accepts_realistic_roster():
     from prismaquant.production_weight_cache import (
         require_injective_cache_filenames,
