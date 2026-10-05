@@ -127,6 +127,12 @@
   checks, actual runtime compatibility and safety remain distinct; no runtime
   probe, re-pin or new identity gate is added.
 
+- **Seed wire filenames are checked before linking** (#2273). Campaign
+  adoption and selected-wire materialization refuse another coordinate's
+  filename without leaving a stray link; a real resume pins registration
+  before receipt reads. The architecture note documents off-menu evidence
+  and the per-cache roster's pre-publication registration contract.
+
 - **The real DeepSeek V4 model-walk export gate owns its import process**
   (#2276). It uses the existing `own_process` marker when sharing a pytest
   session, so an unsupported native AutoModel configuration in another test

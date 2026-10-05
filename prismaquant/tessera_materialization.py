@@ -311,8 +311,11 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
         if record is None:
             record = cost.get(tep.EXPERT_WIRES_KEY, {}).get(name, {}).get(fmt)
             if record is not None:
-                tc._link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'])
+                tc._link_seed_wire(Path(provenance['wire_dir']), wire_dir, record['file'],
+                                   qname=name, format_name=fmt)
         if record is not None:
+            if record['file'] != wire_path.name:
+                raise RuntimeError(f'{name}: wire filename differs from selected rung')
             # The receipt checks and the blob's presence and size here; the
             # content check is the one read below, at the point the bytes are
             # handed to the producer (PrismaQuant #643).
@@ -320,8 +323,6 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
                 grid=family.payload_grid().name)
             tep.locate_expert_wire(record, name=name, wire_dir=wire_dir)
             api.verify_cached_unit(wire_path.read_bytes(), record, expected)
-            if record['file'] != wire_path.name:
-                raise RuntimeError(f'{name}: wire filename differs from selected rung')
             anchor = None if state is None else state.get('anchor')
         else:
             if wire_path.exists():
@@ -479,7 +480,8 @@ def finalize(plan_path):
         # One content check per blob: the verified bytes are the ones the hard
         # link below carries into the published wire directory (#643).
         api.verify_cached_unit(source_path.read_bytes(), checked, expected)
-        tc._link_seed_wire(source_dir, wire_dir, checked['file'])
+        tc._link_seed_wire(source_dir, wire_dir, checked['file'],
+                           qname=name, format_name=fmt)
         linked_path = wire_dir / checked['file']
         if not os.path.samefile(source_path, linked_path):
             # ``_link_seed_wire`` falls back to a copy where a hard link cannot
