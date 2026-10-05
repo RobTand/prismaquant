@@ -291,7 +291,10 @@ def test_gate_beyond_reported_relative_bound_is_refused():
 
 # ---- dense lease collector -------------------------------------------------
 
-def test_dense_lease_block_sidecar_matches_per_invocation_oracle():
+def test_dense_lease_block_sidecar_matches_per_invocation_oracle(monkeypatch):
+    # This oracle explicitly clamps, so pin the matching emulation policy
+    # rather than inheriting a campaign or worker process setting.
+    monkeypatch.setenv("PRISMAQUANT_PROD_ACT_SCALES", "1")
     torch.manual_seed(23)
     weight = torch.randn(4, 8)
     delta = torch.randn_like(weight) * 0.1

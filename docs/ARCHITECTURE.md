@@ -31337,3 +31337,6 @@ this is not the #1962 estimator fix, a repricing, or an issue closure. Design:
 `docs/design/joint_aura_runtime_allocation.md`. Gate:
 `tests/test_joint_sequence_attribution.py` and the spill sidecar tests of
 `tests/test_stageb_one_pass_spill.py`.
+The dense per-invocation oracle explicitly enables calibrated activation
+clipping, matching its independent clamp rather than inheriting a campaign
+or worker process setting. No production activation policy is changed.

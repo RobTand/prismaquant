@@ -396,6 +396,27 @@ def _no_staged_tier_policy_carried_between_tests():
     deactivate_staged_tier_policy_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _no_activation_scale_policy_carried_between_tests():
+    """No test inherits another test's ``PRISMAQUANT_PROD_ACT_SCALES``.
+
+    ``run_adjoint_capture`` writes the sealed ``production_act_scales`` of its
+    config into the process environment, and the in-process stage-A tests feed
+    it ``"0"``. The variable changes what the joint lease does (it skips the
+    calibrated clamp), so a test that compares against a clamping oracle failed
+    whenever ``--dist worksteal`` put it on a worker after such a test (PQ
+    #2230's dense sidecar oracle failed on a Spark this way). Restore the
+    incoming value, or its absence, after every test.
+    """
+    from prismaquant.tessera_joint_aura import ACTIVATION_SCALE_ENV
+    incoming = os.environ.get(ACTIVATION_SCALE_ENV)
+    yield
+    if incoming is None:
+        os.environ.pop(ACTIVATION_SCALE_ENV, None)
+    else:
+        os.environ[ACTIVATION_SCALE_ENV] = incoming
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _no_prismabuild_import_carried_between_modules():
     """No module inherits another module's ``prismabuild`` imports (PQ #1281).
