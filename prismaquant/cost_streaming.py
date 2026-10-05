@@ -7355,9 +7355,12 @@ def validate_cached_streamed_model_identity(
         raise RuntimeError(
             "streamed model identity cannot validate the live source config"
         ) from exc
-    seal_check('source config stat', config_before, config_after,
-        where='streamed model identity',
-        refusal=lambda: RuntimeError('streamed model identity source config changed while validating'))
+    # The config bytes were just read to derive the live semantic identity; a
+    # change during that read is a torn snapshot (partial data), not a seal.
+    if config_before != config_after:
+        raise RuntimeError(
+            "streamed model identity source config changed while validating"
+        )
     if live_config != cached_config:
         changed = sorted(
             key for key in set(live_config) | set(cached_config)

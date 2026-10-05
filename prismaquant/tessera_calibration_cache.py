@@ -300,9 +300,10 @@ def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live
     before = path.stat()
     raw = path.read_bytes()
     after = path.stat()
-    seal_check('source identity cache stat', file_stat_signature(before),
-        file_stat_signature(after), where=str(path),
-        refusal=lambda: RuntimeError('streamed source identity cache changed while reading'))
+    # A file that changed during the very read consuming it may have yielded
+    # torn bytes: partial-data integrity, refused in both modes (not a seal).
+    if file_stat_signature(before) != file_stat_signature(after):
+        raise RuntimeError('streamed source identity cache changed while reading')
     if expected_sha256 is not None and bytes_sha256hex(raw) != expected_sha256:
         raise RuntimeError('streamed source identity cache differs from its declared SHA256')
     cached, identity = _read_streamed_model_identity_cache(
@@ -1946,8 +1947,9 @@ class CaptureMetadataOwner:
         before = _capture_manifest_stat(self.path)
         raw = self.path.read_bytes()
         after = _capture_manifest_stat(self.path)
-        seal_check('capture manifest stat', before, after, where=str(self.path),
-            refusal=lambda: RuntimeError('canonical capture manifest changed while its metadata was read'))
+        # Same-read torn-snapshot fence: integrity in both modes, not a seal.
+        if before != after:
+            raise RuntimeError('canonical capture manifest changed while its metadata was read')
         if len(raw) > MAX_CAPTURE_METADATA_BYTES:
             raise RuntimeError('canonical capture manifest exceeds bounded metadata budget')
         self.sha256 = bytes_sha256hex(raw)
