@@ -208,6 +208,11 @@
   and the ordered writer still refuse real collisions before either write.
   Concurrent producer admission and ordered publication install one shared
   wire roster; a stale bootstrap cannot discard an already published owner.
+  Selected-wire materialization reserves the complete group's coordinates
+  before any seed link, resumed wire read or fresh publication, including a
+  missing-first coordinate whose wire name aliases a later seeded selection.
+  The unchanged direct writer in `experiments/pq237_joint_aura_streamed.py:243-260`
+  is not covered by these campaign and materialization guards.
   Packed expert appends include existing dense keys.
   Disk-backed weight sessions check the complete snapshot roster before
   capture or reuse and share the existing cache leaf helper. Every refusal

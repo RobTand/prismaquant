@@ -5,12 +5,15 @@ base `3f86d3d146a`, PQ #2231 items 13–15, correction of reviewed
 head `49ea7fc87a8`): campaign rendered-file checks
 still cover the whole manifest. Wire checks use the campaign's wire-owning
 coordinate roster plus each new publication, not dense-only render entries.
-Successful ordered publications add their wire coordinate; resume and seed
-admission reserve coordinates before linking or reading their wires. Batch
-admission checks its whole new scope. Source snapshot and packed append rules,
+Successful ordered publications add their wire coordinate. Campaign resume/seed
+admission and selected-wire materialization reserve coordinates before linking,
+reading or freshly publishing their wires. Batch admission checks its whole new
+scope. Source snapshot and packed append rules,
 filenames, serialization, format spellings and serving contracts are unchanged.
 Memory-only multi-token prediction append coverage pins existing behavior.
 Complete destination checks remain; no speed improvement is claimed.
+The unchanged direct wire writer in `experiments/pq237_joint_aura_streamed.py`
+is not covered by these campaign and materialization guards.
 
 Re-stamped 2026-10-04 (`issues/pq-2229-source-digest-cache`, PQ #2229, Refs
 RobTand/tessera#790): the census caller's expert-projection request hands the
@@ -1312,19 +1315,23 @@ checks rendered filenames over each new anchor plus the whole cache manifest,
 and wire filenames over each new anchor plus its wire-owning coordinate roster.
 The wire roster initially includes existing manifest coordinates whose wire
 path is present; it is not recomputed after publication, so a new wire cannot
-retroactively turn a dense-only alias into a wire owner. Successful publications
-Producer admission and the ordered writer install one shared roster through
-dictionary `setdefault`; a concurrent stale bootstrap cannot replace a roster
-already created or updated by the other thread.
-add their coordinate in the same ordered writer step. Resume and seed admission
-reserve every on-menu coordinate before links or receipt reads, including seed
-rows later held aside as stale. Those wires need not have rendered-manifest
-entries. Batch admission checks the whole new batch before its first publication;
-the ordered writer checks again against earlier publications. Rendered tensors
-reuse `require_injective_cache_filenames`. Wire checks compare actual `_wire_path`
-destinations, retaining the dot-to-double-underscore spelling consumed by resume
-and export. The wire roster is process-local, not cross-process ownership or an
-incremental filename index; complete destination checks remain.
+retroactively turn a dense-only alias into a wire owner. Producer admission
+and the ordered writer install one shared roster through dictionary `setdefault`;
+a concurrent stale bootstrap cannot replace a roster already created or updated
+by the other thread. Successful publications add their coordinate in the same
+ordered writer step. Campaign resume and seed admission reserve every on-menu
+coordinate before links or receipt reads, including seed rows later held aside
+as stale. Selected-wire materialization reserves the whole selected group before
+any seed link, resume receipt read or fresh publication, so a missing coordinate
+cannot overwrite a later seeded alias. Those wires need not have rendered-
+manifest entries. Batch admission checks the whole new batch before its first
+publication; the ordered writer checks again against earlier publications.
+Rendered tensors reuse `require_injective_cache_filenames`. Wire checks compare
+actual `_wire_path` destinations, retaining the dot-to-double-underscore spelling
+consumed by resume and export. The wire roster is process-local, not cross-process
+ownership or an incremental filename index; complete destination checks remain.
+The unchanged experiment utility `experiments/pq237_joint_aura_streamed.py:243-260`
+writes and reads wire destinations directly and is not covered by these guards.
 The packed expert append checks its new scope together with existing manifest
 keys, including the dense fill that created the cache. The dense fill itself
 constructs a new manifest rather than accepting a cache to append to.
@@ -1336,7 +1343,8 @@ injectivity check, not the rendered-format grammar. Refusals name both
 coordinates and their shared filename. Existing filenames, serialization,
 format spellings, memory-only source snapshots and serving contracts remain
 unchanged. This is not cross-process directory ownership. Gate:
-`tests/test_campaign_write_destinations_2231.py`.
+`tests/test_campaign_write_destinations_2231.py` and
+`tests/test_tessera_materialization.py`.
 
 Re-stamped 2026-10-01 (PQ #1852, Refs #275): local single-file safetensors
 checkpoints derive complete tensor-to-file coverage from the validated file
