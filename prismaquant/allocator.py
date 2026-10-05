@@ -4409,6 +4409,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # promotion above, so neither can collapse the per-unit entries back
         # into a group format; the carried block and the receipts below close
         # over exactly these entries.
+        def body_assignment_for_accounting(complete):
+            return {name: fmt for name, fmt in complete.items()
+                    if ((not _is_visual_linear(name, model_profile) or name in visual_decision_names)
+                        and not _is_mtp_linear(name) and name not in fixed_lm_head_names)}
+
         routed_unit_rates_record = None
         if args.routed_unit_rates:
             from . import footprint as _fp_routed_rates
@@ -4421,6 +4426,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 reserve_bytes=int(args.artifact_overhead_reserve_bytes or 0),
                 artifact_size_for=_artifact_size_for,
             )
+            achieved = float(_assignment_payload_totals(
+                body_assignment_for_accounting(assignment_expanded),
+                require_all_stats=True)["bits_per_param"])
             try:
                 final_assignment = _stamped_assignment(assignment_expanded)
                 final_size = _artifact_size_for(final_assignment)
@@ -4557,15 +4565,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     "PASSTHROUGH_SOURCE_REQUIREMENTS deliberately."
                 )
 
-        final_body_assignment = {
-            name: fmt
-            for name, fmt in assignment_expanded.items()
-            if (
-                (not _is_visual_linear(name, model_profile) or name in visual_decision_names)
-                and not _is_mtp_linear(name)
-                and name not in fixed_lm_head_names
-            )
-        }
+        final_body_assignment = body_assignment_for_accounting(assignment_expanded)
         paired_trade = _paired_trade_for_assignment(final_body_assignment)
         if paired_trade is not None and paired_trade["refused"]:
             refusals = {layer: row for layer, row in paired_trade["routed_layers"].items()

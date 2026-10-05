@@ -663,7 +663,7 @@ def _synthetic_two_rung_contract(monkeypatch):
     parsed = contract._parse(payload, commit="fixture", sha="fixture", path="fixture")
     cells = []
     for cell in parsed.cells:
-        if cell.family == "TESSERA_E4M3" and cell.structure == "routed_moe":
+        if cell.family == "TESSERA_E4M3_K1" and cell.structure == "routed_moe":
             cell = dataclasses.replace(
                 cell, rungs_q256=cell.rungs_q256 | {1088},
                 covered_rungs_q256=cell.covered_rungs_q256 | {1088})
@@ -671,8 +671,8 @@ def _synthetic_two_rung_contract(monkeypatch):
     extended = dataclasses.replace(
         parsed, cells=tuple(cells),
         attested_rungs={**parsed.attested_rungs,
-                        "TESSERA_E4M3": parsed.attested_rungs.get("TESSERA_E4M3",
-                                                                 frozenset()) | {1088}})
+                        "TESSERA_E4M3_K1": parsed.attested_rungs.get("TESSERA_E4M3_K1",
+                                                                    frozenset()) | {1088}})
     monkeypatch.setattr(menu, "tessera_runtime_contract", lambda: extended)
     monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "attested")
 
@@ -796,7 +796,8 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
         payload["costs"][name][up].update(
             predicted_dloss=0.5, wire_bytes=4096 if name == stays else 4608,
             output_mse=1e-4)
-    monkeypatch.setattr(sys, "argv", _disk_argv(mixed, payload, "--routed-unit-rates"))
+    monkeypatch.setattr(sys, "argv", _disk_argv(mixed, payload, "--routed-unit-rates",
+                                              "--formats", ALLOC_FMT + "," + up))
     allocator.main()
     placed = load_assignment(mixed / "layer.json")
     upgraded = [name for name in _alloc_units() if name != stays]
@@ -874,7 +875,7 @@ def test_routed_unit_rate_final_footprint_overflow_refuses_before_emission(tmp_p
     index = argv.index("--target-bits")
     del argv[index:index + 2]
     argv += ["--target-disk-gb", "16", "--artifact-overhead-reserve-bytes",
-             "1048576", "--routed-unit-rates"]
+             "1048576", "--routed-unit-rates", "--formats", ALLOC_FMT + "," + up]
     monkeypatch.setattr(sys, "argv", argv)
     with pytest.raises(SystemExit, match="whole-artifact upper bound.*hard budget"):
         allocator.main()
