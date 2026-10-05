@@ -1787,6 +1787,7 @@ def assignment_probe_summary(rows: Mapping, *, objective: str = "additive") -> d
 
 def paired_assignment_difference(
     rows_a: Mapping, rows_b: Mapping, *, objective: str = "additive",
+    attribution_groups: Mapping | None = None,
 ) -> dict:
     """A minus B, retaining common-probe covariance conditional on calibration.
 
@@ -1811,24 +1812,22 @@ def paired_assignment_difference(
                 and left["joint_operator_identity_sha256"] != right["joint_operator_identity_sha256"]):
             raise ValueError(f"paired joint AURA changed operator identity for the same candidate: {name}")
         pairs.append((left, right))
-    if objective == "additive":
-        # The candidate-difference algebra, with every signed squared term
-        # retained until fsum: neither rounded assignment totals nor rounded
-        # per-unit differences may erase a small residual across unit changes.
-        values = [math.fsum(sign * 0.5 * row["x2_per_probe"][k]
-                            for pair in pairs for sign, row in zip((1, -1), pair))
-                  for k in range(len(pairs[0][0]["probe_ids"]))]
-    else:
-        values = []
-        for k in range(len(pairs[0][0]["probe_ids"])):
-            # Difference of squares, factored before summing the background.
-            delta = math.fsum(sign * row["signed_per_probe"][k]
-                              for pair in pairs for sign, row in zip((1, -1), pair))
-            total = math.fsum(row["signed_per_probe"][k]
-                              for pair in pairs for row in pair)
-            values.append(0.5 * delta * total)
+    values = _paired_probe_values(pairs, objective)
     mean, stderr = _probe_moments(values)
     metadata_a, metadata_b = _assignment_metadata(a, objective), _assignment_metadata(b, objective)
+    grouped = {}
+    if attribution_groups is not None:
+        if objective != "additive":
+            raise ValueError("paired attribution groups require the additive allocator currency")
+        for group, names in sorted(attribution_groups.items()):
+            names = sorted(names)
+            if not names or len(names) != len(set(names)) or any(name not in a for name in names):
+                raise ValueError(f"paired attribution group has invalid unit roster: {group}")
+            samples = _paired_probe_values([(a[name], b[name]) for name in names], objective)
+            group_mean, group_stderr = _probe_moments(samples)
+            grouped[group] = {"members": names, "mean_difference": group_mean,
+                              "paired_standard_error": group_stderr,
+                              "difference_per_probe": samples}
     return {
         "schema": "prismaquant.joint_aura.paired_assignment_difference.v1",
         "objective": objective, "cost_currency": JOINT_CURRENCY,
@@ -1837,4 +1836,22 @@ def paired_assignment_difference(
         "probe_identity_sha256": metadata_a["probe_identity_sha256"],
         "assignment_a": metadata_a, "assignment_b": metadata_b,
         "uncertainty_scope": PROBE_UNCERTAINTY_SCOPE, "measurement_status": "research",
+        **({"group_differences": grouped} if attribution_groups is not None else {}),
     }
+
+
+def _paired_probe_values(pairs, objective):
+    """The single paired-difference arithmetic, also for named subgroups."""
+    if objective == "additive":
+        # Retain raw signed squared terms until fsum, not rounded unit totals.
+        return [math.fsum(sign * 0.5 * row["x2_per_probe"][k]
+                          for pair in pairs for sign, row in zip((1, -1), pair))
+                for k in range(len(pairs[0][0]["probe_ids"]))]
+    values = []
+    for k in range(len(pairs[0][0]["probe_ids"])):
+        delta = math.fsum(sign * row["signed_per_probe"][k]
+                          for pair in pairs for sign, row in zip((1, -1), pair))
+        total = math.fsum(row["signed_per_probe"][k]
+                          for pair in pairs for row in pair)
+        values.append(0.5 * delta * total)
+    return values

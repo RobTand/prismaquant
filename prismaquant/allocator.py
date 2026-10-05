@@ -129,8 +129,16 @@ from .allocator_candidates import (
     serving_groups_by_key,
     summarize_applicability_masks,
     reduce_continuous_menu,
+    _cost_ucb_z,
+    price_paired_rate_trade,
+    reprice_paired_candidates,
 )
-from .digests import file_digest_sha256hex, file_sha256hex
+from .digests import (
+    DIRECT_ASCII_SPACED_LAX,
+    DIRECT_UTF8_STRICT,
+    file_digest_sha256hex,
+    file_sha256hex,
+)
 from .fixed_head import (
     allow_pinned_lifts_lm_head,
     is_lm_head_name,
@@ -2331,7 +2339,17 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     ap.add_argument("--pact-max-transitions", type=int, default=None,
                     help="The selected solver's max_transitions bound (default: "
                          "pact_hull.DEFAULT_MAX_TRANSITIONS).")
+    ap.add_argument("--cost-baseline-assignment", default=None,
+                    help="Actual starting layer-config or canonical assignment for matched "
+                         "candidate-minus-baseline probe UCB and the routed expert-dominance guard. "
+                         "Required for mixed-rate COST_UCB_Z; no menu baseline is inferred.")
     args = ap.parse_args(argv)
+    cost_baseline_assignment = None
+    if args.cost_baseline_assignment is not None:
+        from .layer_config import load_assignment
+        cost_baseline_assignment = load_assignment(args.cost_baseline_assignment)
+        if not cost_baseline_assignment:
+            ap.error("--cost-baseline-assignment must name a nonempty starting assignment")
 
     pact_flags = (("--pact-regime", args.pact_regime),
                   ("--pact-tensor-parallel", args.pact_tensor_parallel),
@@ -3177,7 +3195,8 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
         defer_menu_reduction=packed_members_deferred | fused_members_deferred,
-        **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}),
+        **({"preserve_runtime_frontier": True}
+           if runtime_frontier_candidates or cost_baseline_assignment is not None else {}),
     )
     print(f"[alloc] candidates built for {len(candidates)} Linears"
           + (f" ({len(packed_members_deferred)} packed-group and "
@@ -3556,7 +3575,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             stats, costs, specs_sorted, candidates, profile=model_profile,
             calibrated_gains=calibrated_gains,
             activation_pricing=activation_pricing,
-            **({"preserve_runtime_frontier": True} if runtime_frontier_candidates else {}))
+            baseline_assignment=cost_baseline_assignment,
+            **({"preserve_runtime_frontier": True}
+               if runtime_frontier_candidates or cost_baseline_assignment is not None else {}))
         sib_groups = sum(1 for n in candidates if _FUSED_SIBLING_MARKER in n)
         print(f"[alloc] fused-sibling aggregation: {sib_groups} groups "
               f"(qkv_proj / gate_up_proj / ...)")
@@ -3586,6 +3607,14 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                       f"{row['fold_frontier']} -> {row['options']} options",
                       flush=True)
 
+    paired_candidate_report: dict = {}
+    if cost_baseline_assignment is not None:
+        try:
+            candidates = reprice_paired_candidates(
+                stats, cost_data["costs"], candidates, cost_baseline_assignment,
+                profile=model_profile, ucb_z=_cost_ucb_z(), report=paired_candidate_report)
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
     candidates = filter_candidates_for_profile(candidates, target_profile)
 
     # The aggregated super items were built one candidate per format NAME,
@@ -3632,6 +3661,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         "costs": str(args.costs),
         "pre_aggregation_candidate_availability": pre_aggregation_availability,
         "post_aggregation_candidate_availability": post_aggregation_availability,
+        **({"paired_rate_trades": paired_candidate_report,
+            "cost_baseline_assignment_sha256": DIRECT_UTF8_STRICT.sha256(cost_baseline_assignment)}
+           if cost_baseline_assignment is not None else {}),
         "fixed_format_assignment": {
             "lm_head_format": lm_head_format_canonical,
             "lm_head_mode": (
@@ -3997,6 +4029,23 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             assign = dict(assign)
         return assign, achieved_r, total, mutable_total
 
+    def _paired_trade_for_assignment(expanded):
+        if cost_baseline_assignment is None:
+            return None
+        assignment = {n: fmt for n, fmt in expanded.items() if n in per_linear_legal_formats}
+        missing = sorted(assignment.keys() - cost_baseline_assignment.keys())
+        if missing:
+            raise SystemExit(f"[alloc] ERROR: cost baseline_assignment missing members: {missing}")
+        if not assignment:
+            return None
+        try:
+            return price_paired_rate_trade(
+                cost_data["costs"], assignment,
+                {n: cost_baseline_assignment[n] for n in assignment},
+                profile=model_profile, ucb_z=_cost_ucb_z())
+        except ValueError as exc:
+            raise SystemExit(f"[alloc] ERROR: paired rate trade: {exc}") from None
+
     def _solve_for_target_uncached(target_bits: float):
         requested_target = float(target_bits)
         mutable_target_bits = requested_target
@@ -4074,10 +4123,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                      if name not in fixed_format_assignment}, require_all_stats=True)
                 achieved = float(exact["bits_per_param"])
                 verdict = _serve_feasibility(expanded)
-                feasible = achieved <= requested_target and verdict.feasible
+                trade = _paired_trade_for_assignment(expanded)
+                feasible = (achieved <= requested_target and verdict.feasible
+                            and (trade is None or not trade["refused"]))
                 diag["exact_filter_trace"].append({
                     "exact_assignment_payload_bpp": achieved,
-                    "feasible": feasible, "serve_constraints": verdict.as_dict()})
+                    "feasible": feasible, "serve_constraints": verdict.as_dict(),
+                    **({"paired_rate_trade": trade} if trade is not None else {})})
                 if feasible:
                     diag["achieved_bits"] = achieved
                     return (dict(proposal.assignment), achieved,
@@ -4148,6 +4200,13 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     <= requested_target + args.overshoot_tolerance
                 ),
             })
+            trade = _paired_trade_for_assignment(expanded)
+            if trade is not None:
+                outer_diag["exact_filter_trace"][-1]["paired_rate_trade"] = trade
+                if trade["refused"]:
+                    outer_diag["reason"] = "routed_expert_dominance"
+                    outer_diag["exact_filter_trace"][-1]["feasible"] = False
+                    return None, float("nan"), float("inf"), float("inf")
             if exact_achieved <= requested_target + args.overshoot_tolerance:
                 outer_diag["achieved_bits"] = exact_achieved
                 outer_diag["solver_additive_candidate_bpp"] = float(
@@ -4343,6 +4402,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                 and name not in fixed_lm_head_names
             )
         }
+        paired_trade = _paired_trade_for_assignment(final_body_assignment)
+        if paired_trade is not None and paired_trade["refused"]:
+            refusals = {layer: row for layer, row in paired_trade["routed_layers"].items()
+                        if row["refused"]}
+            raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
+                             + DIRECT_ASCII_SPACED_LAX.text(refusals))
         final_body_payload = _assignment_payload_totals(
             final_body_assignment,
             require_all_stats=True,
@@ -4482,6 +4547,10 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     isinstance(v, dict) and "solver_seconds" in v
                     for v in _solve_diagnostics.values()) else {}),
             **propagated_cost_provenance(research_cost_provenance),
+            **({"paired_rate_trade": paired_trade,
+                "cost_baseline_assignment_sha256": DIRECT_UTF8_STRICT.sha256(cost_baseline_assignment),
+                "paired_cost_scope": "sum_of_decision_unit_paired_ucbs; full-assignment covariance reported separately"}
+               if paired_trade is not None else {}),
             "assignment_payload_bits_total": (
                 float(final_assignment_payload["bits_total"])
                 if not final_assignment_payload["missing_stats_names"]
@@ -6209,6 +6278,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         # floor clears but serving-group promotion overshoots needs a slightly
         # looser target. The solver recorded both; report them.
         d = _solve_diagnostics.get(round(float(args.target_bits), 9), {})
+        if d.get("reason") == "routed_expert_dominance":
+            trade = d["exact_filter_trace"][-1]["paired_rate_trade"]
+            refusals = {layer: row for layer, row in trade["routed_layers"].items() if row["refused"]}
+            raise SystemExit("[alloc] ERROR: routed layer rate trade refused: "
+                             + DIRECT_ASCII_SPACED_LAX.text(refusals))
         if measured_runtime_table is not None:
             raise SystemExit(
                 f"[alloc] measured runtime proposal infeasible at target_bits={args.target_bits}: "

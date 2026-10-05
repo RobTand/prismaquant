@@ -1020,6 +1020,19 @@ class ModelProfile(ABC):
             return f"{parent}::__packed_format__:{','.join(group)}"
         return None
 
+    def routed_expert_identity(self, qname: str) -> tuple[str, str] | None:
+        """The routed layer and expert owning a split projection, not its role.
+
+        Packed rows cannot identify an individual expert; callers requiring
+        per-expert attribution must refuse them rather than manufacture one.
+        """
+        parsed = self._packed_expert_projection_leaf(qname)
+        if parsed is None or not parsed[2]:
+            return None
+        parent, _leaf, _split = parsed
+        expert = str(qname).split(".")[len(parent.split("."))]
+        return parent, expert
+
     # ------------------------------------------------------------
     # Source passthrough + text-only staging
     # ------------------------------------------------------------
