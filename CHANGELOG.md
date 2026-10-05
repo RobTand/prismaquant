@@ -231,6 +231,46 @@
   unchanged.
 
 
+
+- **The head-wait credit control holds the second launch's token** (#2039).
+  The control test for mid-wait credit reaping decided which launch's
+  completion token to hold after the event had already appended itself, so it
+  held the FIRST launch's token, stranded that credit for the whole test and
+  could never reach the mid-wait admission it exists to prove. The decision
+  now happens before the append. Its read-order check also assumed FIFO worker
+  starts, which the shared two-thread executor does not promise. The control
+  now forces a legal out-of-order read and proves coordinator CUDA launches
+  remain ordered, while retaining the mid-wait fifth-read credit gate.
+  Control-only; production admission and lifetime semantics are unchanged.
+
+- **Projected preparation reserves comparison and allocator residency**
+  (#2039, PR #2247). The previous element-count term was the full-size bool
+  comparison-mask allowance, not staged-copy byte pricing: staged bytes were
+  already charged by the private-byte bound. Replacing that term removed the
+  mask allowance and charged retained verdicts/settle storage as logical bytes
+  even though the guard reads CUDA allocator segments. The opt-in path now
+  conservatively charges a fresh native allocator segment for every staged
+  copy, comparison mask, reduction workspace, retained verdict and per-device
+  settle stack across the entire pass, without assuming cache or stream reuse.
+  Nondefault or unavailable allocator settings refuse before source reads;
+  serial preparation is unchanged. Actual CUDA reserved-growth and early
+  refusal regressions replace the arithmetic-only reservation assertion.
+  Four credits, the finite private-byte cap, authentication, ordered refusals,
+  lifetimes and cancellation remain intact. The historical device timing is
+  an unqualified same-host screen, not a host-copy causality, residency saving,
+  energy/work-per-joule or campaign qualification claim.
+
+- **Ordered projected preparation reaps freed credits during the head wait**
+  (#2039). The coordinator held all four credits until the ordered head's
+  staging wait returned at the loop top, so a launch whose completion event
+  fired mid-wait idled both read-pool workers instead of admitting the next
+  source read. The head wait now reaps completed events and admits through
+  the same finite-credit rule before each bounded result poll. Admission
+  order, the serial-fallback exclusion, private-buffer lifetimes through
+  asynchronous completion and cancellation drains are unchanged; the paired
+  device timing comparison is a separate measurement.
+
+
 - **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing
