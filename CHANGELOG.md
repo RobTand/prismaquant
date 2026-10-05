@@ -79,10 +79,13 @@
 - **PrismaBuild test imports are owned by tests or fixtures, not collection**
   (#2265). The control-artifact tests import their installed CAS inside the
   two tests that use it; the optional prefill decomposer harness imports its
-  candidate inside its module restore scope. A syntax-tree regression checks
-  every test module, including conditional and class-body imports, for new
-  direct collection-time imports. Existing source-origin refusals and
-  installed-module restoration are unchanged.
+  candidate inside an explicit graph-detaching module scope. The three readset
+  source consumers also own pinned source scopes, including when pytest
+  preloads the installed package through its public PrismaBuild bound plugin.
+  A syntax-tree regression checks direct collection imports; a real plugin
+  regression derives the readset consumers from their call graph, executes
+  them with the plugin preloaded, and proves the installed module identities
+  return afterwards. Production source-origin refusals are unchanged.
 
 - **Required domain imports and malformed-header consumer refusals stay
   visible** (Refs #2260, bounded child of #1303).

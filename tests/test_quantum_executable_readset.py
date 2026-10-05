@@ -279,6 +279,7 @@ def test_build_refuses_incomplete_status(tmp_path):
             render_prerequisite=dict(RENDER_PREREQ))
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_seal_deterministic_and_pb_validated(tmp_path):
     core, tiers, _plans = _pb()
     record, receipt, parent = _layer2(tmp_path)
@@ -1230,6 +1231,7 @@ def _expert_linears(model, runner):
         profile=runner.profile)
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
     """Real tiny-CPU quantum sequencing: phase before first payload read.
 
@@ -1285,6 +1287,7 @@ def test_acceptance_real_quantum_reports_before_reads(tmp_path, monkeypatch):
 
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 def test_acceptance_multi_window_reports_across_windows(tmp_path, monkeypatch):
     """R3: real >=2 retained-window case on the existing expert runner.
 

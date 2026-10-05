@@ -160,6 +160,60 @@ def test_restore_drops_an_added_parent_edge_after_its_entry_was_removed(tmp_path
         assert not hasattr(package, "temporary")
 
 
+def test_source_consumers_restore_the_public_plugin_import_graph():
+    """Every readset source consumer owns the graph even with a public plugin."""
+    import os
+    import subprocess
+
+    require_prismabuild_sdk()
+    root = Path(__file__).resolve().parents[1]
+    path = Path(__file__).with_name("test_quantum_executable_readset.py")
+    functions = {node.name: node for node in ast.parse(path.read_text()).body
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    calls = {name: {node.func.id for node in ast.walk(function)
+                    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+             for name, function in functions.items()}
+    consumers = {"_pb"}
+    while True:
+        expanded = consumers | {name for name, dependencies in calls.items()
+                                if dependencies & consumers}
+        if expanded == consumers:
+            break
+        consumers = expanded
+    targets = [f"tests/{path.name}::{name}" for name in functions
+               if name.startswith("test_") and name in consumers]
+    assert targets, "the readset source consumers must execute"
+    program = (
+        "import importlib, sys, pytest\n"
+        "import prismabuild.core as core\n"
+        "import prismabuild.pytest_test_bound as plugin\n"
+        "package = sys.modules['prismabuild']\n"
+        "before = {n: m for n, m in sys.modules.items() "
+        "if n == 'prismabuild' or n.startswith('prismabuild.')}\n"
+        "status = pytest.main(['-p', 'prismabuild.pytest_test_bound', "
+        "'-p', 'no:xdist', '-p', 'no:cacheprovider', *sys.argv[1:]])\n"
+        "assert status == 0, status\n"
+        "after = {n: m for n, m in sys.modules.items() "
+        "if n == 'prismabuild' or n.startswith('prismabuild.')}\n"
+        "assert after.keys() == before.keys()\n"
+        "assert all(after[n] is before[n] for n in before)\n"
+        "assert importlib.import_module('prismabuild.core') is core\n"
+        "assert package.core is core\n"
+        "assert sys.modules['prismabuild.pytest_test_bound'] is plugin\n"
+        "print('public plugin graph restored')\n"
+    )
+    env = {name: value for name, value in os.environ.items()
+           if not name.startswith("PYTEST_") and name != "PQ_OWN_PROCESS_REPORT"}
+    phase_bound = 120
+    env["PRISMABUILD_TEST_TIMEOUT_S"] = str(phase_bound)
+    done = subprocess.run(
+        [sys.executable, "-c", program, *targets], cwd=root, env=env,
+        capture_output=True, text=True,
+        timeout=phase_bound * (3 * len(targets) + 1))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "public plugin graph restored" in done.stdout
+
+
 def test_authenticated_source_scope_restores_installed_identity_and_tools(
         installed_client_sdk, monkeypatch):
     from types import ModuleType

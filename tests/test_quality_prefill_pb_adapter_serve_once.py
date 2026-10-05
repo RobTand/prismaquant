@@ -61,14 +61,16 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture(autouse=True, scope="module")
 def _pb_imports(_no_prismabuild_import_carried_between_modules):
     """Import the candidate only after this module owns its restore scope."""
+    from fleet_sdk import prismabuild_imports_restored
+
     global pb, dc, pool, pbcampaign, pbrun, _IMPORT_EPOCH
 
     # The bytecode control measures only writes made by these owned imports.
     _IMPORT_EPOCH = time.time()
-    with pytest.MonkeyPatch.context() as owned:
+    with (pytest.MonkeyPatch.context() as owned,
+          prismabuild_imports_restored(source_root=PB517_ROOT)):
         # The candidate is another agent's worktree: never write bytecode there.
         owned.setattr(sys, "dont_write_bytecode", True)
-        owned.setattr(sys, "path", list(sys.path))
         for entry in (PB517_ROOT / "src", PB517_ROOT / "tools" / "fleet",
                       PB517_ROOT / "tests"):
             if str(entry) in sys.path:
