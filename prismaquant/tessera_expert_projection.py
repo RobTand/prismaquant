@@ -526,8 +526,8 @@ _RESOLVE_INSTALLED_CAPABILITY = object()
 def _routed_unit_capability_refusal(stack: str, distinct: list[str],
                                     first_unit: str) -> str:
     return (
-        f"{stack}: selected rungs differ across the stack {distinct} "
-        f"(first: {first_unit}); planning per-unit rungs requires the Tessera "
+        f"{stack}: first mixed unit {first_unit}; selected rungs differ "
+        f"across the stack {distinct}; planning per-unit rungs requires the Tessera "
         "runtime contract v57 with producer_interface.routed_units "
         "(tessera.routed-unit-assignment.v1)")
 
