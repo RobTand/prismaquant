@@ -1697,7 +1697,9 @@ def test_cli_builds_extra_head_reads_from_the_bound_fresh_draw_plan(tmp_path):
            "--adjoint-receipt", str(space / "adjoint-capture.json"),
            "--executable-readsets"]) == 0
     expected = [plan["calibration_input"], draw["calibration_input"]]
-    for path in out.glob("layer-*.json"):
+    layer_paths = list(out.glob("layer-*.json"))
+    assert layer_paths
+    for path in layer_paths:
         record = json.loads(path.read_text())
         with gzip.open(record["executable_readset"]["manifest_path"], "rb") as stream:
             manifest = json.load(stream)
