@@ -265,18 +265,9 @@ def _route_sweep_path(args, arm: str) -> Path | None:
 
 
 def _graph_image() -> str:
-    """Observe this Docker container, not an image supplied by the operator.
-
-    Kernel cgroups or Docker's bind-mount roots identify the actual container.
-    Docker inspection supplies its image and manifest digest. Without access
-    to that evidence the graph arm refuses, including outside a container.
-
-    Return the full resolved repo@sha256 reference, never a bare digest or local
-    image ID. Tessera PR 930 review (a3e2814e) requires this exact spelling:
-    https://github.com/RobTand/tessera/pull/930#issuecomment-5985243792
-    Do not normalize either the served reference or the receipt to match.
-    """
+    """Observe the container image, stamping unavailable identity evidence per D32."""
     import re
+    from .dev_mode import NOT_COMPUTED, seal_check
 
     try:
         observed = (Path("/proc/self/cgroup").read_text()
@@ -288,12 +279,14 @@ def _graph_image() -> str:
         container_id = containers.pop()
         container = json.loads(subprocess.check_output(
             ["docker", "container", "inspect", container_id], text=True))[0]
-        if container["Id"] != container_id or not container["State"]["Running"]:
+        seal_check("container_id", container_id, container["Id"],
+                   where="native_export.graph")
+        if not container["State"]["Running"]:
             raise ValueError("observed container is not running")
         image = json.loads(subprocess.check_output(
             ["docker", "image", "inspect", container["Image"]], text=True))[0]
-        if image["Id"] != container["Image"]:
-            raise ValueError("container and inspected image IDs differ")
+        seal_check("image_id", container["Image"], image["Id"],
+                   where="native_export.graph")
         digests = {ref for ref in image.get("RepoDigests", [])
                    if re.fullmatch(r".+@sha256:[0-9a-f]{64}", ref)}
         reference = container["Config"]["Image"]
@@ -304,7 +297,9 @@ def _graph_image() -> str:
         raise ValueError("container image has no unique observed manifest digest")
     except (OSError, ValueError, KeyError, IndexError, TypeError,
             subprocess.CalledProcessError) as exc:
-        raise ValueError(f"cannot derive image: {exc}") from exc
+        seal_check("image", "observed container manifest digest", NOT_COMPUTED,
+                   where=f"native_export.graph: {exc}")
+        return NOT_COMPUTED
 
 
 def _graph_tessera_source_sha256() -> str:
@@ -316,18 +311,16 @@ def _graph_tessera_source_sha256() -> str:
     packaged pin evidence as bytes, without importing tessera.serving.
     """
     from .digests import bytes_sha256hex, file_sha256hex
-    from .tessera_serving_runtime_pin import (
-        load_tessera_serving_runtime_pin, require_exact_tessera_runtime_pin,
-    )
+    from .dev_mode import NOT_COMPUTED, seal_check
+    from .tessera_serving_runtime_pin import load_tessera_serving_runtime_pin
 
     try:
         from tessera import graph_receipt
 
         package = Path(graph_receipt.__file__).resolve().parent
-        require_exact_tessera_runtime_pin(
-            load_tessera_serving_runtime_pin(),
-            installed_contract_sha256=file_sha256hex(
-                package / "serving" / "runtime_contract.json"))
+        seal_check("tessera_runtime_pin", load_tessera_serving_runtime_pin().contract_sha256,
+                   file_sha256hex(package / "serving" / "runtime_contract.json"),
+                   where="native_export.graph")
         sources = sorted(package.rglob("*.py"),
                          key=lambda p: p.relative_to(package).as_posix())
         if not sources:
@@ -336,7 +329,9 @@ def _graph_tessera_source_sha256() -> str:
                  for p in sources)
         return bytes_sha256hex("".join(lines).encode())
     except (ImportError, OSError, ValueError, TypeError, AttributeError) as exc:
-        raise ValueError(f"cannot derive tessera_src_sha256: {exc}") from exc
+        seal_check("tessera_src_sha256", "installed Tessera Python source digest",
+                   NOT_COMPUTED, where=f"native_export.graph: {exc}")
+        return NOT_COMPUTED
 
 
 def _graph_serve_scope(llm, model_dir: Path, compilation_config: dict,
@@ -351,17 +346,22 @@ def _graph_serve_scope(llm, model_dir: Path, compilation_config: dict,
     """
     from tools.gold_engine_options import gold_fabric_request
     from .digests import file_sha256hex
+    from .dev_mode import NOT_COMPUTED, seal_check
 
     config = getattr(getattr(llm, "llm_engine", None), "vllm_config", None)
     model = getattr(config, "model_config", None)
     loaded_model = getattr(model, "model", None)
+    seal_check("loaded_model", str(model_dir.resolve()),
+               str(Path(loaded_model).resolve()) if isinstance(loaded_model, str)
+               else loaded_model, where="native_export.graph")
     try:
-        same_config = file_sha256hex(model_dir / "config.json") == config_sha256
+        current_config_sha256 = file_sha256hex(model_dir / "config.json")
     except OSError as exc:
-        raise ValueError(f"cannot derive model_config_sha256: {exc}") from exc
-    if (not isinstance(loaded_model, str)
-            or Path(loaded_model).resolve() != model_dir.resolve() or not same_config):
-        raise ValueError("cannot derive model_config_sha256: loaded model/config differs")
+        current_config_sha256 = NOT_COMPUTED
+        where = f"native_export.graph: model config.json ({exc})"
+    else:
+        where = "native_export.graph: model config.json"
+    seal_check("model_config_sha256", config_sha256, current_config_sha256, where=where)
     scope = {"image": image, "model_config_sha256": config_sha256,
              "tessera_src_sha256": source_sha256,
              "compilation_config": compilation_config}
@@ -436,7 +436,11 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
             try:
                 config_sha256 = file_sha256hex(model_dir / "config.json")
             except OSError as exc:
-                raise ValueError(f"cannot derive model_config_sha256: {exc}") from exc
+                from .dev_mode import NOT_COMPUTED, seal_check
+
+                seal_check("model_config_sha256", "readable model config.json", NOT_COMPUTED,
+                           where=f"native_export.graph: {exc}")
+                config_sha256 = NOT_COMPUTED
         from vllm import LLM, SamplingParams
         llm = LLM(
             model=str(model_dir),

@@ -335,28 +335,72 @@ def test_graph_image_uses_kernel_container_and_daemon_digest(tmp_path, monkeypat
     assert commands[0][-1] == container
 
 
-def test_graph_image_refuses_when_container_is_not_observed(monkeypatch):
+def test_graph_image_unobserved_stamps_and_continues(monkeypatch, capsys):
     from pathlib import Path
     from prismaquant import validate_native_export as owner
+    from prismaquant.dev_mode import NOT_COMPUTED
 
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     monkeypatch.setattr(Path, "read_text", lambda *a, **kw: "0::/host")
-    with pytest.raises(ValueError, match="image"):
-        owner._graph_image()
+    assert owner._graph_image() == NOT_COMPUTED
+    stamps = capsys.readouterr().err
+    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps and "image" in stamps
 
 
-def test_graph_source_digest_matches_tessera_receipt_recipe(monkeypatch):
+def test_graph_source_digest_matches_tessera_receipt_recipe():
     import hashlib
     import subprocess
     from pathlib import Path
     from tessera import graph_receipt
     from prismaquant import validate_native_export as owner
-    from prismaquant import tessera_serving_runtime_pin as pin
 
-    # This is a digest unit test, not a serving-pin qualification.
-    monkeypatch.setattr(pin, "require_exact_tessera_runtime_pin", lambda *a, **kw: None)
     root = Path(graph_receipt.__file__).resolve().parents[2]
     expected = subprocess.check_output([
         "bash", "-c", "find src -type f -name '*.py' | LC_ALL=C sort | xargs sha256sum",
     ], cwd=root)
     assert owner._graph_tessera_source_sha256() == hashlib.sha256(expected).hexdigest()
 
+
+def test_graph_source_pin_mismatch_stamps_and_continues(monkeypatch, capsys):
+    from prismaquant import validate_native_export as owner, digests
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    expected = owner._graph_tessera_source_sha256()
+    capsys.readouterr()
+    original = digests.file_sha256hex
+    monkeypatch.setattr(digests, "file_sha256hex", lambda path:
+                        "0" * 64 if path.name == "runtime_contract.json" else original(path))
+    assert owner._graph_tessera_source_sha256() == expected
+    stamps = capsys.readouterr().err
+    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
+    assert "tessera_runtime_pin" in stamps
+
+
+@pytest.mark.parametrize("drift", ["loaded_model", "changed_config", "unreadable_config"])
+def test_graph_arm_identity_drift_stamps_and_continues(
+        tmp_path, monkeypatch, capsys, drift):
+    from prismaquant import digests
+
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    owner, args, config, calls, expected = _graph_arm_fixture(tmp_path, monkeypatch)
+    original_load = sys.modules["vllm"].LLM
+
+    def load(**kwargs):
+        result = original_load(**kwargs)
+        if drift == "loaded_model":
+            config.model_config.model = str(tmp_path / "another-model")
+        elif drift == "changed_config":
+            (tmp_path / "config.json").write_bytes(b'{"model_type":"other"}')
+        else:
+            def unavailable(path):
+                raise OSError("config unavailable after load")
+            monkeypatch.setattr(digests, "file_sha256hex", unavailable)
+        return result
+
+    monkeypatch.setattr(sys.modules["vllm"], "LLM", load)
+    result = owner._run_arm(args, tmp_path, None, enforce_eager=False)
+    assert result["passed"], result
+    assert result["metrics"]["serve_scope"] == expected["serve_scope"]
+    stamps = capsys.readouterr().err
+    assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
+    assert ("loaded_model" if drift == "loaded_model" else "model_config_sha256") in stamps

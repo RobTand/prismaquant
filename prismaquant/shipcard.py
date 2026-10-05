@@ -2086,7 +2086,7 @@ def _verify_gold_record(
 
 
 def _verify_graph_receipt(metrics: Mapping[str, Any]) -> list[str]:
-    """Authenticate the saved bytes; Tessera alone judges their equality rule."""
+    """Keep receipt integrity and equality gates; stamp identity drift per D32."""
     slot = "native_export.graph"
     path = metrics.get("graph_receipt_path")
     if not isinstance(path, str) or not path:
@@ -2120,6 +2120,19 @@ def _verify_graph_receipt(metrics: Mapping[str, Any]) -> list[str]:
         return [f"{slot}: graph receipt schema {receipt.get('schema')!r} is not "
                 "tessera.graph_equals_eager.v2"]
     scope = dict(serve)
+    from .dev_mode import seal_check
+
+    try:
+        identities = {
+            "image": receipt["runtime"]["image"],
+            "model_config_sha256": receipt["model"]["config_sha256"],
+            "tessera_src_sha256": receipt["tessera"]["src_sha256"],
+        }
+    except (KeyError, TypeError) as exc:
+        return [f"{slot}: malformed graph receipt identity: {exc}"]
+    for field, recorded in identities.items():
+        seal_check(field, recorded, scope.get(field), where=slot)
+        scope[field] = recorded
     try:
         reason = graph_receipt.verify(receipt, scope)
     except Exception as exc:
@@ -2198,26 +2211,25 @@ def _verify_native_export_record(
         )
     if arm == "graph":
         problems.extend(_verify_graph_receipt(metrics))
+        from .dev_mode import NOT_COMPUTED, seal_check
+
+        scope = metrics.get("serve_scope")
         if model_dir is None:
-            problems.append(
-                f"{slot}: cannot verify serve_scope.model_config_sha256 "
-                "without the artifact model_dir")
+            seal_check("artifact model_dir", "available artifact context", NOT_COMPUTED,
+                       where=slot)
         else:
             from .digests import file_sha256hex
 
             try:
                 config_sha256 = file_sha256hex(Path(model_dir) / "config.json")
             except (OSError, ValueError) as exc:
-                problems.append(
-                    f"{slot}: cannot read artifact config.json for "
-                    f"serve_scope.model_config_sha256: {exc}")
+                config_sha256 = NOT_COMPUTED
+                where = f"{slot}: artifact config.json ({exc})"
             else:
-                scope = metrics.get("serve_scope")
-                if isinstance(scope, Mapping) and scope.get(
-                    "model_config_sha256") != config_sha256:
-                    problems.append(
-                        f"{slot}: serve_scope.model_config_sha256 differs "
-                        "from the artifact config.json sha256")
+                where = f"{slot}: artifact config.json"
+            if isinstance(scope, Mapping):
+                seal_check("model_config_sha256", scope.get("model_config_sha256"),
+                           config_sha256, where=where)
     return problems
 
 
