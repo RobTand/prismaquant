@@ -62,6 +62,81 @@ def _verified_policy():
                 max_buffer_bytes=1024**2, max_scratch_bytes=1024**2)
 
 
+@pytest.mark.parametrize('value', [None, '', '1', 'true', '00'])
+def test_dev_metadata_drift_uses_stored_capture_without_rehash(capture, monkeypatch, capsys, value):
+    root, _path, census, capture_id, acts, hessians, record = capture
+    if value is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', value)
+    requested = copy.deepcopy(capture_id)
+    requested['calibration']['fit_ids_sha256'] = 'running-draw'
+    owner = cc.open_capture_metadata(record['path'], expected_identity=requested,
+                                     expected_sha256=record['sha256'])
+    manifest = Path(record['path'])
+    replacement = manifest.with_suffix('.replacement')
+    replacement.write_bytes(manifest.read_bytes() + b' ')
+    replacement.replace(manifest)
+    original_read = Path.read_bytes
+
+    def read_bytes(path):
+        if path == manifest:
+            pytest.fail('metadata drift reread stored manifest')
+        return original_read(path)
+
+    monkeypatch.setattr(Path, 'read_bytes', read_bytes)
+    monkeypatch.setattr(cc, 'sha256',
+                        lambda *_a, **_k: pytest.fail('metadata drift rehashed capture'))
+    values, receipt = cc.prefetch_capture(record['path'], census=census, names=['a'],
+        device='cpu', metadata_owner=owner, verified_load_policy=_verified_policy())
+    assert torch.equal(values[0]['a'], acts['a'])
+    assert torch.equal(values[1]['a'], hessians['a'])
+    assert receipt['sha256'] == record['sha256']
+    assert receipt['dev_uncertified'] is True
+    assert owner.open(record['path'])['identity']['calibration']['fit_ids_sha256'] != 'running-draw'
+    assert '[DEV-MODE]' in capsys.readouterr().out
+    assert not list(root.parent.glob('*.dev-archived-*'))
+
+
+def test_dev_prefetch_identity_metadata_adopts_stored_draw(capture, monkeypatch, capsys):
+    _root, _path, census, capture_id, acts, _hessians, record = capture
+    monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    requested = copy.deepcopy(capture_id)
+    requested['calibration']['fit_ids_sha256'] = 'running-draw'
+    values, _ = cc.prefetch_capture(record['path'], expected_identity=requested,
+        census=census, names=['a'], device='cpu', expected_sha256=record['sha256'])
+    assert torch.equal(values[0]['a'], acts['a'])
+    assert '[DEV-MODE]' in capsys.readouterr().out
+
+
+def test_dev_owned_capture_still_refuses_corrupt_payload(capture, monkeypatch):
+    root, _path, census, capture_id, _acts, _hessians, record = capture
+    monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    owner = cc.open_capture_metadata(record['path'], expected_identity=capture_id,
+                                     expected_sha256=record['sha256'])
+    (root/'inputs/a.pt').write_bytes(b'corrupt stored payload')
+    with pytest.raises(RuntimeError, match='checksum|SHA256|digest'):
+        cc.prefetch_capture(record['path'], census=census, names=['a'],
+            device='cpu', metadata_owner=owner, verified_load_policy=_verified_policy())
+
+
+def test_dev_selected_source_uses_stored_digest_without_proof_or_hash(capture, monkeypatch, capsys):
+    _root, _path, census, capture_id, _acts, _hessians, record = capture
+    monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    with cc.CaptureSourceAuthentication(census['model'], capture_id, {},
+            manifest_sha256=record['sha256']) as owner:
+        monkeypatch.setattr(cc, 'sha256',
+                            lambda *_a, **_k: pytest.fail('dev source reuse rehashed'))
+        assert owner.read_json(Path(census['model'])/'config.json') == {}
+        receipt = owner.receipt()
+        assert receipt['dev_uncertified'] is True
+        assert receipt['payload_bytes_hashed'] == 0
+        assert receipt['verified_files'][0]['sha256'] == capture_id['source_files']['config.json']
+    assert '[DEV-MODE]' in capsys.readouterr().out
+
+
+
+
 def test_capture_metadata_owner_reuses_one_sealed_manifest_snapshot(capture, monkeypatch):
     """Warm singleton reads do not rehash or parse the complete manifest."""
     root, _path, census, capture_id, acts, hessians, record = capture

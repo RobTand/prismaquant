@@ -2266,10 +2266,8 @@ def run_layer_quantum_core(
                 operator = row["joint_operator_identity"]
                 if operator["qname"] != name or operator["format"] != fmt:
                     raise ValueError("probe/operator alignment mismatch")
-                # What the row measured (the calibration draw, the probes)
-                # refuses in both modes; its producer source and arithmetic
-                # (the Stage B resource policy among them) are run seals
-                # (PQ #1147): dev mode prints them and reuses the row.
+                # Stored sample dimensions remain usable; recorded draw, probe
+                # and execution metadata stamp and reuse in dev mode (D32).
                 if probe_identity_walls_differ(joint_probe_identity, row["probe_identity"]):
                     raise ValueError("probe/operator alignment mismatch")
                 seal_check("joint probe identity", probe_identity_seals(joint_probe_identity),

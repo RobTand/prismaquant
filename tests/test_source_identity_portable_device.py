@@ -83,15 +83,12 @@ def test_two_nfs_mounts_of_one_object_reuse_in_certified(monkeypatch, fstype):
 @pytest.mark.parametrize("field,value", [
     ("size", 5368221857), ("mtime_ns", 1788063368825961509),
     ("ctime_ns", 1788063368825961509)])
-def test_a_swapped_object_with_the_same_inode_refuses_on_nfs(monkeypatch, field, value):
-    """The mount relaxation drops only the device number: an object that
-    reuses the inode but differs in any other field is another object."""
-    _filesystem(monkeypatch, "nfs4")
-    for dev in (_dev_off, _dev_on):
-        dev(monkeypatch)
-        for device in (64, 66):
-            assert cs.stat_fingerprint_reuse(
-                _fingerprint(device=device, **{field: value}), _fingerprint()) is None
+def test_certified_swapped_object_refuses_on_nfs(monkeypatch, field, value):
+    _filesystem(monkeypatch, 'nfs4')
+    _dev_off(monkeypatch)
+    for device in (64, 66):
+        assert cs.stat_fingerprint_reuse(
+            _fingerprint(device=device, **{field: value}), _fingerprint()) is None
 
 
 def test_mountinfo_names_the_longest_mount_holding_the_path(monkeypatch, tmp_path):
@@ -125,14 +122,13 @@ def test_mountinfo_names_the_longest_mount_holding_the_path(monkeypatch, tmp_pat
     ("device", "64"),
     ("device", True),
 ])
-def test_any_other_difference_never_reuses(monkeypatch, field, value):
-    from prismaquant.cost_streaming import stat_fingerprint_reusable
+def test_stat_drift_is_dev_metadata_but_malformed_rows_never_reuse(monkeypatch, field, value):
     live, cached = _fingerprint(), _fingerprint(**{field: value})
     _dev_on(monkeypatch)
-    assert not stat_fingerprint_reusable(live, cached)
+    assert cs.stat_fingerprint_reusable(live, cached) is (type(value) is not str and type(value) is not bool or field == 'path')
     _dev_off(monkeypatch)
-    assert not stat_fingerprint_reusable(live, cached)
-    assert not stat_fingerprint_reusable(live, "not-a-dict")
+    assert not cs.stat_fingerprint_reusable(live, cached)
+    assert not cs.stat_fingerprint_reusable(live, 'not-a-dict')
 
 
 def test_malformed_fingerprints_never_reuse(monkeypatch):
@@ -216,6 +212,29 @@ def _counting_hash(monkeypatch):
     monkeypatch.setattr(cs, "_file_sha256", _count)
     return calls
 
+@pytest.mark.parametrize('value', [None, '', '1', 'true', '00'])
+@pytest.mark.parametrize('field', ['device', 'inode', 'size', 'mtime_ns', 'ctime_ns'])
+def test_dev_stat_drift_reuses_stored_source_without_hashing(monkeypatch, checkpoint, capsys, value, field):
+    root, shards = checkpoint
+    cache = root/'identity-cache.json'
+    first = _build_cache(root, shards)
+    payload = json.loads(cache.read_text())
+    for row in payload['fingerprints']:
+        row[field] += 1
+    cache.write_text(json.dumps(payload))
+    if value is None:
+        monkeypatch.delenv(DEV_ENV, raising=False)
+    else:
+        monkeypatch.setenv(DEV_ENV, value)
+    _refusing_hash(monkeypatch)
+    before = cache.read_bytes()
+    identity = cs.build_streamed_model_identity(_runner(shards), str(root), identity_cache_path=cache)
+    assert identity == first
+    assert cache.read_bytes() == before
+    assert '[DEV-MODE]' in capsys.readouterr().out
+
+
+
 
 def test_dev_reuses_across_device_difference_without_hashing(
         monkeypatch, checkpoint, tmp_path):
@@ -248,26 +267,19 @@ def test_certified_rehashes_across_device_difference(
     assert len(calls) == len(shards)
 
 
-def test_dev_warns_and_rehashes_mutated_cache(
-        monkeypatch, checkpoint, capsys):
-    """The digests key every cache, so dev mode hashes what the cache does
-    not cover, as certified mode does, and says so with the byte count
-    (PQ #1147)."""
+def test_dev_stat_drift_keeps_old_identity_without_rehash(monkeypatch, checkpoint, capsys):
     root, shards = checkpoint
-    cache = root / "identity-cache.json"
-    _build_cache(root, shards)
-    names = sorted(shards)
-    grown = root / names[0]
-    grown.write_bytes(b"a" * 65537)
+    cache = root/'identity-cache.json'
+    first = _build_cache(root, shards)
+    grown = root/sorted(shards)[0]
+    grown.write_bytes(b'a' * 65537)
     _dev_on(monkeypatch)
     calls = _counting_hash(monkeypatch)
     identity = cs.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=cache)
-    assert [Path(call).resolve() for call in calls] == [grown.resolve()]
-    out = capsys.readouterr().out
-    assert "[DEV-MODE] source rehash of 65537 bytes" in out
-    assert hashlib.sha256(b"a" * 65537).hexdigest() in {
-        row["sha256"] for row in identity["shards"]}
+    assert calls == []
+    assert identity == first
+    assert '[DEV-MODE]' in capsys.readouterr().out
 
 
 def test_certified_still_rehashes_mutated_cache(monkeypatch, checkpoint):

@@ -191,49 +191,57 @@ _PROBE_IDENTITY = {
 }
 
 
-@pytest.mark.parametrize("field,value,wall", [
-    ("calibration_sha256", "9" * 64, True), ("calibration_shape", [1, 4], True),
-    ("n_probes", 3, True), ("seed_base", 7, True), ("token_scope", "tail", True),
-    ("noise_layout", {"rows": 2}, True), ("source_model", {"content_sha256": "8" * 64}, True),
-    ("source_execution", {"schema": "v2"}, True),
-    ("producer_source_sha256", "9" * 64, False),
-    ("arithmetic", {"dtype": "torch.float16", "execution_partition": {"rows": 2}}, False),
-    ("arithmetic", {"dtype": "torch.bfloat16", "execution_partition": {"rows": 4}}, True),
+@pytest.mark.parametrize('field,value,dimension', [
+    ('calibration_sha256', '9' * 64, False), ('calibration_shape', [1, 4], False),
+    ('n_probes', 3, True), ('seed_base', 7, False), ('token_scope', 'tail', False),
+    ('noise_layout', {'rows': 2}, False), ('source_model', {'content_sha256': '8' * 64}, False),
+    ('source_execution', {'schema': 'v2'}, False),
+    ('producer_source_sha256', '9' * 64, False),
+    ('arithmetic', {'dtype': 'torch.float16', 'execution_partition': {'rows': 2}}, False),
+    ('arithmetic', {'dtype': 'torch.bfloat16', 'execution_partition': {'rows': 4}}, False),
 ])
-def test_a_probe_identity_splits_what_was_measured_from_how(field, value, wall):
-    """One split for the cost table, the join and Stage B's restored rows."""
+def test_probe_metadata_is_separate_from_sample_dimensions(field, value, dimension):
     from prismaquant.cost_currency import probe_identity_walls_differ
+    assert probe_identity_walls_differ(_PROBE_IDENTITY, {**_PROBE_IDENTITY, field: value}) is dimension
 
-    assert probe_identity_walls_differ(_PROBE_IDENTITY, {**_PROBE_IDENTITY, field: value}) is wall
 
 
-def test_join_refuses_a_quantum_of_another_calibration_draw(tmp_path, campaign, unset):
-    """The calibration draw is what was measured: a wall in dev mode too."""
+def test_join_stamps_another_recorded_calibration_draw(tmp_path, campaign, unset, monkeypatch):
     from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
     from tests.test_joint_quanta_allocator_bridge import _generated_outputs
     from tests.test_stageb_replay_regime import _quanta
 
     root, campaign, _, _, _ = _generated_outputs(tmp_path, campaign)
-    _restamp_probe(root, _quanta(root)[1], "calibration_sha256", "9" * 64)
-    with pytest.raises(JoinRefused, match="probe or measurement identity differs"):
+    _restamp_probe(root, _quanta(root)[1], 'calibration_sha256', '9' * 64)
+    result = join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
+                               output_dir=tmp_path/'joined')
+    assert result['status'] == 'complete'
+    assert '[DEV-MODE]' in unset()
+    monkeypatch.setenv(ENV, '0')
+    with pytest.raises(JoinRefused):
         join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
-                          output_dir=tmp_path / "joined")
-    assert "[DEV-MODE] seal probe identity" not in unset()
+                          output_dir=tmp_path/'certified')
 
 
-def test_rows_of_another_calibration_draw_refuse_in_one_cost_table(tmp_path, campaign, unset):
+
+def test_rows_of_another_recorded_draw_stamp_in_one_cost_table(tmp_path, campaign, unset, monkeypatch):
     from prismaquant.joint_quanta_join import JoinRefused, join_joint_quanta
     from tests.test_joint_quanta_allocator_bridge import _generated_outputs
     from tests.test_stageb_replay_regime import _quanta
 
     root, campaign, _, _, _ = _generated_outputs(tmp_path, campaign)
-    rewritten, total = _restamp_probe(root, _quanta(root)[1], "calibration_sha256",
-                                      "9" * 64, first_only=True)
+    rewritten, total = _restamp_probe(root, _quanta(root)[1], 'calibration_sha256',
+                                      '9' * 64, first_only=True)
     assert rewritten == 1 < total
-    with pytest.raises(JoinRefused, match="rows do not share one probe/calibration identity"):
+    result = join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
+                               output_dir=tmp_path/'joined')
+    assert result['status'] == 'complete'
+    assert '[DEV-MODE]' in unset()
+    monkeypatch.setenv(ENV, '0')
+    with pytest.raises(JoinRefused):
         join_joint_quanta(receipts=None, campaign=campaign, input_root=root,
-                          output_dir=tmp_path / "joined")
-    assert "[DEV-MODE] seal probe identity" not in unset()
+                          output_dir=tmp_path/'certified')
+
 
 
 def test_rows_of_another_producer_source_are_ranked_with_a_stamp(

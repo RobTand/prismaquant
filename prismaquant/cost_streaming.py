@@ -6293,32 +6293,24 @@ def _well_formed_fingerprint(value: object) -> bool:
 
 
 def stat_fingerprint_reuse(live: object, cached: object) -> str | None:
-    """How a recorded shard digest may be reused without rereading, or ``None``.
+    """Reuse recorded digests: exact/NFS in certified mode, stamped drift in dev.
 
-    Both sides must carry the exact six-field shape first; malformed rows
-    never match, in either mode. Then:
-
-    - ``"exact"``: all six fields are equal.
-    - ``"mount"``: only ``device`` differs, and the live file is on a
-      filesystem whose device number is client-local (NFS). Inode, size,
-      mtime, ctime and path still bind the object, so this is certified.
-    - ``"dev"``: only ``device`` differs on any other filesystem, accepted
-      in dev mode only.
-
-    Anything else -- a moved, resized, retouched or replaced file -- refuses
-    in both modes. One predicate for every seed/validate/build/adopt
-    comparison, so they cannot disagree about what reuse means.
+    Malformed records still refuse. A dev stat comparison is provenance, not
+    proof of live bytes: it never makes a consumer rehash the stored source.
     """
     if not (_well_formed_fingerprint(live) and _well_formed_fingerprint(cached)):
         return None
     if live == cached:
-        return "exact"
+        return 'exact'
     assert isinstance(live, dict) and isinstance(cached, dict)
-    if not all(live[key] == cached[key] for key in _REUSE_FINGERPRINT_FIELDS):
-        return None
-    if device_number_is_client_local(live["path"]):
-        return "mount"
-    return "dev" if dev_mode_enabled() else None
+    if (all(live[key] == cached[key] for key in _REUSE_FINGERPRINT_FIELDS)
+            and device_number_is_client_local(live['path'])):
+        return 'mount'
+    if dev_mode_enabled():
+        seal_check('source stat', cached, live, where=str(live['path']))
+        return 'dev'
+    return None
+
 
 
 def stat_fingerprint_reusable(live: object, cached: object) -> bool:
@@ -6405,14 +6397,12 @@ def _digest_cache_digests(
     both of its readers: :func:`build_source_checkpoint_identity`, and the
     seed of :func:`build_streamed_model_identity` (PQ #1374).
     """
-    # A digest cache written on another mount of the same export keys every
-    # entry under that host's device number. Re-index by the portable key
-    # without touching the file format; two entries that agree on everything
-    # but bytes taint the key instead of reusing. Malformed stored rows are
-    # skipped outright: without the exact six-field shape a row must never
-    # match, or a cache missing `device` would reuse against every host.
-    # Whether a portable match is admitted is ``stat_fingerprint_reuse``'s
-    # decision (PQ #1363), not this index's.
+    # Certified reuse keeps the existing portable stat key. D32 dev reuse is
+    # indexed by the recorded pathname, so inode/size/time drift cannot turn
+    # an existing digest into a source reread. Conflicting stored digests still
+    # taint an ambiguous cache entry; malformed rows remain unusable.
+    dev = dev_mode_enabled()
+    key_for = (lambda fp: fp['path']) if dev else portable_fingerprint_key
     portable_index: dict[str, dict[str, object]] = {}
     tainted: set[str] = set()
     for entry in reusable.values():
@@ -6420,7 +6410,7 @@ def _digest_cache_digests(
         if not _well_formed_fingerprint(stored):
             continue
         try:
-            key = portable_fingerprint_key(stored)
+            key = key_for(stored)
         except (TypeError, ValueError):
             continue
         if key in tainted:
@@ -6435,7 +6425,7 @@ def _digest_cache_digests(
     for fingerprint in fingerprints:
         cached = reusable.get(canonical_fingerprint_key(fingerprint))
         if cached is None and _well_formed_fingerprint(fingerprint):
-            candidate = portable_index.get(portable_fingerprint_key(fingerprint))
+            candidate = portable_index.get(key_for(fingerprint))
             if candidate is not None and stat_fingerprint_reusable(
                     fingerprint, candidate.get("fingerprint")):
                 cached = candidate
@@ -6661,15 +6651,12 @@ def _read_streamed_model_identity_cache(
             f"streamed model identity cache {cache_path} is corrupt; "
             "refusing identity reuse"
         ) from exc
-    if (
-        not isinstance(cached, dict)
-        or cached.get("schema") != STREAMED_MODEL_IDENTITY_CACHE_SCHEMA
-        or cached.get("source") != str(source_model)
-    ):
-        raise RuntimeError(
-            f"streamed model identity cache {cache_path} does not bind source "
-            f"{source_model!r}"
-        )
+    refusal = lambda: RuntimeError(
+        f"streamed model identity cache {cache_path} does not bind source {source_model!r}")
+    if not isinstance(cached, dict) or cached.get('schema') != STREAMED_MODEL_IDENTITY_CACHE_SCHEMA:
+        raise refusal()
+    seal_check('source cache path', cached.get('source'), str(source_model),
+               where=str(cache_path), refusal=refusal)
     identity = validate_streamed_model_identity(
         cached.get("identity"), where="streamed model identity cache"
     )
@@ -6844,30 +6831,24 @@ def build_streamed_model_identity(
             else [None]
         )
         reusable = None not in reuse
-        if reusable and "dev" in reuse:
-            dev_warning(
-                "source identity reuses "
-                f"{len(fingerprints)} recorded shard digests across a "
-                "client device-number difference (dev-only portable reuse; "
-                "certified mode would rehash): uncertified")
         if reusable:
-            if (
-                cached_identity.get("config") == canonical_json(
-                    config_dict, where="streamed model config"
-                )
-                and cached_identity.get("weight_map") == mapping
-                and cached_identity.get("checkpoint_weight_map")
-                == checkpoint_weight_map
-            ):
+            running_raw = canonical_json(config_dict, where='streamed model config')
+            raw_matches = cached_identity.get('config') == running_raw
+            semantic_matches = (canonical_streamed_model_semantic_config(cached_identity.get('config'))
+                                == canonical_streamed_model_semantic_config(config_dict))
+            if ((raw_matches or dev_mode_enabled() and semantic_matches)
+                    and cached_identity.get('weight_map') == mapping
+                    and cached_identity.get('checkpoint_weight_map') == checkpoint_weight_map):
+                seal_check('source config provenance', cached_identity.get('config'), running_raw,
+                           where='streamed model identity')
                 return cached_identity
 
     # A schema-valid old cache may cover only the executable decoder shards.
-    # Reuse each digest whose complete stat fingerprint still matches, and
-    # hash only newly covered files (for DSv4 this upgrades 45 cached body
-    # shards by reading the three MTP shards, rather than rereading 156 GB).
+    # Certified reuse requires the original stat match. Dev reuse retains
+    # recorded digests across metadata drift and hashes only genuinely new
+    # source shards not covered by either existing cache.
     reusable_sha: dict[str, str] = {}
     mutated_paths: list[str] = []
-    portable_paths: list[str] = []
     if cached is not None and cached_identity is not None:
         cached_fingerprints = cached.get("fingerprints")
         cached_shards = cached_identity.get("shards")
@@ -6905,14 +6886,6 @@ def build_streamed_model_identity(
                     reusable_sha[path_key] = str(
                         prior_shard["sha256"]
                     ).lower()
-                    if reuse == "dev":
-                        portable_paths.append(path_key)
-    if portable_paths:
-        dev_warning(
-            "source identity reuses "
-            f"{len(portable_paths)} recorded shard digests across a "
-            "client device-number difference (dev-only portable reuse; "
-            "certified mode would rehash): uncertified")
     seeded = 0
     if digest_cache_path is not None:
         pending = [fingerprint for fingerprint in fingerprints
@@ -7363,10 +7336,9 @@ def validate_cached_streamed_model_identity(
         raise RuntimeError(
             "streamed model identity cannot validate the live source config"
         ) from exc
-    if config_before != config_after:
-        raise RuntimeError(
-            "streamed model identity source config changed while validating"
-        )
+    seal_check('source config stat', config_before, config_after,
+        where='streamed model identity',
+        refusal=lambda: RuntimeError('streamed model identity source config changed while validating'))
     if live_config != cached_config:
         changed = sorted(
             key for key in set(live_config) | set(cached_config)
@@ -7377,7 +7349,6 @@ def validate_cached_streamed_model_identity(
             f"content identity: changed={changed[:12]}"
         )
 
-    portable = 0
     for path_key, expected in fingerprint_by_path.items():
         path = Path(path_key)
         if not path.is_file():
@@ -7391,17 +7362,8 @@ def validate_cached_streamed_model_identity(
                 "streamed model identity source shard stat drifted; refusing "
                 f"cached content SHA for {path}"
             )
-        if reuse == "dev":
-            portable += 1
         shard = shard_by_path[path_key]
-        if shard.get("size") != observed["size"]:
-            raise RuntimeError(
-                f"streamed model identity shard size disagrees for {path}"
-            )
-    if portable:
-        dev_warning(
-            f"streamed model identity reuses {portable} recorded shard "
-            "digests across a client device-number difference (dev-only "
-            "portable reuse; certified mode would rehash): uncertified"
-        )
+        seal_check('source shard size metadata', shard.get('size'), observed['size'],
+            where=str(path),
+            refusal=lambda: RuntimeError(f'streamed model identity shard size disagrees for {path}'))
     return identity

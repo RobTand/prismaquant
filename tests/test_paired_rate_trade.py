@@ -12,6 +12,49 @@ LOW = "FP8_E4M3"
 HIGH = "FP8_E5M2"
 
 
+@pytest.mark.parametrize('value', [None, '', '1', 'true', '00'])
+@pytest.mark.parametrize('field', ['seed_base', 'producer_source_sha256',
+                                  'calibration_sha256', 'normalization', 'source'])
+def test_dev_trade_metadata_drift_prices_stored_samples(monkeypatch, capsys, value, field):
+    if value is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', value)
+    name = 'model.layers.5.self_attn.q_proj'
+    costs, assignment, baseline = _trade_rows({name: ([1, 2], [2, 3])})
+    expected = ac.price_paired_rate_trade(costs, assignment, baseline,
+                                        profile=DefaultProfile(), ucb_z=1)
+    row = costs[name][HIGH]
+    if field == 'source':
+        row = _rebuild(row, operator_change=lambda o: o['source_weight'].update(content_sha256='f'*64))
+    else:
+        changed = {'seed_base': 100, 'producer_source_sha256': 'e'*64,
+                   'calibration_sha256': 'b'*64, 'normalization': 'stored-normalizer'}[field]
+        row = _rebuild(row, probe_change=lambda p: p.update({field: changed}))
+    costs[name][HIGH] = row
+    result = ac.price_paired_rate_trade(costs, assignment, baseline,
+                                      profile=DefaultProfile(), ucb_z=1)
+    for key in ('difference_per_probe', 'mean_difference', 'paired_standard_error',
+                'predicted_dloss', 'hedged_difference'):
+        assert result[key] == expected[key]
+    assert costs[name][HIGH] is row
+    assert result['dev_uncertified'] is True
+    assert '[DEV-MODE]' in capsys.readouterr().out
+
+
+def test_dev_trade_still_refuses_corrupt_or_partial_samples(monkeypatch):
+    monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    name = 'model.layers.5.self_attn.q_proj'
+    costs, assignment, baseline = _trade_rows({name: ([1, 2], [2, 3])})
+    costs[name][HIGH]['probe_identity']['producer_source_sha256'] = 'e'*64
+    with pytest.raises(ValueError, match='identity'):
+        ac.price_paired_rate_trade(costs, assignment, baseline, profile=DefaultProfile(), ucb_z=1)
+    costs[name][HIGH] = _row(name, [2, 3, 4], fmt=HIGH)
+    with pytest.raises(ValueError, match='align'):
+        ac.price_paired_rate_trade(costs, assignment, baseline, profile=DefaultProfile(), ucb_z=1)
+
+
+
 def _trade_rows(values):
     costs, assignment, baseline = {}, {}, {}
     for name, (a, b) in values.items():
@@ -235,6 +278,44 @@ def test_changed_packed_rows_without_expert_identity_refuse():
     name = "model.layers.5.mlp.experts.down_proj"
     with pytest.raises(ValueError, match="per-expert attribution"):
         _price({name: ([1, 1], [2, 2])})
+
+
+@pytest.mark.parametrize('value', [None, '', 'true', '0'])
+def test_real_cli_dev_metadata_drift_or_certified_refusal(tmp_path, monkeypatch, capsys, value):
+    import json
+    import pickle
+    from prismaquant import allocator
+    from prismaquant.layer_config import load_assignment
+    from test_allocator_measured_runtime_cli import _main_fixture
+
+    name, argv = _main_fixture(tmp_path, menu={LOW: (0.5, 1), HIGH: (8.5, 2)})
+    argv = argv[:argv.index('--measured-runtime-table')]
+    baseline = tmp_path/'baseline.json'
+    baseline.write_text(json.dumps({name: HIGH}))
+    payload = pickle.loads((tmp_path/'costs.pkl').read_bytes())
+    payload['costs'][name][HIGH] = _rebuild(payload['costs'][name][HIGH],
+        probe_change=lambda p: p.update(producer_source_sha256='e'*64, seed_base=100,
+                                         calibration_sha256='b'*64))
+    (tmp_path/'costs.pkl').write_bytes(pickle.dumps(payload))
+    if value is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', value)
+    monkeypatch.setenv('PRISMAQUANT_COST_UCB_Z', '1')
+    command = [*argv[1:], '--cost-baseline-assignment', str(baseline)]
+    if value == '0':
+        with pytest.raises(SystemExit, match='probe/calibration identity'):
+            allocator.main(command)
+        assert not (tmp_path/'layer.json').exists()
+        return
+    allocator.main(command)
+    assert load_assignment(tmp_path/'layer.json') == {name: LOW}
+    trade = json.loads((tmp_path/'layer.json').read_text())['__prismaquant__']['paired_rate_trade']
+    assert trade['mean_difference'] == -8
+    assert trade['paired_standard_error'] == 0
+    assert trade['dev_uncertified'] is True
+    assert '[DEV-MODE]' in capsys.readouterr().out
+
 
 
 @pytest.mark.parametrize("z", [0, 2])

@@ -46,6 +46,16 @@
 
 ### Changed
 
+- **D32 dev-mode metadata stamp-and-continue** (#2302). The existing central
+  default (anything except exact PRISMAQUANT_DEV_MODE=0) now also governs
+  capture metadata owners, source stat/digest adoption, and paired-trade
+  probe/producer/capture/source/normalizer metadata. Consumers keep stored
+  snapshots and samples without archive, rehash, recompute or proof barriers.
+  Dev receipts are explicitly uncertified; certified refusals, own-byte
+  digests, finite complete numeric dimensions and wire/kernel/resource safety
+  remain. No prices are rescaled or fabricated, and no serving qualification
+  is claimed.
+
 - **Mixed-rate COST_UCB_Z and paired rate-trade validity** (#2282, Refs #2281).
   The existing allocator accepts an explicit `--cost-baseline-assignment`;
   mixed-rate UCB requires it and matched joint AURA source/probe/currency

@@ -23,6 +23,12 @@ The contract:
   it, is integrity, not sealing, and stays in both modes: a missing unit, a
   corrupt file and bytes that do not match their own digest still refuse.
   ``tests/test_no_new_seals.py`` holds that line.
+* D32 (2026-10-05, #2302) also covers owned capture snapshots, source stat
+  records and paired-trade producer/probe/capture/normalizer metadata. Retain
+  the stored snapshot and samples on drift: no source reread, archive,
+  recompute or proof packet. Newly consumed capture bytes still check their
+  own digests; finite complete numeric dimensions and executable semantics
+  are independent of metadata equality.
 * A code change that alters stored numerics is the one case where reuse is
   wrong. Nothing detects it automatically. The ``[DEV-MODE]`` line names the
   recorded and running implementation, so a human decides, and the author of

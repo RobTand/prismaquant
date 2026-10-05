@@ -24,6 +24,7 @@ from prismaquant.perturbed_x_cache import (
 from prismaquant.memory_management import env_truthy
 from prismaquant.routed_experts import PackedExpertProjection
 from .digests import DIRECT_ASCII_SPACED_STRICT, DIRECT_ASCII_STRICT, bytes_sha256hex
+from .dev_mode import dev_mode_enabled, dev_stamp, seal_check
 
 
 JOINT_CURRENCY = "joint_aura_predicted_dloss"
@@ -1190,8 +1191,14 @@ def validate_joint_aura_entry(entry: Mapping) -> bool:
                 raise ValueError(f"invalid {field}")
         if type(probe["n_probes"]) is not int or probe["n_probes"] < 1 or type(probe["seed_base"]) is not int:
             raise ValueError("invalid probe indices")
-        if probe["distribution"] != "rademacher" or probe["normalization"] != "global_kl_fisher":
-            raise ValueError("invalid probe distribution/normalization")
+        if any(not isinstance(probe[field], str) or not probe[field]
+               for field in ('distribution', 'normalization')):
+            raise ValueError('invalid probe distribution/normalization')
+        seal_check('probe distribution/normalization',
+                   ('rademacher', 'global_kl_fisher'),
+                   (probe['distribution'], probe['normalization']),
+                   where='joint AURA row',
+                   refusal=lambda: ValueError('invalid probe distribution/normalization'))
         if not math.isfinite(float(probe["temperature"])) or probe["temperature"] <= 0:
             raise ValueError("invalid probe temperature")
         if not isinstance(operator["qname"], str) or not operator["qname"] or not isinstance(operator["format"], str) or not operator["format"]:
@@ -1656,12 +1663,13 @@ def paired_candidate_difference(entry_a: Mapping, entry_b: Mapping) -> dict:
     """A minus B with common-probe covariance retained, conditional on calibration."""
     if not validate_joint_aura_entry(entry_a) or not validate_joint_aura_entry(entry_b):
         raise ValueError("paired joint AURA requires joint rows")
-    if not _same_probe_identity(entry_a, entry_b):
-        raise ValueError("paired joint AURA probe alignment mismatch")
+    _require_probe_alignment(entry_a, entry_b, where='paired candidate',
+        message='paired joint AURA probe alignment mismatch')
     summary = paired_squared_probe_summary(entry_a["x2_per_probe"], entry_b["x2_per_probe"])
     return {**summary, "probe_ids": list(entry_a["probe_ids"]),
             "probe_identity_sha256": entry_a["probe_identity_sha256"],
-            "uncertainty_scope": "probe_sampling_conditional_on_fixed_calibration"}
+            "uncertainty_scope": "probe_sampling_conditional_on_fixed_calibration",
+            **(dev_stamp(timestamped=False) if dev_mode_enabled() else {})}
 
 
 def paired_squared_probe_summary(squared_a, squared_b) -> dict:
@@ -1692,11 +1700,17 @@ def paired_squared_probe_summary(squared_a, squared_b) -> dict:
             "difference_per_probe": values}
 
 
-def _same_probe_identity(left: Mapping, right: Mapping) -> bool:
-    # Hashes have already been checked against canonical JSON by the row
-    # validator. Python equality would conflate distinct JSON true/1/1.0.
-    return (left["probe_identity_sha256"] == right["probe_identity_sha256"]
-            and identity_sha256(left["probe_ids"]) == identity_sha256(right["probe_ids"]))
+def _require_probe_alignment(left: Mapping, right: Mapping, *, where: str, message: str) -> None:
+    """Separate usable sample dimensions from recorded probe metadata (D32)."""
+    from .cost_currency import probe_identity_walls_differ
+    if (len(left['probe_ids']) != len(right['probe_ids'])
+            or probe_identity_walls_differ(left['probe_identity'], right['probe_identity'])):
+        raise ValueError(message)
+    seal_check('probe identity',
+               {'probe_identity_sha256': left['probe_identity_sha256'], 'probe_ids': left['probe_ids']},
+               {'probe_identity_sha256': right['probe_identity_sha256'], 'probe_ids': right['probe_ids']},
+               where=where, refusal=lambda: ValueError(message))
+
 
 
 def _validated_assignment(rows: Mapping, objective: str) -> dict:
@@ -1715,8 +1729,9 @@ def _validated_assignment(rows: Mapping, objective: str) -> dict:
             raise ValueError(f"joint AURA assignment operator coordinate mismatch: {name}")
         if reference is None:
             reference = row
-        elif not _same_probe_identity(row, reference):
-            raise ValueError("joint AURA assignment probe alignment mismatch")
+        else:
+            _require_probe_alignment(row, reference, where=f'assignment {name}',
+                message='joint AURA assignment probe alignment mismatch')
     return ordered
 
 
@@ -1745,6 +1760,7 @@ def _assignment_metadata(rows: Mapping, objective: str) -> dict:
         "assignment_identity_sha256": identity_sha256(identities),
         "uncertainty_scope": PROBE_UNCERTAINTY_SCOPE,
         "measurement_status": "research",
+        **(dev_stamp(timestamped=False) if dev_mode_enabled() else {}),
     }
 
 
@@ -1793,9 +1809,9 @@ def paired_assignment_difference(
 
     Both arms must name the complete same unit roster, including unchanged
     units (which still contribute cross terms to ``joint_quadratic``). Each
-    candidate binds its own actual render/activation operator. Different
-    formats may differ there, but the same candidate cannot silently change
-    operator identity, and each unit must retain the same source weight.
+    candidate binds its own stored render/activation operator. Certified mode
+    requires matching probe/source metadata; dev mode stamps differences and
+    uses those samples unchanged. Numeric dimensions stay mandatory.
     """
     a, b = _validated_assignment(rows_a, objective), _validated_assignment(rows_b, objective)
     if a.keys() != b.keys():
@@ -1804,13 +1820,18 @@ def paired_assignment_difference(
     for name in a:
         left, right = a[name], b[name]
         operator_a, operator_b = left["joint_operator_identity"], right["joint_operator_identity"]
-        if not _same_probe_identity(left, right):
-            raise ValueError("paired joint AURA assignment probe alignment mismatch")
-        if identity_sha256(operator_a["source_weight"]) != identity_sha256(operator_b["source_weight"]):
-            raise ValueError(f"paired joint AURA source weight identity mismatch: {name}")
-        if (operator_a["format"] == operator_b["format"]
-                and left["joint_operator_identity_sha256"] != right["joint_operator_identity_sha256"]):
-            raise ValueError(f"paired joint AURA changed operator identity for the same candidate: {name}")
+        _require_probe_alignment(left, right, where=f'paired assignment {name}',
+            message='paired joint AURA assignment probe alignment mismatch')
+        for field in ('shape', 'dtype', 'logical_bytes'):
+            if operator_a['source_weight'][field] != operator_b['source_weight'][field]:
+                raise ValueError(f'paired joint AURA source weight geometry mismatch: {name}')
+        seal_check('source weight identity', operator_a['source_weight'], operator_b['source_weight'],
+            where=f'paired assignment {name}',
+            refusal=lambda: ValueError(f'paired joint AURA source weight identity mismatch: {name}'))
+        if operator_a['format'] == operator_b['format']:
+            seal_check('operator identity', left['joint_operator_identity_sha256'],
+                right['joint_operator_identity_sha256'], where=f'paired assignment {name}',
+                refusal=lambda: ValueError(f'paired joint AURA changed operator identity for the same candidate: {name}'))
         pairs.append((left, right))
     values = _paired_probe_values(pairs, objective)
     mean, stderr = _probe_moments(values)
@@ -1837,6 +1858,7 @@ def paired_assignment_difference(
         "assignment_a": metadata_a, "assignment_b": metadata_b,
         "uncertainty_scope": PROBE_UNCERTAINTY_SCOPE, "measurement_status": "research",
         **({"group_differences": grouped} if attribution_groups is not None else {}),
+        **(dev_stamp(timestamped=False) if dev_mode_enabled() else {}),
     }
 
 
