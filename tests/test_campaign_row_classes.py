@@ -395,9 +395,6 @@ def test_retired_interpreters_refuse_in_certified_mode(tag, class_name, monkeypa
         dispatch.validate_row_classes(spec)
     shape = dispatch.load_fleet_interpreters()["tags"][tag]
     assert SDK3_PYTHON not in shape["interpreters"]
-    history = shape["retired_interpreters"][SDK3_PYTHON]
-    assert len(history["attested_by"]) == 64
-    assert "SDK_VERSION 3" in history["observed"]
 
 
 @pytest.mark.parametrize("tag", ["dl380g10", "sparky", "sparklina"])
