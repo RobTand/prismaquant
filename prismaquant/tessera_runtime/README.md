@@ -103,6 +103,19 @@ contract/package with no drift and sealed the inventory/control file hashes
 in its actual CAS output. These are CPU correctness/install facts only.
 
 
+The composed 39-file pin/provisioning/reader/export/fingerprint/doc population
+then completed under the exact Git-installed overlay: PB
+`357857d174f6a5fac067c865eb7810ef32d410d02f4a54d6f12130a849b8d89d`,
+907 passed, zero failed, one skipped. The sole skip is the separately
+opt-in immutable historical-v5 publisher fixture not being supplied; active
+v56 pin/install/API controls ran. Log and per-shard record:
+`/home/rob/fleet/inventory/kernels-d13-final-composed-20261005.log` and
+`/home/rob/fleet/inventory/kernels-d13-final-composed-results-20261005.json`.
+CPU-only, two workers/cores, eight GiB total, one native thread per worker;
+CUDA/native serving, model equality, speed, power and release qualification
+are not claimed by these 907 passes.
+
+
 
 D13 still requires fresh exact-source performance/profiles/both-Spark power
 and CEO review before landing/promotion. CEO approved Option A in
