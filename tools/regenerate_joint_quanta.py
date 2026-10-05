@@ -1197,7 +1197,7 @@ def main(argv=None) -> int:
                      "sha256": row["sha256"],
                      "where": f'{row["label"]} intake'}
                     for row in staged_calib[1:]]
-production = prepared.get("production_cache", {})
+                production = prepared.get("production_cache", {})
                 production_sha = production.get("sha256") \
                     if isinstance(production, dict) else None
                 if not production_sha:

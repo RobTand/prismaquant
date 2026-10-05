@@ -165,41 +165,33 @@ def _source_execution(value):
     return value
 
 
-def _full_calibration(value, *, generic=False):
-    """Validate a full calibration record.
-
-    The original owners (static authority, diagnostic preparation, final
-    authority) pin the retained [512, 512] draw and require fit_tokens_min;
-    only the Fisher path passes ``generic=True`` to derive the shape from the
-    actual loaded tensor. Nothing else loosens.
-    """
+def _full_calibration(value, *, shape=(512, 512)):
+    """Keep the original draw pinned; only Fisher explicitly passes shape=None."""
     _exact(value, {'schema', 'artifact_sha256', 'calibration_sha256', 'shape', 'dtype',
                    'provenance'}, 'original full calibration')
     _same(value['schema'], 'prismaquant.calibration_input.v1', 'full calibration schema')
-    if generic:
-        _require(isinstance(value["shape"], list) and len(value["shape"]) == 2
-                 and all(type(dim) is int and dim > 0 for dim in value["shape"]),
-                 "full calibration shape must retain two positive integer dimensions")
-        rows, seqlen = value["shape"]
-    else:
-        _same(value["shape"], [512, 512], "full calibration shape")
-        rows, seqlen = 512, 512
+    _require(isinstance(value["shape"], list) and len(value["shape"]) == 2
+             and all(type(dim) is int and dim > 0 for dim in value["shape"]),
+             "full calibration shape must retain two positive integer dimensions")
+    if shape is not None:
+        _same(value["shape"], list(shape), "full calibration shape")
+    rows, seqlen = value["shape"]
     _same(value["dtype"], "torch.int64", "full calibration dtype")
     for key in ('artifact_sha256', 'calibration_sha256'):
         _contract.sha256(value[key], where=f'full calibration {key}')
     required = {"fit_ids_sha256", "fit_tokens", "model", "nsamples", "seed",
                 "seqlen", "source", "split_role", "text_sha256"}
-    if not generic:
-        required = required | {"fit_tokens_min"}
     provenance = value["provenance"]
-    _require(isinstance(provenance, dict) and set(provenance) == required,
-            "full calibration provenance fields differ")
+    expected_keys = (required, required | {"fit_tokens_min"}) if shape is None else (required | {"fit_tokens_min"},)
+    _require(isinstance(provenance, dict) and set(provenance) in expected_keys,
+             "full calibration provenance fields differ")
     for key, expected in (("nsamples", rows), ("seqlen", seqlen), ("fit_tokens", rows * seqlen)):
         _require(type(provenance.get(key)) is int and provenance[key] == expected,
                  f"full calibration provenance {key} differs from the actual tensor shape")
     for key in ('fit_ids_sha256', 'text_sha256'):
         _contract.sha256(provenance.get(key), where=f'full calibration provenance {key}')
-    _contract.integer(provenance["fit_tokens_min"], where="full calibration minimum fit tokens", minimum=1)
+    if "fit_tokens_min" in provenance:
+        _contract.integer(provenance["fit_tokens_min"], where="full calibration minimum fit tokens", minimum=1)
     _contract.integer(provenance['seed'], where='full calibration draw seed', minimum=0)
     for key in ('model', 'source', 'split_role'):
         _contract.string(provenance[key], where=f'full calibration provenance {key}')
@@ -618,7 +610,7 @@ def normalize_original_fisher_execution(document, calibration):
     unchanged. Native Stage A/B execute these returned row/context/probe
     fields on the actual tensor, never an old draw relabelled as a new one.
     """
-    draw = _full_calibration(calibration, generic=True)
+    draw = _full_calibration(calibration, shape=None)
     rows, seqlen = draw["shape"]
     for key, expected in (("n_calib_samples", rows), ("calib_seqlen", seqlen)):
         _require(type(document.get(key)) is int and document[key] == expected,

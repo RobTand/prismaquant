@@ -480,7 +480,7 @@ def test_source_generation_executes_the_real_128_by_2048_fisher_basis(tmp_path, 
         tmp_path, "real-fisher-128x2048.safetensors", rows=128, seqlen=2048, seed=0)
     ids, calibration = load_calibration_input(path, expected_sha256=digest,
                                              n_samples=128, seqlen=2048)
-    generation._full_calibration(calibration)
+    generation._full_calibration(calibration, shape=None)
     execution = {"n_calib_samples": 128, "calib_seqlen": 2048, "n_probes": probes,
                  "seed_base": 17000, "probe_microbatch": 1,
                  "token_scope": "all", "temperature": 1.0}
@@ -516,24 +516,12 @@ def test_source_generation_refuses_actual_fisher_basis_disagreement(
 
 
 def _original_mode_record(tmp_path, rows, seqlen):
-    from prismaquant import source_generation as generation
-    path, digest, ids, _ = _calibration_artifact(
-        tmp_path, f"original-{rows}x{seqlen}.safetensors", rows=rows, seqlen=seqlen, seed=0)
-    provenance = dict(ids_shape=[rows, seqlen])
-    import hashlib, json as _json
-    from safetensors.torch import save_file as _save
-    prov = {'fit_ids_sha256': hashlib.sha256(ids.to(torch.int32).numpy().tobytes()).hexdigest(),
-            'fit_tokens': rows * seqlen, 'fit_tokens_min': 13, 'model': '/models/tiny',
-            'nsamples': rows, 'seed': 0, 'seqlen': seqlen, 'source': 'wikitext-2-raw-v1/train',
-            'split_role': 'calibration',
-            'text_sha256': hashlib.sha256(b'fixture-corpus').hexdigest()}
-    artifact = tmp_path / f"original-mode-{rows}x{seqlen}.safetensors"
-    _save({'calibration_ids': ids}, str(artifact),
-          metadata={'calibration_provenance': _json.dumps(prov)})
-    return {'schema': 'prismaquant.calibration_input.v1',
-            'artifact_sha256': hashlib.sha256(artifact.read_bytes()).hexdigest(),
-            'calibration_sha256': hashlib.sha256(ids.numpy().tobytes()).hexdigest(),
-            'shape': [rows, seqlen], 'dtype': 'torch.int64', 'provenance': prov}
+    from prismaquant.calibration_data import load_calibration_input
+    path, digest, _ids, _provenance = _calibration_artifact(
+        tmp_path, f"original-{rows}x{seqlen}.safetensors", rows=rows, seqlen=seqlen,
+        seed=0, provenance_overrides={"fit_tokens_min": 13})
+    return load_calibration_input(path, expected_sha256=digest,
+                                  n_samples=rows, seqlen=seqlen)[1]
 
 
 def test_the_original_owners_still_refuse_a_128_by_2048_record(tmp_path):
@@ -542,7 +530,7 @@ def test_the_original_owners_still_refuse_a_128_by_2048_record(tmp_path):
     with pytest.raises(RuntimeError, match="full calibration shape"):
         generation._full_calibration(record)
     # the Fisher path alone is generic over the actual tensor
-    assert generation._full_calibration(record, generic=True) is record
+    assert generation._full_calibration(record, shape=None) is record
 
 
 def test_the_original_pinned_draw_still_validates(tmp_path):
