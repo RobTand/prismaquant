@@ -206,6 +206,8 @@
   publications and reserves resume/seed coordinates before links or receipt
   reads, even when their rendered-manifest entries are absent. Batch admission
   and the ordered writer still refuse real collisions before either write.
+  Concurrent producer admission and ordered publication install one shared
+  wire roster; a stale bootstrap cannot discard an already published owner.
   Packed expert appends include existing dense keys.
   Disk-backed weight sessions check the complete snapshot roster before
   capture or reuse and share the existing cache leaf helper. Every refusal

@@ -2284,7 +2284,10 @@ def _campaign_wire_coordinates(cache, wire_dir):
     if coordinates is None:
         coordinates = {key for key in cache.weights
                        if _wire_path(wire_dir, *key).exists()}
-        cache._campaign_wire_coordinates = coordinates
+        # Batch admission may bootstrap while the ordered writer publishes.
+        # Install only once and adopt the winner's object, so a stale snapshot
+        # can never replace a roster another thread has created or updated.
+        coordinates = vars(cache).setdefault("_campaign_wire_coordinates", coordinates)
     return coordinates
 
 

@@ -1,7 +1,8 @@
 # PrismaQuant Architecture
 
 Re-stamped 2026-10-05 (`issues/pq-2231-p3-residuals`,
-base `3f86d3d146a`, PQ #2231 items 13–15): campaign rendered-file checks
+base `3f86d3d146a`, PQ #2231 items 13–15, correction of reviewed
+head `49ea7fc87a8`): campaign rendered-file checks
 still cover the whole manifest. Wire checks use the campaign's wire-owning
 coordinate roster plus each new publication, not dense-only render entries.
 Successful ordered publications add their wire coordinate; resume and seed
@@ -1312,6 +1313,9 @@ and wire filenames over each new anchor plus its wire-owning coordinate roster.
 The wire roster initially includes existing manifest coordinates whose wire
 path is present; it is not recomputed after publication, so a new wire cannot
 retroactively turn a dense-only alias into a wire owner. Successful publications
+Producer admission and the ordered writer install one shared roster through
+dictionary `setdefault`; a concurrent stale bootstrap cannot replace a roster
+already created or updated by the other thread.
 add their coordinate in the same ordered writer step. Resume and seed admission
 reserve every on-menu coordinate before links or receipt reads, including seed
 rows later held aside as stale. Those wires need not have rendered-manifest
