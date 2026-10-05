@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- **Projected preparation validates effective CUDA allocator settings**
+  (#2039, PR #2247 hardening). An in-process allocator setter followed by an
+  empty-string reset can leave expandable segments active while the snapshot
+  configuration text is empty. The existing default-native guard now also
+  requires the qualified PyTorch 2.11 effective defaults: expandable segments
+  off, signed SIZE_MAX split bound, zero garbage-collection threshold and the
+  complete all-zero rounding table. Missing, nondefault or unpriced effective
+  fields refuse before source reads. A real setter/reset regression runs in
+  an isolated PB child process so global settings never leak into the suite.
+  The full-pass reservation, source ownership, four credits, cap, ordering,
+  lifetimes and cancellation are unchanged; no tighter or performance claim.
+
+
 - **The head-wait credit control holds the second launch's token** (#2039).
   The control test for mid-wait credit reaping decided which launch's
   completion token to hold after the event had already appended itself, so it

@@ -5200,8 +5200,22 @@ def _projected_cuda_reservation(weights):
     if torch.cuda.get_allocator_backend() != 'native':
         raise RuntimeError(refusal)
     settings = torch.cuda.memory._snapshot().get('allocator_settings', {})
-    if settings.get('PYTORCH_CUDA_ALLOC_CONF') != '':
+    # parseArgs("") resets the displayed string, not all effective settings.
+    # Qualified 2.11 snapshot serialization casts SIZE_MAX to signed int64 (-1)
+    # and emits the 16 1-MiB..64-GiB rounding intervals as power-of-two keys.
+    intervals = (64 * 1024**3 // 1024**2).bit_length() - 1
+    defaults = {'PYTORCH_CUDA_ALLOC_CONF': '', 'expandable_segments': False,
+                'max_split_size': -1, 'garbage_collection_threshold': 0.0,
+                'roundup_power2_divisions': {str(1 << i): 0 for i in range(intervals)}}
+    if not isinstance(settings, dict):
         raise RuntimeError(refusal)
+    for field, default in defaults.items():
+        value = settings.get(field)
+        if type(value) is not type(default) or value != default:
+            raise RuntimeError(f'{refusal}: unpriced effective {field}')
+    # Dict equality alone would accept False in place of the native integer 0.
+    if any(type(value) is not int for value in settings['roundup_power2_divisions'].values()):
+        raise RuntimeError(f'{refusal}: unpriced effective roundup_power2_divisions')
 
     def segment(size):
         if not size:

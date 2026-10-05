@@ -716,9 +716,16 @@ prospective device reservation includes full bool masks and allocator-sized
 verdict/settle storage, as well as staging and reduction workspace. It charges
 fresh native segments for every allocation across the pass, including cached
 freed allocations; no single-stream/cache-reuse tightening is assumed. Unknown
-or nondefault CUDA allocator settings refuse before any source read. The CPU
-private cap, four-credit lifecycle, source ownership and ordering remain as
-above; serial preparation and all serving/default gates are unchanged.
+or nondefault exposed CUDA allocator settings refuse before any source read.
+The guard checks both the configuration text and the effective PyTorch 2.11
+snapshot defaults for expandable segments, split size, garbage collection and
+all sixteen rounding intervals; an empty setter/reset string alone is not proof
+of default state. The real reset regression is isolated in a separate admitted
+process. The qualified snapshot does not expose large_segment_size or
+max_non_split_rounding_size: independent hidden-state qualification remains a
+separate prerequisite, not an assertion of this exposed-state hardening.
+The CPU private cap, four-credit lifecycle, source ownership and ordering remain
+as above; serial preparation and all serving/default gates are unchanged.
 The completed historical timing pair is an **unqualified same-host screen**:
 two prepared arms per side, 19 timed calls per arm before and 20 after. Its
 19-ms/1.20% prepared-mean difference establishes neither host-copy causality
