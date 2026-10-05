@@ -160,26 +160,32 @@ def stack_plan_request(stacks: Mapping[str, tuple[str, int]]) -> dict:
     return plan
 
 
-def _source_digest_cache_directory(override: str | Path | None, out: Path,
-                                   model_path: str | Path) -> Path:
-    """The cache directory this projection hands the producer, created if absent.
+def _refuse_inside_source(path: Path, root: Path, *, what: str, remedy: str) -> None:
+    """Refuse, by name, a path that would write inside the model source it seals."""
+    resolved = path.resolve()
+    if resolved == root or root in resolved.parents:
+        raise ExpertProjectionError(
+            f"{resolved}: {what} lies inside the checkpoint {root} it would seal; {remedy}")
+
+
+def _source_digest_cache_directory(override: str | Path | None, out: Path) -> Path:
+    """The cache directory this projection hands the producer, not yet created.
 
     Defaults beside the projection output -- a campaign-owned directory,
     outside the model source tree -- and an explicit caller path wins.  The
     producer's ``SourceDigestCache`` refuses to live inside the source it
-    seals; the bridge refuses first, by name, so a bad directory is a named
-    caller error instead of a producer traceback (PQ #2229).
+    seals; the bridge refuses that before any write, by name, so a bad
+    directory is a named caller error instead of a producer traceback
+    (PQ #2229, #2243).
     """
-    cache = Path(override) if override is not None else out.parent / "source-digest-cache"
-    root = Path(model_path).resolve()
-    resolved = cache.resolve()
-    if resolved == root or root in resolved.parents:
-        raise ExpertProjectionError(
-            f"{resolved}: source digest cache lies inside the checkpoint {root} it would "
-            f"seal; pass a {SOURCE_DIGEST_CACHE_OPTION} directory outside the model source")
+    return Path(override) if override is not None else out.parent / "source-digest-cache"
+
+
+def _prepare_source_digest_cache(cache: Path) -> Path:
+    """Create the cache directory, refusing an existing file, after the refusals."""
     if cache.exists() and not cache.is_dir():
         raise ExpertProjectionError(
-            f"{resolved}: source digest cache is an existing file, not a directory; "
+            f"{cache.resolve()}: source digest cache is an existing file, not a directory; "
             "pass a directory the producer's SourceDigestCache can write entries into")
     cache.mkdir(parents=True, exist_ok=True)
     return cache
@@ -193,7 +199,10 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
 
     ``source_identity`` hashes every checkpoint file, so this is one subprocess
     per campaign (all stacks in scope), not one per stack.  The request is
-    written beside the answer so a reader can see what was asked.
+    written beside the answer so a reader can see what was asked.  Both
+    inside-source refusals -- the projection output's parent and the digest
+    cache directory -- run before any write, so a refused call leaves the
+    model source untouched (#2243).
 
     When the producer's ``--help`` advertises ``SOURCE_DIGEST_CACHE_OPTION``
     (tessera#790), the command carries it with a stat-bound shard-digest cache
@@ -206,10 +215,14 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
     Every returned projection also carries the caller's own statement at its
     own ``source_digest_cache_use`` key -- whether the option was passed, and
     why or why not -- so a consumer never branches on the producer receipt's
-    schema.  A producer without the option runs as before and is named, never
-    silent.  A cache the caller asked for is never dropped silently either:
-    an explicit ``source_digest_cache`` with a producer that lacks the option
-    is refused by name, as is an override that is an existing file.
+    schema.  That key is PrismaQuant's, not the producer's, and because
+    ``carried_projection`` embeds this returned answer verbatim under
+    ``producer``, the carried block's producer entry carries it too (#2243);
+    nothing else in the answer is PrismaQuant's.  A producer without the
+    option runs as before and is named, never silent.  A cache the caller
+    asked for is never dropped silently either: an explicit
+    ``source_digest_cache`` with a producer that lacks the option is refused
+    by name, as is an override that is an existing file.
     """
     if not stacks:
         raise ExpertProjectionError("no stacks to project")
@@ -222,14 +235,26 @@ def request_expert_projection(model_path: str | Path, stacks: Mapping[str, tuple
             f"producer tool {tool} does not advertise {SOURCE_DIGEST_CACHE_OPTION}; refusing "
             f"to drop the caller's source digest cache {source_digest_cache} silently (PQ #2229)")
     out = Path(out_path)
+    # Both inside-source refusals run before any write (#2243): an out path
+    # or cache directory inside the checkpoint must not leave the refused
+    # call's request file behind in the tree every later source identity
+    # hashes.
+    root = Path(model_path).resolve()
+    _refuse_inside_source(out.parent, root, what="projection output",
+                          remedy="pass an --out path outside the model source")
+    cache = None
+    if carries_cache:
+        cache = _source_digest_cache_directory(source_digest_cache, out)
+        _refuse_inside_source(
+            cache, root, what="source digest cache",
+            remedy=f"pass a {SOURCE_DIGEST_CACHE_OPTION} directory outside the model source")
     out.parent.mkdir(parents=True, exist_ok=True)
     request = out.with_name(out.name + ".request.json")
     request.write_text(json.dumps(stack_plan_request(stacks), indent=1, sort_keys=True))
     command = [producer_python, "-m", tool, str(model_path),
                "--stack-plan", str(request), "--out", str(out)]
-    cache = None
     if carries_cache:
-        cache = _source_digest_cache_directory(source_digest_cache, out, model_path)
+        cache = _prepare_source_digest_cache(cache)
         command += [SOURCE_DIGEST_CACHE_OPTION, str(cache)]
     completed = subprocess.run(
         command, env=child_env,
@@ -386,9 +411,13 @@ def carried_projection(projection: Mapping[str, Any], bound: Mapping[str, Mappin
                        *, request: Mapping[str, Any], tool: str) -> dict:
     """The block the campaign payload and the allocation carry.
 
-    The producer's answer is kept verbatim under ``producer`` (it is the
-    producer's statement, not PrismaQuant's), beside the exact binding that
-    was priced and the request that produced it.
+    The producer's answer is kept verbatim under ``producer`` -- verbatim
+    except for the one caller-side key ``request_expert_projection`` adds to
+    the returned answer at ``source_digest_cache_use``, which therefore rides
+    inside this block (#2243).  The entry is otherwise the producer's
+    statement, not PrismaQuant's, and the block is not restructured: beside
+    the producer entry sit the exact binding that was priced and the request
+    that produced it.
     """
     return {
         "schema": CARRIED_PROJECTION_SCHEMA,
