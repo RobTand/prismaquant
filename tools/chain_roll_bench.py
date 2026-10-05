@@ -58,7 +58,6 @@ import hashlib
 import json
 import os
 import re
-import struct
 import subprocess
 import sys
 import time
@@ -115,6 +114,8 @@ def slice_records(slice_doc, *, layer, batches):
 
 def _safetensors_spans(model_dir: Path, names) -> list[dict]:
     """Byte ranges of ``names`` and each shard's header, adjacent ranges merged."""
+    from prismaquant.source_read_plan import read_safetensors_header
+
     index = json.loads((model_dir / "model.safetensors.index.json").read_text())
     by_shard = defaultdict(list)
     for name in names:
@@ -122,10 +123,7 @@ def _safetensors_spans(model_dir: Path, names) -> list[dict]:
     entries = []
     for shard in sorted(by_shard):
         path = model_dir / shard
-        with open(path, "rb") as handle:
-            (length,) = struct.unpack("<Q", handle.read(8))
-            header = json.loads(handle.read(length))
-        base = 8 + length
+        header, base, _size = read_safetensors_header(str(path))
         spans = sorted((base + header[name]["data_offsets"][0],
                         base + header[name]["data_offsets"][1])
                        for name in by_shard[shard])

@@ -101,6 +101,24 @@
   the tessera#790 acceptance evidence stays open.
 
 
+- **Remaining safetensors header decoders and in-file name grammars read
+  through their owners** (#1303). The model-profile validator's header check
+  and the `chain_roll_bench` / `stage_fed_demonstration` host tools use
+  `source_read_plan.read_safetensors_header` instead of restating the 8-byte
+  prefix + JSON grammar; well-formed files are byte-identical and corrupt
+  prefixes now refuse with the owner's named bound messages. The per-expert
+  cost-name grammar (`measure_quant_cost._PER_EXPERT_NAME_RE`) and the
+  streaming prefix/layer grammar (`streaming_initialization._prefix_layer_index`)
+  are each stated once, and the fused kernel module's unused local
+  `_FP4_E2M1_MAX` literal is removed in favor of the activation-contract
+  constant. Regex acceptance, spans, wire, defaults and served paths are
+  unchanged; the broader domain-numerics census stays open. The benchmark
+  imports the header reader only for manifest spans, so historical child
+  trees need not provide it merely to import the standalone tool. Coverage
+  retains real bytes, spans, grammar results and malformed-header refusals,
+  not source-layout or forwarding assertions.
+
+
 - **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
   private source/capture identities, full-width Hessians and every existing
