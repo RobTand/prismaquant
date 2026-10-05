@@ -193,38 +193,41 @@ def _cache_weight_filename(qname: str, fmt: str) -> str:
 
 
 def require_injective_cache_filenames(
-    qnames: Iterable[str],
-    formats: Iterable[str],
+    coordinates: Iterable[tuple[str, str]],
     *,
     where: str,
 ) -> None:
-    """Refuse a qname set that is not injective under ``_cache_weight_filename``.
+    """Refuse two render coordinates that share one cache filename (#2219).
 
     The leaf mangles ``.`` -> ``_`` and ``/`` -> ``__`` to stay
     filesystem-safe, so distinct qualified names can share one shard leaf
     (``a.b`` and ``a_b``; ``layer/a`` and ``layer__a``). The stored payload is
     the bare tensor -- nothing in the file names the Linear it belongs to --
-    so a colliding pair would silently read and overwrite each other's shard.
-    The mangled spelling itself is load-bearing (archive names, existing
-    caches), so instead of changing it this fails closed on the whole SET:
-    call it where a cache directory is opened for a model's selected qname
-    set, before any shard is written or read -- that is what covers resumes,
-    pre-existing caches and concurrent producers (#2219). The aliasing is
-    format-independent (a qname collision collides for every format), so
-    ``formats`` only spells the refused filename: the first entry is used.
+    so two coordinates that land on one file would silently read and
+    overwrite each other's shard. The mangled spelling itself is load-bearing
+    (archive names, existing caches), so instead of changing it this fails
+    closed on the whole SET: call it where a cache directory is opened for a
+    model's rendered coordinate set, before any shard is written or read --
+    that is what covers resumes, pre-existing caches and concurrent
+    producers. Injectivity is filename-level over ``(qname, canonical
+    format)`` coordinates: ``layer.a`` and ``layer_a`` at two different
+    formats name two different files and are admitted -- the layout #1859
+    deliberately admits -- while the same pair at one format refuses.
+    Callers pass canonical formats; ``_check_rendered_cache_destinations``
+    canonicalizes the identity's ``"qname|FMT"`` pairs before delegating.
     """
-    fmts = [str(fmt) for fmt in formats]
-    owners: dict[str, str] = {}
-    for qname in sorted({str(qname) for qname in qnames}):
-        previous = owners.setdefault(_cache_weight_leaf(qname), qname)
-        if previous != qname:
-            filename = _cache_weight_filename(
-                qname, fmts[0] if fmts else "BF16")
+    owners: dict[str, tuple[str, str]] = {}
+    for coordinate in sorted(
+        {(str(qname), str(fmt)) for qname, fmt in coordinates}
+    ):
+        filename = _cache_weight_filename(*coordinate)
+        previous = owners.setdefault(filename, coordinate)
+        if previous != coordinate:
             raise ValueError(
-                f"{where}: qualified names {previous!r} and {qname!r} map to "
-                f"one rendered cache destination {filename!r}; the mangled "
-                f"leaf is not injective and the rendered shards would "
-                f"silently overwrite each other"
+                f"{where}: coordinates {previous!r} and {coordinate!r} map "
+                f"to one rendered cache destination {filename!r}; the "
+                f"mangled leaf is not injective and the rendered shards "
+                f"would silently overwrite each other"
             )
 
 
@@ -1521,8 +1524,7 @@ class ProductionWeightCache:
         """Run the whole-manifest filename check and arm the size memo."""
         count = len(self.weights)
         require_injective_cache_filenames(
-            (key[0] for key in self.weights),
-            (key[1] for key in self.weights),
+            self.weights.keys(),
             where="production cache residency",
         )
         self._injectivity_checked_keys = count
@@ -4303,11 +4305,7 @@ def _check_rendered_cache_destinations(
          fr.canonical_format_name(pair.rsplit("|", 1)[1].strip().upper()))
         for pair in rendered_pairs
     ]
-    require_injective_cache_filenames(
-        (qname for qname, _fmt in coordinates),
-        (fmt for _qname, fmt in coordinates),
-        where=where,
-    )
+    require_injective_cache_filenames(coordinates, where=where)
 
 
 def build_production_cache_render_identity(
@@ -7385,8 +7383,7 @@ def fill_packed_expert_cache_entries(
     # written. The packed fill bypasses the dense fill's render-identity
     # build, which is where the dense path's own refusal lives.
     require_injective_cache_filenames(
-        (full for (_q, _m, _p, _pn, full, _fmt) in in_scope),
-        (fmt for (_q, _m, _p, _pn, _full, fmt) in in_scope),
+        ((full, fmt) for (_q, _m, _p, _pn, full, fmt) in in_scope),
         where="packed expert production cache",
     )
     if cache_dir_path is not None:

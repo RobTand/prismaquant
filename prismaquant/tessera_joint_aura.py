@@ -1104,8 +1104,11 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         names_by_owner.setdefault(str(_directory), []).append(_name)
     for _directory, _owned in sorted(names_by_owner.items()):
         require_injective_cache_filenames(
-            _owned,
-            (fmt for _name in _owned for fmt in payload["costs"].get(_name, ())),
+            (
+                (_name, fmt)
+                for _name in _owned
+                for fmt in payload["costs"].get(_name, ())
+            ),
             where=f"joint aura render cache @ {_directory}",
         )
     mirror_root = None if render_mirror_root is None else Path(render_mirror_root)

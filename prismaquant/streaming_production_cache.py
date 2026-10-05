@@ -1044,12 +1044,15 @@ def run_streaming_render(
         }
     # #2219: the streaming fill writes dense shards under mangled leaves and
     # bypasses the resident fill's render-identity build (where the dense
-    # path's own refusal lives), so refuse a colliding dense qname set here,
-    # before the first layer's shards are resumed or written. The packed
+    # path's own refusal lives), so refuse a colliding dense coordinate set
+    # here, before the first layer's shards are resumed or written. The packed
     # streaming leg refuses per layer inside ``fill_packed_expert_cache_entries``.
     require_injective_cache_filenames(
-        render_formats_by_qname.keys(),
-        (fmt for fmts in render_formats_by_qname.values() for fmt in fmts),
+        (
+            (qname, fmt)
+            for qname, fmts in render_formats_by_qname.items()
+            for fmt in fmts
+        ),
         where="streaming production cache",
     )
     per_layer_dense: dict[int | None, dict[str, nn.Module]] = defaultdict(dict)

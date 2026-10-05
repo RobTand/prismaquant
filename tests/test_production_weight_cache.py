@@ -1705,8 +1705,10 @@ def test_require_injective_cache_filenames_refuses_colliding_pair():
 
     with pytest.raises(ValueError) as exc_info:
         require_injective_cache_filenames(
-            ["model.layers.0.a", "model.layers.0_a"],
-            ["BF16"],
+            [
+                ("model.layers.0.a", "BF16"),
+                ("model.layers.0_a", "BF16"),
+            ],
             where="unit test open",
         )
     message = str(exc_info.value)
@@ -1722,8 +1724,10 @@ def test_require_injective_cache_filenames_refuses_slash_alias_pair():
 
     with pytest.raises(ValueError) as exc_info:
         require_injective_cache_filenames(
-            ["layer/a", "layer__a"],
-            ["NVFP4"],
+            [
+                ("layer/a", "NVFP4"),
+                ("layer__a", "NVFP4"),
+            ],
             where="unit test open",
         )
     message = str(exc_info.value)
@@ -1738,10 +1742,13 @@ def test_require_injective_cache_filenames_allows_one_qname_two_formats():
     )
 
     # One qname at two formats is two filenames (`...__BF16.pt` vs
-    # `...__NVFP4.pt`), not a collision; only distinct qnames refuse.
+    # `...__NVFP4.pt`), not a collision; only two distinct coordinates that
+    # land on one filename refuse.
     require_injective_cache_filenames(
-        ["model.layers.0.mlp.down_proj", "model.layers.0.mlp.down_proj"],
-        ["BF16", "NVFP4"],
+        [
+            ("model.layers.0.mlp.down_proj", "BF16"),
+            ("model.layers.0.mlp.down_proj", "NVFP4"),
+        ],
         where="unit test open",
     )
 
@@ -1789,8 +1796,7 @@ def test_require_injective_cache_filenames_accepts_realistic_roster():
     )
     assert len(roster) > 50
     require_injective_cache_filenames(
-        roster,
-        ["BF16", "NVFP4"],
+        [(name, fmt) for name in roster for fmt in ("BF16", "NVFP4")],
         where="unit test open",
     )
 
