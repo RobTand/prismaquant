@@ -442,7 +442,6 @@ def consumer_role(root: Path, data_manifest_sha256: str, handoff: str,
 
 
 def main(argv=None) -> int:
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     sub = ap.add_subparsers(dest="command", required=True)
     p = sub.add_parser("prepare")
@@ -461,6 +460,7 @@ def main(argv=None) -> int:
     p.add_argument("--handoff", required=True)
     p.add_argument("--handoff-sha256", required=True)
     args = ap.parse_args(argv)
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     if args.command == "prepare":
         print(DIRECT_ASCII_SPACED_LAX.text(prepare(args.root, args.tier)))
         return 0

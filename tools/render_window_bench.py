@@ -395,7 +395,11 @@ def _spy_main_shares(path: Path, rate: int):
 
 
 def cmd_analyze(args) -> int:
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
+    try:
+        from digests import DIRECT_ASCII_SPACED_LAX
+    finally:
+        sys.path.pop(0)
     out = Path(args.out)
     results = [json.loads(path.read_text()) for path in sorted(out.glob("*-r*.json"))]
     by_arm = defaultdict(list)

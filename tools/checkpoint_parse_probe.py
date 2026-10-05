@@ -89,7 +89,6 @@ def _load_plan(plan_path: Path) -> dict:
 
 
 def main(argv=None) -> int:
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--expect-digest", default=None,
@@ -112,6 +111,7 @@ def main(argv=None) -> int:
         parser.error("--loader-plan is required by --phase loader and both")
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     from prismaquant.cost_stage_checkpoint import canonical_json_sha256_normalized
     from prismaquant.interned_json import load_json_file
 

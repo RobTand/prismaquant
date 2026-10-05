@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -71,7 +72,6 @@ def _candidates(wire_dir: Path, fmt: str, layers: range, experts: int):
 
 
 def main(argv=None) -> int:
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wire-dir", required=True)
     parser.add_argument("--format", default="TESSERA_E4M3_K1_R1024")
@@ -83,6 +83,11 @@ def main(argv=None) -> int:
     parser.add_argument("--mount", default="/mnt/shared")
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
+    try:
+        from digests import DIRECT_ASCII_SPACED_LAX
+    finally:
+        sys.path.pop(0)
 
     source = _candidates(Path(args.wire_dir), args.format,
                          range(args.first_layer, args.last_layer + 1), args.experts)

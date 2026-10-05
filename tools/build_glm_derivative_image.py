@@ -25,6 +25,7 @@ _contract_path = Path(__file__).resolve().parents[1] / "prismaquant/glm_source_d
 sys.path.insert(0, str(_contract_path.parent))
 try:
     _contract = runpy.run_path(str(_contract_path))
+    from digests import DIRECT_ASCII_SPACED_LAX
 finally:
     sys.path.pop(0)
 ORIGINAL_IMAGE_CONTENT_SHA256 = _contract['ORIGINAL_IMAGE_CONTENT_SHA256']
@@ -40,7 +41,6 @@ def inspect_image(name):
 
 
 def main():
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--base-archive', type=Path,

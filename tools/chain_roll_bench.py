@@ -186,7 +186,12 @@ def cmd_manifest(args) -> int:
 # -- spec (host) -------------------------------------------------------------------
 
 def cmd_spec(args) -> int:
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+    # Host-side spec generation does not initialize the scientific package.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
+    try:
+        from digests import DIRECT_ASCII_SPACED_LAX
+    finally:
+        sys.path.pop(0)
     spec = json.loads(Path(args.base_spec).read_text())
     spool = spec["env"].get("PRISMABUILD_PRODUCED_SPOOL_ROOT")
     spec["env"] = {key: value for key, value in spec["env"].items()

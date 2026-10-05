@@ -156,7 +156,6 @@ def slice_intake(config, *, record, prepared, plan_sha256, scratch):
 
 
 def main(argv=None) -> int:
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("walk", "slice"), required=True)
     parser.add_argument("--quantum", type=Path, required=True)
@@ -172,6 +171,7 @@ def main(argv=None) -> int:
     if str(args.scratch).startswith("/mnt/shared"):
         parser.error("--scratch must be host-local, never the pool")
     args.scratch.mkdir(parents=True, exist_ok=True)
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     from prismaquant.io_spans import read_proc_io, read_proc_status
     from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
