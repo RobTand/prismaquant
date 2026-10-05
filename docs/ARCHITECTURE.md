@@ -1,13 +1,15 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-05 (`issues/pq-2231-campaign-wire-snapshots`,
-commit `a1b7e2d1e5860780121221e8ea800a3bbd03ae38`, PQ #2231,
-PR #2256 correction): campaign publication checks rendered and wire filenames
-against existing coordinates before writing; batch admission checks its whole
-scope. Packed expert appends include the dense manifest. Disk-backed weight
-sessions check their source snapshot roster before capture or adoption and
-retain the existing filename spelling. Serialization, format spellings and
-serving contracts are unchanged. CPU controls do not establish new GPU prices.
+Re-stamped 2026-10-05 (`issues/pq-2231-p3-residuals`,
+base `3f86d3d146a`, PQ #2231 items 13–15): campaign rendered-file checks
+still cover the whole manifest. Wire checks use the campaign's wire-owning
+coordinate roster plus each new publication, not dense-only render entries.
+Successful ordered publications add their wire coordinate; resume and seed
+admission reserve coordinates before linking or reading their wires. Batch
+admission checks its whole new scope. Source snapshot and packed append rules,
+filenames, serialization, format spellings and serving contracts are unchanged.
+Memory-only multi-token prediction append coverage pins existing behavior.
+Complete destination checks remain; no speed improvement is claimed.
 
 Re-stamped 2026-10-04 (`issues/pq-2229-source-digest-cache`, PQ #2229, Refs
 RobTand/tessera#790): the census caller's expert-projection request hands the
@@ -1304,13 +1306,21 @@ a storage-aware archive bound; direct callers outside this identity gate and
 full writer/reader integration remain in #870. No numerical, format, runtime-pin,
 export or serving-gate change. Gate: `tests/test_render_cache_destination_identity.py`.
 
-Write-open extension (Refs PQ #2231): the campaign checks the union of each
-new anchor and the current cache manifest before either its rendered tensor
-or wire is written. Batch admission checks the whole batch before its first
-publication; the ordered writer checks again against earlier publications.
-Rendered tensors reuse `require_injective_cache_filenames`. Wire shards retain
-`_wire_path` because resume and export consume that existing dot-to-double-
-underscore spelling, and their check compares those actual wire destinations.
+Write-open extension (PQ #2231): before either publication write, the campaign
+checks rendered filenames over each new anchor plus the whole cache manifest,
+and wire filenames over each new anchor plus its wire-owning coordinate roster.
+The wire roster initially includes existing manifest coordinates whose wire
+path is present; it is not recomputed after publication, so a new wire cannot
+retroactively turn a dense-only alias into a wire owner. Successful publications
+add their coordinate in the same ordered writer step. Resume and seed admission
+reserve every on-menu coordinate before links or receipt reads, including seed
+rows later held aside as stale. Those wires need not have rendered-manifest
+entries. Batch admission checks the whole new batch before its first publication;
+the ordered writer checks again against earlier publications. Rendered tensors
+reuse `require_injective_cache_filenames`. Wire checks compare actual `_wire_path`
+destinations, retaining the dot-to-double-underscore spelling consumed by resume
+and export. The wire roster is process-local, not cross-process ownership or an
+incremental filename index; complete destination checks remain.
 The packed expert append checks its new scope together with existing manifest
 keys, including the dense fill that created the cache. The dense fill itself
 constructs a new manifest rather than accepting a cache to append to.

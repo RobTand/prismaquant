@@ -200,9 +200,13 @@
   at one format refuses. The mangled filename spelling is unchanged.
 
 - **Campaign, wire and source snapshot writes refuse filename collisions**
-  (Refs #2231). Campaign publication checks both existing filename families
-  against the current manifest before writing; batch admission checks before
-  its first publication. Packed expert appends include existing dense keys.
+  (#2231). Campaign rendered-file checks retain the whole manifest; wire-file
+  checks include only the wire-owning roster and each new coordinate, allowing
+  dense-only aliases that never wrote a wire. The roster records successful
+  publications and reserves resume/seed coordinates before links or receipt
+  reads, even when their rendered-manifest entries are absent. Batch admission
+  and the ordered writer still refuse real collisions before either write.
+  Packed expert appends include existing dense keys.
   Disk-backed weight sessions check the complete snapshot roster before
   capture or reuse and share the existing cache leaf helper. Every refusal
   names both coordinates and their shared filename. Cross-format name aliases
