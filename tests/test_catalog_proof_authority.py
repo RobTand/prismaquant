@@ -1,6 +1,11 @@
-"""Bound proof bytes must actually authorize the exact historical encoder pair."""
+"""Proof authority contracts; real integration opts in with PQ_TEST_GENUINE_ENCODER_PROOF.
+
+Unset means that external real-proof population is not exercised, not that a
+synthetic proof replaces it. Configured missing/unpinned artifacts fail by name.
+"""
 import copy
 import json
+import os
 import pickle
 from pathlib import Path
 
@@ -74,14 +79,22 @@ def test_operation_refuses_dependency_change_before_return(tmp_path, campaign, p
 
 # The corrective admission tests bind an actual retained proof. They create no
 # passing proof artifact and qualify no model bytes by themselves.
-_GENUINE_PROOF = Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/identity-reseal-20260915/rollout-inputs/proof-bundle-9753a5b7c5-c92826fa4.json')
+_GENUINE_PROOF_ENV = 'PQ_TEST_GENUINE_ENCODER_PROOF'
 _GENUINE_SHA256 = '15b373db8429240ef29c0641818d1f7e705d18154a8c2d841381a00213fd86c9'
 
 
 def _genuine_adoption():
     import hashlib
-    raw = _GENUINE_PROOF.read_bytes()
-    assert hashlib.sha256(raw).hexdigest() == _GENUINE_SHA256
+    supplied = os.environ.get(_GENUINE_PROOF_ENV)
+    if supplied is None:
+        pytest.skip(f'{_GENUINE_PROOF_ENV} is not configured; real retained encoder-proof integration is not exercised')
+    proof = Path(supplied)
+    if not proof.is_file():
+        pytest.fail(f'{_GENUINE_PROOF_ENV}: configured proof is not a file: {proof}')
+    raw = proof.read_bytes()
+    observed = hashlib.sha256(raw).hexdigest()
+    if observed != _GENUINE_SHA256:
+        pytest.fail(f'{_GENUINE_PROOF_ENV}: SHA256 {observed} is not pinned genuine proof {_GENUINE_SHA256}')
     document = json.loads(raw)
     fixture = next(iter(document['fixture_id']['ids'].values()))
     old = document['pins']['old']['encoder_source_sha256']
@@ -91,15 +104,20 @@ def _genuine_adoption():
     return {'schema': 'prismaquant.joint_catalog_source_adoption.v1',
             'reference_encoding_identity': identity,
             'candidate_encoding_identity': {**identity, 'encoder_source_sha256': new},
-            'encoder_source_proof': {'path': str(_GENUINE_PROOF), 'sha256': _GENUINE_SHA256}}
+            'encoder_source_proof': {'path': str(proof), 'sha256': _GENUINE_SHA256}}
+
+
+@pytest.fixture
+def genuine_adoption():
+    return _genuine_adoption()
 
 
 @pytest.mark.parametrize('dev', ['0', '1'])
 @pytest.mark.parametrize('fmt', ['TESSERA_E4M3_K1_R880', 'TESSERA_E4M3_K1_R912'])
 @pytest.mark.parametrize('failure', ['missing', 'wrong_old_pair', 'wrong_new_pair'])
-def test_actual_t8_targets_require_bound_matching_proof_in_every_mode(monkeypatch, dev, fmt, failure):
+def test_actual_t8_targets_require_bound_matching_proof_in_every_mode(monkeypatch, genuine_adoption, dev, fmt, failure):
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', dev)
-    adoption = _genuine_adoption()
+    adoption = genuine_adoption
     if failure == 'missing':
         adoption['encoder_source_proof'] = None
     elif failure == 'wrong_old_pair':
@@ -113,10 +131,10 @@ def test_actual_t8_targets_require_bound_matching_proof_in_every_mode(monkeypatc
 
 
 @pytest.mark.parametrize('dev', ['0', '1'])
-def test_a_genuine_proof_never_licenses_an_uncovered_family(monkeypatch, dev):
+def test_a_genuine_proof_never_licenses_an_uncovered_family(monkeypatch, genuine_adoption, dev):
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', dev)
-    adoption = _genuine_adoption()
-    document = json.loads(_GENUINE_PROOF.read_text())
+    adoption = genuine_adoption
+    document = json.loads(Path(adoption['encoder_source_proof']['path']).read_text())
     uncovered_fmt = 'TESSERA_E4M3_K2_R880'
     assert 'TESSERA_E4M3_K2' not in document['strata']['routed']
     with pytest.raises(ValueError, match='does not cover the added candidate stratum'):
@@ -125,8 +143,28 @@ def test_a_genuine_proof_never_licenses_an_uncovered_family(monkeypatch, dev):
 
 @pytest.mark.parametrize('dev', ['0', '1'])
 @pytest.mark.parametrize('fmt', ['TESSERA_E4M3_K1_R880', 'TESSERA_E4M3_K1_R912'])
-def test_actual_genuine_proof_covers_only_its_real_t8_source_pair(monkeypatch, dev, fmt):
+def test_actual_genuine_proof_covers_only_its_real_t8_source_pair(monkeypatch, genuine_adoption, dev, fmt):
     monkeypatch.setenv('PRISMAQUANT_DEV_MODE', dev)
-    result = validated_encoder_adoption(_genuine_adoption(), fmt=fmt)
+    result = validated_encoder_adoption(genuine_adoption, fmt=fmt)
     assert result['encoder_source_proof_covered'] is True
     assert result['stratum'] == ['routed', 'TESSERA_E4M3_K1']
+
+
+def test_genuine_proof_artifact_opt_in_is_explicit(monkeypatch):
+    monkeypatch.delenv('PQ_TEST_GENUINE_ENCODER_PROOF', raising=False)
+    with pytest.raises(pytest.skip.Exception, match='PQ_TEST_GENUINE_ENCODER_PROOF'):
+        _genuine_adoption()
+
+
+def test_genuine_proof_artifact_opt_in_missing_path_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv('PQ_TEST_GENUINE_ENCODER_PROOF', str(tmp_path / 'missing-proof.json'))
+    with pytest.raises(pytest.fail.Exception, match='PQ_TEST_GENUINE_ENCODER_PROOF.*not a file'):
+        _genuine_adoption()
+
+
+def test_genuine_proof_artifact_opt_in_never_accepts_unpinned_bytes(monkeypatch, tmp_path):
+    invalid = tmp_path / 'not-a-genuine-proof.json'
+    invalid.write_bytes(b'not a measured encoder proof')
+    monkeypatch.setenv('PQ_TEST_GENUINE_ENCODER_PROOF', str(invalid))
+    with pytest.raises(pytest.fail.Exception, match='PQ_TEST_GENUINE_ENCODER_PROOF.*SHA256'):
+        _genuine_adoption()
