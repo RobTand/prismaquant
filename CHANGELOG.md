@@ -212,6 +212,16 @@
   names both coordinates and their shared filename. Cross-format name aliases
   remain legal when they name distinct files; all on-disk spellings are
   unchanged.
+  The memory-only multi-token prediction append now has an entry-point test
+  for same-format refusal before rendering and cross-format admission; this
+  pins existing behavior rather than changing it (#2231 item 13).
+
+- **Campaign filename indexing is not adopted** (#2231 item 15).
+  A filename index would need to own every cache-manifest mutation and
+  failed-publication lifetime, not just the campaign writer, to retain the
+  rendered-file refusal set. No before/after measurement establishes a material
+  cost here, so the index is not worth adding for this low-priority follow-up;
+  complete destination checks remain and no speed improvement is claimed.
 
 
 - **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**
