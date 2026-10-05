@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **Historical PACT price catalog bridge** (#2271). Backports the existing
+  multi-format catalog and its producer-owned sparse coverage checks onto
+  the retained scientific source, without changing encoder, loss/probe or
+  calibration code. The changed complete package hash is explicit; exact
+  source closure and same-encoder byte/loss controls still require independent
+  review before new-source rows are comparable. No retained price rewrite,
+  DEV_MODE permission, serving/default/pin change or v1 shipping prerequisite.
 - **Campaign resume refuses W4A4 anchors priced under another activation
   contract** (follow-on to #194; `tessera_campaign._require_resumable_anchor`).
   A pre-#194 checkpoint's W4A4 rows carry no `input_global_scale` (dynamic

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from tests.test_joint_catalog_extension import _pair, _write
 from tests.test_joint_quanta_join import campaign, probe
-from prismaquant.joint_catalog_extension import verify_catalog_pair, validated_encoder_adoption
+from prismaquant.joint_catalog_extension import R13_ADDED_FORMAT, verify_catalog_pair, validated_encoder_adoption
 
 
 def _adoption(inputs):
@@ -21,7 +21,7 @@ def _adoption(inputs):
 def test_digest_bound_but_unproven_encoder_adoption_refuses(tmp_path, campaign, probe, mutation):
     inputs, _, _ = _pair(tmp_path, campaign, probe)
     adoption = _adoption(inputs)
-    validated_encoder_adoption(adoption)
+    validated_encoder_adoption(adoption, fmt=R13_ADDED_FORMAT)
     if mutation == 'nonproof':
         adoption['encoder_source_proof'] = _write(tmp_path, 'nonproof.json', {'accepted': True})
     elif mutation == 'wrong_pair':
@@ -31,7 +31,7 @@ def test_digest_bound_but_unproven_encoder_adoption_refuses(tmp_path, campaign, 
     else:
         (tmp_path/'source-proof-arm.json').write_text('{}')
     with pytest.raises((ValueError, RuntimeError), match='encoder|proof|fixture'):
-        validated_encoder_adoption(adoption)
+        validated_encoder_adoption(adoption, fmt=R13_ADDED_FORMAT)
 
 
 def test_cached_catalog_pair_rechecks_changed_proof_arm(tmp_path, campaign, probe):
@@ -53,14 +53,14 @@ def test_operation_reuses_proof_without_per_cell_filesystem_checks(tmp_path, cam
         return original(path)
     monkeypatch.setattr(bridge, '_bound_stat_fence', fence)
     with bridge.EncoderAdoptionValidation() as operation:
-        first = operation.verify(adoption)
+        first = operation.verify(adoption, fmt=R13_ADDED_FORMAT)
         initial = len(calls)
         for _ in range(100):
-            assert operation.verify(adoption) is first
+            assert operation.verify(adoption, fmt=R13_ADDED_FORMAT) is first
         assert len(calls) == initial
     assert len(calls) > initial, 'completion must recheck dependency fences'
     with pytest.raises(ValueError, match='outside'):
-        operation.verify(adoption)
+        operation.verify(adoption, fmt=R13_ADDED_FORMAT)
 
 
 def test_operation_refuses_dependency_change_before_return(tmp_path, campaign, probe):
@@ -68,5 +68,5 @@ def test_operation_refuses_dependency_change_before_return(tmp_path, campaign, p
     inputs, _, _ = _pair(tmp_path, campaign, probe)
     with pytest.raises(ValueError, match='changed during operation'):
         with EncoderAdoptionValidation() as operation:
-            operation.verify(_adoption(inputs))
+            operation.verify(_adoption(inputs), fmt=R13_ADDED_FORMAT)
             (tmp_path/'source-proof-arm.json').write_text('{}')
