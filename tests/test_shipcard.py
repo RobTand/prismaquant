@@ -1626,7 +1626,7 @@ def test_graph_receipt_other_identity_stamps_and_continues(
     record["metrics"]["serve_scope"][field] = "another serve"
     assert _verify_native_export_record(
         "native_export.graph", record, model_dir=tmp_path) == []
-    stamps = capsys.readouterr().err
+    stamps = capsys.readouterr().out
     assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps and field in stamps
     assert record["metrics"]["serve_scope"][field] == "another serve"
 
@@ -1731,7 +1731,7 @@ def test_graph_receipt_bare_image_stamps_and_continues(tmp_path, monkeypatch, ca
     record["metrics"]["serve_scope"]["image"] = full.split("@", 1)[1]
     assert _verify_native_export_record(
         "native_export.graph", record, model_dir=tmp_path) == []
-    stamps = capsys.readouterr().err
+    stamps = capsys.readouterr().out
     assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps and "image" in stamps
 
 
@@ -1753,7 +1753,7 @@ def test_graph_receipt_other_artifact_config_stamps_and_continues(
         "native_export.graph", compute_model_sha(artifact), metrics))
     assert verify(load_shipcard(path), model_dir=artifact,
                   required=["native_export.graph"]) == []
-    stamps = capsys.readouterr().err
+    stamps = capsys.readouterr().out
     assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
     assert "model_config_sha256" in stamps and "artifact config.json" in stamps
 
@@ -1765,7 +1765,7 @@ def test_graph_receipt_without_artifact_context_stamps_and_continues(
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     assert _verify_native_export_record(
         "native_export.graph", _graph_slot_record(tmp_path)) == []
-    stamps = capsys.readouterr().err
+    stamps = capsys.readouterr().out
     assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
     assert "model_dir" in stamps
 
@@ -1783,5 +1783,5 @@ def test_graph_receipt_unreadable_artifact_config_stamps_and_continues(
     monkeypatch.setattr(digests, "file_sha256hex", unreadable)
     assert shipcard._verify_native_export_record(
         "native_export.graph", record, model_dir=tmp_path) == []
-    stamps = capsys.readouterr().err
+    stamps = capsys.readouterr().out
     assert "[DEV-MODE]" in stamps and "artifact config.json" in stamps

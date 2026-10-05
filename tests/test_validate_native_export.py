@@ -343,7 +343,7 @@ def test_graph_image_unobserved_stamps_and_continues(monkeypatch, capsys):
     monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
     monkeypatch.setattr(Path, "read_text", lambda *a, **kw: "0::/host")
     assert owner._graph_image() == NOT_COMPUTED
-    stamps = capsys.readouterr().err
+    stamps = capsys.readouterr().out
     assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps and "image" in stamps
 
 
@@ -371,7 +371,7 @@ def test_graph_source_pin_mismatch_stamps_and_continues(monkeypatch, capsys):
     monkeypatch.setattr(digests, "file_sha256hex", lambda path:
                         "0" * 64 if path.name == "runtime_contract.json" else original(path))
     assert owner._graph_tessera_source_sha256() == expected
-    stamps = capsys.readouterr().err
+    stamps = capsys.readouterr().out
     assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
     assert "tessera_runtime_pin" in stamps
 
@@ -401,6 +401,6 @@ def test_graph_arm_identity_drift_stamps_and_continues(
     result = owner._run_arm(args, tmp_path, None, enforce_eager=False)
     assert result["passed"], result
     assert result["metrics"]["serve_scope"] == expected["serve_scope"]
-    stamps = capsys.readouterr().err
+    stamps = capsys.readouterr().out
     assert "[DEV-MODE]" in stamps and "native_export.graph" in stamps
     assert ("loaded_model" if drift == "loaded_model" else "model_config_sha256") in stamps
