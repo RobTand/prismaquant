@@ -244,9 +244,9 @@ class EncoderAdoptionValidation:
         _same(adoption.get("schema"), ADOPTION_SCHEMA, "encoder adoption schema")
         reference, candidate = adoption["reference_encoding_identity"], adoption["candidate_encoding_identity"]
         bound = adoption.get("encoder_source_proof")
-        # A cell with no proof keys on None, so a stratum's dev-mode stamp is
-        # printed once per operation, not once per cell.
-        key = (None if bound is None else bound["path"], None if bound is None else bound["sha256"],
+        _require(isinstance(bound, dict) and set(bound) == {"path", "sha256"},
+                 "added candidate names no encoder source proof")
+        key = (bound["path"], bound["sha256"],
                reference.get("encoder_source_sha256"),
                candidate.get("encoder_source_sha256"), reference.get("encoder_fixture_id"),
                candidate.get("encoder_fixture_id"), unit_kind(candidate.get("unit", '')), format_family(fmt))
@@ -275,11 +275,6 @@ class EncoderAdoptionValidation:
         return False
 
 
-def _unproven_adoption(stratum):
-    """The result of an adoption no reseal proof covers, admitted in dev mode only."""
-    return {"proof": None, "producer_package": None, "dependencies": [], "fences": (),
-            "encoder_source_proof_covered": False, "stratum": list(stratum)}
-
 
 def validated_encoder_adoption(adoption, *, fmt):
     """Authenticate the existing migration's semantics and all proof dependencies.
@@ -290,16 +285,11 @@ def validated_encoder_adoption(adoption, *, fmt):
     The producer package is a declaration; Tessera independently hashes that
     complete package before using its historical identity factory.
 
-    ``fmt`` is the added candidate's format; the proof must cover its
-    ``(unit kind, format family)`` stratum. Whether a proof covers the
-    candidate's encoder-source migration is a seal (PQ #1147, PQ #1432): no
-    proof, a proof for another source pair and a proof that does not cover
-    the stratum each go through ``seal_check``. Certified mode refuses; dev
-    mode prints one ``[DEV-MODE]`` line and admits the cell with
-    ``encoder_source_proof_covered: False`` and no producer package. The exact
-    source-seal and fixture shapes, the fixture equality with the reference
-    cell, and a named proof's bytes and internal consistency stay walls in
-    both modes.
+    ``fmt`` names the added candidate's exact ``(unit kind, format family)``
+    stratum. A missing bound proof, a proof for another source pair or a
+    proof without that stratum is an unconditional refusal in every mode,
+    including DEV_MODE. Source-seal/fixture shapes and equality, named proof
+    bytes, internal consistency and dependency fences remain hard walls.
     """
     from tools.reseal_campaign_identity import load_bundle, unit_kind, format_family, Refused
 
@@ -316,30 +306,25 @@ def validated_encoder_adoption(adoption, *, fmt):
     proof = adoption.get("encoder_source_proof")
     stratum = (unit_kind(candidate["unit"]), format_family(fmt))
     migration = f"{stratum[0]}:{stratum[1]} encoder source {old} -> {new}"
-    if proof is None:
-        _seal("a reseal proof covering " + migration, None,
-              "added candidate names no encoder source proof for " + migration, same=False)
-        return _unproven_adoption(stratum)
+    _require(isinstance(proof, dict) and set(proof) == {"path", "sha256"},
+             "added candidate names no encoder source proof for " + migration)
     key = (proof["path"], proof["sha256"], _bound_stat_fence(Path(proof["path"])), old, new, fixture, stratum)
     cached = _VERIFIED_ENCODER_PROOFS.get(key)
     if cached is not None and cached["fences"] == tuple(
             (b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in cached["dependencies"]):
         return copy.deepcopy(cached)
     document = _json(proof, "encoder source proof")
-    if not (_seal(old, document.get("pins", {}).get("old", {}).get("encoder_source_sha256"),
-                  "encoder proof old source")
-            and _seal(new, document.get("pins", {}).get("new", {}).get("encoder_source_sha256"),
-                      "encoder proof new source")):
-        return _unproven_adoption(stratum)
+    _same(old, document.get("pins", {}).get("old", {}).get("encoder_source_sha256"),
+          "encoder proof old source")
+    _same(new, document.get("pins", {}).get("new", {}).get("encoder_source_sha256"),
+          "encoder proof new source")
     _require(document.get("arms"), "encoder proof has no measured comparison arms")
     try:
         checked = load_bundle(proof["path"], document["pins"])
     except Refused as error:
         raise ValueError("joint catalog extension: encoder proof refused: " + str(error)) from error
-    covered = stratum in checked["covered"]
-    if not _seal(list(stratum), sorted(list(s) for s in checked["covered"]),
-                 "encoder proof does not cover the added candidate stratum", same=covered):
-        return _unproven_adoption(stratum)
+    _require(stratum in checked["covered"],
+             "encoder proof does not cover the added candidate stratum")
     fixture_record = document.get("fixture_id", {})
     fixture_bound = {"path": fixture_record.get("result"), "sha256": fixture_record.get("result_sha256")}
     observed = _json(fixture_bound, "encoder fixture proof")
@@ -903,49 +888,7 @@ def _overlay_hessian_commitments(overlay_hessian, panel_hessian):
     return overlay_units, panel_units
 
 
-def hessian_references(payload):
-    """Every Hessian reference a cost table's rows can name, found through hash-bound inputs.
 
-    A joined table keeps the panel's H provenance in ``provenance.hessian``;
-    the rows :func:`attach_candidate_overlay` added keep the overlay cost
-    run's ``capture_sha256`` (PQ #985). The overlay's own H provenance, the
-    one that names its ``hessian_capture.references.json``, is reached through
-    the chain the table already binds: ``provenance.catalog_extension`` ->
-    ``inputs.extended_plan`` -> ``inputs.candidate_overlay`` -> ``cost`` ->
-    ``provenance.hessian`` (or directly from ``provenance.candidate_overlay``
-    on a table built with the overlay attached). Every hop is read by path and
-    SHA-256, so no reference is taken on a name alone.
-
-    Returns ``{"primary": <the table's own capture_sha256>, "captures":
-    {capture_sha256: hessian provenance}}`` for
-    ``tessera_menu.assert_uniform_hessian_identity`` (RobTand/prismaquant#1270).
-    Nothing here opens a reference file; the gate does, for the rows that
-    need it.
-    """
-    provenance = (payload or {}).get("provenance") or {}
-    primary = provenance.get("hessian")
-    captures = {}
-
-    def add(hessian):
-        if isinstance(hessian, dict) and hessian.get("capture_sha256"):
-            captures.setdefault(hessian["capture_sha256"], dict(hessian))
-
-    add(primary)
-    overlays = []
-    if provenance.get("catalog_extension") is not None:
-        document = _json(provenance["catalog_extension"], "catalog extension")
-        plan = _json(document["inputs"]["extended_plan"], "extended plan")
-        overlays.append(plan.get("inputs", {}).get("candidate_overlay"))
-    overlays.append(provenance.get("candidate_overlay"))
-    for bound in overlays:
-        if bound is None:
-            continue
-        catalog = _json(bound, "candidate overlay")
-        for source in catalog_sources(catalog):
-            costs = pickle.loads(_read_bound(source["cost"], "overlay measured scalar costs"))
-            add((costs.get("provenance") or {}).get("hessian"))
-    return {"primary": primary.get("capture_sha256") if isinstance(primary, dict) else None,
-            "captures": captures}
 
 def attach_candidate_overlay(data, bound, *, verify_payloads=False):
     """Attach an authenticated historical catalog without rewriting its base.

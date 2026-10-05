@@ -2567,16 +2567,15 @@ catalog cells), reads each format's qualification results from
 `--qualified-dir` or `--format-qualified-dir FORMAT=DIR`, and admits a
 rebinding that binds the catalog or one it declares in `carried_from`.
 
-Encoder-source adoption is a seal, not a wall, since sealing went off
-(PQ #1147). An added cell encoded under a Tessera pin that no reseal proof
-covers carries `encoder_source_proof: null`. `validated_encoder_adoption`
-routes the proof's presence, its old/new source pins and its coverage of the
-candidate's `(unit kind, format family)` stratum through `dev_mode.seal_check`:
-dev mode stamps `[DEV-MODE]` and admits the cell, and
-`PRISMAQUANT_DEV_MODE=0` refuses it. Unit, source, projection, calibration and
-`encoder_fixture_id` equality with the reference cell, the byte and stat
-fences, the wire and render digests and rendered-shape equality stay hard
-walls in both modes.
+Encoder-source adoption retains the frozen 5918 hard proof walls (PQ #2271).
+An added cell must bind a genuine proof for its exact old/new encoder-source
+pair and its `(unit kind, format family)` stratum. A missing proof, wrong
+source pair or uncovered stratum refuses unconditionally in every mode;
+DEV_MODE never admits an unproven cell, and `--no-proof` is not a production
+option. Unit/source/projection/calibration/fixture equality, wire/render
+digests, byte/stat fences and rendered-shape/H commitments remain hard.
+Closure hashes and H-screen byte/loss equality are candidate controls, never
+a substitute for the bound covering proof or independent acceptance.
 
 A catalog extension is priced by a **full re-price**, not a merge (PQ #1432).
 The join (`joint_quanta_join.py`, the `coverage` check) requires every unit's
@@ -2659,11 +2658,11 @@ encoder, loss/probe, calibration, model/profile or quantizer owners. The
 complete PrismaQuant package hash nevertheless changes and is recorded
 honestly, never restamped as the retained `6b558df3` producer.
 `tools/pact_catalog_comparability.py` hashes every durable package input and
-requires all non-catalog paths to remain byte-identical, then joins actual
-same-encoder anchor wires and losses to the retained control. Those file
-facts alone do not admit numerical comparability: the exact bridge head and
-machine-readable closure/canary proof require independent parent/D5
-acceptance before sparse new-source rows enter a comparable table.
+compares actual same-encoder anchor wires/losses with the retained control.
+That source/H-screen control neither creates nor replaces the genuine
+source-pair/stratum proof. The exact corrected head and complete proof still
+require parent/D5 acceptance before any new-source cell enters comparable
+intake; a numerically equal candidate can remain unqualified.
 The retained table is never rewritten; DEV_MODE, source-gate overrides, a
 new catalog convention and an implicit serving/default/pin promotion are
 not licensed. R880/R912 measurement is separate from v1 shipping, and a
@@ -2677,11 +2676,11 @@ catalog extension over several Tessera formats** (PQ #1432, full-gamut PACT).
 added format's recipe comes from the pinned contract (`added_format_recipe`),
 several added formats go sorted before the terminal BF16 (`extended_roster`),
 a v2 overlay catalog declares its formats and per-cell sources
-(`catalog_view`, `catalog_sources`), and encoder-source adoption without a
-covering proof goes through `dev_mode.seal_check`. The catalog builder and
-overlay assembler take N formats; the assembler's cell count is derived. The
-join decision is a full re-price, pinned by one join test. No default, stage,
-serving lane or ship gate changes; the format menu is unchanged.
+(`catalog_view`, `catalog_sources`). On this historical backport the
+three original unconditional encoder-proof refusals are preserved in every
+mode, not routed through a dev-mode seal. The builder has no `--no-proof`
+path. The unchanged full Stage B and join checks remain hard; no serving
+lane, pin, format default or full-price promotion is licensed.
 
 Re-stamped (2026-09-25, `fix/1236-deferred-unlink-publish`) for **a retired
 entry that keeps its file while its group can still be read** (PQ #1236). A

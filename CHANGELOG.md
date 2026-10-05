@@ -5,12 +5,14 @@
 ### Fixed
 
 - **Historical PACT price catalog bridge** (#2271). Backports the existing
-  multi-format catalog and its producer-owned sparse coverage checks onto
-  the retained scientific source, without changing encoder, loss/probe or
-  calibration code. The changed complete package hash is explicit; exact
-  source closure and same-encoder byte/loss controls still require independent
-  review before new-source rows are comparable. No retained price rewrite,
-  DEV_MODE permission, serving/default/pin change or v1 shipping prerequisite.
+  multi-format catalog and sparse coverage logic onto the retained source.
+  D5 rejected head 78ced97b because its missing/wrong-pair/uncovered proof
+  cases became dev-mode admissions. The correction restores all three
+  unconditional 5918 refusals in every mode and removes `--no-proof` and
+  the unproven-cell fallback. Genuine source-pair/stratum proof plus exact-head
+  independent acceptance remain mandatory; closure/H-screen equality is not
+  covering proof. No retained row rewrite, reader/serving/pin/default change,
+  full-price promotion or v1 shipping prerequisite is licensed.
 - **Campaign resume refuses W4A4 anchors priced under another activation
   contract** (follow-on to #194; `tessera_campaign._require_resumable_anchor`).
   A pre-#194 checkpoint's W4A4 rows carry no `input_global_scale` (dynamic

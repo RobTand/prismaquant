@@ -18,9 +18,9 @@ each unit's ``dir``). A workspace contributes a cell for every priced
 Tessera format a unit does not already offer (``--formats`` narrows that).
 Each cell's recipe must be the pinned contract's
 (``joint_catalog_extension.added_format_recipe``). Workspace cells bind
-``--proof``/``--proof-sha256``, or, with ``--no-proof``, no reseal proof
-(``encoder_source_proof: null``): the loader admits those only in dev mode
-(PQ #1147). Reference cells are found through ``--reference-plan``. With no
+``--proof``/``--proof-sha256``. Every workspace cell needs a genuine bound
+proof covering its exact source pair and unit-kind/family stratum in every
+mode. Reference cells are found through ``--reference-plan``. With no
 ``--workspace`` and no ``--carry``, the tool builds the R13 A4 catalog from
 its original workspace and proof, and writes the v1 bytes it always did;
 any other build writes ``prismaquant.t4_adopted_catalog.v2``.
@@ -169,8 +169,7 @@ def main():
                                           '(default: every priced Tessera format a unit does not offer)')
     parser.add_argument('--proof', help='reseal proof bundle every workspace cell binds')
     parser.add_argument('--proof-sha256')
-    parser.add_argument('--no-proof', action='store_true',
-                        help='workspace cells bind no reseal proof (admitted in dev mode only)')
+
     args = parser.parse_args()
     out = Path(args.out)
     assert not out.exists(), out
@@ -178,19 +177,18 @@ def main():
     from prismaquant.tessera_joint_aura import STAGE
 
     legacy = not args.workspace and not args.carry
-    if bool(args.proof) != bool(args.proof_sha256) or (args.proof and args.no_proof):
-        parser.error('--proof and --proof-sha256 go together, and exclude --no-proof')
+    if bool(args.proof) != bool(args.proof_sha256):
+        parser.error('--proof and --proof-sha256 go together')
     if legacy:
         workspaces = [(str(base / LEGACY_WORKSPACE_COST.relative_to(BASE)),
                        str(base / LEGACY_WORKSPACE_PLAN.relative_to(BASE)))]
         formats_filter = {FMT} if args.formats is None else set(args.formats.split(','))
-        proof_path, proof_expected = (PROOF, PROOF_SHA256) if not (args.proof or args.no_proof) else (
-            (None, None) if args.no_proof else (Path(args.proof), args.proof_sha256))
+        proof_path, proof_expected = (PROOF, PROOF_SHA256) if not args.proof else (Path(args.proof), args.proof_sha256)
     else:
         workspaces = list(args.workspace or ())
         formats_filter = None if args.formats is None else set(args.formats.split(','))
-        if workspaces and not (args.proof or args.no_proof):
-            parser.error('a --workspace build names its reseal proof (--proof) or declares none (--no-proof)')
+        if workspaces and not args.proof:
+            parser.error('a --workspace build requires its genuine bound reseal proof (--proof and --proof-sha256)')
         proof_path, proof_expected = (None, None) if not args.proof else (Path(args.proof), args.proof_sha256)
     reference_plans = args.reference_plan or [str(base / REFERENCE_PLAN.relative_to(BASE))]
 

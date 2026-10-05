@@ -1104,44 +1104,29 @@ def test_a_multi_format_pair_refuses_an_undeclared_or_misrecipied_cell(tmp_path,
         verify_catalog_pair(inputs)
 
 
-def test_a_cell_with_no_reseal_proof_is_admitted_in_dev_mode_only(tmp_path, campaign, probe, monkeypatch, capsys):
-    """New wires are encoded at the current pin, whose encoder source no reseal
-    proof covers. Sealing is off (PQ #1147): the pair check and the loader
-    admit such a cell with one [DEV-MODE] line per stratum, and certified mode
-    refuses it. The source/H and fixture walls hold in both modes."""
+@pytest.mark.parametrize('dev', ['0', '1'])
+@pytest.mark.parametrize('fmt', ['TESSERA_E4M3_K1_R880', 'TESSERA_E4M3_K1_R912'])
+def test_a_target_cell_with_no_reseal_proof_refuses_in_every_mode(tmp_path, campaign, probe, monkeypatch, dev, fmt):
+    """Neither catalog qualification nor intake admits an unproven target cell."""
     from prismaquant.joint_catalog_extension import attach_candidate_overlay
-    added = {'TESSERA_E4M3_K1_R1152': sorted(campaign['roster'])}
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', dev)
+    added = {fmt: sorted(campaign['roster'])}
     inputs, _, _ = _pair(tmp_path/'pair', campaign, probe, added=added, proof=False)
     case = _overlay_case(tmp_path/'overlay', campaign, probe, added=added, proof=False,
                          schema=CATALOG_SCHEMA_V2)
-    # Certified first: the pair memo would otherwise answer from the dev pass.
     with pytest.raises(ValueError, match='names no encoder source proof'):
         verify_catalog_pair(inputs)
     data, bound = case.bind()
     with pytest.raises(ValueError, match='names no encoder source proof'):
         attach_candidate_overlay(data, bound, verify_payloads=True)
-    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
-    capsys.readouterr()
-    assert verify_catalog_pair(inputs)['added_cells'] == len(campaign['roster'])
-    stamps = [line for line in capsys.readouterr().out.splitlines() if '[DEV-MODE]' in line]
-    assert len(stamps) == 1 and 'dense:TESSERA_E4M3_K1' in stamps[0]
-    data, bound = case.bind()
-    result = attach_candidate_overlay(data, bound, verify_payloads=True)
-    assert all('TESSERA_E4M3_K1_R1152' in roster for roster in result.formats_by_qname.values())
-    # A source/H wall still refuses in dev mode.
-    def drift(rows, _costs):
-        rows[0]['record']['identity']['calibration']['hessian_sha256'] = '0'*64
-    data, bound = case.bind(drift)
-    with pytest.raises(ValueError):
-        attach_candidate_overlay(data, bound, verify_payloads=True)
 
 
-def test_a_proof_that_does_not_cover_the_candidate_stratum_is_a_seal(tmp_path, campaign, probe, monkeypatch):
-    """A family outside this fixture's actual routed proof coverage is refused.
-    Certified mode refuses; dev mode records it unproven, without a producer
-    package. The candidate family is derived from the owning contract."""
+@pytest.mark.parametrize('dev', ['0', '1'])
+def test_an_uncovered_candidate_stratum_refuses_in_every_mode(tmp_path, campaign, probe, monkeypatch, dev):
+    """Proof coverage is an unconditional wall, never a dev-mode admission."""
     from prismaquant.joint_catalog_extension import validated_encoder_adoption
     from prismaquant.tessera_legal_domain import packaged_contract_payload
+    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', dev)
     inputs, _, _ = _pair(tmp_path, campaign, probe)
     prepared = json.loads(Path(inputs['extended_prepared']['path']).read_bytes())
     cache = pickle.loads(Path(prepared['production_cache']['path']).read_bytes())
@@ -1155,11 +1140,7 @@ def test_a_proof_that_does_not_cover_the_candidate_stratum_is_a_seal(tmp_path, c
     adoption['candidate_encoding_identity']['unit'] = 'model.layers.0.mlp.experts.0.down_proj'
     with pytest.raises(ValueError, match='does not cover the added candidate stratum'):
         validated_encoder_adoption(adoption, fmt=uncovered_fmt)
-    monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '1')
-    result = validated_encoder_adoption(adoption, fmt=uncovered_fmt)
-    assert result['encoder_source_proof_covered'] is False
-    assert result['proof'] is None and result['producer_package'] is None
-    # The fixture wall is not a seal.
     adoption['candidate_encoding_identity']['encoder_fixture_id'] = 'e'*64
     with pytest.raises(ValueError, match='adopted encoder fixture'):
         validated_encoder_adoption(adoption, fmt=uncovered_fmt)
+
