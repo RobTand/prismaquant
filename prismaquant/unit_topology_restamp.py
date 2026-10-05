@@ -26,7 +26,11 @@ import argparse
 import json
 from pathlib import Path
 import pickle
-from .digests import bytes_sha256hex
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_SPACED_LAX,
+    bytes_sha256hex,
+)
 
 RECEIPT_SCHEMA = "prismaquant.unit_topology_restamp.receipt.v1"
 
@@ -71,7 +75,7 @@ def restamp_table(*, table: str, table_sha256: str, output: str,
     }
     _atomic_write_new_bytes(target, encoded)
     _atomic_write_new_bytes(receipt_path,
-                            (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode())
+                            DIRECT_ASCII_INDENT2_LAX.encoded(receipt) + b"\n")
     return receipt
 
 
@@ -84,8 +88,9 @@ def main(argv=None) -> int:
     parser.add_argument("--model", default=None,
                         help="model whose profile declares the grammar; default provenance.model")
     args = parser.parse_args(argv)
-    print(json.dumps(restamp_table(table=args.table, table_sha256=args.table_sha256,
-                                   output=args.output, model=args.model), sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(restamp_table(
+        table=args.table, table_sha256=args.table_sha256,
+        output=args.output, model=args.model)))
     return 0
 
 

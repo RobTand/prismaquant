@@ -40,7 +40,7 @@ import torch
 from . import format_registry as fr
 from .allocator_candidates import PASSTHROUGH_SOURCE_REQUIREMENTS
 from .measure_quant_cost import canonical_linear_name
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from .kl_fisher import forward_kl_per_token
 
 # Teacher-confident threshold: teacher top-1 prob must strictly exceed this
@@ -437,8 +437,7 @@ def measure_emulated_kl(
     result["n_targets_matched"] = len(matched)
     result["provenance"] = {
         "git_commit": _git_commit(),
-        "assignment_sha256": _sha256(
-            json.dumps(assignment, sort_keys=True).encode()),
+        "assignment_sha256": DIRECT_ASCII_SPACED_LAX.sha256(assignment),
         "dataset_sha256": _sha256(tok_bytes),
         "seqlen": int(seqlen),
         "max_tokens": int(max_tokens),

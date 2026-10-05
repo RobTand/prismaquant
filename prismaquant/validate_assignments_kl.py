@@ -74,7 +74,7 @@ from prismaquant.source_prefetch import (
     _available_memory_bytes,
     prefetch_safetensors_checkpoint,
 )
-from .digests import text_sha256hex
+from .digests import DIRECT_UTF8_STRICT, text_sha256hex
 
 
 def _load_json(path: str | Path):
@@ -1739,13 +1739,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 } if candidate_budget is not None else {}),
             }
             result["resolved_assignment_payload"] = resolved_assignment_payload
-            result["resolved_assignment_payload_sha256"] = text_sha256hex(json.dumps(
-                    resolved_assignment_payload,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                    allow_nan=False,
-                ))
+            result["resolved_assignment_payload_sha256"] = DIRECT_UTF8_STRICT.sha256(
+                    resolved_assignment_payload)
             if candidate_budget is not None:
                 result["whole_artifact_upper_bound_bytes"] = int(
                     candidate_budget[

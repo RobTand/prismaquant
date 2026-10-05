@@ -19,6 +19,7 @@ from .shipcard import (
     _strict_json_object,
     safetensors_header_spans,
 )
+from .digests import DIRECT_ASCII_SPACED_LAX
 from .source_read_plan import safetensors_prefix_length
 
 
@@ -158,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(json.dumps({"status": "structure_error", "error": str(exc)}))
         return 1
-    print(json.dumps(result, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(result))
     return 0
 
 

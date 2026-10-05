@@ -543,6 +543,54 @@ class _CrossFormatMtpProfile(_CollidingMtpProfile):
         return _CrossFormatMtp()
 
 
+@pytest.mark.parametrize("second_format", ["FP8_E4M3", "NVFP4"])
+def test_mtp_memory_append_checks_only_its_own_format_coordinates(
+    tmp_path, monkeypatch, second_format,
+):
+    from prismaquant import mtp_production_cache as mtp
+
+    _patch_auto_config(monkeypatch)
+    activation_dir = tmp_path / "activations"
+    rows = torch.ones(3, 16)
+    _write_activation(activation_dir, "mtp.a.b", rows)
+    _write_activation(activation_dir, "mtp.a_b", rows)
+    cache = _empty_cache()
+    # An outside coordinate aliases the first destination, but no directory
+    # is open: only this append's own pairs belong to the check.
+    cache.weights[("mtp_a_b", "FP8_E4M3")] = torch.zeros(16, 16)
+    before = dict(cache.weights)
+    render = mtp._render_dense_layer
+    render_calls = []
+
+    def checked_render(*args, **kwargs):
+        render_calls.append(kwargs["cache_dir_path"])
+        assert second_format != "FP8_E4M3", "collision reached the renderer"
+        return render(*args, **kwargs)
+
+    monkeypatch.setattr(mtp, "_render_dense_layer", checked_render)
+    kwargs = dict(
+        profile=_CrossFormatMtpProfile(), activation_cache_dir=activation_dir,
+        render_assignment={"mtp.a.b": "FP8_E4M3", "mtp.a_b": second_format},
+        device="cpu", dtype=torch.float32, progress=False,
+    )
+    if second_format == "FP8_E4M3":
+        with pytest.raises(ValueError) as error:
+            fill_profile_mtp_production_cache(cache, "/fake/model", **kwargs)
+        assert "('mtp.a.b', 'FP8_E4M3')" in str(error.value)
+        assert "('mtp.a_b', 'FP8_E4M3')" in str(error.value)
+        assert "mtp_a_b__FP8_E4M3.pt" in str(error.value)
+        assert cache.weights == before
+        assert render_calls == []
+    else:
+        assert fill_profile_mtp_production_cache(cache, "/fake/model", **kwargs) == 2
+        assert render_calls == [None]
+        for coordinate in (("mtp.a.b", "FP8_E4M3"), ("mtp.a_b", "NVFP4")):
+            assert isinstance(cache.weights[coordinate], torch.Tensor)
+        assert cache.weights[("mtp_a_b", "FP8_E4M3")] is before[("mtp_a_b", "FP8_E4M3")]
+    assert cache.cache_dir is None
+    assert list(tmp_path.iterdir()) == [activation_dir]
+
+
 def test_mtp_append_admits_a_cross_format_alias_pair(
     tmp_path, monkeypatch,
 ):

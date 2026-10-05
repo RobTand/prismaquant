@@ -89,6 +89,7 @@ from prismaquant.activation_sampling import update_priority_reservoir
 from prismaquant.build_rtn_cache import iter_quantizable_tensors
 from prismaquant.cost_stage_checkpoint import atomic_write_bytes, unique_temp_suffix
 from prismaquant.digests import (
+    DIRECT_ASCII_INDENT2_LAX,
     DIRECT_UTF8_STRICT,
     LengthFramedSourceSha256,
     bytes_sha256hex,
@@ -2628,14 +2629,13 @@ def _write_render_score_sidecar(
 ) -> None:
     if path is None:
         return
-    import json as _json
 
     payload = {
         "schema": "prismaquant.production_render_scores.v1",
         "records": dict(sorted((str(k), dict(v)) for k, v in records.items())),
     }
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(_json.dumps(payload, indent=2, sort_keys=True))
+    tmp.write_text(DIRECT_ASCII_INDENT2_LAX.text(payload))
     os.replace(tmp, path)
 
 
@@ -5309,7 +5309,7 @@ def _merge_packed_pair_map_or_refuse(
     merged[section_key] = merged_section
     atomic_write_bytes(
         sidecar_path,
-        json.dumps(merged, indent=2, sort_keys=True).encode("utf-8"),
+        DIRECT_ASCII_INDENT2_LAX.encoded(merged),
     )
 
 
@@ -5377,7 +5377,7 @@ def _merge_streaming_layer_map_or_refuse(
     merged[section_key] = merged_section
     atomic_write_bytes(
         sidecar_path,
-        json.dumps(merged, indent=2, sort_keys=True).encode("utf-8"),
+        DIRECT_ASCII_INDENT2_LAX.encoded(merged),
     )
 
 
@@ -5464,7 +5464,7 @@ def _check_and_record_append_identity(
             )
         atomic_write_bytes(
             sidecar_path,
-            json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"),
+            DIRECT_ASCII_INDENT2_LAX.encoded(payload),
         )
         return
     try:
@@ -5501,7 +5501,7 @@ def _check_and_record_append_identity(
         merged[section_key] = current
         atomic_write_bytes(
             sidecar_path,
-            json.dumps(merged, indent=2, sort_keys=True).encode("utf-8"),
+            DIRECT_ASCII_INDENT2_LAX.encoded(merged),
         )
         return
     try:
@@ -5636,9 +5636,7 @@ def _check_production_cache_render_identity(
             }
         atomic_write_bytes(
             sidecar_path,
-            json.dumps(
-                current_identity, indent=2, sort_keys=True
-            ).encode("utf-8"),
+            DIRECT_ASCII_INDENT2_LAX.encoded(current_identity),
         )
         return
     try:
@@ -5712,7 +5710,7 @@ def _check_production_cache_render_identity(
             )
             atomic_write_bytes(
                 sidecar_path,
-                json.dumps(adopted, indent=2, sort_keys=True).encode("utf-8"),
+                DIRECT_ASCII_INDENT2_LAX.encoded(adopted),
             )
             return
         raise ValueError(

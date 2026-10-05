@@ -72,7 +72,7 @@ from .cost_stage_checkpoint import canonical_json, canonical_json_sha256, publis
 from .dev_mode import NOT_COMPUTED, seal_check
 from .joint_adjoint_slices import checkpoint_cotangent_plane, checkpoint_is_referenced
 from .matmul_arithmetic import BF16_REDUCTION_FIELD
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
 
 CHAIN_STATE_SCHEMA = "prismaquant.stage_a.chain_state.v1"
 CHAIN_ARITHMETIC_SCHEMA = "prismaquant.stage_a.chain_arithmetic.v1"
@@ -201,8 +201,7 @@ def build_chain_state(*, run_identity, stride, boundary_storage, bind_identity, 
 
 def write_chain_state(space, document) -> dict:
     """Publish the chain state once; a second writer refuses."""
-    payload = (json.dumps(document, sort_keys=True, separators=(",", ":"),
-                          allow_nan=False) + "\n").encode()
+    payload = DIRECT_ASCII_STRICT.encoded(document) + b"\n"
     path = chain_state_path(space)
     if not publish_new_bytes(path, payload):
         raise ChainResumeRefused(

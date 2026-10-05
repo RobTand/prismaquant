@@ -59,7 +59,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from .cost_stage_checkpoint import canonical_json_bytes, canonical_json_sha256
 from .dev_mode import seal_check
-from .digests import bytes_sha256hex, newline_utf8_sha256
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, newline_utf8_sha256
 from .qnames import LAYER_QNAME as _QNAME_LAYER
 from .source_read_plan import uncovered_spans
 
@@ -406,7 +406,7 @@ def _plan_block(plan: Mapping) -> dict:
 
 
 def _canonical_partition_bytes(value) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return DIRECT_ASCII_LAX.encoded(value)
 
 
 def _windows_by_layer(plan: Mapping, window_partition: Mapping | None = None) -> dict[int, int]:

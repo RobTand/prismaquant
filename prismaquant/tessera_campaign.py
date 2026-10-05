@@ -74,7 +74,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes, text_sha256hex
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    DIRECT_ASCII_STRICT,
+    bytes_sha256hex,
+    indent2_json_file_bytes,
+    text_sha256hex,
+)
 
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
@@ -725,6 +731,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         tmp = wire_path.with_suffix(".tessera.tmp")
         tmp.write_bytes(blob)
         os.replace(tmp, wire_path)
+        _campaign_wire_coordinates(cache, wire_dir).add((qname, format_name))
         if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
             # The existing PWC entry is already disk-backed. Completed anchor
             # files must not accumulate an unbounded page-cache owner across
@@ -2026,7 +2033,7 @@ def canonical_refusals(refusals: Sequence[dict]) -> list[dict]:
     """
     return sorted(refusals, key=lambda entry: (
         entry["qname"], entry.get("family", ""), entry.get("format_name", ""),
-        json.dumps(entry, sort_keys=True, separators=(",", ":"), allow_nan=False)))
+        DIRECT_ASCII_STRICT.text(entry)))
 
 
 def campaign_cost_payload(
@@ -2269,14 +2276,48 @@ def _wire_path(wire_dir: Path, qname: str, format_name: str) -> Path:
     return wire_dir / f"{qname.replace('.', '__')}__{format_name}.tessera"
 
 
+def _campaign_wire_coordinates(cache, wire_dir):
+    """The wires this cache owns, independent of its rendered-only entries.
+
+    A pre-existing manifest contributes only destinations already present in
+    the wire directory. Snapshot that roster once: checking existence again
+    after an alias is published would misidentify a dense-only entry as the
+    new wire's owner. Fresh publications and resume/seed admission explicitly
+    add their coordinates, including wires with no rendered-manifest entry.
+    This is process-local campaign ownership, not a cross-process index.
+    """
+    coordinates = getattr(cache, "_campaign_wire_coordinates", None)
+    if coordinates is None:
+        coordinates = {key for key in cache.weights
+                       if _wire_path(wire_dir, *key).exists()}
+        # Batch admission may bootstrap while the ordered writer publishes.
+        # Install only once and adopt the winner's object, so a stale snapshot
+        # can never replace a roster another thread has created or updated.
+        coordinates = vars(cache).setdefault("_campaign_wire_coordinates", coordinates)
+    return coordinates
+
+
 def _require_injective_anchor_filenames(cache, wire_dir, coordinates):
-    """Check both unchanged filename families at the campaign write open."""
+    """Check actual rendered and wire destinations before either write."""
     from .production_weight_cache import require_injective_cache_filenames
 
-    coordinates = set(cache.weights).union(coordinates)
+    coordinates = set(coordinates)
     if cache.cache_dir:
         require_injective_cache_filenames(
-            coordinates, where="campaign rendered weights")
+            set(cache.weights).union(coordinates), where="campaign rendered weights")
+    _require_injective_wire_filenames(
+        wire_dir, _campaign_wire_coordinates(cache, wire_dir).union(coordinates))
+
+
+def _register_campaign_wire_coordinates(cache, wire_dir, coordinates):
+    """Reserve resume/seed wires before their links or receipt reads."""
+    coordinates = set(coordinates)
+    owned = _campaign_wire_coordinates(cache, wire_dir)
+    _require_injective_wire_filenames(wire_dir, owned.union(coordinates))
+    owned.update(coordinates)
+
+
+def _require_injective_wire_filenames(wire_dir, coordinates):
     # Resume and export consume _wire_path: its legacy dot-to-double-
     # underscore spelling is different from the rendered-weight leaf.
     owners = {}
@@ -2901,8 +2942,7 @@ def _campaign_identity_metadata_plan(*, weights, menus, calibration_source,
     planned, largest_serialization, widest_roster = {}, 0, 0
     for name in sorted(weights):
         shape_bytes = len(json.dumps(list(weights[name].shape), separators=(",", ":")).encode())
-        projection_bytes = len(json.dumps((projected_units or {}).get(name),
-            sort_keys=True, separators=(",", ":"), allow_nan=False).encode())
+        projection_bytes = len(DIRECT_ASCII_STRICT.encoded((projected_units or {}).get(name)))
         receipt_bytes = len(name.encode()) + shape_bytes + settings_bytes + projection_bytes
         planned[name] = (IDENTITY_HOLD_UNIT_OBJECT_BYTES +
                          _frozenset_table_bytes(len(menus[name])) +
@@ -5990,11 +6030,11 @@ def write_export_inputs(cache_dir: Path, *, hessians, hessian_rows,
             # do not leave a half-written .pt.tmp beside them.
             tmp_capture.unlink(missing_ok=True)
             raise
-        tmp_sidecar.write_text(json.dumps({
+        tmp_sidecar.write_text(DIRECT_ASCII_INDENT2_LAX.text({
             **capture_provenance,
             "capture_sha256": capture_sha256,
             "capture_sha256_schema": HESSIAN_CAPTURE_SHA256_SCHEMA,
-        }, indent=2, sort_keys=True) + "\n")
+        }) + "\n")
         if sidecar.exists():
             sidecar.unlink()
         os.replace(tmp_capture, hessian_capture_path)
@@ -7749,6 +7789,14 @@ def _main(argv, *, source_scope, waits) -> int:
                 _require_campaign_acquisition_anchor(CampaignAnchor(**row), acquisition_schedule)
             if state.get("unservable"):
                 raise ValueError("acquisition refuses unservable checkpoint/seed anchor work")
+        # Resume does not reconstruct cache.weights; seed wires are linked
+        # before adopt_state reads them. Reserve every admitted coordinate
+        # here, before either path touches those bytes, including stale rows
+        # whose seed files are linked but whose prices are not adopted.
+        _register_campaign_wire_coordinates(
+            cache, wire_dir,
+            ((row["qname"], row["format_name"]) for row in state["anchors"]
+             if row["format_name"] in on_menu))
 
     def adopt_state(name: str, state, *, where: str, deferred=None, entry=None) -> None:
         """Verify one unit's stored anchors against this run and take them.
@@ -8056,7 +8104,7 @@ def _main(argv, *, source_scope, waits) -> int:
         record = dict(row_stream.execution_record(),
                       finalize_seconds=round(_time.monotonic() - started, 3))
         atomic_write_bytes(cache_dir / EXECUTION_FILENAME,
-                           (json.dumps(record, indent=2, sort_keys=True) + "\n").encode())
+                           DIRECT_ASCII_INDENT2_LAX.encoded(record) + b"\n")
         print(f"[campaign] row head: stream finalized {record['units']} units "
               f"(first batch ready {record['first_batch_ready_seconds']} s, "
               f"reads {record['read_seconds']} s, waited {record['wait_seconds']} s, "

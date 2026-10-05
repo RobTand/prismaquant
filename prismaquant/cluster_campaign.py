@@ -42,10 +42,22 @@ import time
 from typing import Any
 
 if __package__:
-    from .digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex, text_sha256hex
+    from .digests import (
+        DIRECT_UTF8_INDENT2_STRICT,
+        DIRECT_UTF8_STRICT,
+        bytes_sha256hex,
+        file_sha256hex,
+        text_sha256hex,
+    )
 else:
     # Local workers execute this file directly without importing PQ/torch.
-    from digests import DIRECT_UTF8_STRICT, bytes_sha256hex, file_sha256hex, text_sha256hex
+    from digests import (
+        DIRECT_UTF8_INDENT2_STRICT,
+        DIRECT_UTF8_STRICT,
+        bytes_sha256hex,
+        file_sha256hex,
+        text_sha256hex,
+    )
 
 
 CAMPAIGN_MANIFEST_SCHEMA_V2 = "prismaquant.cluster_campaign.manifest.v2"
@@ -901,13 +913,7 @@ class _StateStore:
                 "campaign state compare-and-swap failed: "
                 f"expected={expected_identity!r}, observed={current_identity!r}"
             )
-        encoded = json.dumps(
-            validated,
-            indent=2,
-            sort_keys=True,
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8") + b"\n"
+        encoded = DIRECT_UTF8_INDENT2_STRICT.encoded(validated) + b"\n"
         descriptor, temporary_raw = tempfile.mkstemp(
             prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
         )
@@ -2096,13 +2102,7 @@ def _atomic_write_new_bytes(path: Path, encoded: bytes) -> None:
 
 
 def _atomic_write_new_json(path: Path, value: Mapping[str, object]) -> None:
-    encoded = json.dumps(
-        value,
-        indent=2,
-        sort_keys=True,
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8") + b"\n"
+    encoded = DIRECT_UTF8_INDENT2_STRICT.encoded(value) + b"\n"
     _atomic_write_new_bytes(path, encoded)
 
 

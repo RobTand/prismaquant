@@ -50,7 +50,7 @@ from typing import Any, Mapping, Sequence
 from .stage_inputs import (
     SOURCE_IDENTITY_KEYS, ExpertProjectionError, require_source_identity,
 )
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
 #: The producer's public projection schema (``tessera.export_serving.project_expert_plan``).
 PROJECTION_SCHEMA = "tessera.expert_projection.v1"
@@ -423,7 +423,7 @@ def carried_projection(projection: Mapping[str, Any], bound: Mapping[str, Mappin
         "schema": CARRIED_PROJECTION_SCHEMA,
         "tool": str(tool),
         "request": {stack: dict(entry) for stack, entry in sorted(request.items())},
-        "producer": json.loads(json.dumps(projection, sort_keys=True)),
+        "producer": json.loads(DIRECT_ASCII_SPACED_LAX.text(projection)),
         "stacks": {stack: {name: dict(unit) for name, unit in sorted(units.items())}
                    for stack, units in sorted(bound.items())},
     }
@@ -741,7 +741,7 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
             raise ExpertProjectionError(
                 f"cost table population block is not {POPULATION_SCHEMA}; the allocation "
                 "cannot say which population was priced")
-        block[POPULATION_KEY] = json.loads(json.dumps(population, sort_keys=True))
+        block[POPULATION_KEY] = json.loads(DIRECT_ASCII_SPACED_LAX.text(population))
         if population.get("schema") == POPULATION_SCHEMA:
             unpriced = population.get("unpriced")
             if not isinstance(unpriced, Mapping) or set(unpriced) != {"dense", "routed_experts"}:
@@ -833,7 +833,7 @@ def _allocation_expert_projection_block(payload: Mapping[str, Any],
         receipts[name] = check_expert_wire_receipt(
             record, name=name, unit=units[name], q256=int(q256),
             grid=family.payload_grid().name)
-    block[PROJECTION_KEY] = json.loads(json.dumps(carried, sort_keys=True))
+    block[PROJECTION_KEY] = json.loads(DIRECT_ASCII_SPACED_LAX.text(carried))
     block[EXPERT_WIRES_KEY] = receipts
     block[STACK_FORMATS_KEY] = dict(stack_formats)
     block[WIRE_DIR_KEY] = wire_dir

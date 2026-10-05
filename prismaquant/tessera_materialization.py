@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from . import tessera_expert_projection as tep
 from .cost_stage_checkpoint import atomic_write_bytes
 from .nvfp4_activation_contract import resolve_input_global_scale_policy
-from .digests import file_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, file_sha256hex
 
 REQUEST_SCHEMA = "prismaquant.tessera_selected_wire_request.v1"
 PLAN_SCHEMA = "prismaquant.tessera_selected_wire_plan.v1"
@@ -295,6 +295,10 @@ def run(plan_path, group_index, *, anchor_batch_size=1):
     wire_dir.mkdir(exist_ok=True)
     cache = ProductionWeightCache(weights={}, levers={'tessera_campaign': True},
         cache_dir=str(root), metadata={'schema': REQUEST_SCHEMA})
+    # Missing selections and adopted/resumed wires share this directory.
+    # Reserve the whole group before iteration: a later seeded alias must
+    # not appear after an earlier coordinate has been scheduled to encode.
+    tc._register_campaign_wire_coordinates(cache, wire_dir, group['assignment'].items())
     api = tc._checkpoint_identity_api()
     missing, expected_by_name = [], {}
     for name in names:
@@ -546,7 +550,7 @@ def main(argv=None):
         result = run(args.plan, args.group, anchor_batch_size=args.anchor_batch_size)
     else:
         result = finalize(args.plan)
-    print(json.dumps(result, indent=2, sort_keys=True))
+    print(DIRECT_ASCII_INDENT2_LAX.text(result))
 
 
 if __name__ == '__main__':

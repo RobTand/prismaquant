@@ -46,6 +46,31 @@
 
 ### Changed
 
+- **Bounded sorted-JSON consumers route to their existing exact
+  `JsonProfile` recipes** (Refs #1301, follow-up to the byte-hash routing).
+  79 selected scopes / 86 sorted-`json.dumps` calls across 56 package
+  modules now call the profile they already spelled out by options —
+  `DIRECT_ASCII_SPACED_LAX`, `DIRECT_ASCII_SPACED_STRICT`,
+  `DIRECT_ASCII_LAX`, `DIRECT_ASCII_STRICT`, `DIRECT_ASCII_INDENT2_LAX`,
+  `DIRECT_UTF8_LAX`, `DIRECT_UTF8_STRICT` or `DIRECT_UTF8_INDENT2_STRICT` —
+  via `.text`, `.encoded` or `.sha256` exactly where the previous expression
+  consumed text, bytes or the digest of those bytes. Each route is
+  byte-identical to the recipe it replaces: the encoder options and UTF-8
+  encoding step are unchanged. Flags, bytes, refusals, evaluation order,
+  newlines, prefix truncation and source-identity contracts are unchanged,
+  and `digests.py` itself is untouched. Five matching scopes in two
+  protected loaders stay on raw `json.dumps`: the campaign container test
+  loads `prismabuild_progress.py` by run path without package context (its
+  four scopes), and the host row profiler loads `io_spans.py` by file-spec
+  without package context — `tools/pq_profile_source.py:18-25`,
+  `tools/pq_row_profile_observer.py:26` — so `ReadRateReporter._emit` keeps
+  its direct recipe; no fallback loaders were added. `dsv4_campaign_completion.py`
+  extends its existing same-tree file-spec digests owner binding with the
+  two UTF-8 profiles symmetrically in package and no-package mode. The
+  committed per-scope census in
+  `docs/audits/digest_site_census_pq1301_2026-10-04.json` retains all 501
+  historical rows and names the 334 remaining gated scopes; #1301 stays open.
+
 - **Raw byte-hash constructors route to the digest owners** (Refs #1301).
   83 raw `hashlib.sha256(...).hexdigest()` constructor sites across 47
   package modules now call the existing `prismaquant.digests` byte/text
@@ -229,14 +254,35 @@
   at one format refuses. The mangled filename spelling is unchanged.
 
 - **Campaign, wire and source snapshot writes refuse filename collisions**
-  (Refs #2231). Campaign publication checks both existing filename families
-  against the current manifest before writing; batch admission checks before
-  its first publication. Packed expert appends include existing dense keys.
+  (#2231). Campaign rendered-file checks retain the whole manifest; wire-file
+  checks include only the wire-owning roster and each new coordinate, allowing
+  dense-only aliases that never wrote a wire. The roster records successful
+  publications and reserves resume/seed coordinates before links or receipt
+  reads, even when their rendered-manifest entries are absent. Batch admission
+  and the ordered writer still refuse real collisions before either write.
+  Concurrent producer admission and ordered publication install one shared
+  wire roster; a stale bootstrap cannot discard an already published owner.
+  Selected-wire materialization reserves the complete group's coordinates
+  before any seed link, resumed wire read or fresh publication, including a
+  missing-first coordinate whose wire name aliases a later seeded selection.
+  The unchanged direct writer in `experiments/pq237_joint_aura_streamed.py:243-260`
+  is not covered by these campaign and materialization guards.
+  Packed expert appends include existing dense keys.
   Disk-backed weight sessions check the complete snapshot roster before
   capture or reuse and share the existing cache leaf helper. Every refusal
   names both coordinates and their shared filename. Cross-format name aliases
   remain legal when they name distinct files; all on-disk spellings are
   unchanged.
+  The memory-only multi-token prediction append now has an entry-point test
+  for same-format refusal before rendering and cross-format admission; this
+  pins existing behavior rather than changing it (#2231 item 13).
+
+- **Campaign filename indexing is not adopted** (#2231 item 15).
+  A filename index would need to own every cache-manifest mutation and
+  failed-publication lifetime, not just the campaign writer, to retain the
+  rendered-file refusal set. No before/after measurement establishes a material
+  cost here, so the index is not worth adding for this low-priority follow-up;
+  complete destination checks remain and no speed improvement is claimed.
 
 - **Projected preparation validates effective CUDA allocator settings**
   (#2039, PR #2247 hardening). An in-process allocator setter followed by an

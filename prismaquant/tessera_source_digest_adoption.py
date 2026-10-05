@@ -22,6 +22,7 @@ def adopt_source_digests(source, binding, output, *, expected_content_sha256,
     from . import cost_streaming as owner
     from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
     from .cost_stage_checkpoint import publish_new_bytes
+    from .digests import DIRECT_ASCII_INDENT2_LAX
     from tessera.source_digest_cache import SourceDigestCache
     source=Path(source).resolve();path=Path(binding['path'])
     before=_bound_stat_fence(path);raw=_read_bound(binding,'retained source hash proof');document=json.loads(raw)
@@ -65,7 +66,7 @@ def adopt_source_digests(source, binding, output, *, expected_content_sha256,
         'cache_directory':str(out.resolve()),'shards':len(observed),'source_bytes':sum(fp['size'] for _,_,fp,_,_ in observed),
         'device_portable_shards':sum(portable for *_,portable in observed),
         'fresh_source_payload_reads':0,'writer_kind':'adopted_verified_prismaquant_streamed_identity'}
-    receipt=out/'adoption-receipt.json';encoded=(json.dumps(result,sort_keys=True,indent=2)+'\n').encode()
+    receipt=out/'adoption-receipt.json';encoded=DIRECT_ASCII_INDENT2_LAX.encoded(result)+b'\n'
     if not publish_new_bytes(receipt,encoded) and receipt.read_bytes()!=encoded:
         raise ValueError('existing adoption receipt differs')
     return result
@@ -78,6 +79,7 @@ def main(argv=None):
     parser.add_argument('--out',required=True);args=parser.parse_args(argv)
     result=adopt_source_digests(args.model,{'path':args.source_cache,'sha256':args.source_cache_sha256},args.out,
                               expected_content_sha256=args.expected_content_sha256)
-    print(json.dumps(result,sort_keys=True));return 0
+    from .digests import DIRECT_ASCII_SPACED_LAX
+    print(DIRECT_ASCII_SPACED_LAX.text(result));return 0
 
 if __name__=='__main__':raise SystemExit(main())

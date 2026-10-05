@@ -11,7 +11,7 @@ from .calibration_data import load_calibration_input
 from .cluster_campaign import _atomic_write_new_bytes
 
 from .joint_eval_observation import STATUS, observation_status  # noqa: F401  (re-exported)
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex
 
 SCHEMA = 'prismaquant.tessera_joint_eval_panel.v1'
 ALGORITHM = 'python_random_permutation_prefix_v1'
@@ -102,7 +102,7 @@ def main(argv=None):
     if not isinstance(storage, dict) or 'directory' not in storage:
         raise ValueError('diagnostic joint evaluation requires exact boundary storage')
     storage['directory'] = str(Path(args.output_root) / 'exact-boundaries')
-    _atomic_write_new_bytes(Path(args.output), (json.dumps(plan, indent=2, sort_keys=True) + '\n').encode())
+    _atomic_write_new_bytes(Path(args.output), DIRECT_ASCII_INDENT2_LAX.encoded(plan) + b'\n')
     return 0
 
 

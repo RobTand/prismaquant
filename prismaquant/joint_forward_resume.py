@@ -19,7 +19,7 @@ import stat
 
 from .dev_mode import seal_check
 from .file_identity import file_stat_signature
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex
 
 SCHEMA = 'prismaquant.joint_forward_recovery.v1'
 
@@ -536,7 +536,7 @@ continues the imported chain.
                        'record': record, 'receipt': _read(path.parent / 'receipt.json')[0]})
     document['groups'] = groups
     records = _verified_chain_records(document, sdk)
-    raw = (json.dumps(document, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    raw = DIRECT_ASCII_LAX.encoded(document) + b'\n'
     with Path(output).open('xb') as handle:
         handle.write(raw)
         handle.flush()
