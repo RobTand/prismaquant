@@ -145,12 +145,13 @@ standard-library dependency boundary. Band handoff, checkpoint parsing and
 Stage B head help/argument handling still precede scientific imports; the
 other tools retain their original package-dependent qualified contexts.
 
-The separately attached correction packet records all changed boundaries,
-their exact original/candidate source locations, retained input paths/keys,
-observed output types/bytes/errors and any producer computation omitted.
-An isolated boundary comparison is explicitly not a producer rerun. No model
-roll, capture, CUDA benchmark or image rebuild is part of that proof.
-
+The separately attached correction packet accounts for all 58 changed
+boundaries and distinguishes observed paired results from unresolved inputs
+or runtime prerequisites. A listed source location is not a qualified result.
+Each observed row identifies retained input paths/keys, output types/bytes
+and any omitted producer computation. An isolated boundary comparison is
+explicitly not a producer rerun; no model roll, capture, CUDA benchmark or
+image rebuild is part of that proof.
 Mixed compact, indented and strict recipes remain outside this migration.
 The separately staged `tools/tessera_fleet/model_worker.py` keeps its original
 standard-library serialization; its actual publication bytes are tested.
