@@ -229,14 +229,35 @@
   at one format refuses. The mangled filename spelling is unchanged.
 
 - **Campaign, wire and source snapshot writes refuse filename collisions**
-  (Refs #2231). Campaign publication checks both existing filename families
-  against the current manifest before writing; batch admission checks before
-  its first publication. Packed expert appends include existing dense keys.
+  (#2231). Campaign rendered-file checks retain the whole manifest; wire-file
+  checks include only the wire-owning roster and each new coordinate, allowing
+  dense-only aliases that never wrote a wire. The roster records successful
+  publications and reserves resume/seed coordinates before links or receipt
+  reads, even when their rendered-manifest entries are absent. Batch admission
+  and the ordered writer still refuse real collisions before either write.
+  Concurrent producer admission and ordered publication install one shared
+  wire roster; a stale bootstrap cannot discard an already published owner.
+  Selected-wire materialization reserves the complete group's coordinates
+  before any seed link, resumed wire read or fresh publication, including a
+  missing-first coordinate whose wire name aliases a later seeded selection.
+  The unchanged direct writer in `experiments/pq237_joint_aura_streamed.py:243-260`
+  is not covered by these campaign and materialization guards.
+  Packed expert appends include existing dense keys.
   Disk-backed weight sessions check the complete snapshot roster before
   capture or reuse and share the existing cache leaf helper. Every refusal
   names both coordinates and their shared filename. Cross-format name aliases
   remain legal when they name distinct files; all on-disk spellings are
   unchanged.
+  The memory-only multi-token prediction append now has an entry-point test
+  for same-format refusal before rendering and cross-format admission; this
+  pins existing behavior rather than changing it (#2231 item 13).
+
+- **Campaign filename indexing is not adopted** (#2231 item 15).
+  A filename index would need to own every cache-manifest mutation and
+  failed-publication lifetime, not just the campaign writer, to retain the
+  rendered-file refusal set. No before/after measurement establishes a material
+  cost here, so the index is not worth adding for this low-priority follow-up;
+  complete destination checks remain and no speed improvement is claimed.
 
 
 - **Real codec CPU fixtures retain their branch/assertion acceptance at bounded geometry**

@@ -725,6 +725,7 @@ def _finish_anchor(*, qname, weight, activations, format_name, cache, wire_dir,
         tmp = wire_path.with_suffix(".tessera.tmp")
         tmp.write_bytes(blob)
         os.replace(tmp, wire_path)
+        _campaign_wire_coordinates(cache, wire_dir).add((qname, format_name))
         if getattr(cache, 'metadata', {}).get('release_completed_anchor_file_pages'):
             # The existing PWC entry is already disk-backed. Completed anchor
             # files must not accumulate an unbounded page-cache owner across
@@ -2269,14 +2270,48 @@ def _wire_path(wire_dir: Path, qname: str, format_name: str) -> Path:
     return wire_dir / f"{qname.replace('.', '__')}__{format_name}.tessera"
 
 
+def _campaign_wire_coordinates(cache, wire_dir):
+    """The wires this cache owns, independent of its rendered-only entries.
+
+    A pre-existing manifest contributes only destinations already present in
+    the wire directory. Snapshot that roster once: checking existence again
+    after an alias is published would misidentify a dense-only entry as the
+    new wire's owner. Fresh publications and resume/seed admission explicitly
+    add their coordinates, including wires with no rendered-manifest entry.
+    This is process-local campaign ownership, not a cross-process index.
+    """
+    coordinates = getattr(cache, "_campaign_wire_coordinates", None)
+    if coordinates is None:
+        coordinates = {key for key in cache.weights
+                       if _wire_path(wire_dir, *key).exists()}
+        # Batch admission may bootstrap while the ordered writer publishes.
+        # Install only once and adopt the winner's object, so a stale snapshot
+        # can never replace a roster another thread has created or updated.
+        coordinates = vars(cache).setdefault("_campaign_wire_coordinates", coordinates)
+    return coordinates
+
+
 def _require_injective_anchor_filenames(cache, wire_dir, coordinates):
-    """Check both unchanged filename families at the campaign write open."""
+    """Check actual rendered and wire destinations before either write."""
     from .production_weight_cache import require_injective_cache_filenames
 
-    coordinates = set(cache.weights).union(coordinates)
+    coordinates = set(coordinates)
     if cache.cache_dir:
         require_injective_cache_filenames(
-            coordinates, where="campaign rendered weights")
+            set(cache.weights).union(coordinates), where="campaign rendered weights")
+    _require_injective_wire_filenames(
+        wire_dir, _campaign_wire_coordinates(cache, wire_dir).union(coordinates))
+
+
+def _register_campaign_wire_coordinates(cache, wire_dir, coordinates):
+    """Reserve resume/seed wires before their links or receipt reads."""
+    coordinates = set(coordinates)
+    owned = _campaign_wire_coordinates(cache, wire_dir)
+    _require_injective_wire_filenames(wire_dir, owned.union(coordinates))
+    owned.update(coordinates)
+
+
+def _require_injective_wire_filenames(wire_dir, coordinates):
     # Resume and export consume _wire_path: its legacy dot-to-double-
     # underscore spelling is different from the rendered-weight leaf.
     owners = {}
@@ -7664,6 +7699,14 @@ def _main(argv, *, source_scope, waits) -> int:
                 _require_campaign_acquisition_anchor(CampaignAnchor(**row), acquisition_schedule)
             if state.get("unservable"):
                 raise ValueError("acquisition refuses unservable checkpoint/seed anchor work")
+        # Resume does not reconstruct cache.weights; seed wires are linked
+        # before adopt_state reads them. Reserve every admitted coordinate
+        # here, before either path touches those bytes, including stale rows
+        # whose seed files are linked but whose prices are not adopted.
+        _register_campaign_wire_coordinates(
+            cache, wire_dir,
+            ((row["qname"], row["format_name"]) for row in state["anchors"]
+             if row["format_name"] in on_menu))
 
     def adopt_state(name: str, state, *, where: str, deferred=None, entry=None) -> None:
         """Verify one unit's stored anchors against this run and take them.
