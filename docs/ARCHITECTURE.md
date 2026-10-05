@@ -711,10 +711,21 @@ the 2026-10-04 reservation-pricing and head-wait credit-reaping corrections,
 their control evidence and the completed same-host paired device comparison
 are recorded in
 [the 2026-10-04 copy-pair report](measurements/pq2039_copy_pair_2026-10-04.md).
-The measured local latency gain preserves every source copy/comparison;
-aggregate CPU copy work increased. The option remains off, the higher
-CPU-material provider remains unqualified for GPU transfers, and no
-full-campaign, saturation or energy claim follows.
+Re-stamped 2026-10-05 (Refs #2039, PR #2247): the opt-in window's
+prospective device reservation includes full bool masks and allocator-sized
+verdict/settle storage, as well as staging and reduction workspace. It charges
+fresh native segments for every allocation across the pass, including cached
+freed allocations; no single-stream/cache-reuse tightening is assumed. Unknown
+or nondefault CUDA allocator settings refuse before any source read. The CPU
+private cap, four-credit lifecycle, source ownership and ordering remain as
+above; serial preparation and all serving/default gates are unchanged.
+The completed historical timing pair is an **unqualified same-host screen**:
+two prepared arms per side, 19 timed calls per arm before and 20 after. Its
+19-ms/1.20% prepared-mean difference establishes neither host-copy causality
+nor this corrected head's performance or residency. Profile-window clock
+qualification remains HOLD; no energy/work-per-joule, saturation, serving or
+full-campaign claim follows. The higher CPU-material provider remains
+unqualified for GPU transfers.
 
 
 Re-stamped 2026-10-02 (`sol/pq-1934-recovery-20261002`, Refs #1931, #1935):

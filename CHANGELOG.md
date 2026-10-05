@@ -12,17 +12,22 @@
   now happens before the append. Control-only; production code and its
   admission semantics are unchanged.
 
-- **The projected-preparation window prices its device reservation in bytes**
-  (#2039). The opt-in window reserved device bytes for its staged unit copies
-  from element counts instead of tensor bytes, understating the prospective
-  device bound for every sub-four-byte dtype and admitting work whose real
-  device residency could exceed the guarded reservation, and priced no
-  storage for the verdict flags each check holds until the ordered settle
-  reads them. The bound now prices the staged copies' bytes plus one byte per
-  unit for each flag and the same again for the settle's stacked copy beside
-  the originals. Four credits, the finite private-byte cap, source reads,
-  comparisons, refusals and cancellation are unchanged; no GPU, campaign or
-  qualification claim.
+- **Projected preparation reserves comparison and allocator residency**
+  (#2039, PR #2247). The previous element-count term was the full-size bool
+  comparison-mask allowance, not staged-copy byte pricing: staged bytes were
+  already charged by the private-byte bound. Replacing that term removed the
+  mask allowance and charged retained verdicts/settle storage as logical bytes
+  even though the guard reads CUDA allocator segments. The opt-in path now
+  conservatively charges a fresh native allocator segment for every staged
+  copy, comparison mask, reduction workspace, retained verdict and per-device
+  settle stack across the entire pass, without assuming cache or stream reuse.
+  Nondefault or unavailable allocator settings refuse before source reads;
+  serial preparation is unchanged. Actual CUDA reserved-growth and early
+  refusal regressions replace the arithmetic-only reservation assertion.
+  Four credits, the finite private-byte cap, authentication, ordered refusals,
+  lifetimes and cancellation remain intact. The historical device timing is
+  an unqualified same-host screen, not a host-copy causality, residency saving,
+  energy/work-per-joule or campaign qualification claim.
 
 - **Ordered projected preparation reaps freed credits during the head wait**
   (#2039). The coordinator held all four credits until the ordered head's

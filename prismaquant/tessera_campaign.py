@@ -5179,6 +5179,59 @@ def _launch_prepared_projected_check(check, live):
     return staged
 
 
+def _projected_cuda_reservation(weights):
+    """Bound native CUDA reserved growth without assuming cache or stream reuse.
+
+    The guard reads segments, not tensor payloads. Charge a fresh segment for
+    EVERY allocation in the pass; a freed mask/staging block can remain cached.
+    Native sizing is from PyTorch c10/core/AllocatorConfig.h and
+    cuda/CUDACachingAllocator.cpp (round_size/get_allocation_size): 512-byte
+    blocks, 2-MiB small segments, 20-MiB medium segments, 2-MiB large rounding.
+    Nondefault allocators/settings need their own reviewed residency bound.
+    """
+    import torch
+
+    eligible = [live for live in weights
+                if live.device.type == 'cuda' and _device_comparable(live.dtype)]
+    if not eligible:
+        return 0
+    refusal = ('parallel projected preparation requires the default native CUDA '
+               'allocator residency model')
+    if torch.cuda.get_allocator_backend() != 'native':
+        raise RuntimeError(refusal)
+    settings = torch.cuda.memory._snapshot().get('allocator_settings', {})
+    if settings.get('PYTORCH_CUDA_ALLOC_CONF') != '':
+        raise RuntimeError(refusal)
+
+    def segment(size):
+        if not size:
+            return 0
+        size = ((size + 511) // 512) * 512
+        if size <= 1024**2:
+            return 2 * 1024**2
+        if size < 10 * 1024**2:
+            return 20 * 1024**2
+        return ((size + 2 * 1024**2 - 1) // (2 * 1024**2)) * (2 * 1024**2)
+
+    total = 0
+    counts = {}
+    for live in eligible:
+        elements = live.numel()
+        # A contiguous bool mask's full reduction has one output. Reduce.cuh
+        # bounds its global partials by the input count and uses one int
+        # semaphore. Split 32-bit iterators may allocate scratch repeatedly;
+        # charge each possible slice separately, plus its scalar accumulator.
+        slice_count = max(1, (elements + (2**31 - 2)) // (2**31 - 1))
+        slices = 1 << (slice_count - 1).bit_length()
+        total += segment(elements * live.element_size()) + segment(elements)
+        total += slices * (segment(min(elements, 2**31 - 1)) + segment(4))
+        total += 2 * segment(1)  # verdict plus possible reduction accumulator
+        counts[live.device] = counts.get(live.device, 0) + 1
+    # One stacked bool allocation per device, beside all original verdicts.
+    return total + sum(segment(count) for count in counts.values())
+
+
+
 @contextmanager
 def _parallel_projected_checks(units, *, weights, model_path, source,
                                resource_check, source_authentication,
@@ -5201,12 +5254,7 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
     if any(size > preparation_max_bytes for size in sizes):
         raise RuntimeError('one projected unit exceeds the private preparation byte cap')
     pin_bound = min(preparation_max_bytes, sum(sorted(sizes, reverse=True)[:4]))
-    # Device pricing is bytes, not element counts: at most four staged unit
-    # copies are resident at once, and every check's 0-d verdict flag lives
-    # until the ordered settle reads it, with the settle's stacked copy beside
-    # the originals.
-    staged_bound = min(pin_bound, sum(sorted(sizes, reverse=True)[:4]))
-    gpu_bound = staged_bound + 2 * len(rows)
+    gpu_bound = _projected_cuda_reservation([weights[n] for n, _u in rows])
     reserve_allocation(resource_check, 'before_parallel_projected_preparation',
                        cpu_bytes=pin_bound, device_bytes=gpu_bound)
     pool = layer_streaming._layer_read_pool(2, allow_resize=False)
