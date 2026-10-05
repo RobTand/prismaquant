@@ -76,6 +76,14 @@
 
 ### Fixed
 
+- **The real DeepSeek V4 model-walk export gate owns its import process**
+  (#2276). It uses the existing `own_process` marker when sharing a pytest
+  session, so an unsupported native AutoModel configuration in another test
+  cannot select the gate's model implementation. The regression runs that
+  real unsupported-configuration predecessor, the complete export gate, and
+  the native-import refusal control together. Production registration and
+  its native-module refusal are unchanged.
+
 - **Required domain imports and malformed-header consumer refusals stay
   visible** (Refs #2260, bounded child of #1303).
   `tests/test_container_qname_owner_1303.py` imports
