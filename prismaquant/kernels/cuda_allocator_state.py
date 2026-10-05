@@ -5,10 +5,11 @@ No CUDA kernel, renderer, allocator setter or separate extension cache is used.
 Build this through PrismaBuild using the established extension build policy.
 """
 from functools import lru_cache
-import hashlib
 from pathlib import Path
 
 import torch
+
+from prismaquant.digests import bytes_sha256hex
 
 
 @lru_cache(maxsize=1)
@@ -19,8 +20,8 @@ def _backend():
     source = Path(__file__).with_suffix('.cpp')
     header = Path(torch.__file__).parent / 'include/c10/core/AllocatorConfig.h'
     flags = ['-O2']
-    digest = hashlib.sha256(source.read_bytes() + header.read_bytes()
-                            + str((torch.__version__, torch.version.git_version, flags)).encode()).hexdigest()
+    digest = bytes_sha256hex(source.read_bytes() + header.read_bytes()
+                             + str((torch.__version__, torch.version.git_version, flags)).encode())
     name = 'pq_cuda_allocator_state_' + digest[:16]
     with jit_build_lock(torch_build_directory(name)):
         return load(name=name, sources=[str(source)], extra_cflags=flags,
