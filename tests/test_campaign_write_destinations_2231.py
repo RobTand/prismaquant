@@ -63,10 +63,16 @@ def assert_no_files(tmp_path):
     ("layer.a", "layer__a", f"layer__a__{FORMAT}.tessera"),
 ])
 def test_campaign_publication_checks_existing_manifest(
-        anchor_inputs, tmp_path, first, second, filename):
+        anchor_inputs, tmp_path, monkeypatch, first, second, filename):
     cache, wire_dir, weight, prepare = anchor_inputs
     cache.weights[(first, FORMAT)] = weight
     before = dict(cache.weights)
+    existing_wire = None
+    if filename.endswith(".tessera"):
+        existing_wire = campaign._wire_path(wire_dir, first, FORMAT)
+        existing_wire.write_bytes(b"existing wire")
+    monkeypatch.setattr(pwc, "_store_rendered_weight_entry",
+                        lambda **_kwargs: pytest.fail("collision reached the rendered write"))
 
     with pytest.raises(ValueError) as error:
         campaign._finish_anchor(
@@ -77,7 +83,41 @@ def test_campaign_publication_checks_existing_manifest(
 
     assert_refusal(error, first, second, filename)
     assert cache.weights == before
-    assert_no_files(tmp_path)
+    if existing_wire is None:
+        assert_no_files(tmp_path)
+    else:
+        assert existing_wire.read_bytes() == b"existing wire"
+        assert {path for path in tmp_path.rglob("*") if path.is_file()} == {existing_wire}
+
+
+def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path):
+    cache, wire_dir, weight, prepare = anchor_inputs
+    dense, new = "layer.a", "layer__a"
+    dense_filename = pwc._cache_weight_filename(dense, FORMAT)
+    dense_path = tmp_path / dense_filename
+    torch.save(weight, dense_path)
+    dense_bytes = dense_path.read_bytes()
+    cache.weights[(dense, FORMAT)] = dense_filename
+    assert not campaign._wire_path(wire_dir, dense, FORMAT).exists()
+
+    campaign._finish_anchor(
+        qname=new, weight=weight, activations=weight, format_name=FORMAT,
+        cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+        render=weight * 0.75, blob=b"new wire", elapsed=0.0,
+    )
+
+    assert dense_path.read_bytes() == dense_bytes
+    assert cache.weights[(dense, FORMAT)] == dense_filename
+    assert set(cache.weights) == {(dense, FORMAT), (new, FORMAT)}
+    new_render = tmp_path / cache.weights[(new, FORMAT)]
+    torch.testing.assert_close(torch.load(new_render, weights_only=True),
+                               (weight * 0.75).to(torch.bfloat16))
+    new_wire = campaign._wire_path(wire_dir, new, FORMAT)
+    assert new_wire.read_bytes() == b"new wire"
+    assert {path for path in tmp_path.rglob("*") if path.is_file()} == {
+        dense_path, new_render, new_wire,
+    }
+
 
 
 @pytest.mark.parametrize("first,second,filename", [
