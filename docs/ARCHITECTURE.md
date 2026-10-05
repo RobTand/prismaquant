@@ -4767,7 +4767,7 @@ It was a blanket 1800 s. `tools/dispatch_joint_quanta.py` now derives it per
 row as W + ceil(bytes / floor). W is the spec's
 `PRISMAQUANT_STAGED_RANGE_WAIT_S`. The reader sets one deadline, start + W,
 for every staged wait in the phase
-(`prismaquant/joint_adjoint_checkpoints.py:1986`,
+(`prismaquant/joint_adjoint_checkpoints.py:1989`,
 `prismaquant/joint_quantum_handoff.py:1033`), so the phase waits at most W in
 total outside a PrismaBuild landing record. Since PQ #1143 a spill
 consumer's `handoff-load` holds only the owner states and the shared-pass
