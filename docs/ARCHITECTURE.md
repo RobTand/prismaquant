@@ -1,15 +1,15 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-05 (PQ #1586, graph equality receipt v2 fabric scope):
-`native_export.graph` consumes Tessera's graph-equals-eager v2 receipt for
-its own serve, including collective fabric. The native producer stamps
-observed image/model/source identity, resolved serving sizes and the fabric
-request captured from the launch environment; the ship-card verifier
-re-hashes the receipt and binds the scope's model-configuration SHA-256 to
-its artifact, refuses non-v2 schemas, and delegates equality and fabric
-matching to `tessera.graph_receipt.verify`. No eager-only waiver, pin bump
-or serving qualification is implied. The D13 serving pin must carry that
-v2 module before this change can qualify or land; see §7.1.
+Re-stamped 2026-10-05 (PQ #1586, D32 graph identity stamps):
+`native_export.graph` keeps receipt-byte integrity, v2 format, numeric
+comparison and the six serve-correctness fields as refusing gates. Image,
+Tessera source and model-config identity differences go through
+`prismaquant.dev_mode.seal_check`; dev mode is on unless
+`PRISMAQUANT_DEV_MODE` is exactly `0`. Missing artifact context,
+unreadable identity evidence, re-pins and config drift stamp `[DEV-MODE]`
+and continue with stored data. Only the receipt's identity values are used
+for Tessera's equality replay; recorded correctness settings are unchanged.
+No eager-only waiver, pin bump or serving qualification is implied; see §7.1.
 
 Re-stamped 2026-10-05 (`kernels/d13-public-master-pin-20261005`, PQ #2262):
 the immutable serving/development candidate names fetched public Tessera
@@ -25868,40 +25868,54 @@ physical, so its contract is a **record**, not CI.
 **Graph equality receipt (#1586).** Every `native_export.graph` record must
 carry `metrics.graph_receipt_path`, `metrics.graph_receipt_sha256`, and
 `metrics.serve_scope`. The verifier reads the named bytes once, checks that
-SHA-256, refuses any schema other than `tessera.graph_equals_eager.v2` by
-name, then calls only `tessera.graph_receipt.verify(receipt, serve_scope)`.
-The recorded fabric passes through unchanged. A v1 receipt cannot attest
-this card, even if its arms satisfy the equality rule.
-Tessera re-applies its equality rule; a changed file, edited verdict, missing
-receipt or scope mismatch refuses by name, including Tessera's exact reason.
-Only a None result admits the slot. Any exception from the verify call itself
-also refuses as `graph receipt unreadable`, naming its type and message; the
-catch is limited to that call, so both raising and reason-returning Tessera
-receipt owners fail closed on structurally malformed receipts.
-The graph slot also re-hashes the artifact's `config.json` bytes, using the
-same file-SHA-256 recipe as the producer, and requires that digest to equal
-`serve_scope.model_config_sha256`. A matching receipt and recorded scope from
-another artifact's config cannot close this card, even when the record's
-separate `model_sha` names this artifact. Missing artifact context or an
-unreadable config refuses the configuration binding by name.
-The eager slot's existing generation/arm checks are unchanged.
+SHA-256 against those bytes, and refuses any schema other than
+`tessera.graph_equals_eager.v2` by name. A v1 receipt cannot attest this
+card, even if its arms satisfy the equality rule.
+
+D32 separates identity from correctness. PrismaQuant compares `image`,
+`model_config_sha256` and `tessera_src_sha256` with the receipt through
+`prismaquant.dev_mode.seal_check`, once per field, naming
+`native_export.graph`. Dev mode is on unless `PRISMAQUANT_DEV_MODE` is
+exactly `0`; a mismatch emits `[DEV-MODE]` and continues. PrismaQuant
+passes `tessera.graph_receipt.verify` a copy of the serve scope containing
+the receipt's own three identities. The recorded scope is not rewritten.
+`compilation_config`, `speculative_tokens`, `max_model_len`,
+`max_num_seqs`, `tensor_parallel_size` and `fabric` pass through unchanged:
+these are the settings under which graph was measured equal to eager, not
+identity seals. A mismatch in any of them still refuses by Tessera's reason.
+
+Tessera re-applies its numeric equality rule. Changed receipt bytes, edited
+verdicts, missing receipts or correctness scope, and malformed receipts still
+refuse. Only a None result admits the slot. Any exception from the verify
+call itself also refuses as `graph receipt unreadable`, naming its type and
+message; the catch is limited to that call. Receipt identity structure must
+also be readable; identity stamping is not a malformed-format waiver.
+
+The graph slot re-hashes the artifact's `config.json` using the producer's
+file-SHA-256 recipe, but compares that digest with
+`serve_scope.model_config_sha256` through `seal_check`. A different config,
+missing artifact context or unreadable config stamps provenance and continues
+in dev mode; it is not a new ship gate. The eager slot's existing
+generation/arm checks are unchanged.
 
 `validate_native_export --no-enforce-eager` (or `--both-arms`) requires
 `--graph-receipt PATH` before preflight. Its graph arm takes
 `--compilation-config JSON`, `--max-num-seqs` and `--tensor-parallel-size`
-alongside the existing model, length and speculative configuration. Receipt
-scope is never copied from the receipt or supplied as an identity override:
+alongside the existing model, length and speculative configuration.
+The producer observes scope rather than taking a caller identity override;
+only ship-card equality replay substitutes the receipt's three identities:
 
 - `image` comes from the running container identified by kernel cgroup or
   mount roots, inspected through Docker; its actual image's `RepoDigests`
   supplies the manifest reference, never a tag, local image ID or caller env.
-  The process needs access to Docker inspection; missing/ambiguous evidence
-  refuses `image` instead of substituting the serving image pin.
+  Missing/ambiguous inspection evidence stamps unavailable identity and records
+  `NOT_COMPUTED`; it does not substitute a serving image pin or refuse a run.
 - `model_config_sha256` hashes the model's `config.json` bytes before
-  load and checks the resolved engine model path and those bytes after load.
+  load. Resolved model-path differences and post-load config drift or unavailable
+  bytes stamp through `seal_check`, keeping the pre-load identity.
 - `tessera_src_sha256` hashes the installed package located by
-  `tessera.graph_receipt`, after checking its packaged contract against the
-  immutable serving pin. The recipe is Tessera #702's sorted Python source
+  `tessera.graph_receipt`; its packaged-contract comparison with the serving
+  pin stamps re-pins through `seal_check`. The recipe is Tessera #702's sorted Python source
   `sha256sum` lines, with logical `src/tessera/...` names, then SHA-256 of
   those lines. The producer reads JSON/source bytes, never imports serving.
 - `compilation_config` is the exact JSON object passed to the graph LLM,
@@ -25921,7 +25935,8 @@ scope is never copied from the receipt or supplied as an identity override:
   every rank's NCCL banners, so a request NCCL did not honour is refused by
   the fabric mismatch rather than silently relabelled.
 
-Unavailable values refuse with their scope field name. This does not change
+Unavailable correctness fields refuse by name; unavailable image/source/config
+identity evidence stamps and records `NOT_COMPUTED` instead. This does not change
 which artifact lane `validate_native_export` loads: it still refuses a
 Tessera checkpoint instead of forcing compressed-tensors quantization onto it.
 A GLM Tessera release still owes its own artifact-scope graph equality serve,

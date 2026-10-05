@@ -89,29 +89,25 @@
 
 ### Fixed
 
-- **Graph ship slots require equality receipts for their own serve** (#1586).
+- **Graph ship slots keep equality gates and stamp identity drift** (#1586, D32).
   The native graph arm requires `--graph-receipt` and records its path,
   byte SHA-256 and observed image/model/Tessera/configuration scope. Ship-card
-  verification authenticates those bytes and calls Tessera's stdlib-only
-  `graph_receipt.verify`, refusing edited verdicts and any scope mismatch
-  by name. Malformed receipts refuse whether Tessera returns a reason or
-  raises; the verify-call-only catch names the exception type and message.
-  Verification re-hashes the card artifact's config.json and binds it to
-  `serve_scope.model_config_sha256`, so a mutually matching receipt and scope
-  borrowed from another artifact cannot verify; missing artifact context
-  refuses by name.
-  The v2 contract adds collective fabric to the serve scope: one resolved
-  rank is `none`; above one rank, the launch environment's
-  `gold_fabric_request` maps `sockets` to `socket` and `ib_or_roce` to
-  `roce`, refusing missing or other `NCCL_IB_DISABLE` values by name.
-  This is the request captured before the engine can mutate its environment,
-  not an observation; Tessera observes NCCL banners and refuses a request it
-  did not honour through the fabric mismatch. The card passes fabric through
-  unchanged and explicitly refuses every schema other than
-  `tessera.graph_equals_eager.v2`, including otherwise equal v1 receipts.
-  Eager verification is unchanged; no eager-only waiver is added.
-  This change must land with or after the D13 Tessera pin bump carrying the
-  v2 receipt module. Pre-pin CPU evidence is non-qualifying, not a GLM release.
+  verification keeps receipt-byte integrity, v2 schema, malformed-format and
+  edited-verdict refusals. `compilation_config`, `speculative_tokens`,
+  `max_model_len`, `max_num_seqs`, `tensor_parallel_size` and `fabric`
+  still match the receipt's measured correctness scope or refuse by name.
+  PrismaQuant compares image, Tessera source and model-config identities
+  through `seal_check`, then supplies the receipt's own identity values to
+  Tessera's numeric equality verifier, without rewriting the recorded scope.
+  Dev mode is on unless `PRISMAQUANT_DEV_MODE` is exactly `0`: identity
+  differences, re-pins, config drift, missing artifact context and unreadable
+  identity evidence stamp `[DEV-MODE]` and continue with stored data.
+  Artifact config re-hashing is a provenance stamp, not a ship refusal.
+  The v2 fabric is `none` at one resolved rank; above one rank the launch
+  environment maps `NCCL_IB_DISABLE=1` to `socket` and `0` to `roce`.
+  Missing or other values still refuse. Tessera observes NCCL banners, so an
+  unhonoured request still refuses through the fabric mismatch. Eager is
+  unchanged; CPU evidence is not a serving or release qualification.
 
 
 - **Test cost: repeated in-process work runs once; two stale consumer
