@@ -4149,15 +4149,16 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
                                "pilot_admission": row["pilot_admission"],
                                "execution_plan": execution_stamp,
                                "action_key": answer["action_key"]})
-            print(DIRECT_ASCII_SPACED_LAX.text({"published": row.get("quantum_id", "stage-a"),
+            print(json.dumps({"published": row.get("quantum_id", "stage-a"),
                               "action_key": answer["action_key"],
-                              "status": answer.get("status", "")}))
+                              "status": answer.get("status", "")},
+                             sort_keys=True))
     except (RuntimeError, OSError) as exc:
         print(f"dispatch_joint_quanta: submission failed: {exc}", file=sys.stderr)
         return EXIT_SUBMIT_FAILED
     for waiting in band_pending:
-        print(DIRECT_ASCII_SPACED_LAX.text({"band_serial_pending": waiting["quantum_id"],
-                          "reason": waiting["reason"]}))
+        print(json.dumps({"band_serial_pending": waiting["quantum_id"],
+                          "reason": waiting["reason"]}, sort_keys=True))
     if not rows:
         print(DIRECT_ASCII_SPACED_LAX.text({"published": [], "note": "nothing publishable"}))
     return 0

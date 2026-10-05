@@ -18,7 +18,7 @@ import argparse
 import hashlib
 import json
 import os
-import sys
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -83,11 +83,7 @@ def main(argv=None) -> int:
     parser.add_argument("--mount", default="/mnt/shared")
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
-    try:
-        from digests import DIRECT_ASCII_SPACED_LAX
-    finally:
-        sys.path.pop(0)
+
 
     source = _candidates(Path(args.wire_dir), args.format,
                          range(args.first_layer, args.last_layer + 1), args.experts)
@@ -121,7 +117,7 @@ def main(argv=None) -> int:
             arm["nfs_read"] = {"ops": delta[0], "queue_ms_per_op": round(delta[5] / ops, 2),
                                "rtt_ms_per_op": round(delta[6] / ops, 2),
                                "execute_ms_per_op": round(delta[7] / ops, 2)}
-        print(DIRECT_ASCII_SPACED_LAX.text(arm), flush=True)
+        print(json.dumps(arm, sort_keys=True), flush=True)
         arms.append(arm)
     report = {"schema": "prismaquant.wire_rehash_reader_sweep.v1", "host": os.uname().nodename,
               "format": args.format, "block_bytes": _BLOCK, "arms": arms}

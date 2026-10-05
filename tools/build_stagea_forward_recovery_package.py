@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.joint_forward_resume import _read, chain_documents
 from prismaquant.stage_a_head import drop_source_head_walk_reads
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+
 
 TEMPLATE = Path(__file__).resolve().parent / 'templates' / 'stagea_forward_recovery_launch.py.template'
 MANIFEST_NAME = 'adjoint-recovery-manifest.json.gz'
@@ -200,12 +200,12 @@ def main():
     (root / 'package-pins.json').write_text(json.dumps({name: hashlib.sha256((root/name).read_bytes()).hexdigest()
                                                      for name in names}, sort_keys=True, indent=2) + '\n')
     (root / f'launch-{label}.py').write_text(launcher)
-    print(DIRECT_ASCII_SPACED_LAX.text({'package': str(root), 'source_head': args.source_head,
+    print(json.dumps({'package': str(root), 'source_head': args.source_head,
         'data_manifest_sha256': digest, 'capsule': bound, 'frontier': capsule['frontier'],
         'head_walk_reads_dropped': dropped,
         'phases': len(manifest['read_plan']['phases']),
         'max_phase_bytes': max(p['bytes'] for p in manifest['read_plan']['phases']),
-        'runtime_pin_pending': True}))
+        'runtime_pin_pending': True}, sort_keys=True))
 
 
 if __name__ == '__main__':

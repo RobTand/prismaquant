@@ -122,11 +122,12 @@ primitive scopes, 508 to 503; no new scope is admitted.
 
 ## Tools spaced-JSON bundle (Refs #1301, 2026-10-05)
 
-The source inventory contains 58 changed serialization calls in 45 scopes
-across 36 tool files. Calls use the existing profile for text, encoded bytes
-or the digest of those bytes; callers still own argument construction, final
-line feeds, error order, comparisons and publication. This is a source
-inventory, not an end-to-end consumer qualification count.
+The original selection contained 58 serialization calls in 45 scopes across
+36 files. At the CEO-authorized proof cutoff, 40 proved calls remain on the
+existing profile in 32 scopes across 24 files; 18 individually unproved calls
+are restored to their exact `99a578e0` expressions as explicit #1301 residuals.
+Proved neighboring calls in mixed scopes remain routed. Callers still own
+argument construction, text/bytes, hashing, line feeds and publication.
 
 The original routing assertions and generic recipe/profile comparisons did
 not prove each consumer. They have been removed. Their pre-change failures
@@ -145,13 +146,14 @@ standard-library dependency boundary. Band handoff, checkpoint parsing and
 Stage B head help/argument handling still precede scientific imports; the
 other tools retain their original package-dependent qualified contexts.
 
-The separately attached correction packet accounts for all 58 changed
-boundaries and distinguishes observed paired results from unresolved inputs
-or runtime prerequisites. A listed source location is not a qualified result.
-Each observed row identifies retained input paths/keys, output types/bytes
-and any omitted producer computation. An isolated boundary comparison is
-explicitly not a producer rerun; no model roll, capture, CUDA benchmark or
-image rebuild is part of that proof.
+The immutable version-three cutover packet reconciles all 58 original calls
+as 40 retained proved routes plus 18 explicitly restored residuals. It records
+retained-input and original CPU-fixture provenance, native output/framing and
+omitted computation; a source location alone is not proof. Earlier packets,
+all red actions and late native diagnostics remain preserved. The native
+deadline wrapper did not qualify either GPU route for retention. This is
+boundary/fixture evidence, not a producer, campaign, wire or serving rerun.
+No model roll, capture, CUDA benchmark or image rebuild was performed.
 Mixed compact, indented and strict recipes remain outside this migration.
 The separately staged `tools/tessera_fleet/model_worker.py` keeps its original
 standard-library serialization; its actual publication bytes are tested.

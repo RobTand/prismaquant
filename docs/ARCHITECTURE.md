@@ -1,14 +1,16 @@
 # PrismaQuant Architecture
 
 Re-stamped 2026-10-05 (PR #2317 correction, PQ #2320, Refs #1301):
-host-only render metadata audits, image metadata, chain-spec construction, wire
-rehashing and render analysis load the existing standard-library digest owner through their sibling
-module context, without initializing PrismaQuant or Torch. Checkpoint, Stage B
-head and band-handoff command-line parsing still precedes scientific imports.
-The correction preserves the existing serializer profile and output interfaces;
-real standalone help, argument refusal, spec output and analysis publication
-are exercised without an inherited repository search path. It does not qualify
-heavy model producers or claim a performance improvement.
+the CEO-authorized cutoff retains 40 proved serializer calls in 32 scopes
+across 24 files and restores 18 individual unproved calls to their exact
+original recipes as explicit #1301 residuals. Proved mixed-scope neighbors
+and all eight lightweight bootstrap repairs remain. Image metadata, chain
+specification, render analysis and render metadata audits use the existing
+standard-library sibling digest owner; the residual wire reader keeps its
+original standard-library JSON recipe. Checkpoint, head and band argument
+handling still precedes scientific imports. The original 36-file launch
+matrix preserves each supported context; CPU help is not native execution
+or whole-producer qualification. No format, serving pin or default changes.
 
 Re-stamped 2026-10-05 (`issues/pq-2273-2299`, base `a1f852f6ee3`, PQ #2273):
 seed wire filenames must match their priced unit/rung before linking in campaign

@@ -13,7 +13,7 @@ from prismaquant.calibration_data import load_calibration_input
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.cost_streaming import build_streamed_model_identity
 from prismaquant.glm_routing_replay import capture_replayed_glm_routes
-from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+
 from prismaquant.joint_adjoint_checkpoints import reference_from_record
 from prismaquant.joint_aura import source_execution_identity
 from prismaquant.joint_cost_quantum import build_quantum_source_runner
@@ -100,9 +100,9 @@ def main():
                    "metadata": result["metadata"],
                    # Absent at PyTorch's default (PQ #1028).
                    **bf16_reduction_stamp()}
-        if not publish_new_bytes(root / "receipt.json", (DIRECT_ASCII_SPACED_LAX.text(receipt) + "\n").encode()):
+        if not publish_new_bytes(root / "receipt.json", (json.dumps(receipt, sort_keys=True) + "\n").encode()):
             raise ValueError("routing capture receipt already exists")
-        print(DIRECT_ASCII_SPACED_LAX.text({"status": "complete", "boundary": receipt["boundary"]}))
+        print(json.dumps({"status": "complete", "boundary": receipt["boundary"]}, sort_keys=True))
     finally:
         if runner is not None:
             runner.shutdown()

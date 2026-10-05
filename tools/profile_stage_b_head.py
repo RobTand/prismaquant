@@ -171,7 +171,7 @@ def main(argv=None) -> int:
     if str(args.scratch).startswith("/mnt/shared"):
         parser.error("--scratch must be host-local, never the pool")
     args.scratch.mkdir(parents=True, exist_ok=True)
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+
     from prismaquant.io_spans import read_proc_io, read_proc_status
     from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
@@ -218,7 +218,7 @@ def main(argv=None) -> int:
         "local_journal_written": written,
         **result,
     }
-    print("STAGE_B_HEAD_PROFILE " + DIRECT_ASCII_SPACED_LAX.text(report), flush=True)
+    print("STAGE_B_HEAD_PROFILE " + json.dumps(report, sort_keys=True), flush=True)
     return 0
 
 

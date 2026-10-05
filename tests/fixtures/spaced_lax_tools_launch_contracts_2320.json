@@ -483,5 +483,13 @@
       "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
       "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
     }
-  ]
+  ],
+  "cutover": {
+    "authority": "CEO Option B dec-1005-213921-b04d",
+    "original_calls": 58,
+    "retained_proven_routes": 40,
+    "individual_restored_residuals": 18,
+    "original_context_population": 36,
+    "limit": "The original supported-context matrix is retained, including residual-source contexts. CPU help does not qualify native execution; native scope remains unexercised for acceptance."
+  }
 }

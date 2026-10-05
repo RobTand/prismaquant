@@ -85,19 +85,20 @@
   `docs/audits/digest_site_census_pq1301_2026-10-04.json` retains all 501
   historical rows and names the 334 remaining gated scopes; #1301 stays open.
 
-- **The tools sorted-JSON bundle uses its existing spaced ASCII lax profile**
-  (Refs #1301, correction #2320). The source inventory is 58 calls in 45 scopes
-  across 36 tool files, not 35. The caller still owns text versus bytes, final
-  line feeds, hashing and publication. Source-routing assertions and generic
-  profile comparisons have been removed: they did not establish consumer
-  equivalence, and their old failures were not behavioral regressions.
-  Actual consumer tests freeze pre-refactor output, refusal and publication
-  outcomes and cover lightweight standalone launchers without scientific
-  dependencies. The separate, scoped boundary packet identifies each retained
-  input and omitted producer computation; it is not a claim that all producers
-  were rerun. The previous missing-xxhash run remains failed. Mixed recipes and
-  the separately staged standard-library model worker remain unchanged; the
-  existing syntactic duplication ratchet is not weakened. #1301 stays open.
+- **The tools serializer correction retains only proved routes** (Refs #1301,
+  correction #2320). The original selection was 58 calls in 45 scopes across
+  36 files. The CEO-authorized cutoff retains 40 proved profile calls in 32
+  scopes across 24 files and restores 18 individual unproved expressions to
+  their exact original recipes as explicit #1301 residuals. Proved mixed-scope
+  neighbors and all eight actual lightweight bootstrap repairs remain.
+  Source-routing/profile-echo assertions were removed in favor of actual
+  consumer outcomes and the supported-context launch matrix. Version-three
+  evidence distinguishes boundary and unqualified CPU-fixture behavior from
+  whole-producer/native qualification; all old red runs and late diagnostics
+  remain preserved. The owner-generated gated-scope baseline is 309, a net
+  reduction of 25 from the original 334, with residuals explicitly restored.
+  The staged standard-library worker and unrelated recipe families stay
+  unchanged. #1301 remains open; no speed, serving or full-suite claim.
 
 - **Raw byte-hash constructors route to the digest owners** (Refs #1301).
   83 raw `hashlib.sha256(...).hexdigest()` constructor sites across 47

@@ -172,7 +172,7 @@ def _render_key(path: str):
 
 
 def run_window(args):
-    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
+
     import torch
     fixture = json.loads(Path(args.fixture_json).read_text())
     _attach_strict(fixture)
@@ -206,9 +206,10 @@ def run_window(args):
                     tensor = renders[key]
                     file_receipt = cache.file_load_receipt(key, tensor)
                     identity = cache.resident_render_identity(*key, tensor)
-                    digest.update(DIRECT_ASCII_SPACED_LAX.encoded([list(key), list(tensor.shape), str(tensor.dtype),
+                    digest.update(json.dumps(
+                        [list(key), list(tensor.shape), str(tensor.dtype),
                          {k: v for k, v in file_receipt.items() if k != 'path'},
-                         identity]))
+                         identity], sort_keys=True).encode())
                     digest.update(tensor.contiguous().view(torch.uint8).numpy().tobytes())
                 digest = digest.hexdigest()
             digested = time.perf_counter()

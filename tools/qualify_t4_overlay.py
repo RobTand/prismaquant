@@ -86,5 +86,5 @@ def main():
  _drive_ordered_walk(batch['tasks'],read_task,commit_task,workers=workers)
  manifest=({k:batch[k] for k in ('parent_key','plan_key','child_ordinal')} if args.pb_task_batch else {});manifest.update(schema=('prismabuild.child_result_manifest.v1' if args.pb_task_batch else 'prismaquant.t4_qualification_pilot_result.v1'),results=results);Path(batch['result_manifest_path']).write_text(DIRECT_ASCII_SPACED_LAX.text(manifest)+'\n')
  from prismaquant.residency_map import residency_report
- print(DIRECT_ASCII_SPACED_LAX.text({'residency_report':residency_report()}),flush=True)
+ print(json.dumps({'residency_report':residency_report()},sort_keys=True),flush=True)
 if __name__=='__main__':main()
