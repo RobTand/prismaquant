@@ -168,3 +168,68 @@ def test_packed_append_checks_dense_manifest_before_sidecar(tmp_path, monkeypatc
     assert cache.weights == {(dense, "NVFP4"): filename}
     assert shard.read_bytes() == b"existing dense shard"
     assert list(tmp_path.iterdir()) == [shard]
+
+
+@pytest.mark.parametrize("second,filename", [
+    ("layer_a", f"layer_a__{FORMAT}.pt"),
+    ("layer__a", f"layer__a__{FORMAT}.tessera"),
+])
+def test_queued_campaign_collision_preserves_first_publication(
+        anchor_inputs, tmp_path, monkeypatch, second, filename):
+    from threading import Event
+    from prismaquant.tessera_publication import BoundedPublisher, PublicationError
+
+    cache, wire_dir, weight, prepare = anchor_inputs
+    first = "layer.a"
+    first_entered = Event()
+    release_first = Event()
+    write_calls = []
+    first_render_bytes = []
+    store = pwc._store_rendered_weight_entry
+
+    def hold_first_write(**kwargs):
+        write_calls.append((kwargs["qname"], kwargs["fmt"]))
+        if kwargs["qname"] == first:
+            first_entered.set()
+            assert release_first.wait(timeout=30), "first publication was not released"
+        result = store(**kwargs)
+        if kwargs["qname"] == first:
+            first_render_bytes.append((tmp_path / cache.weights[(first, FORMAT)]).read_bytes())
+        return result
+
+    monkeypatch.setattr(pwc, "_store_rendered_weight_entry", hold_first_write)
+    with BoundedPublisher(budget_bytes=64) as publisher:
+        try:
+            campaign._finish_anchor(
+                qname=first, weight=weight, activations=weight, format_name=FORMAT,
+                cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+                render=weight * 0.75, blob=b"first wire", elapsed=0.0, publisher=publisher,
+            )
+            assert first_entered.wait(timeout=30), "writer did not reach the first publication"
+            assert cache.weights == {}
+            campaign._finish_anchor(
+                qname=second, weight=weight, activations=weight, format_name=FORMAT,
+                cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+                render=weight * 0.5, blob=b"second wire", elapsed=0.0, publisher=publisher,
+            )
+            assert publisher.outstanding == 2
+        finally:
+            release_first.set()
+        with pytest.raises(PublicationError) as error:
+            publisher.drain()
+        assert isinstance(error.value.__cause__, ValueError)
+        assert_refusal(SimpleNamespace(value=error.value.__cause__), first, second, filename)
+        assert len(publisher.completed()) == 1
+
+    assert write_calls == [(first, FORMAT)]
+    assert set(cache.weights) == {(first, FORMAT)}
+    first_render = tmp_path / cache.weights[(first, FORMAT)]
+    first_wire = campaign._wire_path(wire_dir, first, FORMAT)
+    assert first_render.read_bytes() == first_render_bytes[0]
+    torch.testing.assert_close(torch.load(first_render, weights_only=True),
+                               (weight * 0.75).to(torch.bfloat16))
+    assert first_wire.read_bytes() == b"first wire"
+    assert {path for path in tmp_path.rglob("*") if path.is_file()} == {
+        first_render, first_wire,
+    }
+
