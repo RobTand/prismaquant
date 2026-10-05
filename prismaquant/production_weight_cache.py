@@ -221,10 +221,10 @@ def require_injective_cache_filenames(
             filename = _cache_weight_filename(
                 qname, fmts[0] if fmts else "BF16")
             raise ValueError(
-                f"{where}: qualified names {previous!r} and {qname!r} share "
-                f"one cache filename {filename!r}; the mangled leaf is not "
-                f"injective and the rendered shards would silently overwrite "
-                f"each other"
+                f"{where}: qualified names {previous!r} and {qname!r} map to "
+                f"one rendered cache destination {filename!r}; the mangled "
+                f"leaf is not injective and the rendered shards would "
+                f"silently overwrite each other"
             )
 
 
