@@ -25,9 +25,16 @@ require = Contract(ValueError).require
 
 
 def same(actual, expected, label, *, contract: Contract | None = None):
-    """Compare identity with the caller's refusal vocabulary, or the stage default."""
+    """Actual two-thing comparability with the caller's refusal vocabulary."""
     check = require if contract is None else contract.require
     check(actual == expected, f"{label}: identity mismatch")
+
+
+def recorded_same(actual, expected, label):
+    """Recorded-versus-running provenance, stamped in default dev mode."""
+    from .dev_mode import seal_check
+    seal_check(label, expected, actual, where="Stage A/B recorded versus running provenance",
+               refusal=lambda: ValueError(f"{label}: identity mismatch"))
 
 
 def bound(record, label):
@@ -80,7 +87,8 @@ def read_bound(record, label):
             return hit[1]
     raw = (path.read_bytes() if BOUND_READER is None
            else BOUND_READER(path, record['sha256'], label))
-    same(bytes_sha256hex(raw), record['sha256'], f'{label}: owned bytes')
+    require(bytes_sha256hex(raw) == record["sha256"],
+            f"{label}: owned bytes: artifact checksum changed")
     if fence is not None and len(raw) == fence[3]:
         _BOUND_BYTES[key] = (fence, raw)
     return raw

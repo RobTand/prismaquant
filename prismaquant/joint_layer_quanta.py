@@ -2548,6 +2548,7 @@ def build_quantum_executable_manifest(
         render_prerequisite: Mapping,
         layer_source_spans: Mapping[int, Sequence] | None = None,
         source_model_root: str | None = None,
+        extra_head_reads: Sequence[Mapping] | None = None,
         prepared_inputs: Mapping | None = None,
         head_slice: Mapping | None = None,
         replay_mode: str | None = None,
@@ -2790,6 +2791,12 @@ def build_quantum_executable_manifest(
         {"path": calib_path, "offset": 0, "bytes": calib_bytes,
          "sha256": calib_sha256}, where="calibration intake")
     head_indices = [head_index]
+    for extra in (extra_head_reads or ()):
+        # The run reads these after the encoding calibration and before any
+        # forward phase: an independent Fisher draw's tokens, in read order.
+        head_indices.append(_take(
+            {"path": extra["path"], "offset": 0, "bytes": extra["bytes"],
+             "sha256": extra["sha256"]}, where=extra.get("where", "head read")))
     head_annotation: dict = {}
     if head_slice is not None:
         bound_head = check_head_slice_binding(
@@ -3059,6 +3066,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
                             metadata_root: str | None = None,
                             layer_source_spans: Mapping[int, Sequence] | None = None,
                             source_model_root: str | None = None,
+                            extra_head_reads: Sequence[Mapping] | None = None,
                             prepared_inputs: Mapping | None = None,
                             head_slice: Mapping | None = None,
                             replay_mode: str | None = None,
@@ -3163,6 +3171,7 @@ def bind_quantum_executable(record: Mapping, receipt: Mapping,
             calib=calib, render_prerequisite=render_prerequisite,
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
+            extra_head_reads=extra_head_reads,
             prepared_inputs=prepared_inputs, head_slice=head_slice,
             replay_mode=replay_mode, checkpoint_incoming_mode=checkpoint_incoming_mode,
             head_source=head_source)
@@ -3243,6 +3252,7 @@ def emit_quantum_executable_readsets(
         output_root: str, metadata_root: str | None = None,
         layer_source_spans: Mapping[int, Sequence] | None = None,
         source_model_root: str | None = None,
+        extra_head_reads: Sequence[Mapping] | None = None,
         prepared_inputs: Mapping | None = None,
         head_slice: Mapping | None = None,
         replay_mode: str | None = None,
@@ -3278,6 +3288,7 @@ def emit_quantum_executable_readsets(
             calib=calib, render_prerequisite=render_prerequisite,
             layer_source_spans=layer_source_spans,
             source_model_root=source_model_root,
+            extra_head_reads=extra_head_reads,
             prepared_inputs=prepared_inputs, head_slice=head_slice,
             replay_mode=replay_mode, checkpoint_incoming_mode=checkpoint_incoming_mode,
             head_source=head_source)
@@ -3300,6 +3311,7 @@ def emit_quantum_executable_readsets(
                 metadata_root=metadata_root,
                 layer_source_spans=layer_source_spans,
                 source_model_root=source_model_root,
+                extra_head_reads=extra_head_reads,
                 prepared_inputs=prepared_inputs, head_slice=head_slice,
                 replay_mode=replay_mode, checkpoint_incoming_mode=checkpoint_incoming_mode,
                 head_source=head_source,

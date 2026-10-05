@@ -1132,8 +1132,11 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
     the census, the campaign plan and its receipts, the merged cost payload,
     the merged checkpoint manifest and every one of its unit shards, then the
     calibration input, the capture compatibility record, the projection
-    backend and the canonical capture manifest. ``run`` additionally binds the
-    prepared completion and the production cache it names.
+    backend and the canonical capture manifest. A plan that binds a
+    ``joint_eval_draw`` descriptor stages that draw's calibration input here
+    too, beside the encoding calibration input, before forward cost.
+    ``run`` additionally binds the prepared completion and the production
+    cache it names.
     """
     inputs = plan["inputs"]
     track.add(plan_path, 0, _required_size(plan_path, "joint plan"), "plan")
@@ -1168,6 +1171,15 @@ def _joint_head(track: _Phases, plan_path: str, plan: dict, *, roster,
             continue
         path = _bound(record, f"plan {key}")
         track.add(path, 0, _required_size(path, f"plan {key}"), "head")
+    # A top-level joint_eval_draw descriptor binds a fresh eval calibration
+    # alongside the unchanged encoding calibration input; both are staged
+    # here, before any forward-cost phase, in the order the pass reads them.
+    eval_draw = plan.get("joint_eval_draw")
+    if eval_draw is not None:
+        path = _bound(eval_draw.get("calibration_input"),
+                      "plan joint_eval_draw.calibration_input")
+        track.add(path, 0,
+                  _required_size(path, "plan joint_eval_draw.calibration_input"), "head")
     backend = ((plan.get("execution") or {}).get("projection_backend") or {}).get("binary")
     if backend is not None:
         path = _bound(backend, "plan execution.projection_backend.binary")
@@ -1620,9 +1632,13 @@ def _cost_layer_windows(names, *, formats_by_qname, census, owners,
 
 
 def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
-                                 retained_budget, source_bytes, n_probes=4,
+                                 retained_budget, source_bytes, n_probes,
                                  validated_completed_units=None, argv=None):
     """Declare COST's forward/reverse reads with sealed retained-window IDs.
+
+    The sealed probe count is the plan's ``execution.n_probes``; the explicit
+    ``n_probes`` argument must agree with it, so a plan declaring sixteen
+    probes can never be sealed with an invented four.
 
     Full target partitions are derived before applying a validated resume
     subset. COST creates boundaries online from source and calibration IDs;
@@ -1639,12 +1655,26 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
         raise SystemExit("COST V2 requires a complete retained-window budget")
     if type(source_bytes) is not int or source_bytes <= 0:
         raise SystemExit("COST V2 requires the fixed declared source-owner byte cap")
-    if type(n_probes) is not int or n_probes != 4:
-        raise SystemExit("COST V2 currently declares exactly four joint probes")
+    if type(n_probes) is not int or n_probes < 2:
+        raise SystemExit("COST V2 requires an explicit integer n_probes of at least two")
     plan_path, prepared = os.path.abspath(plan_path), os.path.abspath(prepared)
     plan = _read_json(plan_path, "joint plan")
     if plan.get("schema") != JOINT_PLAN_SCHEMA:
         raise SystemExit(f"{plan_path}: not a {JOINT_PLAN_SCHEMA} plan")
+    # The sealed probe count is the plan's, never an invented default: the
+    # declared execution.n_probes is the count the pass executes, and the
+    # caller's explicit argument must agree with it or the manifest would
+    # price one count and serve another.
+    plan_execution = plan.get("execution")
+    plan_probes = plan_execution.get("n_probes") if isinstance(plan_execution, dict) else None
+    if type(plan_probes) is not int or plan_probes < 2:
+        raise SystemExit(
+            "the joint plan must declare an exact integer execution.n_probes "
+            "of at least two for COST V2")
+    if plan_probes != n_probes:
+        raise SystemExit(
+            f"COST V2 n_probes={n_probes} disagrees with the plan's "
+            f"execution.n_probes={plan_probes}")
     prefetch = plan.get("source_prefetch") or {}
     if (prefetch.get("prefetch_lookahead") != 1
             or prefetch.get("max_cache_slots") != 2):
@@ -1671,6 +1701,18 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
         if not fmts or any(not isinstance(fmt, str) or not fmt for fmt in fmts):
             raise SystemExit(f"prepared COST has no measured candidate: {name}")
         formats_by_qname[name] = fmts
+
+    # An optional diagnostic ``joint_eval_targets`` roster selects the subset
+    # the fresh eval draw reprices; COST's windows and rosters derive from that
+    # actual selection, never from the completion's whole historical roster.
+    from prismaquant.tessera_joint_eval_panel import evaluation_formats
+    formats_by_qname = evaluation_formats(plan, formats_by_qname)
+    if not isinstance(formats_by_qname, dict) or not formats_by_qname:
+        raise SystemExit("COST V2 eval target selection left no repriced target")
+    if not set(formats_by_qname) <= set(roster):
+        raise SystemExit("COST V2 eval target roster names units outside the campaign")
+    if any(not fmts for fmts in formats_by_qname.values()):
+        raise SystemExit("COST V2 eval target selection has a formatless unit")
 
     workspace = os.path.dirname(campaign_plan_path)
     campaign = Campaign(workspace)
@@ -1701,7 +1743,8 @@ def build_joint_cost_v2_manifest(plan_path, *, prepared, produced_by,
     # selected archive and proves storage <= the declared file size.
     windows_by_layer, render_paths = {}, {}
     for layer in source_layers:
-        names = sorted(by_layer.get(layer, ()))
+        names = sorted(name for name in by_layer.get(layer, ())
+                       if name in formats_by_qname)
         if not names:
             windows_by_layer[layer] = ()
             continue

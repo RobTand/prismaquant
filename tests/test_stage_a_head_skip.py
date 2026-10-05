@@ -392,15 +392,19 @@ def test_a_completion_under_another_digest_refuses(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("dev", [False, True], ids=["certified", "dev"])
-def test_a_completion_prepared_under_another_plan_refuses(tmp_path, monkeypatch, dev):
+def test_another_prepared_plan_is_stamped_in_dev_and_refused_when_certified(
+        tmp_path, monkeypatch, capsys, dev):
     campaign = _campaign(tmp_path, implementation=ONE)
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1" if dev else "0")
     if dev:
-        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+        result = _capture(campaign, tmp_path / "run", monkeypatch, plan_sha256="9" * 64)
+        assert result["passed"]
+        assert "[DEV-MODE]" in capsys.readouterr().out
+        assert (adjoint_space(tmp_path / "run") / "checkpoints").exists()
     else:
-        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
-    with pytest.raises(ValueError, match="prepared plan"):
-        _capture(campaign, tmp_path / "run", monkeypatch, plan_sha256="9" * 64)
-    assert not (adjoint_space(tmp_path / "run") / "checkpoints").exists()
+        with pytest.raises(ValueError, match="prepared plan"):
+            _capture(campaign, tmp_path / "run", monkeypatch, plan_sha256="9" * 64)
+        assert not (adjoint_space(tmp_path / "run") / "checkpoints").exists()
 
 
 def test_a_completion_with_another_calibration_refuses(tmp_path, monkeypatch):

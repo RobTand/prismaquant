@@ -239,6 +239,31 @@ def test_build_covers_whole_consumption_corpus(tmp_path):
     assert manifest["annotations"]["render_prerequisite"]["scope"] == "pb732"
 
 
+def test_independent_draw_stages_encoding_then_fisher_tokens_through_emit_and_bind(tmp_path):
+    record, receipt, parent = _layer2(tmp_path)
+    record, _digest = _bind_slice(record, receipt, tmp_path / "adjoint-slices")
+    kwargs = dict(strided_boundaries=STRIDED, n_probes=N_PROBES,
+                  calib=dict(CALIB), render_prerequisite=dict(RENDER_PREREQ))
+    baseline = build_quantum_executable_manifest(record, receipt, parent, **kwargs)
+    draw = {"path": "/fixture/fisher/train-2048.safetensors",
+            "bytes": 2048, "sha256": "a" * 64}
+    emitted = emit_quantum_executable_readsets(
+        receipt, [record], parent, output_root=str(tmp_path / "run"),
+        extra_head_reads=[draw], **kwargs)
+    assert len(emitted) == 1
+    result = emitted[0]
+    manifest = result["manifest"]
+    head = manifest["read_plan"]["phases"][0]
+    assert head["name"] == "head"
+    reads = [manifest["entries"][index] for index in head["entry_indices"]]
+    assert [row["path"] for row in reads] == [CALIB["path"], draw["path"]]
+    assert reads[1] == {"offset": 0, **draw}
+    assert manifest["total_bytes"] == baseline["total_bytes"] + draw["bytes"]
+    assert result["record"]["executable_readset"]["manifest_sha256"] == result["manifest_sha256"]
+    plain = build_quantum_executable_manifest(record, receipt, parent, **kwargs)
+    assert seal_manifest_bytes(plain) == seal_manifest_bytes(baseline)
+
+
 def test_checkpoint_manifest_is_the_first_declared_checkpoint_read(tmp_path):
     """``load_adjoint_checkpoint`` opens ``checkpoint.json`` before any
     entry, so the executable readset declares it first in the

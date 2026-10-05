@@ -464,11 +464,14 @@ def stage_a_bind_identity(config: dict, prepared: dict) -> dict:
     from .calibration_data import load_calibration_input
     from .cost_streaming import validate_streamed_model_identity
 
-    execution = config["execution"]
-    ids, _ = load_calibration_input(
+    from .tessera_joint_eval_panel import evaluation_execution, select_evaluation
+    encoding_execution = config["execution"]
+    ids, calibration = load_calibration_input(
         config["calibration_input"]["path"],
         expected_sha256=config["calibration_input"]["sha256"],
-        n_samples=execution["n_calib_samples"], seqlen=execution["calib_seqlen"])
+        n_samples=encoding_execution["n_calib_samples"], seqlen=encoding_execution["calib_seqlen"])
+    ids, _calibration, _descriptor = select_evaluation(ids, calibration, config)
+    execution = evaluation_execution(config)
     probe_microbatch = int(execution.get("probe_microbatch", 0))
     batch_rows = min(probe_microbatch or len(ids), len(ids))
     partition = None
