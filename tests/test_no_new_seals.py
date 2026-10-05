@@ -76,6 +76,7 @@ MODULES = (
     "prismaquant/stage_a_chain_split.py",
     "prismaquant/stage_inputs.py",
     "prismaquant/tessera_joint_aura.py",
+    "prismaquant/tessera_joint_eval_panel.py",
     "tools/dispatch_joint_quanta.py",
     "tools/dispatch_tessera_campaign.py",
     "tools/tessera_campaign_container.py",
@@ -317,6 +318,14 @@ ALLOWLIST = {
         "running artifact ceiling: PrismaBuild admits the one and the run spends the other"),
     ("prismaquant/stage_inputs.py", "bound"): (
         1, INTEGRITY, "an artifact's bytes against the digest it was bound under"),
+    ("prismaquant/stage_inputs.py", "read_bound"): (
+        1, INTEGRITY, "loaded control bytes against their own declared checksum, not a run identity"),
+    ("prismaquant/tessera_joint_aura.py", "seed_source_identity_cache"): (
+        2, INTEGRITY, "the existing or copied cache file's bytes against that file's own checksum"),
+    ("prismaquant/tessera_joint_aura.py", "load_measured_anchor_input.verify_files"): (
+        1, INTEGRITY, "wire bytes against the encoded blob's own checksum"),
+    ("prismaquant/tessera_joint_eval_panel.py", "load_eval_draw"): (
+        1, INTEGRITY, "loaded int64 token bytes against the draw artifact's own token digest"),
     # Moved unchanged from tessera_expert_projection.py, which this lint never
     # scanned, when stage_inputs.py joined the campaign path (PQ #1555).
     ("prismaquant/stage_inputs.py", "require_source_identity"): (

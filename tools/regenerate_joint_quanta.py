@@ -1135,7 +1135,8 @@ def main(argv=None) -> int:
         # (no writes); the probe count comes from the sealed plan, never a
         # knob. Refusal writes nothing.
         try:
-            execution = plan.get("execution", {})
+            from prismaquant.tessera_joint_eval_panel import evaluation_execution, evaluation_formats
+            execution = evaluation_execution(plan)
             n_probes = execution.get("n_probes") \
                 if isinstance(execution, dict) else None
             if type(n_probes) is not int or isinstance(n_probes, bool) \
@@ -1157,7 +1158,8 @@ def main(argv=None) -> int:
                 bound_manifests = [(row["manifest_path"], row["manifest"],
                                     row["manifest_sha256"]) for row in emitted]
             if args.executable_readsets:
-                calib_input = plan.get("calibration_input", {})
+                calib_input = (plan.get("joint_eval_draw") or {}).get("calibration_input",
+                                                                        plan.get("calibration_input", {}))
                 calib_path = calib_input.get("path") \
                     if isinstance(calib_input, dict) else None
                 calib_sha256 = calib_input.get("sha256") \
@@ -1242,11 +1244,16 @@ def main(argv=None) -> int:
                     raise ValueError(
                         "the prepared completion names no unit roster: "
                         "refusing")
+                formats_by_qname = evaluation_formats(plan, formats_by_qname)
                 from prismaquant.joint_cost_quantum import (
                     derive_layer_prepared_inputs,
                 )
                 by_layer: dict[int, list] = {}
+                from prismaquant.joint_layer_quanta import qname_layer
+                measurement_layers = {qname_layer(name) for name in formats_by_qname}
                 for record in produced["records"]:
+                    if record.get("layer") not in measurement_layers:
+                        continue
                     by_layer.setdefault(record.get("layer"), []).append(
                         record)
                 # PQ #1022: every layer's retained admission is settled
@@ -1260,7 +1267,7 @@ def main(argv=None) -> int:
                     try:
                         prepared_by_layer[layer] = derive_layer_prepared_inputs(
                             layer_records[0],
-                            execution=plan.get("execution", {}),
+                            execution=execution,
                             formats_by_qname=formats_by_qname,
                             production_cache=production_cache,
                             prepared_sha256=args.prepared_sha256,
@@ -1308,7 +1315,7 @@ def main(argv=None) -> int:
                     for layer in sorted(by_layer):
                         bound = derive_layer_spill_bound(
                             prepared_by_layer[layer],
-                            execution=plan.get("execution", {}),
+                            execution=execution,
                             production_cache=production_cache,
                             profile=profile, model_config=model_config,
                             replay_regime=args.replay_regime, block=block)

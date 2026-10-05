@@ -1467,7 +1467,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             stat = path.stat()
             return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
         before = [signature(p) for p in (wire, render)]
-        _same(_sha(wire), cell["record"]["blob_sha256"], f"{pair}: wire checksum")
+        _require(_sha(wire) == cell["record"]["blob_sha256"], f"{pair}: wire checksum changed")
         digest = None if defer_render_hashes else _sha(render)
         after = [signature(p) for p in (wire, render)]
         _same(after, before, f"{pair}: input files changed while hashing")
@@ -2419,6 +2419,14 @@ def load_joint_anchor_plan(path, digest, *, projection_runtime=True, defer_pool_
         _require(Path(execution['boundary_storage']['directory']).resolve().is_relative_to(
                  Path(config['output_root']).resolve()),
                  'diagnostic joint boundaries must be owned by pilot output root')
+    if config.get("joint_eval_draw") is not None:
+        from .tessera_joint_eval_panel import evaluation_execution
+        evaluation_execution(config)
+        _require(execution.get("operator_windows") is not None,
+                 "independent joint evaluation requires operator observation windows")
+        _require(Path(execution["boundary_storage"]["directory"]).resolve().is_relative_to(
+            Path(config["output_root"]).resolve()),
+            "independent joint boundaries must be owned by the research output root")
     if config.get("head_walk_workers") is not None:
         _head_walk_worker_count(config["head_walk_workers"])
     if "file_hash_workers" in config:
@@ -2584,23 +2592,18 @@ def seed_source_identity_cache(config, root):
     if source.resolve() == destination.resolve():
         return destination
     if destination.exists():
-        _same(_sha(destination), binding["sha256"],
-              "existing output source identity cache")
+        _require(_sha(destination) == binding["sha256"],
+                 "existing output source identity cache: artifact checksum changed")
     else:
         atomic_write_bytes(destination, source.read_bytes())
-        _same(_sha(destination), binding["sha256"],
-              "seeded source identity cache")
+        _require(_sha(destination) == binding["sha256"],
+                 "seeded source identity cache: artifact checksum changed")
     return destination
 
 
-#: The prepared-record bindings that name DIGESTS of things a dev iteration
-#: legitimately changes: which plan the prepare ran under, and which producer
-#: package made it, plus the projection backend's numerical qualification.
-#: In dev mode these are records: ``seal_check`` prints the difference and
-#: reuses the existing preparation without rewriting its completion or cache.
-#: Model identity, calibration, roster and reader remain walls in both modes.
-#: A changed projection backend requires deliberate fresh measurement when it
-#: changes numerics; recording this seal never certifies an old measurement.
+#: Plan/package/backend digests retain their recorded-versus-running shortcut.
+#: Actual calibration, coordinate, shape and dtype joins remain both-mode
+#: comparability checks; owned wire/render/control bytes keep their digests.
 _DEV_RECORDED_PREPARED_KEYS = ("plan_sha256", "implementation_sha256", "projection_backend")
 
 
@@ -2976,10 +2979,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
         for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
             _same(calibration["provenance"].get(name), original_draw.get(name), f"original full draw {name}")
         result["calibration_input"] = calibration
-        from .tessera_joint_eval_panel import select_panel
-        eval_ids, eval_panel = select_panel(ids, calibration, config.get('joint_eval'))
+        from .tessera_joint_eval_panel import evaluation_execution, select_evaluation
+        if command == "prepare":
+            eval_ids, eval_calibration, eval_panel = ids, calibration, None
+        else:
+            eval_ids, eval_calibration, eval_panel = select_evaluation(ids, calibration, config)
+            execution = evaluation_execution(config)
         if eval_panel is not None:
-            result['joint_eval'] = eval_panel
+            result["joint_eval"] = eval_panel
+            result["evaluation_calibration_input"] = eval_calibration
         if command == "prepare":
             if config.get("qualification_window") is not None:
                 from .memory_management import CaptureMemoryGuard
@@ -3120,9 +3128,11 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                 max_file_bytes=_prepare_file_read_bound(data,
                     max_render_bytes=config["max_render_bytes"]))
             result["wire_validation"] = HISTORICAL_WIRE_VALIDATION
-            _live_targets(runner, data.formats_by_qname)
-            formats = list(dict.fromkeys(fmt for values in data.formats_by_qname.values() for fmt in values))
-            expected_rows = data.formats_by_qname
+            from .tessera_joint_eval_panel import evaluation_formats
+            measurement_formats = evaluation_formats(config, data.formats_by_qname)
+            _live_targets(runner, measurement_formats)
+            formats = list(dict.fromkeys(fmt for values in measurement_formats.values() for fmt in values))
+            expected_rows = measurement_formats
             if config.get("source_scope") == "mtp":
                 # The MTP layer is priced on its own head's self-KL, not the body's
                 # end KL (PQ #1353), from the same qualified cache.
@@ -3150,14 +3160,15 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                     **({"operator_windows": operator_policy} if operator_policy is not None else {}),
                     **({"source_transition": source_transition} if source_transition is not None else {}),
                     include_routed_experts=True, include_lm_head=False, dw_dtype="float32",
-                    min_free_gib=config["min_free_gib"], formats_by_qname=data.formats_by_qname,
+                    min_free_gib=config["min_free_gib"], formats_by_qname=measurement_formats,
                     checkpoint_dir=Path(config["output_root"]) / "checkpoints", resume=resume,
                     model_identity=source, profile=runner.profile,
                     **({'retained_operator_windows': execution['retained_operator_windows'],
                         'device_envelope_bytes': declared_device_bytes}
                        if execution.get('retained_operator_windows') is not None else {}),
                     checkpoint_identity_extra={"tessera_joint_anchor_plan_sha256": plan_sha256,
-                        "prepared_anchor_sha256": prepared["sha256"], "calibration_input": calibration,
+                        "prepared_anchor_sha256": prepared["sha256"], "calibration_input": eval_calibration,
+                        "encoding_calibration_input": calibration,
                         **({'joint_eval': eval_panel} if eval_panel is not None else {}),
                         "reader_identity": reader_identity})
             _same(set(payload["costs"]), set(expected_rows), "complete joint output roster")
@@ -3167,7 +3178,8 @@ def execute(command, config, *, plan_sha256, prepared=None, resume=False,
                     _require(validate_joint_aura_entry(row), f"{name}: invalid measured joint cost")
             payload["provenance"]["tessera_joint_anchors"] = {
                 "plan_sha256": plan_sha256, "prepared": prepared, "inputs": data.inputs,
-                "calibration_input": calibration, "measured_cells": len(data.cells),
+                "calibration_input": eval_calibration, "encoding_calibration_input": calibration,
+                "measured_cells": len(data.cells),
                 **({'joint_eval': eval_panel} if eval_panel is not None else {}),
                 "wire_validation": HISTORICAL_WIRE_VALIDATION,
                 **render_census}

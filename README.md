@@ -105,6 +105,22 @@ AURA answers the global question with three commitments:
 
 Full derivations, the additivity/cancellation analysis, and the served evidence: [`paper/main.pdf`](paper/main.pdf).
 
+**Independent-context research pricing.** Joint-AURA plans may bind an explicit
+`joint_eval_draw` training-token artifact separately from the immutable encoding/H
+calibration. The original candidate bytes, activation scales and their calibration
+receipts remain unchanged; Stage A/B, band headers and read manifests bind the new
+Fisher draw, actual sequence shape and explicit probe count (at least two). The
+existing subset-only `joint_eval` and independent draw are mutually exclusive.
+Signed paired samples and actual expert token/call counts retain their exact draw
+identities. These outputs are diagnostic research, refused by shipping allocation;
+they do not turn an old capture into a new context or establish held-out quality.
+Probe-count forecasts from a small retained pilot are conditional planning numbers,
+not population-variance or served-KL precision guarantees. CPU/GPU execution and
+staged NVMe/RAM consumption use PrismaBuild admission and byte-integrity checks.
+In default dev mode, recorded-versus-running identity or provenance differences
+are stamped and continue under `dev_mode.seal_check`; no re-seal or cache adoption
+is required. Certified mode remains explicit.
+
 ---
 
 ## Pipeline

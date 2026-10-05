@@ -2849,10 +2849,8 @@ def run_adjoint_capture(
         completion = _preflight_run_prepared(
             prepared, plan_sha256=plan_sha256, implementation_sha256=implementation,
             reader_identity=reader_identity, projection_backend=projection_backend.identity)
-        # A wall in dev mode too, where the preflight only records a plan
-        # mismatch: the completion's roster is this plan's only because the
-        # prepare ran under it (PQ #1051).
-        _same(completion.get("plan_sha256"), plan_sha256, "prepared plan")
+        from .stage_inputs import recorded_same
+        recorded_same(completion.get("plan_sha256"), plan_sha256, "prepared plan")
         data = None
         if head_walk:
             data = load_measured_anchor_input(
@@ -2884,7 +2882,13 @@ def run_adjoint_capture(
             # reached, as the Stage B head slice does (PQ #1010).
             from .joint_run_progress import HEAD_PHASE
             _pb_commit(head.progress_units, HEAD_PHASE)
+        from .tessera_joint_eval_panel import evaluation_execution, select_evaluation
+        result["encoding_calibration_input"] = calibration
+        ids, calibration, eval_panel = select_evaluation(ids, calibration, config)
+        execution = evaluation_execution(config)
         result["calibration_input"] = calibration
+        if eval_panel is not None:
+            result["joint_eval"] = eval_panel
         result["head"] = head.record
 
         identity_cache_path = (seed_source_identity_cache(config, space / "run")

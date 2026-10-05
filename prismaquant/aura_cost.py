@@ -2515,11 +2515,8 @@ def compute_aura_cost_streamed(
     pilot_panel = (checkpoint_identity_extra or {}).get('joint_eval') if joint_activation else None
     if pilot_panel is not None and operator_windows is None:
         raise ValueError('joint diagnostic panel requires observer-backed operator windows')
-    observation_counts = ({name: {'tokens': 0, 'calls': 0, 'n_probes': n_probes,
-                           'count_scope': 'summed_over_probes',
-                           'per_probe': [{'tokens': 0, 'calls': 0} for _ in range(n_probes)]}
-                           for name in names}
-                          if pilot_panel is not None else None)
+    from .joint_eval_observation import new_observation_counts, observe_probe, stamp_observations
+    observation_counts = new_observation_counts(names, n_probes) if pilot_panel is not None else None
     completed_checkpoint_units: set[str] = set()
     checkpoint_root: Path | None = None
     checkpoint_identity_sha256: str | None = None
@@ -2795,21 +2792,7 @@ def compute_aura_cost_streamed(
                 raise RuntimeError("joint AURA incomplete unit coverage")
             payload["costs"] = joint_rows
             if observation_counts is not None:
-                from .joint_eval_observation import observation_status
-                if set(observation_counts) != set(names):
-                    raise RuntimeError('joint pilot observation roster differs')
-                for name in names:
-                    count = observation_counts[name]
-                    if (any(count[key] != sum(item[key] for item in count['per_probe'])
-                            for key in ('tokens', 'calls'))
-                            or count['count_scope'] != 'summed_over_probes'):
-                        raise RuntimeError(f'joint pilot invalid observation count for {name}')
-                    payload['stats'][name]['joint_eval_observations'] = dict(count)
-                    payload['stats'][name]['joint_eval_status'] = observation_status(count)
-                    for row in payload['costs'][name].values():
-                        row['joint_eval_status'] = payload['stats'][name]['joint_eval_status']
-                        row['joint_eval_observations'] = dict(count)
-                payload['provenance']['joint_eval'] = pilot_panel
+                stamp_observations(payload, observation_counts, pilot_panel)
             payload["provenance"].update({
                 "cost_mode": "aura", "joint_activation": True,
                 "cost_currency": "joint_aura_predicted_dloss",
@@ -3381,10 +3364,7 @@ def compute_aura_cost_streamed(
                     for name, diagnostic in diagnostics.items():
                         g_trace[name] += diagnostic['g_trace']
                         if observation_counts is not None:
-                            observation_counts[name]['tokens'] += diagnostic['observed_tokens']
-                            observation_counts[name]['calls'] += diagnostic['observed_calls']
-                            observation_counts[name]['per_probe'][probe_index]['tokens'] += diagnostic['observed_tokens']
-                            observation_counts[name]['per_probe'][probe_index]['calls'] += diagnostic['observed_calls']
+                            observe_probe(observation_counts, name, probe_index, diagnostic)
                         if collect_col_energy:
                             previous = col_energy.get(name)
                             col_energy[name] = (diagnostic['col_energy'] if previous is None

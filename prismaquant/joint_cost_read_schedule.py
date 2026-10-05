@@ -264,7 +264,8 @@ def load_joint_cost_read_schedule(*, manifest_path: str | Path, manifest_sha256:
     _sha(prepared_sha256, "prepared_sha256")
     _require(type(retained_budget) is RetainedWindowBudget, "retained budget object required")
     source_cap = _int(source_owner_cap_bytes, "source_owner_cap_bytes", positive=True)
-    _require(_int(n_probes, "n_probes", positive=True) == 4, "COST V2 requires four probes")
+    _require(_int(n_probes, "n_probes", positive=True) >= 2,
+             "COST V2 requires at least two probes")
     _require(progress_callback is None or callable(progress_callback), "progress callback invalid")
     m, phases = _validate_pb_v2(_read_sealed(manifest_path, manifest_sha256, manifest_bytes))
     a = _object(m["annotations"], _ANNOTATION_KEYS, "COST annotations")
