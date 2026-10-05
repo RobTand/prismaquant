@@ -1933,10 +1933,13 @@ class CaptureMetadataOwner:
     """One hash-bound, bounded capture-manifest snapshot for selected rows.
 
     The owner is separate from resident X/H ownership. It retains the validated
-    metadata and entry digests for selected consumers. D32 stat/identity drift
-    is stamped in dev mode without rereading or rebinding the snapshot;
-    certified mode preserves the original refusal. Payload bytes still verify
-    against their own digests in either mode.
+    metadata and entry digests for selected consumers. Comparisons of the held
+    snapshot against a later, running observation -- the requested identity or
+    the manifest's current path/stat -- stamp in dev mode (D32) without
+    rereading or rebinding the snapshot; certified mode preserves the original
+    refusals. A stat change during the very read that snapshots the manifest,
+    or manifest bytes that hash to something other than the declared digest,
+    is torn/partial data and refuses in both modes.
     """
 
     def __init__(self, path, *, expected_identity, expected_sha256):

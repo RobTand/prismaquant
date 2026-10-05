@@ -10,6 +10,7 @@ import pytest
 import torch
 
 from prismaquant import tessera_calibration_cache as cc
+from test_source_identity_validate_derivation import checkpoint  # noqa: F401 fixture
 
 
 def canonical_fields():
@@ -96,6 +97,70 @@ def test_dev_metadata_drift_uses_stored_capture_without_rehash(capture, monkeypa
     assert owner.open(record['path'])['identity']['calibration']['fit_ids_sha256'] != 'running-draw'
     assert '[DEV-MODE]' in capsys.readouterr().out
     assert not list(root.parent.glob('*.dev-archived-*'))
+
+
+def _torn_second_stat(monkeypatch, method, target):
+    """Make the second stat of ``target`` through ``method`` disagree."""
+    from types import SimpleNamespace
+
+    real = getattr(Path, method)
+    seen = []
+
+    def wrapper(self, *args, **kwargs):
+        result = real(self, *args, **kwargs)
+        if self == target:
+            if seen:
+                fields = {name: getattr(result, name) for name in
+                          ('st_mode', 'st_dev', 'st_ino', 'st_size',
+                           'st_mtime_ns', 'st_ctime_ns')}
+                fields['st_mtime_ns'] = result.st_mtime_ns + 1
+                return SimpleNamespace(**fields)
+            seen.append(True)
+        return result
+
+    monkeypatch.setattr(Path, method, wrapper)
+
+
+@pytest.mark.parametrize('mode', [None, '1', '0'])
+@pytest.mark.parametrize('fence', ['metadata_owner', 'proof_digests', 'validate_cached'])
+def test_torn_during_read_fences_refuse_in_both_modes(
+        monkeypatch, mode, fence, capture, checkpoint):
+    from prismaquant import cost_streaming as cs
+    from test_source_identity_validate_derivation import _build_cache, _llama_config_dict
+
+    if mode is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    if fence == 'metadata_owner':
+        _root, _path, _census, capture_id, _acts, _hessians, record = capture
+        manifest = Path(record['path'])
+        _torn_second_stat(monkeypatch, 'lstat', manifest)
+        with pytest.raises(RuntimeError, match='changed while its metadata was read'):
+            cc.open_capture_metadata(manifest, expected_identity=capture_id,
+                                     expected_sha256=record['sha256'])
+    elif fence == 'proof_digests':
+        root, shards = checkpoint
+        config = _llama_config_dict()
+        config['_name_or_path'] = str(root)
+        cache, _identity = _build_cache(root, shards, config)
+        declared = cc.sha256(cache)
+        roster = {name: cc.sha256(path) for name, path in shards.items()}
+        _torn_second_stat(monkeypatch, 'stat', cache)
+        with pytest.raises(RuntimeError, match='changed while reading'):
+            cc.streamed_identity_proof_digests(
+                root, cache, roster, live_stat=lambda name: (root / name).stat(),
+                expected_sha256=declared)
+    else:
+        root, shards = checkpoint
+        config = _llama_config_dict()
+        config['_name_or_path'] = str(root)
+        cache, _identity = _build_cache(root, shards, config)
+        monkeypatch.setattr(cs, 'live_streaming_runner_config', lambda _source: config)
+        _torn_second_stat(monkeypatch, 'stat', root / 'config.json')
+        with pytest.raises(RuntimeError, match='source config changed while validating'):
+            cs.validate_cached_streamed_model_identity(str(root), cache)
+
 
 
 def test_dev_prefetch_identity_metadata_adopts_stored_draw(capture, monkeypatch, capsys):
