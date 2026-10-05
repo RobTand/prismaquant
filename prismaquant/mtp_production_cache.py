@@ -35,6 +35,7 @@ from prismaquant.production_weight_cache import (
     _weighted_render_family,
     _write_render_score_sidecar,
     build_mtp_append_identity,
+    require_injective_cache_filenames,
 )
 from prismaquant.streaming_production_cache import _render_dense_layer
 
@@ -418,6 +419,24 @@ def fill_profile_mtp_production_cache(
         }
 
         cache_dir_path = _cache_dir_for_append(cache, cache_dir)
+        # #2231: this append streams shards under the same mangled leaf as
+        # every other producer, and the first residency read that would
+        # catch a collision arrives only after the overwriting write. Refuse
+        # here at the write open: over this append's own (qname, canonical
+        # format) coordinates, and -- when a real cache directory is opened
+        # -- over the union with the manifest keys already in the cache,
+        # since a pair split across the append and an earlier stripe or the
+        # dense fill shares one directory and one leaf. This runs before the
+        # stale-scope pruning below on purpose: a replaced stripe's manifest
+        # key still names a disk shard that survives the prune and would
+        # take the overwrite.
+        append_pairs = set(expected_pairs)
+        if cache_dir_path is not None:
+            append_pairs.update(cache.weights)
+        require_injective_cache_filenames(
+            append_pairs,
+            where="MTP production cache append",
+        )
         if cache_dir_path is not None:
             # #170: the base render-identity sidecar covers only the dense
             # fill, yet this append streams further shards into the same
