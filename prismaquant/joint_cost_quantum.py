@@ -102,6 +102,7 @@ from .joint_quantum_handoff import (
     load_quantum_handoff,
     require_band_serial_readset,
 )
+from .tessera_joint_aura import _restores_activation_scale_env
 
 #: Exit codes (§6.2/§6.4): 3 is the identity refusal -- nothing written; 4 is
 #: the clean gap (status.json says gapped; PB retries the sealed action key).
@@ -3918,6 +3919,7 @@ def _build_quantum_source_identity(runner, config, *, run_dir,
         runner, config["model"], **identity_cache, **proof)
 
 
+@_restores_activation_scale_env
 def run_layer_quantum(
     config, *, record, adjoint_slice, plan_sha256, prepared, output_root,
     data_manifest_sha256=None, resume=False, adjoint_handoff=None,
