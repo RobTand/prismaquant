@@ -73,11 +73,17 @@ def test_the_reused_ids_attest_the_v39_routed_rungs_on_the_glm_image(rung):
     assert route.requires_serve_flags == ("TESSERA_SERVE_MODE=resident",)
 
 
-@pytest.mark.parametrize("image,rung", [(OLD_IMAGE, 1024), (NEW_IMAGE, 800)])
+@pytest.mark.parametrize("image,rung", [(OLD_IMAGE, 1024), (NEW_IMAGE, 768)])
 def test_a_withdrawn_image_or_unattested_rung_still_refuses(image, rung):
     route = _resolve(_routed(rung), image)
     assert route.route_status == lane.ROUTE_STATUS_UNATTESTED, route.as_dict()
     assert not [r.cell_id for r in route.regimes if r.cell_id]
+
+
+def test_v11_non_census_rung_800_is_covered_only_by_its_censused_run_table():
+    route = _resolve(_routed(800), NEW_IMAGE)
+    assert route.route_status == lane.ROUTE_STATUS_BACKED_WITH_SERVE_FLAG, route.as_dict()
+    assert {r.regime: r.cell_id for r in route.regimes} == REUSED
 
 
 @pytest.mark.parametrize("residency", ["resident", "streamed"])
@@ -186,14 +192,9 @@ def _layer43_case(tmp_path, fmt):
 def test_layer43s_routed_e4m3_pick_passes_the_export_scope_gate(tmp_path, rung):
     """The real gate, the real packaged table, no contract substitution.
 
-    ``require_assignment_scope`` resolves the unit on the reused cells; each
-    of them admits q896 through ``cell_lane_admits``.  Since contract v42 the
-    cells also launch through the fused routed lane.  Through v44 its
-    predicate read rate-4 columns only, so at q896 the lane refused the plan
-    and the route recorded the compact pair alone (PQ #1274).  Since v45
-    (tessera#694) the lane reads ``column_rates`` [1..8] and its routed-expert
-    launch reaches ``column_rates_routed_moe`` [1..6]; q896 plans rates 3 and
-    4, so both rungs record the fused pair beside the compact one (PQ #1702).
+    The original v39 image/cell ids remain. V56 adds the MMA launch beside
+    compact and fused launches; the report must retain all three declared
+    possibilities rather than silently dropping the new extension.
     """
     from prismaquant import tessera_export_lane as export
 
@@ -207,7 +208,8 @@ def test_layer43s_routed_e4m3_pick_passes_the_export_scope_gate(tmp_path, rung):
                "native_window_moe_compact")
     fused = ("tessera.routed_fused.FusedRoutedWindowMoE.__call__",
              "native_routed_fused_window")
-    want = [compact, fused]
+    mma = (fused[0], "native_routed_fused_window_e4m3mma")
+    want = [compact, fused, mma]
     for row in route["regime_routes"]:
         assert sorted((pair["symbol"], pair["decoder"])
                       for pair in row["executes"]) == sorted(want), row
@@ -220,10 +222,10 @@ def test_layer43s_routed_e4m3_pick_passes_the_export_scope_gate(tmp_path, rung):
         assert admits and sorted(launches) == sorted(want)
 
 
-def test_layer43_at_unattested_q800_is_refused_by_the_export_scope_gate(tmp_path):
-    """The broader v39 claim is still bounded by its exact rung set."""
+def test_layer43_at_uncovered_q768_is_refused_by_the_export_scope_gate(tmp_path):
+    """V11 coverage does not invent the uncensused single-rate table [3]."""
     from prismaquant import tessera_export_lane as export
 
-    model, assignment = _layer43_case(tmp_path, "TESSERA_E4M3_K1_R800")
+    model, assignment = _layer43_case(tmp_path, "TESSERA_E4M3_K1_R768")
     with pytest.raises(export.TesseraExportLaneError, match="unattested"):
         export.require_assignment_scope(model, assignment, target=_Target())

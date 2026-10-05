@@ -40,6 +40,19 @@ def _installed_contract() -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
 
 
+def set_cell_census(payload: dict, cell: dict, rungs: list[int]) -> None:
+    """Change a valid fixture census and its v11 derived run-table metadata."""
+    from prismaquant.lane_eligibility import _allowable_rung_tables
+
+    cell["rungs_q256"] = list(rungs)
+    if "run_tables" in cell:
+        row = next(r for r in payload["formats"] if r["family"] == cell["family"])
+        tables = _allowable_rung_tables(row, "fixture.formats")
+        cell["run_tables"] = [list(t) for t in sorted(
+            {tables[r] for r in rungs})] if tables else []
+
+
+
 def down_convert_lane_table(payload: dict, schema: str) -> dict:
     """The installed contract, expressed in an OLDER lane grammar.
 

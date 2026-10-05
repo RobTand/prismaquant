@@ -467,12 +467,11 @@ def test_the_rungs_a_cell_names_are_the_whole_admitted_set(tmp_path,
     """Absence is the only negative signal a closed-world v3 table carries.
     Dropping a rung from the cells removes it from the menu; nothing in this
     repository can widen it back."""
+    from tests.conftest import set_cell_census
     contract = _packaged_contract()
     for cell in contract["lane_eligibility"]["cells"]:
-        if cell["family"] == "TESSERA_E2M1_K2":
-            cell["rungs_q256"] = [896]
-        else:
-            cell["rungs_q256"] = [1024]
+        rungs = [896] if cell["family"] == "TESSERA_E2M1_K2" else [1024]
+        set_cell_census(contract, cell, rungs)
     for row in contract["formats"]:
         if row["family"] == "TESSERA_E2M1_K2":
             row["attested_rungs_q256"] = [896]

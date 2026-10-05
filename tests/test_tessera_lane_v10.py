@@ -134,23 +134,19 @@ def test_the_packaged_table_publishes_the_three_platforms():
     assert not [c for c in table.cells if c.platform != "sm_121"]
 
 
-def test_the_cell_roster_matches_the_reviewed_v39_answer():
+def test_the_cell_roster_matches_the_reviewed_pin_answer():
     """Read the scope roster from its one reviewed owner, not a second list.
 
     The unchanged status-only gate permits each route-only/not-recorded cell.
-    This is not a served-KL claim. The v39 image/structure decision is pinned
+    This is not a served-KL claim. The v56 image/structure crossing is pinned
     independently by test_tessera_pin_v38_scope.py.
     """
     table = _packaged_table()
     routed = [c for c in table.cells if c.structure == "routed_moe"]
-    assert sorted(c.id for c in routed) == [
-        "tessera_bf16_k1_routed_moe_sm121_batch_resident",
-        "tessera_bf16_k1_routed_moe_sm121_decode_resident",
-        "tessera_e2m1_k2_routed_moe_sm121_batch_resident",
-        "tessera_e2m1_k2_routed_moe_sm121_decode_resident",
-        "tessera_e4m3_k1_routed_moe_sm121_batch_resident",
-        "tessera_e4m3_k1_routed_moe_sm121_decode_resident",
-    ]
+    expected_routed = {row[0] for row in contract.TESSERA_DEV_PIN_ANSWER["cells"]
+                       if row[3] == "routed_moe"}
+    assert {c.id for c in routed} == expected_routed
+    assert len(routed) == 10
     for cell in table.cells:
         admits, why = lane.cell_evidence_admits(cell)
         assert admits, (cell.id, why)
