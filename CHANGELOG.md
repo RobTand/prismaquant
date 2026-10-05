@@ -127,6 +127,11 @@
   checks, actual runtime compatibility and safety remain distinct; no runtime
   probe, re-pin or new identity gate is added.
 
+- **The collection-time PrismaBuild import guard catches dynamic imports**
+  (#2299). It scans importlib and built-in import calls and decorator arguments,
+  including named local helpers, without entering uncalled test bodies; the
+  source-family test documents its static-analysis limit and rename upkeep.
+
 - **Seed wire filenames are checked before linking** (#2273). Campaign
   adoption and selected-wire materialization refuse another coordinate's
   filename without leaving a stray link; a real resume pins registration
