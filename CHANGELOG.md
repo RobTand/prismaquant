@@ -84,6 +84,21 @@
   only — no gate reads it — and manifests written before it existed keep
   the plain refusal.
 
+- **An expert-projection refusal no longer writes into the model source, and
+  the carried block's producer entry is described as it is** (#2243).
+  `request_expert_projection` ran both inside-source refusals after writing
+  the stack-plan request file, so a call with an output path inside the
+  checkpoint was refused only after a file had landed in the source tree
+  every later source identity hashes; the refusals (output parent and
+  digest cache directory) now run before any write, and an output path
+  inside the source is refused even when the producer advertises no digest
+  cache. Nothing else moved: the returned projection still carries the
+  caller's `source_digest_cache_use` record, and because
+  `carried_projection` embeds that answer verbatim under `producer`, the
+  docstrings and `docs/ARCHITECTURE.md` now say the carried block's
+  producer entry carries this one caller-side key instead of restructuring
+  the block.
+
 - **The census caller hands the producer's projection a stat-bound digest
   cache** (#2229, Refs RobTand/tessera#790). `request_expert_projection`
   passes `--source-digest-cache` whenever the selected producer's CLI
