@@ -323,7 +323,7 @@ def test_packaged_capability_reader_requires_v57_and_the_exact_block(tmp_path, m
         monkeypatch.setattr(trc, "contract_path", lambda: path)
         return trc.packaged_routed_unit_capability()
 
-    sha, block = read(_capability_contract(tmp_path))
+    sha, block = read(_capability_contract(tmp_path, block=exact))
     assert block == exact
     assert len(sha) == 64
     # The block is checked field for field: a renamed or reworded field is not
@@ -428,6 +428,8 @@ def test_mixed_allocation_block_without_the_installed_capability_refuses(
     payload = _alloc_cost_payload(tmp_path, formats=(ALLOC_FMT, "TESSERA_E4M3_K1_R768"))
     mixed = _alloc_assignment()
     mixed[f"{ALLOC_STACK}.0.w2"] = "TESSERA_E4M3_K1_R768"
+    monkeypatch.setattr(trc, "packaged_routed_unit_capability",
+                        lambda: (_ for _ in ()).throw(trc.TesseraContractError("requires v57")))
     with pytest.raises(ExpertProjectionError, match="v57"):
         tep.allocation_expert_projection_block(payload, mixed)
 
@@ -482,9 +484,8 @@ def test_stack_plan_emits_unit_q256_overrides_and_normalizes_uniform_stacks():
     all_up = writer.stack_plan(_logical_plan({t: 768 for t in tensors}),
                                dict(members), dict(layouts),
                                baseline_q256={WRITER_STACK: 1024})
-    assert all_up[WRITER_STACK]["unit_q256"] == {
-        t[: -len(".weight")]: 768 for t in tensors}
-    assert all_up[WRITER_STACK]["q256"] == 1024
+    assert "unit_q256" not in all_up[WRITER_STACK]
+    assert all_up[WRITER_STACK]["q256"] == 768
 
 
 def test_stack_plan_refuses_mixed_grids_bf16_mixing_and_missing_baseline():
@@ -545,6 +546,7 @@ def test_plan_from_assignment_threads_the_carried_request_baseline(
 def test_export_lane_mixed_selection_agrees_with_its_per_unit_stamp(case, monkeypatch):
     monkeypatch.setattr(trc, "packaged_routed_unit_capability",
                         lambda: ("d" * 64, dict(trc.ROUTED_UNIT_ASSIGNMENT_BLOCK)))
+    carried = _lane_carried()
     source_tensors = carried["producer"]["source"]["tensors"]
     shards = {name + ".weight": source_tensors[name + ".weight"]
               for name in _lane_units()}
@@ -600,7 +602,7 @@ def test_selected_census_assignment_checks_the_per_unit_stamp(tmp_path, monkeypa
                                  "wire_bytes": len(blob),
                                  "hessian_identity": {"applied": True}}
     cost.setdefault(tep.EXPERT_WIRES_KEY, {}).setdefault(routed, {})[up] = record
-    names = sorted(units)
+    names = sorted(cost["costs"])
     assignment = {name: CENSUS_FMT for name in names}
     assignment[routed] = up
     stack_formats, unit_rungs = tep.require_unit_assignment(
@@ -841,9 +843,12 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     assert {name: placed[name] for name in _alloc_units()} == {
         name: ALLOC_FMT for name in _alloc_units()}
     assert plain["tessera_expert_stack_formats"] == {ALLOC_STACK: ALLOC_FMT}
-    assert plain == {k: v for k, v in
-                     json.loads((noop / "layer.json").read_text())["__prismaquant__"].items()
-                     if k != "tessera_routed_unit_rates"}
+    from test_allocator_output_pin_1304 import _without_wall_time
+    def stable(value, root):
+        return _without_wall_time(json.loads(json.dumps(value).replace(str(root), "<TMP>")))
+    expected = {k: v for k, v in json.loads((noop / "layer.json").read_text())["__prismaquant__"].items()
+                if k != "tessera_routed_unit_rates"}
+    assert stable(plain, off) == stable(expected, noop)
     assert tep.UNIT_RUNGS_KEY not in plain
     assert "tessera_routed_unit_rates" not in plain
 

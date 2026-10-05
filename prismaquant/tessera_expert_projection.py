@@ -578,7 +578,9 @@ def require_unit_assignment(selected: Mapping[str, str], stack_of: Mapping[str, 
         if len(distinct) == 1:
             stack_formats[stack] = distinct[0]
             continue
-        first_unit = sorted(members)[0]
+        ordered = sorted(members)
+        reference = members[ordered[0]]
+        first_unit = next((name for name in ordered if members[name] != reference), ordered[0])
         refusal = _routed_unit_capability_refusal(stack, distinct, first_unit)
         if capability is _RESOLVE_INSTALLED_CAPABILITY:
             from .tessera_runtime_contract import packaged_routed_unit_capability
