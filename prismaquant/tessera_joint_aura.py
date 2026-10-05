@@ -1095,6 +1095,13 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     # per cell, and the join reaches the same file the walk verifies.
     owner_roots = {str(directory): Path(directory).resolve()
                    for directory in set(map(str, owners.values()))}
+    # Only measured formats name render reads. Share this set with the walk's
+    # anchor coverage check so cost-only rows cannot widen the refusal (#2231).
+    measured_formats_by_name = {
+        name: {fmt for fmt, row in payload["costs"][name].items()
+               if row.get("output_mse_measured") is True}
+        for name in names
+    }
     # #2219: the walk reads each unit's renders from its owner row's cache
     # directory under the mangled leaf, and the payload is the bare tensor, so
     # a colliding roster would point two units' cells at one render. Refuse
@@ -1112,7 +1119,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
             (
                 (_name, fmt)
                 for _name in _owned
-                for fmt in payload["costs"].get(_name, ())
+                for fmt in measured_formats_by_name[_name]
             ),
             where=f"joint aura render cache @ {_root}",
         )
@@ -1264,9 +1271,7 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
         anchors = {anchor["format_name"]: anchor for anchor in state["anchors"]}
         _require(anchors and len(anchors) == len(state["anchors"]) and
                  set(anchors) == set(state["wire_records"]), f"{name}: anchor/receipt coverage differs")
-        measured = {fmt for fmt, row in payload["costs"][name].items()
-                    if row.get("output_mse_measured") is True}
-        _same(set(anchors), measured, f"{name}: measured payload/journal coverage")
+        _same(set(anchors), measured_formats_by_name[name], f"{name}: measured payload/journal coverage")
         unit = identity["units"][name]
         _same(unit["weight"]["shape"], census["unit_shapes"][name], f"{name}: census source shape")
         unit_cells, fences, events = {}, {}, []

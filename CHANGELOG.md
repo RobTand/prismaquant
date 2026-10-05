@@ -13,7 +13,9 @@
   joint aura head walk's per-owner
   check groups names by the resolved owner root instead of the directory
   string as spelled, so two rows naming one cache directory through
-  different spellings are checked as one cache. The residency docstring now
+  different spellings are checked as one cache. The same check now shares
+  the walk's measured-format set, so costed but unmeasured aliases do not
+  refuse distinct render reads (#2231 item 10). The residency docstring now
   states the prefetch recheck honestly: it runs on every call that has
   something to load (the `if not keys: return 0` early return skips it),
   not on every call. Still unrefused at write time, and out of scope here:
