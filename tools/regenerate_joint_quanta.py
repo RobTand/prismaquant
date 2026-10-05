@@ -219,6 +219,7 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     reason. ``adjoint.receipt_sha256`` may differ only when this run binds
     a receipt; otherwise it must be equal.
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     from prismaquant.joint_layer_quanta import canonical_sha256
     qid = new.get("quantum_id", "?")
     old_root = old_root.rstrip("/")
@@ -271,7 +272,7 @@ def _check_authorized_diff(old: dict, new: dict, *, old_root: str, bound: bool,
     if not bound and old_receipt != new_receipt:
         raise ValueError(f"Gate 1 {where}: {qid} stage-A binding moved with "
                          f"no stage-A proof bound")
-    if json.dumps(old_body, sort_keys=True) != json.dumps(new_body, sort_keys=True):
+    if DIRECT_ASCII_SPACED_LAX.text(old_body) != DIRECT_ASCII_SPACED_LAX.text(new_body):
         raise ValueError(f"Gate 1 {where}: {qid} differs outside the moved "
                          f"paths")
     body = {key: value for key, value in new.items()
@@ -445,6 +446,7 @@ def _check_authorized_metadata_diff(old: dict, new: dict, *,
     argv inside) -- plus the receipt seal when binding. The data fields
     (``output_space``, ``adjoint.boundary_artifacts``) and every scientific
     field stay byte-equal; the new identity must recompute."""
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     from prismaquant.joint_layer_quanta import canonical_sha256
     qid = new.get("quantum_id", "?")
     original_root = original_root.rstrip("/")
@@ -496,8 +498,7 @@ def _check_authorized_metadata_diff(old: dict, new: dict, *,
                 if k not in ("identity_sha256", "read_set", "adjoint")}
     new_body = {k: v for k, v in new.items()
                 if k not in ("identity_sha256", "read_set", "adjoint")}
-    if json.dumps(old_body, sort_keys=True) != json.dumps(new_body,
-                                                         sort_keys=True):
+    if DIRECT_ASCII_SPACED_LAX.text(old_body) != DIRECT_ASCII_SPACED_LAX.text(new_body):
         raise ValueError(f"Gate 1 {where}: {qid} differs outside the "
                          "relocated control metadata")
     body = {key: value for key, value in new.items()
@@ -539,6 +540,7 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
     band-granular binding, PQ #993) the produced generation may cover a
     subset of the prior quanta; every produced quantum still compares.
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     prior_paths = sorted(prior_dir.glob("layer-*.json"))
     if not prior_paths:
         raise ValueError(f"no prior layer-*.json records under {prior_dir}")
@@ -600,8 +602,7 @@ def _compare_existing_generation(prior_dir: Path, produced: dict, *,
                     if k not in _CONTROL_BLOCKS}
         new_body = {k: v for k, v in new_record.items()
                     if k not in _CONTROL_BLOCKS}
-        if json.dumps(old_body, sort_keys=True) != json.dumps(
-                new_body, sort_keys=True):
+        if DIRECT_ASCII_SPACED_LAX.text(old_body) != DIRECT_ASCII_SPACED_LAX.text(new_body):
             raise ValueError(
                 f"{where}: scientific fields differ (campaign identity, "
                 f"membership, extents, output_space or another non-control "
@@ -788,6 +789,7 @@ def _build_head_slices(plan: dict, *, plan_sha256: str, prepared: dict,
 
 
 def main(argv=None) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--plan", type=Path, required=True)
     ap.add_argument("--plan-sha256", required=True)
@@ -1055,8 +1057,7 @@ def main(argv=None) -> int:
                 stored = json.loads(on_disk.read_bytes().decode("utf-8"))
             except (OSError, ValueError) as exc:
                 return _fail(f"Gate 1 cannot read {on_disk}: {exc}")
-            if json.dumps(stored, sort_keys=True) != json.dumps(
-                    record, sort_keys=True):
+            if DIRECT_ASCII_SPACED_LAX.text(stored) != DIRECT_ASCII_SPACED_LAX.text(record):
                 return _fail(f"Gate 1: {record['quantum_id']} differs from "
                               f"the sealed inputs under receipt-less "
                               f"regeneration at the original root; "

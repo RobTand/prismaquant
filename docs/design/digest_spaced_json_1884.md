@@ -119,3 +119,31 @@ masked as `<handoff-sha256>` in stdout goldens; manifest bytes and SHA stay
 unmasked. The old tape's same field receives the same mask. No golden is
 recorded from replaced production code. The ratchet removes exactly five
 primitive scopes, 508 to 503; no new scope is admitted.
+
+## Tools spaced-JSON bundle (Refs #1301, 2026-10-05)
+
+The reviewed `DIRECT_ASCII_SPACED_LAX-tools-47-sites` bundle routes 45 of the
+47 selected scopes — 58 `json.dumps(value, sort_keys=True)` calls across 35
+`tools/` files — through the existing `DIRECT_ASCII_SPACED_LAX` owner: `.text`
+where the call fed print, `write_text`, argv, comparisons or set/Counter keys,
+`.encoded` where it fed bytes (the GLM derivative image's manifest member and
+the render-window identity digest stream), and `.sha256` where it hashed its
+own encoding (chain_roll_bench's plane digest). Imports follow each file's own
+convention: module-level where the file already imports prismaquant at module
+level, function-local otherwise. Identity bytes are unchanged at every routed
+site; `tests/test_spaced_lax_tools_routing_1301.py` pins the
+recipe-to-profile byte equivalence per site and fails before the edit.
+
+The bundle keeps its reviewed exclusions. Nine other-exact and four
+new-recipe neighbor calls inside the ten mixed scopes keep their compact,
+indent and strict spellings, and their rows stay in the primitive ratchet.
+`tools/tessera_fleet/model_worker.py` (both its selected scopes) is not
+routed: `tools.tessera_fleet.dispatch_model` copies that file alone into
+sealed workspaces and pinned producer images and runs it with the standard
+library alone, where the digest owner cannot be imported; its bytes are
+unchanged and pinned by test. The ratchet shrinks exactly 36 rows (35
+non-mixed sorted-JSON scopes plus the one raw hashlib site whose hash moved
+onto `.sha256`), 334 to 298; no new raw site is admitted. No new profile, and
+no error/publication/LF/encoding semantics change at any site; the three
+`prismaquant/` `json.dump` file writers are a different reviewed bundle and
+are untouched.

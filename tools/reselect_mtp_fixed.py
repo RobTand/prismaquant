@@ -15,6 +15,7 @@ from prismaquant import format_registry as fr
 from prismaquant.allocator_candidates import selection_serving_lane_provenance
 from prismaquant.allocator import _mtp_rung_attestation
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from prismaquant.footprint import (
     mtp_selection_rebased_bytes, recursive_regular_file_bytes,
     whole_artifact_budget_from_assignment_payload,
@@ -179,7 +180,7 @@ def main() -> int:
     raw = (json.dumps(result, separators=(",", ":"), allow_nan=False) + "\n").encode()
     if not publish_new_bytes(output, raw):
         parser.error("output already exists; refusing overwrite")
-    print(json.dumps({"output": str(output), "sha256": hashlib.sha256(raw).hexdigest(),
+    print(DIRECT_ASCII_SPACED_LAX.text({"output": str(output), "sha256": hashlib.sha256(raw).hexdigest(),
                       "body_sha256": args.expect_body_sha256,
                       "mtp_cost_sha256": args.expect_cost_sha256,
                       "selected_mtp_wires": len(result["__prismaquant__"]["mtp_selection"][
@@ -188,8 +189,7 @@ def main() -> int:
                       "E": record["E"],
                       "whole_artifact_payload_bytes": payload_bytes,
                       "whole_artifact_reserve_bytes": reserve_bytes,
-                      "whole_artifact_budget_bytes": args.whole_artifact_budget_bytes},
-                     sort_keys=True))
+                      "whole_artifact_budget_bytes": args.whole_artifact_budget_bytes}))
     return 0
 
 

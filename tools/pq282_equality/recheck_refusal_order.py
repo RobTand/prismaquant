@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from dispatch_tessera_campaign import cmd_merge
 from prismaquant.tessera_campaign import canonical_refusals
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 ap = argparse.ArgumentParser(description=__doc__)
 ap.add_argument("--recorded", type=Path, required=True)
@@ -28,7 +29,7 @@ paths = {"monolith": args.recorded / "monolith/cost.pkl",
          "historical_merge": args.recorded / "merged/cost.pkl"}
 raw = {name: path.read_bytes() for name, path in paths.items()}
 payloads = {name: pickle.loads(data) for name, data in raw.items()}
-counts = {name: Counter(json.dumps(item, sort_keys=True) for item in payload["non_interpolable"])
+counts = {name: Counter(DIRECT_ASCII_SPACED_LAX.text(item) for item in payload["non_interpolable"])
           for name, payload in payloads.items()}
 if counts["monolith"] != counts["historical_merge"]:
     raise RuntimeError("historical refusal records differ in content or multiplicity")

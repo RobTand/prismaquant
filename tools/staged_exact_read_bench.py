@@ -881,11 +881,12 @@ CHILDREN = {"paths": child_paths, "ceiling": child_ceiling,
 
 
 def child_main(args) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     slice_doc = load_slice(args.slice, args.slice_sha256)
     result = CHILDREN[args.child](args, slice_doc)
     result["tree"] = str(Path(__import__("prismaquant").__file__).resolve().parents[1])
     result["pid"] = os.getpid()
-    print(MARKER + json.dumps(result, sort_keys=True), flush=True)
+    print(MARKER + DIRECT_ASCII_SPACED_LAX.text(result), flush=True)
     return 0
 
 

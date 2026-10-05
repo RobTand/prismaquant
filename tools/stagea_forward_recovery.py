@@ -1,6 +1,5 @@
 """Inspect or freeze a contained Stage-A forward recovery authority."""
 import argparse
-import json
 from pathlib import Path
 import re
 import sys
@@ -10,6 +9,7 @@ from prismaquant.joint_forward_resume import (
     SCHEMA, ForwardRecoveryRefused, _sdk, _read, _checked_group, _records,
     _require_imported_by_owner, build_forward_recovery, chain_documents,
     chained_specification, require_contained)
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 
 def inspect_owner(spec, spool_directory, *, sdk):
@@ -77,27 +77,26 @@ def main():
                                          owner_request=args.owner_request)
             if args.frontier is not None:
                 spec['frontier'] = args.frontier
-            print(json.dumps(inspect_owner(spec, args.spool_directory, sdk=_sdk()),
-                             sort_keys=True))
+            print(DIRECT_ASCII_SPACED_LAX.text(inspect_owner(spec, args.spool_directory, sdk=_sdk())))
             return
         if not args.output:
             parser.error('--output is required to freeze recovery')
-        print(json.dumps(build_forward_recovery(
+        print(DIRECT_ASCII_SPACED_LAX.text(build_forward_recovery(
             imported=imported, owner_request=args.owner_request,
             spool_directory=args.spool_directory, output=args.output,
             bind_current_implementation=args.bind_current_implementation,
-            frontier=args.frontier), sort_keys=True))
+            frontier=args.frontier)))
         return
     spec = _read(args.specification)[0]
     if not args.inspect_live:
         if not args.output:
             parser.error('--output is required to freeze recovery')
-        print(json.dumps(build_forward_recovery(specification=spec,
+        print(DIRECT_ASCII_SPACED_LAX.text(build_forward_recovery(specification=spec,
             spool_directory=args.spool_directory, output=args.output,
             bind_current_implementation=args.bind_current_implementation,
-            frontier=args.frontier), sort_keys=True))
+            frontier=args.frontier)))
         return
-    print(json.dumps(inspect_owner(spec, args.spool_directory, sdk=_sdk()), sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(inspect_owner(spec, args.spool_directory, sdk=_sdk())))
 
 
 if __name__ == '__main__':

@@ -71,6 +71,7 @@ def _candidates(wire_dir: Path, fmt: str, layers: range, experts: int):
 
 
 def main(argv=None) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--wire-dir", required=True)
     parser.add_argument("--format", default="TESSERA_E4M3_K1_R1024")
@@ -115,7 +116,7 @@ def main(argv=None) -> int:
             arm["nfs_read"] = {"ops": delta[0], "queue_ms_per_op": round(delta[5] / ops, 2),
                                "rtt_ms_per_op": round(delta[6] / ops, 2),
                                "execute_ms_per_op": round(delta[7] / ops, 2)}
-        print(json.dumps(arm, sort_keys=True), flush=True)
+        print(DIRECT_ASCII_SPACED_LAX.text(arm), flush=True)
         arms.append(arm)
     report = {"schema": "prismaquant.wire_rehash_reader_sweep.v1", "host": os.uname().nodename,
               "format": args.format, "block_bytes": _BLOCK, "arms": arms}

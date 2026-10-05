@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
 from prismaquant.tessera_reuse_authority import CANONICAL_CAPTURE
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 
 def collection_document(paths) -> dict:
@@ -79,7 +80,7 @@ def main(argv=None):
     parser.add_argument("--reference", action="append", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
-    print(json.dumps(publish_collection(args.reference, args.output), sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(publish_collection(args.reference, args.output)))
     return 0
 
 

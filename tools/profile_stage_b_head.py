@@ -156,6 +156,7 @@ def slice_intake(config, *, record, prepared, plan_sha256, scratch):
 
 
 def main(argv=None) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("walk", "slice"), required=True)
     parser.add_argument("--quantum", type=Path, required=True)
@@ -217,7 +218,7 @@ def main(argv=None) -> int:
         "local_journal_written": written,
         **result,
     }
-    print("STAGE_B_HEAD_PROFILE " + json.dumps(report, sort_keys=True), flush=True)
+    print("STAGE_B_HEAD_PROFILE " + DIRECT_ASCII_SPACED_LAX.text(report), flush=True)
     return 0
 
 

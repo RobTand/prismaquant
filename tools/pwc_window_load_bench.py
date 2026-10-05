@@ -172,6 +172,7 @@ def _render_key(path: str):
 
 
 def run_window(args):
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     import torch
     fixture = json.loads(Path(args.fixture_json).read_text())
     _attach_strict(fixture)
@@ -205,10 +206,9 @@ def run_window(args):
                     tensor = renders[key]
                     file_receipt = cache.file_load_receipt(key, tensor)
                     identity = cache.resident_render_identity(*key, tensor)
-                    digest.update(json.dumps(
-                        [list(key), list(tensor.shape), str(tensor.dtype),
+                    digest.update(DIRECT_ASCII_SPACED_LAX.encoded([list(key), list(tensor.shape), str(tensor.dtype),
                          {k: v for k, v in file_receipt.items() if k != 'path'},
-                         identity], sort_keys=True).encode())
+                         identity]))
                     digest.update(tensor.contiguous().view(torch.uint8).numpy().tobytes())
                 digest = digest.hexdigest()
             digested = time.perf_counter()
@@ -456,6 +456,7 @@ def _trees(args, out: Path):
 
 def _quantum_identity(out: Path, trees: dict, me: list) -> dict:
     """The joint quantum on each tree; the fix tree twice, as a run-to-run control."""
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     quantum = {}
     for arm in ('base', 'fix', 'fix-control'):
         tree = trees['fix' if arm.startswith('fix') else 'base']
@@ -469,7 +470,7 @@ def _quantum_identity(out: Path, trees: dict, me: list) -> dict:
     shutil.rmtree(out / 'quantum-scratch', ignore_errors=True)
     result = {
         'payload_identical': len({q['payload_sha256'] for q in quantum.values()}) == 1,
-        'files_identical': len({json.dumps(q['files'], sort_keys=True)
+        'files_identical': len({DIRECT_ASCII_SPACED_LAX.text(q['files'])
                                 for q in quantum.values()}) == 1,
         'leaves': _compare_leaves(quantum),
         **{arm: {'payload_sha256': q['payload_sha256'], 'costs': q['costs'],

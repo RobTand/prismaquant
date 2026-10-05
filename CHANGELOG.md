@@ -85,6 +85,22 @@
   `docs/audits/digest_site_census_pq1301_2026-10-04.json` retains all 501
   historical rows and names the 334 remaining gated scopes; #1301 stays open.
 
+- **The reviewed tools sorted-JSON bundle routes to `DIRECT_ASCII_SPACED_LAX`**
+  (Refs #1301). 45 selected scopes / 58 sorted-`json.dumps` calls across 35
+  `tools/` files now call the spaced ASCII lax profile they already spelled
+  out by options, via `.text`, `.encoded` or `.sha256` exactly where the
+  previous expression consumed text, bytes or the digest of those bytes. Each
+  route is byte-identical to the recipe it replaces; per-site fixtures in
+  `tests/test_spaced_lax_tools_routing_1301.py` pin the recipe-to-profile
+  bytes and fail before the edit. Nine other-exact and four new-recipe
+  neighbor calls inside the ten mixed scopes keep their own spellings, and
+  `tools/tessera_fleet/model_worker.py` keeps its raw recipe: dispatch_model
+  stages that file alone into sealed workspaces and pinned producer images
+  where it runs with the standard library alone, so the digest owner cannot
+  be imported there. The primitive ratchet shrinks exactly 36 rows (35
+  non-mixed sorted-JSON scopes and the one raw hashlib site whose hash moved
+  onto `.sha256`), 334 to 298; no new raw site is admitted. #1301 stays open.
+
 - **Raw byte-hash constructors route to the digest owners** (Refs #1301).
   83 raw `hashlib.sha256(...).hexdigest()` constructor sites across 47
   package modules now call the existing `prismaquant.digests` byte/text

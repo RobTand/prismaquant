@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from prismaquant import cost_streaming
 from prismaquant.tessera_source_digest_adoption import adopt_source_digests
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from tessera import serving_parts
 from tessera.source_digest_cache import SourceDigestCache
 source=Path('/mnt/shared/models/GLM-5.3-Flash-BF16')
@@ -23,4 +24,4 @@ assert whole['tensors']==original_identity['checkpoint_weight_map']
 assert cache.receipt()['cached_shards']==120 and cache.receipt()['hashed_shards']==0
 result.update(whole_source_readback_matches=True,source_digest_receipt=cache.receipt(),fresh_nonshard_hashes=checks,source_header_validation='all120headers',full_model_exported=False)
 (root/'source-adoption-readback.json').write_text(json.dumps(result,indent=2)+'\n')
-print(json.dumps({k:v for k,v in result.items() if k not in ('source_digest_receipt','fresh_nonshard_hashes')},sort_keys=True))
+print(DIRECT_ASCII_SPACED_LAX.text({k:v for k,v in result.items() if k not in ('source_digest_receipt','fresh_nonshard_hashes')}))

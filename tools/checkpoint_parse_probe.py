@@ -63,9 +63,10 @@ def _gib(field: str) -> float:
 
 
 def _report(step: str, **extra) -> None:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     row = {"step": step, "rss_gib": _gib("VmRSS:"), "peak_rss_gib": _gib("VmHWM:")}
     row.update(extra)
-    print(json.dumps(row, sort_keys=True), flush=True)
+    print(DIRECT_ASCII_SPACED_LAX.text(row), flush=True)
 
 
 def menu_sample(identity: dict, units: int) -> tuple[int, int]:
@@ -88,6 +89,7 @@ def _load_plan(plan_path: Path) -> dict:
 
 
 def main(argv=None) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--expect-digest", default=None,
@@ -127,11 +129,10 @@ def main(argv=None) -> int:
         identity = manifest["identity"]
         if args.sample_units:
             occurrences, objects = menu_sample(identity, args.sample_units)
-            print(json.dumps({"step": "menu.sample",
+            print(DIRECT_ASCII_SPACED_LAX.text({"step": "menu.sample",
                               "units": args.sample_units, "occurrences": occurrences,
                               "distinct_menu_strings": objects,
-                              "objects_per_occurrence": round(objects / max(occurrences, 1), 6)},
-                             sort_keys=True), flush=True)
+                              "objects_per_occurrence": round(objects / max(occurrences, 1), 6)}), flush=True)
 
         started = time.time()
         digest = canonical_json_sha256_normalized(identity, where="checkpoint identity")

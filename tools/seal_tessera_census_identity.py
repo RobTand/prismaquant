@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.tessera_census_cache import seal_roster
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 
 def main(argv=None) -> int:
@@ -41,11 +42,10 @@ def main(argv=None) -> int:
     _atomic_write_new_bytes(out, encoded)
     sha = hashlib.sha256(encoded).hexdigest()
     _atomic_write_new_bytes(out.with_name(out.name + ".sha256"), f"{sha}  {out.name}\n".encode())
-    print(json.dumps({"roster": str(out.resolve()), "roster_sha256": sha,
+    print(DIRECT_ASCII_SPACED_LAX.text({"roster": str(out.resolve()), "roster_sha256": sha,
                       "identity_sha256": roster["identity_sha256"],
                       "units": len(roster["units"]),
-                      "checkpoint_manifest_sha256": roster["checkpoint_manifest"]["sha256"]},
-                     sort_keys=True))
+                      "checkpoint_manifest_sha256": roster["checkpoint_manifest"]["sha256"]}))
     return 0
 
 

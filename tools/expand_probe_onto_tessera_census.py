@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import pickle
 import sys
 from pathlib import Path
@@ -21,6 +20,7 @@ from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.model_profiles.structure import load_structure_spec
 from prismaquant.schemas import validate_probe_payload
 from prismaquant.tessera_census_stats import META_KEY, expand_probe_onto_census
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 
 def _bound(path: str, digest: str, label: str):
@@ -65,7 +65,7 @@ def main(argv=None) -> int:
                     "rows": len(expanded["stats"]),
                     "dropped_row_count": len(expanded["meta"][META_KEY]["dropped_rows"]),
                     "n_params": sum(int(r["n_params"]) for r in expanded["stats"].values())})
-    print(json.dumps(summary, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(summary))
     return 0
 
 

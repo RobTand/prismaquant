@@ -7,6 +7,7 @@ from tessera.cached_unit import verify_cached_unit
 from prismaquant.tessera_joint_aura import _decode_wire, _resolve_render_origin, RENDER_COMPARISON_BY_ORIGIN, _read_verified_wire_blob, _drive_ordered_walk, _decoder_identity
 from prismaquant.production_weight_cache import _cb_cache_tensor_identity, ProductionWeightCache
 from prismaquant.io_engine import SealedBuffer, read_file
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from prismaquant.residency_map import residency_resolver
 from prismaquant.staged_tier_policy import policy_is_active, refuse_pool_bulk_read
 
@@ -83,7 +84,7 @@ def main():
   print(json.dumps({'qname':cell['qname'],'seconds':value['verified_cell']['qualification_seconds'],'committed':len(results)}),flush=True)
  workers=int(os.environ.get('T4_QUALIFY_READ_WORKERS','1'));assert 0<workers<=len(os.sched_getaffinity(0))
  _drive_ordered_walk(batch['tasks'],read_task,commit_task,workers=workers)
- manifest=({k:batch[k] for k in ('parent_key','plan_key','child_ordinal')} if args.pb_task_batch else {});manifest.update(schema=('prismabuild.child_result_manifest.v1' if args.pb_task_batch else 'prismaquant.t4_qualification_pilot_result.v1'),results=results);Path(batch['result_manifest_path']).write_text(json.dumps(manifest,sort_keys=True)+'\n')
+ manifest=({k:batch[k] for k in ('parent_key','plan_key','child_ordinal')} if args.pb_task_batch else {});manifest.update(schema=('prismabuild.child_result_manifest.v1' if args.pb_task_batch else 'prismaquant.t4_qualification_pilot_result.v1'),results=results);Path(batch['result_manifest_path']).write_text(DIRECT_ASCII_SPACED_LAX.text(manifest)+'\n')
  from prismaquant.residency_map import residency_report
- print(json.dumps({'residency_report':residency_report()},sort_keys=True),flush=True)
+ print(DIRECT_ASCII_SPACED_LAX.text({'residency_report':residency_report()}),flush=True)
 if __name__=='__main__':main()

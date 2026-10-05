@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from prismaquant.glm_mtp_selection import (WIRE_BINDING_SCHEMA,
                                            backfill_mtp_selection_wires)
 from prismaquant.layer_config import (canonicalize_assignment,
@@ -90,7 +91,7 @@ def main(argv=None):
                           allow_nan=False) + '\n').encode()
     if not publish_new_bytes(output, encoded):
         raise FileExistsError(f'MTP child output exists: {output}')
-    print(json.dumps({'schema': 'prismaquant.mtp_cached_child_handoff.v1',
+    print(DIRECT_ASCII_SPACED_LAX.text({'schema': 'prismaquant.mtp_cached_child_handoff.v1',
                       'manifest': str(output.resolve()),
                       'manifest_sha256': hashlib.sha256(encoded).hexdigest(),
                       'assignment_sha256': args.assignment_sha256,
@@ -99,8 +100,7 @@ def main(argv=None):
                           for record in manifest['units'].values()})),
                       'units': len(manifest['units']),
                       'root': str(output.parent.resolve()),
-                      'export_qualified': False, 'serving_qualified': False},
-                     sort_keys=True))
+                      'export_qualified': False, 'serving_qualified': False}))
     return 0
 
 

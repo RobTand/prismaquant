@@ -1,5 +1,4 @@
 """Tiny real-CUDA Stage B activation check; execute only in an admitted action."""
-import json
 import sys
 from pathlib import Path
 
@@ -9,6 +8,7 @@ from prismaquant import format_registry
 from prismaquant.joint_cost_quantum import bind_joint_served_quantizer
 from prismaquant.nvfp4_activation_contract import ServedQuantizerUnboundError
 from prismaquant.perturbed_x_cache import _activation_qdq
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 
 fmt = "TESSERA_E2M1_K2_R896"
 spec = format_registry.get_format(fmt)
@@ -26,6 +26,6 @@ torch.cuda.synchronize()
 assert y.shape == x.shape and y.dtype == x.dtype
 assert torch.isfinite(y).all().item() and not torch.equal(x, y)
 assert bind_joint_served_quantizer({name: [fmt]}) == identity
-print(json.dumps({"status": "passed", "served_quantizer": identity,
+print(DIRECT_ASCII_SPACED_LAX.text({"status": "passed", "served_quantizer": identity,
                   "shape": list(x.shape), "changed_elements": int((x != y).sum().item()),
-                  "cuda": torch.version.cuda, "device": torch.cuda.get_device_name()}, sort_keys=True))
+                  "cuda": torch.version.cuda, "device": torch.cuda.get_device_name()}))

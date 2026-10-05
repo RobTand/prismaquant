@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.cluster_campaign import _atomic_write_new_bytes
-from prismaquant.digests import bytes_sha256hex
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 from prismaquant.layer_config import (
     LAYER_CONFIG_META_KEY, load_assignment, read_layer_config_metadata,
 )
@@ -158,8 +158,8 @@ def main(argv=None) -> int:
     }
     shas["summary"] = _write(out / "summary.json",
                              (json.dumps(summary, indent=2, sort_keys=True) + "\n").encode())
-    print(json.dumps({key: summary[key] for key in ("units", "formats", "blob_bytes", "sha256",
-                                                     "seconds")}, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text({key: summary[key] for key in ("units", "formats", "blob_bytes", "sha256",
+                                                     "seconds")}))
     print(json.dumps({"summary_sha256": shas["summary"]}))
     return 0
 
