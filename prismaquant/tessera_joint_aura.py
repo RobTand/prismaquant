@@ -2709,7 +2709,7 @@ def _apply_device_envelope(device, device_bytes, *, where):
     return enforce_device_envelope(device, device_bytes, where=where)
 
 
-def _restores_activation_scale_env(function):
+def restores_activation_scale_env(function):
     """Restore the caller's activation-scale environment on every exit.
 
     Joint execution, adjoint capture and layer quantum entry points set the
@@ -2735,7 +2735,7 @@ def _restores_activation_scale_env(function):
     return wrapper
 
 
-@_restores_activation_scale_env
+@restores_activation_scale_env
 def execute(command, config, *, plan_sha256, prepared=None, resume=False,
             source_transition=None, prewarm_manifest=None, cost_read_manifest=None, plan_path=None,
             data_manifest_sha256=None):
