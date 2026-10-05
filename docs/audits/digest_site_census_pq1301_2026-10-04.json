@@ -4185,27 +4185,18 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "migrated-by-pq2259-2026-10-05",
+   "disposition": "retained protected file-loader contract: the host profile observer loads this file by file-spec without package context; raw sorted JSON stays",
    "family": "sorted-json",
    "file": "prismaquant/io_spans.py",
    "linenos": [
     415
    ],
    "n_calls": 1,
-   "route_verdict": "DIRECT_ASCII_SPACED_STRICT",
+   "route_verdict": "retained:protected-file-loader",
    "scope": "ReadRateReporter._emit",
    "site": "sorted-json:prismaquant/io_spans.py::ReadRateReporter._emit",
    "usage": "arg:_log",
-   "migrated_calls": [
-    {
-     "method": "text",
-     "base_line": 415,
-     "original_expression": "json.dumps(record, sort_keys=True, allow_nan=False)",
-     "routed_expression": "DIRECT_ASCII_SPACED_STRICT.text(record)",
-     "profile": "DIRECT_ASCII_SPACED_STRICT"
-    }
-   ],
-   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
+   "note": "tools/pq_profile_source.py:18-25 loads prismaquant/io_spans.py via spec_from_file_location for the host row profiler, and tools/pq_row_profile_observer.py:26 binds its PeriodicSampler from that owner, so a package-relative digests import here breaks the observer's no-package load; retained on raw sorted JSON. Original line numbers belong to the fresh source the census was taken against, not the final source-qualified runtime packet."
   },
   {
    "classification": "ephemeral",
@@ -8019,15 +8010,15 @@
   "historical_owner_rows": 16,
   "historical_census_rows": 501,
   "migrated_by_byte_hash_slice": 72,
-  "migrated_by_json_profile_slice": 80,
-  "total_migrated_scopes": 152,
-  "remaining_gated_scopes": 333,
+  "migrated_by_json_profile_slice": 79,
+  "total_migrated_scopes": 151,
+  "remaining_gated_scopes": 334,
   "remaining_by_family": {
    "hashlib": 163,
-   "sorted-json": 170
+   "sorted-json": 171
   },
   "remaining_by_classification": {
-   "load-bearing": 299,
+   "load-bearing": 300,
    "ephemeral": 34
   },
   "remaining_gated_scopes_breakdown": {
@@ -8040,7 +8031,8 @@
    "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools": 88,
    "load-bearing distinct JSON identity: needs a new named JsonProfile decision before migration": 46,
    "eligible: mechanical byte-identical routing to the named owner": 92,
-   "retained protected file-loader contract: reporter loaded by run_path without package context; raw sorted JSON stays": 4
+   "retained protected file-loader contract: reporter loaded by run_path without package context; raw sorted JSON stays": 4,
+   "retained protected file-loader contract: the host profile observer loads this file by file-spec without package context; raw sorted JSON stays": 1
   }
  },
  "historical_summary": {
@@ -8081,10 +8073,10 @@
   "issue": "https://github.com/RobTand/prismaquant/issues/2259",
   "base_commit": "62fd01ad964d55a23a2fdd8ae891c78dd9a691b6",
   "selected_scope_rows": 84,
-  "migrated_scope_rows": 80,
-  "migrated_calls": 87,
-  "migrated_package_modules": 57,
-  "retained_scope_rows": 4,
+  "migrated_scope_rows": 79,
+  "migrated_calls": 86,
+  "migrated_package_modules": 56,
+  "retained_scope_rows": 5,
   "initial_audit_action": "92c652251f155a49dd67fa196d7b1c3d1186b2b5e1b751ed256cbe1bfc6c751a",
   "initial_audit_source_snapshot": "fbbf7e34b09dbe8a7ce74a7d4c6870fc5e66cfab",
   "exact_recipes_and_arguments_observed": true,
@@ -8128,6 +8120,16 @@
     "reason": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context",
     "scope": "report",
     "site": "sorted-json:prismaquant/prismabuild_progress.py::report"
+   },
+   {
+    "current_lines": [
+     415
+    ],
+    "disposition": "retained:protected-file-loader",
+    "file": "prismaquant/io_spans.py",
+    "reason": "tools/pq_profile_source.py:18-25 loads io_spans.py via spec_from_file_location for the host row profiler and tools/pq_row_profile_observer.py:26 binds its PeriodicSampler from that owner; a package-relative digests import breaks the no-package load",
+    "scope": "ReadRateReporter._emit",
+    "site": "sorted-json:prismaquant/io_spans.py::ReadRateReporter._emit"
    }
   ],
   "scope": "Bounded package cohort only; #1301 remains open. Tools cohort, new-profile decisions, non-hexdigest identities and protected deployments are not collapsed."

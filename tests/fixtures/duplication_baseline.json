@@ -192,6 +192,7 @@
   "sorted-json:prismaquant/glm_mtp_capture.py::publish_final_hidden",
   "sorted-json:prismaquant/glm_mtp_capture.py::publish_mtp_capture",
   "sorted-json:prismaquant/io_spans.py::IoSpanLog.close",
+  "sorted-json:prismaquant/io_spans.py::ReadRateReporter._emit",
   "sorted-json:prismaquant/joint_cost_quantum.py::publish_quantum_outputs",
   "sorted-json:prismaquant/joint_cost_quantum.py::write_failure_counters",
   "sorted-json:prismaquant/joint_cost_stage_a.py::_failed_produced_output_record",
