@@ -707,11 +707,10 @@ submitted CUDA work before releasing owners. This is not a new cache, source
 provider or automatic GPU admission. Bounded pending-CUDA ownership and
 original-layer timing controls are recorded in
 [the 2026-10-02 preparation report](measurements/pq2039_preparation_2026-10-02.md);
-the 2026-10-04 reservation-pricing and head-wait credit-reaping corrections
-and their control evidence are recorded in
-[the 2026-10-04 copy-pair report](measurements/pq2039_copy_pair_2026-10-04.md),
-whose paired device comparison was withdrawn before admission and is
-therefore unqualified.
+the 2026-10-04 reservation-pricing and head-wait credit-reaping corrections,
+their control evidence and the completed same-host paired device comparison
+are recorded in
+[the 2026-10-04 copy-pair report](measurements/pq2039_copy_pair_2026-10-04.md).
 The measured local latency gain preserves every source copy/comparison;
 aggregate CPU copy work increased. The option remains off, the higher
 CPU-material provider remains unqualified for GPU transfers, and no
