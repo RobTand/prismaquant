@@ -2011,6 +2011,121 @@ def _resolve_cost_entry(cost_rows: dict, fmt_name: str) -> tuple[dict | None, st
     return None, fmt_name
 
 
+def price_paired_rate_trade(
+    costs: Mapping, assignment: Mapping[str, str], baseline_assignment: Mapping[str, str],
+    *, profile, ucb_z: float,
+) -> dict:
+    """Price an explicit candidate-minus-baseline trade in the row's currency.
+
+    Only authenticated joint rows license paired sampling uncertainty. Their
+    global KL Fisher normalization is already inside the signed projections;
+    no sensitivity, family gain, token divisor or sample clipping enters here.
+    Dominance and the hedge consume the same named paired statistics.
+    """
+    from .joint_aura import paired_assignment_difference
+
+    if not math.isfinite(ucb_z) or ucb_z < 0:
+        raise ValueError("paired rate trade ucb_z must be finite and nonnegative")
+    if not baseline_assignment:
+        raise ValueError("paired rate trade requires an explicit baseline_assignment")
+    if assignment.keys() != baseline_assignment.keys():
+        raise ValueError("paired rate trade baseline_assignment must name the same complete unit roster")
+
+    def select(formats):
+        rows = {}
+        for name in sorted(formats):
+            fmt = formats[name]
+            row, _entry_fmt = _resolve_cost_entry(costs.get(name, {}), fmt)
+            if row is None or "error" in row:
+                raise ValueError(f"paired rate trade missing matched cost row: {name}@{fmt}")
+            if not joint_row_binds_cell(row, name, fmt, where="paired rate trade"):
+                raise ValueError(f"paired rate trade requires matched joint AURA currency: {name}@{fmt}")
+            rows[name] = row
+        return rows
+
+    candidate, baseline = select(assignment), select(baseline_assignment)
+    layers = defaultdict(lambda: defaultdict(list))
+    identify = getattr(profile, "routed_expert_identity", None)
+    packed_group = getattr(profile, "packed_expert_format_group", None)
+    for name in sorted(candidate):
+        identity = identify(name) if callable(identify) else None
+        if identity is not None:
+            layer, expert = identity
+            layers[layer][expert].append(name)
+        elif (assignment[name] != baseline_assignment[name]
+              and callable(packed_group) and packed_group(name) is not None):
+            raise ValueError(f"paired rate trade lacks per-expert attribution: {name}")
+    groups = {}
+    for layer, experts in layers.items():
+        groups[layer] = [name for names in experts.values() for name in names]
+        for expert, names in experts.items():
+            groups[f"{layer}.{expert}"] = names
+    result = paired_assignment_difference(candidate, baseline, attribution_groups=groups)
+    routed = {}
+    for layer, experts in sorted(layers.items()):
+        layer_summary = result["group_differences"][layer]
+        delta = layer_summary["mean_difference"]
+        expert_summaries, dominant = {}, []
+        for expert in sorted(experts):
+            summary = result["group_differences"][f"{layer}.{expert}"]
+            contribution = summary["mean_difference"]
+            # Twice the signed magnitude implements the strict half boundary
+            # without an arbitrary tolerance or division-by-zero fallback.
+            if 2 * abs(contribution) > abs(delta):
+                dominant.append(expert)
+            expert_summaries[expert] = {
+                **summary,
+                "fraction_of_layer_change": abs(contribution / delta) if delta else None,
+            }
+        routed[layer] = {**layer_summary, "experts": expert_summaries,
+                         "dominant_experts": dominant, "refused": bool(dominant),
+                         "refusal_reason": ("indeterminate_cancellation" if dominant and delta == 0
+                                            else "expert_dominance" if dominant else None)}
+    base = sum(row["predicted_dloss"] for row in candidate.values())
+    hedge = ucb_z * result["paired_standard_error"]
+    return {**result, "routed_layers": routed,
+            "refused": any(layer["refused"] for layer in routed.values()),
+            "ucb_z": ucb_z, "hedged_difference": result["mean_difference"] + hedge,
+            "candidate_point_cost": base, "predicted_dloss": max(base + hedge, 0.0),
+            "normalization": next(iter(candidate.values()))["probe_identity"]["normalization"],
+            "clipping": "nonnegative_candidate_total_only"}
+
+
+def reprice_paired_candidates(
+    stats: Mapping, costs: Mapping, candidates: Mapping, baseline_assignment: Mapping,
+    *, profile, ucb_z: float, report: dict,
+) -> dict:
+    """Reprice expanded recipes before the final menu reduction, not per member.
+
+    A routed layer is indivisible on the normal packed path. The final full
+    assignment guard also covers callers opting out of that aggregation.
+    """
+    from dataclasses import replace
+
+    out = {}
+    for name, menu in candidates.items():
+        members = (stats[name].get("_packed_group_members")
+                   or stats[name].get("_fused_siblings") or [name])
+        missing = sorted(set(members) - baseline_assignment.keys())
+        if missing:
+            raise ValueError(f"paired baseline_assignment missing members of {name}: {missing}")
+        baseline = {m: baseline_assignment[m] for m in members}
+        kept = []
+        report[name] = {}
+        for candidate in menu:
+            assignment = candidate.member_formats or {m: candidate.fmt for m in members}
+            trade = price_paired_rate_trade(costs, assignment, baseline, profile=profile, ucb_z=ucb_z)
+            report[name][candidate.fmt] = trade
+            if trade["refused"] and stats[name].get("_packed_group_members"):
+                continue
+            kept.append(replace(candidate, predicted_dloss=(
+                trade["predicted_dloss"] if ucb_z > 0 else candidate.predicted_dloss)))
+        if not kept:
+            raise ValueError(f"paired rate trade refused every option of {name}: expert dominance")
+        out[name] = kept
+    return out
+
+
 def _super_item_ucb_hedge(member_terms, ucb_z: float) -> tuple[float, float]:
     """Separate member hedges and retain a conservative group stderr bound.
 
@@ -3087,6 +3202,9 @@ def tessera_group_composites(
     ucb_z: float = 0.0,
     report: dict | None = None,
     preserve_runtime_frontier: bool = False,
+    costs: Mapping | None = None,
+    baseline_assignment: Mapping[str, str] | None = None,
+    profile=None,
 ) -> list["Candidate"]:
     """The group's exact knapsack, over the fields the CONTRACT frees (#132).
 
@@ -3146,9 +3264,9 @@ def tessera_group_composites(
       the same numbers the DP would charge if the members were separate units,
       so a uniform-rung option prices identically to the old per-NAME
       aggregation (asserted by the caller);
-    * mixed-rung composites retain their existing ``z > 0`` refusal. The
-      conservative uncertainty bound on uniform groups does not establish
-      support for uncertainty repricing across this separate option path.
+    * paired UCB keeps complete combinations until their common-probe
+      candidate-minus-explicit-baseline uncertainty is priced. A scalar
+      intermediate frontier cannot safely prune correlated differences.
     """
     # The family's name grammar, answered by its lane.
     format_promotion_class = fr.promotion_class_for
@@ -3223,15 +3341,13 @@ def tessera_group_composites(
                     "rather than assert one"))
         return []
 
-    # Checked HERE, not on entry: a stock-only group under a hedge has no
-    # classes to fold and must be untouched by this path.
-    if shared_classes and float(ucb_z) > 0.0:
-        raise NotImplementedError(
-            "Tessera mixed-rung group composites do not support UCB pricing: "
-            f"PRISMAQUANT_COST_UCB_Z={ucb_z}. Set the hedge to 0 for a "
-            "Tessera group run; uniform-group uncertainty support does not "
-            "enable uncertainty repricing for mixed-rung options."
-        )
+    # Stock-only groups never enter paired pricing. A mixed-rate hedge must
+    # name the actual starting assignment, not a guessed menu endpoint.
+    paired = bool(shared_classes and float(ucb_z) > 0.0)
+    if paired and baseline_assignment is None:
+        raise ValueError("mixed-rate PRISMAQUANT_COST_UCB_Z requires explicit baseline_assignment")
+    if paired and costs is None:
+        raise ValueError("mixed-rate PRISMAQUANT_COST_UCB_Z requires matched costs/probe currency")
 
     # A fused runtime measurement prices the complete member recipe. Without
     # that measurement even an intermediate byte/loss-dominated combination
@@ -3239,7 +3355,7 @@ def tessera_group_composites(
     # existing explicit memory guard, until the runtime solver can price them.
     reduce_rows = (
         (lambda rows: sorted(rows, key=lambda row: (row[0], row[1], row[2])))
-        if preserve_runtime_frontier else _pareto_frontier
+        if preserve_runtime_frontier or paired else _pareto_frontier
     )
     out: list["Candidate"] = []
     index = 0
@@ -3271,6 +3387,21 @@ def tessera_group_composites(
             sizes.append(len(frontier))
         for total_bytes, total_cost, fmts in frontier:
             member_formats = dict(zip(members, fmts))
+            trade = None
+            if paired:
+                missing = sorted(set(members) - baseline_assignment.keys())
+                if missing:
+                    raise ValueError(f"mixed-rate baseline_assignment missing members: {missing}")
+                trade = price_paired_rate_trade(
+                    costs, member_formats, {m: baseline_assignment[m] for m in members},
+                    profile=profile, ucb_z=float(ucb_z))
+                total_cost = trade["predicted_dloss"]
+                if report is not None:
+                    report.setdefault("__paired_trades__", {})[
+                        fr.whole_group_option_name(family, index)] = trade
+                if trade["refused"]:
+                    index += 1
+                    continue
             out.append(Candidate(
                 fmt=fr.whole_group_option_name(family, index),
                 bits_per_param=8.0 * total_bytes / max(int(n_params), 1),
@@ -3313,6 +3444,7 @@ def aggregate_fused_siblings(
     calibrated_gains: dict[str, float] | None = None,
     activation_pricing: ActivationFairPricing | None = None,
     preserve_runtime_frontier: bool = False,
+    baseline_assignment: Mapping[str, str] | None = None,
 ) -> tuple[dict, dict, dict]:
     """Aggregate fused siblings into single DP items.
 
@@ -3553,6 +3685,17 @@ def aggregate_fused_siblings(
                 entry["predicted_dloss"]
                 + ucb_z * float(entry.get("predicted_dloss_stderr", 0.0))
             ) * gain
+            if baseline_assignment is not None and ucb_z > 0:
+                missing = sorted(set(members) - baseline_assignment.keys())
+                if missing:
+                    raise ValueError(f"paired baseline_assignment missing members of {super_name}: {missing}")
+                trade = price_paired_rate_trade(
+                    costs, {m: spec.name for m in members},
+                    {m: baseline_assignment[m] for m in members}, profile=profile, ucb_z=ucb_z)
+                predicted = trade["predicted_dloss"]
+                entry.update(predicted_dloss=trade["candidate_point_cost"],
+                             predicted_dloss_stderr=trade["paired_standard_error"],
+                             paired_rate_trade=trade)
             cands.append(Candidate(
                 fmt=spec.name,
                 bits_per_param=bits_per_param,
@@ -3617,7 +3760,8 @@ def aggregate_fused_siblings(
             tessera_group_composites(
                 members, candidates, n_params, licence=fused_licence,
                 ucb_z=ucb_z, report=group_report,
-                preserve_runtime_frontier=preserve_runtime_frontier)
+                preserve_runtime_frontier=preserve_runtime_frontier,
+                costs=costs, baseline_assignment=baseline_assignment, profile=profile)
             if fold_enabled and columns_reason is None else []
         )
         if columns_reason is not None:
@@ -3637,12 +3781,14 @@ def aggregate_fused_siblings(
             member_formats_by_option: dict[str, dict[str, str]] = {}
             for composite in composites:
                 member_formats = composite.member_formats or {}
+                trade = group_report.get("__paired_trades__", {}).get(composite.fmt)
+                point_cost = (trade["candidate_point_cost"] if trade is not None
+                              else float(composite.predicted_dloss))
                 super_cost[composite.fmt] = {
-                    "predicted_dloss": float(composite.predicted_dloss),
-                    "predicted_dloss_stderr": 0.0,
-                    "weight_mse": (
-                        float(composite.predicted_dloss) / (0.5 * sum_h)
-                        if sum_h > 0 else 0.0),
+                    "predicted_dloss": point_cost,
+                    "predicted_dloss_stderr": trade["paired_standard_error"] if trade is not None else 0.0,
+                    "weight_mse": point_cost / (0.5 * sum_h) if sum_h > 0 else 0.0,
+                    **({"paired_rate_trade": trade} if trade is not None else {}),
                 }
                 if activation_pricing is not None:
                     super_cost[composite.fmt][APPLIED_MARKER_KEY] = True

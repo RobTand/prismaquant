@@ -16291,7 +16291,29 @@ group uncertainty (PrismaQuant #236). Uniform fused/packed groups retain the
 sum of scaled standard errors as a conservative bound; shared AURA probes
 do not establish independence. Default `PRISMAQUANT_COST_UCB_Z=0` candidate
 prices are unchanged, while grouped uncertainty metadata can increase even
-at zero. The mixed-rung Tessera fold still refuses opt-in UCB pricing.
+at zero. Re-stamped 2026-10-05 (#2282, Refs #2281): the mixed-rung fold
+supports paired UCB against an explicit caller-owned starting assignment
+(`--cost-baseline-assignment` on the allocator CLI). It requires validated
+common-probe joint AURA rows, retains every complete combination until its
+paired delta is priced, and refuses missing baseline, probe, source or currency
+evidence by name. `joint_aura.paired_assignment_difference` owns the hedge and
+named subgroup statistics. Signed candidate-minus-baseline samples are not
+clipped, re-normalized, gained or activation-scaled; only the final candidate
+total is clamped nonnegative. Decision-unit UCBs sum conservatively across
+units; full-assignment common-probe covariance is reported separately, not
+claimed as the DP's objective.
+
+The same paired representation aggregates each routed expert's projections
+under the profile's real layer/expert identity. A layer trade is refused if
+`abs(expert signed delta) > 0.5 * abs(layer signed delta)`; exactly half is
+allowed, with no tolerance. Nonzero expert changes cancelling to zero layer
+change refuse as indeterminate cancellation. Unchanged assignments and trades
+whose expert terms are all exactly zero have no dominance. Rejected packed
+options remain in applicability provenance; the final expanded assignment is
+checked before emission, including aggregation opt-outs. Legacy stock/uniform
+marginal pricing without a paired baseline and default `z=0` prices stay
+unchanged. CPU fixtures in `tests/test_paired_rate_trade.py` qualify this source
+policy, not corrected model prices, held-out KL, GPU execution or #2281.
 
 Re-stamped (2026-09-05, `codex/two-anchor-bootstrap`) for campaign
 bootstrapping from two endpoints (§4.10). A requested initial count of one
@@ -21271,9 +21293,13 @@ improves the local MSE previously used for routed experts, but it does **not** m
 discontinuities; activation weighting inside `gW` must not be presented as route-flip coverage.
 
 **UCB — two of them, both default-off, neither set by the pipeline.** Cost-side
-`PRISMAQUANT_COST_UCB_Z` adds `z·stderr` before the DP (`allocator_candidates.py:358-371`);
-`z=0` is bit-identical to no-UCB and it only bites on the `predicted_dloss` branch (AURA /
-expert-empirical), not `output_mse`/`weight_mse`. Selection-side `--kl-ucb-z` yields
+`PRISMAQUANT_COST_UCB_Z` adds `z·stderr` before the DP. Without a paired
+baseline it keeps the existing `predicted_dloss` marginal branch (AURA /
+expert-empirical), not `output_mse`/`weight_mse`. An explicit
+`--cost-baseline-assignment` uses matched candidate-minus-baseline probe
+uncertainty and the expert-dominance guard; mixed-rate UCB requires this
+baseline. `z=0` preserves prices except refusal of explicitly compared
+dominated trades. Selection-side `--kl-ucb-z` yields
 `kl_ucb = mean + z·stderr` over calib repeats (`validate_assignments_kl.py:640-660`), consumed
 by `select_validated_frontier --metric ucb`. Both are **research-only** as of R28
 (`docs/design/runtime_flags.md` §1): the one measured win (`z=2`, −8.0% on the 27B old-vs-new
@@ -23268,10 +23294,12 @@ while the family constraint itself costs 1.008x / 1.000x / 1.000x against an
 unconstrained bound. Exactness is enforced, not claimed: the fold is pinned
 against brute force on a menu with a non-convex pocket, a uniform-rung option
 must price identically through both constructions or the aggregation refuses,
-and the fold still refuses at `PRISMAQUANT_COST_UCB_Z > 0`: mixed-rung UCB
-repricing remains unsupported. Uniform fused/packed groups use a conservative
-sum of scaled standard errors (#236), since shared AURA probes do not imply
-independent estimates. This does not promote mixed-rung uncertainty support.
+and paired mixed-rung UCB requires an explicit starting assignment and matched
+joint AURA probes (#2282). Its exact fold retains complete combinations before
+paired pricing; scalar intermediate pruning cannot assume independent delta
+errors. Legacy uniform fused/packed marginal UCB retains the conservative sum
+of scaled standard errors (#236). No source/teacher, native format or serving
+pin changes, and this source repair does not close the measured #2281 defect.
 Measured again on a cost table whose
 anchors were placed per group (the correct placement) the one-rung constraint
 costs **1.237x / 1.558x / 1.113x**, and at 4.0 the fold is shown to *contain*
