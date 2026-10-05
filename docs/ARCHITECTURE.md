@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-2231-campaign-wire-snapshots`,
+commit `a1b7e2d1e5860780121221e8ea800a3bbd03ae38`, PQ #2231,
+PR #2256 correction): campaign publication checks rendered and wire filenames
+against existing coordinates before writing; batch admission checks its whole
+scope. Packed expert appends include the dense manifest. Disk-backed weight
+sessions check their source snapshot roster before capture or adoption and
+retain the existing filename spelling. Serialization, format spellings and
+serving contracts are unchanged. CPU controls do not establish new GPU prices.
+
 Re-stamped 2026-10-04 (`issues/pq-2229-source-digest-cache`, PQ #2229, Refs
 RobTand/tessera#790): the census caller's expert-projection request hands the
 producer a stat-bound source-digest cache when the selected producer's CLI
@@ -1294,6 +1303,26 @@ This is not produced-render publication, global concurrent-writer ownership or
 a storage-aware archive bound; direct callers outside this identity gate and
 full writer/reader integration remain in #870. No numerical, format, runtime-pin,
 export or serving-gate change. Gate: `tests/test_render_cache_destination_identity.py`.
+
+Write-open extension (Refs PQ #2231): the campaign checks the union of each
+new anchor and the current cache manifest before either its rendered tensor
+or wire is written. Batch admission checks the whole batch before its first
+publication; the ordered writer checks again against earlier publications.
+Rendered tensors reuse `require_injective_cache_filenames`. Wire shards retain
+`_wire_path` because resume and export consume that existing dot-to-double-
+underscore spelling, and their check compares those actual wire destinations.
+The packed expert append checks its new scope together with existing manifest
+keys, including the dense fill that created the cache. The dense fill itself
+constructs a new manifest rather than accepting a cache to append to.
+Disk-backed `WeightSession` checks its complete live-name and alias roster
+before creating the spill directory or capturing or adopting a source
+snapshot. Both snapshot paths reuse the shared cache leaf through one
+`__bf16src.pt` filename helper; this fixed source-snapshot suffix has its own
+injectivity check, not the rendered-format grammar. Refusals name both
+coordinates and their shared filename. Existing filenames, serialization,
+format spellings, memory-only source snapshots and serving contracts remain
+unchanged. This is not cross-process directory ownership. Gate:
+`tests/test_campaign_write_destinations_2231.py`.
 
 Re-stamped 2026-10-01 (PQ #1852, Refs #275): local single-file safetensors
 checkpoints derive complete tensor-to-file coverage from the validated file
