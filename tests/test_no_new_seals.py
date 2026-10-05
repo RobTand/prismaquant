@@ -318,8 +318,6 @@ ALLOWLIST = {
         "running artifact ceiling: PrismaBuild admits the one and the run spends the other"),
     ("prismaquant/stage_inputs.py", "bound"): (
         1, INTEGRITY, "an artifact's bytes against the digest it was bound under"),
-    ("prismaquant/stage_inputs.py", "read_bound"): (
-        1, INTEGRITY, "loaded control bytes against their own declared checksum, not a run identity"),
     ("prismaquant/tessera_joint_aura.py", "seed_source_identity_cache"): (
         2, INTEGRITY, "the existing or copied cache file's bytes against that file's own checksum"),
     ("prismaquant/tessera_joint_aura.py", "load_measured_anchor_input.verify_files"): (
