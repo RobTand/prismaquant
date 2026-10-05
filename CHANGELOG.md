@@ -51,7 +51,10 @@
   `2dbac1910c88254d9c6391f02a34c4b07e516803` / contract v56
   (`47f180ef…d0aed78`), v11 run-table coverage and four extension rows.
   Root graph-receipt v2 retains all nine scope fields. The existing
-  fingerprint, provisioning, lane, export and release refusals do not change.
+  fingerprint, provisioning, lane, export and release refusals remain enforced.
+  Route-census scope checks use the existing authoritative scoped-schema set
+  at both entry points, preserving flat-row refusal and valid scoped replay
+  under v11 rather than comparing with the legacy v10 label.
   Isolated installed-package evidence is not performance, compiled-cell
   or ship-card qualification; D13 landing still needs the fresh public-source
   packet and CEO review. No private `608bb` result is transferred.

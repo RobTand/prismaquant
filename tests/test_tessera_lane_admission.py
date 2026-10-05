@@ -31,7 +31,6 @@ from prismaquant import tessera_render as tr
 from prismaquant.lane_eligibility import (
     EVIDENCE_SMOKE_REFUSALS,
     FORMAT_KIND_TESSERA_WIRE,
-    LANE_ELIGIBILITY_SCHEMA_TESSERA,
     LaneEligibilityError,
     cell_evidence_admits,
     load_eligibility_table,

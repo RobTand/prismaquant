@@ -176,10 +176,10 @@ LANE_ELIGIBILITY_SCHEMA_TESSERA_V5 = "tessera.lane-eligibility.v5"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_V4 = "tessera.lane-eligibility.v4"
 LANE_ELIGIBILITY_SCHEMA_TESSERA_LEGACY_V3 = "tessera.lane-eligibility.v3"
 
-#: The CURRENT grammar. Every "is this the newest schema?" test used to spell
-#: itself against this name, which made a version bump silently demote the
-#: previous grammar from "scoped" to "legacy unscoped". Scope is a property a
-#: set answers, not a single constant: see :data:`SCOPED_LANE_SCHEMAS`.
+#: The legacy v10 schema alias. It is not the active pin or the accepted
+#: grammar roster. Scope is a property the authoritative set answers, not a
+#: single constant: see :data:`SCOPED_LANE_SCHEMAS`. Keeping an old alias
+#: must never silently demote another supported grammar to unscoped.
 LANE_ELIGIBILITY_SCHEMA_TESSERA = LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
 
 #: The schemas whose cells carry a per-cell runtime scope, so an explicit

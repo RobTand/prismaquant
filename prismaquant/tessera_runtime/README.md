@@ -591,8 +591,8 @@ only one split identity, is drift rather than a silently ignored field or a
 missing-key exception. A future activating review must transcribe both v3
 identities into its frozen state; this change does not fabricate them for v2.
 
-This is the metadata-report slice deferred by #1574. The current v45 contract
-still has 14 cells and none names its serving code; producer requalification,
+This metadata-report slice was deferred by #1574. At #1768 the v45
+contract had 14 cells and none named its serving code; producer requalification,
 `contract_answer`'s code-column review and a separately reviewed v3 pin remain
 required. No cell promotion, new GPU/serving measurement or live pin change is
 claimed by the CPU reader tests. The existing package-source matcher and

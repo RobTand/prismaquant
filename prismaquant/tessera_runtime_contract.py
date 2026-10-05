@@ -146,10 +146,10 @@ class TesseraContractError(RuntimeError):
 #: The schema ids this reader accepts.  Both are checked before any key is
 #: read: an older table is not a subset of this one, and "missing field" is the
 #: wrong error to hand someone whose contract predates the field.
-#: ``TESSERA_LANE_SCHEMA`` is the CURRENT lane grammar and follows
-#: ``lane_eligibility.LANE_ELIGIBILITY_SCHEMA_TESSERA`` (v10 since
-#: 2026-09-12) so that the two readers cannot disagree about which schema
-#: is newest.
+#: ``TESSERA_LANE_SCHEMA`` retains the legacy v10 alias. Accepted grammars
+#: are the closed ``TESSERA_LANE_SCHEMAS`` set below; scoped behavior uses
+#: ``SCOPED_LANE_SCHEMAS``, which also includes the active v11 pin. A single
+#: legacy alias must never decide whether a table carries runtime scope.
 TESSERA_CONTRACT_SCHEMA = "tessera.runtime-contract.v1"
 TESSERA_LANE_SCHEMA = LANE_ELIGIBILITY_SCHEMA_TESSERA
 TESSERA_LANE_SCHEMAS = frozenset(

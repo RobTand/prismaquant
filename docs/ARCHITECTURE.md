@@ -11,6 +11,13 @@ four native-extension rows and 22 eager cells. Every existing runtime,
 plugin, lane, evidence, export and quality refusal remains independently
 enforced. Zero compiled cells is still a release/allocation gap, not a
 Python module-availability prerequisite. No default or pipeline topology moves.
+The route-census policy uses authoritative `SCOPED_LANE_SCHEMAS` membership
+at both its flat-census refusal and its scoped-v2 replay entry. The legacy
+v10 alias remains a version label, never a scope predicate: pinning v11
+must not admit unbound flat rows or reject a valid scoped census. #214
+fill/verify refusal assertions remain exact, and the installed-v11
+regression exercises actual table loading, scoped fill and replay.
+
 
 An isolated PB install at this exact commit imports root
 `tessera.graph_receipt` v2 (`verify(receipt, serve) -> str | None`), with
