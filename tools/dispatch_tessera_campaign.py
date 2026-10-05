@@ -3694,14 +3694,16 @@ def _payload_acquisition_records(payloads, *, unit_identities):
 
 def _merge_acquisition_settings(identities, states_by_row, *, acquisition, scope_groups):
     if acquisition is None and not any(
-            "acquisition_origin" in identity["settings"] or "acquisition_schedule" in identity["settings"]
-            or any("acquisition_source_weight" in unit for unit in identity["units"].values())
+            "acquisition_origin" in (identity.get("settings") or ())
+            or "acquisition_schedule" in (identity.get("settings") or ())
+            or any("acquisition_source_weight" in unit
+                   for unit in (identity.get("units") or {}).values())
             for identity in identities.values()):
         return None
     from prismaquant.tessera_campaign import CampaignAnchor, _require_campaign_acquisition_anchor
     records = {}
     for row, identity in identities.items():
-        settings = identity["settings"]
+        settings = identity.get("settings") or {}
         if (settings.get("menu_mode") != "research" or settings.get("max_rounds") != 1
                 or settings.get("rate_band") is not None or settings.get("exhaustive_rate_grid")):
             raise MergeRefused(f"{row}: acquisition checkpoint regime differs")
