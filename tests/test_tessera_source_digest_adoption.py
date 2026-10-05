@@ -15,6 +15,29 @@ def authority(checkpoint,monkeypatch):
     return root,shards,cache,identity,{'path':str(cache),'sha256':hashlib.sha256(cache.read_bytes()).hexdigest()}
 
 
+@pytest.mark.parametrize('mode', [None, '1', '0'])
+@pytest.mark.parametrize('change', ['size', 'mtime'])
+def test_adoption_never_launders_old_digest_under_new_fingerprint(authority, tmp_path, monkeypatch, mode, change):
+    import os
+    root, shards, _path, identity, binding = authority
+    if mode is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    shard = next(iter(shards.values()))
+    if change == 'size':
+        shard.write_bytes(shard.read_bytes() + b'changed')
+    else:
+        before = shard.stat()
+        os.utime(shard, ns=(before.st_atime_ns, before.st_mtime_ns + 1))
+    out = tmp_path/'must-not-publish'
+    with pytest.raises((ValueError, RuntimeError)):
+        adopt_source_digests(root, binding, out, expected_content_sha256=identity['content_sha256'],
+                             quiescent_seconds=0)
+    assert not out.exists()
+
+
+
 def test_adopts_original_hashes_without_payload_reads(authority,tmp_path,monkeypatch):
     from tessera.source_digest_cache import SourceDigestCache
     from tessera import serving_parts

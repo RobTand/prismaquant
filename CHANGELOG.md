@@ -46,6 +46,23 @@
 
 ### Changed
 
+- **D32 dev-mode metadata stamp-and-continue** (#2302). The existing central
+  default (anything except exact PRISMAQUANT_DEV_MODE=0) now also governs
+  capture metadata owners, source provenance consumers and paired-trade
+  producer/arithmetic/source metadata. Consumers keep stored data without
+  archive, rehash, recompute or proof barriers and mark dev results in-band.
+  Row-to-row probe coordinates, seed/draw/token/noise alignment and KL units
+  (temperature, normalization, distribution) remain mathematical refusals in
+  both modes. Own-byte digests, strict publishing fingerprints, same-held-fd
+  mutation, finite complete numeric dimensions and wire/kernel/resource safety
+  remain. No prices are rescaled or fabricated; no serving qualification is
+  claimed.
+
+- **Verified-capture capacity test isolation** (#2308). Scope its global
+  `os.open` refusal sentinel to the loader call so failed-only pytest temp
+  cleanup does not trip the sentinel after the safety assertion has passed.
+  The real pre-open capacity refusal is unchanged.
+
 - **Mixed-rate COST_UCB_Z and paired rate-trade validity** (#2282, Refs #2281).
   The existing allocator accepts an explicit `--cost-baseline-assignment`;
   mixed-rate UCB requires it and matched joint AURA source/probe/currency

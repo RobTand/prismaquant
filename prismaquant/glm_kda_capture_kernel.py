@@ -33,7 +33,7 @@ an arithmetic change, and **the mode is the seal**: in kernel mode the
 admitted kernel's identity goes into the probe identity's ``arithmetic``
 block under ``kda_capture_kernel`` for every quantum, including one whose
 target and chain layers have no KDA attention. ``arithmetic`` is a run seal
-(``cost_currency.PROBE_IDENTITY_SEAL_FIELDS``): dev mode joins rows with and
+(cost_currency.probe_identity_seals): dev mode joins rows with and
 without the kernel and prints the difference, and certified mode refuses to
 join them. The identity names what ran (source, compiled code, probe result,
 runtime); the digest of the qualification that vouches for it goes into the

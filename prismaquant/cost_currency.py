@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from .digests import DIRECT_ASCII_STRICT
 
 #: COST_MODE -> the objective currency the run's DP ranks in, read off the
 #: COST_RENDER x COST_OBJECTIVE decomposition `run-pipeline.sh` resolves
@@ -62,43 +63,29 @@ class CostCurrencyError(RuntimeError):
     """A cost table cannot be ranked in this run's objective currency."""
 
 
-#: The joint AURA probe identity fields that are run seals (PQ #1147): the
-#: producer source and the arithmetic (dtype, projection backend, replay
-#: regime, operator windows, served quantizer and activation policy, Stage B
-#: resource policy). They change how a cost was computed, not what was
-#: measured. Every other field names what was measured, and rows that differ
-#: in it refuse in both modes: the calibration draw, the probes (count, seed,
-#: distribution, noise layout), the token scope, the temperature, the
-#: normalization, the source model, the schema, and ``source_execution`` (its
-#: GLM source derivative changes what the source model computes).
-PROBE_IDENTITY_SEAL_FIELDS = frozenset({"producer_source_sha256", "arithmetic"})
-#: Inside ``arithmetic``, the execution partition (the microbatch shape) stays
-#: a wall: rows measured under another batch shape refuse, as the chain
-#: regime's batch size does.
-PROBE_IDENTITY_ARITHMETIC_WALLS = ("execution_partition",)
+#: Probe coordinates, draw, token selection, noise layout and KL units are
+#: mathematical data contracts. Only the producer/arithmetic/source remainder
+#: is recorded-versus-running provenance (D32); unknown fields fail closed.
+PROBE_IDENTITY_SEAL_FIELDS = frozenset({
+    'producer_source_sha256', 'arithmetic', 'source_model', 'source_execution'})
 
 
 def probe_identity_walls_differ(left, right) -> bool:
-    """True when two joint probe identities differ outside the run seals."""
-
+    """Whether two rows describe different vectors, tokens or mathematical units."""
     if not isinstance(left, Mapping) or not isinstance(right, Mapping):
         return left != right
-    if any(left.get(name) != right.get(name)
-           for name in (set(left) | set(right)) - PROBE_IDENTITY_SEAL_FIELDS):
-        return True
-    arithmetic = left.get("arithmetic"), right.get("arithmetic")
-    if not all(isinstance(value, Mapping) for value in arithmetic):
-        return arithmetic[0] != arithmetic[1]
-    return any(arithmetic[0].get(name) != arithmetic[1].get(name)
-               for name in PROBE_IDENTITY_ARITHMETIC_WALLS)
+    left_math = {name: left[name] for name in left if name not in PROBE_IDENTITY_SEAL_FIELDS}
+    right_math = {name: right[name] for name in right if name not in PROBE_IDENTITY_SEAL_FIELDS}
+    return DIRECT_ASCII_STRICT.sha256(left_math) != DIRECT_ASCII_STRICT.sha256(right_math)
 
 
 def probe_identity_seals(identity) -> dict:
-    """The run-seal fields of a joint probe identity, for a ``[DEV-MODE]`` line."""
-
+    """Only the D32 source/producer/arithmetic provenance remainder."""
     if not isinstance(identity, Mapping):
         return {}
     return {name: identity.get(name) for name in sorted(PROBE_IDENTITY_SEAL_FIELDS)}
+
+
 
 
 def first_joint_probe_identity(costs):
@@ -333,16 +320,14 @@ def _require_joint_run_currency(cost_data, costs, *, sampled_research=False):
                 raise ValueError("operator identity differs from its cost-table key")
             current = entry["probe_identity_sha256"]
             if probe_identity is not None and current != probe_identity:
-                # The digest covers what was measured and how. What was
-                # measured (the calibration draw, the probes) refuses in both
-                # modes; the run seals alone differing prints a [DEV-MODE]
-                # line and the rows are ranked (PQ #1147).
+                # Each row already validates its own bytes and sample moments.
+                # Recorded probe/capture/producer metadata is a D32 seal, not
+                # a reason to regenerate or silently relabel stored rows.
                 refusal = ValueError("rows do not share one probe/calibration identity")
-                if probe_identity_walls_differ(previous, entry["probe_identity"]):
+                if probe_identity_walls_differ(previous, entry['probe_identity']):
                     raise refusal
                 from .dev_mode import seal_check
-                seal_check("probe identity", probe_identity_seals(previous),
-                           probe_identity_seals(entry["probe_identity"]),
+                seal_check("probe identity", previous, entry["probe_identity"],
                            where=f"joint AURA cost row {unit}/{fmt}",
                            same=False, refusal=refusal)
             probe_identity = current

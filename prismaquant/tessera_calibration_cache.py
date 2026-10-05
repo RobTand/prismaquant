@@ -31,6 +31,7 @@ from .digests import (
 )
 from .file_identity import file_stat_signature
 from .memory_management import reserve_allocation
+from .dev_mode import NOT_COMPUTED, dev_mode_enabled, dev_stamp, seal_check
 
 SCHEMA = 'prismaquant.tessera_calibration_cache.v2'
 STAGE = 'tessera_calibration_capture'
@@ -178,10 +179,12 @@ def capture_identity(census_path, *, calibration, max_act_rows,
     recorded = validate_source_initialization_contract(census.get('model_load_contract'))
     runtime = dict(torch=torch.__version__,cuda=torch.version.cuda,
                    transformers=importlib.metadata.version('transformers'))
-    if (contract != recorded or census.get('capture_runtime') != runtime or
-            attention_implementation not in ('eager','sdpa') or
-            census.get('attention_implementation') != attention_implementation):
+    if attention_implementation not in ('eager', 'sdpa'):
         raise RuntimeError('canonical model initialization, runtime or attention differs from census')
+    seal_check('capture initialization/runtime',
+        (recorded, census.get('capture_runtime'), census.get('attention_implementation')),
+        (contract, runtime, attention_implementation), where=str(census_path),
+        refusal=lambda: RuntimeError('canonical model initialization, runtime or attention differs from census'))
     root = Path(census['model'])
     files = capture_source_files(root)
     if not files or not (root / 'config.json').is_file():
@@ -216,8 +219,8 @@ def capture_identity(census_path, *, calibration, max_act_rows,
                                    **hashing) as digest_of:
             for name,digest in expected.items():
                 actual = source[name] if name in source else digest_of(root/name)
-                if actual != digest:
-                    raise RuntimeError(f'calibration source differs from census producer: {name}')
+                seal_check('capture producer source', digest, actual, where=name,
+                    refusal=lambda: RuntimeError(f'calibration source differs from census producer: {name}'))
     else:
         if not isinstance(source_authentication, CaptureSourceAuthentication):
             raise TypeError('selected source needs the complete-capture descriptor owner')
@@ -296,16 +299,15 @@ def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live
     path = Path(cache_path)
     before = path.stat()
     raw = path.read_bytes()
-    cached = json.loads(raw)
     after = path.stat()
+    # A file that changed during the very read consuming it may have yielded
+    # torn bytes: partial-data integrity, refused in both modes (not a seal).
     if file_stat_signature(before) != file_stat_signature(after):
         raise RuntimeError('streamed source identity cache changed while reading')
     if expected_sha256 is not None and bytes_sha256hex(raw) != expected_sha256:
         raise RuntimeError('streamed source identity cache differs from its declared SHA256')
-    checked_cache, identity = _read_streamed_model_identity_cache(
-        path, source_model=str(root))
-    if cached != checked_cache:
-        raise RuntimeError('streamed source identity cache changed while validating')
+    cached, identity = _read_streamed_model_identity_cache(
+        path, source_model=str(root), raw=raw)
     checkpoint_map, indexed_shards = _local_checkpoint_shards(root)
     if (indexed_shards is None or checkpoint_map is None or
             identity.get('checkpoint_weight_map') != checkpoint_map):
@@ -327,17 +329,17 @@ def streamed_identity_proof_digests(root, cache_path, source_files=None, *, live
     for row in shards:
         source_path = Path(str(row['path']))
         name = source_path.name
-        if (source_path.resolve() != (root / name).resolve() or name not in expected_shards
-                or (source_files is not None and row.get('sha256') != source_files[name])):
+        if source_path.resolve() != (root / name).resolve() or name not in expected_shards:
             raise RuntimeError(f'{name}: streamed source SHA differs from canonical capture')
+        if source_files is not None:
+            seal_check('capture source proof digest', source_files[name], row.get('sha256'), where=name,
+                refusal=lambda: RuntimeError(f'{name}: streamed source SHA differs from canonical capture'))
         fingerprint = fp_by_path[str(source_path)]
-        # The same predicate the identity cache is built and validated
-        # with: device may differ only where it is client-local (NFS) or
-        # in dev mode (PQ #1363); anything else names another object.
         live = stat_fingerprint(str(source_path), live_stat(name))
-        if not stat_fingerprint_reusable(live, fingerprint):
-            raise RuntimeError(f'{name}: streamed source proof names another object')
-        digests[name] = row['sha256']
+        seal_check('capture source proof stat', fingerprint, live, where=name,
+            same=stat_fingerprint_reusable(live, fingerprint),
+            refusal=lambda: RuntimeError(f'{name}: streamed source proof names another object'))
+        digests[name] = source_files[name] if source_files is not None else row['sha256']
     if set(digests) != expected_shards:
         raise RuntimeError('streamed source proof omits canonical capture shards')
     return digests, bytes_sha256hex(raw)
@@ -357,10 +359,11 @@ class CaptureSourceAuthentication:
     """One complete capture's source descriptors, not a weight/digest cache.
 
     Header inspection may open an unconsumed shard without hashing its payload.
-    Tensor reads authenticate the same held object first, once in this owner's
-    lifetime. Stat fences reject mutation/replacement; only SHA256 authenticates
-    content. Ordinary source files must remain stable through their read leases.
-    Construct through ``authenticate_selected_capture_source``.
+    Certified tensor reads authenticate the held object once and retain the
+    original stat fences. Dev reads keep recorded source metadata without a
+    fresh source/proof hash, visibly uncertified; actual decoder and capture
+    payload structure, immutable original-material deliveries and resource
+    guards are unchanged. Construct through ``authenticate_selected_capture_source``.
 
     **Explicit recording mode** (:meth:`recording`, PQ #1896) retains the
     descriptor/producer/stat contract; it does not qualify immutable source
@@ -368,8 +371,8 @@ class CaptureSourceAuthentication:
     provider is qualified (Refs #2010). No sealed roster exists to compare
     against, so the first
     payload read of a file hashes all of it through the held descriptor and
-    records the digest; a census that declares producer digests is compared
-    there, and a mismatch refuses before the first tensor. The hash leaves the
+    records the digest; a declared producer digest is compared through the
+    central seal policy. The hash leaves the
     file's clean pages cached for subsequent tensor reads; kernel reclamation
     can still cause physical rereads. :meth:`release_retained_pages` drops a file's pages
     after its last consumer, and :meth:`authenticate_complete_source` hashes
@@ -716,9 +719,10 @@ class CaptureSourceAuthentication:
         self._producer = dict(declared)
         self._derived_censuses = {}
         for name, digest in declared.items():
-            if name in self._expected and self._expected[name] != digest:
-                raise RuntimeError(f'capture source roster differs from census producer: {name}')
-            self._expected[name] = digest
+            if name in self._expected:
+                seal_check('capture producer source', self._expected[name], digest, where=name,
+                    refusal=lambda: RuntimeError(f'capture source roster differs from census producer: {name}'))
+            self._expected.setdefault(name, digest)
         _require_sha256_roster(self._expected, what='capture source roster')
         self._roster = None
         self._authorized = frozenset(self._expected)
@@ -839,19 +843,29 @@ class CaptureSourceAuthentication:
             return
         from .cost_streaming import stat_fingerprint, stat_fingerprint_reusable
         live = stat_fingerprint(str((self.root/name).resolve()), observed)
-        if not stat_fingerprint_reusable(live, self._fingerprints[name]):
-            raise RuntimeError(f'source file changed since the capture prep stat it: {name}')
+        seal_check('capture prep source stat', self._fingerprints[name], live, where=name,
+            same=stat_fingerprint_reusable(live, self._fingerprints[name]),
+            refusal=lambda: RuntimeError(f'source file changed since the capture prep stat it: {name}'))
 
     def _check_file(self, name, state):
         if self._original is not None:
             state['buffer'].require_sealed()
             return
         try:
-            current = (os.fstat(state['fd']), os.stat(self.root/name))
-            if any(file_stat_signature(value) != file_stat_signature(state['before']) for value in current):
-                raise RuntimeError(f'authenticated source changed during consumption: {name}')
+            held = file_stat_signature(os.fstat(state['fd']))
         except OSError as exc:
             raise RuntimeError(f'authenticated source changed during consumption: {name}') from exc
+        try:
+            pathname = file_stat_signature(os.stat(self.root/name))
+        except OSError:
+            # The held descriptor is still the bytes this reader consumes.
+            # Missing/replaced pathname metadata is not a new source proof.
+            pathname = NOT_COMPUTED
+        expected = file_stat_signature(state['before'])
+        if held != expected:
+            raise RuntimeError(f'authenticated source changed during consumption: {name}')
+        seal_check('capture source pathname stat', expected, pathname, where=name,
+            refusal=lambda: RuntimeError(f'authenticated source changed during consumption: {name}'))
 
     def require_unchanged(self):
         with self._lock:
@@ -871,17 +885,24 @@ class CaptureSourceAuthentication:
         with state['lock']:
             self._check_file(name, state)
             if state['sha256'] is None:
+                if not self.is_recording and dev_mode_enabled():
+                    expected = self._expected[name]
+                    seal_check('capture source digest', expected, NOT_COMPUTED, where=name)
+                    state['sha256'] = expected
+                    state['sha256_source'] = 'dev_recorded_metadata'
+                    return
                 release = (self.release_read_pages if not self.is_recording
                            else unconsumed and self.release_read_pages)
                 digest = sha256(self.root/name, file_descriptor=state['fd'],
                     resource_check=self.resource_check, release_read_pages=release)
                 self._check_file(name, state)
                 expected = self._expected.get(name)
-                if self.is_recording:
-                    if expected is not None and digest != expected:
-                        raise RuntimeError(f'calibration source differs from census producer: {name}')
-                elif digest != expected:
-                    raise RuntimeError(f'calibration source content differs from sealed capture: {name}')
+                if expected is not None:
+                    seal_check('capture producer source', expected, digest, where=name,
+                        refusal=lambda: RuntimeError(
+                            f'calibration source differs from census producer: {name}'
+                            if self.is_recording else
+                            f'calibration source content differs from sealed capture: {name}'))
                 state['sha256'] = digest
                 state['sha256_source'] = 'fresh_descriptor_sha256'
 
@@ -925,7 +946,8 @@ class CaptureSourceAuthentication:
         self.require_unchanged()
         for name, digest in digests.items():
             held[name]['sha256'] = digest
-            held[name]['sha256_source'] = 'verified_streamed_identity_cache'
+            held[name]['sha256_source'] = ('dev_recorded_metadata' if dev_mode_enabled()
+                                          else 'verified_streamed_identity_cache')
         self._adopted_cache_sha256 = proof_sha256
         return len(digests)
 
@@ -979,10 +1001,12 @@ class CaptureSourceAuthentication:
         census = json.loads(raw)
         digest = bytes_sha256hex(raw)
         producer = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
-        if (not isinstance(census.get('model'), str) or
-                Path(os.path.abspath(census['model'])) != self.root or
-                _producer_digests(producer) != self._producer):
+        if not isinstance(census.get('model'), str):
             raise RuntimeError('derived census names another source model or producer roster')
+        seal_check('derived census source metadata', (str(self.root), self._producer),
+            (str(Path(os.path.abspath(census['model']))), _producer_digests(producer)),
+            where=str(census_path),
+            refusal=lambda: RuntimeError('derived census names another source model or producer roster'))
         with self._lock:
             self._require_open()
             self._derived_censuses[digest] = str(Path(os.path.abspath(census_path)))
@@ -990,10 +1014,15 @@ class CaptureSourceAuthentication:
 
     def require_recording_roster(self, root, names, producer_digests):
         """A streamed capture's identity names this owner's source and producer."""
-        if (not self.is_recording or Path(os.path.abspath(root)) != self.root or
-                set(names) != self._roster or producer_digests != self._producer):
+        if not self.is_recording:
             raise RuntimeError('streamed capture source, roster or census producer differs '
                                'from its recording owner')
+        seal_check('recording capture source metadata',
+            (str(self.root), self._roster, self._producer),
+            (str(Path(os.path.abspath(root))), frozenset(names), producer_digests),
+            where='recording capture',
+            refusal=lambda: RuntimeError('streamed capture source, roster or census producer differs '
+                                         'from its recording owner'))
 
     def adopt_recorded_digests(self, digests):
         """Bind digests other readers of these objects recorded; nothing is read.
@@ -1012,8 +1041,9 @@ class CaptureSourceAuthentication:
             with state['lock']:
                 self._check_file(name, state)
                 expected = self._expected.get(name)
-                if expected is not None and digest != expected:
-                    raise RuntimeError(f'calibration source differs from census producer: {name}')
+                if expected is not None:
+                    seal_check('recorded capture producer metadata', expected, digest, where=name,
+                        refusal=lambda: RuntimeError(f'calibration source differs from census producer: {name}'))
                 if state['sha256'] is not None and state['sha256'] != digest:
                     raise RuntimeError(f'recorded source digests disagree: {name}')
                 if state['sha256'] is None:
@@ -1073,11 +1103,17 @@ class CaptureSourceAuthentication:
         if self.is_recording:
             raise RuntimeError('a recording owner has no sealed source roster')
         canonical = json.loads(self._identity_json)
-        if (Path(os.path.abspath(root)) != self.root or
-                census_digest not in {canonical['census_sha256'], *self._derived_censuses} or
-                names != set(self._source_files) or
-                any(self._expected.get(name) != digest for name, digest in producer_digests.items())):
-            raise RuntimeError('selected source census or complete source roster changed')
+        seal_check('capture source/census metadata',
+            {'root': str(self.root), 'census_sha256': canonical['census_sha256'],
+             'names': set(self._source_files),
+             'producer': {name: self._expected.get(name) for name in producer_digests}},
+            {'root': str(Path(os.path.abspath(root))), 'census_sha256': census_digest,
+             'names': names, 'producer': producer_digests}, where='selected source',
+            same=(Path(os.path.abspath(root)) == self.root
+                  and census_digest in {canonical['census_sha256'], *self._derived_censuses}
+                  and names == set(self._source_files)
+                  and all(self._expected.get(name) == digest for name, digest in producer_digests.items())),
+            refusal=lambda: RuntimeError('selected source census or complete source roster changed'))
         # Metadata includes producer auxiliaries outside capture's historical
         # glob. Keep that glob/identity unchanged, while still authenticating it.
         for name in sorted(self._expected):
@@ -1164,18 +1200,23 @@ class CaptureSourceAuthentication:
         if self.is_recording:
             return self._recording_receipt()
         adopted = self.adopted_identity_cache_sha256 is not None
+        uncertified = dev_mode_enabled() or any(
+            state['sha256_source'] == 'dev_recorded_metadata' for state in self._files.values())
         verified = [{"name": name, "sha256": state['sha256'],
             "bytes_hashed": (state['before'].st_size if state['sha256_source'] ==
                              'fresh_descriptor_sha256' else 0),
-            **({'proof_source': state['sha256_source']} if adopted else {}),
+            **({'proof_source': state['sha256_source']} if adopted or uncertified else {}),
             "payload_reads": state['payload_reads']}
             for name, state in sorted(self._files.items()) if state['sha256'] is not None]
         return dict(schema='prismaquant.selected_source_authentication.v1',
             capture_manifest_sha256=self.manifest_sha256,
             census_sha256=json.loads(self._identity_json)['census_sha256'],
-            authentication=('cached full-file SHA256 bound to held source descriptors'
+            authentication=('recorded source metadata; live payload not rehashed (D32)'
+                            if uncertified else
+                            'cached full-file SHA256 bound to held source descriptors'
                             if adopted else
                             'fresh SHA256 through held read-only source descriptors'),
+            **(dev_stamp(timestamped=False) if uncertified else {}),
             **({'streamed_identity_cache_sha256': self._adopted_cache_sha256}
                if adopted else {}),
             **({'streamed_identity_cache_refused': self._identity_proof_refusal}
@@ -1200,7 +1241,7 @@ class CaptureSourceAuthentication:
             authentication='SHA256 recorded through the held read-only descriptors the '
                            'capture read its source through',
             producer_verified=sorted(name for name in self._producer
-                                     if (self._files.get(name) or {}).get('sha256') is not None),
+                                     if (self._files.get(name) or {}).get('sha256') == self._producer[name]),
             verified_files=verified,
             payload_bytes_hashed=sum(row['bytes_hashed'] for row in verified
                                      if row['name'].endswith('.safetensors')),
@@ -1447,8 +1488,11 @@ def _load_execution(policy, identity, output=None, *, identity_sha256=None):
 
 
 def merge_load_execution(total, partial):
-    if total['identity_sha256'] != partial['identity_sha256'] or total['policy'] != partial['policy']:
+    if total['policy'] != partial['policy']:
         raise RuntimeError('capture load execution identity changed between units')
+    seal_check('capture load identity', total['identity_sha256'], partial['identity_sha256'],
+        where='capture load execution merge',
+        refusal=lambda: RuntimeError('capture load execution identity changed between units'))
     for key in ('loaded_entries', 'source_read_bytes'):
         total[key] += partial[key]
     for key in ('peak_buffer_bytes', 'peak_archive_storage_bytes'):
@@ -1888,11 +1932,14 @@ def _freeze_capture_metadata(value):
 class CaptureMetadataOwner:
     """One hash-bound, bounded capture-manifest snapshot for selected rows.
 
-    The owner is deliberately separate from resident X/H ownership.  It keeps
-    the already validated metadata for a run that consumes many selected
-    units, while a strict same-path stat fence detects any replacement or
-    mutation before each reuse.  On a fence change it rehashes the path for
-    evidence and refuses; a changed pathname is never silently rebound.
+    The owner is separate from resident X/H ownership. It retains the validated
+    metadata and entry digests for selected consumers. Comparisons of the held
+    snapshot against a later, running observation -- the requested identity or
+    the manifest's current path/stat -- stamp in dev mode (D32) without
+    rereading or rebinding the snapshot; certified mode preserves the original
+    refusals. A stat change during the very read that snapshots the manifest,
+    or manifest bytes that hash to something other than the declared digest,
+    is torn/partial data and refuses in both modes.
     """
 
     def __init__(self, path, *, expected_identity, expected_sha256):
@@ -1903,6 +1950,7 @@ class CaptureMetadataOwner:
         before = _capture_manifest_stat(self.path)
         raw = self.path.read_bytes()
         after = _capture_manifest_stat(self.path)
+        # Same-read torn-snapshot fence: integrity in both modes, not a seal.
         if before != after:
             raise RuntimeError('canonical capture manifest changed while its metadata was read')
         if len(raw) > MAX_CAPTURE_METADATA_BYTES:
@@ -1916,8 +1964,8 @@ class CaptureMetadataOwner:
             raise RuntimeError('canonical capture manifest is not valid JSON') from error
         expected = DIRECT_ASCII_STRICT.text(expected_identity)
         identity = DIRECT_ASCII_STRICT.text(manifest['identity'])
-        if identity != expected:
-            raise RuntimeError('calibration capture identity, completeness or scope mismatch')
+        seal_check('capture identity', expected, identity, where=str(self.path),
+            refusal=lambda: RuntimeError('calibration capture identity, completeness or scope mismatch'))
         self._stat = after
         # No warm reader may alter an entry path, checksum, identity or unit
         # geometry in the retained object.  The conversion happens once at
@@ -1929,17 +1977,26 @@ class CaptureMetadataOwner:
 
     def _assert_unchanged(self, path):
         candidate = Path(path).resolve()
-        if candidate != self.path:
-            raise RuntimeError('capture metadata owner path differs from requested capture')
-        observed = _capture_manifest_stat(candidate)
-        if observed != self._stat:
-            # The rehash is intentionally not an admission mechanism: a
-            # replacement with identical bytes still violates the held-path
-            # mutation fence.  It tells a caller whether content changed while
-            # preserving that fail-closed rule.
+        seal_check('capture metadata path', self.path, candidate,
+            where='capture metadata owner',
+            refusal=lambda: RuntimeError('capture metadata owner path differs from requested capture'))
+        if dev_mode_enabled():
+            try:
+                observed = file_stat_signature(candidate.lstat())
+            except FileNotFoundError:
+                observed = NOT_COMPUTED
+        else:
+            observed = _capture_manifest_stat(candidate)
+
+        def refusal():
+            # Only certified mode reads the replacement for the original error.
             changed = bytes_sha256hex(candidate.read_bytes()) != self.sha256
-            raise RuntimeError('canonical capture manifest metadata changed'
-                               + (' and content differs' if changed else ''))
+            return RuntimeError('canonical capture manifest metadata changed'
+                                + (' and content differs' if changed else ''))
+
+        seal_check('capture manifest stat', self._stat, observed,
+                   where=str(self.path), refusal=refusal)
+
 
     def open(self, path):
         self._assert_unchanged(path)
@@ -2149,10 +2206,12 @@ def authenticate_selected_capture_source(census_path, capture_path, *, expected_
     manifest = require_capture_contract(capture_path, expected_sha256=expected_sha256)
     canonical = manifest['identity']
     census = json.loads(Path(census_path).read_text())
-    if (census.get('model') != str(model) or
-            canonical['model_load_contract']['schema'] not in SELECTED_SOURCE_LOAD_SCHEMAS or
-            any(census.get(key) != value for key, value in (calibration_parameters or {}).items())):
+    if canonical['model_load_contract']['schema'] not in SELECTED_SOURCE_LOAD_SCHEMAS:
         raise RuntimeError('selected source model, draw or streaming witness differs from census')
+    seal_check('selected source model/draw',
+        {'model': census.get('model'), **{key: census.get(key) for key in (calibration_parameters or {})}},
+        {'model': str(model), **(calibration_parameters or {})}, where=str(census_path),
+        refusal=lambda: RuntimeError('selected source model, draw or streaming witness differs from census'))
     producer = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
     owner = CaptureSourceAuthentication(model, canonical, producer,
         manifest_sha256=expected_sha256, resource_check=resource_check,
@@ -2161,8 +2220,8 @@ def authenticate_selected_capture_source(census_path, capture_path, *, expected_
         actual = capture_identity(census_path, calibration=canonical['calibration'],
             max_act_rows=max_act_rows, model_load_contract=census.get('model_load_contract'),
             attention_implementation=attention_implementation, source_authentication=owner)
-        if actual != canonical:
-            raise RuntimeError('selected source capture identity differs from the canonical census')
+        seal_check('selected source capture identity', canonical, actual, where=str(census_path),
+            refusal=lambda: RuntimeError('selected source capture identity differs from the canonical census'))
         return owner
     except BaseException:
         owner.close()
@@ -2280,7 +2339,6 @@ def prefetch_capture(path, *, expected_identity=None, census, names, device,
     if metadata_owner is None:
         if expected_identity is None:
             raise TypeError('prefetch needs an expected identity without a capture metadata owner')
-        execution = _load_execution(verified_load_policy, expected_identity, load_execution)
         digest = sha256(path)
         if expected_sha256 is not None and digest != expected_sha256:
             raise RuntimeError('priced calibration capture manifest changed')
@@ -2293,15 +2351,22 @@ def prefetch_capture(path, *, expected_identity=None, census, names, device,
         if expected_sha256 is not None and expected_sha256 != metadata_owner.sha256:
             raise RuntimeError('prefetch metadata owner SHA256 differs from requested capture')
         manifest = metadata_owner.open(path)
+        path = metadata_owner.path
         expected_identity = manifest['identity']
         digest = metadata_owner.sha256
         execution = metadata_owner.load_execution(verified_load_policy, load_execution)
     names = sorted(names)
-    if (manifest.get('schema') != SCHEMA or manifest.get('status') != 'complete' or
-            manifest.get('identity') != expected_identity or
-            set(manifest.get('entries',{})) != set(expected_identity['units']) or
-            not set(names) <= set(expected_identity['units'])):
+    stored_identity = manifest['identity']
+    # Completeness and requested numeric coordinates concern the stored bytes,
+    # not the running producer/draw identity. Contract validation is unchanged.
+    if not set(names) <= set(stored_identity['units']):
         raise RuntimeError('calibration capture identity, completeness or scope mismatch')
+    seal_check('capture identity', stored_identity, expected_identity,
+        where=str(path),
+        refusal=lambda: RuntimeError('calibration capture identity, completeness or scope mismatch'))
+    expected_identity = stored_identity
+    if metadata_owner is None:
+        execution = _load_execution(verified_load_policy, stored_identity, load_execution)
     if execution is not None:
         preflight_verified_capture_entries(path.parent, manifest['entries'], names=names,
             policy=execution['policy'], census=census, max_rows=expected_identity['max_act_rows'])
@@ -2376,7 +2441,10 @@ def prefetch_capture(path, *, expected_identity=None, census, names, device,
         raise
     resident = sum(t.numel()*t.element_size() for t in (*acts.values(),*hessians.values()))
     print(f'[campaign] calibration prefetched: {len(names)} units, {resident} resident bytes, 0 misses',flush=True)
-    return (acts,hessians,counts,maxima),dict(path=str(path.resolve()),sha256=digest)
+    receipt = dict(path=str(path.resolve()), sha256=digest)
+    if dev_mode_enabled():
+        receipt.update(dev_stamp(timestamped=False))
+    return (acts,hessians,counts,maxima), receipt
 
 
 def _parallel_prefetch_capture(path, *, manifest, expected_identity, census, names, device,
@@ -2475,7 +2543,10 @@ def _parallel_prefetch_capture(path, *, manifest, expected_identity, census, nam
     print(f'[campaign] calibration prefetched: {len(names)} units, {resident} resident bytes, '
           f'0 misses, {min(threads, len(names))} active readers '
           f'({threads} configured maximum)',flush=True)
-    return (acts,hessians,counts,maxima),dict(path=str(path.resolve()),sha256=digest)
+    receipt = dict(path=str(path.resolve()), sha256=digest)
+    if dev_mode_enabled():
+        receipt.update(dev_stamp(timestamped=False))
+    return (acts,hessians,counts,maxima), receipt
 
 
 def require_original_source_authority(owner, authority_input, plan_input, admitted_execution):

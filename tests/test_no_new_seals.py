@@ -504,6 +504,28 @@ def test_every_campaign_seal_goes_through_seal_check():
     assert violations(_campaign_sources()) == []
 
 
+def test_d32_consumers_add_no_run_identity_refusals():
+    # Reuse the campaign ratchet at the newly repaired consumers. These counts
+    # admit own-byte digests, complete numeric structure and same-vector probe
+    # coordinates, never recorded-versus-running provenance refusal.
+    scopes = {
+        'prismaquant/tessera_calibration_cache.py': {
+            'CaptureMetadataOwner.__init__': 1,
+            'CaptureMetadataOwner._assert_unchanged': 0,
+            'prefetch_capture': 3,  # manifest bytes, owned manifest binding, entry bytes
+        },
+        'prismaquant/joint_aura.py': {
+            'paired_assignment_difference': 0,
+            '_validated_assignment': 1,  # operator coordinate against the row's own unit
+            '_require_probe_alignment': 1,  # same mathematical probe coordinates
+        },
+    }
+    for path, expected in scopes.items():
+        counts = Counter(scope for scope, _line in seal_sites((ROOT/path).read_text()))
+        assert {scope: counts[scope] for scope in expected} == expected
+
+
+
 def test_allowlist_keys_are_unique():
     tree = ast.parse(Path(__file__).read_text())
     assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
