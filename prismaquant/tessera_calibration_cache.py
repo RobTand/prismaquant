@@ -861,8 +861,9 @@ class CaptureSourceAuthentication:
             # Missing/replaced pathname metadata is not a new source proof.
             pathname = NOT_COMPUTED
         expected = file_stat_signature(state['before'])
-        seal_check('capture source stat', expected, [held, pathname], where=name,
-            same=held == expected and pathname == expected,
+        if held != expected:
+            raise RuntimeError(f'authenticated source changed during consumption: {name}')
+        seal_check('capture source pathname stat', expected, pathname, where=name,
             refusal=lambda: RuntimeError(f'authenticated source changed during consumption: {name}'))
 
     def require_unchanged(self):
@@ -944,7 +945,8 @@ class CaptureSourceAuthentication:
         self.require_unchanged()
         for name, digest in digests.items():
             held[name]['sha256'] = digest
-            held[name]['sha256_source'] = 'verified_streamed_identity_cache'
+            held[name]['sha256_source'] = ('dev_recorded_metadata' if dev_mode_enabled()
+                                          else 'verified_streamed_identity_cache')
         self._adopted_cache_sha256 = proof_sha256
         return len(digests)
 

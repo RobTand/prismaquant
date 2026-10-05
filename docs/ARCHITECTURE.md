@@ -7258,7 +7258,7 @@ about 70 minutes at 12.8 W of 140, inside its GPU reservation.
   sha256}`, admitted like `source_identity_cache`. `build_streamed_model_identity`
   takes it as `digest_cache_path` and fills every shard the identity cache
   misses from it, using the same lookup and fingerprint predicate as
-  `build_source_checkpoint_identity` (`_digest_cache_digests`, one owner).
+  `build_source_checkpoint_identity` (`_digest_cache_entries`, one owner).
 - **The refusal.** `prepare` and `run` pass `refuse_uncovered`: when neither
   cache covers a shard, the pass refuses before hashing a byte, with the
   uncovered bytes and the quantum's command in the message. This holds in
@@ -7327,10 +7327,14 @@ identity proofs that survive another NFS mount, checked by one predicate**
     or `nfs4` in `/proc/self/mountinfo`). There, the device number is the
     client's anonymous number for the mount, and the inode is the server's
     file id. Certified mode now admits it.
-  - Since PQ #2302 / CEO D32, `dev` admits well-formed stat metadata drift
-    (device, inode, path, size, mtime or ctime) through `seal_check` and reuses
-    the recorded digest. It does not claim the live source was rehashed.
-  - Certified mode retains the previous exact/NFS-mount rule.
+  - The strict shared predicate still rejects inode/path/size/mtime/ctime
+    drift in both modes. Its existing dev-only device-number exception is
+    unchanged; NFS client-local device numbers remain certified-portable.
+  - D32 relaxation belongs to provenance consumers, not this byte-proof
+    predicate. Source identity consumers retain the original record/fence
+    with an in-band dev marker; they never publish an old digest under a
+    drifted new fingerprint. Held-descriptor mutation remains an integrity
+    refusal even in dev mode; pathname/prep metadata comparisons stamp.
 - **Measured.** The pool read `st_dev` 64 and 66 on two mounts, with
   identical inode, size, mtime and ctime on all 120 GLM-5.3 shards. The
   capture owner refused its proof with "names another object", and the M4

@@ -137,6 +137,51 @@ def test_dev_selected_source_uses_stored_digest_without_proof_or_hash(capture, m
 
 
 
+
+
+
+@pytest.mark.parametrize('mode', [None, '1', '0'])
+@pytest.mark.parametrize('change', ['size', 'same_size_bytes'])
+def test_held_descriptor_mutation_is_integrity_in_both_modes(capture, monkeypatch, mode, change):
+    _root, _path, census, capture_id, _acts, _hessians, receipt = capture
+    if mode is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    source = Path(census['model'])/'model.safetensors'
+    owner = cc.CaptureSourceAuthentication(census['model'], capture_id, {},
+        manifest_sha256=receipt['sha256'])
+    try:
+        before = owner.file_stat(source)
+        source.write_bytes(b'x' * (before.st_size + (change == 'size')))
+        with pytest.raises(RuntimeError, match='authenticated source changed during consumption'):
+            owner.file_stat(source)
+    finally:
+        with pytest.raises(RuntimeError, match='authenticated source changed during consumption'):
+            owner.close()
+
+@pytest.mark.parametrize('mode', [None, '1', '0'])
+@pytest.mark.parametrize('change', ['size', 'mtime'])
+def test_owned_entry_integrity_refuses_dev_stat_drift(capture, monkeypatch, mode, change):
+    import os
+    root, _path, _census, _identity, _acts, _hessians, receipt = capture
+    if mode is None:
+        monkeypatch.delenv('PRISMAQUANT_DEV_MODE', raising=False)
+    else:
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', mode)
+    path = root/'inputs/a.pt'
+    record = cc.require_capture_contract(receipt['path'], receipt['sha256'])['entries']['a']
+    verified = dict(path=record['path'], sha256=record['sha256'],
+                    fingerprint=cc.capture_entry_fingerprint(path))
+    if change == 'size':
+        path.write_bytes(path.read_bytes()[:-1])
+    else:
+        before = path.stat()
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1))
+    with pytest.raises(RuntimeError, match='capture entry changed'):
+        cc._require_verified_entry(path, 'a', record, verified)
+
+
 def test_capture_metadata_owner_reuses_one_sealed_manifest_snapshot(capture, monkeypatch):
     """Warm singleton reads do not rehash or parse the complete manifest."""
     root, _path, census, capture_id, acts, hessians, record = capture

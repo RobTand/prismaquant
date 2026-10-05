@@ -122,13 +122,12 @@ def test_mountinfo_names_the_longest_mount_holding_the_path(monkeypatch, tmp_pat
     ("device", "64"),
     ("device", True),
 ])
-def test_stat_drift_is_dev_metadata_but_malformed_rows_never_reuse(monkeypatch, field, value):
+def test_byte_reuse_never_admits_object_or_malformed_stat_drift(monkeypatch, field, value):
     live, cached = _fingerprint(), _fingerprint(**{field: value})
-    _dev_on(monkeypatch)
-    assert cs.stat_fingerprint_reusable(live, cached) is (type(value) is not str and type(value) is not bool or field == 'path')
-    _dev_off(monkeypatch)
-    assert not cs.stat_fingerprint_reusable(live, cached)
-    assert not cs.stat_fingerprint_reusable(live, 'not-a-dict')
+    for dev in (_dev_on, _dev_off):
+        dev(monkeypatch)
+        assert not cs.stat_fingerprint_reusable(live, cached)
+        assert not cs.stat_fingerprint_reusable(live, 'not-a-dict')
 
 
 def test_malformed_fingerprints_never_reuse(monkeypatch):
@@ -229,8 +228,9 @@ def test_dev_stat_drift_reuses_stored_source_without_hashing(monkeypatch, checkp
     _refusing_hash(monkeypatch)
     before = cache.read_bytes()
     identity = cs.build_streamed_model_identity(_runner(shards), str(root), identity_cache_path=cache)
-    assert identity == first
     assert cache.read_bytes() == before
+    assert {key: identity[key] for key in first} == first
+    assert identity['dev_uncertified'] is True
     assert '[DEV-MODE]' in capsys.readouterr().out
 
 
@@ -278,7 +278,8 @@ def test_dev_stat_drift_keeps_old_identity_without_rehash(monkeypatch, checkpoin
     identity = cs.build_streamed_model_identity(
         _runner(shards), str(root), identity_cache_path=cache)
     assert calls == []
-    assert identity == first
+    assert {key: identity[key] for key in first} == first
+    assert identity['dev_uncertified'] is True
     assert '[DEV-MODE]' in capsys.readouterr().out
 
 
