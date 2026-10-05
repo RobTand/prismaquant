@@ -4545,6 +4545,28 @@ it raises the site's original exception, with the same type and message. In
 dev mode it prints one `[DEV-MODE]` line that names the first differing field
 and both values, and the run continues.
 
+Re-stamped 2026-10-05 (PQ #2302, CEO D32): selected capture metadata,
+source digest stat reuse, and paired-rate trade consumers follow the same
+existing default-on policy. An owned capture snapshot keeps its original
+entry digests and identity when a requested draw/producer or its manifest
+inode/device/size/mtime/ctime differs; it prints the comparison and does not
+reread, archive, regenerate, or re-seal the snapshot. Newly read capture bytes
+still match their own manifest/entry digests. Source identity caches reuse
+stored shard digests across stat drift rather than rehashing existing data;
+semantic model configuration and executable tensor maps remain separate.
+Paired trades retain stored samples when producer/arithmetic/source provenance
+differs. Row-to-row probe ids, seed, calibration draw/shape/dtype, token scope,
+noise layout, temperature, normalization and distribution must still align in
+both modes: they identify the same vectors, tokens and KL units. Source
+provenance stamps cannot pair independent vectors or rescale a currency.
+No samples are invented, prices rescaled or old rows relabeled as new evidence.
+Own-record digests, finite moments, complete numeric dimensions, actual tensor/
+wire/kernel semantics and live resource safety remain required.
+The result and selected-capture receipts carry `dev_uncertified`; certified
+`PRISMAQUANT_DEV_MODE=0` retains the original metadata refusal. These CPU
+consumer tests do not establish served quality or runtime qualification.
+
+
 A re-declared plan has its own path (2026-09-25, `claude/gpu-availability-i1azgo-pq1191`, PQ #1191).
 `dispatch_joint_quanta --execution-plan PATH` names the plan the rows run
 under, for example a Stage B resource re-declare. The records keep naming the
@@ -4570,13 +4592,12 @@ These still refuse in both modes:
 
 - Byte integrity: bytes that do not hash to their stored digest, a record that
   does not reproduce its own seal, and a missing unit.
-- Layout and data identities: the stride, the batch and layer counts, the
-  unit roster, the calibration draw, the probes, the seed, the chain regime
-  and the token scope. The boundary storage layout (the schema, the capture
-  order and the read window `prefetch_batches`) is a wall; its byte ceilings
-  are seals. A joint AURA row's calibration draw, probes, token scope, source
-  model, source execution and execution partition are walls; its producer
-  source and the rest of its arithmetic are seals.
+- Actual stored tensor/sample dimensions and executable storage layout still
+  determine how data is read. Producer/source/arithmetic provenance is a D32
+  stamp; row-to-row probe coordinates, seed, draw, tokens, noise and KL units
+  are mathematical contracts in both modes, not provenance comparisons. A
+  different objective currency (body KL versus MTP KL), malformed samples or
+  mismatched actual operator coordinates still refuse.
 - Ownership: a chain resume reopens only a boundary generation that stopped
   partway (`running` or `failed`). A `complete`, `attached` or `retained`
   generation belongs to another reader or owner and refuses.
@@ -4610,12 +4631,11 @@ rebuild the source model identity; it records `not computed`. The catalog
 extension does not re-derive the original campaign scope, which re-hashed the
 merged checkpoint (302.653 s measured under #833). AURA reuses stored
 checkpoint rows from another producer instead of archiving the lineage and
-recomputing it; unit checkpoints with no manifest have no recorded identity
-to be reused under, so dev mode archives them and recomputes, as before. A
-resume adopts the chain state's stored run and bind identities, so the run it
-continues keeps its own records. A source identity that no cache covers is
-hashed in both modes, because the digests key every cache; dev mode prints
-the byte count first.
+recomputing it. Unit checkpoints without a manifest are partial data and
+refuse; they are not automatically archived or regenerated. A resume adopts
+the chain state's stored run and bind identities. New source bytes with no
+stored digest are recorded when an identity is first created; existing cached
+digests are not recomputed because of metadata drift in dev mode (PQ #2302).
 
 A certified submitter (`PRISMAQUANT_DEV_MODE=0`) now seals `0` into the
 container spec env, because unset in the container now means dev mode. This
@@ -7288,7 +7308,7 @@ about 70 minutes at 12.8 W of 140, inside its GPU reservation.
   sha256}`, admitted like `source_identity_cache`. `build_streamed_model_identity`
   takes it as `digest_cache_path` and fills every shard the identity cache
   misses from it, using the same lookup and fingerprint predicate as
-  `build_source_checkpoint_identity` (`_digest_cache_digests`, one owner).
+  `build_source_checkpoint_identity` (`_digest_cache_entries`, one owner).
 - **The refusal.** `prepare` and `run` pass `refuse_uncovered`: when neither
   cache covers a shard, the pass refuses before hashing a byte, with the
   uncovered bytes and the quantum's command in the message. This holds in
@@ -7357,10 +7377,14 @@ identity proofs that survive another NFS mount, checked by one predicate**
     or `nfs4` in `/proc/self/mountinfo`). There, the device number is the
     client's anonymous number for the mount, and the inode is the server's
     file id. Certified mode now admits it.
-  - `dev` means only `st_dev` differs on any other filesystem. Only dev mode
-    admits it. Only `dev` reuse prints the uncertified `[DEV-MODE]` line.
-  - Any other field difference refuses in both modes: path, inode, size,
-    mtime or ctime.
+  - The strict shared predicate still rejects inode/path/size/mtime/ctime
+    drift in both modes. Its existing dev-only device-number exception is
+    unchanged; NFS client-local device numbers remain certified-portable.
+  - D32 relaxation belongs to provenance consumers, not this byte-proof
+    predicate. Source identity consumers retain the original record/fence
+    with an in-band dev marker; they never publish an old digest under a
+    drifted new fingerprint. Held-descriptor mutation remains an integrity
+    refusal even in dev mode; pathname/prep metadata comparisons stamp.
 - **Measured.** The pool read `st_dev` 64 and 66 on two mounts, with
   identical inode, size, mtime and ctime on all 120 GLM-5.3 shards. The
   capture owner refused its proof with "names another object", and the M4
@@ -9596,9 +9620,11 @@ hidden giant hash in either entry point: a missing, unrecognized, mutated,
 or contract-less top-up cache each refuses fast with the byte count, and so
 does a call with no cache path at all (initialize explicitly with a
 certified run, which remains the existing explicit preparation path);
-certified rehash behavior is unchanged. (Superseded 2026-09-24 by PQ #1147:
-with dev mode the default, dev mode hashes those shards too and prints the
-byte count first.) Gate: `tests/test_source_identity_portable_device.py`.
+certified rehash behavior is unchanged. This historical device-only rule was
+superseded by PQ #1147 and, for stored metadata drift, by PQ #2302 / CEO D32:
+dev mode reuses existing stored digests without rehashing them. New, uncovered
+source data is still recorded when first needed. Gate:
+`tests/test_source_identity_portable_device.py`.
 Stamps follow, newest first, each recording its own branch and date.
 
 Re-stamped (2026-09-20, `flash/stagea-forward-read-plan-20260920`) for **the
@@ -20511,28 +20537,24 @@ Rob, 2026-09-24: "All sealing should be disabled until further notice."
   differs at <field> (<where>): recorded ..., running ...` and continues.
   `tests/test_no_new_seals.py` refuses any new identity `if`-then-`raise` site
   on those modules that is not on its allowlist; every entry gives its reason.
-- **What stays a refusal in both modes.** Byte integrity: bytes that do not
-  hash to their stored digest, a record that does not reproduce its own seal,
-  a missing unit. Layout and data identities: the stride, the batch and layer
-  counts, the roster, the calibration draw, the probes, the seed, the chain
-  regime, the token scope, the boundary storage layout (schema, capture
-  order, read window), and a joint AURA row's calibration draw and probes
-  (`cost_currency.PROBE_IDENTITY_SEAL_FIELDS` names the fields that are
-  seals). Ownership: a resume reopens only a `running` or `failed` boundary
-  generation. Resource guards, including the spill bound's capacity half. A
-  digest that covers calibration and cannot be split into fields (the seed's
-  and the rebind's bind-identity digests) stays a refusal; a dev resume
-  compares the identity key by key first and then rebinds the stored one.
+- **What stays a refusal in both modes.** Byte integrity: read bytes against
+  their own stored digest, a record that does not reproduce its own digest,
+  missing units, corrupt/partial payloads and malformed numeric dimensions.
+  Currency, operator coordinates, actual tensor/wire/kernel semantics and
+  live resource guards remain separate from provenance comparisons.
+  Recorded-versus-running producer, source, pin and run metadata are D32
+  seals. Comparing two stored rows' vectors/tokens/units is mathematical
+  admission: probe ids, seed, draw/shape/dtype, noise layout, token scope,
+  temperature, normalization and distribution still align in both modes.
+  Existing storage layout and ownership grammars determine how bytes are read.
 - **Reuse, not recompute.** A mismatched AURA checkpoint lineage is reused
-  with a `[DEV-MODE]` line, not archived and recomputed; corrupt checkpoints
-  still refuse. Unit checkpoints with no manifest have no recorded identity,
-  so dev mode archives them (`<root>.dev-archived-<iso>`) and recomputes, as
-  before #1147. A source identity no cache covers is hashed in both modes
-  (the digests key every cache); dev mode prints the byte count first. A
-  chain resume adopts the chain state's stored run and bind
-  identities and does not rebuild the source model identity only to compare
-  it (it records `not computed`). The catalog extension does not re-derive
-  the original campaign scope.
+  with a `[DEV-MODE]` line, not archived or recomputed; corrupt or incomplete
+  checkpoint data still refuses. A chain resume adopts stored run/bind
+  identities and does not rebuild a source identity solely for comparison.
+  Selected capture owners retain their validated metadata snapshot. Source
+  caches retain stored digests across dev-mode stat drift. Initial recording
+  of new bytes is distinct from recomputing existing identity metadata.
+  The catalog extension does not re-derive the original campaign scope.
 - **Stamps.** Every dev run carries a top-level `dev_uncertified` stamp in
   `results.json`. Per-progress-record stamps are opt-in via
   `PRISMAQUANT_DEV_PROGRESS_STAMP=1`, so the default durable-unit commit is
