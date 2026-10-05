@@ -152,7 +152,7 @@ def test_every_cells_evidence_block_is_closed():
             "status", "receipt", "attribution", "control", "record"}, row["id"]
 
 
-def test_the_projection_is_positional_and_its_width_is_uniform():
+def test_the_projection_is_positional_and_its_width_is_uniform(monkeypatch):
     """The columns documented beside the literal, asserted as a shape.
 
     A row that grew or lost a column is a WIDENED or narrowed projection, and
@@ -165,6 +165,8 @@ def test_the_projection_is_positional_and_its_width_is_uniform():
     assert len(widths) == 1, sorted(widths)
     # 18 columns: 0-12 unconditional, 13-15 runtime, 16 evidence, 17 coverage.
     assert widths == {18}, sorted(widths)
+    # The parsed development answer is opt-in, just as it is for menu tests.
+    monkeypatch.setenv(contract.TESSERA_DEV_PIN_ENV, contract.TESSERA_DEV_PIN_COMMIT)
     parsed = {cell.cell_id: cell for cell in contract.load_tessera_contract().cells}
     for row in rows:
         assert isinstance(row[13], dict) and set(row[13]) == {
