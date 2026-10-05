@@ -101,6 +101,14 @@
 
 ### Fixed
 
+- **Retired interpreter receipts no longer admit explicit campaign row
+  classes** (#2222). The SDK3 entries on `dl380g10`, `sparky` and `sparklina`
+  are preserved under `retired_interpreters`, separate from active placement
+  attestations. The existing inventory reader validates both mappings and
+  refuses active/retired overlap; the existing placement refusal names retired
+  paths as history. Active SDK4 and ROCm entries, container and instruction-set
+  refusals, independent package pins and version guards are unchanged.
+
 - **The real DeepSeek V4 model-walk export gate owns its import process**
   (#2276). It uses the existing `own_process` marker when sharing a pytest
   session, so an unsupported native AutoModel configuration in another test

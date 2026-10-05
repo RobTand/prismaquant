@@ -255,7 +255,7 @@ WEIGHTS_ONLY_FORBIDDEN_MODULES = frozenset({"prismaquant.tessera_campaign"})
 
 
 def load_fleet_interpreters(path=None) -> dict:
-    """The placement attestation table, checked for shape before it is trusted."""
+    """Validate active placement attestations and separately retained history."""
 
     source = Path(path) if path is not None else FLEET_INTERPRETERS
     table = json.loads(source.read_text())
@@ -271,16 +271,22 @@ def load_fleet_interpreters(path=None) -> dict:
         for field in ("isa", "gpu_runtime"):
             if not isinstance(shape.get(field), str) or not shape[field]:
                 raise RowClassRefused(f"{source}: tag {tag!r} declares no {field}")
-        interpreters = shape.get("interpreters")
-        if not isinstance(interpreters, dict):
-            raise RowClassRefused(
-                f"{source}: tag {tag!r} declares no interpreters mapping")
-        for interpreter, record in interpreters.items():
-            if not isinstance(record, dict) or not isinstance(
-                    record.get("attested_by"), str) or not record["attested_by"]:
+        for field in ("interpreters", "retired_interpreters"):
+            interpreters = shape.get(field, {} if field == "retired_interpreters" else None)
+            if not isinstance(interpreters, dict):
                 raise RowClassRefused(
-                    f"{source}: interpreter {interpreter} on tag {tag!r} names no "
-                    "PrismaBuild action key that ran it")
+                    f"{source}: tag {tag!r} declares no {field} mapping")
+            for interpreter, record in interpreters.items():
+                if not isinstance(record, dict) or not isinstance(
+                        record.get("attested_by"), str) or not record["attested_by"]:
+                    raise RowClassRefused(
+                        f"{source}: interpreter {interpreter} on tag {tag!r} names no "
+                        "PrismaBuild action key that ran it")
+        overlap = shape["interpreters"].keys() & shape.get("retired_interpreters", {}).keys()
+        if overlap:
+            raise RowClassRefused(
+                f"{source}: tag {tag!r} lists interpreters as both active and retired: "
+                f"{sorted(overlap)}")
     return table
 
 
@@ -379,12 +385,16 @@ def _attest_placement(resolved: dict, fleet: dict) -> None:
             continue
         if resolved["python"] not in shape["interpreters"]:
             attested = sorted(shape["interpreters"])
+            history = (" This interpreter is retired; its retained receipt is history, "
+                       "not placement admission."
+                       if resolved["python"] in shape.get("retired_interpreters", {})
+                       else "")
             raise RowClassRefused(
                 f"row class {resolved['name']!r} runs {resolved['python']}, "
                 f"which is not attested on tag {tag!r}; that tag attests "
                 f"{attested or 'no host interpreter'}. Run it there once and "
                 f"add it to {FLEET_INTERPRETERS.name} with the PrismaBuild "
-                "action key, or give the class a container")
+                f"action key, or give the class a container.{history}")
 
 
 def validate_row_classes(spec: dict, *, fleet=None, where="spec") -> list[dict]:

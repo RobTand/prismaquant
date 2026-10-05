@@ -12782,7 +12782,7 @@ the only thing keeping a row off a box it cannot run on was the `["gb10"]`
 default — the moment a second tag was added to a spec, every row in it became
 eligible for that box. A class now owns `python` / `env` / `tags` / `cpus` /
 `container`, `tools/fleet_interpreters.json` says what each tag means (ISA,
-container GPU runtime, and the host interpreters observed there with the
+container GPU runtime, and the active host interpreters observed there with the
 PrismaBuild key that ran them), and a class whose interpreter is not attested
 on its tags, or whose container's GPU runtime is not the one its tags attach
 with, is refused at spec load. The `default` class resolves to exactly the
@@ -23645,12 +23645,24 @@ own plan entry when it lands.
 boxes execute, the GPU runtime a container there attaches with (`nvidia` is
 `--gpus all`; `rocm-wsl` is `--device /dev/dxg` plus a read-only
 `/usr/lib/wsl/lib` mount, which is what a WSL2 ROCm box needs and what a GB10
-does not have), and the host interpreters observed running work there, each
-naming the PrismaBuild action key that ran it. A declared class is refused
-when its interpreter is not attested on one of its tags, when a tag is not in
-the table at all, or when its container's GPU runtime is not the one its tags
-attach with. A spec that declares no classes is not checked: it is the shape
-every campaign in flight already has.
+does not have), and the active host interpreters observed running work there,
+each naming the PrismaBuild action key that ran it. A declared class is refused
+when its interpreter is not actively attested on one of its tags, when a tag is
+not in the table at all, or when its container's GPU runtime is not the one its
+tags attach with. A spec that declares no classes is not checked: it is the
+shape every campaign in flight already has.
+
+Retired interpreter receipts are history, not placement admission (2026-10-05,
+#2222). Each tag's required `interpreters` mapping holds only active
+attestations; its optional `retired_interpreters` mapping preserves historical
+action keys and observations separately. `load_fleet_interpreters` validates
+both mappings and refuses a path listed as both active and retired on one tag.
+Placement continues to use only `interpreters`; a retired-path refusal names
+that path, tag and retirement. The SDK3 entries on `dl380g10`, `sparky` and
+`sparklina` move to history without changing their receipts. Active SDK4 and
+ROCm attestations, container runtime checks, instruction-set rules, downstream
+package pins and Software Development Kit version guards do not move. No
+interpreter is provisioned or probed by this contract.
 
 Two refusals carry a measurement rather than a preference. A Tessera
 **Hessian-aware** wire is not bit-comparable across instruction sets — the
