@@ -5216,6 +5216,17 @@ def _projected_cuda_reservation(weights):
     # Dict equality alone would accept False in place of the native integer 0.
     if any(type(value) is not int for value in settings['roundup_power2_divisions'].values()):
         raise RuntimeError(f'{refusal}: unpriced effective roundup_power2_divisions')
+    # The snapshot omits these sticky sizes. Read them from the executing
+    # libC10 through its public getters; never infer them from configuration text.
+    from .kernels import cuda_allocator_state
+    try:
+        sizing = cuda_allocator_state.sizing()
+    except (ImportError, OSError, RuntimeError) as error:
+        raise RuntimeError(f'{refusal}: effective sizing accessor unavailable') from error
+    if (type(sizing) is not tuple or len(sizing) != 2
+            or any(type(value) is not int for value in sizing)
+            or sizing != (20 * 1024**2, 20 * 1024**2)):
+        raise RuntimeError(f'{refusal}: unpriced effective large-segment/nonsplit sizing')
 
     def segment(size):
         if not size:
