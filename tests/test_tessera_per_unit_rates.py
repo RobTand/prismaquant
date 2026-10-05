@@ -836,6 +836,10 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
         payload["costs"][name][ALLOC_FMT].update(predicted_dloss=1.0, wire_bytes=4096)
         payload["costs"][name]["TESSERA_E4M3_K1_R768"].update(
             predicted_dloss=0.5, wire_bytes=4608)
+    payload["costs"][ineligible]["TESSERA_E4M3_K1_R896"] = dict(
+        payload["costs"][ineligible][ALLOC_FMT], predicted_dloss=-1.0, wire_bytes=4096)
+    payload[tep.EXPERT_WIRES_KEY][ineligible]["TESSERA_E4M3_K1_R896"] = \
+        payload[tep.EXPERT_WIRES_KEY][ineligible][ALLOC_FMT]
     monkeypatch.setattr(sys, "argv", _disk_argv(off, payload))
     allocator.main()
     plain = json.loads((off / "layer.json").read_text())["__prismaquant__"]
