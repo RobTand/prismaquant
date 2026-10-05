@@ -261,6 +261,13 @@ def test_reaped_credit_reaches_readers_during_head_wait(monkeypatch, cpu_transpo
     held until the wait ends.
     """
     reads = []
+    launched = []
+    third_started = threading.Event()
+    original_launch = campaign._launch_prepared_projected_check
+    def launch(check, live):
+        launched.append(int(live.value[0, 0]))
+        return original_launch(check, live)
+    monkeypatch.setattr(campaign, '_launch_prepared_projected_check', launch)
     gate = threading.Event()
     fifth = threading.Event()
     allow_new = threading.Event()
@@ -283,7 +290,14 @@ def test_reaped_credit_reaches_readers_during_head_wait(monkeypatch, cpu_transpo
     monkeypatch.setattr(torch.Tensor, 'copy_', copy)
     values = [torch.full((2, 3), i, dtype=torch.bfloat16) for i in range(6)]
     def read(name, unit, **kwargs):
+        # Reader starts are concurrent, unlike coordinator submissions and
+        # CUDA launches. Force a legal non-FIFO start to make that distinction
+        # deterministic instead of depending on executor scheduling luck.
+        if name == 'u1':
+            assert third_started.wait(3), 'third read never started'
         reads.append(name)
+        if name == 'u2':
+            third_started.set()
         if name == 'u5':
             fifth.set()
         return values[int(name[1:])].clone(), lambda:None
@@ -291,9 +305,11 @@ def test_reaped_credit_reaches_readers_during_head_wait(monkeypatch, cpu_transpo
     thread, done, result = _foreground(lambda: run_check(monkeypatch, values, read=read))
     try:
         deadline = time.monotonic() + 5
-        while len(reads) < 5 and time.monotonic() < deadline:
+        while ((len(reads) < 5 or len(cpu_transport.events) < 2)
+               and time.monotonic() < deadline):
             time.sleep(.005)
-        assert reads[:5] == ['u0', 'u1', 'u2', 'u3', 'u4'], reads
+        assert sorted(reads[:5]) == ['u0', 'u1', 'u2', 'u3', 'u4'], reads
+        assert launched == [0, 1], launched
         assert not fifth.is_set(), 'fifth read started before its credit existed'
         cpu_transport.events[1].done.set()  # u1's H2D completes mid-wait
         assert fifth.wait(2), 'no read started from the credit freed during the head wait'
@@ -306,6 +322,7 @@ def test_reaped_credit_reaches_readers_during_head_wait(monkeypatch, cpu_transpo
     assert done.is_set()
     assert isinstance(result[0], dict), repr(result[0])
     assert sorted(result[0]) == [f'u{i}' for i in range(6)]
+    assert launched == list(range(6))
 
 
 @pytest.mark.parametrize('exit_kind', ['mismatch','cancel','allocation','copy','success'])

@@ -9,8 +9,11 @@
   completion token to hold after the event had already appended itself, so it
   held the FIRST launch's token, stranded that credit for the whole test and
   could never reach the mid-wait admission it exists to prove. The decision
-  now happens before the append. Control-only; production code and its
-  admission semantics are unchanged.
+  now happens before the append. Its read-order check also assumed FIFO worker
+  starts, which the shared two-thread executor does not promise. The control
+  now forces a legal out-of-order read and proves coordinator CUDA launches
+  remain ordered, while retaining the mid-wait fifth-read credit gate.
+  Control-only; production admission and lifetime semantics are unchanged.
 
 - **Projected preparation reserves comparison and allocator residency**
   (#2039, PR #2247). The previous element-count term was the full-size bool
