@@ -89,6 +89,7 @@ from .joint_layer_quanta import (
 )
 from .produced_output_spool import plane_partitions, sealed_spool_root
 from .source_read_plan import chain_opening_window, chain_prefetch_window
+from .tessera_joint_aura import _restores_activation_scale_env
 
 
 def stage_a_forward_observer(progress):
@@ -2645,6 +2646,7 @@ def run_original_diagnostic_capture(authority_input, plan_input, session_prepara
     return result
 
 
+@_restores_activation_scale_env
 def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
     read_manifest_sha256=None, data_manifest_sha256=None, resume=False,

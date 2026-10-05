@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`,
+base `333dcb135a882`, PQ #2258): the joint execution, Stage A adjoint capture
+and Stage B layer quantum entry points share the existing activation-scale
+environment restoration wrapper. The plan's policy remains live during each
+workload; normal returns and exceptions restore the caller's prior value,
+including an unset or empty value. This changes no admitted plan policy,
+render numerics inside the call, wire, menu or serving gate.
+Regression: `tests/test_activation_scale_scope_2258.py`.
+
 Re-stamped 2026-10-05 (`issues/pq-2231-p3-residuals`,
 base `3f86d3d146a`, PQ #2231 items 13–15, correction of reviewed
 head `49ea7fc87a8`): campaign rendered-file checks

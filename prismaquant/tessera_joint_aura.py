@@ -2710,19 +2710,12 @@ def _apply_device_envelope(device, device_bytes, *, where):
 
 
 def _restores_activation_scale_env(function):
-    """Scope ``execute``'s activation-scale write to the call that makes it.
+    """Restore the caller's activation-scale environment on every exit.
 
-    ``execute`` sets ``PRISMAQUANT_PROD_ACT_SCALES`` from the admitted plan so
-    the render path it drives reads the campaign's value.  As a process entry
-    point that is right; called in-process it leaves the value behind.  Every
-    admitted plan carries ``"0"`` (``load_joint_anchor_plan``), and that is the input
-    which turns the render scorer's activation clip OFF for everything that
-    runs afterwards (``production_weight_cache.py``, in
-    ``_local_forward_render_score``).  Plenty of code outside ``execute``
-    reads the key -- the render scorer is exactly that code, which is why the
-    leak bites -- but nothing needs THIS command's value to still be set after
-    ``execute`` has returned.  So restoring it on the way out leaves the
-    campaign byte-identical and leaves the process as it was found.
+    Joint execution, adjoint capture and layer quantum entry points set the
+    admitted plan's policy for their own render workload. No caller needs that
+    policy after return. The shared finally preserves an unset key, an empty
+    value or any prior value, including when setup or the workload raises.
     """
     absent = object()
 
