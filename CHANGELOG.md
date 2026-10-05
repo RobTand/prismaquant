@@ -230,6 +230,22 @@
   remain legal when they name distinct files; all on-disk spellings are
   unchanged.
 
+- **Projected preparation validates effective CUDA allocator settings**
+  (#2039, PR #2247 hardening). An in-process allocator setter followed by an
+  empty-string reset can leave expandable segments active while the snapshot
+  configuration text is empty. The existing default-native guard now also
+  requires the qualified PyTorch 2.11 effective defaults: expandable segments
+  off, signed SIZE_MAX split bound, zero garbage-collection threshold and the
+  complete all-zero rounding table. Public C10 getters also read the sticky
+  large-segment and nonsplit-rounding sizes the snapshot omits; both must be
+  their derived 20-MiB defaults. The tiny read-only bridge reuses the existing
+  locked Torch extension loader/cache and packages its C++ source; no CUDA
+  kernel, Torch rebuild, state reset or serving-pin change is involved.
+  Missing, nondefault or unpriced fields refuse before source reads. Real
+  setter/reset regressions run in isolated PB child processes so global
+  settings never leak into the suite, including the large-segment-only reset.
+  The full-pass reservation, source ownership, four credits, cap, ordering,
+  lifetimes and cancellation are unchanged; no tighter or performance claim.
 
 
 - **The head-wait credit control holds the second launch's token** (#2039).

@@ -23,6 +23,14 @@ class Live:
         return self.value.element_size()
 
 
+def _default_allocator_settings():
+    """Qualified PyTorch 2.11 effective snapshot, including the signed SIZE_MAX."""
+    intervals = (64 * 1024**3 // 1024**2).bit_length() - 1
+    return {'PYTORCH_CUDA_ALLOC_CONF': '', 'expandable_segments': False,
+            'max_split_size': -1, 'garbage_collection_threshold': 0.0,
+            'roundup_power2_divisions': {str(1 << i): 0 for i in range(intervals)}}
+
+
 @pytest.fixture
 def cpu_transport(monkeypatch):
     """Use real CPU copies and explicit completion tokens for transport controls."""
@@ -33,7 +41,9 @@ def cpu_transport(monkeypatch):
     # the real allocator and the real split CaptureMemoryGuard.
     monkeypatch.setattr(torch.cuda, "get_allocator_backend", lambda: "native")
     monkeypatch.setattr(torch.cuda.memory, "_snapshot", lambda: {
-        "allocator_settings": {"PYTORCH_CUDA_ALLOC_CONF": ""}})
+        "allocator_settings": _default_allocator_settings()})
+    from prismaquant.kernels import cuda_allocator_state
+    monkeypatch.setattr(cuda_allocator_state, 'sizing', lambda: (20 * 1024**2, 20 * 1024**2))
     original_empty, original_to = torch.empty_like, torch.Tensor.to
     monkeypatch.setattr(torch, 'empty_like', lambda value, **kw: original_empty(
         value, **{k:v for k,v in kw.items() if k != 'pin_memory'}))
@@ -514,3 +524,121 @@ def test_unpriced_allocator_refuses_before_source_read(
     with pytest.raises(RuntimeError, match='default native CUDA allocator residency model'):
         run_check(monkeypatch, values, read=read)
     assert reads == []
+
+
+@pytest.mark.parametrize('field,value', [
+    ('expandable_segments', True),
+    ('max_split_size', 64 * 1024**2),
+    ('garbage_collection_threshold', 0.5),
+    ('roundup_power2_divisions', {**_default_allocator_settings()['roundup_power2_divisions'], '1': 4}),
+    ('roundup_power2_divisions', {}),
+    ('roundup_power2_divisions', {'1': 0}),
+    ('roundup_power2_divisions', {**_default_allocator_settings()['roundup_power2_divisions'], '1': False}),
+    ('expandable_segments', None),
+    ('max_split_size', None),
+    ('garbage_collection_threshold', None),
+    ('roundup_power2_divisions', None),
+])
+def test_effective_allocator_state_refuses_before_source_read(
+        monkeypatch, cpu_transport, field, value):
+    settings = _default_allocator_settings()
+    if value is None:
+        del settings[field]
+    else:
+        settings[field] = value
+    assert settings['PYTORCH_CUDA_ALLOC_CONF'] == ''
+    monkeypatch.setattr(torch.cuda.memory, '_snapshot', lambda: {'allocator_settings': settings})
+    reads = []
+    values = [torch.zeros((2, 3), dtype=torch.bfloat16)]
+    def read(name, unit, **kwargs):
+        reads.append(name)
+        return values[0], lambda: None
+    with pytest.raises(RuntimeError, match='default native CUDA allocator residency model'):
+        run_check(monkeypatch, values, read=read)
+    assert reads == []
+
+
+@pytest.mark.parametrize('configuration,expandable', [
+    ('expandable_segments:True,large_segment_size_mb:64', True),
+    ('large_segment_size_mb:64', False),
+], ids=['exposed-expandable-reset', 'hidden-large-only-reset'])
+def test_sticky_allocator_reset_is_refused_in_isolated_cuda_process(configuration, expandable):
+    """Real setter/reset state is process-global, so it never enters suite workers."""
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA required for isolated allocator setter/reset qualification')
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent('''
+        import json, os, sys, torch
+        from prismaquant import tessera_campaign as campaign
+        from prismaquant.kernels import cuda_allocator_state
+        torch.cuda.init()
+        defaults = torch.cuda.memory._snapshot()['allocator_settings']
+        assert defaults['PYTORCH_CUDA_ALLOC_CONF'] == ''
+        assert defaults['expandable_segments'] is False
+        assert cuda_allocator_state.sizing() == (20 * 1024**2, 20 * 1024**2)
+        torch._C._accelerator_setAllocatorSettings(sys.argv[1])
+        torch._C._accelerator_setAllocatorSettings('')
+        sticky = torch.cuda.memory._snapshot()['allocator_settings']
+        assert sticky['PYTORCH_CUDA_ALLOC_CONF'] == ''
+        assert sticky['expandable_segments'] is (sys.argv[2] == '1')
+        native_sizing = cuda_allocator_state.sizing()
+        assert native_sizing == (64 * 1024**2, 64 * 1024**2), native_sizing
+        print(json.dumps({'torch': torch.__version__, 'torch_source': torch.version.git_version,
+                          'defaults': defaults, 'sticky_after_empty_reset': sticky,
+                          'public_C10_sizing': native_sizing}), flush=True)
+        os.environ['PRISMAQUANT_LAYER_READ_THREADS'] = '2'
+        source_weight = torch.zeros((2, 3), dtype=torch.bfloat16)
+        weights = {'u': source_weight.cuda()}
+        unit = dict(source_tensor='w', rows=2, cols=3)
+        reads = []
+        def read(name, unit, **kwargs):
+            reads.append(name)
+            return source_weight, lambda: None
+        campaign._read_projected_unit = read
+        try:
+            campaign._checked_projected_units({'s': {'u': unit}}, weights=weights,
+                model_path='fixture', source={}, source_authentication=object(),
+                resource_check=lambda label, **kwargs: None,
+                parallel_preparation=True, preparation_max_bytes=48)
+        except RuntimeError as error:
+            assert 'default native CUDA allocator residency model' in str(error), str(error)
+        else:
+            raise AssertionError(f'empty config string admitted sticky allocator state; reads={reads}')
+        assert reads == [], reads
+        print('sticky allocator reset: refused before source reads', flush=True)
+    ''')
+    child = subprocess.run([sys.executable, '-c', script, configuration, '1' if expandable else '0'],
+                           capture_output=True, text=True)
+    assert child.returncode == 0, child.stdout + child.stderr
+    assert 'sticky allocator reset: refused before source reads' in child.stdout
+    print(child.stdout)
+
+
+
+@pytest.mark.parametrize('value', [(64 * 1024**2, 64 * 1024**2),
+                                 (20 * 1024**2, 64 * 1024**2), None,
+                                 (True, 20 * 1024**2), RuntimeError('native accessor unavailable')])
+def test_hidden_allocator_sizing_refuses_before_source_read(monkeypatch, cpu_transport, value):
+    from prismaquant.kernels import cuda_allocator_state
+    def sizing():
+        if isinstance(value, Exception):
+            raise value
+        return value
+    monkeypatch.setattr(cuda_allocator_state, 'sizing', sizing)
+    reads = []
+    values = [torch.zeros((2, 3), dtype=torch.bfloat16)]
+    def read(name, unit, **kwargs):
+        reads.append(name)
+        return values[0], lambda: None
+    with pytest.raises(RuntimeError, match='default native CUDA allocator residency model'):
+        run_check(monkeypatch, values, read=read)
+    assert reads == []
+
+
+def test_public_allocator_getters_read_default_live_sizing():
+    from prismaquant.kernels import cuda_allocator_state
+    assert cuda_allocator_state.sizing() == (20 * 1024**2, 20 * 1024**2)
+
