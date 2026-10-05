@@ -68,9 +68,11 @@ def real_joint_run():
     active = joint_acquisition_from_cost_data(payload, shapes, [FAMILY], max_new_points=1)
     deferred = joint_acquisition_from_cost_data(payload, shapes, [DEFERRED],
         max_new_points=0, boundary_policy="defer")
-    idle = joint_acquisition_from_cost_data(payload, {names[-1]: shapes[names[-1]]}, [FAMILY],
+    idle_name = next((r["unit_name"] for r in active["reports"] if not r["proposed_q256"]),
+                     names[-1])
+    idle = joint_acquisition_from_cost_data(payload, {idle_name: shapes[idle_name]}, [FAMILY],
         max_new_points=0, boundary_policy="defer")["reports"][0]
-    active["reports"] = [idle if r["unit_name"] == names[-1] else r for r in active["reports"]]
+    active["reports"] = [idle if r["unit_name"] == idle_name else r for r in active["reports"]]
     active["reports"].extend(deferred["reports"])
     document = dict(schema="prismaquant.tessera_full_domain_campaign_acquisition.v1",
         source_tensor_inventory_sha256=sha(json.dumps([
@@ -80,10 +82,13 @@ def real_joint_run():
         atomic_serving_group_expansion_required=True, allocator_payload=False,
         production_qualified=False, **active)
     document["total_requested_quality_measurements"] = sum(len(r["proposed_q256"]) for r in document["reports"])
-    assert document["total_requested_quality_measurements"] >= 1
-    assert all(not r["proposed_q256"] for r in document["reports"] if r["unit_name"] == names[-1])
+    active_names = sorted(r["unit_name"] for r in document["reports"]
+        if r["proposed_q256"])
+    assert len(active_names) >= 2, "the two-atomic-row scenario needs two proposing units"
+    assert all(not r["proposed_q256"] for r in document["reports"] if r["unit_name"] == idle_name)
     return SimpleNamespace(payload=payload, document=document, names=names, shapes=shapes,
-        weights=source_weights, inputs=captures, tokens=tokens)
+        weights=source_weights, inputs=captures, tokens=tokens, idle_name=idle_name,
+        active_names=active_names)
 
 
 @pytest.fixture
@@ -133,9 +138,9 @@ def test_actual_plan_projects_two_atomic_rows_and_records_deferred_cohort(handof
     assert len(planned["rows"]) == len(actions) == 2
     assert len(planned["acquisition"]["requested_groups"]) == 3
     assert len(planned["acquisition"]["deferred_groups"]) == 1
-    assert planned["acquisition"]["deferred_groups"][0]["members"] == [handoff.run.names[-1]]
+    assert planned["acquisition"]["deferred_groups"][0]["members"] == [handoff.run.idle_name]
     assert "deferred" in planned["acquisition"]["deferred_groups"][0]["reason"]
-    assert {name for row in planned["rows"] for name in row["members"]} == set(handoff.run.names[:2])
+    assert {name for row in planned["rows"] for name in row["members"]} == set(handoff.run.active_names)
     for row, action in zip(planned["rows"], actions):
         argv = dispatch._inner_campaign_argv(action)
         assert dispatch._campaign_acquisition_argv(argv) == handoff.binding
@@ -244,7 +249,7 @@ def test_readset_refuses_controls_outside_shared_mount(handoff, monkeypatch):
 def records(handoff, *, menu_families=None):
     result = {}
     from prismaquant.tessera_menu import expand_tessera_menu
-    for index, name in enumerate(handoff.run.names[:2]):
+    for index, name in enumerate(handoff.run.active_names):
         projected, keys, _ = campaign._campaign_acquisition_row_scope(handoff.acquisition,
             handoff.census["anchor_groups"], selected=[name])
         menus = {name: expand_tessera_menu(tuple(handoff.run.shapes[name]), mode="research",
@@ -332,7 +337,8 @@ def test_known_unrequested_family_outside_actual_restricted_menu_refuses(handoff
 
 def test_runtime_refuses_unknown_partial_actual_groups_and_changed_source(handoff):
     names = handoff.run.names
-    grouped = {"g:actual-complete-cohort": names[:2], "u:" + names[2]: [names[2]]}
+    grouped = {"g:actual-complete-cohort": list(handoff.run.active_names),
+               "u:" + handoff.run.idle_name: [handoff.run.idle_name]}
     with pytest.raises(ValueError, match="complete.*atomic"):
         campaign._campaign_acquisition_row_scope(handoff.acquisition, grouped, selected=names[:1])
     with pytest.raises(ValueError, match="complete.*atomic"):
@@ -481,12 +487,12 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
         acquisition_unit_identities=unit_identities)
     assert merged["provenance"]["acquisition_schedule"] == schedules
     assert checkpoint["identity"]["settings"]["acquisition_schedule"] == schedules
-    assert set(merged["costs"]) == set(handoff.run.names[:2])
-    assert set(checkpoint["identity"]["units"]) == set(handoff.run.names[:2])
+    assert set(merged["costs"]) == set(handoff.run.active_names)
+    assert set(checkpoint["identity"]["units"]) == set(handoff.run.active_names)
     for key, value in handoff.acquisition["identity"].items():
         assert merged["provenance"]["acquisition"][key] == value
         assert checkpoint["identity"]["settings"]["acquisition_origin"][key] == value
-    assert merged["provenance"]["coverage"]["unpriced_groups"] == ["u:" + handoff.run.names[-1]]
+    assert merged["provenance"]["coverage"]["unpriced_groups"] == ["u:" + handoff.run.idle_name]
     assert handoff.request.read_bytes() == handoff.raw_request
     assert handoff.cost.read_bytes() == handoff.raw_cost
     for name in handoff.run.names:
