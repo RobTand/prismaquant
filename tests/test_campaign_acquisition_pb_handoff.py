@@ -17,6 +17,7 @@ import dispatch_tessera_campaign as dispatch
 from experiments import glm_data_manifests as manifests
 from prismaquant import tessera_campaign as campaign, tessera_hessian as th
 from prismaquant.cost_stage_checkpoint import prepare_journal, write_unit
+from prismaquant.cost_streaming import StreamedCausalLM
 from prismaquant.model_profiles import DefaultProfile
 from prismaquant.production_weight_cache import ProductionWeightCache
 from prismaquant.tessera_full_domain_acquisition import (
@@ -26,7 +27,9 @@ from prismaquant.tessera_full_domain_acquisition import (
 from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_control_inputs
 from prismaquant.tessera_legal_domain import live_pins, tessera_source_state
 from test_campaign_acquisition_scheduler import arguments
-from test_streamed_cost_checkpoints import _DenseTinyLM, _dense_runner, _model_identity
+from test_streamed_cost_checkpoints import (
+    _DenseTinyLM, _FakeStreamingContext, _model_identity,
+)
 from test_tessera_campaign_fanout import _plan_args, _shard
 
 FAMILY = "TESSERA_E4M3_K1"
@@ -43,8 +46,11 @@ def real_joint_run():
     import prismaquant.aura_cost as aura
     pytest.importorskip("tessera")
     torch.manual_seed(85)
-    state = _DenseTinyLM(width=32, layers=3).eval().state_dict()
-    model, _, runner = _dense_runner(state)
+    model = _DenseTinyLM(width=32, layers=3).eval()
+    for layer in model.model.layers:
+        layer._fixture_requires_stream_residency = True
+    context = _FakeStreamingContext(model)
+    runner = StreamedCausalLM(context, DefaultProfile())
     names = sorted(name for name, _ in model.named_modules() if name.endswith(".proj"))
     source_weights = {name: model.get_submodule(name).weight.detach().clone() for name in names}
     captures, handles = {}, []
