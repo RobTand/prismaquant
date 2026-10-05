@@ -10,6 +10,7 @@ semantic reporter. Full GPU execution belongs to a later lane, not here.
 """
 
 import copy
+import gzip
 import hashlib
 import json
 import os
@@ -1669,6 +1670,41 @@ def test_cli_executable_readsets_end_to_end(tmp_path):
             adjoint_path=Path(record["adjoint"]["slice_path"]),
             adjoint_sha256=canonical,
             output_root=Path(str(campaign["root"])))
+
+
+def test_cli_builds_extra_head_reads_from_the_bound_fresh_draw_plan(tmp_path):
+    import regenerate_joint_quanta as regen
+    from test_tessera_joint_eval_panel import _encoding_calibration, _fresh_draw
+    campaign = _exec_campaign(tmp_path)
+    encoding, _ = _encoding_calibration(tmp_path)
+    draw, _ = _fresh_draw(tmp_path, encoding)
+    plan = json.loads(campaign["plan_path"].read_text())
+    plan["calibration_input"] = {
+        "path": str(tmp_path / "encoding.safetensors"),
+        "sha256": encoding["artifact_sha256"]}
+    plan["execution"].update(n_calib_samples=4, calib_seqlen=8)
+    plan["joint_eval_draw"] = draw
+    campaign["plan_path"].write_text(json.dumps(plan, sort_keys=True))
+    campaign["plan_sha"] = hashlib.sha256(
+        campaign["plan_path"].read_bytes()).hexdigest()
+    receipt, space = _exec_receipt(tmp_path, campaign)
+    write_adjoint_receipt(space, receipt)
+    out = tmp_path / "reviewed"
+    assert regen.main(
+        _exec_argv(tmp_path, campaign)
+        + ["--output-root", str(campaign["root"]),
+           "--records-out", str(out),
+           "--adjoint-receipt", str(space / "adjoint-capture.json"),
+           "--executable-readsets"]) == 0
+    expected = [plan["calibration_input"], draw["calibration_input"]]
+    for path in out.glob("layer-*.json"):
+        record = json.loads(path.read_text())
+        with gzip.open(record["executable_readset"]["manifest_path"], "rb") as stream:
+            manifest = json.load(stream)
+        for entry, reference in zip(manifest["entries"][:2], expected, strict=True):
+            assert entry["path"] == reference["path"]
+            assert entry["sha256"] == reference["sha256"]
+            assert entry["bytes"] == Path(reference["path"]).stat().st_size
 
 
 def test_cli_executable_refusal_writes_nothing(tmp_path):

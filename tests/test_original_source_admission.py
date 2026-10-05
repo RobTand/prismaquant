@@ -163,6 +163,22 @@ def test_original_draw_requires_its_minimum_fit_tokens(authority_case):
         sg.normalize_original_diagnostic_preparation(preparation)
 
 
+@pytest.mark.parametrize("dev_mode", ["1", "0"])
+def test_session_identity_directly_compares_shape_after_preparation_validation(
+        authority_case, monkeypatch, dev_mode):
+    case = authority_case
+    preparation = copy.deepcopy(case["prepared"])
+    # Isolate the session join: upstream preparation validation has its own
+    # original-shape tests above. Keep the actual flat tensor digest unchanged.
+    preparation["calibration"]["shape"] = [128, 2048]
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_mode)
+    monkeypatch.setattr(sg, "normalize_original_diagnostic_preparation", sg._snapshot)
+    with pytest.raises(RuntimeError, match="prepared/base full calibration shape"):
+        sg.original_diagnostic_session_identity(
+            base_plan=case["base"], base_plan_sha256="a" * 64, prepared=preparation,
+            execution_sha256=case["base"]["execution"]["sha256"])
+
+
 def test_original_json_snapshot_keeps_direct_order_unicode_and_owned_values():
     value = {10: ['café', '\ud800', -0.0], 9: (True, None, 1.0)}
     expected = json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
