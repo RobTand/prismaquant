@@ -77,6 +77,32 @@ was refused before pytest because the owned overlay inherited duplicate
 Tessera metadata. Its zero-execution failure is retained; no dependency
 guard or shared default interpreter is changed to make it pass.
 
+The duplicate metadata was removed only from the owned overlay search path
+through a dependency shadow; inherited parent/default environments remain
+untouched. Actual installed-v11 behavioral control
+`6852eb7392c7e9d1e8b8f414906e5690ffc6e750a4b917948fb2a7f77179abdc`
+failed all three original policy cases. Both scope classifiers now use
+`SCOPED_LANE_SCHEMAS`; #214 exact flat fill/verify refusals are preserved.
+The corrected v56 fixture/coverage population
+`b53bd4c5367a1d11542207d3f2b761ab771708418da4c85c9472f8602768ef0c`
+passed 31 tests with zero failures/skips, including the real-loader v11
+scoped fill/replay control and explicit rate/rule-boundary controls.
+This does not erase the earlier failed full candidate run or its data faults.
+
+The completed full tracked-live AST/schema-LSP audit
+`0dffad99abd5ca416fac29d60f1e94cf10015e4614679eeaa7da7bba38616f14`
+scanned 1,747 Python files and all 51 relevant comparisons. No production
+old-v10/legacy-label equality remains. The five v11 equalities deliberately
+kept select run-table grammar, coverage inventory and allowance projection,
+not generic scope. Full inventory and reviewed rationale:
+`/mnt/shared/tessera-measurements/d13-public-master-2dbac191/schema-comparison-sweep.json`
+and `/home/rob/fleet/inventory/kernels-d13-schema-comparison-reviewed-20261005.json`.
+PB `80662975483d47eefb21d733ec666751309053555947d34893052b47b8d363fc`
+compiled all five affected reader/pin modules, rechecked the installed
+contract/package with no drift and sealed the inventory/control file hashes
+in its actual CAS output. These are CPU correctness/install facts only.
+
+
 
 D13 still requires fresh exact-source performance/profiles/both-Spark power
 and CEO review before landing/promotion. CEO approved Option A in
