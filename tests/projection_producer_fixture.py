@@ -2,7 +2,10 @@
 from pathlib import Path
 import json
 import os
+import socket
 import subprocess
+
+import pytest
 
 from prismaquant.tessera_expert_projection import PRODUCER_PYTHON_ENV, producer_plan_tool
 
@@ -31,14 +34,21 @@ print(json.dumps({'executable_sha256': hashlib.sha256(Path(sys.executable).read_
 def require_projection_producer(monkeypatch):
     """Authenticate the declared external bytes before selecting their real CLI.
 
-    The declaration is part of PB's checkout snapshot, including the secondary
-    executable path/digest and complete package-code digest. A missing or changed
-    declared dependency fails; it cannot silently become a skipped consumer test.
+    The declaration travels in the checkout snapshot with its producer host,
+    executable digest and complete package-code digest. An absent interpreter
+    is a named skip only off that host. It fails on the required host, and a
+    changed installed dependency fails everywhere.
     """
     declaration = json.loads(DECLARATION.read_text())
     assert declaration['schema'] == 'prismaquant.test_projection_producer.v1'
     interpreter = os.environ.get(PRODUCER_PYTHON_ENV) or declaration['interpreter']
     assert interpreter == declaration['interpreter'], 'selected producer path differs from sealed dependency'
+    required_host = declaration['required_host']
+    if not Path(interpreter).is_file():
+        reason = f'missing declared projection producer interpreter {interpreter}; required on {required_host}'
+        if socket.gethostname().split('.')[0] == required_host:
+            pytest.fail(reason)
+        pytest.skip(reason)
     # Probe the same inherited environment as the real CLI, not a sanitized
     # interpreter whose import origin could differ from the subsequent request.
     probe = subprocess.run([interpreter, '-c', SOURCE_PROBE],
