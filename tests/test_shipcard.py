@@ -1555,16 +1555,19 @@ def test_graph_receipt_matching_equal_verifies(tmp_path):
     assert _verify_native_export_record("native_export.graph", _graph_slot_record(tmp_path), model_dir=tmp_path) == []
 
 
-def test_graph_receipt_socket_against_roce_serve_refuses(tmp_path):
+def test_graph_receipt_socket_against_roce_serve_refuses(tmp_path, monkeypatch):
     from tessera import graph_receipt
     from prismaquant.shipcard import _verify_native_export_record
+    from test_validate_native_export import _graph_arm_fixture
 
-    record = _graph_slot_record(tmp_path)
+    owner, args, config, calls, expected = _graph_arm_fixture(tmp_path, monkeypatch)
+    monkeypatch.setenv("NCCL_IB_DISABLE", "0")
+    record = owner._run_arm(args, tmp_path, None, enforce_eager=False)
+    assert record["passed"], record
     metrics = record["metrics"]
     receipt = json.loads(pathlib.Path(metrics["graph_receipt_path"]).read_bytes())
     assert receipt["schema"] == "tessera.graph_equals_eager.v2"
     assert receipt["runtime"]["fabric"] == "socket"
-    metrics["serve_scope"]["fabric"] = "roce"
     reason = graph_receipt.verify(receipt, metrics["serve_scope"])
     assert "no attested arm" in reason and "fabric" in reason, reason
     problems = _verify_native_export_record(
