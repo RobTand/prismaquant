@@ -165,29 +165,41 @@ def _source_execution(value):
     return value
 
 
-def _full_calibration(value):
+def _full_calibration(value, *, generic=False):
+    """Validate a full calibration record.
+
+    The original owners (static authority, diagnostic preparation, final
+    authority) pin the retained [512, 512] draw and require fit_tokens_min;
+    only the Fisher path passes ``generic=True`` to derive the shape from the
+    actual loaded tensor. Nothing else loosens.
+    """
     _exact(value, {'schema', 'artifact_sha256', 'calibration_sha256', 'shape', 'dtype',
                    'provenance'}, 'original full calibration')
     _same(value['schema'], 'prismaquant.calibration_input.v1', 'full calibration schema')
-    _require(isinstance(value["shape"], list) and len(value["shape"]) == 2
-             and all(type(dim) is int and dim > 0 for dim in value["shape"]),
-             "full calibration shape must retain two positive integer dimensions")
-    rows, seqlen = value["shape"]
+    if generic:
+        _require(isinstance(value["shape"], list) and len(value["shape"]) == 2
+                 and all(type(dim) is int and dim > 0 for dim in value["shape"]),
+                 "full calibration shape must retain two positive integer dimensions")
+        rows, seqlen = value["shape"]
+    else:
+        _same(value["shape"], [512, 512], "full calibration shape")
+        rows, seqlen = 512, 512
     _same(value["dtype"], "torch.int64", "full calibration dtype")
     for key in ('artifact_sha256', 'calibration_sha256'):
         _contract.sha256(value[key], where=f'full calibration {key}')
     required = {"fit_ids_sha256", "fit_tokens", "model", "nsamples", "seed",
                 "seqlen", "source", "split_role", "text_sha256"}
+    if not generic:
+        required = required | {"fit_tokens_min"}
     provenance = value["provenance"]
-    _require(isinstance(provenance, dict) and set(provenance) in
-             (required, required | {"fit_tokens_min"}), "full calibration provenance fields differ")
+    _require(isinstance(provenance, dict) and set(provenance) == required,
+            "full calibration provenance fields differ")
     for key, expected in (("nsamples", rows), ("seqlen", seqlen), ("fit_tokens", rows * seqlen)):
         _require(type(provenance.get(key)) is int and provenance[key] == expected,
                  f"full calibration provenance {key} differs from the actual tensor shape")
     for key in ('fit_ids_sha256', 'text_sha256'):
         _contract.sha256(provenance.get(key), where=f'full calibration provenance {key}')
-    if "fit_tokens_min" in provenance:
-        _contract.integer(provenance["fit_tokens_min"], where="full calibration minimum fit tokens", minimum=1)
+    _contract.integer(provenance["fit_tokens_min"], where="full calibration minimum fit tokens", minimum=1)
     _contract.integer(provenance['seed'], where='full calibration draw seed', minimum=0)
     for key in ('model', 'source', 'split_role'):
         _contract.string(provenance[key], where=f'full calibration provenance {key}')
@@ -606,7 +618,7 @@ def normalize_original_fisher_execution(document, calibration):
     unchanged. Native Stage A/B execute these returned row/context/probe
     fields on the actual tensor, never an old draw relabelled as a new one.
     """
-    draw = _full_calibration(calibration)
+    draw = _full_calibration(calibration, generic=True)
     rows, seqlen = draw["shape"]
     for key, expected in (("n_calib_samples", rows), ("calib_seqlen", seqlen)):
         _require(type(document.get(key)) is int and document[key] == expected,
@@ -635,6 +647,10 @@ def original_diagnostic_session_identity(*, base_plan, base_plan_sha256, prepare
     diagnostic = base['selected_row_diagnostic']
     _same(diagnostic['calibration_tensor_sha256'], preparation['calibration']['calibration_sha256'],
           'prepared/base full calibration tensor')
+    # The tensor digest alone cannot distinguish [128, 2048] from [512, 512]
+    # (both 262144 tokens): compare the shapes the records declare.
+    _same(preparation['calibration']['shape'], diagnostic['calibration_shape'],
+          'prepared/base full calibration shape')
     return {
         'schema': 'prismaquant.original_diagnostic_session_identity.v1',
         'static_authority_sha256': base['static_authority_sha256'],

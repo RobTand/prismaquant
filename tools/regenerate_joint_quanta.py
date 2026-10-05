@@ -1158,23 +1158,46 @@ def main(argv=None) -> int:
                 bound_manifests = [(row["manifest_path"], row["manifest"],
                                     row["manifest_sha256"]) for row in emitted]
             if args.executable_readsets:
-                calib_input = (plan.get("joint_eval_draw") or {}).get("calibration_input",
-                                                                        plan.get("calibration_input", {}))
-                calib_path = calib_input.get("path") \
-                    if isinstance(calib_input, dict) else None
-                calib_sha256 = calib_input.get("sha256") \
-                    if isinstance(calib_input, dict) else None
-                if type(calib_path) is not str or not calib_path:
+                # The run reads the ENCODING calibration first (the plan's
+                # own input), then the Fisher draw's tokens: stage both, in
+                # that order, or a staged run stops readset-not-staged at the
+                # first read and wastes the GPU slot it holds.
+                calib_refs = []
+                encoding = plan.get("calibration_input")
+                if isinstance(encoding, dict):
+                    calib_refs.append(("encoding calibration input", encoding))
+                draw = (plan.get("joint_eval_draw") or {}).get("calibration_input")
+                if isinstance(draw, dict):
+                    calib_refs.append(("joint eval draw calibration input", draw))
+                if not calib_refs:
                     raise ValueError(
                         "the sealed plan names no calibration input path: "
                         "refusing")
-                try:
-                    calib_bytes = Path(calib_path).stat().st_size
-                except OSError as exc:
-                    raise ValueError(
-                        f"calibration input unreadable at {calib_path}: "
-                        f"{exc}") from exc
-                production = prepared.get("production_cache", {})
+                staged_calib = []
+                for label, calib_input in calib_refs:
+                    calib_path = calib_input.get("path")
+                    calib_sha256 = calib_input.get("sha256")
+                    if type(calib_path) is not str or not calib_path:
+                        raise ValueError(
+                            f"the sealed plan names no {label} path: refusing")
+                    try:
+                        calib_bytes = Path(calib_path).stat().st_size
+                    except OSError as exc:
+                        raise ValueError(
+                            f"{label} unreadable at {calib_path}: {exc}") from exc
+                    staged_calib.append({"label": label, "path": calib_path,
+                                         "sha256": calib_sha256, "bytes": calib_bytes})
+                # The encoding calibration is the head's first read; the
+                # draw's tokens follow it, before any forward phase.
+                calib_path = staged_calib[0]["path"]
+                calib_sha256 = staged_calib[0]["sha256"]
+                calib_bytes = staged_calib[0]["bytes"]
+                extra_head_reads = [
+                    {"path": row["path"], "bytes": row["bytes"],
+                     "sha256": row["sha256"],
+                     "where": f'{row["label"]} intake'}
+                    for row in staged_calib[1:]]
+production = prepared.get("production_cache", {})
                 production_sha = production.get("sha256") \
                     if isinstance(production, dict) else None
                 if not production_sha:
@@ -1352,6 +1375,7 @@ def main(argv=None) -> int:
                             calib={"path": calib_path,
                                    "bytes": calib_bytes,
                                    "sha256": calib_sha256},
+                            extra_head_reads=extra_head_reads,
                             render_prerequisite={
                                 "scope": "pb732",
                                 "production_pkl_sha256": production_sha,
