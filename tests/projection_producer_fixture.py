@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import os
 import socket
+import stat
 import subprocess
 
 import pytest
@@ -36,19 +37,26 @@ def require_projection_producer(monkeypatch):
 
     The declaration travels in the checkout snapshot with its producer host,
     executable digest and complete package-code digest. An absent interpreter
-    is a named skip only off that host. It fails on the required host, and a
-    changed installed dependency fails everywhere.
+    is a named skip only off that host. Other stat errors, non-regular paths
+    and changed installed dependencies fail everywhere.
     """
     declaration = json.loads(DECLARATION.read_text())
     assert declaration['schema'] == 'prismaquant.test_projection_producer.v1'
     interpreter = os.environ.get(PRODUCER_PYTHON_ENV) or declaration['interpreter']
     assert interpreter == declaration['interpreter'], 'selected producer path differs from sealed dependency'
     required_host = declaration['required_host']
-    if not Path(interpreter).is_file():
+    try:
+        interpreter_stat = os.stat(interpreter)
+    except FileNotFoundError:
         reason = f'missing declared projection producer interpreter {interpreter}; required on {required_host}'
         if socket.gethostname().split('.')[0] == required_host:
             pytest.fail(reason)
         pytest.skip(reason)
+    except OSError as error:
+        pytest.fail(f'cannot stat declared projection producer interpreter {interpreter}: '
+                    f'{type(error).__name__}: {error}')
+    if not stat.S_ISREG(interpreter_stat.st_mode):
+        pytest.fail(f'declared projection producer interpreter {interpreter} is not a regular file')
     # Probe the same inherited environment as the real CLI, not a sanitized
     # interpreter whose import origin could differ from the subsequent request.
     probe = subprocess.run([interpreter, '-c', SOURCE_PROBE],

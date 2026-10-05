@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`, PR #2297 correction,
+base `b199db027330`, PQ #2228): the producer test fixture uses `os.stat`
+without suppressing errors. Only `FileNotFoundError` reaches the existing
+off-host missing-interpreter skip. Permission, input/output and other stat
+errors fail with the interpreter path and error named on every host;
+non-regular paths fail as non-regular files, never as missing producers.
+The existing producer fingerprints are unchanged. No run identity, seal or
+provenance refusal is added. The regression also covers the required host.
+
 Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`, PQ #2228): the CPU test
 producer declaration names `dl380g10` as its required host. A missing
 interpreter fails there; on other hosts it produces a skip naming the exact
@@ -16913,10 +16922,12 @@ package-code digest, and the public output schema. `projection_producer_fixture`
 authenticates installed bytes before ordinary campaign/MTP controls select
 the interpreter. The declaration travels in PrismaBuild's source snapshot,
 so a closed worker environment does not rely on an arbitrary ambient variable.
-Missing producers fail on the declared `required_host` (`dl380g10`); elsewhere,
-the test skips with the missing interpreter and required host named. Present
-but drifted producers fail everywhere. This is not the serving/development
-pin or a full-suite result. CPU actions use `--tag x86` under standing rule
+Only `FileNotFoundError` from stat is treated as a missing producer: it fails
+on the declared `required_host` (`dl380g10`); elsewhere the test skips with
+the missing interpreter and required host named. Other stat errors and
+non-regular paths fail everywhere with the path and error named, as do
+present but drifted producers. This is not the serving/development pin or a
+full-suite result. CPU actions use `--tag x86` under standing rule
 D29, retaining execution on the required host. The sealed declaration and
 pre-execution byte checks bind the secondary dependency; they are not a
 portable secondary-interpreter capability/claim fence.
