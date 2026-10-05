@@ -165,6 +165,7 @@ def test_real_selected_result_admits_only_the_reviewed_source_and_invocation(
     assert bool(gateway.submitted) is (fault is None)
 
 
+@pytest.mark.usefixtures("pinned_pb_source")
 @pytest.mark.parametrize("fault", [None, "source", "refs", "wrapper", "attempt"])
 def test_production_gateway_consumes_selected_results_from_the_sealed_sdk4_root(
         tmp_path, campaign, records_dir, monkeypatch, capsys, fault):
