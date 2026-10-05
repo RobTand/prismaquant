@@ -764,11 +764,39 @@ private buffers until completion; failure/cancellation drains readers and fences
 submitted CUDA work before releasing owners. This is not a new cache, source
 provider or automatic GPU admission. Bounded pending-CUDA ownership and
 original-layer timing controls are recorded in
-[the 2026-10-02 preparation report](measurements/pq2039_preparation_2026-10-02.md).
-The measured local latency gain preserves every source copy/comparison;
-aggregate CPU copy work increased. The option remains off, the higher
-CPU-material provider remains unqualified for GPU transfers, and no
-full-campaign, saturation or energy claim follows.
+[the 2026-10-02 preparation report](measurements/pq2039_preparation_2026-10-02.md);
+the 2026-10-04 reservation-pricing and head-wait credit-reaping corrections,
+their control evidence and the completed same-host paired device comparison
+are recorded in
+[the 2026-10-04 copy-pair report](measurements/pq2039_copy_pair_2026-10-04.md).
+Re-stamped 2026-10-05 (Refs #2039, PR #2247): the opt-in window's
+prospective device reservation includes full bool masks and allocator-sized
+verdict/settle storage, as well as staging and reduction workspace. It charges
+fresh native segments for every allocation across the pass, including cached
+freed allocations; no single-stream/cache-reuse tightening is assumed. Unknown
+or nondefault exposed CUDA allocator settings refuse before any source read.
+The guard checks both the configuration text and the effective PyTorch 2.11
+snapshot defaults for expandable segments, split size, garbage collection and
+all sixteen rounding intervals; an empty setter/reset string alone is not proof
+of default state. The real reset regression is isolated in a separate admitted
+process. The qualified snapshot does not expose large_segment_size or
+max_non_split_rounding_size, so a small read-only C++ bridge queries the executing
+public C10 getters and requires both sizes to be the derived 20-MiB defaults.
+The bridge reuses jit_build_lock, torch_build_directory and Torch's loader/cache,
+compiles no CUDA kernel, caches only code, and never resets allocator state.
+Missing/unpriced getter state refuses before source reads. Its C++ source is
+packaged with PrismaQuant; no Torch rebuild, renderer fork or serving-pin change
+is introduced. The isolated regression covers the large-segment-only empty reset
+as well as the exposed expandable-segment reset. The full-pass bound is unchanged.
+The CPU private cap, four-credit lifecycle, source ownership and ordering remain
+as above; serial preparation and all serving/default gates are unchanged.
+The completed historical timing pair is an **unqualified same-host screen**:
+two prepared arms per side, 19 timed calls per arm before and 20 after. Its
+19-ms/1.20% prepared-mean difference establishes neither host-copy causality
+nor this corrected head's performance or residency. Profile-window clock
+qualification remains HOLD; no energy/work-per-joule, saturation, serving or
+full-campaign claim follows. The higher CPU-material provider remains
+unqualified for GPU transfers.
 
 
 Re-stamped 2026-10-02 (`sol/pq-1934-recovery-20261002`, Refs #1931, #1935):

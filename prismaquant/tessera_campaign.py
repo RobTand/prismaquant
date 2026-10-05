@@ -5242,6 +5242,84 @@ def _launch_prepared_projected_check(check, live):
     return staged
 
 
+def _projected_cuda_reservation(weights):
+    """Bound native CUDA reserved growth without assuming cache or stream reuse.
+
+    The guard reads segments, not tensor payloads. Charge a fresh segment for
+    EVERY allocation in the pass; a freed mask/staging block can remain cached.
+    Native sizing is from PyTorch c10/core/AllocatorConfig.h and
+    cuda/CUDACachingAllocator.cpp (round_size/get_allocation_size): 512-byte
+    blocks, 2-MiB small segments, 20-MiB medium segments, 2-MiB large rounding.
+    Nondefault allocators/settings need their own reviewed residency bound.
+    """
+    import torch
+
+    eligible = [live for live in weights
+                if live.device.type == 'cuda' and _device_comparable(live.dtype)]
+    if not eligible:
+        return 0
+    refusal = ('parallel projected preparation requires the default native CUDA '
+               'allocator residency model')
+    if torch.cuda.get_allocator_backend() != 'native':
+        raise RuntimeError(refusal)
+    settings = torch.cuda.memory._snapshot().get('allocator_settings', {})
+    # parseArgs("") resets the displayed string, not all effective settings.
+    # Qualified 2.11 snapshot serialization casts SIZE_MAX to signed int64 (-1)
+    # and emits the 16 1-MiB..64-GiB rounding intervals as power-of-two keys.
+    intervals = (64 * 1024**3 // 1024**2).bit_length() - 1
+    defaults = {'PYTORCH_CUDA_ALLOC_CONF': '', 'expandable_segments': False,
+                'max_split_size': -1, 'garbage_collection_threshold': 0.0,
+                'roundup_power2_divisions': {str(1 << i): 0 for i in range(intervals)}}
+    if not isinstance(settings, dict):
+        raise RuntimeError(refusal)
+    for field, default in defaults.items():
+        value = settings.get(field)
+        if type(value) is not type(default) or value != default:
+            raise RuntimeError(f'{refusal}: unpriced effective {field}')
+    # Dict equality alone would accept False in place of the native integer 0.
+    if any(type(value) is not int for value in settings['roundup_power2_divisions'].values()):
+        raise RuntimeError(f'{refusal}: unpriced effective roundup_power2_divisions')
+    # The snapshot omits these sticky sizes. Read them from the executing
+    # libC10 through its public getters; never infer them from configuration text.
+    from .kernels import cuda_allocator_state
+    try:
+        sizing = cuda_allocator_state.sizing()
+    except (ImportError, OSError, RuntimeError) as error:
+        raise RuntimeError(f'{refusal}: effective sizing accessor unavailable') from error
+    if (type(sizing) is not tuple or len(sizing) != 2
+            or any(type(value) is not int for value in sizing)
+            or sizing != (20 * 1024**2, 20 * 1024**2)):
+        raise RuntimeError(f'{refusal}: unpriced effective large-segment/nonsplit sizing')
+
+    def segment(size):
+        if not size:
+            return 0
+        size = ((size + 511) // 512) * 512
+        if size <= 1024**2:
+            return 2 * 1024**2
+        if size < 10 * 1024**2:
+            return 20 * 1024**2
+        return ((size + 2 * 1024**2 - 1) // (2 * 1024**2)) * (2 * 1024**2)
+
+    total = 0
+    counts = {}
+    for live in eligible:
+        elements = live.numel()
+        # A contiguous bool mask's full reduction has one output. Reduce.cuh
+        # bounds its global partials by the input count and uses one int
+        # semaphore. Split 32-bit iterators may allocate scratch repeatedly;
+        # charge each possible slice separately, plus its scalar accumulator.
+        slice_count = max(1, (elements + (2**31 - 2)) // (2**31 - 1))
+        slices = 1 << (slice_count - 1).bit_length()
+        total += segment(elements * live.element_size()) + segment(elements)
+        total += slices * (segment(min(elements, 2**31 - 1)) + segment(4))
+        total += 2 * segment(1)  # verdict plus possible reduction accumulator
+        counts[live.device] = counts.get(live.device, 0) + 1
+    # One stacked bool allocation per device, beside all original verdicts.
+    return total + sum(segment(count) for count in counts.values())
+
+
+
 @contextmanager
 def _parallel_projected_checks(units, *, weights, model_path, source,
                                resource_check, source_authentication,
@@ -5261,11 +5339,10 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
         raise RuntimeError('parallel projected preparation requires the shared two-thread read pool')
     rows = list(units.items())
     sizes = [weights[n].numel()*weights[n].element_size() for n,_u in rows]
-    elements = [weights[n].numel() for n,_u in rows]
     if any(size > preparation_max_bytes for size in sizes):
         raise RuntimeError('one projected unit exceeds the private preparation byte cap')
     pin_bound = min(preparation_max_bytes, sum(sorted(sizes, reverse=True)[:4]))
-    gpu_bound = pin_bound + min(pin_bound, sum(sorted(elements, reverse=True)[:4]))
+    gpu_bound = _projected_cuda_reservation([weights[n] for n, _u in rows])
     reserve_allocation(resource_check, 'before_parallel_projected_preparation',
                        cpu_bytes=pin_bound, device_bytes=gpu_bound)
     pool = layer_streaming._layer_read_pool(2, allow_resize=False)
@@ -5279,6 +5356,32 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
     def require_running():
         if cancelled():
             raise CancelledError('projected preparation cancelled')
+    def admit():
+        nonlocal index, held_bytes
+        while index < len(rows) and len(pending)+len(inflight) < 4:
+            name, unit = rows[index]
+            live, size = weights[name], sizes[index]
+            eligible = live.device.type == 'cuda' and _device_comparable(live.dtype)
+            # Serial fallbacks never coexist with pending private staging.
+            if not eligible and (pending or inflight):
+                break
+            if held_bytes + size > preparation_max_bytes:
+                break
+            resource_check(f'before_source_projection_check:{name}')
+            if eligible:
+                future = pool.submit(_prepare_device_projected_check, name, unit,
+                    live_shape=tuple(live.shape), live_dtype=live.dtype,
+                    model_path=model_path, source=source,
+                    release_source_pages=release_source_pages,
+                    source_authentication=source_authentication, cancelled=cancelled)
+                futures.append(future)
+            else:
+                future = None
+            pending.append((name, unit, future, size))
+            held_bytes += size
+            index += 1
+            if not eligible:
+                break
     def reap():
         nonlocal held_bytes
         while inflight and inflight[0][2].query():
@@ -5289,30 +5392,7 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
         while index < len(rows) or pending:
             require_running()
             reap()
-            while index < len(rows) and len(pending)+len(inflight) < 4:
-                name, unit = rows[index]
-                live, size = weights[name], sizes[index]
-                eligible = live.device.type == 'cuda' and _device_comparable(live.dtype)
-                # Serial fallbacks never coexist with pending private staging.
-                if not eligible and (pending or inflight):
-                    break
-                if held_bytes + size > preparation_max_bytes:
-                    break
-                resource_check(f'before_source_projection_check:{name}')
-                if eligible:
-                    future = pool.submit(_prepare_device_projected_check, name, unit,
-                        live_shape=tuple(live.shape), live_dtype=live.dtype,
-                        model_path=model_path, source=source,
-                        release_source_pages=release_source_pages,
-                        source_authentication=source_authentication, cancelled=cancelled)
-                    futures.append(future)
-                else:
-                    future = None
-                pending.append((name, unit, future, size))
-                held_bytes += size
-                index += 1
-                if not eligible:
-                    break
+            admit()
             if not pending:
                 # Event polling grants no progress and never reads a verdict.
                 stop.wait(.001)
@@ -5326,6 +5406,11 @@ def _parallel_projected_checks(units, *, weights, model_path, source,
             else:
                 while True:
                     require_running()
+                    # A launch completed during this wait frees its credit
+                    # here, not at the next loop top: the readers must not
+                    # idle while the ordered head stages.
+                    reap()
+                    admit()
                     try:
                         check = future.result(timeout=.05)
                         break
