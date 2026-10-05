@@ -1,5 +1,17 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (PR #2317 correction, PQ #2320, Refs #1301):
+the CEO-authorized cutoff retains 40 proved serializer calls in 32 scopes
+across 24 files and restores 18 individual unproved calls to their exact
+original recipes as explicit #1301 residuals. Proved mixed-scope neighbors
+and all eight lightweight bootstrap repairs remain. Image metadata, chain
+specification, render analysis and render metadata audits use the existing
+standard-library sibling digest owner; the residual wire reader keeps its
+original standard-library JSON recipe. Checkpoint, head and band argument
+handling still precedes scientific imports. The original 36-file launch
+matrix preserves each supported context; CPU help is not native execution
+or whole-producer qualification. No format, serving pin or default changes.
+
 Re-stamped 2026-10-05 (`kernels/d13-public-master-pin-20261005`, PQ #2262):
 the immutable serving/development candidate names fetched public Tessera
 master `2dbac1910c88254d9c6391f02a34c4b07e516803`, packaged contract

@@ -25,6 +25,7 @@ _contract_path = Path(__file__).resolve().parents[1] / "prismaquant/glm_source_d
 sys.path.insert(0, str(_contract_path.parent))
 try:
     _contract = runpy.run_path(str(_contract_path))
+    from digests import DIRECT_ASCII_SPACED_LAX
 finally:
     sys.path.pop(0)
 ORIGINAL_IMAGE_CONTENT_SHA256 = _contract['ORIGINAL_IMAGE_CONTENT_SHA256']
@@ -98,8 +99,8 @@ print(json.dumps(dict(path=str(p),source=base64.b64encode(p.read_bytes()).decode
         encoded = json.dumps(config, sort_keys=True, separators=(',', ':')).encode()
         config_digest = hashlib.sha256(encoded).hexdigest()
         config_name = config_digest + '.json'
-        updated = json.dumps([dict(Config=config_name, RepoTags=[image],
-            Layers=[*manifest['Layers'], layer_name])], sort_keys=True).encode()
+        updated = DIRECT_ASCII_SPACED_LAX.encoded([dict(Config=config_name, RepoTags=[image],
+            Layers=[*manifest['Layers'], layer_name])])
         with tarfile.open(archive, 'w:') as new:
             for member in old:
                 if member.name in ('manifest.json', 'repositories', 'index.json', 'oci-layout'):

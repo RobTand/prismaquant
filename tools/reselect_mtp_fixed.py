@@ -15,6 +15,7 @@ from prismaquant import format_registry as fr
 from prismaquant.allocator_candidates import selection_serving_lane_provenance
 from prismaquant.allocator import _mtp_rung_attestation
 from prismaquant.cost_stage_checkpoint import publish_new_bytes
+
 from prismaquant.footprint import (
     mtp_selection_rebased_bytes, recursive_regular_file_bytes,
     whole_artifact_budget_from_assignment_payload,

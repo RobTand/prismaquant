@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from prismaquant.joint_forward_resume import _read, chain_documents
 from prismaquant.stage_a_head import drop_source_head_walk_reads
 
+
 TEMPLATE = Path(__file__).resolve().parent / 'templates' / 'stagea_forward_recovery_launch.py.template'
 MANIFEST_NAME = 'adjoint-recovery-manifest.json.gz'
 #: Campaign fields a reviewed declaration supplies. ``original_manifest_sha256``

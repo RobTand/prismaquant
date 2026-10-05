@@ -1,0 +1,495 @@
+{
+  "schema": "pq2317.independent_launch_contracts.v1",
+  "scope": {
+    "files": 36,
+    "standard_library_help_modes": 10,
+    "scientific_package_help_modes": 24,
+    "no_parser_batch_modules": 2
+  },
+  "source_reference": "99a578e071b; actual original import/argument/caller context, not an invented uniform contract",
+  "rows": [
+    {
+      "file": "tools/audit_t4_render_paths.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/audit_t4_render_paths.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": true,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/band_serial_handoff_live_pair.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/band_serial_handoff_live_pair.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": false,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/bench_fence_rehash.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/bench_fence_rehash.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": false,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/build_glm_derivative_image.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/build_glm_derivative_image.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": true,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/build_stagea_forward_recovery_package.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.build_stagea_forward_recovery_package",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/build_stagea_seed_package.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.build_stagea_seed_package",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/build_stagea_split_package.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.build_stagea_split_package",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence.",
+      "additional_supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.build_stagea_split_package",
+        "forward",
+        "--help"
+      ]
+    },
+    {
+      "file": "tools/build_tessera_census_cache.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.build_tessera_census_cache",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/build_tessera_hessian_collection.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.build_tessera_hessian_collection",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/build_tessera_mtp_cached_units.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.build_tessera_mtp_cached_units",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/capture_glm_routing_replay.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.capture_glm_routing_replay",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/chain_roll_bench.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/chain_roll_bench.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": false,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/check_campaign_activation_identity.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.check_campaign_activation_identity",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/check_stageb_a4_group_quantizer.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.check_stageb_a4_group_quantizer",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence.",
+      "additional_required_context": "Real tiny GPU script execution with the retained owner-produced served activation policy; help does not qualify native grouped activation."
+    },
+    {
+      "file": "tools/check_stageb_a4_quantizer.py",
+      "kind": "Unconditional GPU batch module; no argument parser",
+      "supported_probe": [
+        "Qualified GPU interpreter",
+        "tools/check_stageb_a4_quantizer.py"
+      ],
+      "working_directory": "Actual source checkout; its own repository-root bootstrap",
+      "dependencies": "Torch, the qualified serving runtime and real CUDA device; actual 4 by 1024 bfloat16 activation",
+      "cpu_population": "Named missing-CUDA skip, not a pretend help or no-Torch success",
+      "limit": "Use the authorized tiny native execution and a permanent GPU subprocess test; no model or benchmark."
+    },
+    {
+      "file": "tools/checkpoint_parse_probe.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/checkpoint_parse_probe.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": false,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/compare_stage_a_checkpoints.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.compare_stage_a_checkpoints",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/compose_tessera_cached_units.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.compose_tessera_cached_units",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/dispatch_joint_quanta.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.dispatch_joint_quanta",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/dispatch_tessera_campaign.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.dispatch_tessera_campaign",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/expand_probe_onto_tessera_census.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.expand_probe_onto_tessera_census",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/measure_wire_rehash_readers.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/measure_wire_rehash_readers.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": true,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/nvfp4_served_qdq_bench.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.nvfp4_served_qdq_bench",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/pq282_equality/recheck_refusal_order.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.pq282_equality.recheck_refusal_order",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/profile_stage_b_head.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/profile_stage_b_head.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": false,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/prove_glm_source_adoption.py",
+      "kind": "Unconditional scientific metadata batch module; no argument parser",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.prove_glm_source_adoption"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Real PrismaQuant and Tessera imports; actual source/binding inputs in full execution",
+      "bounded_probe": "Parent-approved Python audit hook denies the actual named application input open and observes the exact path plus distinct denial exit, before any output publication. Both original and corrected source must reach it.",
+      "limit": "Bootstrap-to-input only, not producer, 120-header adoption or serializer output proof. Generic import errors are failures."
+    },
+    {
+      "file": "tools/pwc_window_load_bench.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/pwc_window_load_bench.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": false,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/qualify_t4_overlay.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.qualify_t4_overlay",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/regenerate_joint_quanta.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.regenerate_joint_quanta",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/render_window_bench.py",
+      "kind": "Standard-library argument/help entry",
+      "supported_probe": [
+        "/usr/bin/python3",
+        "-S",
+        "tools/render_window_bench.py",
+        "--help"
+      ],
+      "working_directory": "Outside the repository; no coordinator PYTHONPATH",
+      "whole_body_standard_library": false,
+      "limit": "Help does not qualify a scientific producer body. Chain spec and render analyze additionally have actual standard-library output/publication probes."
+    },
+    {
+      "file": "tools/reselect_mtp_fixed.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.reselect_mtp_fixed",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/retire_stage_a_run.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.retire_stage_a_run",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/seal_tessera_census_identity.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.seal_tessera_census_identity",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/stage_b_preparation_submission.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.stage_b_preparation_submission",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/stagea_forward_recovery.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.stagea_forward_recovery",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    },
+    {
+      "file": "tools/staged_exact_read_bench.py",
+      "kind": "Package-dependent argument/help entry",
+      "supported_probe": [
+        "Qualified SDK4 interpreter",
+        "-m",
+        "tools.staged_exact_read_bench",
+        "--help"
+      ],
+      "working_directory": "Source checkout; coordinator PYTHONPATH cleared",
+      "dependencies": "Original scientific/package dependencies remain real, including Torch/Tessera where imported. No standard-library-only promise.",
+      "limit": "Argument/help bootstrap only; actual serialization boundaries and any native operations need their separate evidence."
+    }
+  ],
+  "cutover": {
+    "authority": "CEO Option B dec-1005-213921-b04d",
+    "original_calls": 58,
+    "retained_proven_routes": 40,
+    "individual_restored_residuals": 18,
+    "original_context_population": 36,
+    "limit": "The original supported-context matrix is retained, including residual-source contexts. CPU help does not qualify native execution; native scope remains unexercised for acceptance."
+  }
+}

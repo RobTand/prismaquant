@@ -119,3 +119,43 @@ masked as `<handoff-sha256>` in stdout goldens; manifest bytes and SHA stay
 unmasked. The old tape's same field receives the same mask. No golden is
 recorded from replaced production code. The ratchet removes exactly five
 primitive scopes, 508 to 503; no new scope is admitted.
+
+## Tools spaced-JSON bundle (Refs #1301, 2026-10-05)
+
+The original selection contained 58 serialization calls in 45 scopes across
+36 files. At the CEO-authorized proof cutoff, 40 proved calls remain on the
+existing profile in 32 scopes across 24 files; 18 individually unproved calls
+are restored to their exact `99a578e0` expressions as explicit #1301 residuals.
+Proved neighboring calls in mixed scopes remain routed. Callers still own
+argument construction, text/bytes, hashing, line feeds and publication.
+
+The original routing assertions and generic recipe/profile comparisons did
+not prove each consumer. They have been removed. Their pre-change failures
+were style/source failures, not behavioral regressions. The historical
+`b2cb7017` run failed nine declared-dependency cases for missing `xxhash` and
+remains failed; agreement with an equally broken baseline did not make it green.
+
+`tests/test_spaced_lax_tools_routing_1301.py` now exercises actual state
+append/refusal, calculated benchmark summaries, spec construction, checkpoint
+parsing, container submissions, analysis publication and worker file bytes.
+Its frozen outcomes were recorded from original commit `99a578e0`, not from
+the replacement profile. Actual lightweight launch tests run outside the
+repository without `PYTHONPATH` and without site packages. The image driver,
+chain spec, wire reader, metadata audit and render analysis retain their
+standard-library dependency boundary. Band handoff, checkpoint parsing and
+Stage B head help/argument handling still precede scientific imports; the
+other tools retain their original package-dependent qualified contexts.
+
+The immutable version-three cutover packet reconciles all 58 original calls
+as 40 retained proved routes plus 18 explicitly restored residuals. It records
+retained-input and original CPU-fixture provenance, native output/framing and
+omitted computation; a source location alone is not proof. Earlier packets,
+all red actions and late native diagnostics remain preserved. The native
+deadline wrapper did not qualify either GPU route for retention. This is
+boundary/fixture evidence, not a producer, campaign, wire or serving rerun.
+No model roll, capture, CUDA benchmark or image rebuild was performed.
+Mixed compact, indented and strict recipes remain outside this migration.
+The separately staged `tools/tessera_fleet/model_worker.py` keeps its original
+standard-library serialization; its actual publication bytes are tested.
+The existing duplication ratchet retains syntactic policy. The three package
+`json.dump` file writers remain a different bundle; #1301 stays open.

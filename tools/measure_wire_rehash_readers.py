@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import os
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -82,6 +83,7 @@ def main(argv=None) -> int:
     parser.add_argument("--mount", default="/mnt/shared")
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
+
 
     source = _candidates(Path(args.wire_dir), args.format,
                          range(args.first_layer, args.last_layer + 1), args.experts)

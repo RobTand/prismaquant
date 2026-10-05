@@ -1645,6 +1645,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
     the first row kind that is built for another one records it in its own
     plan entry when it lands.
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     resolved = row_class(spec, row_class_name)
     if resolved["weights_only"]:
         if module in WEIGHTS_ONLY_FORBIDDEN_MODULES:
@@ -1676,7 +1677,7 @@ def _row(spec: dict, argv: list[str], *, mem_gb: int, timeout_s: int | None,
             container_spec["container_admission_reference"] = resolved["container_admission_reference"]
         validate_container(container_spec, bounded=bounded)
         command = ["python3", "-m", "tools.tessera_campaign_container", "--spec",
-                   json.dumps(container_spec, sort_keys=True), "--", *command]
+                   DIRECT_ASCII_SPACED_LAX.text(container_spec), "--", *command]
         # The class owns the image: whatever container this row resolved runs
         # is what PrismaBuild must find on the claiming box before the claim
         # (RobTand/prismabuild#714). Without an explicit portable override,
@@ -2796,12 +2797,13 @@ def _pbrun_argv(args, *, manifest: Path, inner: list[str],
     declares nothing because its launcher loads and verifies the image inside
     the action (RobTand/prismabuild#714).
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     if container_spec is None:
         spec = Path(args.spec).read_text()
         parsed_spec = json.loads(spec)
     else:
         parsed_spec = container_spec
-        spec = json.dumps(container_spec, sort_keys=True)
+        spec = DIRECT_ASCII_SPACED_LAX.text(container_spec)
     container_image = admission_image_reference(parsed_spec)
     argv = ["python3", str(args.pbrun), "--demand", args.demand]
     if gpu_memory_gb is not None:

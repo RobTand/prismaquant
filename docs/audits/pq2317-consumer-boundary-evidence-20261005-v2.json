@@ -1,0 +1,1517 @@
+{
+  "calls": 58,
+  "decision": "dec-1005-191047-b99d",
+  "equal": 34,
+  "rows": [
+    {
+      "argument_construction_executed": true,
+      "call": 1,
+      "candidate": {
+        "publication_bytes": 13846929,
+        "publication_sha256": "b5b4fcd65f246975ad2299ca5f4719fe893325c7d258ac995ab6631251ad4cef",
+        "returned": "13846929",
+        "returned_type": "int"
+      },
+      "candidate_line": 28,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(summary)",
+      "old_source": "json.dumps(summary,sort_keys=True)",
+      "omitted_computation": "Render stat collection and retained proof reads are represented by the actual retained original render-paths document. The actual original/candidate LF write_text publication boundary executes on it, with only destination mapped to fresh temporary files.",
+      "original": {
+        "publication_bytes": 13846929,
+        "publication_sha256": "b5b4fcd65f246975ad2299ca5f4719fe893325c7d258ac995ab6631251ad4cef",
+        "returned": "13846929",
+        "returned_type": "int"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "b5b4fcd65f246975ad2299ca5f4719fe893325c7d258ac995ab6631251ad4cef",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/t4-reuse-20260922/render-paths.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/audit_t4_render_paths.py::main@23",
+      "status": "equal"
+    },
+    {
+      "call": 2,
+      "candidate_line": 465,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(prepare(args.root, args.tier))",
+      "old_source": "json.dumps(prepare(args.root, args.tier), sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/band_serial_handoff_live_pair.py::main@464",
+      "status": "retained original input available; paired replay not executed",
+      "retained_input": {
+        "format": "pickle",
+        "path": "/tmp/pq2320-pair-valid-inputs-YPZlqU/5.pickle",
+        "action": "8ee6b30b31e1dcad45d8cff667ca57b9d01d7f1251d5dcf7a919ac359ef8c093",
+        "test": "tests/test_pq2320_pair_capture.py::test_actual_tiny_pair_preparation",
+        "scope": "original tiny CPU-fixture metadata, no live staging or campaign qualification"
+      }
+    },
+    {
+      "call": 3,
+      "candidate_line": 468,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(derive(args.root, args.handoff, args.handoff_sha256))",
+      "old_source": "json.dumps(derive(args.root, args.handoff, args.handoff_sha256),\n                         sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/band_serial_handoff_live_pair.py::main@467",
+      "status": "input not yet held"
+    },
+    {
+      "call": 4,
+      "candidate_line": 191,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(report)",
+      "old_source": "json.dumps(report, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/bench_fence_rehash.py::_finish@191",
+      "status": "supported by paired actual consumer execution",
+      "actual_consumer_evidence": {
+        "call": 4,
+        "mode": "retained original CPU-fixture behavior, not campaign measurement",
+        "original_action": "14ada06fe804d42807b072bfd065dad3616ea1723df24c89ed16f1bdc0013ab4",
+        "candidate_action": "5e86b3838fcffa9f8de0fa728270865480a61b57e59d2e1f95022bbe668fec05",
+        "fixture_source": "tests/test_spaced_lax_tools_routing_1301.py",
+        "test": "test_fence_finish_reports_calculated_median_and_removes_scratch[median]",
+        "observed_fixture_table": "tests/fixtures/spaced_lax_tools_consumers_2320.json",
+        "qualification": "actual old callable on original 99a578e0 and actual candidate callable used the same concrete fixture; final observable checked against recorded original outcome; no recreated serializer/profile echo",
+        "environmental_readings": "fixture run values, not measured campaign timing"
+      }
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 5,
+      "candidate": {
+        "bytes": 3077,
+        "returned_type": "bytes",
+        "sha256": "b4c6cba29563602203bb88b572ffc1b0163829e2120b66716d7b3ddfbc4bbdda"
+      },
+      "candidate_line": 102,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.encoded([dict(Config=config_name, RepoTags=[image],\n            Layers=[*manifest['Layers'], layer_name])])",
+      "old_source": "json.dumps([dict(Config=config_name, RepoTags=[image],\n            Layers=[*manifest['Layers'], layer_name])], sort_keys=True)",
+      "omitted_computation": "Image inspection, source patch, layer/config creation and image build omitted; actual manifest list construction and strict byte encoding executed from retained real Config, RepoTags and Layers leaves",
+      "original": {
+        "bytes": 3077,
+        "returned_type": "bytes",
+        "sha256": "b4c6cba29563602203bb88b572ffc1b0163829e2120b66716d7b3ddfbc4bbdda"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "docker-manifest",
+        "input_metadata_sha256": "b4c6cba29563602203bb88b572ffc1b0163829e2120b66716d7b3ddfbc4bbdda",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/joint-original-graph-implementation-01/derivative-image-build-03/corrected-image.tar"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/build_glm_derivative_image.py::main@101",
+      "status": "equal"
+    },
+    {
+      "call": 6,
+      "candidate_line": 203,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({'package': str(root), 'source_head': args.source_head,\n        'data_manifest_sha256': digest, 'capsule': bound, 'frontier': capsule['frontier'],\n        'head_walk_reads_dropped': dropped,\n        'phases': len(manifest['read_plan']['phases']),\n        'max_phase_bytes': max(p['bytes'] for p in manifest['read_plan']['phases']),\n        'runtime_pin_pending': True})",
+      "old_source": "json.dumps({'package': str(root), 'source_head': args.source_head,\n        'data_manifest_sha256': digest, 'capsule': bound, 'frontier': capsule['frontier'],\n        'head_walk_reads_dropped': dropped,\n        'phases': len(manifest['read_plan']['phases']),\n        'max_phase_bytes': max(p['bytes'] for p in manifest['read_plan']['phases']),\n        'runtime_pin_pending': True}, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/build_stagea_forward_recovery_package.py::main@202",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 7,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 935,
+        "stdout_sha256": "46eedf7b5c358283a4146f3d16a160df5869d676953aa0d92cf14f83dbb610fb"
+      },
+      "candidate_line": 287,
+      "fixture_provenance": {
+        "action": "4aec58c38e664483865763a66b854fe1efa1b226a3ae1bc6efc028e869d55b65",
+        "index": "/tmp/pq2320-original-inputs-VSMR5f/index.json",
+        "record": 7,
+        "scope": "retained original CPU-fixture behavior, not campaign measurement"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(package)",
+      "old_source": "json.dumps(package, sort_keys=True)",
+      "omitted_computation": "Actual original builder computed and persisted this same package dictionary through its genuine small fixture. The main serializer uses that retained package; source run and packaging work are not rerun by this boundary.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 935,
+        "stdout_sha256": "46eedf7b5c358283a4146f3d16a160df5869d676953aa0d92cf14f83dbb610fb"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "e7104537160efb80cdcf4e32723e1807ef8028aee447d73606965e9fdfc2b43f",
+        "keys": [],
+        "path": "/tmp/pq2320-original-inputs-VSMR5f/7.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/build_stagea_seed_package.py::main@286",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 8,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1050,
+        "stdout_sha256": "bede8b07ed8f33d5912edc75cb1fedc05127f9c595fb11bf3a30dc8755e0d845"
+      },
+      "candidate_line": 469,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({key: value for key, value in package.items()\n                      if key not in (\"prep\", \"quanta\")})",
+      "old_source": "json.dumps({key: value for key, value in package.items()\n                      if key not in (\"prep\", \"quanta\")}, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1050,
+        "stdout_sha256": "bede8b07ed8f33d5912edc75cb1fedc05127f9c595fb11bf3a30dc8755e0d845"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "5f9652b5b3a20b3ccb807be1625ec7036180ff844bf2350a64147b56ad6e6e0f",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-split-r5-46edac57eda/package/split-package.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/build_stagea_split_package.py::main@468",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 9,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 615,
+        "stdout_sha256": "bc64e882386a1e35e6f789f760b2ef7e389f11d3aeaf00962137c62dbabddae3"
+      },
+      "candidate_line": 161,
+      "fixture_provenance": {
+        "action": "52bf0be62c447d9339d5d7bf06cd4ba60e9b4052c03f0b3b807ef1c3ccf4e784",
+        "index": "/tmp/pq2320-census-inputs-g5X0Iz/index.json",
+        "record": 2,
+        "scope": "original unqualified CPU metadata fixture; no campaign measurement",
+        "test": "tests/test_tessera_census_cache.py::test_plan_layer_config_out_drops_the_outside_bf16_rows_after_the_refusal[BF16]"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({key: summary[key] for key in (\"units\", \"formats\", \"blob_bytes\", \"sha256\",\n                                                     \"seconds\")})",
+      "old_source": "json.dumps({key: summary[key] for key in (\"units\", \"formats\", \"blob_bytes\", \"sha256\",\n                                                     \"seconds\")}, sort_keys=True)",
+      "omitted_computation": "Actual original census builder calculated and persisted this full summary during the unqualified small metadata/wire fixture. Source subset dictionary construction and stdout/LF execute; no campaign, real producer package, encode/decode or serving qualification.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 615,
+        "stdout_sha256": "bc64e882386a1e35e6f789f760b2ef7e389f11d3aeaf00962137c62dbabddae3"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "68a89d50128b2c7b065be917fc56a09efcb551f8bb5e1757ff442a9ac9c99a99",
+        "keys": [],
+        "path": "/tmp/pq2320-census-inputs-g5X0Iz/2.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/build_tessera_census_cache.py::main@161",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 10,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1561,
+        "stdout_sha256": "2ef2c1cd99e488497409bbb5b4a69d04e1ab9e07068d82e87d791550588bdbfb"
+      },
+      "candidate_line": 83,
+      "fixture_provenance": {
+        "action": "4aec58c38e664483865763a66b854fe1efa1b226a3ae1bc6efc028e869d55b65",
+        "index": "/tmp/pq2320-original-inputs-VSMR5f/index.json",
+        "record": 1,
+        "scope": "retained original CPU-fixture behavior, not campaign measurement"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(publish_collection(args.reference, args.output))",
+      "old_source": "json.dumps(publish_collection(args.reference, args.output), sort_keys=True)",
+      "omitted_computation": "Actual publish_collection returned a reader-validated two-reference physical H publication. Producer-return acquisition is omitted at the allowed serializer-input seam; the actual old/new stdout/LF boundary runs.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1561,
+        "stdout_sha256": "2ef2c1cd99e488497409bbb5b4a69d04e1ab9e07068d82e87d791550588bdbfb"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "9dabf45ecb160df683fe1533ac7a86edca91c4dd6cd9d176b6af40a5b9823842",
+        "keys": [],
+        "path": "/tmp/pq2320-original-inputs-VSMR5f/1.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/build_tessera_hessian_collection.py::main@82",
+      "status": "equal"
+    },
+    {
+      "call": 11,
+      "candidate_line": 94,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({'schema': 'prismaquant.mtp_cached_child_handoff.v1',\n                      'manifest': str(output.resolve()),\n                      'manifest_sha256': hashlib.sha256(encoded).hexdigest(),\n                      'assignment_sha256': args.assignment_sha256,\n                      'encoder_source_sha256': next(iter({\n                          record['identity']['encoder_source_sha256']\n                          for record in manifest['units'].values()})),\n                      'units': len(manifest['units']),\n                      'root': str(output.parent.resolve()),\n                      'export_qualified': False, 'serving_qualified': False})",
+      "old_source": "json.dumps({'schema': 'prismaquant.mtp_cached_child_handoff.v1',\n                      'manifest': str(output.resolve()),\n                      'manifest_sha256': hashlib.sha256(encoded).hexdigest(),\n                      'assignment_sha256': args.assignment_sha256,\n                      'encoder_source_sha256': next(iter({\n                          record['identity']['encoder_source_sha256']\n                          for record in manifest['units'].values()})),\n                      'units': len(manifest['units']),\n                      'root': str(output.parent.resolve()),\n                      'export_qualified': False, 'serving_qualified': False},\n                     sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/build_tessera_mtp_cached_units.py::main@93",
+      "status": "input not yet held"
+    },
+    {
+      "call": 12,
+      "candidate_line": 103,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(receipt)",
+      "old_source": "json.dumps(receipt, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/capture_glm_routing_replay.py::main@102",
+      "status": "input not yet held"
+    },
+    {
+      "call": 13,
+      "candidate_line": 105,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"status\": \"complete\", \"boundary\": receipt[\"boundary\"]})",
+      "old_source": "json.dumps({\"status\": \"complete\", \"boundary\": receipt[\"boundary\"]}, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/capture_glm_routing_replay.py::main@104",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 14,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 3537,
+        "stdout_sha256": "06e72342834bc87ecf0684a9ac60692f3b4453718c86092898493bc36b20b734"
+      },
+      "candidate_line": 205,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(spec)",
+      "old_source": "json.dumps(spec, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 3537,
+        "stdout_sha256": "06e72342834bc87ecf0684a9ac60692f3b4453718c86092898493bc36b20b734"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "d9cfc8315f8e707aba26230bd23ca2f7ea55ea4912970eb63c6b3645815c0813",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-e2m1-01/anchor-spec.extension-e2m1-r896.reseal-c92826fa4.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/chain_roll_bench.py::cmd_spec@199",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 15,
+      "candidate": {
+        "bytes": 64,
+        "returned": "'2e476ff98c9786bb973c8804e7dce1aaeb94cc5a80f90f85fe040d0d0ce4e96c'",
+        "returned_type": "str",
+        "sha256": "cc332ce6f7644770ef6132847f9bc73d8ec73f2ab6a46d5f8a6665c23d668766"
+      },
+      "candidate_line": 469,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.sha256(digests)",
+      "old_source": "json.dumps(\n            digests, sort_keys=True)",
+      "omitted_computation": "No GLM roll rerun. Actual retained 256-entry payload digest dictionary from successful action 40becd9a40dbfbb86bb88f2ef51d8f10ba985ddabf0e921b3a044851c6343672, sparky /home/rob/pb-scratch/ws-rd-1162/ab2/out/head-r0.json. Complete source encoding and SHA256 hash executes.",
+      "original": {
+        "bytes": 64,
+        "returned": "'2e476ff98c9786bb973c8804e7dce1aaeb94cc5a80f90f85fe040d0d0ce4e96c'",
+        "returned_type": "str",
+        "sha256": "cc332ce6f7644770ef6132847f9bc73d8ec73f2ab6a46d5f8a6665c23d668766"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "20cd841d4f9b0ae97ffdc2b6c45fbf399e8c8eca5b716a9663e05d1b337f7766",
+        "keys": [
+          "payload_sha256"
+        ],
+        "path": ".pq2320-chain-head-r0.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/chain_roll_bench.py::cmd_child@462",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 16,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1661,
+        "stdout_sha256": "59578dbca1b586f32c0031341851f823badc2258b12808ad66168fc473774acd"
+      },
+      "candidate_line": 17,
+      "fixture_provenance": {
+        "action": "694361eb9834c2e91534ef7e092ba2214c272b2d0e1545933d28f76d5d7739f9",
+        "input_plan": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/plan.json",
+        "input_prepared": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/overlay/prepare/prepared.json",
+        "scope": "actual retained campaign metadata checker, no tensors/model execution"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({'plan_sha256':a.plan_sha256,'prepared_sha256':a.prepared_sha256,'production_act_scales':os.environ['PRISMAQUANT_PROD_ACT_SCALES'],'cells':sum(counts.values()),'counts':[{'format':f,'clip_enabled':c,'cells':v} for (f,c),v in sorted(counts.items())],'mismatches':len(mismatch),'examples':mismatch[:3]})",
+      "old_source": "json.dumps({'plan_sha256':a.plan_sha256,'prepared_sha256':a.prepared_sha256,'production_act_scales':os.environ['PRISMAQUANT_PROD_ACT_SCALES'],'cells':sum(counts.values()),'counts':[{'format':f,'clip_enabled':c,'cells':v} for (f,c),v in sorted(counts.items())],'mismatches':len(mismatch),'examples':mismatch[:3]},sort_keys=True)",
+      "omitted_computation": "Both actual original and candidate read-only checkers executed on the same real held plan, prepared metadata and compact PWC and emitted identical valid stdout for 234278 cells in action 694361eb9834c2e91534ef7e092ba2214c272b2d0e1545933d28f76d5d7739f9. This extra replay omits already-constructed dictionary upstream and executes actual source print/LF.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1661,
+        "stdout_sha256": "59578dbca1b586f32c0031341851f823badc2258b12808ad66168fc473774acd"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "67ca3b4c0ed3652970725d5d69943da2778885f262f90314701ff0bcf5a72beb",
+        "keys": [],
+        "path": "/tmp/pq2320-activation-recorded-input.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/check_campaign_activation_identity.py::<module>@16",
+      "status": "equal"
+    },
+    {
+      "call": 17,
+      "candidate_line": 55,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({'status': 'passed', 'policy': binding, 'served_quantizer': identity,\n                  'old_maxima_unchanged': True, 'a8_qdq_and_identity_unchanged': True,\n                  'groups': observations})",
+      "old_source": "json.dumps({'status': 'passed', 'policy': binding, 'served_quantizer': identity,\n                  'old_maxima_unchanged': True, 'a8_qdq_and_identity_unchanged': True,\n                  'groups': observations}, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/check_stageb_a4_group_quantizer.py::<module>@55",
+      "status": "native runtime prerequisite failed before a valid serialization output",
+      "blocker": "Bare CUDA interpreter lacks registered scaled_fp4_quant; held container could not import the mounted Tessera package. Metadata diagnosis observed PermissionError reading /tessera-pin/src/tessera/__init__.py. Correct container user/access context still needs a new observed native run."
+    },
+    {
+      "call": 18,
+      "candidate_line": 29,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"status\": \"passed\", \"served_quantizer\": identity,\n                  \"shape\": list(x.shape), \"changed_elements\": int((x != y).sum().item()),\n                  \"cuda\": torch.version.cuda, \"device\": torch.cuda.get_device_name()})",
+      "old_source": "json.dumps({\"status\": \"passed\", \"served_quantizer\": identity,\n                  \"shape\": list(x.shape), \"changed_elements\": int((x != y).sum().item()),\n                  \"cuda\": torch.version.cuda, \"device\": torch.cuda.get_device_name()}, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/check_stageb_a4_quantizer.py::<module>@29",
+      "status": "native runtime prerequisite failed before a valid serialization output",
+      "blocker": "Bare CUDA interpreter lacks registered scaled_fp4_quant; held container could not import the mounted Tessera package. Metadata diagnosis observed PermissionError reading /tessera-pin/src/tessera/__init__.py. Correct container user/access context still needs a new observed native run."
+    },
+    {
+      "call": 19,
+      "candidate_line": 69,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(row)",
+      "old_source": "json.dumps(row, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/checkpoint_parse_probe.py::_report@68",
+      "status": "supported by paired actual consumer execution",
+      "actual_consumer_evidence": {
+        "call": 19,
+        "mode": "retained original CPU-fixture behavior, not campaign measurement",
+        "original_action": "14ada06fe804d42807b072bfd065dad3616ea1723df24c89ed16f1bdc0013ab4",
+        "candidate_action": "5e86b3838fcffa9f8de0fa728270865480a61b57e59d2e1f95022bbe668fec05",
+        "fixture_source": "tests/test_spaced_lax_tools_routing_1301.py",
+        "test": "test_checkpoint_parse_reads_identity_and_counts_interned_menu",
+        "observed_fixture_table": "tests/fixtures/spaced_lax_tools_consumers_2320.json",
+        "qualification": "actual old callable on original 99a578e0 and actual candidate callable used the same concrete fixture; final observable checked against recorded original outcome; no recreated serializer/profile echo",
+        "environmental_readings": "RSS 0.5 GiB and clock 100.0 were injected environmental readings, not measured values"
+      }
+    },
+    {
+      "call": 20,
+      "candidate_line": 132,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"step\": \"menu.sample\",\n                              \"units\": args.sample_units, \"occurrences\": occurrences,\n                              \"distinct_menu_strings\": objects,\n                              \"objects_per_occurrence\": round(objects / max(occurrences, 1), 6)})",
+      "old_source": "json.dumps({\"step\": \"menu.sample\",\n                              \"units\": args.sample_units, \"occurrences\": occurrences,\n                              \"distinct_menu_strings\": objects,\n                              \"objects_per_occurrence\": round(objects / max(occurrences, 1), 6)},\n                             sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/checkpoint_parse_probe.py::main@130",
+      "status": "supported by paired actual consumer execution",
+      "actual_consumer_evidence": {
+        "call": 20,
+        "mode": "retained original CPU-fixture behavior, not campaign measurement",
+        "original_action": "14ada06fe804d42807b072bfd065dad3616ea1723df24c89ed16f1bdc0013ab4",
+        "candidate_action": "5e86b3838fcffa9f8de0fa728270865480a61b57e59d2e1f95022bbe668fec05",
+        "fixture_source": "tests/test_spaced_lax_tools_routing_1301.py",
+        "test": "test_checkpoint_parse_reads_identity_and_counts_interned_menu",
+        "observed_fixture_table": "tests/fixtures/spaced_lax_tools_consumers_2320.json",
+        "qualification": "actual old callable on original 99a578e0 and actual candidate callable used the same concrete fixture; final observable checked against recorded original outcome; no recreated serializer/profile echo",
+        "environmental_readings": "RSS 0.5 GiB and clock 100.0 were injected environmental readings, not measured values"
+      }
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 21,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 130,
+        "stdout_sha256": "409881715948f47fdd74e0dcb2b5c80e6a984360a2db9544d1f94c4098109b77"
+      },
+      "candidate_line": 58,
+      "fixture_provenance": {
+        "action": "aa2d0450a8904aaac8cdd251157b49926d190405710fb66235752acda4e4d3d7",
+        "index": "/tmp/pq2320-comparison-inputs-Ct5soi/index.json",
+        "record": 2,
+        "test": "tests/test_stage_a_chain_seed.py::test_the_plane_distance_tool_writes_its_record_once"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(summary)",
+      "old_source": "json.dumps(summary, sort_keys=True)",
+      "omitted_computation": "Actual original checkpoint-distance CLI compared physical tiny checkpoint planes, published its real record once and produced this summary. Source old/new stdout and LF execute; numerical comparison/publication original support is retained, not a campaign measurement.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 130,
+        "stdout_sha256": "409881715948f47fdd74e0dcb2b5c80e6a984360a2db9544d1f94c4098109b77"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "ade274df03ed5323aa72b851bd65e50502a0af3976b3928bc28cb766f110376d",
+        "keys": [],
+        "path": "/tmp/pq2320-comparison-inputs-Ct5soi/2.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/compare_stage_a_checkpoints.py::main@57",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 22,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1522,
+        "stdout_sha256": "28c4639236d51900527bceb7c3ec7ecc26ad9e41ed3108b2549212fc87056f21"
+      },
+      "candidate_line": 75,
+      "fixture_provenance": {
+        "action": "b0255cbba77d1a030ffb3bbb97df39874bee7f0c02b8474ba3dda1bc0e8004f3",
+        "index": "/tmp/pq2320-composition-inputs-o5l2L6/index.json",
+        "record": 1,
+        "scope": "unqualified metadata-only original CPU-fixture behavior; opaque placeholder identifiers are fixture strings, not authentic packages or wire blobs",
+        "test": "tests/test_pq2320_metadata_capture.py::test_actual_metadata_composition_publication"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({'schema': 'prismaquant.cached_unit_composition_handoff.v1',\n                      'manifest': str(output.resolve()),\n                      'manifest_sha256': hashlib.sha256(raw).hexdigest(),\n                      'children': bundle.child_manifests,\n                      'units': len(bundle.units),\n                      'encoder_source_proof_mode': bundle.encoder_source_proof_mode,\n                      'warnings': bundle.warnings,\n                      'export_qualified': False, 'serving_qualified': False})",
+      "old_source": "json.dumps({'schema': 'prismaquant.cached_unit_composition_handoff.v1',\n                      'manifest': str(output.resolve()),\n                      'manifest_sha256': hashlib.sha256(raw).hexdigest(),\n                      'children': bundle.child_manifests,\n                      'units': len(bundle.units),\n                      'encoder_source_proof_mode': bundle.encoder_source_proof_mode,\n                      'warnings': bundle.warnings,\n                      'export_qualified': False, 'serving_qualified': False},\n                     sort_keys=True)",
+      "omitted_computation": "Recorded actual original metadata-only CLI composition and publication from source 99a578e0. Source dictionary construction is outside replay and must be source-reviewed unchanged. No real wire blob, producer-package authentication, encode/decode, campaign or serving qualification. Actual old/new print/LF boundary runs with exact typed recorded object.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1522,
+        "stdout_sha256": "28c4639236d51900527bceb7c3ec7ecc26ad9e41ed3108b2549212fc87056f21"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "fc51341849d30981d220a1edc1645411747d70a6c52dd42f1677f8dd93f592da",
+        "keys": [],
+        "path": "/tmp/pq2320-composition-inputs-o5l2L6/1.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/compose_tessera_cached_units.py::main@75",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 23,
+      "candidate": {
+        "bytes": 3536,
+        "returned_type": "str",
+        "sha256": "bd08c185567205573043f996a6917e707ae9664228866238f67d513f480411b7"
+      },
+      "candidate_line": 2018,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(spec)",
+      "old_source": "json.dumps(spec, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 3536,
+        "returned_type": "str",
+        "sha256": "bd08c185567205573043f996a6917e707ae9664228866238f67d513f480411b7"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "d9cfc8315f8e707aba26230bd23ca2f7ea55ea4912970eb63c6b3645815c0813",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-e2m1-01/anchor-spec.extension-e2m1-r896.reseal-c92826fa4.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/dispatch_joint_quanta.py::_container_wrap@2017",
+      "status": "equal"
+    },
+    {
+      "call": 24,
+      "candidate_line": 3292,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({**event, \"unix\": time.time()})",
+      "old_source": "json.dumps({**event, \"unix\": time.time()}, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/dispatch_joint_quanta.py::_append_state@3290",
+      "status": "supported by paired actual consumer execution",
+      "actual_consumer_evidence": {
+        "call": 24,
+        "mode": "retained original CPU-fixture behavior, not campaign measurement",
+        "original_action": "14ada06fe804d42807b072bfd065dad3616ea1723df24c89ed16f1bdc0013ab4",
+        "candidate_action": "5e86b3838fcffa9f8de0fa728270865480a61b57e59d2e1f95022bbe668fec05",
+        "fixture_source": "tests/test_spaced_lax_tools_routing_1301.py",
+        "test": "test_state_append_preserves_existing_bytes_and_nonfinite_event",
+        "observed_fixture_table": "tests/fixtures/spaced_lax_tools_consumers_2320.json",
+        "qualification": "actual old callable on original 99a578e0 and actual candidate callable used the same concrete fixture; final observable checked against recorded original outcome; no recreated serializer/profile echo",
+        "environmental_readings": "clock 1234.5 was an injected environmental reading, not campaign timing"
+      }
+    },
+    {
+      "call": 25,
+      "candidate_line": 4152,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"published\": row.get(\"quantum_id\", \"stage-a\"),\n                              \"action_key\": answer[\"action_key\"],\n                              \"status\": answer.get(\"status\", \"\")})",
+      "old_source": "json.dumps({\"published\": row.get(\"quantum_id\", \"stage-a\"),\n                              \"action_key\": answer[\"action_key\"],\n                              \"status\": answer.get(\"status\", \"\")},\n                             sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/dispatch_joint_quanta.py::_dispatch@4149",
+      "status": "input not yet held"
+    },
+    {
+      "call": 26,
+      "candidate_line": 4159,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"band_serial_pending\": waiting[\"quantum_id\"],\n                          \"reason\": waiting[\"reason\"]})",
+      "old_source": "json.dumps({\"band_serial_pending\": waiting[\"quantum_id\"],\n                          \"reason\": waiting[\"reason\"]}, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/dispatch_joint_quanta.py::_dispatch@4157",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 27,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 49,
+        "stdout_sha256": "253037b450150ee47574db8c94287e77e607868036594b594ee03f95768417e8"
+      },
+      "candidate_line": 4162,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"published\": [], \"note\": \"nothing publishable\"})",
+      "old_source": "json.dumps({\"published\": [], \"note\": \"nothing publishable\"},\n                         sort_keys=True)",
+      "omitted_computation": "The empty-dispatch decision is outside this boundary; the actual source literal, print and LF are executed without an invented external input.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 49,
+        "stdout_sha256": "253037b450150ee47574db8c94287e77e607868036594b594ee03f95768417e8"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "path": "tools/dispatch_joint_quanta.py",
+        "source": "literal argument in the actual original/candidate boundary"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/dispatch_joint_quanta.py::_dispatch@4160",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 28,
+      "candidate": {
+        "bytes": 2204,
+        "returned_type": "str",
+        "sha256": "72bca65090078b424c16b3faf01933887a92086c86c20f0ff62780166ad0f859"
+      },
+      "candidate_line": 1680,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(container_spec)",
+      "old_source": "json.dumps(container_spec, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2204,
+        "returned_type": "str",
+        "sha256": "72bca65090078b424c16b3faf01933887a92086c86c20f0ff62780166ad0f859"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "d9cfc8315f8e707aba26230bd23ca2f7ea55ea4912970eb63c6b3645815c0813",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-e2m1-01/anchor-spec.extension-e2m1-r896.reseal-c92826fa4.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/dispatch_tessera_campaign.py::_row@1679",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 29,
+      "candidate": {
+        "bytes": 3536,
+        "returned_type": "str",
+        "sha256": "bd08c185567205573043f996a6917e707ae9664228866238f67d513f480411b7"
+      },
+      "candidate_line": 2806,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(container_spec)",
+      "old_source": "json.dumps(container_spec, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 3536,
+        "returned_type": "str",
+        "sha256": "bd08c185567205573043f996a6917e707ae9664228866238f67d513f480411b7"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "d9cfc8315f8e707aba26230bd23ca2f7ea55ea4912970eb63c6b3645815c0813",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-e2m1-01/anchor-spec.extension-e2m1-r896.reseal-c92826fa4.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/dispatch_tessera_campaign.py::_pbrun_argv@2804",
+      "status": "equal"
+    },
+    {
+      "call": 30,
+      "candidate_line": 68,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(summary)",
+      "old_source": "json.dumps(summary, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/expand_probe_onto_tessera_census.py::main@68",
+      "status": "input not yet held"
+    },
+    {
+      "call": 31,
+      "candidate_line": 124,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(arm)",
+      "old_source": "json.dumps(arm, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/measure_wire_rehash_readers.py::main@118",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 32,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 33197,
+        "stdout_sha256": "62ee9c1c280c56c8dc79958580f5dd6bb727137c0b3c27eba8b22f7c706178b2"
+      },
+      "candidate_line": 263,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(result)",
+      "old_source": "json.dumps(result, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 33197,
+        "stdout_sha256": "62ee9c1c280c56c8dc79958580f5dd6bb727137c0b3c27eba8b22f7c706178b2"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json-log",
+        "input_metadata_sha256": "509213d29bc235a96b551f72dca01b04883599973cadd2562796e9e80df665d7",
+        "keys": [],
+        "path": "/mnt/shared/agents-ws-qdq/all-sparklina-1790292081/bench.log"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/nvfp4_served_qdq_bench.py::main@263",
+      "status": "equal"
+    },
+    {
+      "call": 33,
+      "candidate_line": 32,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(item)",
+      "old_source": "json.dumps(item, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/pq282_equality/recheck_refusal_order.py::<module>@31",
+      "status": "input not yet held"
+    },
+    {
+      "call": 34,
+      "candidate_line": 221,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(report)",
+      "old_source": "json.dumps(report, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/profile_stage_b_head.py::main@220",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 35,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 881,
+        "stdout_sha256": "dd68341d7c5e29a23826bddc3f74708e5b6a3971d9cc862b73f7867fc3fbb9fd"
+      },
+      "candidate_line": 27,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({k:v for k,v in result.items() if k not in ('source_digest_receipt','fresh_nonshard_hashes')})",
+      "old_source": "json.dumps({k:v for k,v in result.items() if k not in ('source_digest_receipt','fresh_nonshard_hashes')},sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 881,
+        "stdout_sha256": "dd68341d7c5e29a23826bddc3f74708e5b6a3971d9cc862b73f7867fc3fbb9fd"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "98349bbb5cf94ef0c71ebf9c851d80febeef89662cec8e061c9b6558ec94397d",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/cpu-export-codex-20260922/source-adoption-readback.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/prove_glm_source_adoption.py::<module>@26",
+      "status": "equal"
+    },
+    {
+      "call": 36,
+      "candidate_line": 209,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.encoded([list(key), list(tensor.shape), str(tensor.dtype),\n                         {k: v for k, v in file_receipt.items() if k != 'path'},\n                         identity])",
+      "old_source": "json.dumps(\n                        [list(key), list(tensor.shape), str(tensor.dtype),\n                         {k: v for k, v in file_receipt.items() if k != 'path'},\n                         identity], sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/pwc_window_load_bench.py::run_window@208",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 37,
+      "candidate": {
+        "bytes": 255,
+        "returned": "'{\"checkpoints/manifest.json\": \"c4b0597832ca6008fceaa2733bf5f7e5bbb9f7690ddb47ee1bd96ae05df19863\", \"checkpoints/units/c5a93f1281ce675641c6413189248d18ffaeaed3112833a7ef9d7a2c293a2bce.pkl\": \"a1b2d966274810251176ee8567a2caf0cfeb064e9618c3986c08a96e03f06690\"}'",
+        "returned_type": "str",
+        "sha256": "f0761d95ace48c1ebe5da3c6c9cbba2bd19a6b70811fdca50ce70a62aa4a4d29"
+      },
+      "candidate_line": 473,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(q['files'])",
+      "old_source": "json.dumps(q['files'], sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 255,
+        "returned": "'{\"checkpoints/manifest.json\": \"c4b0597832ca6008fceaa2733bf5f7e5bbb9f7690ddb47ee1bd96ae05df19863\", \"checkpoints/units/c5a93f1281ce675641c6413189248d18ffaeaed3112833a7ef9d7a2c293a2bce.pkl\": \"a1b2d966274810251176ee8567a2caf0cfeb064e9618c3986c08a96e03f06690\"}'",
+        "returned_type": "str",
+        "sha256": "f0761d95ace48c1ebe5da3c6c9cbba2bd19a6b70811fdca50ce70a62aa4a4d29"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "64ceb8aba1e60af802fe62f5a06891f9f892ae35f3309c65b4a2455d69991ad8",
+        "keys": [],
+        "path": "/mnt/shared/prismaquant-measurements/ws-prefetch-1210/identity2/quantum-base.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/pwc_window_load_bench.py::_quantum_identity@472",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 38,
+      "candidate": {
+        "publication_bytes": 5550,
+        "publication_sha256": "cfb299f55f81c10b741ef8cefa598c30104bec180f2765da62865c8f3e0c7ed4",
+        "returned": "5550",
+        "returned_type": "int"
+      },
+      "candidate_line": 87,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(manifest)",
+      "old_source": "json.dumps(manifest,sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "publication_bytes": 5550,
+        "publication_sha256": "cfb299f55f81c10b741ef8cefa598c30104bec180f2765da62865c8f3e0c7ed4",
+        "returned": "5550",
+        "returned_type": "int"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "cfb299f55f81c10b741ef8cefa598c30104bec180f2765da62865c8f3e0c7ed4",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/t4-reuse-20260922/pilot24-results.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/qualify_t4_overlay.py::main@86",
+      "status": "equal"
+    },
+    {
+      "call": 39,
+      "candidate_line": 89,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({'residency_report':residency_report()})",
+      "old_source": "json.dumps({'residency_report':residency_report()},sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/qualify_t4_overlay.py::main@88",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 40,
+      "candidate": {
+        "bytes": 2333836,
+        "returned_type": "str",
+        "sha256": "e0a783b84bcc76f77b1a04fb69060d5f00be28639474649b40987bd141545a1e"
+      },
+      "candidate_line": 275,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(old_body)",
+      "old_source": "json.dumps(old_body, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2333836,
+        "returned_type": "str",
+        "sha256": "e0a783b84bcc76f77b1a04fb69060d5f00be28639474649b40987bd141545a1e"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/meta-045-fae344d/records/layer-040.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/regenerate_joint_quanta.py::_check_authorized_diff@274",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 41,
+      "candidate": {
+        "bytes": 2333836,
+        "returned_type": "str",
+        "sha256": "e0a783b84bcc76f77b1a04fb69060d5f00be28639474649b40987bd141545a1e"
+      },
+      "candidate_line": 275,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(new_body)",
+      "old_source": "json.dumps(new_body, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2333836,
+        "returned_type": "str",
+        "sha256": "e0a783b84bcc76f77b1a04fb69060d5f00be28639474649b40987bd141545a1e"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/meta-045-fae344d/records/layer-040.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/regenerate_joint_quanta.py::_check_authorized_diff@274",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 42,
+      "candidate": {
+        "bytes": 2334572,
+        "returned_type": "str",
+        "sha256": "33eb72fe59c23586f8866da292ab32fb08181d2fb17f53f6f9a0a70cac2be5a6"
+      },
+      "candidate_line": 501,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(old_body)",
+      "old_source": "json.dumps(old_body, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2334572,
+        "returned_type": "str",
+        "sha256": "33eb72fe59c23586f8866da292ab32fb08181d2fb17f53f6f9a0a70cac2be5a6"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/meta-045-fae344d/records/layer-040.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/regenerate_joint_quanta.py::_check_authorized_metadata_diff@499",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 43,
+      "candidate": {
+        "bytes": 2334572,
+        "returned_type": "str",
+        "sha256": "33eb72fe59c23586f8866da292ab32fb08181d2fb17f53f6f9a0a70cac2be5a6"
+      },
+      "candidate_line": 501,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(new_body)",
+      "old_source": "json.dumps(new_body,\n                                                         sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2334572,
+        "returned_type": "str",
+        "sha256": "33eb72fe59c23586f8866da292ab32fb08181d2fb17f53f6f9a0a70cac2be5a6"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/meta-045-fae344d/records/layer-040.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/regenerate_joint_quanta.py::_check_authorized_metadata_diff@499",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 44,
+      "candidate": {
+        "bytes": 2335515,
+        "returned_type": "str",
+        "sha256": "4a0bb93878318ec2b58ef7c3718c21191df9d39afa62c78e05dafc2fa6b516c4"
+      },
+      "candidate_line": 605,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(old_body)",
+      "old_source": "json.dumps(old_body, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2335515,
+        "returned_type": "str",
+        "sha256": "4a0bb93878318ec2b58ef7c3718c21191df9d39afa62c78e05dafc2fa6b516c4"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/meta-045-fae344d/records/layer-040.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/regenerate_joint_quanta.py::_compare_existing_generation@603",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 45,
+      "candidate": {
+        "bytes": 2335515,
+        "returned_type": "str",
+        "sha256": "4a0bb93878318ec2b58ef7c3718c21191df9d39afa62c78e05dafc2fa6b516c4"
+      },
+      "candidate_line": 605,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(new_body)",
+      "old_source": "json.dumps(\n                new_body, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2335515,
+        "returned_type": "str",
+        "sha256": "4a0bb93878318ec2b58ef7c3718c21191df9d39afa62c78e05dafc2fa6b516c4"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/meta-045-fae344d/records/layer-040.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/regenerate_joint_quanta.py::_compare_existing_generation@603",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 46,
+      "candidate": {
+        "bytes": 2335515,
+        "returned_type": "str",
+        "sha256": "4a0bb93878318ec2b58ef7c3718c21191df9d39afa62c78e05dafc2fa6b516c4"
+      },
+      "candidate_line": 1060,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(stored)",
+      "old_source": "json.dumps(stored, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2335515,
+        "returned_type": "str",
+        "sha256": "4a0bb93878318ec2b58ef7c3718c21191df9d39afa62c78e05dafc2fa6b516c4"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/meta-045-fae344d/records/layer-040.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/regenerate_joint_quanta.py::main@1058",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 47,
+      "candidate": {
+        "bytes": 2335515,
+        "returned_type": "str",
+        "sha256": "4a0bb93878318ec2b58ef7c3718c21191df9d39afa62c78e05dafc2fa6b516c4"
+      },
+      "candidate_line": 1060,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(record)",
+      "old_source": "json.dumps(\n                    record, sort_keys=True)",
+      "omitted_computation": "Original producer work preceding the retained boundary inputs; no producer rerun",
+      "original": {
+        "bytes": 2335515,
+        "returned_type": "str",
+        "sha256": "4a0bb93878318ec2b58ef7c3718c21191df9d39afa62c78e05dafc2fa6b516c4"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "json",
+        "input_metadata_sha256": "f179640dea63c585762243507a6c656b34d50f366cf4eecd6c03e09725b18348",
+        "keys": [],
+        "path": "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/meta-045-fae344d/records/layer-040.json"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/regenerate_joint_quanta.py::main@1058",
+      "status": "equal"
+    },
+    {
+      "call": 48,
+      "candidate_line": 439,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(report)",
+      "old_source": "json.dumps(report, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/render_window_bench.py::cmd_analyze@434",
+      "status": "supported by paired actual consumer execution",
+      "actual_consumer_evidence": {
+        "call": 48,
+        "mode": "retained original CPU-fixture behavior, not campaign measurement",
+        "original_action": "14ada06fe804d42807b072bfd065dad3616ea1723df24c89ed16f1bdc0013ab4",
+        "candidate_action": "5e86b3838fcffa9f8de0fa728270865480a61b57e59d2e1f95022bbe668fec05",
+        "fixture_source": "tests/test_spaced_lax_tools_routing_1301.py",
+        "test": "test_render_analysis_publishes_reductions_and_exit_status[equal]",
+        "observed_fixture_table": "tests/fixtures/spaced_lax_tools_consumers_2320.json",
+        "qualification": "actual old callable on original 99a578e0 and actual candidate callable used the same concrete fixture; final observable checked against recorded original outcome; no recreated serializer/profile echo",
+        "environmental_readings": "fixture run values, not measured campaign timing"
+      }
+    },
+    {
+      "call": 49,
+      "candidate_line": 183,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"output\": str(output), \"sha256\": hashlib.sha256(raw).hexdigest(),\n                      \"body_sha256\": args.expect_body_sha256,\n                      \"mtp_cost_sha256\": args.expect_cost_sha256,\n                      \"selected_mtp_wires\": len(result[\"__prismaquant__\"][\"mtp_selection\"][\n                          \"mtp_expert_wires\"]),\n                      \"rung\": record[\"rung\"], \"resident_bytes\": record[\"resident_bytes\"],\n                      \"E\": record[\"E\"],\n                      \"whole_artifact_payload_bytes\": payload_bytes,\n                      \"whole_artifact_reserve_bytes\": reserve_bytes,\n                      \"whole_artifact_budget_bytes\": args.whole_artifact_budget_bytes})",
+      "old_source": "json.dumps({\"output\": str(output), \"sha256\": hashlib.sha256(raw).hexdigest(),\n                      \"body_sha256\": args.expect_body_sha256,\n                      \"mtp_cost_sha256\": args.expect_cost_sha256,\n                      \"selected_mtp_wires\": len(result[\"__prismaquant__\"][\"mtp_selection\"][\n                          \"mtp_expert_wires\"]),\n                      \"rung\": record[\"rung\"], \"resident_bytes\": record[\"resident_bytes\"],\n                      \"E\": record[\"E\"],\n                      \"whole_artifact_payload_bytes\": payload_bytes,\n                      \"whole_artifact_reserve_bytes\": reserve_bytes,\n                      \"whole_artifact_budget_bytes\": args.whole_artifact_budget_bytes},\n                     sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/reselect_mtp_fixed.py::main@182",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 50,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 12711,
+        "stdout_sha256": "1c067222a5128366ea07a49b09553af3bc3c3fdd357a46efc3ac5fdc51d0436b"
+      },
+      "candidate_line": 46,
+      "fixture_provenance": {
+        "action": "4aec58c38e664483865763a66b854fe1efa1b226a3ae1bc6efc028e869d55b65",
+        "index": "/tmp/pq2320-original-inputs-VSMR5f/index.json",
+        "record": 2,
+        "scope": "retained original CPU-fixture behavior, not campaign measurement"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\n                \"status\": \"planned\", \"record\": plan.record,\n                \"batches\": [row[\"batch_id\"] for *_, row in plan.batches],\n                \"untouched_batches\": plan.untouched,\n                \"bindings_read\": plan.bindings_read})",
+      "old_source": "json.dumps({\n                \"status\": \"planned\", \"record\": plan.record,\n                \"batches\": [row[\"batch_id\"] for *_, row in plan.batches],\n                \"untouched_batches\": plan.untouched,\n                \"bindings_read\": plan.bindings_read}, sort_keys=True)",
+      "omitted_computation": "Actual original retirement main constructed this dry-run dictionary from the real small fixture plan. Argument construction is outside this boundary replay and must be independently source-reviewed unchanged; actual old/new print/LF runs. No campaign containment claim.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 12711,
+        "stdout_sha256": "1c067222a5128366ea07a49b09553af3bc3c3fdd357a46efc3ac5fdc51d0436b"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "7c6ec2dda8703208804be9020bd07e3389a78ee24b4e35d85484ccd6f8e81244",
+        "keys": [],
+        "path": "/tmp/pq2320-original-inputs-VSMR5f/2.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/retire_stage_a_run.py::main@46",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 51,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 455,
+        "stdout_sha256": "b07eee04a2c568f7858f025328e7717659d174ca0741d1fcf45f2403b6a25827"
+      },
+      "candidate_line": 56,
+      "fixture_provenance": {
+        "action": "4aec58c38e664483865763a66b854fe1efa1b226a3ae1bc6efc028e869d55b65",
+        "index": "/tmp/pq2320-original-inputs-VSMR5f/index.json",
+        "record": 3,
+        "scope": "retained original CPU-fixture behavior, not campaign measurement"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"status\": \"retired\", **report})",
+      "old_source": "json.dumps({\"status\": \"retired\", **report}, sort_keys=True)",
+      "omitted_computation": "Actual original retirement main constructed this completed small-fixture report. Argument construction is outside this boundary replay and must be independently source-reviewed unchanged; actual old/new print/LF runs. No campaign containment claim.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 455,
+        "stdout_sha256": "b07eee04a2c568f7858f025328e7717659d174ca0741d1fcf45f2403b6a25827"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "e3dfbd04ebeed6cbde33ecca19f11ea352369f43453b58c907db3d9c40ef4e7d",
+        "keys": [],
+        "path": "/tmp/pq2320-original-inputs-VSMR5f/3.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/retire_stage_a_run.py::main@56",
+      "status": "equal"
+    },
+    {
+      "call": 52,
+      "candidate_line": 45,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text({\"roster\": str(out.resolve()), \"roster_sha256\": sha,\n                      \"identity_sha256\": roster[\"identity_sha256\"],\n                      \"units\": len(roster[\"units\"]),\n                      \"checkpoint_manifest_sha256\": roster[\"checkpoint_manifest\"][\"sha256\"]})",
+      "old_source": "json.dumps({\"roster\": str(out.resolve()), \"roster_sha256\": sha,\n                      \"identity_sha256\": roster[\"identity_sha256\"],\n                      \"units\": len(roster[\"units\"]),\n                      \"checkpoint_manifest_sha256\": roster[\"checkpoint_manifest\"][\"sha256\"]},\n                     sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/seal_tessera_census_identity.py::main@44",
+      "status": "input not yet held"
+    },
+    {
+      "argument_construction_executed": true,
+      "call": 53,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1162,
+        "stdout_sha256": "228a4c4592eeb820f35e142a310e5596461ac726f3fd58bf9c75b9e32a1221e3"
+      },
+      "candidate_line": 274,
+      "fixture_provenance": {
+        "action": "a6b0016f7500a8a13ab28fbeafd6ed97da076adbaa55b6b7e90c33fd019b7dcb",
+        "index": "/tmp/pq2320-preparation-inputs-L3iUB0/index.json",
+        "record": 2,
+        "test": "tests/test_stage_b_prep_io_1070.py::test_the_manifest_declares_every_file_the_generator_opens"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(submission)",
+      "old_source": "json.dumps(submission, sort_keys=True)",
+      "omitted_computation": "Actual original preparation compiler generated and persisted this request from its small physical fixture; the real old/new stdout/LF runs. No live queue submission, campaign or serving claim.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 1162,
+        "stdout_sha256": "228a4c4592eeb820f35e142a310e5596461ac726f3fd58bf9c75b9e32a1221e3"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "1ef15fdc50f5f39f550b5fcee2332b21de4cbb4c2764478cf5971f0c2ee41af4",
+        "keys": [],
+        "path": "/tmp/pq2320-preparation-inputs-L3iUB0/2.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/stage_b_preparation_submission.py::main@273",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 54,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 225,
+        "stdout_sha256": "537988ac85406ee7abe98dd26e1b1da0fd1d515c2d7ab0c33b04331c22e5ff7f"
+      },
+      "candidate_line": 80,
+      "fixture_provenance": {
+        "action": "03a4089dc79bac1c869499c3cc305499e8d0e8b8bb2b2178ecb55bff245ada2b",
+        "index": "/tmp/pq2320-recovery-inputs-aixXsG/index.json",
+        "record": 2,
+        "scope": "retained original small CPU-fixture behavior; SDK containment/context doubles are not campaign proof",
+        "test": "tests/test_joint_forward_resume.py::test_two_hop_chained_recovery_equals_uninterrupted"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(inspect_owner(spec, args.spool_directory, sdk=_sdk()))",
+      "old_source": "json.dumps(inspect_owner(spec, args.spool_directory, sdk=_sdk()),\n                             sort_keys=True)",
+      "omitted_computation": "The actual original small two-hop fixture called the real recovery/inspection implementation and produced this return object. Producer-return acquisition and branch argument construction are omitted at the explicit serializer-input seam and source-reviewed, not claimed exercised by this replay. Actual old/new stdout/LF is executed. No real campaign containment, large source or owner retirement qualification.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 225,
+        "stdout_sha256": "537988ac85406ee7abe98dd26e1b1da0fd1d515c2d7ab0c33b04331c22e5ff7f"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "083c324a679cd214fcc8d659458c48b9c22f84cb16d60f159977367cd625d552",
+        "keys": [],
+        "path": "/tmp/pq2320-recovery-inputs-aixXsG/2.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/stagea_forward_recovery.py::main@80",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 55,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 219,
+        "stdout_sha256": "bcf46f87cf5f98a865142d3a27ebc7fcc4261db2c2163f1e3e00844c41236fc4"
+      },
+      "candidate_line": 84,
+      "fixture_provenance": {
+        "action": "03a4089dc79bac1c869499c3cc305499e8d0e8b8bb2b2178ecb55bff245ada2b",
+        "index": "/tmp/pq2320-recovery-inputs-aixXsG/index.json",
+        "record": 1,
+        "scope": "retained original small CPU-fixture behavior; SDK containment/context doubles are not campaign proof",
+        "test": "tests/test_joint_forward_resume.py::test_two_hop_chained_recovery_equals_uninterrupted"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(build_forward_recovery(\n            imported=imported, owner_request=args.owner_request,\n            spool_directory=args.spool_directory, output=args.output,\n            bind_current_implementation=args.bind_current_implementation,\n            frontier=args.frontier))",
+      "old_source": "json.dumps(build_forward_recovery(\n            imported=imported, owner_request=args.owner_request,\n            spool_directory=args.spool_directory, output=args.output,\n            bind_current_implementation=args.bind_current_implementation,\n            frontier=args.frontier), sort_keys=True)",
+      "omitted_computation": "The actual original small two-hop fixture called the real recovery/inspection implementation and produced this return object. Producer-return acquisition and branch argument construction are omitted at the explicit serializer-input seam and source-reviewed, not claimed exercised by this replay. Actual old/new stdout/LF is executed. No real campaign containment, large source or owner retirement qualification.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 219,
+        "stdout_sha256": "bcf46f87cf5f98a865142d3a27ebc7fcc4261db2c2163f1e3e00844c41236fc4"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "238d0cc86ba31f4524e70e7de930c1b8a7f343f19a9c35e01d8afaae9e21fe91",
+        "keys": [],
+        "path": "/tmp/pq2320-recovery-inputs-aixXsG/1.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/stagea_forward_recovery.py::main@85",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 56,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 210,
+        "stdout_sha256": "9ff25bf9b93c216e974d2f00b0d580b7fd28e536d7dd4dce07698fb41deaff87"
+      },
+      "candidate_line": 94,
+      "fixture_provenance": {
+        "action": "03a4089dc79bac1c869499c3cc305499e8d0e8b8bb2b2178ecb55bff245ada2b",
+        "index": "/tmp/pq2320-recovery-inputs-aixXsG/index.json",
+        "record": 0,
+        "scope": "retained original small CPU-fixture behavior; SDK containment/context doubles are not campaign proof",
+        "test": "tests/test_joint_forward_resume.py::test_two_hop_chained_recovery_equals_uninterrupted"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(build_forward_recovery(specification=spec,\n            spool_directory=args.spool_directory, output=args.output,\n            bind_current_implementation=args.bind_current_implementation,\n            frontier=args.frontier))",
+      "old_source": "json.dumps(build_forward_recovery(specification=spec,\n            spool_directory=args.spool_directory, output=args.output,\n            bind_current_implementation=args.bind_current_implementation,\n            frontier=args.frontier), sort_keys=True)",
+      "omitted_computation": "The actual original small two-hop fixture called the real recovery/inspection implementation and produced this return object. Producer-return acquisition and branch argument construction are omitted at the explicit serializer-input seam and source-reviewed, not claimed exercised by this replay. Actual old/new stdout/LF is executed. No real campaign containment, large source or owner retirement qualification.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 210,
+        "stdout_sha256": "9ff25bf9b93c216e974d2f00b0d580b7fd28e536d7dd4dce07698fb41deaff87"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "d261c3d3434f68e2f618af5d3cdcfbdeba088663fae6edf85938d3feacd27e30",
+        "keys": [],
+        "path": "/tmp/pq2320-recovery-inputs-aixXsG/0.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/stagea_forward_recovery.py::main@95",
+      "status": "equal"
+    },
+    {
+      "argument_construction_executed": false,
+      "call": 57,
+      "candidate": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 225,
+        "stdout_sha256": "537988ac85406ee7abe98dd26e1b1da0fd1d515c2d7ab0c33b04331c22e5ff7f"
+      },
+      "candidate_line": 99,
+      "fixture_provenance": {
+        "action": "03a4089dc79bac1c869499c3cc305499e8d0e8b8bb2b2178ecb55bff245ada2b",
+        "index": "/tmp/pq2320-recovery-inputs-aixXsG/index.json",
+        "record": 2,
+        "scope": "retained original small CPU-fixture behavior; SDK containment/context doubles are not campaign proof",
+        "test": "tests/test_joint_forward_resume.py::test_two_hop_chained_recovery_equals_uninterrupted"
+      },
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(inspect_owner(spec, args.spool_directory, sdk=_sdk()))",
+      "old_source": "json.dumps(inspect_owner(spec, args.spool_directory, sdk=_sdk()), sort_keys=True)",
+      "omitted_computation": "The actual original small two-hop fixture called the real recovery/inspection implementation and produced this return object. Producer-return acquisition and branch argument construction are omitted at the explicit serializer-input seam and source-reviewed, not claimed exercised by this replay. Actual old/new stdout/LF is executed. No real campaign containment, large source or owner retirement qualification.",
+      "original": {
+        "returned": "None",
+        "returned_type": "NoneType",
+        "stdout_bytes": 225,
+        "stdout_sha256": "537988ac85406ee7abe98dd26e1b1da0fd1d515c2d7ab0c33b04331c22e5ff7f"
+      },
+      "original_commit": "99a578e071b",
+      "retained_input": {
+        "format": "pickle",
+        "input_metadata_sha256": "083c324a679cd214fcc8d659458c48b9c22f84cb16d60f159977367cd625d552",
+        "keys": [],
+        "path": "/tmp/pq2320-recovery-inputs-aixXsG/2.pickle"
+      },
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/stagea_forward_recovery.py::main@100",
+      "status": "equal"
+    },
+    {
+      "call": 58,
+      "candidate_line": 889,
+      "new_source": "DIRECT_ASCII_SPACED_LAX.text(result)",
+      "old_source": "json.dumps(result, sort_keys=True)",
+      "omitted_computation": "no boundary executed",
+      "original_commit": "99a578e071b",
+      "scope": "serialization boundary, not producer rerun",
+      "site": "tools/staged_exact_read_bench.py::child_main@888",
+      "status": "input not yet held"
+    }
+  ],
+  "scope": "Observed paired boundary/consumer evidence, not whole-producer qualification or approval",
+  "combined_supported_calls": 39,
+  "complete": false,
+  "boundary_replay_action": "ec444a4139b38e28620e551746bed7ba39f38fdeb9ae6e8a1572c9aaf4c0e9eb",
+  "remaining": [
+    {
+      "call": 2,
+      "site": "tools/band_serial_handoff_live_pair.py::main@464",
+      "status": "retained original input available; paired replay not executed"
+    },
+    {
+      "call": 3,
+      "site": "tools/band_serial_handoff_live_pair.py::main@467",
+      "status": "input not yet held"
+    },
+    {
+      "call": 6,
+      "site": "tools/build_stagea_forward_recovery_package.py::main@202",
+      "status": "input not yet held"
+    },
+    {
+      "call": 11,
+      "site": "tools/build_tessera_mtp_cached_units.py::main@93",
+      "status": "input not yet held"
+    },
+    {
+      "call": 12,
+      "site": "tools/capture_glm_routing_replay.py::main@102",
+      "status": "input not yet held"
+    },
+    {
+      "call": 13,
+      "site": "tools/capture_glm_routing_replay.py::main@104",
+      "status": "input not yet held"
+    },
+    {
+      "call": 17,
+      "site": "tools/check_stageb_a4_group_quantizer.py::<module>@55",
+      "status": "native runtime prerequisite failed before a valid serialization output"
+    },
+    {
+      "call": 18,
+      "site": "tools/check_stageb_a4_quantizer.py::<module>@29",
+      "status": "native runtime prerequisite failed before a valid serialization output"
+    },
+    {
+      "call": 25,
+      "site": "tools/dispatch_joint_quanta.py::_dispatch@4149",
+      "status": "input not yet held"
+    },
+    {
+      "call": 26,
+      "site": "tools/dispatch_joint_quanta.py::_dispatch@4157",
+      "status": "input not yet held"
+    },
+    {
+      "call": 30,
+      "site": "tools/expand_probe_onto_tessera_census.py::main@68",
+      "status": "input not yet held"
+    },
+    {
+      "call": 31,
+      "site": "tools/measure_wire_rehash_readers.py::main@118",
+      "status": "input not yet held"
+    },
+    {
+      "call": 33,
+      "site": "tools/pq282_equality/recheck_refusal_order.py::<module>@31",
+      "status": "input not yet held"
+    },
+    {
+      "call": 34,
+      "site": "tools/profile_stage_b_head.py::main@220",
+      "status": "input not yet held"
+    },
+    {
+      "call": 36,
+      "site": "tools/pwc_window_load_bench.py::run_window@208",
+      "status": "input not yet held"
+    },
+    {
+      "call": 39,
+      "site": "tools/qualify_t4_overlay.py::main@88",
+      "status": "input not yet held"
+    },
+    {
+      "call": 49,
+      "site": "tools/reselect_mtp_fixed.py::main@182",
+      "status": "input not yet held"
+    },
+    {
+      "call": 52,
+      "site": "tools/seal_tessera_census_identity.py::main@44",
+      "status": "input not yet held"
+    },
+    {
+      "call": 58,
+      "site": "tools/staged_exact_read_bench.py::child_main@888",
+      "status": "input not yet held"
+    }
+  ],
+  "approved": false
+}

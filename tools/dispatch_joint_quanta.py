@@ -1951,6 +1951,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
     to read it first (the quantum row derives its load grace from the
     spec's staged wait); the wrapper then seals that parse and reads nothing.
     """
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     spec = (json.loads(Path(spec_path).read_text()) if spec is None
             else json.loads(json.dumps(spec)))
     if spill_bound is not None:
@@ -2015,7 +2016,7 @@ def _container_wrap(spec_path: Path, payload: list[str], *,
                 or float(spec.get("env", {}).get("PRISMAQUANT_MAX_GPU_MEM_GB", -1)) * 1024 ** 3 != limits["gpu_bytes"]):
             raise DispatchRefused("container host/device envelope differs from the bound Stage B resource policy")
     argv = ["python3", "-m", "tools.tessera_campaign_container",
-            "--spec", json.dumps(spec, sort_keys=True),
+            "--spec", DIRECT_ASCII_SPACED_LAX.text(spec),
             "--", *payload]
     return argv, admission_image_reference(spec, portable_refusal=DispatchRefused)
 
@@ -3287,8 +3288,9 @@ def _read_state(state_path: Path) -> list[dict]:
 
 
 def _append_state(state_path: Path, event: dict) -> None:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    line = (json.dumps({**event, "unix": time.time()}, sort_keys=True) + "\n").encode()
+    line = (DIRECT_ASCII_SPACED_LAX.text({**event, "unix": time.time()}) + "\n").encode()
     with open(state_path, "ab") as handle:
         handle.write(line)
 
@@ -3876,6 +3878,7 @@ def main(argv: list[str] | None = None, _gateway: Gateway | None = None,
 
 def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
     """Run ``main`` on parsed ``args``; ``report`` receives the dry-run plan."""
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     gateway = _gateway if _gateway is not None else Gateway()
     if args.spec:
         global SPEC_PATH
@@ -4158,8 +4161,7 @@ def _dispatch(args, *, _gateway: Gateway | None, _coverage, report) -> int:
         print(json.dumps({"band_serial_pending": waiting["quantum_id"],
                           "reason": waiting["reason"]}, sort_keys=True))
     if not rows:
-        print(json.dumps({"published": [], "note": "nothing publishable"},
-                         sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text({"published": [], "note": "nothing publishable"}))
     return 0
 
 

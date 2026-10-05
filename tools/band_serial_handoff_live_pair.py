@@ -460,8 +460,9 @@ def main(argv=None) -> int:
     p.add_argument("--handoff", required=True)
     p.add_argument("--handoff-sha256", required=True)
     args = ap.parse_args(argv)
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     if args.command == "prepare":
-        print(json.dumps(prepare(args.root, args.tier), sort_keys=True))
+        print(DIRECT_ASCII_SPACED_LAX.text(prepare(args.root, args.tier)))
         return 0
     if args.command == "derive":
         print(json.dumps(derive(args.root, args.handoff, args.handoff_sha256),

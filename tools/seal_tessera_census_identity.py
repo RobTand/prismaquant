@@ -21,6 +21,7 @@ from prismaquant.cluster_campaign import _atomic_write_new_bytes
 from prismaquant.tessera_census_cache import seal_roster
 
 
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, help="census cost.anchors.json")
