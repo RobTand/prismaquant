@@ -1402,8 +1402,8 @@ def test_joint_aura_admits_a_cross_format_alias_pair_across_one_owner(
     # Injectivity is filename-level over (qname, canonical format)
     # coordinates (#2219): the alias pair measured at two formats names two
     # different render files, so the grouped per-owner check admits them and
-    # the walk reads exactly the two measured formats -- one per unit, plus
-    # each row's BF16 leg.
+    # the walk reads exactly the two measured formats, one per unit; BF16
+    # is only a terminal menu entry, not another render read.
     config, names, fmt_a, fmt_b = colliding_two_owner_fixture(
         tmp_path, formats=("TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"),
     )
@@ -1414,3 +1414,68 @@ def test_joint_aura_admits_a_cross_format_alias_pair_across_one_owner(
         names[0]: (fmt_a, "BF16"),
         names[1]: (fmt_b, "BF16"),
     }
+
+
+def test_joint_aura_admits_a_cross_format_alias_with_an_unmeasured_cost(
+    tmp_path, monkeypatch,
+):
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.production_weight_cache import _cache_weight_filename
+
+    config, names, fmt_a, fmt_b = colliding_two_owner_fixture(
+        tmp_path, formats=("TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"),
+    )
+    cost_path = Path(config["merged_cost"]["path"])
+    payload = pickle.loads(cost_path.read_bytes())
+    payload["costs"][names[0]][fmt_b] = {
+        "output_mse_measured": False,
+        "cost_source": "tessera_campaign_interpolated",
+        "output_mse": 0.3,
+    }
+    cost_path.write_bytes(pickle.dumps(payload))
+    config["merged_cost"] = bind(cost_path)
+
+    plan = json.loads(Path(config["campaign_plan"]["path"]).read_text())
+    cache = Path(plan["rows"][0]["dir"]).resolve() / "cache"
+    expected = {
+        cache / _cache_weight_filename(names[0], fmt_a),
+        cache / _cache_weight_filename(names[1], fmt_b),
+    }
+    assert len(expected) == 2
+    assert (cache / _cache_weight_filename(names[0], fmt_b)
+            == cache / _cache_weight_filename(names[1], fmt_b))
+    reads = []
+    resolve_origin = bridge._resolve_render_origin
+
+    def record_read(render, **kwargs):
+        reads.append(Path(render))
+        return resolve_origin(render, **kwargs)
+
+    monkeypatch.setattr(bridge, "_resolve_render_origin", record_read)
+    data = load(config)
+
+    assert set(data.cells) == {(names[0], fmt_a), (names[1], fmt_b)}
+    assert len(reads) == 2
+    assert set(reads) == expected
+
+
+@pytest.mark.parametrize("fmt", ["TESSERA_E4M3_K1_R1024", "TESSERA_E4M3_K1_R896"])
+def test_joint_aura_refuses_measured_aliases_before_the_walk(
+    tmp_path, monkeypatch, fmt,
+):
+    from prismaquant import tessera_joint_aura as bridge
+    from prismaquant.production_weight_cache import _cache_weight_filename
+
+    config, names, _, _ = colliding_two_owner_fixture(tmp_path, formats=(fmt, fmt))
+
+    def refuse_walk(*args, **kwargs):
+        pytest.fail("a measured filename collision reached the per-unit walk")
+
+    monkeypatch.setattr(bridge, "_load_unit", refuse_walk)
+    with pytest.raises(ValueError) as exc_info:
+        load(config)
+
+    message = str(exc_info.value)
+    assert all(name in message for name in names)
+    assert fmt in message
+    assert _cache_weight_filename(names[0], fmt) in message
