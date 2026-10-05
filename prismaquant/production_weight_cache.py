@@ -178,9 +178,57 @@ def _render_base_format(fmt: str) -> str:
     return str(fmt).strip().upper()
 
 
+def _cache_weight_leaf(qname: str) -> str:
+    """The mangled, filesystem-safe leaf body of a qualified name.
+
+    One home for the mangling (#2219): ``_cache_weight_filename`` spells the
+    shard leaf with it and ``require_injective_cache_filenames`` tests
+    injectivity against it, so the two can never disagree.
+    """
+    return str(qname).replace("/", "__").replace(".", "_")
+
+
 def _cache_weight_filename(qname: str, fmt: str) -> str:
-    safe = qname.replace("/", "__").replace(".", "_")
-    return f"{safe}__{fmt}.pt"
+    return f"{_cache_weight_leaf(qname)}__{fmt}.pt"
+
+
+def require_injective_cache_filenames(
+    coordinates: Iterable[tuple[str, str]],
+    *,
+    where: str,
+) -> None:
+    """Refuse two render coordinates that share one cache filename (#2219).
+
+    The leaf mangles ``.`` -> ``_`` and ``/`` -> ``__`` to stay
+    filesystem-safe, so distinct qualified names can share one shard leaf
+    (``a.b`` and ``a_b``; ``layer/a`` and ``layer__a``). The stored payload is
+    the bare tensor -- nothing in the file names the Linear it belongs to --
+    so two coordinates that land on one file would silently read and
+    overwrite each other's shard. The mangled spelling itself is load-bearing
+    (archive names, existing caches), so instead of changing it this fails
+    closed on the whole SET: call it where a cache directory is opened for a
+    model's rendered coordinate set, before any shard is written or read --
+    that is what covers resumes, pre-existing caches and concurrent
+    producers. Injectivity is filename-level over ``(qname, canonical
+    format)`` coordinates: ``layer.a`` and ``layer_a`` at two different
+    formats name two different files and are admitted -- the layout #1859
+    deliberately admits -- while the same pair at one format refuses.
+    Callers pass canonical formats; ``_check_rendered_cache_destinations``
+    canonicalizes the identity's ``"qname|FMT"`` pairs before delegating.
+    """
+    owners: dict[str, tuple[str, str]] = {}
+    for coordinate in sorted(
+        {(str(qname), str(fmt)) for qname, fmt in coordinates}
+    ):
+        filename = _cache_weight_filename(*coordinate)
+        previous = owners.setdefault(filename, coordinate)
+        if previous != coordinate:
+            raise ValueError(
+                f"{where}: coordinates {previous!r} and {coordinate!r} map "
+                f"to one rendered cache destination {filename!r}; the "
+                f"mangled leaf is not injective and the rendered shards "
+                f"would silently overwrite each other"
+            )
 
 
 _UNCACHED_PACKED_EXPERT_RE = re.compile(
@@ -344,6 +392,10 @@ class ProductionWeightCache:
     _file_load_max_bytes: int = 0
     _file_load_receipts: dict | None = None
     _expected_file_sha256: dict[tuple[str, str], str] | None = None
+    # Key count at the last successful cache-filename injectivity check
+    # (#2219); None until the first residency open. The class attribute backs
+    # caches unpickled from older pickles that predate the field.
+    _injectivity_checked_keys: int | None = None
 
     def __post_init__(self) -> None:
         # Normalize to ``activation_max_abs`` if a caller used the legacy
@@ -1307,6 +1359,11 @@ class ProductionWeightCache:
         the bounded branch requires the caller's digest binding.
         """
         from .staged_tier_policy import policy_is_active, refuse_pool_bulk_read
+        # #2219: the lazy get() -> _resolve_to_tensor -> here path runs the
+        # whole-manifest check behind the count memo (per-file O(n) would
+        # cost too much); the prefetch open rechecks unconditionally, so a
+        # same-size pop/add swap is caught there.
+        self._require_injective_filenames()
         path = Path(self._path_for_value(value)).absolute()
         limit = getattr(self, "_file_load_max_bytes", 0)
         window_files = getattr(self, '_resident_window_files', None)
@@ -1463,6 +1520,41 @@ class ProductionWeightCache:
             raise RuntimeError("PWC file receipt tensor or source file changed")
         return dict(receipt)
 
+    def _check_injective_filenames(self) -> None:
+        """Run the whole-manifest filename check and arm the size memo."""
+        count = len(self.weights)
+        require_injective_cache_filenames(
+            self.weights.keys(),
+            where="production cache residency",
+        )
+        self._injectivity_checked_keys = count
+
+    def _require_injective_filenames(self) -> None:
+        """Refuse a colliding manifest before a lazy file-backed load (#2219).
+
+        Whole-manifest: the check runs over ALL of ``self.weights`` — not
+        just the keys one call asked for — so a colliding pair is refused no
+        matter which subset a prefetch names or whether the pair is read
+        through ``get()`` alone.
+
+        Keys can be POPPED from the manifest after fill
+        (``export_native_compressed.py`` export stream,
+        ``mtp_production_cache.py`` stripe pruning,
+        ``streaming_production_cache.py`` per-layer pop), so a size memo can
+        miss a same-size pop/add swap. The two residency paths therefore
+        differ: ``prefetch`` calls :meth:`_check_injective_filenames`
+        UNCONDITIONALLY on every call (O(n) string work next to the
+        ``torch.load``s it precedes), while this lazy per-file path keeps the
+        count memo — it can miss a same-size swap until the next ``prefetch``
+        or key-set growth. No method of this class pops from
+        ``self.weights`` (they only swap values between tensors and paths),
+        so the memo's own blind spot is exactly the external pop sites above.
+        """
+        count = len(self.weights)
+        if getattr(self, "_injectivity_checked_keys", None) == count:
+            return
+        self._check_injective_filenames()
+
     def prefetch(self, keys: Sequence[tuple[str, str]] | None = None,
                  max_workers: int = 4, *, executor=None) -> int:
         """Eagerly load (a subset of) cache entries via a thread pool.
@@ -1497,6 +1589,12 @@ class ProductionWeightCache:
                     if not isinstance(self.weights.get(k), torch.Tensor)]
         if not keys:
             return 0
+        # #2219: the reader/residency open — whole-manifest, UNCONDITIONAL on
+        # every call: keys can be popped elsewhere (export stream, MTP stripe
+        # pruning, streaming per-layer pop), so a size memo could miss a
+        # same-size swap; O(n) next to the loads this precedes. Also arms the
+        # memo the lazy _load_file_tensor path relies on.
+        self._check_injective_filenames()
 
         def _load_one(key):
             value = self.weights.get(key)
@@ -4260,20 +4358,20 @@ def validate_pre_guard_admission(
 def _check_rendered_cache_destinations(
     rendered_pairs: Iterable[str], *, where: str
 ) -> None:
-    """Refuse distinct coordinates that share one legacy archive leaf."""
+    """Refuse distinct coordinates that share one legacy archive leaf (#2219).
+
+    The render-identity sidecars spell coordinates as ``"qname|FMT"`` pair
+    strings; this is the pair-shaped entry into the one shared check next to
+    ``_cache_weight_filename``, which owns the rule.
+    """
     from prismaquant import format_registry as fr
 
-    owners: dict[str, tuple[str, str]] = {}
-    for pair in rendered_pairs:
-        qname, fmt = pair.rsplit("|", 1)
-        coordinate = (qname, fr.canonical_format_name(fmt.strip().upper()))
-        filename = _cache_weight_filename(*coordinate)
-        previous = owners.setdefault(filename, coordinate)
-        if previous != coordinate:
-            raise ValueError(
-                f"{where}.rendered_pairs aliases rendered cache destination "
-                f"{filename!r}: {previous!r} and {coordinate!r}"
-            )
+    coordinates = [
+        (pair.rsplit("|", 1)[0],
+         fr.canonical_format_name(pair.rsplit("|", 1)[1].strip().upper()))
+        for pair in rendered_pairs
+    ]
+    require_injective_cache_filenames(coordinates, where=where)
 
 
 def build_production_cache_render_identity(
@@ -7346,6 +7444,14 @@ def fill_packed_expert_cache_entries(
             print("[prod-cache/experts] no non-BF16 packed experts in scope",
                   flush=True)
         return coverage
+    # #2219: refuse a colliding packed full-name set at the directory open,
+    # before the append identity reads its sidecar or any shard is probed or
+    # written. The packed fill bypasses the dense fill's render-identity
+    # build, which is where the dense path's own refusal lives.
+    require_injective_cache_filenames(
+        ((full, fmt) for (_q, _m, _p, _pn, full, fmt) in in_scope),
+        where="packed expert production cache",
+    )
     if cache_dir_path is not None:
         from prismaquant.perturbed_x_cache import calibration_data_hash
 
