@@ -192,3 +192,26 @@ not rerun or relabelled. Root critical review/merge remains required. The genuin
 qualification, fleet activation and all energy/work-per-joule claims remain
 independent unopened gates. PR #2058's producer commits are already included in
 #2110; no second producer implementation or duplicate PR was created.
+
+## Pilot gateway collection isolation
+
+The production gateway test owns the authenticated source graph through the
+existing `pinned_pb_source` fixture, matching the SDK4 pin tests. This fixture
+detaches preimported PrismaBuild modules and sibling fleet tools for the test,
+then restores their identities and path order. It does not weaken the production
+resolver or replace the result reader, capture binder or gateway.
+
+`tests/test_original_cuda_control_artifacts.py` imports `PrismaBuildCAS` from
+the installed distribution at module collection. Module and function import
+restore fixtures start after collection and therefore preserve this installed
+graph as their entry state. Adding the sealed source to `sys.path` in
+`require_paths()` cannot replace a module already in `sys.modules`; the gateway
+test previously failed there before entering `reader_sdk_bound()`. The reader
+binding names a helper root, not a fresh canonical import graph.
+
+The minimal pair fails even with the gateway file listed first and all artifact
+tests deselected: action
+`f7d476fa074ac6b24b4db4b54208b39da81b3f1227f3c14d333f5f663b3a854c`
+records five failures and 28 deselections on dl380g10. This establishes
+collection-time contamination, not a requirement that an artifact test execute
+first or share a particular work-stealing schedule. Production code is unchanged.
