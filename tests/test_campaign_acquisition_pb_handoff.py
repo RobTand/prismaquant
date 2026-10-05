@@ -483,6 +483,11 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
                           for name in members}
         payloads[row["row_id"]] = campaign.campaign_cost_payload(measured, requested_menu,
             loo={}, provenance={"provenance": prov})
+        # The row runner publishes these after campaign_cost_payload; the merge
+        # reads them from every row payload.
+        payloads[row["row_id"]]["menu_sizes"] = {n: len(m) for n, m in menus.items()}
+        payloads[row["row_id"]]["anchor_counts"] = {
+            n: {f: len(a) for f, a in by_f.items()} for n, by_f in measured.items()}
         directories[row["row_id"]] = str(row_dir)
     coverage = dispatch.declared_coverage(planned, acquisition=handoff.acquisition, census=handoff.census)
     _, _, merged_capture_digest = dispatch.merge_export_inputs(directories, payloads,
