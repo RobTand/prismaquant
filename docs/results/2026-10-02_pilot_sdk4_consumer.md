@@ -249,3 +249,41 @@ remain attached. This is a proven collection cause and a submitted fixture
 fix, not a claim that the pending fix proofs passed. No branch was pushed.
 No complete repository suite, graphics processor work, real model validation,
 live deployment or performance measurement was performed for this fix.
+
+## Completed pilot gateway isolation proof
+
+The pending statements above describe the initial handoff. The actions then
+finished on dl380g10 without withdrawal or resubmission. Original full-group
+coordinator clients reached their tool deadlines while the pool kept running;
+a published `pbwait.py` completion client recovered both worker endings.
+Coordinator timeouts are not treated as worker test failures.
+
+| Control | PrismaBuild action | Actual outcome |
+| --- | --- | --- |
+| Minimal pair after the fix, one worker | `fdc600eed049d4d96250bf53347e3f0895f92e73169152d49bb4329bf1beab67` | 33 passed, 0 skipped |
+| Unfixed original 70-file grouping, four workers | `899348347907b7ff7ae108781859751577591b859de38675473609094362f04f` | 5 failed, 971 passed, 30 skipped |
+| Fixed original 70-file grouping, four workers | `92f457bc9fe3a05e1e9d9612f7f1be62b3c2b2fb04f566cbc4440eb3d427f60a` | 976 passed, 30 skipped |
+
+Both full-group source snapshots have parent
+`62fd01ad964d55a23a2fdd8ae891c78dd9a691b6`, use the exact original ordered
+70-file selection and collect 1006 tests with no ignored files. The five
+gateway cases are the only failures before the fix and all five pass afterward.
+Both full-group runs use four CPUs, work stealing, 8 GiB and one native thread
+per worker, with graphics processor visibility disabled.
+
+Successful receipt SHA-256 values are
+`16212d3a2165f4fd28ef92433532c8be4d0c3b484a0c072fb2e2c9e6f5b4e6ef`
+for the pair and
+`67958f1502db27f95bb1c0699fc4704e229bd2f2cb73980c985f04daee9d9492`
+for the full grouping. Their durable result payloads were read and their
+hashes and byte lengths verified. The failed full-group worker log was also
+read and verified against its recorded hash and byte length; no successful
+receipt is claimed for that failure.
+
+Complete action, source, receipt and skip-reason records are retained in
+`/home/rob/tmp/pq-pbimport-triage-evidence.json`. The 30 skips include graphics
+processor and Triton paths, an absent DeepSeek source configuration, optional
+real-model validation, the installed Gemma4 shared-key/value limitation, and
+the filesystem direct-input/output prerequisite. This proof establishes test
+isolation only, not a complete repository suite, model or graphics processor
+qualification, live deployment, throughput or energy.
