@@ -1973,6 +1973,7 @@ def assert_uniform_hessian_identity(costs: "dict", *, references=None) -> dict:
                 schema = "modern"
             reference = ident.get('reference_binding')
             if reference is not None:
+                import json
                 from .digests import DIRECT_ASCII_SPACED_LAX
                 from tessera.hessian_capture import normalize_reference_binding
                 reference = DIRECT_ASCII_SPACED_LAX.text(normalize_reference_binding(reference))
