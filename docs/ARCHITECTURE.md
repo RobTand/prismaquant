@@ -1202,18 +1202,19 @@ SDK installation and source review do not establish fleet runtime activation;
 the published worker generation remains independent. This dependency move
 makes no numerical, wire, pipeline-default, serving or speed claim.
 
-Re-stamped 2026-10-05 (PQ #2265): test collection must not import PrismaBuild.
-The module and per-test restorers begin after collection, so they otherwise
-preserve the collected installed package while a sealed-source test resolves
-another root. Tests now import their installed CAS in their bodies and the
-optional prefill candidate in its graph-detaching module fixture. The three
-readset source consumers use explicit pinned source scopes, so the supported
-public-name pytest plugin can preload the installed package without changing
-which source they exercise. A real subprocess regression derives these
-consumers from the readset call graph, runs them with that plugin preloaded,
-and checks that the previous package module identities and the core parent
-edge are restored. The direct collection-import guard checks conditional and
-class-body imports; production source-origin refusals remain unchanged.
+Re-stamped 2026-10-05 (PQ #2265): each pytest module explicitly owns an
+initially detached PrismaBuild import graph through the module autouse
+restorer. Collection or a public-name pytest plugin may have loaded the
+installed graph before setup; the owner saves it, removes cached package
+entries, and restores exactly those module objects and parent edges at
+teardown. This unbound scope chooses no source, changes no source guard, and
+adds no SDK prerequisite: installed tests still use their original paths,
+while each source resolver authenticates and checks its own selected tree.
+Existing explicit pinned-source scopes remain for source-specific objects.
+The repository-wide regression derives origin-refusing families from test
+syntax, imported calls and fixture dependencies, runs representatives with
+the public plugin preloaded, and checks the installed graph afterwards. A
+direct collection-import guard remains. Production refusals are unchanged.
 
 Re-stamped 2026-10-03 (Refs PQ #2106, #1293): produced-output CPU
 fixtures explicitly supply SDK4 host capacity for their private queue claims,

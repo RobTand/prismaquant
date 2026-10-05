@@ -82,10 +82,13 @@
   candidate inside an explicit graph-detaching module scope. The three readset
   source consumers also own pinned source scopes, including when pytest
   preloads the installed package through its public PrismaBuild bound plugin.
-  A syntax-tree regression checks direct collection imports; a real plugin
-  regression derives the readset consumers from their call graph, executes
-  them with the plugin preloaded, and proves the installed module identities
-  return afterwards. Production source-origin refusals are unchanged.
+  Every test module now explicitly owns an initially detached import graph,
+  which also covers candidate, published-runtime and imported helper families
+  without adding source prerequisites to unrelated tests. The old graph and
+  parent edges return at module teardown. A syntax-tree regression discovers
+  origin-refusing resolvers across tests, follows imports, fixture parameters
+  and named calls, and runs a representative of every family with the real
+  public plugin preloaded. All origin assertions remain unchanged.
 
 - **Required domain imports and malformed-header consumer refusals stay
   visible** (Refs #2260, bounded child of #1303).
