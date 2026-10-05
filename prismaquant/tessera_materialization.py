@@ -475,6 +475,9 @@ def finalize(plan_path):
         expected = _expert_input_identity(api, weight, units[name], fmt, activation)
         checked = tep.check_expert_wire_receipt(record, name=name, unit=units[name], q256=rung,
             grid=family.payload_grid().name)
+        # The name is checked before the source wire is located or read: a
+        # misnamed receipt is refused without touching its bytes (#2310).
+        tc._require_seed_wire_filename(wire_dir, checked['file'], qname=name, format_name=fmt)
         source_path = source_dir / checked['file']
         tep.locate_expert_wire(checked, name=name, wire_dir=source_dir)
         # One content check per blob: the verified bytes are the ones the hard

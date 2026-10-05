@@ -3484,13 +3484,22 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     }
 
 
-def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename, *,
-                    qname: str, format_name: str) -> None:
-    """Put a seed's priced wire where this run's receipt check will read it."""
+def _require_seed_wire_filename(wire_dir: Path, filename, *,
+                                qname: str, format_name: str) -> None:
+    """Refuse a seed receipt whose file name is not its unit/rung destination.
+
+    Pure name arithmetic: callers run it before they read or link the wire.
+    """
     if not isinstance(filename, str) or not filename or "/" in filename:
         raise RuntimeError(f"seed wire receipt names an unusable file: {filename!r}")
     if filename != _wire_path(wire_dir, qname, format_name).name:
         raise RuntimeError(f"{qname}: seed wire filename differs from priced unit/rung")
+
+
+def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename, *,
+                    qname: str, format_name: str) -> None:
+    """Put a seed's priced wire where this run's receipt check will read it."""
+    _require_seed_wire_filename(wire_dir, filename, qname=qname, format_name=format_name)
     target = wire_dir / filename
     if target.exists():
         return
