@@ -62,6 +62,22 @@ Raw log: `/home/rob/fleet/inventory/kernels-d13-preparation-20261005.log`;
 identities and full old-answer drift:
 `/mnt/shared/tessera-measurements/d13-public-master-2dbac191/preparation.json`.
 
+The final non-editable Git install is PB
+`7f50b73fca5cfab880bbffcf8ff7e939803975c1e37883e30cec6c776d6dd16e`;
+`direct_url.json` records the real public remote and exact full commit, not
+a manually restamped local install. The verified source manifest hashes
+all 1,910 archived files to
+`f7f331f6fb77d7dd5a688ff773a6a571e1cb8ade961b6a6c8c3a82736175958f`.
+PB `7da66126cebfe7e1c88b6e07e3fa7b56a8c850d6a95cabb11e8052ec67f21eb8`
+ran valid LSP references for all eight authoritative pin constants using
+python-lsp-server 1.12.2, Jedi 0.19.2 and Parso 0.8.5. The initial
+Parso 0.8.4/Python 3.14 zero-result queries are not qualification.
+The admitted 37-file test action `30f1aeb54b128dc241796e9efe5e2405719a92a9af5728d289876716506704bf`
+was refused before pytest because the owned overlay inherited duplicate
+Tessera metadata. Its zero-execution failure is retained; no dependency
+guard or shared default interpreter is changed to make it pass.
+
+
 D13 still requires fresh exact-source performance/profiles/both-Spark power
 and CEO review before landing/promotion. CEO approved Option A in
 `dec-1005-023421-75cf`: qualify and review this exact candidate first,
