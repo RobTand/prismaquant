@@ -8,7 +8,7 @@ from pathlib import Path
 
 QNAME = 'model.language_model.layers.15.mlp.experts.56.gate_proj'
 OLD_SOURCE = '6b558df3a2746f2a79637fc1d6dc488dc69351c20388b2d8d7212bd3087837c5'
-ALLOWED_PACKAGE_CHANGE = {'joint_catalog_extension.py'}
+ALLOWED_PACKAGE_CHANGE = {'joint_catalog_extension.py', 'joint_served_activation.py', 'joint_stageb_resources.py'}
 
 
 def digest(path):
@@ -68,14 +68,19 @@ def main():
     old_files, new_files = inventory(original), inventory(current)
     changed = sorted(k for k in set(old_files) | set(new_files) if old_files.get(k) != new_files.get(k))
     if set(changed) != ALLOWED_PACKAGE_CHANGE:
-        raise ValueError(f'Non-catalog package closure changed: {changed}')
-    report = {'schema': 'pact.catalog_source_comparability.v1',
+        raise ValueError(f'Non-admission package closure changed: {changed}')
+    accepted_catalog = Path('/mnt/shared/tessera-measurements/pact-missing224-20261005/bridge-pricing-sourceb5221b25/prismaquant/joint_catalog_extension.py')
+    if digest(accepted_catalog) != digest(current / 'joint_catalog_extension.py'):
+        raise ValueError('Accepted b522 catalog/proof walls changed during companion backport')
+    report = {'schema': 'pact.catalog_source_comparability.v2',
               'original_source': {'root': str(args.original_source), 'package_sha256': old_hash},
               'bridge_source': {'package_root': str(current), 'package_sha256': new_hash},
               'package_files': len(old_files), 'changed_package_paths': changed,
-              'non_catalog_package_files_byte_identical': True,
+              'non_admission_package_files_byte_identical': True,
+              'accepted_b522_catalog_owner': binding(accepted_catalog),
+              'accepted_b522_catalog_owner_byte_identical': True,
               'file_identities': {k: {'original': old_files.get(k), 'bridge': new_files.get(k)} for k in sorted(set(old_files) | set(new_files))},
-              'numerical_closure_statement': 'Every durable original PrismaQuant package input outside the catalog metadata/admission owner remains byte-identical, including the encoder invocation, loss/probe, calibration, model/profile and quantizer owners. The changed catalog diff still requires independent review; this file hash fact alone is not numerical qualification.',
+              'numerical_closure_statement': 'Every durable original PrismaQuant package input outside the three explicitly authorized metadata/admission owners remains byte-identical, including encoder invocation, loss/probe, calibration, model/profile and quantizer owners. The accepted b522 catalog/proof owner is itself unchanged. Changed resource/policy metadata and exact new head still require independent review; file hashes alone are not numerical or full-price qualification.',
               'source_hash_restamp': False, 'retained_rows_modified': False,
               'new_joint_prices_admitted': 0, 'review_required': True}
     prior_path = Path('/mnt/shared/tessera-measurements/glm-canonical-census-20260908/activation-runtime-allocation-20260911/extension-r1024-02/workspace/merged/cost.pkl')

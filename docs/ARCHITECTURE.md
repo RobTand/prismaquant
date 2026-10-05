@@ -2577,6 +2577,20 @@ digests, byte/stat fences and rendered-shape/H commitments remain hard.
 Closure hashes and H-screen byte/loss equality are candidate controls, never
 a substitute for the bound covering proof or independent acceptance.
 
+The historical-source companion carries the accepted PQ #1437 metadata
+owners only: candidate resource derivation, served-activation policy scope,
+and Stage B control-file closure. A v1 policy/catalog retains its original
+bytes and full-roster rule. A v2 catalog may add sparse non-A4 cells, but every
+executed routed group member must gain every newly priced A4 policy format;
+the policy's full-group maxima and source/calibration commitments are unchanged.
+Control closure binds each source's cost, journal and genuine covering proof,
+including fixture and comparison-arm results. Listing provisional sources is
+not intake authority: the unconditional encoder-proof refusals above remain.
+The old full T4 catalog can be carried from the pre-A4 base without altering
+any old cell or policy; a new sparse T8 source is qualified independently.
+New package/resource proofs need their own exact-head acceptance. No encoder,
+loss/probe, calibration/model, quantizer or full-price join owner is changed.
+
 A catalog extension is priced by a **full re-price**, not a merge (PQ #1432).
 The join (`joint_quanta_join.py`, the `coverage` check) requires every unit's
 candidate set to equal its prepared roster, and the pair check requires the

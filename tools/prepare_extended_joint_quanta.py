@@ -20,7 +20,8 @@ import json
 from pathlib import Path
 
 from prismaquant.joint_catalog_extension import (
-    create_extension, extension_campaign_identity, require_extension)
+    catalog_control_bindings, catalog_sources, create_extension, extension_campaign_identity,
+    require_extension)
 from prismaquant.joint_replay_regime import REPLAY_REGIME_ENV
 from prismaquant.stage_b_prep_io import (
     PreparationPublicationRefused, PreparationReadRefused, bind_preparation_publication,
@@ -169,15 +170,21 @@ def control_digests(inputs, plan, prepared, extension=None):
     resources, activation, catalog = documents
     bindings += list(resources['inputs'].values())
     bindings += [activation[k] for k in ('original_prepared', 'original_cache', 'census')]
-    bindings += [catalog[k] for k in ('old_prepared', 'old_pwc', 'cost', 'reseal_proof')]
-    proof = json.loads(_read_bound(catalog['reseal_proof'], 'encoder adoption proof'))
+    # A v1 catalog binds one cost run and one reseal proof; a v2 catalog binds
+    # one per source. Enumerating a provisional source without a proof is
+    # not intake authority: the unchanged adopter still requires a genuine
+    # covering source-pair/stratum proof unconditionally (PQ #1437/#2271).
+    bindings += catalog_control_bindings(catalog)
+    proofs = [json.loads(_read_bound(source['reseal_proof'], 'encoder adoption proof'))
+              for source in catalog_sources(catalog) if source.get('reseal_proof') is not None]
     digests = {}
     for binding in bindings:
         if digests.get(binding['path'], binding['sha256']) != binding['sha256']:
             raise ValueError(f"control file {binding['path']} is bound to two digests")
         digests[binding['path']] = binding['sha256']
-    for path in (proof['fixture_id']['result'], *(arm['result'] for arm in proof['arms'])):
-        digests.setdefault(path, None)
+    for proof in proofs:
+        for path in (proof['fixture_id']['result'], *(arm['result'] for arm in proof['arms'])):
+            digests.setdefault(path, None)
     return digests
 
 

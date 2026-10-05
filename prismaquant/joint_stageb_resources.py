@@ -114,7 +114,8 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
     from .joint_retained_window_plan import (DECLARED_BUDGET_FIELDS, MEASURED_BUDGET_FIELDS,
         RetainedWindowBudget, derive_retained_window_budget, targets_from_statistics_plan)
     from .joint_statistics_plan import plan_joint_statistics_target_windows
-    from .joint_served_activation import FORMAT, FORMAT_MAXIMA_KEY, verify_policy as verify_activation
+    from .joint_catalog_extension import CATALOG_SCHEMA_V1, catalog_view, extended_roster
+    from .joint_served_activation import FORMAT_MAXIMA_KEY, policy_formats, verify_policy as verify_activation
 
     _require(set(inputs) == {"original_plan", "original_prepared", "candidate_overlay", "served_activation_policy"},
              "four exact source/catalog/activation bindings required")
@@ -133,15 +134,35 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
     _require(type(gpu_bytes) is int and 0 < gpu_bytes <= min(72 * GIB, plan["max_gpu_bytes"]),
              "device cap exceeds approved or original bound")
     _require(host_bytes + gpu_bytes <= physical_bytes, "host/device reservations exceed aggregate cap")
-    formats = {n: [f for f in fs if f not in _ZERO_COST_FORMATS] for n, fs in prepared["formats_by_qname"].items()}
+    roster = prepared["formats_by_qname"]
     paths = {pair: str(Path(cache._path_for_value(path)).absolute()) for pair, path in cache.weights.items()}
-    expected = {(n, FORMAT) for n in formats if FORMAT not in formats[n]}
     added = {(row["qname"], row["format"]): row for row in catalog["cells"]}
-    _require(set(added) == expected and len(added) == len(catalog["cells"]), "added candidate roster differs")
-    for pair, row in added.items():
-        path = Path(row["render"])
-        paths[pair] = str(path)
-        formats[pair[0]].append(FORMAT)
+    _require(len(added) == len(catalog["cells"]), "added candidate roster differs")
+    priced = policy_formats(activation)
+    if catalog.get("schema", CATALOG_SCHEMA_V1) == CATALOG_SCHEMA_V1:
+        # A v1 catalog adds the one policy format across the whole roster.
+        _require(priced == (catalog.get("format", priced[0]),) and set(added) == {
+            (n, priced[0]) for n in roster if priced[0] not in roster[n]}, "added candidate roster differs")
+    else:
+        # A v2 catalog declares its coverage (PQ #1437): each cell adds a
+        # format its unit does not offer. Every executed-group member must
+        # gain exactly the policy's formats among its added A4 formats, or
+        # some routed A4 rung would be priced at its unit's own maximum.
+        from . import format_registry as registry
+        catalog_view(catalog)
+        _require(all(n in roster and f not in roster[n] for n, f in added),
+                 "added candidate roster differs")
+        a4 = {f for f in {f for _n, f in added} if getattr(registry.get_format(f), "act_bits", None) == 4}
+        for member in activation["effective_max_abs"]:
+            gained = sorted(f for n, f in added if n == member and f in a4)
+            _require(gained == list(priced),
+                     f"{member} gains A4 formats {gained}, not the served policy's {list(priced)}")
+    extra = {}
+    for (name, fmt), row in added.items():
+        paths[name, fmt] = str(Path(row["render"]))
+        extra.setdefault(name, []).append(fmt)
+    formats = {n: [f for f in (extended_roster(fs, extra[n]) if n in extra else fs) if f not in _ZERO_COST_FORMATS]
+               for n, fs in roster.items()}
     by_layer = {}
     for name in formats:
         layer = qname_layer(name)
@@ -187,7 +208,8 @@ def derive_policy(inputs, *, host_bytes=28 * GIB, physical_bytes=100 * GIB, gpu_
             record_file(pair, observe_file(pair))
     mode = "observed" if recorded is None else "reused sealed observations for"
     print(f"resource geometry: {mode} {len(file_rows)} files; deriving {len(by_layer)} layers", flush=True)
-    maxima = {**cache.activation_max_abs, FORMAT_MAXIMA_KEY: {FORMAT: activation["effective_max_abs"]}}
+    maxima = {**cache.activation_max_abs,
+              FORMAT_MAXIMA_KEY: {fmt: activation["effective_max_abs"] for fmt in priced}}
     targets = {}
     for layer, names in sorted(by_layer.items()):
         names.sort()

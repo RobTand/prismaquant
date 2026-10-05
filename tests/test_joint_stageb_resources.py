@@ -17,15 +17,24 @@ def bound(path, value, binary=False):
     return {'path': str(path), 'sha256': hashlib.sha256(raw).hexdigest()}
 
 
-@pytest.fixture
-def resource_fixture(tmp_path, monkeypatch):
+NAMES = tuple(f'model.language_model.layers.{layer}.mlp.experts.{e}.{role}_proj'
+              for layer in (8, 9) for e in range(2) for role in ('gate', 'up', 'down'))
+
+
+def _inputs(tmp_path, monkeypatch, *, added=None, activation_formats=None):
+    """The four bindings a resource derivation reads, and the original plan.
+
+    With ``added`` unset, a v1 catalog adds ``FORMAT`` to every unit. With
+    ``added`` (``{format: qnames}``), a v2 catalog adds those cells, and the
+    served activation policy prices ``activation_formats``.
+    """
     from prismaquant import model_profiles
     from prismaquant.production_weight_cache import ProductionWeightCache
     from prismaquant.joint_retained_window_plan import RetainedWindowBudget
     from prismaquant.joint_served_activation import derive_policy as activation_policy
     monkeypatch.setattr(model_profiles, 'detect_profile', lambda _: None)
-    names = [f'model.language_model.layers.{layer}.mlp.experts.{e}.{role}_proj'
-             for layer in (8, 9) for e in range(2) for role in ('gate', 'up', 'down')]
+    names = list(NAMES)
+    tmp_path.mkdir(parents=True, exist_ok=True)
     fmt = 'TESSERA_E4M3_K1_R1024'
     budget = RetainedWindowBudget(64 << 20, 1 << 20, 1 << 20, 1 << 20,
         1 << 20, 1 << 20, 1 << 20, 4096, 1 << 20, 16, 1 << 20, 1 << 20, 1)
@@ -40,9 +49,11 @@ def resource_fixture(tmp_path, monkeypatch):
         path = tmp_path/(name+'.old.pt');path.write_bytes(b'o'*2048)
         weights[name, fmt] = str(path)
         cells[name, fmt] = {'source_weight': {'shape': [16, 16]}}
-        new = tmp_path/(name+'.new.pt');new.write_bytes(b'n'*2048);s=new.stat()
-        additions.append({'qname': name, 'format': FORMAT, 'render': str(new),
-            'render_stat': {'inode': s.st_ino, 'bytes': s.st_size, 'mtime_ns': s.st_mtime_ns, 'ctime_ns': s.st_ctime_ns}})
+    for added_fmt, qnames in ({FORMAT: names} if added is None else added).items():
+        for name in qnames:
+            new = tmp_path/(name+'.'+added_fmt+'.new.pt');new.write_bytes(b'n'*2048);s=new.stat()
+            additions.append({'qname': name, 'format': added_fmt, 'render': str(new),
+                'render_stat': {'inode': s.st_ino, 'bytes': s.st_size, 'mtime_ns': s.st_mtime_ns, 'ctime_ns': s.st_ctime_ns}})
     census = bound(tmp_path/'census.json', {'model': '/synthetic', 'unit_shapes': {n: [16, 16] for n in names}})
     cache = ProductionWeightCache(weights=weights, levers={}, activation_max_abs={n: float(i+1) for i,n in enumerate(names)},
         metadata={'inputs': {'census': census}, 'verified_cells': cells})
@@ -51,11 +62,32 @@ def resource_fixture(tmp_path, monkeypatch):
         'production_cache': bound(tmp_path/'cache.pkl', cache, True),
         'formats_by_qname': {n: [fmt, 'BF16'] for n in names}}
     old_prepared = bound(tmp_path/'prepared.json', prepared)
-    catalog = bound(tmp_path/'catalog.json', {'old_prepared': old_prepared, 'cells': additions})
-    activation = bound(tmp_path/'activation.json', activation_policy(old_prepared))
+    if added is None:
+        catalog = bound(tmp_path/'catalog.json', {'old_prepared': old_prepared, 'cells': additions})
+        activation = bound(tmp_path/'activation.json', activation_policy(old_prepared))
+    else:
+        from prismaquant.joint_catalog_extension import CATALOG_SCHEMA_V2
+        source = {'cost': {'path': str(tmp_path/'cost.pkl'), 'sha256': '0'*64},
+                  'anchor_journal': None, 'reseal_proof': None}
+        catalog = bound(tmp_path/'catalog.json', {
+            'schema': CATALOG_SCHEMA_V2, 'old_prepared': old_prepared, 'cells': additions,
+            'formats': sorted(added), 'sources': [source], 'cell_sources': [0]*len(additions),
+            'carried_from': []})
+        activation = bound(tmp_path/'activation.json', activation_policy(
+            old_prepared, **({} if activation_formats is None else {'formats': activation_formats})))
     inputs = {'original_plan': old_plan, 'original_prepared': old_prepared,
               'candidate_overlay': catalog, 'served_activation_policy': activation}
-    limits = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+    return inputs, plan, names
+
+
+LIMITS = dict(host_bytes=16 << 20, physical_bytes=64 << 20, gpu_bytes=48 << 20)
+
+
+@pytest.fixture
+def resource_fixture(tmp_path, monkeypatch):
+    inputs, plan, _names = _inputs(tmp_path, monkeypatch)
+    catalog, activation = inputs['candidate_overlay'], inputs['served_activation_policy']
+    limits = LIMITS
     policy = derive_policy(inputs, **limits)
     policy_binding = bound(tmp_path/'resources.json', policy)
     extended = copy.deepcopy(plan)
@@ -269,3 +301,54 @@ def test_the_chain_receipt_is_read_once_for_a_complete_roll(tmp_path):
         chain_owner_from_receipt(path, action_key='e' * 64, layer=42, layers=[42])
     with pytest.raises(ValueError, match='no admission reading'):
         chain_owner_from_receipt(path, action_key='e' * 64, layer=41, layers=[41])
+
+
+# -- a v2 catalog over several formats (PQ #1437) ------------------------------
+
+R768 = 'TESSERA_E2M1_K2_R768'
+
+
+@pytest.mark.parametrize('sparse_format', ['TESSERA_E4M3_K1_R880', 'TESSERA_E4M3_K1_R912'])
+def test_a_v2_catalog_derives_with_every_added_format_before_bf16(tmp_path, monkeypatch, sparse_format):
+    """Every member gains the policy's two A4 formats; half also gain an A8
+    rung, which the policy does not price. The derivation observes every
+    added render and re-derives from its own record."""
+    names = list(NAMES)
+    added = {R768: names, FORMAT: names, sparse_format: names[::2]}
+    inputs, _plan, _ = _inputs(tmp_path, monkeypatch, added=added, activation_formats=[R768, FORMAT])
+    policy = derive_policy(inputs, **LIMITS)
+    members = {tuple(row['member']) for row in policy['candidate_files']}
+    assert len(members) == len(names) + sum(len(qs) for qs in added.values())
+    assert {(n, f) for f, qs in added.items() for n in qs} <= members
+    assert verify_policy(bound(tmp_path / 'resources.json', policy)) == policy
+
+
+@pytest.mark.parametrize('case, match', [
+    ('member_missing_a_policy_format', 'not the served policy'),
+    ('a4_format_outside_the_policy', 'not the served policy'),
+    ('format_already_offered', 'added candidate roster differs'),
+])
+def test_a_v2_catalog_refuses_a_routed_a4_rung_the_policy_does_not_price(tmp_path, monkeypatch, case, match):
+    names = list(NAMES)
+    added = {R768: names, FORMAT: names}
+    if case == 'member_missing_a_policy_format':
+        added[R768] = names[1:]
+    elif case == 'a4_format_outside_the_policy':
+        added['TESSERA_E2M1_K2_R640'] = names
+    else:
+        added['TESSERA_E4M3_K1_R1024'] = names[:1]
+    inputs, _plan, _ = _inputs(tmp_path, monkeypatch, added=added, activation_formats=[R768, FORMAT])
+    with pytest.raises(ValueError, match=match):
+        derive_policy(inputs, **LIMITS)
+
+
+@pytest.mark.parametrize('sparse_format', ['TESSERA_E4M3_K1_R880', 'TESSERA_E4M3_K1_R912'])
+def test_carried_full_v1_a4_policy_permits_sparse_target_t8_metadata(tmp_path, monkeypatch, sparse_format):
+    names = list(NAMES)
+    inputs, original, _ = _inputs(tmp_path, monkeypatch,
+        added={FORMAT: names, sparse_format: names[::2]})
+    policy = derive_policy(inputs, **LIMITS)
+    assert verify_policy(bound(tmp_path / 'resources.json', policy)) == policy
+    assert policy['inputs']['served_activation_policy'] == inputs['served_activation_policy']
+    assert original['execution']['seed_base'] == 7
+    assert len(policy['candidate_files']) == 2 * len(names) + len(names[::2])

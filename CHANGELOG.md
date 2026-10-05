@@ -12,7 +12,12 @@
   the unproven-cell fallback. Genuine source-pair/stratum proof plus exact-head
   independent acceptance remain mandatory; closure/H-screen equality is not
   covering proof. No retained row rewrite, reader/serving/pin/default change,
-  full-price promotion or v1 shipping prerequisite is licensed.
+  full-price promotion or v1 shipping prerequisite is licensed. A separately
+  scoped PQ #1437 companion carries multi-source Stage B control closure and
+  resource/policy metadata: sparse non-A4 additions still preserve every
+  routed member's full A4 policy coverage and the default v1 bytes. Expanded
+  source/resource evidence needs separate exact-head acceptance; no numerical
+  pricing, encoder, source/calibration or join fence is widened.
 - **Campaign resume refuses W4A4 anchors priced under another activation
   contract** (follow-on to #194; `tessera_campaign._require_resumable_anchor`).
   A pre-#194 checkpoint's W4A4 rows carry no `input_global_scale` (dynamic

@@ -1,4 +1,10 @@
-"""Explicit A4-only executed-group pricing over immutable qualification evidence."""
+"""Explicit A4-only executed-group pricing over immutable qualification evidence.
+
+A v1 policy prices one added routed A4 format, ``FORMAT``. A v2 policy
+(PQ #1437) names the added routed A4 formats it prices in ``formats``. The
+executed group's maximum belongs to the routed unit, not to the weight
+format, so every policy format of a member is priced at the same group scale.
+"""
 from __future__ import annotations
 
 import argparse
@@ -10,6 +16,7 @@ from pathlib import Path
 
 FORMAT = "TESSERA_E2M1_K2_R896"
 SCHEMA = "prismaquant.joint_served_activation_policy.v1"
+SCHEMA_V2 = "prismaquant.joint_served_activation_policy.v2"
 FORMAT_MAXIMA_KEY = "__prismaquant_joint_format_maxima_v1__"
 _VERIFIED = {}
 _GROUP_INDEX = {}
@@ -31,8 +38,24 @@ def _policy_bytes(bound, label, read_bound):
     return raw
 
 
-def derive_policy(original_prepared, *, read_bound=None):
-    """Derive the existing runtime's scale reduction from authenticated full draw."""
+def policy_formats(policy):
+    """The added routed A4 formats a v1 or v2 policy prices, in order."""
+    if isinstance(policy, dict) and policy.get("schema") == SCHEMA and policy.get("format") == FORMAT:
+        return (FORMAT,)
+    _require(isinstance(policy, dict) and policy.get("schema") == SCHEMA_V2, "unknown policy scope")
+    formats = policy.get("formats")
+    _require(isinstance(formats, list) and formats and formats == sorted(set(formats))
+             and all(isinstance(fmt, str) for fmt in formats), "unknown policy scope")
+    return tuple(formats)
+
+
+def derive_policy(original_prepared, *, formats=None, read_bound=None):
+    """Derive the existing runtime's scale reduction from authenticated full draw.
+
+    With ``formats`` unset, the v1 policy for ``FORMAT``. With ``formats``, a
+    v2 policy over those added formats, each of which must quantize its input
+    to 4 bits.
+    """
     from .tessera_joint_allocation import _read_bound
     from .cost_stage_checkpoint import canonical_json_sha256
     from .model_profiles import detect_profile
@@ -50,11 +73,22 @@ def derive_policy(original_prepared, *, read_bound=None):
         expected_members=prepared["formats_by_qname"], policy=LEGACY_INPUT_GLOBAL_SCALE_POLICY)
     _require(declaration is not None and declaration["roster_complete"], "requires complete routed groups")
     members = {name for row in declaration["groups"].values() for name in row["members"]}
+    if formats is None:
+        scope = {"schema": SCHEMA, "format": FORMAT}
+    else:
+        from .format_registry import get_format
+        formats = list(formats)
+        _require(formats and formats == sorted(set(formats)), "policy formats must be a sorted unique list")
+        for fmt in formats:
+            _require(getattr(get_format(fmt), "act_bits", None) == 4,
+                     f"policy may only price A4 formats; {fmt} is not A4")
+        scope = {"schema": SCHEMA_V2, "formats": formats}
     # Only newly added routed A4 candidates change pricing semantics. Existing
     # dense A4 and every original candidate retain their exact old activation.
-    _require(all(FORMAT not in prepared["formats_by_qname"][name] for name in members),
+    _require(all(fmt not in prepared["formats_by_qname"][name]
+                 for name in members for fmt in policy_formats(scope)),
              "policy may only price newly added routed A4 candidates")
-    result = {"schema": SCHEMA, "format": FORMAT, "original_prepared": dict(original_prepared),
+    result = {**scope, "original_prepared": dict(original_prepared),
         "original_cache": dict(prepared["production_cache"]), "census": dict(census_binding),
         "source_model_identity_sha256": canonical_json_sha256(prepared["source_model_identity"], where="served-group source"),
         "calibration_input": copy.deepcopy(prepared["calibration_input"]),
@@ -74,11 +108,14 @@ def verify_policy(bound, *, original_prepared=None, read_bound=None):
         policy = cached["policy"]
     else:
         policy = json.loads(_policy_bytes(bound, "served activation policy", read_bound))
-        _require(policy.get("schema") == SCHEMA and policy.get("format") == FORMAT, "unknown policy scope")
+        formats = policy_formats(policy)
         dependencies = [dict(bound)] + [policy[k] for k in ("original_prepared", "original_cache", "census")]
         before = tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"]))) for b in dependencies)
         _require(before[0] == key, "policy changed while it was read")
-        _require(policy == derive_policy(policy["original_prepared"], **({} if read_bound is None else {"read_bound":read_bound})), "group maxima or calibrated source evidence changed")
+        _require(policy == derive_policy(policy["original_prepared"],
+                                         **({} if policy["schema"] == SCHEMA else {"formats": formats}),
+                                         **({} if read_bound is None else {"read_bound":read_bound})),
+                 "group maxima or calibrated source evidence changed")
         _require(before == tuple((b["path"], b["sha256"], _bound_stat_fence(Path(b["path"])))
                                  for b in dependencies), "calibrated policy inputs changed during verification")
         _VERIFIED.clear()
@@ -97,7 +134,7 @@ def format_activation_maxima(maxima, spec):
     selected = overrides.get(spec.name)
     if selected is None:
         return maxima
-    _require(spec.name == FORMAT, "only the declared A4 format can override activation maxima")
+    _require(getattr(spec, "act_bits", None) == 4, "only a declared A4 format can override activation maxima")
     return ChainMap(selected, maxima)
 
 
@@ -114,8 +151,7 @@ def activate_verified_policy(cache, bound, policy):
     read against that digest. The scope and every cache-facing check below
     still run here; only the campaign-wide re-derivation does not repeat.
     """
-    _require(isinstance(policy, dict) and policy.get("schema") == SCHEMA
-             and policy.get("format") == FORMAT, "unknown policy scope")
+    policy_formats(policy)
     return _attach_policy(cache, bound, policy)
 
 
@@ -123,12 +159,15 @@ def _attach_policy(cache, bound, policy):
     from .nvfp4_activation_contract import resolve_input_global_scale_policy
     _require(resolve_input_global_scale_policy() == policy["executed_grouping"]["input_global_scale_policy"],
              "active scale arithmetic differs from the explicit policy")
+    formats = policy_formats(policy)
     for name, maximum in policy["qualification_max_abs"].items():
         _require(cache.activation_max_abs.get(name) == maximum, "cache qualified maximum differs for " + name)
-        _require((name, FORMAT) in cache.weights, "new A4 candidate missing for " + name)
+        for fmt in formats:
+            _require((name, fmt) in cache.weights, f"new A4 candidate missing for {name}: {fmt}")
     cache._joint_served_activation = (dict(bound), policy)
     cache._joint_activation_maxima_view = {
-        **cache.activation_max_abs, FORMAT_MAXIMA_KEY: {FORMAT: policy["effective_max_abs"]}}
+        **cache.activation_max_abs,
+        FORMAT_MAXIMA_KEY: {fmt: policy["effective_max_abs"] for fmt in formats}}
     return policy
 
 
@@ -140,7 +179,7 @@ def joint_activation_maxima(cache):
 
 
 def policy_group(policy, name, fmt):
-    if fmt != FORMAT or name not in policy["effective_max_abs"]:
+    if fmt not in policy_formats(policy) or name not in policy["effective_max_abs"]:
         return None
     cached = _GROUP_INDEX.get(id(policy))
     if cached is None or cached[0] is not policy:
@@ -184,9 +223,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--original-prepared", required=True)
     parser.add_argument("--original-prepared-sha256", required=True)
+    parser.add_argument("--format", action="append", dest="formats",
+                        help="an added routed A4 format to price (repeatable); unset writes the v1 policy for "
+                             + FORMAT)
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
-    result = derive_policy({"path": args.original_prepared, "sha256": args.original_prepared_sha256})
+    result = derive_policy({"path": args.original_prepared, "sha256": args.original_prepared_sha256},
+                           formats=None if args.formats is None else sorted(set(args.formats)))
     raw = (json.dumps(result, sort_keys=True) + "\n").encode()
     _require(publish_new_bytes(Path(args.out), raw), "output already exists")
     print(json.dumps({"status": "proposed", "path": args.out,
