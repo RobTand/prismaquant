@@ -26,8 +26,7 @@ from prismaquant.tessera_full_domain_acquisition import (
 from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_control_inputs
 from prismaquant.tessera_legal_domain import live_pins, tessera_source_state
 from test_campaign_acquisition_scheduler import arguments
-from test_joint_aura_streamed import _fixture
-from test_streamed_cost_checkpoints import _model_identity
+from test_streamed_cost_checkpoints import _DenseTinyLM, _dense_runner, _model_identity
 from test_tessera_campaign_fanout import _plan_args, _shard
 
 FAMILY = "TESSERA_E4M3_K1"
@@ -43,7 +42,9 @@ def sha(raw):
 def real_joint_run():
     import prismaquant.aura_cost as aura
     pytest.importorskip("tessera")
-    model, _, runner, _ = _fixture(layers=3)
+    torch.manual_seed(85)
+    state = _DenseTinyLM(width=32, layers=3).eval().state_dict()
+    model, _, runner = _dense_runner(state)
     names = sorted(name for name, _ in model.named_modules() if name.endswith(".proj"))
     source_weights = {name: model.get_submodule(name).weight.detach().clone() for name in names}
     captures, handles = {}, []
@@ -340,11 +341,13 @@ def test_runtime_refuses_unknown_partial_actual_groups_and_changed_source(handof
     grouped = {"g:actual-complete-cohort": list(handoff.run.active_names),
                "u:" + handoff.run.idle_name: [handoff.run.idle_name]}
     with pytest.raises(ValueError, match="complete.*atomic"):
-        campaign._campaign_acquisition_row_scope(handoff.acquisition, grouped, selected=names[:1])
+        campaign._campaign_acquisition_row_scope(handoff.acquisition, grouped,
+            selected=[handoff.run.active_names[0]])
     with pytest.raises(ValueError, match="complete.*atomic"):
         campaign._campaign_acquisition_row_scope(handoff.acquisition, grouped, selected=["unknown"])
     with pytest.raises(ValueError, match="no requested measurement work|zero"):
-        campaign._campaign_acquisition_row_scope(handoff.acquisition, handoff.census["anchor_groups"], selected=names[-1:])
+        campaign._campaign_acquisition_row_scope(handoff.acquisition, handoff.census["anchor_groups"],
+            selected=[handoff.run.idle_name])
     name = names[0]
     with pytest.raises(ValueError, match="source weight identity"):
         campaign._require_campaign_acquisition_source(name, handoff.run.weights[name] + 0.01,
