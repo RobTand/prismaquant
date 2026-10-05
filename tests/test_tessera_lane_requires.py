@@ -48,6 +48,7 @@ from importlib.resources import as_file
 from prismaquant import lane_eligibility as lane
 from prismaquant import tessera_render as render
 from prismaquant import tessera_runtime_contract as contract
+from tests.conftest import set_cell_census
 
 
 WINDOW_LANE = "tessera_window_gemv"
@@ -70,18 +71,20 @@ CLAIMING_FAMILY = "TESSERA_E2M1_K2"
 CLAIMING_NAME = "TESSERA_E2M1_K2_R896"
 CLAIMING_RATE = 896
 WINDOW_LAUNCH = {"symbol": "tessera_window_gemv::gemv", "decoder": "window_gemv"}
-#: The lanes contract v42 (Tessera #640) adds for the fused routed window MoE.
-FUSED_LANES = ("tessera_routed_fused_e4m3", "tessera_routed_fused_value")
-#: The cells contract v42 (Tessera #640) lets launch through the fused routed
-#: lane, beside the compact adapter they already named.
+#: The current three routed extension lanes, including the E4M3 MMA variant.
+FUSED_LANES = ("tessera_routed_fused_e4m3", "tessera_routed_fused_value",
+               "tessera_routed_fused_mma_e4m3")
+#: Exact routed roster from the independently reviewed answer, including
+#: the separately image-scoped v56 cells.
 FUSED_ROUTED_CELLS = {
-    f"tessera_{family}_k1_routed_moe_sm121_{regime}_resident"
-    for family in ("e4m3", "bf16") for regime in ("decode", "batch")
+    row[0] for row in contract.TESSERA_DEV_PIN_ANSWER["cells"]
+    if row[3] == "routed_moe" and row[2] in {E4M3, BF16}
 }
 COMPACT_E4M3 = ("tessera.native_window_moe.NativeWindowMoE.__call__",
                 "native_window_moe_compact")
 FUSED_E4M3 = ("tessera.routed_fused.FusedRoutedWindowMoE.__call__",
               "native_routed_fused_window")
+FUSED_MMA_E4M3 = (FUSED_E4M3[0], "native_routed_fused_window_e4m3mma")
 #: Contract v34's dense window-GEMM launch, verbatim: a qualified symbol
 #: that is NOT an extension launch -- no native_extensions row declares
 #: `tessera`, and no lane serves `native_window_gemm`.
@@ -115,7 +118,7 @@ def _gated_carrier(payload):
     moved = copy.deepcopy(payload)
     cell = _cell(moved, GATED_CARRIER)
     cell["executes"] = [WINDOW_LAUNCH]
-    cell["rungs_q256"] = [1024]
+    set_cell_census(moved, cell, [1024])
     return moved
 
 
@@ -461,34 +464,28 @@ def test_every_lane_gated_cell_on_a_synthesised_table_admits_this_producers_plan
             assert why == ""
 
 
-def test_the_shipped_routed_e4m3_cells_make_both_launches_at_every_rung(payload):
-    """The cells GLM's routed E4M3 picks ride launch the fused pair at every
-    rung they list.
+def test_the_shipped_routed_e4m3_cells_make_all_declared_launches_at_every_rung(payload):
+    """The current pin declares compact, fused and fused-MMA routed launches.
 
-    They execute ``native_window_moe_compact`` and, since contract v42, the
-    fused routed pair.  Through v44 that pair's lane
-    (``tessera_routed_fused_e4m3``) read rate-4 columns only, so q1024 made
-    both launches and every mixed-rate rung (q896 among them) kept the compact
-    launch alone (PQ #1274).  Since v45 (tessera#694) the lane reads
-    ``column_rates`` [1..8] and its routed-expert launch reaches
-    ``column_rates_routed_moe`` [1..6].  The cells list q832 to q1088, whose
-    plans use rates 3 to 5, so every rung makes both launches (PQ #1702).
+    Historical v44 rate-four and v45 routed-subset refusals remain covered
+    by explicit predicate fixtures; v56 publishes routed rates1..8.
     """
     table = _table(payload)
     for cell_id in (GATED_CARRIER, GATED_CARRIER.replace("_decode_", "_batch_")):
         cell = _parsed_cell(table, cell_id)
         assert {896, 1024} <= set(cell.rungs_q256)
-        assert set(cell.executes) == {COMPACT_E4M3, FUSED_E4M3}
+        assert set(cell.executes) == {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3}
         claim = lane.lane_claim_for_cell(cell, table.lanes)
         assert claim is not None and claim.extension == "tessera_routed_fused_e4m3"
         for rung in cell.rungs_q256:
             admits, why, launches = lane.cell_rung_launches(cell, rung, table.lanes)
             assert admits and why == "", (cell_id, rung, why)
-            assert set(launches) == {COMPACT_E4M3, FUSED_E4M3}, (cell_id, rung, launches)
+            assert set(launches) == {COMPACT_E4M3, FUSED_E4M3, FUSED_MMA_E4M3}, (cell_id, rung, launches)
     gated_decoders = {claim.decoder for claim in table.lanes
                       if claim.requires is not None}
     assert gated_decoders == {"window_gemv", "native_routed_fused_window",
-                              "native_routed_fused_window_folded"}, gated_decoders
+                              "native_routed_fused_window_folded",
+                              "native_routed_fused_window_e4m3mma"}, gated_decoders
 
 
 def _lane_beside_compact(payload, rung):
@@ -500,7 +497,7 @@ def _lane_beside_compact(payload, rung):
     cell = _cell(moved, GATED_CARRIER)
     cell["executes"] = [WINDOW_LAUNCH, {"symbol": COMPACT_E4M3[0],
                                         "decoder": COMPACT_E4M3[1]}]
-    cell["rungs_q256"] = [rung]
+    set_cell_census(moved, cell, [rung])
     return moved
 
 

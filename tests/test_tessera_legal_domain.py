@@ -291,20 +291,21 @@ def test_every_fact_names_the_table_that_answered_it():
 def test_native_qualification_is_exactly_the_reviewed_primary_cells():
     """Project the reviewed pin's cells, not a second hand-maintained roster.
 
-    The v39 scope decision is pinned in test_tessera_pin_v38_scope.py. Here
-    the inventory must reproduce that independent owner's reviewed answer:
-    every named rung, with no extrapolation to its legal neighbours.
+    The independently reviewed v56 answer carries finite census rungs AND
+    rule-derived coverage. Inventory must project both, without assuming
+    every legal neighbour is unqualified.
     """
     from prismaquant.tessera_runtime_contract import TESSERA_DEV_PIN_ANSWER
 
     cells = [cell for cell in TESSERA_DEV_PIN_ANSWER['cells']
              if cell[2] in domain.PRIMARY_FAMILIES]
     assert cells and all(cell[8] == 'device_qualified' for cell in cells)
-    expected = {(cell[2], rate, cell[3]) for cell in cells for rate in cell[5]}
+    expected = {(cell[2], rate, cell[3]) for cell in cells
+                for rate in set(cell[5]) | set(cell[-1]["covered_rungs_q256"])}
     triples = domain.native_qualification_set()
     primary = {t for t in triples if t[0] in domain.PRIMARY_FAMILIES}
     assert primary == expected
-    assert (BF, 1792, "dense") not in primary
+    assert (BF, 3585, "dense") not in primary
 
 
 def test_the_native_set_does_not_shrink_the_legal_domain(rates):
@@ -327,12 +328,12 @@ def test_the_native_set_does_not_shrink_the_legal_domain(rates):
 
 
 def test_an_unattested_neighbour_of_an_attested_rung_is_still_producer_legal():
-    """R1023 has no cell and is still in the domain with a route."""
-    facts = domain.support_facts(E4, 1023, "dense")
+    """BF16 R3585 is just beyond the native rule but still producer-legal."""
+    facts = domain.support_facts(BF, 3585, "dense")
     assert facts.producer_legal.value is True
     assert facts.reader_supported.value is True
     assert facts.native_qualification.value is False
-    assert 1023 in domain.legal_rates(E4)[0]
+    assert 3585 in domain.legal_rates(BF)[0]
 
 
 def test_routed_moe_attestation_uses_its_own_runtime_image():
@@ -795,6 +796,8 @@ def test_the_importable_tessera_is_a_pin_and_not_the_working_checkout():
         # Renamed 2026-09-29 for the v45 pin b40c93cb73: export.py did
         # not move.
         "b40c93cb73745097e57a1ba4cf5b9eee166c759a",
+        # Public v56: the cap delegates to the same WINDOW payload width.
+        "2dbac1910c88254d9c6391f02a34c4b07e516803",
     }
     # The unpinned working checkout is a state this module knows about and
     # rejects, not one it fails to recognise.
@@ -852,6 +855,7 @@ def test_the_two_pins_produce_the_same_wire_for_the_primary_families():
         "reader-pin-387eda36", "study-producer-d403cc5a",
         "reader-pin-cc739a55", "reader-pin-09d6559d", "reader-pin-f94929de",
         "reader-pin-38e96012", "reader-pin-a5f3b232", "reader-pin-b40c93cb",
+        "reader-pin-2dbac191",
     }
     for family in domain.PRIMARY_FAMILIES:
         rates, _ = domain.legal_rates(family, domain.GLM53_LINEAR_SHAPES)

@@ -369,12 +369,16 @@ TESSERA_SERVING_RUNTIME_CONTRACT_SHA256_PENDING = "PENDING_TESSERA_CONTRACT_SHA2
 #: ``serving_parts.py`` and the census tool. The contract bytes do not move
 #: (v45, ``0869f326…``), so no admission answer moves. The pin stays schema
 #: v2.
+#: Re-pinned 2026-10-05 to fetched public master 2dbac191 (PQ #2262),
+#: contract v56 / 47f180ef, lane schema v11. Root graph_receipt is v2 with
+#: all nine scope fields. Schema v2 remains one producer/serving commit;
+#: no code-digest/v3 activation, compiled-cell or release-card waiver.
 TESSERA_SERVING_RUNTIME_PINNED_COMMIT = (
-    "b40c93cb73745097e57a1ba4cf5b9eee166c759a"
+    "2dbac1910c88254d9c6391f02a34c4b07e516803"
 )
 TESSERA_SERVING_RUNTIME_PINNED_VERSION = "0.1.0"
 TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
-    "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
+    "47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78"
 )
 #: The v3 split (#1561).  ``TESSERA_SERVING_RUNTIME_PINNED_COMMIT`` above is
 #: the SERVING commit; the producer commit and the serving code digest are
@@ -384,7 +388,7 @@ TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 = (
 #: which names the venv; ``tests/test_tessera_serving_code_identity.py``
 #: enforces that, because this module imports nothing from the package.
 TESSERA_SERVING_RUNTIME_PINNED_PRODUCER_COMMIT = (
-    "b40c93cb73745097e57a1ba4cf5b9eee166c759a"
+    "2dbac1910c88254d9c6391f02a34c4b07e516803"
 )
 TESSERA_SERVING_RUNTIME_PINNED_SERVING_SOURCE_SHA256: str | None = None
 

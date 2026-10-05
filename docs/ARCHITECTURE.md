@@ -1,5 +1,45 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`kernels/d13-public-master-pin-20261005`, PQ #2262):
+the immutable serving/development candidate names fetched public Tessera
+master `2dbac1910c88254d9c6391f02a34c4b07e516803`, packaged contract
+v56, raw SHA-256 `47f180efaf97faa5c411df5d48f9da7dff4b9c9fc0c3ddbf9f815bcd4d0aed78`.
+Pin schema remains v2; producer and serving commits are the same, the
+serving source constant stays `None`, and release-tag status is advisory.
+The complete reviewed answer carries v11 allowable run-table coverage,
+four native-extension rows and 22 eager cells. Every existing runtime,
+plugin, lane, evidence, export and quality refusal remains independently
+enforced. Zero compiled cells is still a release/allocation gap, not a
+Python module-availability prerequisite. No default or pipeline topology moves.
+The route-census policy uses authoritative `SCOPED_LANE_SCHEMAS` membership
+at both its flat-census refusal and its scoped-v2 replay entry. The legacy
+v10 alias remains a version label, never a scope predicate: pinning v11
+must not admit unbound flat rows or reject a valid scoped census. #214
+fill/verify refusal assertions remain exact, and the installed-v11
+regression exercises actual table loading, scoped fill and replay.
+
+
+An isolated PB install at this exact commit imports root
+`tessera.graph_receipt` v2 (`verify(receipt, serve) -> str | None`), with
+all nine scope fields including `fabric`: `none` for TP1, `socket` or
+`roce` for TP2+. Its source digest is
+`6e9abbfd5a5ccf455dbd61b6c0c5d2353d4c4162c9652947205d7a6b7e20d41b`.
+PrismaQuant does not import or vendor the Tessera serving runtime.
+Availability does not qualify Tessera #702, PQ #1586, a graph card or a
+compiled cell. Requested NCCL fabric and observed per-rank banners remain
+separate; the ship window is SOCKET under the existing CEO decision.
+
+D13 landing/promotion remains held for the fresh exact-source performance
+packet, before/after in-process profiles, both-Spark power and CEO review.
+CEO approved Option A in `dec-1005-023421-75cf`: CPU/install qualification
+and review come first, then only that exact reviewed candidate supplies the
+controlled-window packet. Main and promotion stay held. The private `608bb`/1770 result
+is not public-source evidence, and equal contract bytes never transfer
+package/native qualification. Any post-window source or package move needs
+its own applicable evidence. Artifact allocation, exact EXL3 client/protocol,
+own v2 graph receipt, compiled admission, quality and publication gates
+remain the responsibilities of their existing owners.
+
 Re-stamped 2026-10-05 (`issues/pq-2273-2299`, base `a1f852f6ee3`, PQ #2273):
 seed wire filenames must match their priced unit/rung before linking in campaign
 adoption or selected-wire materialization; a real campaign resume regression pins

@@ -19,8 +19,8 @@ that quietly stopped publishing a field is caught here rather than by a
 ``KeyError`` inside the parser:
 
 * every cell id follows Tessera's derived grammar,
-  ``family_structure_platform_regime[_residency]`` (its #111), spelled off the
-  row's own fields rather than typed;
+  ``family_structure_platform_regime[_residency][_runtime_<scope-sha256>]``
+  (its #111), spelled off the row's own fields rather than typed;
 * every cell carries a ``platform`` that the table declares;
 * every cell carries a ``runtime`` scope with its own ``vllm`` and ``torch``
   versions -- the answer's columns 14 and 15, which scope the claim the same
@@ -120,7 +120,17 @@ def test_every_cell_id_follows_the_derived_grammar():
             str(row["platform"]).replace("_", ""),
             str(row["regime"]),
         ))
-        allowed = {stem, f"{stem}_resident", f"{stem}_streamed"}
+        residency_flags = [flag for flag in row["requires_serve_flags"]
+                           if flag.startswith("TESSERA_SERVE_MODE=")]
+        assert len(residency_flags) == 1, row["id"]
+        residencies = sorted(residency_flags[0].split("=", 1)[1].split("|"))
+        assert set(residencies) <= {"resident", "streamed"}, row["id"]
+        base = stem if len(residencies) == 2 else f"{stem}_{residencies[0]}"
+        encoded = json.dumps({
+            "image": row["runtime"]["image"],
+            "execution_modes": sorted(row["runtime"]["execution_modes"]),
+        }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        allowed = {base, base + "_runtime_" + hashlib.sha256(encoded).hexdigest()}
         assert str(row["id"]) in allowed, (row["id"], sorted(allowed))
 
 
@@ -142,7 +152,7 @@ def test_every_cells_evidence_block_is_closed():
             "status", "receipt", "attribution", "control", "record"}, row["id"]
 
 
-def test_the_projection_is_positional_and_its_width_is_uniform():
+def test_the_projection_is_positional_and_its_width_is_uniform(monkeypatch):
     """The columns documented beside the literal, asserted as a shape.
 
     A row that grew or lost a column is a WIDENED or narrowed projection, and
@@ -153,9 +163,19 @@ def test_the_projection_is_positional_and_its_width_is_uniform():
     rows = contract.TESSERA_DEV_PIN_ANSWER["cells"]
     widths = {len(row) for row in rows}
     assert len(widths) == 1, sorted(widths)
-    # 17 columns: 0-12 unconditional, 13-15 the runtime scope, 16 the evidence.
-    assert widths == {17}, sorted(widths)
+    # 18 columns: 0-12 unconditional, 13-15 runtime, 16 evidence, 17 coverage.
+    assert widths == {18}, sorted(widths)
+    # The parsed development answer is opt-in, just as it is for menu tests.
+    monkeypatch.setenv(contract.TESSERA_DEV_PIN_ENV, contract.TESSERA_DEV_PIN_COMMIT)
+    parsed = {cell.cell_id: cell for cell in contract.load_tessera_contract().cells}
     for row in rows:
         assert isinstance(row[13], dict) and set(row[13]) == {
             "image", "execution_modes"}
         assert len(row[16]) == 7, row[0]
+        assert isinstance(row[17], dict) and set(row[17]) == {
+            "run_tables", "covered_rungs_q256"}, row[0]
+        cell = parsed[row[0]]
+        assert row[17] == {
+            "run_tables": [list(table) for table in sorted(cell.run_tables)],
+            "covered_rungs_q256": sorted(cell.covered_rungs_q256),
+        }, row[0]

@@ -60,13 +60,13 @@ def _packaged_contract() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# v10 is the current grammar, and it inherits every property v9 had
+# Historical v10 grammar properties remain covered after the v11 pin
 # ---------------------------------------------------------------------------
-def test_v10_is_the_current_grammar():
+def test_v10_remains_the_legacy_schema_constant():
     assert (lane.LANE_ELIGIBILITY_SCHEMA_TESSERA
             == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
             == "tessera.lane-eligibility.v10")
-    # The two readers cannot disagree about which schema is newest.
+    # The legacy aliases agree; the exact v56 package uses the supported v11.
     assert contract.TESSERA_LANE_SCHEMA == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA
 
 
@@ -104,41 +104,17 @@ def test_v10_joins_every_set_v9_is_in():
 # ---------------------------------------------------------------------------
 # The packaged contract, at the pinned digest
 # ---------------------------------------------------------------------------
-def test_the_packaged_contract_is_v45_at_the_pinned_digest():
-    """v24 through v45 fit the v10 grammar, despite changed admission scopes.
-
-    The contract version and the lane schema are two different clocks, and
-    v24 was the bump that separated them: it added cells and filled a
-    ``serve_image``, both of them shapes v10 already defines, so a v10 reader
-    reads the document with the code it already has. v25-v32 did the same
-    (a quantiser table, a loader axis, format structures, two routed-MoE
-    cells, a TP2 receipt, eight dense-cell WITHDRAWALS, the routed reader
-    domain widen and the KL receipts' ``q256`` scoping), and so did v33-v34
-    (a per-image quantiser list and four re-minted dense cells), and v35-v38
-    (an fp4 quantiser row, the BF16 R1792 dense withdrawal, and eight cells
-    on the GLM image -- two of them re-using the routed E4M3 ids for a new
-    claim), and v40 (a top-level ``producer_interface`` block naming the
-    drivers that take ``--producer-authority``), v41 (optional serving-code
-    fields on a cell's runtime, stamped by none), v42 (two lane-bearing
-    fused routed extensions, and one more launch in four routed cells), v43
-    (the fused dense second launch in the six dense cells), v44 (the
-    supported exporter move, ``src/tessera/export_serving.py`` beside the
-    shim) and v45 (the fused routed lanes read ``column_rates`` [1..8] and
-    publish the structure-scoped ``column_rates_routed_moe`` [1..6] on their
-    ``native_extensions`` rows, a name PQ #1618 taught the lane reader);
-    none moved the lane schema.  A bump that changed what
-    a field MEANS would move the schema string and fail this reader closed, as
-    v10 itself did to v9 below.
-    """
+def test_the_packaged_contract_is_v56_at_the_pinned_digest():
+    """The v56 pin uses v11; historical v10 refusal regressions remain below."""
     raw = _packaged_bytes()
     assert (hashlib.sha256(raw).hexdigest()
             == TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256), (
         "the installed Tessera is not the pinned one; install the pinned "
         "commit rather than relaxing this check")
     payload = json.loads(raw)
-    assert payload["contract_version"] == 45
+    assert payload["contract_version"] == 56
     assert (payload["lane_eligibility"]["schema"]
-            == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10)
+            == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11)
 
 
 def _packaged_table():
@@ -146,47 +122,31 @@ def _packaged_table():
         return lane.load_eligibility_table(contract_path=path)
 
 
-def test_the_v10_table_parses_and_publishes_the_three_platforms():
-    """Declared platforms and carried cells are two different facts.
-
-    v24 was the first contract with a cell off ``sm_121`` (two
-    ``TESSERA_BF16_K1`` dense cells on ``gfx1201``); v31 withdrew them with
-    the rest of the non-``E2M1_K2`` dense roster (Tessera #538 and the A4
-    retirement), so the table again carries cells on ``sm_121`` only -- six
-    of them through v32, ten since v34 re-minted the E4M3 R1024 and BF16
-    R1792 dense pairs on ``sm_121``, and fourteen since v38 (v37 withdrew the
-    BF16 R1792 pair; v38 minted six new ids and re-used two on the GLM image,
-    all on ``sm_121``) -- while still DECLARING all three platforms.  A declared
-    platform with no cell is a refusal to claim, not an absence from the
-    grammar, and the test below pins what it answers.
-    """
+def test_the_packaged_table_publishes_the_three_platforms():
+    """Twenty-two eager cells are scoped to sm_121; AMD declares no cells."""
     table = _packaged_table()
     assert table.present
-    assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
+    assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
     assert {"sm_121", "gfx1151", "gfx1201"} <= set(table.platforms)
     assert {cell.platform for cell in table.cells} == {"sm_121"}
-    assert len(table.cells) == 14
+    assert len(table.cells) == 22
     # The withdrawal is total off sm_121: both AMD platforms ship no cell.
     assert not [c for c in table.cells if c.platform != "sm_121"]
 
 
-def test_the_cell_roster_matches_the_reviewed_v39_answer():
+def test_the_cell_roster_matches_the_reviewed_pin_answer():
     """Read the scope roster from its one reviewed owner, not a second list.
 
     The unchanged status-only gate permits each route-only/not-recorded cell.
-    This is not a served-KL claim. The v39 image/structure decision is pinned
+    This is not a served-KL claim. The v56 image/structure crossing is pinned
     independently by test_tessera_pin_v38_scope.py.
     """
     table = _packaged_table()
     routed = [c for c in table.cells if c.structure == "routed_moe"]
-    assert sorted(c.id for c in routed) == [
-        "tessera_bf16_k1_routed_moe_sm121_batch_resident",
-        "tessera_bf16_k1_routed_moe_sm121_decode_resident",
-        "tessera_e2m1_k2_routed_moe_sm121_batch_resident",
-        "tessera_e2m1_k2_routed_moe_sm121_decode_resident",
-        "tessera_e4m3_k1_routed_moe_sm121_batch_resident",
-        "tessera_e4m3_k1_routed_moe_sm121_decode_resident",
-    ]
+    expected_routed = {row[0] for row in contract.TESSERA_DEV_PIN_ANSWER["cells"]
+                       if row[3] == "routed_moe"}
+    assert {c.id for c in routed} == expected_routed
+    assert len(routed) == 10
     for cell in table.cells:
         admits, why = lane.cell_evidence_admits(cell)
         assert admits, (cell.id, why)
@@ -227,18 +187,20 @@ def test_a_declared_platform_with_no_cell_is_still_a_refusal_to_claim():
 # ---------------------------------------------------------------------------
 # The refusal that stood before this change -- the designed fail-closed
 # ---------------------------------------------------------------------------
-def test_a_v9_closed_eligibility_reader_refuses_the_real_v24_bytes(monkeypatch):
+def test_a_v9_closed_eligibility_reader_refuses_a_v10_table(monkeypatch):
     """By NAME, not by a missing field.  The whole point of a versioned schema.
 
-    The sets are restored to their pre-#527 value and the REAL packaged v24
-    block is handed to the parser.  It must refuse, and the message must name
+    The sets are restored to their pre-v10 value and the installed table is
+    labelled v10. It must refuse, and the message must name
     the schema -- "missing field(s) ['executes']" would send its reader off to
     edit a table rather than to install a release the reader was written for.
     """
     pre_527 = frozenset(
-        lane.LANE_ELIGIBILITY_SCHEMAS - {lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10})
+        lane.LANE_ELIGIBILITY_SCHEMAS - {lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
+                                         lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11})
     monkeypatch.setattr(lane, "LANE_ELIGIBILITY_SCHEMAS", pre_527)
     payload = _packaged_contract()
+    payload["lane_eligibility"]["schema"] = lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
     with pytest.raises(lane.LaneEligibilityError) as excinfo:
         lane._parse_table(
             payload["lane_eligibility"], payload["formats"], "", "commit", "sha",
@@ -248,12 +210,15 @@ def test_a_v9_closed_eligibility_reader_refuses_the_real_v24_bytes(monkeypatch):
     assert "schema must be one of" in message
 
 
-def test_a_v9_closed_contract_reader_refuses_the_real_v24_bytes(monkeypatch, tmp_path):
+def test_a_v9_closed_contract_reader_refuses_a_v10_table(monkeypatch, tmp_path):
     """The second reader, refusing the same bytes for the same reason."""
     pre_527 = frozenset(
-        contract.TESSERA_LANE_SCHEMAS - {lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10})
+        contract.TESSERA_LANE_SCHEMAS - {lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
+                                       lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11})
     monkeypatch.setattr(contract, "TESSERA_LANE_SCHEMAS", pre_527)
-    raw = _packaged_bytes()
+    payload = _packaged_contract()
+    payload["lane_eligibility"]["schema"] = lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
+    raw = json.dumps(payload).encode()
     path = tmp_path / "runtime_contract.json"
     path.write_bytes(raw)
     sha = hashlib.sha256(raw).hexdigest()
@@ -265,10 +230,10 @@ def test_a_v9_closed_contract_reader_refuses_the_real_v24_bytes(monkeypatch, tmp
 
 
 # ---------------------------------------------------------------------------
-# The answer moved by one entry, and the platform axis is not in it yet
+# The active answer names v11; unused identity fields remain outside it
 # ---------------------------------------------------------------------------
-def test_the_pin_answer_names_v10_and_does_not_project_the_platform_axis():
-    """Why the reviewed diff is one field.
+def test_the_pin_answer_names_v11_without_an_unused_platform_axis():
+    """Only the projection an admission gate reads belongs in the answer.
 
     ``TESSERA_DEV_PIN_ANSWER`` is the projection an ADMISSION gate reads, and
     it re-stales when that projection WIDENS as much as when a value moves.
@@ -278,6 +243,6 @@ def test_the_pin_answer_names_v10_and_does_not_project_the_platform_axis():
     would then land with no diff to review.
     """
     answer = contract.TESSERA_DEV_PIN_ANSWER
-    assert answer["lane_schema"] == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10
+    assert answer["lane_schema"] == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
     assert "platforms" not in answer
     assert "contract_version" not in answer
