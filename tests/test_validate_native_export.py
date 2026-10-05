@@ -152,6 +152,7 @@ def _graph_arm_fixture(tmp_path, monkeypatch):
     from prismaquant import validate_native_export as owner
     from test_shipcard import _graph_receipt_metrics
 
+    monkeypatch.setenv("NCCL_IB_DISABLE", "1")
     (tmp_path / "config.json").write_bytes(b'{"model_type":"glm5next"}')
     metrics = _graph_receipt_metrics(tmp_path)
     config = types.SimpleNamespace(
@@ -206,6 +207,54 @@ def test_graph_arm_stamps_derived_scope_and_receipt(tmp_path, monkeypatch):
     assert calls[0]["compilation_config"] == {"mode": "NONE"}
     assert calls[0]["max_num_seqs"] == 8
     assert calls[0]["tensor_parallel_size"] == 1
+
+
+@pytest.mark.parametrize("disable", [None, "1", "0", "other"])
+def test_graph_arm_single_rank_fabric_is_none(tmp_path, monkeypatch, disable):
+    owner, args, config, calls, expected = _graph_arm_fixture(tmp_path, monkeypatch)
+    config.parallel_config.tensor_parallel_size = 1
+    # The resolved engine, not the requested two ranks, decides whether it reduces.
+    assert args.tensor_parallel_size == 2
+    if disable is None:
+        monkeypatch.delenv("NCCL_IB_DISABLE")
+    else:
+        monkeypatch.setenv("NCCL_IB_DISABLE", disable)
+    result = owner._run_arm(args, tmp_path, None, enforce_eager=False)
+    assert result["passed"], result
+    assert result["metrics"]["serve_scope"]["fabric"] == "none"
+
+
+@pytest.mark.parametrize("disable,fabric", [("1", "socket"), ("0", "roce")])
+def test_graph_arm_parallel_fabric_uses_launch_request(
+        tmp_path, monkeypatch, disable, fabric):
+    owner, args, config, calls, expected = _graph_arm_fixture(tmp_path, monkeypatch)
+    monkeypatch.setenv("NCCL_IB_DISABLE", disable)
+    original_load = sys.modules["vllm"].LLM
+
+    def load(**kwargs):
+        monkeypatch.setenv("NCCL_IB_DISABLE", "0" if disable == "1" else "1")
+        return original_load(**kwargs)
+
+    monkeypatch.setattr(sys.modules["vllm"], "LLM", load)
+    result = owner._run_arm(args, tmp_path, None, enforce_eager=False)
+    assert result["passed"], result
+    assert result["metrics"]["serve_scope"]["fabric"] == fabric
+
+
+@pytest.mark.parametrize("disable,transport", [
+    (None, "unset_nccl_default"), ("other", "declared_other"),
+])
+def test_graph_arm_parallel_fabric_refuses_underived_request(
+        tmp_path, monkeypatch, disable, transport):
+    owner, args, config, calls, expected = _graph_arm_fixture(tmp_path, monkeypatch)
+    if disable is None:
+        monkeypatch.delenv("NCCL_IB_DISABLE")
+    else:
+        monkeypatch.setenv("NCCL_IB_DISABLE", disable)
+    result = owner._run_arm(args, tmp_path, None, enforce_eager=False)
+    assert not result["passed"], result
+    assert "cannot derive fabric" in result["detail"]
+    assert "NCCL_IB_DISABLE" in result["detail"] and transport in result["detail"]
 
 
 @pytest.mark.parametrize("parent,field", [

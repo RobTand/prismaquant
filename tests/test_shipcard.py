@@ -1513,7 +1513,8 @@ def _graph_receipt_metrics(root):
     config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
     receipt = graph_receipt.finish({
         "schema": graph_receipt.SCHEMA,
-        "runtime": {"image": "registry/serve@sha256:" + "1" * 64},
+        "runtime": {"image": "registry/serve@sha256:" + "1" * 64,
+                    "fabric": "socket"},
         "model": {"config_sha256": config_sha256},
         "tessera": {"src_sha256": "3" * 64},
         "arms": [{
@@ -1552,6 +1553,51 @@ def test_graph_receipt_matching_equal_verifies(tmp_path):
     from prismaquant.shipcard import _verify_native_export_record
 
     assert _verify_native_export_record("native_export.graph", _graph_slot_record(tmp_path), model_dir=tmp_path) == []
+
+
+def test_graph_receipt_socket_against_roce_serve_refuses(tmp_path):
+    from tessera import graph_receipt
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    metrics = record["metrics"]
+    receipt = json.loads(pathlib.Path(metrics["graph_receipt_path"]).read_bytes())
+    assert receipt["schema"] == "tessera.graph_equals_eager.v2"
+    assert receipt["runtime"]["fabric"] == "socket"
+    metrics["serve_scope"]["fabric"] = "roce"
+    reason = graph_receipt.verify(receipt, metrics["serve_scope"])
+    assert "no attested arm" in reason and "fabric" in reason, reason
+    problems = _verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path)
+    assert any("graph equality receipt refused: " + reason in p
+               for p in problems), problems
+
+
+def test_graph_receipt_v1_refuses_before_equality_verification(tmp_path, monkeypatch):
+    from tessera import graph_receipt
+    from prismaquant.shipcard import _verify_native_export_record
+
+    record = _graph_slot_record(tmp_path)
+    path = pathlib.Path(record["metrics"]["graph_receipt_path"])
+    receipt = json.loads(path.read_bytes())
+    receipt["schema"] = "tessera.graph_equals_eager.v1"
+    del receipt["runtime"]["fabric"]
+    graph_receipt.finish(receipt)
+    assert receipt["verdict"] == "equal"
+    reason = graph_receipt.verify(receipt, record["metrics"]["serve_scope"])
+    assert "tessera.graph_equals_eager.v1" in reason and "fabric" in reason, reason
+    raw = json.dumps(receipt).encode()
+    path.write_bytes(raw)
+    record["metrics"]["graph_receipt_sha256"] = hashlib.sha256(raw).hexdigest()
+
+    def unexpected_verify(*args):
+        pytest.fail("the card must refuse a v1 schema before calling verify")
+
+    monkeypatch.setattr(graph_receipt, "verify", unexpected_verify)
+    problems = _verify_native_export_record(
+        "native_export.graph", record, model_dir=tmp_path)
+    assert any("schema" in p and "tessera.graph_equals_eager.v1" in p
+               and "tessera.graph_equals_eager.v2" in p for p in problems), problems
 
 
 @pytest.mark.parametrize("field", [
