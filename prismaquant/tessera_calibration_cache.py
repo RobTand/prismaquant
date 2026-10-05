@@ -851,14 +851,19 @@ class CaptureSourceAuthentication:
             state['buffer'].require_sealed()
             return
         try:
-            current = (os.fstat(state['fd']), os.stat(self.root/name))
-            seal_check('capture source stat', file_stat_signature(state['before']),
-                [file_stat_signature(value) for value in current], where=name,
-                same=all(file_stat_signature(value) == file_stat_signature(state['before'])
-                         for value in current),
-                refusal=lambda: RuntimeError(f'authenticated source changed during consumption: {name}'))
+            held = file_stat_signature(os.fstat(state['fd']))
         except OSError as exc:
             raise RuntimeError(f'authenticated source changed during consumption: {name}') from exc
+        try:
+            pathname = file_stat_signature(os.stat(self.root/name))
+        except OSError:
+            # The held descriptor is still the bytes this reader consumes.
+            # Missing/replaced pathname metadata is not a new source proof.
+            pathname = NOT_COMPUTED
+        expected = file_stat_signature(state['before'])
+        seal_check('capture source stat', expected, [held, pathname], where=name,
+            same=held == expected and pathname == expected,
+            refusal=lambda: RuntimeError(f'authenticated source changed during consumption: {name}'))
 
     def require_unchanged(self):
         with self._lock:
@@ -993,10 +998,12 @@ class CaptureSourceAuthentication:
         census = json.loads(raw)
         digest = bytes_sha256hex(raw)
         producer = ((census.get('expert_projection') or {}).get('producer') or {}).get('source') or {}
-        if (not isinstance(census.get('model'), str) or
-                Path(os.path.abspath(census['model'])) != self.root or
-                _producer_digests(producer) != self._producer):
+        if not isinstance(census.get('model'), str):
             raise RuntimeError('derived census names another source model or producer roster')
+        seal_check('derived census source metadata', (str(self.root), self._producer),
+            (str(Path(os.path.abspath(census['model']))), _producer_digests(producer)),
+            where=str(census_path),
+            refusal=lambda: RuntimeError('derived census names another source model or producer roster'))
         with self._lock:
             self._require_open()
             self._derived_censuses[digest] = str(Path(os.path.abspath(census_path)))
@@ -1004,10 +1011,15 @@ class CaptureSourceAuthentication:
 
     def require_recording_roster(self, root, names, producer_digests):
         """A streamed capture's identity names this owner's source and producer."""
-        if (not self.is_recording or Path(os.path.abspath(root)) != self.root or
-                set(names) != self._roster or producer_digests != self._producer):
+        if not self.is_recording:
             raise RuntimeError('streamed capture source, roster or census producer differs '
                                'from its recording owner')
+        seal_check('recording capture source metadata',
+            (str(self.root), self._roster, self._producer),
+            (str(Path(os.path.abspath(root))), frozenset(names), producer_digests),
+            where='recording capture',
+            refusal=lambda: RuntimeError('streamed capture source, roster or census producer differs '
+                                         'from its recording owner'))
 
     def adopt_recorded_digests(self, digests):
         """Bind digests other readers of these objects recorded; nothing is read.
@@ -1026,8 +1038,9 @@ class CaptureSourceAuthentication:
             with state['lock']:
                 self._check_file(name, state)
                 expected = self._expected.get(name)
-                if expected is not None and digest != expected:
-                    raise RuntimeError(f'calibration source differs from census producer: {name}')
+                if expected is not None:
+                    seal_check('recorded capture producer metadata', expected, digest, where=name,
+                        refusal=lambda: RuntimeError(f'calibration source differs from census producer: {name}'))
                 if state['sha256'] is not None and state['sha256'] != digest:
                     raise RuntimeError(f'recorded source digests disagree: {name}')
                 if state['sha256'] is None:
@@ -1472,8 +1485,11 @@ def _load_execution(policy, identity, output=None, *, identity_sha256=None):
 
 
 def merge_load_execution(total, partial):
-    if total['identity_sha256'] != partial['identity_sha256'] or total['policy'] != partial['policy']:
+    if total['policy'] != partial['policy']:
         raise RuntimeError('capture load execution identity changed between units')
+    seal_check('capture load identity', total['identity_sha256'], partial['identity_sha256'],
+        where='capture load execution merge',
+        refusal=lambda: RuntimeError('capture load execution identity changed between units'))
     for key in ('loaded_entries', 'source_read_bytes'):
         total[key] += partial[key]
     for key in ('peak_buffer_bytes', 'peak_archive_storage_bytes'):
@@ -1957,7 +1973,13 @@ class CaptureMetadataOwner:
         seal_check('capture metadata path', self.path, candidate,
             where='capture metadata owner',
             refusal=lambda: RuntimeError('capture metadata owner path differs from requested capture'))
-        observed = _capture_manifest_stat(candidate)
+        if dev_mode_enabled():
+            try:
+                observed = file_stat_signature(candidate.lstat())
+            except FileNotFoundError:
+                observed = NOT_COMPUTED
+        else:
+            observed = _capture_manifest_stat(candidate)
 
         def refusal():
             # Only certified mode reads the replacement for the original error.
