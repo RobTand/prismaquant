@@ -1,5 +1,41 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`, PR #2297 correction,
+base `b199db027330`, PQ #2228): the producer test fixture uses `os.stat`
+without suppressing errors. Only `FileNotFoundError` reaches the existing
+off-host missing-interpreter skip. Permission, input/output and other stat
+errors fail with the interpreter path and error named on every host;
+non-regular paths fail as non-regular files, never as missing producers.
+The existing producer fingerprints are unchanged. No run identity, seal or
+provenance refusal is added. The regression also covers the required host.
+
+Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`, PQ #2228): the CPU test
+producer declaration names `dl380g10` as its required host. A missing
+interpreter fails there; on other hosts it produces a skip naming the exact
+missing interpreter and required host. Present producer bytes remain fully
+authenticated on every host, and drift still fails. CPU test placement uses
+`--tag x86` under standing rule D29, so these tests continue to execute on
+`dl380g10`. This is honest test dependency reporting, not a portable producer
+installation or a scheduler capability fence.
+Regression: `tests/test_projection_producer_fixture.py`.
+
+Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`, PQ #2254): the fence
+rehash benchmark observes `hashlib.file_digest`, called by
+`digests.file_digest_sha256hex`, rather than the retired hashing attribute
+on `joint_catalog_extension`. Fence validation and benchmark workload are
+unchanged. The tiny synthetic regression is a correctness check, not a
+speed, energy or residency measurement.
+Regression: `tests/test_bench_fence_rehash.py`.
+
+Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`,
+base `333dcb135a882`, PQ #2258): the joint execution, Stage A adjoint capture
+and Stage B layer quantum entry points share the existing activation-scale
+environment restoration wrapper. The plan's policy remains live during each
+workload; normal returns and exceptions restore the caller's prior value,
+including an unset or empty value. This changes no admitted plan policy,
+render numerics inside the call, wire, menu or serving gate.
+Regression: `tests/test_activation_scale_scope_2258.py`.
+
 Re-stamped 2026-10-05 (`issues/pq-2231-p3-residuals`,
 base `3f86d3d146a`, PQ #2231 items 13–15, correction of reviewed
 head `49ea7fc87a8`): campaign rendered-file checks
@@ -16918,17 +16954,20 @@ interchangeable. This does not install a package, move an export/serving pin,
 requalify a cell, or activate the HELD #1549 split. Export keeps its exact-pin gates.
 The CPU test dependency is declared separately in
 `tests/projection_producer_environment.json`: named external executable and
-digest, landed producer commit/archive, complete installed package-code digest,
-and the public output schema. `projection_producer_fixture` authenticates those
-installed bytes before the ordinary campaign/MTP controls select the interpreter.
-The declaration travels in PB's source snapshot, so a closed worker environment
-does not rely on inheriting an arbitrary ambient variable. Missing or drifted
-declared producers fail rather than hiding behind a consumer-package import skip.
-This scoped producer dependency is not the serving/dev pin or a full-suite result.
-Admission is intentionally DL-host-specific: published PB fences the primary
-interpreter, while its documented indirect-input rule uses the owning host tag.
-The sealed test declaration and pre-execution byte checks bind this secondary
-dependency; this is not a portable secondary-interpreter capability/claim fence.
+digest, required host, landed producer commit/archive, complete installed
+package-code digest, and the public output schema. `projection_producer_fixture`
+authenticates installed bytes before ordinary campaign/MTP controls select
+the interpreter. The declaration travels in PrismaBuild's source snapshot,
+so a closed worker environment does not rely on an arbitrary ambient variable.
+Only `FileNotFoundError` from stat is treated as a missing producer: it fails
+on the declared `required_host` (`dl380g10`); elsewhere the test skips with
+the missing interpreter and required host named. Other stat errors and
+non-regular paths fail everywhere with the path and error named, as do
+present but drifted producers. This is not the serving/development pin or a
+full-suite result. CPU actions use `--tag x86` under standing rule
+D29, retaining execution on the required host. The sealed declaration and
+pre-execution byte checks bind the secondary dependency; they are not a
+portable secondary-interpreter capability/claim fence.
 
 `prismaquant/tessera_expert_projection.py` is the only reader of Tessera's
 `tessera.expert_projection.v1` answer (`python -m tessera.producer_plan`,

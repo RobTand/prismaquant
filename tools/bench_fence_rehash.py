@@ -73,13 +73,13 @@ def _write_drifted_wires(root, n, mib):
 
 
 class _DigestSpy:
-    """Wrap ``hashlib.file_digest`` as the fence sees it: threads and peak concurrency."""
+    """Observe the shared stdlib digest used by the fence's digests owner."""
 
-    def __init__(self, module):
+    def __init__(self):
         self.lock = threading.Lock()
         self.active = self.peak = self.calls = 0
         self.threads = set()
-        self._module, self._real = module, module.hashlib.file_digest
+        self._real = hashlib.file_digest
 
         def spy(handle, digest):
             with self.lock:
@@ -93,10 +93,10 @@ class _DigestSpy:
                 with self.lock:
                     self.active -= 1
 
-        module.hashlib.file_digest = spy
+        hashlib.file_digest = spy
 
     def restore(self):
-        self._module.hashlib.file_digest = self._real
+        hashlib.file_digest = self._real
 
 
 def main(argv=None):
@@ -158,7 +158,7 @@ def main(argv=None):
                     _fadvise_drop(path)
             jce.FENCE_REHASHED.clear()
             engine_counters.clear()
-            spy = _DigestSpy(jce)
+            spy = _DigestSpy()
             try:
                 started = time.perf_counter()
                 with jce.streamed_fences() as fences:

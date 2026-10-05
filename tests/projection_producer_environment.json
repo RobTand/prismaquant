@@ -6,6 +6,7 @@
   "wheel_sha256": "bf3be0ae18ef7c40ccf2edf513a0abfed35a0603c9d8421fd78d780196c326ee",
   "provision_action": "e329d0982b6012cf10a380b27f4f0c2a93b0c2ef246655d073e58aea391cf8cf",
   "interpreter": "/home/rob/venvs/pq2131-producer-b770727c-20261003/bin/python",
+  "required_host": "dl380g10",
   "executable_sha256": "52e0a13e60a981d8c4b6478be2ba5176f69da07948a056bf49cf6f077e30cb41",
   "module": "tessera.producer_plan",
   "module_sha256": "cdc709e7c1145265a2ed0092135a0bf4b3c0d38747a71d1e41027fceb3211eaf",
