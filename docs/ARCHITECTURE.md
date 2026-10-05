@@ -1,13 +1,13 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-04 (`v6/pq2112-parent-panel-reload-20261004`, PQ #2094,
-PR #2112 parent correction): shape-time conversion and reload compare the
-independently expected panel digest with the authenticated panel bytes.
-Reload requires checker-bound rows; synthetic/legacy digest-only receipts and
-nonempty unauthenticated rate pools refuse. Receipt reads use the existing
-checker evidence byte envelope, and malformed artifact bindings fail cleanly.
-The immutable serving pin, SDK4 source contract and native/energy/serving
-qualification remain unchanged. CPU controls do not establish new GPU prices.
+Re-stamped 2026-10-05 (`issues/pq-2231-campaign-wire-snapshots`,
+commit `a1b7e2d1e5860780121221e8ea800a3bbd03ae38`, PQ #2231,
+PR #2256 correction): campaign publication checks rendered and wire filenames
+against existing coordinates before writing; batch admission checks its whole
+scope. Packed expert appends include the dense manifest. Disk-backed weight
+sessions check their source snapshot roster before capture or adoption and
+retain the existing filename spelling. Serialization, format spellings and
+serving contracts are unchanged. CPU controls do not establish new GPU prices.
 
 Refs #2174/#2169: the PrismaSnap campaign builder establishes the direct
 worker's sibling module search context temporarily while synthetically loading
