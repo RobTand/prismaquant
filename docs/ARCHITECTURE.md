@@ -1,5 +1,13 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`, PQ #2254): the fence
+rehash benchmark observes `hashlib.file_digest`, called by
+`digests.file_digest_sha256hex`, rather than the retired hashing attribute
+on `joint_catalog_extension`. Fence validation and benchmark workload are
+unchanged. The tiny synthetic regression is a correctness check, not a
+speed, energy or residency measurement.
+Regression: `tests/test_bench_fence_rehash.py`.
+
 Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`,
 base `333dcb135a882`, PQ #2258): the joint execution, Stage A adjoint capture
 and Stage B layer quantum entry points share the existing activation-scale
