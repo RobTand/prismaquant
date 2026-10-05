@@ -1098,18 +1098,23 @@ def load_measured_anchor_input(inputs, *, file_hash_workers=1, verify_payloads=T
     # #2219: the walk reads each unit's renders from its owner row's cache
     # directory under the mangled leaf, and the payload is the bare tensor, so
     # a colliding roster would point two units' cells at one render. Refuse
-    # per owner root before the walk reads anything.
-    names_by_owner: dict[str, list[str]] = {}
+    # per owner root before the walk reads anything. Group by the RESOLVED
+    # owner root, not the directory string as spelled (#2231): two rows
+    # naming one cache directory through different spellings are one cache,
+    # and a pair colliding across them must not reach the walk unrefused.
+    names_by_owner: dict[Path, list[str]] = {}
     for _name, _directory in owners.items():
-        names_by_owner.setdefault(str(_directory), []).append(_name)
-    for _directory, _owned in sorted(names_by_owner.items()):
+        names_by_owner.setdefault(
+            owner_roots[str(_directory)], []).append(_name)
+    for _root, _owned in sorted(
+            names_by_owner.items(), key=lambda item: str(item[0])):
         require_injective_cache_filenames(
             (
                 (_name, fmt)
                 for _name in _owned
                 for fmt in payload["costs"].get(_name, ())
             ),
-            where=f"joint aura render cache @ {_directory}",
+            where=f"joint aura render cache @ {_root}",
         )
     mirror_root = None if render_mirror_root is None else Path(render_mirror_root)
     roster = sorted(names)

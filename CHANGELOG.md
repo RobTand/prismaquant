@@ -4,6 +4,24 @@
 
 ### Fixed
 
+- **Remaining write paths refuse non-injective cache filename sets at the
+  write open** (#2231, parent #2219). The shared
+  `require_injective_cache_filenames` check now also covers the MTP append —
+  over its own `(qname, canonical format)` coordinates and, when it opens a
+  real cache directory, over the union with the manifest keys already in
+  the cache, before the stale-scope prune or any shard is written — and the
+  joint aura head walk's per-owner
+  check groups names by the resolved owner root instead of the directory
+  string as spelled, so two rows naming one cache directory through
+  different spellings are checked as one cache. The residency docstring now
+  states the prefetch recheck honestly: it runs on every call that has
+  something to load (the `if not keys: return 0` early return skips it),
+  not on every call. Still unrefused at write time, and out of scope here:
+  the campaign encode lane (`tessera_campaign.py`), the `.tessera` wire
+  family (`_wire_path`), `weight_session.py` source snapshots, a
+  `__` separator check on format names, and the packed and dense opens'
+  union with the manifest keys already in a directory they append to.
+
 - **Non-injective production cache filenames refuse at open** (#2219).
   `_cache_weight_filename` mangles `.` → `_` and `/` → `__`, so distinct
   qualified names can share one shard leaf while the stored payload is the
@@ -12,13 +30,13 @@
   directory is opened for a model's rendered coordinate set: the dense fill's
   render-identity destination check (via delegation), the packed-expert
   fill, the streaming dense fill, and every residency read — `prefetch`
-  rechecks the whole manifest on every call (keys can be popped after
-  fill), and the lazy `get()` load path carries the same check behind a
-  size memo — plus the joint aura head walk's per-owner render reads.
-  Injectivity is filename-level over `(qname, canonical format)`
-  coordinates: an alias pair at two different formats names two different
-  files and is admitted (#1859); the same pair at one format refuses.
-  The mangled filename spelling is unchanged.
+  rechecks the whole manifest on every call that has something to load
+  (keys can be popped after fill), and the lazy `get()` load path carries
+  the same check behind a size memo — plus the joint aura head walk's
+  per-owner render reads. Injectivity is filename-level over
+  `(qname, canonical format)` coordinates: an alias pair at two different
+  formats names two different files and is admitted (#1859); the same pair
+  at one format refuses. The mangled filename spelling is unchanged.
 
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
   (#2213, parent #1929). Streaming/resume controls keep three units, two layers,
