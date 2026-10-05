@@ -141,8 +141,9 @@ Its frozen outcomes were recorded from original commit `99a578e0`, not from
 the replacement profile. Actual lightweight launch tests run outside the
 repository without `PYTHONPATH` and without site packages. The image driver,
 chain spec, wire reader, metadata audit and render analysis retain their
-standard-library dependency boundary; other help and argument parsing still
-precede scientific imports.
+standard-library dependency boundary. Band handoff, checkpoint parsing and
+Stage B head help/argument handling still precede scientific imports; the
+other tools retain their original package-dependent qualified contexts.
 
 The separately attached correction packet records all changed boundaries,
 their exact original/candidate source locations, retained input paths/keys,

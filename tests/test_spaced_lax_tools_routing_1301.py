@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +20,9 @@ import pytest
 from golden_table import GoldenTable
 
 GOLDEN = GoldenTable("spaced_lax_tools_consumers_2320")
+ROOT = Path(__file__).resolve().parents[1]
+LAUNCH_CONTRACTS = json.loads((Path(__file__).parent / "fixtures" /
+    "spaced_lax_tools_launch_contracts_2320.json").read_text())["rows"]
 
 
 def test_state_append_preserves_existing_bytes_and_nonfinite_event(tmp_path, monkeypatch):
@@ -158,11 +162,8 @@ def _standalone(name, args, tmp_path):
                           cwd=tmp_path, env=env, capture_output=True, check=False)
 
 
-@pytest.mark.parametrize("name", [
-    "audit_t4_render_paths.py", "build_glm_derivative_image.py", "checkpoint_parse_probe.py",
-    "measure_wire_rehash_readers.py", "profile_stage_b_head.py",
-    "band_serial_handoff_live_pair.py", "chain_roll_bench.py",
-])
+@pytest.mark.parametrize("name", [row["file"].removeprefix("tools/")
+    for row in LAUNCH_CONTRACTS if row["kind"] == "Standard-library argument/help entry"])
 def test_lightweight_cli_help_works_without_scientific_dependencies(name, tmp_path):
     result = _standalone(name, ["--help"], tmp_path)
     assert result.returncode == 0, result.stderr.decode()
@@ -192,3 +193,97 @@ def test_render_analysis_cli_publishes_without_scientific_dependencies(tmp_path)
     result = _standalone("render_window_bench.py", ["analyze", "--out", str(tmp_path)], tmp_path)
     assert result.returncode == 0, result.stderr.decode()
     assert json.loads((tmp_path / "analysis.json").read_bytes())["identical_projections"] is True
+
+
+def _scientific_environment():
+    env = dict(os.environ)
+    dependencies = env.pop("PQ_TEST_DEPENDENCY_PATH", None)
+    if dependencies:
+        env["PYTHONPATH"] = dependencies
+    else:
+        env.pop("PYTHONPATH", None)
+    return env
+
+
+@pytest.mark.parametrize("row", [row for row in LAUNCH_CONTRACTS
+    if row["kind"] == "Package-dependent argument/help entry"], ids=lambda row: row["file"])
+def test_package_dependent_entrypoint_help_uses_its_supported_context(row):
+    env = _scientific_environment()
+    result = subprocess.run([sys.executable, *row["supported_probe"][1:]],
+        cwd=ROOT, env=env, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr.decode()
+
+
+def test_split_forward_subcommand_keeps_its_supported_bootstrap():
+    env = _scientific_environment()
+    result = subprocess.run([sys.executable, "-m", "tools.build_stagea_split_package",
+        "forward", "--help"], cwd=ROOT, env=env, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr.decode()
+
+
+def test_source_adoption_batch_reaches_only_its_actual_input_boundary():
+    """Real imports and input open, not source adoption or 120-header execution."""
+    expected = "/mnt/shared/tessera-measurements/glm-canonical-census-20260908/first-proof-joint-01/prepare/source-identity.json"
+    probe = r'''
+import json, os, runpy, sys
+expected = sys.argv[1]
+output_root = "/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/cpu-export-codex-20260922"
+denied = []
+publications = []
+class ApplicationInputDenied(Exception):
+    pass
+def audit(event, args):
+    if event != "open" or not isinstance(args[0], (str, bytes, os.PathLike)):
+        return
+    path = os.fsdecode(args[0])
+    if path == expected:
+        denied.append(path)
+        raise ApplicationInputDenied("bootstrap application input deliberately denied")
+    flags = args[2]
+    if path.startswith(output_root + "/") and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT):
+        publications.append(path)
+        raise RuntimeError("unexpected output publication before the input boundary")
+sys.addaudithook(audit)
+try:
+    runpy.run_module("tools.prove_glm_source_adoption", run_name="__main__")
+except ApplicationInputDenied:
+    print(json.dumps({"scope": "bootstrap through first application input only",
+        "denied_open": denied, "publications": publications,
+        "reason": "bootstrap application input deliberately denied"}, sort_keys=True))
+    raise SystemExit(86)
+raise SystemExit("script did not reach the actual denied input")
+'''
+    env = _scientific_environment()
+    result = subprocess.run([sys.executable, "-c", probe, expected],
+        cwd=ROOT, env=env, capture_output=True, check=False)
+    assert result.returncode == 86, result.stderr.decode()
+    observed = json.loads(result.stdout.splitlines()[-1])
+    assert observed["denied_open"] == [expected]
+    assert observed["publications"] == []
+    assert observed["reason"] == "bootstrap application input deliberately denied"
+
+
+@pytest.mark.parametrize("name", ["check_stageb_a4_quantizer.py", "check_stageb_a4_group_quantizer.py"])
+def test_native_batch_entrypoint_runs_its_real_tiny_cuda_checker(name):
+    import hashlib
+    import torch
+    if not torch.cuda.is_available():
+        pytest.skip("actual tiny registered-operator batch bootstrap requires CUDA")
+    args = []
+    if name == "check_stageb_a4_group_quantizer.py":
+        policy = Path("/mnt/shared/tessera-measurements/glm-campaign-takeover-20260913/r13-stageb-20260923/a4/served-activation-policy.json")
+        args = ["--policy", str(policy), "--policy-sha256", hashlib.sha256(policy.read_bytes()).hexdigest()]
+    result = subprocess.run([sys.executable, str(ROOT / "tools" / name), *args],
+        cwd=ROOT, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr.decode()
+    assert json.loads(result.stdout.splitlines()[-1])["status"] == "passed"
+
+
+def test_separately_staged_model_worker_keeps_its_standard_library_help(tmp_path):
+    worker = tmp_path / "worker.py"
+    worker.write_bytes((ROOT / "tools/tessera_fleet/model_worker.py").read_bytes())
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    result = subprocess.run(["/usr/bin/python3", "-S", str(worker), "--help"],
+        cwd=tmp_path, env=env, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr.decode()
