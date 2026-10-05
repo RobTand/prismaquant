@@ -1155,7 +1155,11 @@ def quantum_runtime_execution(config, *, replay_regime, kda_capture_kernel=None)
     replay regime and the KDA capture kernel (PQ #1199) are the launch
     settings ``run_layer_quantum`` resolved; an unset kernel adds no key.
     """
-    execution = dict(config["execution"])
+    from .tessera_joint_eval_panel import evaluation_execution
+    execution = dict(evaluation_execution(config))
+    panel = config.get("joint_eval_draw") or config.get("joint_eval")
+    if panel is not None:
+        execution["joint_eval"] = panel
     checkpoint_budget = publication_budget(execution.get(CHECKPOINT_PUBLICATION_SETTING))
     publication_job_limit(execution.get(CHECKPOINT_PUBLICATION_JOBS_SETTING),
                           budget=checkpoint_budget)
@@ -2162,6 +2166,9 @@ def run_layer_quantum_core(
                 f"prepared render tensor proof differs from the source for {name}@{fmt}: "
                 f"{_render_proof_sides(value, source, side='skeleton')}")
         joint_cache_renders.setdefault(name, {})[fmt] = dict(value)
+    pilot_panel = execution.get("joint_eval")
+    from .joint_eval_observation import new_observation_counts, observe_probe, stamp_observations
+    observation_counts = new_observation_counts(names, n_probes) if pilot_panel is not None else None
     joint_run_identity = {
         "schema": "prismaquant.joint_aura.run.v2",
         "probe_identity": joint_probe_identity,
@@ -2178,6 +2185,9 @@ def run_layer_quantum_core(
     attribution_run = sequence_attribution_run_identity(attribution_config)
     if attribution_run is not None:
         joint_run_identity["sequence_attribution"] = attribution_run
+
+    if pilot_panel is not None:
+        joint_run_identity["joint_eval"] = pilot_panel
 
     # ---- journal ---------------------------------------------------------
     checkpoint_git_commit = _checkpoint_git_commit()
@@ -2249,7 +2259,7 @@ def run_layer_quantum_core(
             collect_col_energy=False, s2=s2, s4=s4, x2_probe=x2_probe, dw_src=dw_src,
             g_trace=g_trace, col_energy={}, diagnostic_weight_mse_pairs=set(),
             weight_mse_diagnostic={}, require_source_weight_identity=False,
-            source_weight_identity={}, observation_counts=None)
+            source_weight_identity={}, observation_counts=observation_counts)
         rows = state.get("joint_aura_rows")
         if not isinstance(rows, Mapping) or set(rows) != set(unit_formats[name]):
             raise RuntimeError(f"joint AURA checkpoint row scope mismatch for {name}")
@@ -2899,7 +2909,7 @@ def run_layer_quantum_core(
                 name, render_formats[name], s2=s2, s4=s4,
                 x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
                 col_energy={}, weight_mse_diagnostic={},
-                source_weight_identity={}, observation_counts=None),
+                source_weight_identity={}, observation_counts=observation_counts),
                 "joint_aura_rows": joint_rows[name]}
 
         def commit_streamed_units(targets):
@@ -3184,6 +3194,8 @@ def run_layer_quantum_core(
                                                  **window_receipt))
             for name, diagnostic in diagnostics.items():
                 g_trace[name] += diagnostic["g_trace"]
+                if observation_counts is not None:
+                    observe_probe(observation_counts, name, probe_index, diagnostic)
             for key, components in terms.items():
                 joint_components[key].append(components)
                 value = squared_signed(components["total"])
@@ -3706,6 +3718,8 @@ def run_layer_quantum_core(
         s2=s2, s4=s4, x2_probe=x2_probe, dw_src=dw_src, g_trace=g_trace,
         col_energy={}, weight_mse_diagnostic={}, unit_topology=unit_topology)
     payload["costs"] = joint_rows
+    if observation_counts is not None:
+        stamp_observations(payload, observation_counts, pilot_panel)
     probe_identity_sha256 = identity_sha256(joint_probe_identity)
     if probe_identity_sha256 != identity_sha256(joint_probe):
         raise RuntimeError("joint probe identity changed after it was validated")
@@ -4225,6 +4239,13 @@ def run_layer_quantum(
             identity_cache_bytes = None
             digest_cache_bytes = None
 
+        from .tessera_joint_eval_panel import evaluation_formats, select_evaluation
+        formats_by_qname = evaluation_formats(config, formats_by_qname)
+        result["encoding_calibration_input"] = calibration
+        ids, calibration, eval_panel = select_evaluation(ids, calibration, config)
+        result["calibration_input"] = calibration
+        if eval_panel is not None:
+            result["joint_eval"] = eval_panel
         runner = build_quantum_source_runner(
             config, offload_folder=space / "run" / "offload",
             sealed_head_tensors=((record.get("executable_readset") or {})
