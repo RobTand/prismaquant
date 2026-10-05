@@ -108,7 +108,8 @@ def _hosts_prismabuild(entry: str) -> bool:
 
 
 @contextlib.contextmanager
-def prismabuild_imports_restored(*, source_root: Path | None = None):
+def prismabuild_imports_restored(*, source_root: Path | None = None,
+                               detach: bool = False):
     """Leave ``import prismabuild`` resolving where it did before (PQ #1281).
 
     Several tests import PrismaBuild from a sealed generation tree: they
@@ -133,6 +134,12 @@ def prismabuild_imports_restored(*, source_root: Path | None = None):
     Restoring is silent and unconditional, like the other restore fixtures
     in ``tests/conftest.py``: importing from a sealed tree is legitimate,
     only its escape from the test is the defect.
+
+    ``detach`` gives a fixture ownership of an initially unbound graph. It
+    removes pre-existing package entries without choosing a source or adding
+    a prerequisite. Resolvers still authenticate and refuse origins themselves.
+    The previous graph and parent edges return on exit; without ``source_root``
+    unrelated path changes retain the preservation-only behavior above.
 
     ``source_root`` is an explicit fixture-owned binding, authenticated by
     its caller before entry. It detaches the canonical PB graph and sibling
@@ -165,9 +172,10 @@ def prismabuild_imports_restored(*, source_root: Path | None = None):
         parent = saved_modules.get(parent_name)
         if parent is not None:
             saved_attributes[name] = (parent, leaf, getattr(parent, leaf, missing))
-    if source_root is not None:
+    if source_root is not None or detach:
         for name in saved_modules:
             sys.modules.pop(name, None)
+    if source_root is not None:
         sys.path[:0] = [str(source_root / "src"), str(fleet)]
     try:
         yield
