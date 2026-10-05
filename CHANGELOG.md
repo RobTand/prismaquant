@@ -132,6 +132,12 @@
 
 ### Fixed
 
+- **Restore the shared owned-byte digest comparison after the #2283 port.**
+  `read_bound` again routes the acquired-byte hash through the hard `same`
+  comparison before memoizing, preserving `owned bytes: identity mismatch`.
+  A stat-fence drift cannot adopt changed bytes; dev-mode provenance stamps
+  never waive this byte-integrity check. Existing consumer tests stay unchanged.
+
 - **The seed wire filename refusal in `tessera_materialization.finalize()`
   precedes the source read** (#2310). The check that a seed receipt names its
   unit/rung destination is now one helper, `_require_seed_wire_filename`, which

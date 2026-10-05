@@ -1163,7 +1163,8 @@ def stage_a_spool_window_bytes(campaign: Mapping,
 
     plan = json.loads(Path(campaign["plan_path"]).read_text())
     try:
-        execution = plan["execution"]
+        from prismaquant.tessera_joint_eval_panel import evaluation_execution
+        execution = evaluation_execution(plan)
         n_probes = int(execution["n_probes"])
         n_rows = int(execution["n_calib_samples"])
         seqlen = int(execution["calib_seqlen"])

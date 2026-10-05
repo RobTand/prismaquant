@@ -10,6 +10,7 @@ semantic reporter. Full GPU execution belongs to a later lane, not here.
 """
 
 import copy
+import gzip
 import hashlib
 import json
 import os
@@ -237,6 +238,31 @@ def test_build_covers_whole_consumption_corpus(tmp_path):
     assert manifest["total_bytes"] == sum(
         e["bytes"] for e in manifest["entries"])
     assert manifest["annotations"]["render_prerequisite"]["scope"] == "pb732"
+
+
+def test_independent_draw_stages_encoding_then_fisher_tokens_through_emit_and_bind(tmp_path):
+    record, receipt, parent = _layer2(tmp_path)
+    record, _digest = _bind_slice(record, receipt, tmp_path / "adjoint-slices")
+    kwargs = dict(strided_boundaries=STRIDED, n_probes=N_PROBES,
+                  calib=dict(CALIB), render_prerequisite=dict(RENDER_PREREQ))
+    baseline = build_quantum_executable_manifest(record, receipt, parent, **kwargs)
+    draw = {"path": "/fixture/fisher/train-2048.safetensors",
+            "bytes": 2048, "sha256": "a" * 64}
+    emitted = emit_quantum_executable_readsets(
+        receipt, [record], parent, output_root=str(tmp_path / "run"),
+        extra_head_reads=[draw], **kwargs)
+    assert len(emitted) == 1
+    result = emitted[0]
+    manifest = result["manifest"]
+    head = manifest["read_plan"]["phases"][0]
+    assert head["name"] == "head"
+    reads = [manifest["entries"][index] for index in head["entry_indices"]]
+    assert [row["path"] for row in reads] == [CALIB["path"], draw["path"]]
+    assert reads[1] == {"offset": 0, **draw}
+    assert manifest["total_bytes"] == baseline["total_bytes"] + draw["bytes"]
+    assert result["record"]["executable_readset"]["manifest_sha256"] == result["manifest_sha256"]
+    plain = build_quantum_executable_manifest(record, receipt, parent, **kwargs)
+    assert seal_manifest_bytes(plain) == seal_manifest_bytes(baseline)
 
 
 def test_checkpoint_manifest_is_the_first_declared_checkpoint_read(tmp_path):
@@ -1644,6 +1670,41 @@ def test_cli_executable_readsets_end_to_end(tmp_path):
             adjoint_path=Path(record["adjoint"]["slice_path"]),
             adjoint_sha256=canonical,
             output_root=Path(str(campaign["root"])))
+
+
+def test_cli_builds_extra_head_reads_from_the_bound_fresh_draw_plan(tmp_path):
+    import regenerate_joint_quanta as regen
+    from test_tessera_joint_eval_panel import _encoding_calibration, _fresh_draw
+    campaign = _exec_campaign(tmp_path)
+    encoding, _ = _encoding_calibration(tmp_path)
+    draw, _ = _fresh_draw(tmp_path, encoding)
+    plan = json.loads(campaign["plan_path"].read_text())
+    plan["calibration_input"] = {
+        "path": str(tmp_path / "encoding.safetensors"),
+        "sha256": encoding["artifact_sha256"]}
+    plan["execution"].update(n_calib_samples=4, calib_seqlen=8)
+    plan["joint_eval_draw"] = draw
+    campaign["plan_path"].write_text(json.dumps(plan, sort_keys=True))
+    campaign["plan_sha"] = hashlib.sha256(
+        campaign["plan_path"].read_bytes()).hexdigest()
+    receipt, space = _exec_receipt(tmp_path, campaign)
+    write_adjoint_receipt(space, receipt)
+    out = tmp_path / "reviewed"
+    assert regen.main(
+        _exec_argv(tmp_path, campaign)
+        + ["--output-root", str(campaign["root"]),
+           "--records-out", str(out),
+           "--adjoint-receipt", str(space / "adjoint-capture.json"),
+           "--executable-readsets"]) == 0
+    expected = [plan["calibration_input"], draw["calibration_input"]]
+    for path in out.glob("layer-*.json"):
+        record = json.loads(path.read_text())
+        with gzip.open(record["executable_readset"]["manifest_path"], "rb") as stream:
+            manifest = json.load(stream)
+        for entry, reference in zip(manifest["entries"][:2], expected, strict=True):
+            assert entry["path"] == reference["path"]
+            assert entry["sha256"] == reference["sha256"]
+            assert entry["bytes"] == Path(reference["path"]).stat().st_size
 
 
 def test_cli_executable_refusal_writes_nothing(tmp_path):

@@ -133,6 +133,52 @@ def authority_case(original_runner, original_model, tmp_path):
                final=final, final_input=final_input, tmp=tmp_path)
 
 
+@pytest.mark.parametrize("owner", ["static", "preparation", "session"])
+def test_original_owners_keep_the_512_by_512_draw(authority_case, owner):
+    case = authority_case
+    preparation = copy.deepcopy(case["prepared"])
+    calibration = preparation["calibration"]
+    # Same flat token payload/digest and same token count, different shape.
+    calibration["shape"] = [128, 2048]
+    calibration["provenance"]["nsamples"] = 128
+    calibration["provenance"]["seqlen"] = 2048
+    with pytest.raises(RuntimeError, match="full calibration shape"):
+        if owner == "static":
+            authority = {key: copy.deepcopy(case["authority"][key])
+                         for key in sg.ORIGINAL_STATIC_AUTHORITY_KEYS}
+            authority["calibration"] = calibration
+            sg.normalize_original_source_static_authority(authority)
+        elif owner == "preparation":
+            sg.normalize_original_diagnostic_preparation(preparation)
+        else:
+            sg.original_diagnostic_session_identity(
+                base_plan=case["base"], base_plan_sha256="a" * 64, prepared=preparation,
+                execution_sha256=case["base"]["execution"]["sha256"])
+
+
+def test_original_draw_requires_its_minimum_fit_tokens(authority_case):
+    preparation = copy.deepcopy(authority_case["prepared"])
+    del preparation["calibration"]["provenance"]["fit_tokens_min"]
+    with pytest.raises(RuntimeError, match="provenance fields"):
+        sg.normalize_original_diagnostic_preparation(preparation)
+
+
+@pytest.mark.parametrize("dev_mode", ["1", "0"])
+def test_session_identity_directly_compares_shape_after_preparation_validation(
+        authority_case, monkeypatch, dev_mode):
+    case = authority_case
+    preparation = copy.deepcopy(case["prepared"])
+    # Isolate the session join: upstream preparation validation has its own
+    # original-shape tests above. Keep the actual flat tensor digest unchanged.
+    preparation["calibration"]["shape"] = [128, 2048]
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", dev_mode)
+    monkeypatch.setattr(sg, "normalize_original_diagnostic_preparation", sg._snapshot)
+    with pytest.raises(RuntimeError, match="prepared/base full calibration shape"):
+        sg.original_diagnostic_session_identity(
+            base_plan=case["base"], base_plan_sha256="a" * 64, prepared=preparation,
+            execution_sha256=case["base"]["execution"]["sha256"])
+
+
 def test_original_json_snapshot_keeps_direct_order_unicode_and_owned_values():
     value = {10: ['café', '\ud800', -0.0], 9: (True, None, 1.0)}
     expected = json.loads(json.dumps(value, sort_keys=True, allow_nan=False))

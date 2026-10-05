@@ -43,7 +43,7 @@ def _binding_sha(completed):
                                      separators=(",", ":")).encode()).hexdigest()
 
 
-def _manifest(completed=()):
+def _manifest(completed=(), *, n_probes=4):
     windows = []
     for layer in (1, 0):
         name = NAMES[layer][0]
@@ -63,7 +63,7 @@ def _manifest(completed=()):
         "mode": "retained_cost_v2", "plan": "/mnt/shared/plan.json",
         "plan_sha256": PLAN_SHA, "prepared": "/mnt/shared/prepared.json",
         "prepared_sha256": PREPARED_SHA, "source_owner_cap_bytes": 100,
-        "retained_budget": _budget().as_dict(), "probes_per_window": 4,
+        "retained_budget": _budget().as_dict(), "probes_per_window": n_probes,
         "source_prefetch_lookahead_layers": 1,
         "tail_retained_source_layers": [0, 1],
         "window_partition_sha256": digest, "windows": windows,
@@ -86,8 +86,10 @@ def _manifest(completed=()):
             "read_plan": {"phases": phases, "read_bytes": cumulative}}
 
 
-def _load(tmp_path, manifest=None, *, completed=(), gzip_wire=False, **overrides):
-    manifest = _manifest(completed) if manifest is None else manifest
+def _load(tmp_path, manifest=None, *, completed=(), gzip_wire=False, n_probes=4,
+          **overrides):
+    manifest = (_manifest(completed, n_probes=n_probes) if manifest is None
+                else manifest)
     raw = json.dumps(manifest, separators=(",", ":")).encode()
     if gzip_wire:
         raw = gzip.compress(raw, mtime=0)
@@ -97,7 +99,7 @@ def _load(tmp_path, manifest=None, *, completed=(), gzip_wire=False, **overrides
                   manifest_bytes=len(raw), plan_path="/mnt/shared/plan.json",
                   plan_sha256=PLAN_SHA, prepared_path="/mnt/shared/prepared.json",
                   prepared_sha256=PREPARED_SHA, retained_budget=_budget(),
-                  source_owner_cap_bytes=100, n_probes=4,
+                  source_owner_cap_bytes=100, n_probes=n_probes,
                   target_names_by_layer=NAMES, validated_completed_units=completed)
     kwargs.update(overrides)
     return load_joint_cost_read_schedule(**kwargs)
@@ -195,6 +197,7 @@ def test_gzip_requires_one_complete_member(tmp_path):
 @pytest.mark.parametrize("mutate,reason", [
     (lambda m: m["annotations"].update(extra=True), "annotations"),
     (lambda m: m["annotations"].update(plan_sha256="c" * 64), "joint plan binding"),
+    (lambda m: m["annotations"].update(probes_per_window=8), "probe count differs"),
     (lambda m: m["annotations"].update(validated_completed_units=1), "checkpoint binding"),
     (lambda m: m["annotations"]["windows"][0].update(active_pending_names=[]), "pending names"),
     (lambda m: m["annotations"]["windows"][0].update(statistics_bytes=1000), "retained budget"),
@@ -210,3 +213,34 @@ def test_mutated_manifest_refused(tmp_path, mutate, reason):
     mutate(manifest)
     with pytest.raises(ValueError, match=reason):
         _load(tmp_path, manifest)
+
+
+@pytest.mark.parametrize("count", [2, 8, 16])
+def test_explicit_probe_count_at_or_above_two_is_sealed(tmp_path, count):
+    """The loader binds whatever exact count >= 2 both sides declare.
+
+    Pre-fix this refused every count but four ("COST V2 requires four
+    probes"); the seal is now the count itself, not the number four.
+    """
+    schedule = _load(tmp_path, n_probes=count)
+    assert schedule.identity["manifest_bytes"] > 0
+    assert len(schedule.windows) == 2
+    assert schedule.windows_for_layer(1)[0].active_pending_names == NAMES[1]
+
+
+def test_probe_count_argument_disagreeing_with_manifest_refused(tmp_path):
+    # The manifest seals four while the caller declares eight: the binding
+    # refuses on the count seal, not by re-deriving either side.
+    with pytest.raises(ValueError, match="probe count differs"):
+        _load(tmp_path, _manifest(n_probes=4), n_probes=8)
+
+
+@pytest.mark.parametrize("bad,reason", [
+    (1, "at least two"),
+    (True, "exact positive integer"),
+    (4.0, "exact positive integer"),
+    ("4", "exact positive integer"),
+])
+def test_probe_count_must_be_an_exact_integer_of_at_least_two(tmp_path, bad, reason):
+    with pytest.raises(ValueError, match=reason):
+        _load(tmp_path, n_probes=bad)
