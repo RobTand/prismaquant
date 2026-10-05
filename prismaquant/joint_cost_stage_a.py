@@ -48,7 +48,7 @@ import torch
 
 from .cost_stage_checkpoint import atomic_write_bytes, canonical_json_sha256
 from .dev_mode import NOT_COMPUTED, dev_mode_enabled, seal_check
-from .digests import bytes_sha256hex, indent2_json_file_bytes
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes
 from .stage_a_selected_row_diagnostic import (
     RECEIPT_SCHEMA as DIAGNOSTIC_RECEIPT_SCHEMA,
     SelectedRowDiagnosticRefused, bind_diagnostic_draw, diagnostic_marker_path,
@@ -2237,8 +2237,7 @@ def _write_split_digests(space, label, samples, block) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {"schema": SPLIT_DIGESTS_SCHEMA, "label": label,
                 "samples": list(samples), **block}
-    atomic_write_bytes(path, (json.dumps(document, sort_keys=True, indent=2)
-                              + "\n").encode())
+    atomic_write_bytes(path, DIRECT_ASCII_INDENT2_LAX.encoded(document) + b"\n")
     return path
 
 

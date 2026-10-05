@@ -46,6 +46,31 @@
 
 ### Changed
 
+- **Bounded sorted-JSON consumers route to their existing exact
+  `JsonProfile` recipes** (Refs #1301, follow-up to the byte-hash routing).
+  79 selected scopes / 86 sorted-`json.dumps` calls across 56 package
+  modules now call the profile they already spelled out by options —
+  `DIRECT_ASCII_SPACED_LAX`, `DIRECT_ASCII_SPACED_STRICT`,
+  `DIRECT_ASCII_LAX`, `DIRECT_ASCII_STRICT`, `DIRECT_ASCII_INDENT2_LAX`,
+  `DIRECT_UTF8_LAX`, `DIRECT_UTF8_STRICT` or `DIRECT_UTF8_INDENT2_STRICT` —
+  via `.text`, `.encoded` or `.sha256` exactly where the previous expression
+  consumed text, bytes or the digest of those bytes. Each route is
+  byte-identical to the recipe it replaces: the encoder options and UTF-8
+  encoding step are unchanged. Flags, bytes, refusals, evaluation order,
+  newlines, prefix truncation and source-identity contracts are unchanged,
+  and `digests.py` itself is untouched. Five matching scopes in two
+  protected loaders stay on raw `json.dumps`: the campaign container test
+  loads `prismabuild_progress.py` by run path without package context (its
+  four scopes), and the host row profiler loads `io_spans.py` by file-spec
+  without package context — `tools/pq_profile_source.py:18-25`,
+  `tools/pq_row_profile_observer.py:26` — so `ReadRateReporter._emit` keeps
+  its direct recipe; no fallback loaders were added. `dsv4_campaign_completion.py`
+  extends its existing same-tree file-spec digests owner binding with the
+  two UTF-8 profiles symmetrically in package and no-package mode. The
+  committed per-scope census in
+  `docs/audits/digest_site_census_pq1301_2026-10-04.json` retains all 501
+  historical rows and names the 334 remaining gated scopes; #1301 stays open.
+
 - **Raw byte-hash constructors route to the digest owners** (Refs #1301).
   83 raw `hashlib.sha256(...).hexdigest()` constructor sites across 47
   package modules now call the existing `prismaquant.digests` byte/text

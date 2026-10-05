@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping, Sequence
-import json
 import os
 from pathlib import Path
 import pickle
@@ -64,6 +63,7 @@ from prismaquant.stock_anchored_cost import (
     DEFAULT_COSTED_FORMAT,
     RENDER_LEVERS,
 )
+from prismaquant.digests import DIRECT_ASCII_INDENT2_LAX
 
 
 def _log(msg: str) -> None:
@@ -390,7 +390,7 @@ def run_harvest(args: argparse.Namespace) -> dict[str, object]:
     )
     provenance = payload.get("provenance", {})
     side = output.with_suffix(".provenance.json")
-    side.write_text(json.dumps({
+    side.write_text(DIRECT_ASCII_INDENT2_LAX.text({
         "schema": HARVEST_SCHEMA,
         "output": str(output),
         "plan_scope": planned["plan_scope"],
@@ -400,7 +400,7 @@ def run_harvest(args: argparse.Namespace) -> dict[str, object]:
         "git_commit": provenance.get("git_commit"),
         "calib_hash": observed_calib_hash,
         "n_probes": int(args.n_probes),
-    }, indent=2, sort_keys=True) + "\n")
+    }) + "\n")
     _log(
         f"wrote {output}: {len(payload.get('costs', {}))} unit(s), "
         f"{provenance.get('dw_production_anchor_rows')} production-anchor "

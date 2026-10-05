@@ -381,7 +381,7 @@ class CaptureSourceAuthentication:
         self._setup(root, producer_source, manifest_sha256=manifest_sha256,
                     resource_check=resource_check, release_read_pages=release_read_pages,
                     source_files=dict(identity['source_files']))
-        self._identity_json = json.dumps(identity, sort_keys=True, allow_nan=False)
+        self._identity_json = DIRECT_ASCII_SPACED_STRICT.text(identity)
 
     @classmethod
     def recording(cls, root, producer_source, *, binding_sha256=None, fingerprints=None,

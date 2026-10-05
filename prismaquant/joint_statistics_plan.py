@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import json
 
 from .joint_aura import _joint_projection_requirements, identity_sha256
+from .digests import DIRECT_ASCII_STRICT
 
 SCHEMA = 'prismaquant.joint_statistics_target_windows.v1'
 
@@ -94,4 +95,4 @@ def plan_joint_statistics_target_windows(modules, specs_by_qname, *, max_statist
     windows.append(tuple(current))
     sizes.append(used)
     return JointStatisticsTargetPlan(max_statistics_bytes, targets, tuple(windows), tuple(sizes),
-        json.dumps(backend.identity, sort_keys=True, separators=(',', ':'), allow_nan=False))
+        DIRECT_ASCII_STRICT.text(backend.identity))

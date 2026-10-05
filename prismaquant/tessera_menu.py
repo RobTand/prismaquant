@@ -1973,9 +1973,9 @@ def assert_uniform_hessian_identity(costs: "dict", *, references=None) -> dict:
                 schema = "modern"
             reference = ident.get('reference_binding')
             if reference is not None:
-                import json
+                from .digests import DIRECT_ASCII_SPACED_LAX
                 from tessera.hessian_capture import normalize_reference_binding
-                reference = json.dumps(normalize_reference_binding(reference), sort_keys=True)
+                reference = DIRECT_ASCII_SPACED_LAX.text(normalize_reference_binding(reference))
             key = (schema, modern, bool(ident.get("supplied")),
                    ident.get("text_sha"), ident.get("token_count"),
                    ident.get("kwarg"), ident.get("capture_sha256"), reference)
@@ -2027,6 +2027,8 @@ def _content_equal_hessian_identity(seen, capture_rows, references, required,
                                     legacy_rows, unstamped):
     """One draw, one kwarg set, one binding, several seals: compare content (#1270)."""
     import json
+
+    from .digests import DIRECT_ASCII_SPACED_LAX
     (key, *_) = sorted(seen, key=lambda k: -seen[k])
     binding = key[7]
 
@@ -2061,8 +2063,8 @@ def _content_equal_hessian_identity(seen, capture_rows, references, required,
                    "compared with the table's own capture.")
     from tessera.hessian_capture import normalize_reference_binding
     primary_binding = files[primary].get("reference_binding")
-    if primary_binding is None or json.dumps(
-            normalize_reference_binding(primary_binding), sort_keys=True) != binding:
+    if primary_binding is None or DIRECT_ASCII_SPACED_LAX.text(
+            normalize_reference_binding(primary_binding)) != binding:
         refuse("The table's own reference file binds a different canonical "
                "capture or census than its rows.")
     from .joint_catalog_extension import _overlay_hessian_commitments

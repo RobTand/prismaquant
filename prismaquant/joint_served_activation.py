@@ -14,7 +14,7 @@ import json
 import pickle
 from pathlib import Path
 from .schemas import Contract
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
 FORMAT = "TESSERA_E2M1_K2_R896"
 SCHEMA = "prismaquant.joint_served_activation_policy.v1"
@@ -229,7 +229,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     result = derive_policy({"path": args.original_prepared, "sha256": args.original_prepared_sha256},
                            formats=None if args.formats is None else sorted(set(args.formats)))
-    raw = (json.dumps(result, sort_keys=True) + "\n").encode()
+    raw = DIRECT_ASCII_SPACED_LAX.encoded(result) + b"\n"
     _require(publish_new_bytes(Path(args.out), raw), "output already exists")
     print(json.dumps({"status": "proposed", "path": args.out,
                       "members": len(result["effective_max_abs"]),

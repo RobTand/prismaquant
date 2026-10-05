@@ -35,7 +35,11 @@ from .cost_stage_checkpoint import (
     canonical_json_sha256,
     publish_new_bytes,
 )
-from .digests import bytes_sha256hex, indent2_json_file_bytes
+from .digests import (
+    DIRECT_ASCII_STRICT,
+    bytes_sha256hex,
+    indent2_json_file_bytes,
+)
 from .io_spans import ReadRateReporter
 
 from .joint_adjoint_slices import (  # noqa: F401 -- re-exported: one spelling
@@ -218,8 +222,7 @@ def reference_from_record(record: dict):
     return ExactActivationReference(
         path=str(record["path"]),
         name=str(record["name"]),
-        metadata_json=json.dumps(
-            metadata, sort_keys=True, separators=(",", ":"), allow_nan=False),
+        metadata_json=DIRECT_ASCII_STRICT.text(metadata),
         shape=tuple(int(dim) for dim in record["shape"]),
         dtype=str(record["dtype"]),
         tensor_bytes=int(record["tensor_bytes"]),

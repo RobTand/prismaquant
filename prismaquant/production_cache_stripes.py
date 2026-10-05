@@ -23,7 +23,7 @@ from pathlib import Path
 
 from prismaquant.decision_units import block_id_from_qname
 from prismaquant.model_profiles import detect_profile
-from .digests import file_sha256hex
+from .digests import DIRECT_ASCII_INDENT2_LAX, file_sha256hex
 
 
 SCHEMA = "prismaquant.production_cache_stripe_plan.v1"
@@ -194,7 +194,7 @@ def write_plan(
     }
     manifest_path = output_dir / "stripe-plan.json"
     manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        DIRECT_ASCII_INDENT2_LAX.text(manifest) + "\n",
         encoding="utf-8",
     )
     return manifest_path

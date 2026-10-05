@@ -48,7 +48,13 @@ from .prismasnap_checkpoint import (
     _derivation_digest,
 )
 from .schemas import strict_json_loads
-from .digests import SHA256_HEX, bytes_sha256hex, file_sha256hex, is_sha256hex
+from .digests import (
+    DIRECT_UTF8_INDENT2_STRICT,
+    SHA256_HEX,
+    bytes_sha256hex,
+    file_sha256hex,
+    is_sha256hex,
+)
 
 
 PROVENANCE_SCHEMA = "prismaquant.prismasnap.provenance.v1"
@@ -1702,9 +1708,7 @@ def attest_fold_fidelity(
         temporary = root / f".{PROVENANCE_JSON}.verification.tmp"
         if os.path.lexists(temporary):
             raise RuntimeError(f"stale PrismaSnap verification temporary: {temporary}")
-        data = json.dumps(
-            provenance, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False
-        ).encode("utf-8")
+        data = DIRECT_UTF8_INDENT2_STRICT.encoded(provenance)
         with temporary.open("xb") as handle:
             handle.write(data)
             handle.flush()

@@ -388,8 +388,9 @@ def _joint_projection_requirements(modules, specs_by_qname, *, activation_max_ab
             else:
                 callable_key = id(spec.activation_quantize_dequantize)
             group = (identity_sha256(receipt), callable_key)
-            grouped.setdefault(group, (spec, [], json.dumps(receipt, sort_keys=True,
-                separators=(",", ":"), allow_nan=False)))[1].append(fmt)
+            grouped.setdefault(
+                group, (spec, [], DIRECT_ASCII_STRICT.text(receipt)),
+            )[1].append(fmt)
         groups = tuple(_JointActivationGroup(spec, tuple(formats), receipt)
                        for spec, formats, receipt in grouped.values())
         requirements[name] = _JointTargetRequirements(tuple(weight.shape), groups,
