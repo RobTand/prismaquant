@@ -56,6 +56,11 @@
   remain. No prices are rescaled or fabricated, and no serving qualification
   is claimed.
 
+- **Verified-capture capacity test isolation** (#2308). Scope its global
+  `os.open` refusal sentinel to the loader call so failed-only pytest temp
+  cleanup does not trip the sentinel after the safety assertion has passed.
+  The real pre-open capacity refusal is unchanged.
+
 - **Mixed-rate COST_UCB_Z and paired rate-trade validity** (#2282, Refs #2281).
   The existing allocator accepts an explicit `--cost-baseline-assignment`;
   mixed-rate UCB requires it and matched joint AURA source/probe/currency
