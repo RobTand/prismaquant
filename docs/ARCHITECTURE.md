@@ -1,14 +1,15 @@
 # PrismaQuant Architecture
 
-Re-stamped 2026-10-04 (PQ #1586, graph equality receipt verification):
-`native_export.graph` now consumes Tessera's graph-equals-eager receipt for
-its own serve, not merely a load/generation smoke. The native producer stamps
-observed image/model/source identity and resolved serving sizes; the ship-card
-reader authenticates the saved receipt bytes, binds the recorded model-config
-SHA-256 to the card's actual artifact config.json bytes, and delegates equality
-to `tessera.graph_receipt.verify`. No eager-only waiver, pin bump or serving
-qualification is implied. The D13 serving pin must carry that module before
-this change can qualify or land; see §7.1.
+Re-stamped 2026-10-05 (PQ #1586, graph equality receipt v2 fabric scope):
+`native_export.graph` consumes Tessera's graph-equals-eager v2 receipt for
+its own serve, including collective fabric. The native producer stamps
+observed image/model/source identity, resolved serving sizes and the fabric
+request captured from the launch environment; the ship-card verifier
+re-hashes the receipt and binds the scope's model-configuration SHA-256 to
+its artifact, refuses non-v2 schemas, and delegates equality and fabric
+matching to `tessera.graph_receipt.verify`. No eager-only waiver, pin bump
+or serving qualification is implied. The D13 serving pin must carry that
+v2 module before this change can qualify or land; see §7.1.
 
 Re-stamped 2026-10-05 (`kernels/d13-public-master-pin-20261005`, PQ #2262):
 the immutable serving/development candidate names fetched public Tessera
@@ -25867,7 +25868,10 @@ physical, so its contract is a **record**, not CI.
 **Graph equality receipt (#1586).** Every `native_export.graph` record must
 carry `metrics.graph_receipt_path`, `metrics.graph_receipt_sha256`, and
 `metrics.serve_scope`. The verifier reads the named bytes once, checks that
-SHA-256, then calls only `tessera.graph_receipt.verify(receipt, serve_scope)`.
+SHA-256, refuses any schema other than `tessera.graph_equals_eager.v2` by
+name, then calls only `tessera.graph_receipt.verify(receipt, serve_scope)`.
+The recorded fabric passes through unchanged. A v1 receipt cannot attest
+this card, even if its arms satisfy the equality rule.
 Tessera re-applies its equality rule; a changed file, edited verdict, missing
 receipt or scope mismatch refuses by name, including Tessera's exact reason.
 Only a None result admits the slot. Any exception from the verify call itself
@@ -25907,14 +25911,23 @@ scope is never copied from the receipt or supplied as an identity override:
   `tensor_parallel_size` are read from the loaded engine's resolved
   speculative/model/scheduler/parallel configs, not copied from CLI wishes.
   An explicitly absent resolved speculative config derives zero tokens.
+- `fabric` is `none` when the resolved engine's `tensor_parallel_size`
+  is one. Above one rank, `tools.gold_engine_options.gold_fabric_request`
+  reads an environment snapshot captured before importing or constructing
+  the engine: `NCCL_IB_DISABLE=1` requests `sockets`, mapped to `socket`;
+  `NCCL_IB_DISABLE=0` requests `ib_or_roce`, mapped to `roce`. Missing or
+  other values refuse `fabric` and name `NCCL_IB_DISABLE`. This is a
+  **request, not an observation**. Tessera's v2 receipt observes fabric from
+  every rank's NCCL banners, so a request NCCL did not honour is refused by
+  the fabric mismatch rather than silently relabelled.
 
 Unavailable values refuse with their scope field name. This does not change
 which artifact lane `validate_native_export` loads: it still refuses a
 Tessera checkpoint instead of forcing compressed-tensors quantization onto it.
 A GLM Tessera release still owes its own artifact-scope graph equality serve,
-compiled cells and all independent ship gates. This change depends on Tessera
-PR #930 and the D13 serving pin bump carrying `tessera.graph_receipt`; the
-pre-pin CPU smoke with that PR's source is non-qualifying evidence only.
+compiled cells and all independent ship gates. This change depends on the
+D13 serving pin bump carrying `tessera.graph_receipt` with the v2 fabric
+contract; the pre-pin CPU smoke with v2 source is non-qualifying evidence only.
 
 
 **Sampled whole-stack proposal validation is deliberately narrower than an

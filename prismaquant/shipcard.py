@@ -2116,6 +2116,9 @@ def _verify_graph_receipt(metrics: Mapping[str, Any]) -> list[str]:
         return [f"{slot}: malformed graph receipt: {exc}"]
     if not isinstance(receipt, dict):
         return [f"{slot}: malformed graph receipt: expected a JSON object"]
+    if receipt.get("schema") != "tessera.graph_equals_eager.v2":
+        return [f"{slot}: graph receipt schema {receipt.get('schema')!r} is not "
+                "tessera.graph_equals_eager.v2"]
     scope = dict(serve)
     try:
         reason = graph_receipt.verify(receipt, scope)

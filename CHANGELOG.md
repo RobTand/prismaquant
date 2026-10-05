@@ -100,9 +100,18 @@
   `serve_scope.model_config_sha256`, so a mutually matching receipt and scope
   borrowed from another artifact cannot verify; missing artifact context
   refuses by name.
+  The v2 contract adds collective fabric to the serve scope: one resolved
+  rank is `none`; above one rank, the launch environment's
+  `gold_fabric_request` maps `sockets` to `socket` and `ib_or_roce` to
+  `roce`, refusing missing or other `NCCL_IB_DISABLE` values by name.
+  This is the request captured before the engine can mutate its environment,
+  not an observation; Tessera observes NCCL banners and refuses a request it
+  did not honour through the fabric mismatch. The card passes fabric through
+  unchanged and explicitly refuses every schema other than
+  `tessera.graph_equals_eager.v2`, including otherwise equal v1 receipts.
   Eager verification is unchanged; no eager-only waiver is added.
   This change must land with or after the D13 Tessera pin bump carrying the
-  receipt module. Pre-pin CPU evidence is non-qualifying, not a GLM release.
+  v2 receipt module. Pre-pin CPU evidence is non-qualifying, not a GLM release.
 
 
 - **Test cost: repeated in-process work runs once; two stale consumer

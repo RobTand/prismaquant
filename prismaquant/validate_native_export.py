@@ -341,8 +341,15 @@ def _graph_tessera_source_sha256() -> str:
 
 def _graph_serve_scope(llm, model_dir: Path, compilation_config: dict,
                        *, image: str, source_sha256: str,
-                       config_sha256: str) -> dict:
-    """Read resolved engine sizes and speculation, not requested CLI values."""
+                       config_sha256: str, launch_environ: dict[str, str]) -> dict:
+    """Read resolved engine settings and the fabric REQUEST captured before launch.
+
+    One rank reduces across nothing (none). Above one rank, gold_fabric_request
+    reads the launched NCCL environment, not an observed transport. Tessera's
+    receipt observes fabric from NCCL banners; if NCCL did not honour this
+    request, verify refuses the resulting fabric mismatch.
+    """
+    from tools.gold_engine_options import gold_fabric_request
     from .digests import file_sha256hex
 
     config = getattr(getattr(llm, "llm_engine", None), "vllm_config", None)
@@ -372,6 +379,16 @@ def _graph_serve_scope(llm, model_dir: Path, compilation_config: dict,
                 or value < (0 if name == "speculative_tokens" else 1)):
             raise ValueError(f"cannot derive {name} from the served vLLM config")
         scope[name] = value
+    if scope["tensor_parallel_size"] == 1:
+        scope["fabric"] = "none"
+    else:
+        request = gold_fabric_request(launch_environ)
+        fabric = {"sockets": "socket", "ib_or_roce": "roce"}.get(request["transport"])
+        if fabric is None:
+            raise ValueError(
+                f"cannot derive fabric from launched NCCL_IB_DISABLE: "
+                f"{request['transport']} ({request['values'].get('NCCL_IB_DISABLE')!r})")
+        scope["fabric"] = fabric
     return scope
 
 
@@ -379,6 +396,7 @@ def _graph_serve_scope(llm, model_dir: Path, compilation_config: dict,
 def _run_arm(args, model_dir: Path, spec: dict | None, *,
              enforce_eager: bool) -> dict:
     """One load+generate smoke. Returns a shipcard-shaped verdict block."""
+    launch_environ = dict(os.environ) if not enforce_eager else None
     arm = "eager" if enforce_eager else "graph"
     print(f"[validate] starting vLLM ({arm} arm) ...", flush=True)
     sweep_path = _route_sweep_path(args, arm)
@@ -436,7 +454,8 @@ def _run_arm(args, model_dir: Path, spec: dict | None, *,
         if not enforce_eager:
             graph_metrics["serve_scope"] = _graph_serve_scope(
                 llm, model_dir, compilation, image=image,
-                source_sha256=source_sha256, config_sha256=config_sha256)
+                source_sha256=source_sha256, config_sha256=config_sha256,
+                launch_environ=launch_environ)
         hooks = _install_route_sweep_hooks(llm, sweep_path)
         sp = SamplingParams(temperature=0.0, max_tokens=args.max_new_tokens)
         out = llm.generate([args.prompt], sp)
