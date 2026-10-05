@@ -1,5 +1,21 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-687-journal-seal-fields`, base `4afbb861e0a`,
+PQ #687, CEO dec-1005-212354-dc9d, D32): `prepare_journal` accepts an empty-by-default
+caller-declared set of top-level producer seal fields. The campaign checkpoint
+and stream journal declare only `prismaquant_source_sha256` and
+`encoder_source_sha256`. A producer-only mismatch goes through `seal_check`,
+prints one `[DEV-MODE]` line naming all moved fields and both values, and reuses
+stored shards. The manifest stays byte-unchanged, and its original digest binds
+reused and newly published shards; later resumes compare against that same
+stored identity, so no stamp rewrites or diverges the journal. Every undeclared
+field, a mixed mismatch and every byte-integrity refusal remain enforced.
+Certified mode (`PRISMAQUANT_DEV_MODE=0`) retains the existing refusal.
+This retires the freeze-the-tree / `--seed-checkpoint` workaround for producer-hash
+moves only; `--seed-checkpoint` stays the path for real correctness changes,
+and every comparability field still refuses.
+
+
 Re-stamped 2026-10-05 (`issues/pq-2273-2299`, base `a1f852f6ee3`, PQ #2273):
 seed wire filenames must match their priced unit/rung before linking in campaign
 adoption or selected-wire materialization; a real campaign resume regression pins
@@ -2374,8 +2390,11 @@ dispatcher's demand could not cover the head the row then chose.
   (`tessera_row_stream.RECEIPT_FIELDS`), which the stream head can only
   re-derive one entry at a time. The row takes them from the manifest
   (`cost_stage_checkpoint.stored_manifest_identity`,
-  `_manifest_unit_receipts`), and `prepare_journal` compares every other field
-  of the run identity by name before the first entry is read. A receipt that
+  `_manifest_unit_receipts`), and `prepare_journal` compares every undeclared
+  field of the run identity by name before the first entry is read. Campaign
+  producer hashes are caller-declared seals: only those moves stamp and reuse
+  stored shards in dev mode; mixed or comparability changes still refuse.
+  A receipt that
   the manifest does not record reads as `CHECKPOINT_RECEIPT_ABSENT` and is
   refused by field.
 - `RowStream.expect_identities` then requires each entry's first read to

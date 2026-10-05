@@ -46,6 +46,18 @@
 
 ### Changed
 
+- **Caller-declared journal producer seals** (#687, CEO
+  dec-1005-212354-dc9d, D32). `prepare_journal` defaults to no seal fields;
+  the campaign checkpoint and stream journal declare only the PrismaQuant and
+  encoder source hashes. Producer-only drift stamps one `[DEV-MODE]` line
+  and reuses stored shards without rewriting their manifest or digest.
+  Mixed mismatches, every comparability field and byte-integrity checks still
+  refuse, as does certified mode (`PRISMAQUANT_DEV_MODE=0`). This retires
+  the freeze-the-tree / `--seed-checkpoint` workaround for producer-hash moves
+  only; `--seed-checkpoint` stays the path for real correctness changes,
+  and every comparability field still refuses.
+
+
 - **D32 dev-mode metadata stamp-and-continue** (#2302). The existing central
   default (anything except exact PRISMAQUANT_DEV_MODE=0) now also governs
   capture metadata owners, source provenance consumers and paired-trade

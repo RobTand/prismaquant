@@ -423,3 +423,39 @@ def test_seed_refuses_changed_scoring_rows_before_linking_wire(
             assert pickle.load(handle)['costs'] == _payload['costs']
         assert list((new_cache/'wire').glob('*.tessera'))
     assert checkpoint.read_bytes() == original_manifest
+
+
+
+@pytest.mark.parametrize("changed", ["producer", "mixed", "certified"])
+def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_campaign, capsys, changed):
+    from prismaquant import production_weight_cache as pwc
+    from prismaquant.cost_stage_checkpoint import unit_path
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    (campaign, checkpoint, argv, _model, inputs), initial = priced_campaign()
+    original_manifest = checkpoint.read_bytes()
+    root = checkpoint.with_name(checkpoint.name + ".parts")
+    original_shard = unit_path(root, UNIT).read_bytes()
+    stored = json.loads(original_manifest)["identity"]
+    api = campaign._checkpoint_identity_api()
+    monkeypatch.setattr(pwc, "_production_cache_source_sha256", lambda: "a" * 64)
+    monkeypatch.setattr(api, "encoder_source_sha256", lambda: "b" * 64)
+    _forbid_reencode(monkeypatch, campaign)
+    capsys.readouterr()
+    if changed == "mixed":
+        inputs["rows"][0, 0] += 1
+    elif changed == "certified":
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    if changed == "producer":
+        assert campaign.main(argv) == 0
+        assert _priced_cost_payload(tmp_path)["costs"] == initial["costs"]
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[DEV-MODE]") and "checkpoint" in line]
+        assert len(lines) == 1
+        for field, current in (("prismaquant_source_sha256", "a" * 64), ("encoder_source_sha256", "b" * 64)):
+            assert field in lines[0] and stored[field] in lines[0] and current in lines[0]
+    else:
+        with pytest.raises(RuntimeError, match="checkpoint identity mismatch"):
+            campaign.main(argv)
+        assert "[DEV-MODE]" not in capsys.readouterr().out
+    assert checkpoint.read_bytes() == original_manifest
+    assert unit_path(root, UNIT).read_bytes() == original_shard
+

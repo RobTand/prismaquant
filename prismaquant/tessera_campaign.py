@@ -2363,6 +2363,10 @@ def _manifest_unit_receipts(identity, names):
     return receipts
 
 
+#: Producer provenance only; every recipe, input and sampling field still refuses.
+CAMPAIGN_CHECKPOINT_SEAL_FIELDS = frozenset({"prismaquant_source_sha256", "encoder_source_sha256"})
+
+
 def _campaign_checkpoint_identity(*, weights, acts, hessians, menus, args,
                                   calibration_identity, serving_scope,
                                   static_scales, static_scale_policy,
@@ -7731,7 +7735,7 @@ def _main(argv, *, source_scope, waits) -> int:
         return prepare_journal(
             checkpoint.with_name(checkpoint.name + ".parts"), manifest_path=checkpoint,
             stage="Tessera campaign", resume=True, identity=identity,
-            qnames=targets,
+            qnames=targets, seal_fields=CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
         )
 
     # Under the stream head the identity, and so the journal, exist only at
@@ -7774,6 +7778,7 @@ def _main(argv, *, source_scope, waits) -> int:
         stream_journal, stream_identity_sha256, stream_resumed = prepare_journal(
             checkpoint.with_name(checkpoint.name + STREAM_JOURNAL_SUFFIX),
             stage=STREAM_JOURNAL_STAGE, resume=True, qnames=targets,
+            seal_fields=CAMPAIGN_CHECKPOINT_SEAL_FIELDS,
             identity=run_identity(unit_receipts={
                 name: dict.fromkeys(RECEIPT_FIELDS, STREAM_JOURNAL_RECEIPT)
                 for name in weights}))
