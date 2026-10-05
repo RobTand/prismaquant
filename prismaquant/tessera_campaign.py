@@ -2311,6 +2311,8 @@ def _require_injective_anchor_filenames(cache, wire_dir, coordinates):
 
 def _register_campaign_wire_coordinates(cache, wire_dir, coordinates):
     """Reserve resume/seed wires before their links or receipt reads."""
+    # The roster belongs to the cache object: one cache, one wire_dir.
+    # This check/update is not atomic with the writer; register before publication.
     coordinates = set(coordinates)
     owned = _campaign_wire_coordinates(cache, wire_dir)
     _require_injective_wire_filenames(wire_dir, owned.union(coordinates))
@@ -3467,7 +3469,8 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
         for fmt, record in state.get("wire_records", {}).items():
             if not admits(name, fmt):
                 continue
-            _link_seed_wire(seed_wire, wire_dir, record.get("file"))
+            _link_seed_wire(seed_wire, wire_dir, record.get("file"),
+                            qname=name, format_name=fmt)
         adopt(name, state, where=f"seed checkpoint {manifest}")
         adopted.append(name)
     print(f"[campaign] adopted verified anchors for {len(adopted)} units from "
@@ -3481,10 +3484,13 @@ def _adopt_seed_checkpoint(manifest_path, wire_dir_arg, *, targets, wire_dir,
     }
 
 
-def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename) -> None:
+def _link_seed_wire(seed_wire: Path, wire_dir: Path, filename, *,
+                    qname: str, format_name: str) -> None:
     """Put a seed's priced wire where this run's receipt check will read it."""
     if not isinstance(filename, str) or not filename or "/" in filename:
         raise RuntimeError(f"seed wire receipt names an unusable file: {filename!r}")
+    if filename != _wire_path(wire_dir, qname, format_name).name:
+        raise RuntimeError(f"{qname}: seed wire filename differs from priced unit/rung")
     target = wire_dir / filename
     if target.exists():
         return

@@ -1,5 +1,12 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-2273-2299`, base `a1f852f6ee3`, PQ #2273):
+seed wire filenames must match their priced unit/rung before linking in campaign
+adoption or selected-wire materialization; a real campaign resume regression pins
+registration before receipt reads. The write-open scope note below explains
+off-menu evidence, and the roster helper documents one cache per wire directory
+and registration before publication. No bytes, formats or serving gates change.
+
 Re-stamped 2026-10-05 (`issues/pq-2258-2254-2228`, PR #2297 correction,
 base `b199db027330`, PQ #2228): the producer test fixture uses `os.stat`
 without suppressing errors. Only `FileNotFoundError` reaches the existing
@@ -1399,7 +1406,11 @@ a concurrent stale bootstrap cannot replace a roster already created or updated
 by the other thread. Successful publications add their coordinate in the same
 ordered writer step. Campaign resume and seed admission reserve every on-menu
 coordinate before links or receipt reads, including seed rows later held aside
-as stale. Selected-wire materialization reserves the whole selected group before
+as stale.
+Off-menu resumed rows are not registered: an on-menu alias may replace their
+evidence-only wire when no rendered entry owns it, but any later adoption
+re-verifies that evidence and refuses changed bytes, so no price is accepted.
+Selected-wire materialization reserves the whole selected group before
 any seed link, resume receipt read or fresh publication, so a missing coordinate
 cannot overwrite a later seeded alias. Those wires need not have rendered-
 manifest entries. Batch admission checks the whole new batch before its first

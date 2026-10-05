@@ -233,6 +233,38 @@ def test_main_resumes_identical_cost_and_wire_without_reencoding(
     assert wire.read_bytes() == original_wire
 
 
+def test_main_registers_resumed_wire_before_receipt_read(
+        monkeypatch, tmp_path, priced_campaign):
+    from prismaquant import production_weight_cache as pwc
+
+    (campaign, _checkpoint, argv, _model, inputs), _payload = priced_campaign()
+    caches = []
+    cache_type = pwc.ProductionWeightCache
+    verify = campaign._checkpoint_wire_record
+    expected = {(UNIT, inputs["menu"][0].format_name)}
+
+    def capture_cache(**kwargs):
+        cache = cache_type(**kwargs)
+        caches.append(cache)
+        return cache
+
+    reads = []
+
+    def read_wire(*args, **kwargs):
+        assert caches[-1].weights == {}
+        assert getattr(caches[-1], "_campaign_wire_coordinates", set()) == expected, (
+            "resume did not register its wire before the receipt read")
+        reads.append(args)
+        return verify(*args, **kwargs)
+
+    monkeypatch.setattr(pwc, "ProductionWeightCache", capture_cache)
+    monkeypatch.setattr(campaign, "_checkpoint_wire_record", read_wire)
+    _forbid_reencode(monkeypatch, campaign)
+    assert campaign.main(argv) == 0
+    assert len(reads) == 1
+    assert caches[-1]._campaign_wire_coordinates == expected
+
+
 def test_main_refuses_changed_hessian_values_under_same_draw(
         monkeypatch, tmp_path, priced_campaign):
     (campaign, checkpoint, argv, _model, inputs), _payload = priced_campaign(hessian=True)

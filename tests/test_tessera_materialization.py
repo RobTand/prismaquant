@@ -539,9 +539,9 @@ def test_materialization_refuses_unbound_producer_source(selection, monkeypatch)
         tm._inputs(path)
 
 
-@pytest.mark.parametrize("colliding", [True, False])
+@pytest.mark.parametrize("colliding,malformed", [(True, False), (False, False), (False, True)])
 def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
-        selection, tmp_path, monkeypatch, colliding):
+        selection, tmp_path, monkeypatch, colliding, malformed):
     from transformers import AutoModelForCausalLM
     from prismaquant import production_weight_cache as pwc
     from prismaquant import model_profiles, tessera_hessian as th
@@ -568,6 +568,8 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
     seed_record.update(api.make_unit_record(seed_blob,
         tm._expert_input_identity(api, weight, units[second], FMT, None),
         tc._wire_path(s.case.wire_dir, second, FMT).name))
+    if malformed:
+        seed_record["file"] = "other-coordinate.tessera"
     seed_path = s.case.wire_dir / seed_record["file"]
     seed_path.write_bytes(seed_blob)
     provenance = copy.deepcopy(s.cost["provenance"])
@@ -614,9 +616,10 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
         assert seen_cache[0]._campaign_wire_coordinates == set(group["assignment"].items())
         return store(**kwargs)
 
-    def seed_link(*args):
+    def seed_link(*args, **kwargs):
+        result = link(*args, **kwargs)
         links.append(args)
-        return link(*args)
+        return result
 
     def read_wire(*args):
         reads.append(args)
@@ -634,7 +637,13 @@ def test_run_registers_2231_wire_coordinates_before_seed_or_fresh_publication(
     monkeypatch.setattr(pwc, "_store_rendered_weight_entry", publish)
     monkeypatch.setattr(tc, "_link_seed_wire", seed_link)
     monkeypatch.setattr(api, "verify_cached_unit", read_wire)
-    if colliding:
+    if malformed:
+        with pytest.raises(RuntimeError, match="wire filename differs"):
+            tm.run(tmp_path / "plan.json", 0)
+        assert publications == links == reads == []
+        group_wire = s.workspace / "groups" / "0" / "wire"
+        assert list(group_wire.iterdir()) == []
+    elif colliding:
         with pytest.raises(ValueError) as error:
             tm.run(tmp_path / "plan.json", 0)
         assert first in str(error.value) and second in str(error.value)
