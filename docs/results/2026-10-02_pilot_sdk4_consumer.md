@@ -215,3 +215,37 @@ tests deselected: action
 records five failures and 28 deselections on dl380g10. This establishes
 collection-time contamination, not a requirement that an artifact test execute
 first or share a particular work-stealing schedule. Production code is unchanged.
+
+Before the fix, source-guided bisection reduced the 69 companion files to
+35, then to the single artifact test file. The complementary 34 files were
+collected with only the five gateway cases selected and did not reproduce it.
+The minimal pair runs all 33 cases in one worker, with the artifact file first.
+
+| Control | PrismaBuild action | Actual outcome |
+| --- | --- | --- |
+| Main-equivalent original 70-file grouping, four workers | `2087a67cbf4c2c143c891360111feb7eda1e68f44751860ee1da75d29ea98e7a` | 5 failed, 971 passed, 30 skipped |
+| First 35 companion files and gateway file, one worker | `3cfaacb7c1a87f42d2214e92af810a9a1674b7a7e44eab7c18628c6249e32a8e` | 5 failed, 703 passed, 18 skipped |
+| Complementary 34 companion files and gateway file, one worker | `a337c9a2db3885e691d6a53e0871ad41ff80b657d9f5885fa31af0694da414e5` | 5 passed, 291 deselected |
+| Minimal pair before the fix, one worker | `27c3c4eb81f1ae7ce3c1ac3627f64e0d17d3b475dbee3d6ce1264e23199d6eb4` | 5 failed, 28 passed, 0 skipped |
+
+These are CPU-only actions on dl380g10, with one native thread per worker.
+The original 70-file grouping uses four CPUs and 8 GiB; serial controls use
+one CPU and 8 GiB. The unchanged interpreter argument is
+`/home/rob/venvs/pq-pbdc4803-tessera-b40c93cb/bin/python`. The main-equivalent
+grouping and the earlier passing file-only control are reused from the supplied
+receipts, not claimed as new runs of this branch.
+
+Post-fix source was submitted for the same minimal pair and the exact original
+70-file grouping, respectively:
+
+- `fdc600eed049d4d96250bf53347e3f0895f92e73169152d49bb4329bf1beab67`
+- `92f457bc9fe3a05e1e9d9612f7f1be62b3c2b2fb04f566cbc4440eb3d427f60a`
+
+Both sealed source bundles contain the fixed test bytes with SHA-256
+`76d2faebea96d054ff6ed344a4bd4d63b066ba9da46568a117c6fdea94ec392d`.
+No post-fix terminal outcome or receipt was observed at handoff. The pair was
+still ready with zero attempts at the 03:06Z diagnostic; completion clients
+remain attached. This is a proven collection cause and a submitted fixture
+fix, not a claim that the pending fix proofs passed. No branch was pushed.
+No complete repository suite, graphics processor work, real model validation,
+live deployment or performance measurement was performed for this fix.
