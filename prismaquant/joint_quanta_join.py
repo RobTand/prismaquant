@@ -51,7 +51,7 @@ from prismaquant.joint_layer_quanta import (
     quantum_id,
     roster_digest,
 )
-from .digests import bytes_sha256hex, file_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex, file_sha256hex
 
 RECORD_SCHEMA = "prismaquant.joint_layer_quanta.v1"
 STATUS_SCHEMA = "prismaquant.joint_layer_quantum.status.v1"
@@ -966,12 +966,12 @@ def main(argv: list[str] | None = None) -> int:
     except JoinRefused as exc:
         print(f"joint_quanta_join: refused: {exc}", file=sys.stderr)
         return EXIT_REFUSED
-    print(json.dumps({"status": result["status"],
-                      "gaps": result["gaps"],
-                      "coverage_sha256": result["coverage_sha256"],
-                      "joint_cost_path": result["joint_cost_path"],
-                      "results_path": result["results_path"]},
-                     sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(
+        {"status": result["status"],
+         "gaps": result["gaps"],
+         "coverage_sha256": result["coverage_sha256"],
+         "joint_cost_path": result["joint_cost_path"],
+         "results_path": result["results_path"]}))
     return 0
 
 

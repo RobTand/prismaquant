@@ -16,7 +16,7 @@ import stat
 from typing import Callable, Mapping
 import zlib
 
-from .digests import bytes_sha256hex, is_sha256hex, text_sha256hex
+from .digests import DIRECT_ASCII_LAX, bytes_sha256hex, is_sha256hex, text_sha256hex
 from .joint_retained_window_plan import RetainedWindowBudget
 from .qnames import LAYER_QNAME as _LAYER
 from .schemas import Contract, strict_json_loads
@@ -331,8 +331,7 @@ def _bind_runtime(a: dict, phases: tuple[str, ...], retained_budget: RetainedWin
     binding = {
         "schema": COMPLETED_SCHEMA, "plan_sha256": plan_sha256,
         "prepared_sha256": prepared_sha256, "units": sorted(completed)}
-    binding_sha = text_sha256hex(json.dumps(
-        binding, sort_keys=True, separators=(",", ":")))
+    binding_sha = DIRECT_ASCII_LAX.sha256(binding)
     _require(type(a["validated_completed_units"]) is int
              and a["validated_completed_units"] == len(completed)
              and a["validated_completed_units_sha256"] in ((None, binding_sha) if not completed

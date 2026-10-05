@@ -79,7 +79,12 @@ from .stage_a_chain_resume import (
     resume_declarations,
 )
 from .stage_a_chain_seed import seed_marker_path, seed_receipt_path
-from .digests import bytes_sha256hex, file_sha256hex, text_sha256hex
+from .digests import (
+    DIRECT_ASCII_INDENT2_LAX,
+    bytes_sha256hex,
+    file_sha256hex,
+    text_sha256hex,
+)
 
 BAND_TOOL_ENTRY_POINT = "prismaquant.joint_adjoint_band"
 BAND_RESULT_SCHEMA = "prismaquant.joint_adjoint_band.result.v1"
@@ -710,8 +715,8 @@ def main(argv=None) -> int:
     except (BandRefused, AdjointSliceRefused, OSError, KeyError, ValueError) as exc:
         print(f"joint_adjoint_band: refused: {type(exc).__name__}: {exc}", flush=True)
         return 3
-    print(json.dumps(band_summary(band, path=args.output, file_sha256=file_sha256),
-                     sort_keys=True, indent=2))
+    print(DIRECT_ASCII_INDENT2_LAX.text(
+        band_summary(band, path=args.output, file_sha256=file_sha256)))
     return 0
 
 

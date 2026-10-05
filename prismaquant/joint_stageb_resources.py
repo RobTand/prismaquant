@@ -12,7 +12,7 @@ from pathlib import Path
 from .cost_stage_checkpoint import canonical_json_sha256, publish_new_bytes
 from .stage_inputs import bound_stat_fence as _bound_stat_fence, read_bound as _read_bound
 from .schemas import Contract
-from .digests import bytes_sha256hex
+from .digests import DIRECT_ASCII_SPACED_LAX, bytes_sha256hex
 
 SCHEMA = "prismaquant.joint_stageb_resource_policy.v1"
 GIB = 1024 ** 3
@@ -498,15 +498,15 @@ def main(argv=None):
     policy = derive_policy(json.loads(Path(args.inputs).read_bytes()), host_bytes=args.host_bytes,
                            physical_bytes=args.physical_bytes, gpu_bytes=args.gpu_bytes,
                            capture=capture, chain=chain, cotangent=cotangent)
-    raw = (json.dumps(policy, sort_keys=True) + "\n").encode()
+    raw = DIRECT_ASCII_SPACED_LAX.encoded(policy) + b"\n"
     _require(publish_new_bytes(Path(args.out), raw), "policy output already exists")
-    print(json.dumps({"status": "resource_geometry_derived", "out": args.out,
+    print(DIRECT_ASCII_SPACED_LAX.text({"status": "resource_geometry_derived", "out": args.out,
         "sha256": bytes_sha256hex(raw),
         "limits": policy["limits"], "budget": policy["budget"],
         "capture": policy["derivation"].get("capture"),
         "chain": policy["derivation"].get("chain"),
         "peak_planned_bytes": policy["derivation"]["peak_planned_bytes"],
-        "windows_by_layer": policy["derivation"]["windows_by_layer"]}, sort_keys=True))
+        "windows_by_layer": policy["derivation"]["windows_by_layer"]}))
 
 
 if __name__ == "__main__":

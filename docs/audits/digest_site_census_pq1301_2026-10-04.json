@@ -3580,7 +3580,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/autoscale.py",
    "linenos": [
@@ -3590,11 +3590,21 @@
    "route_verdict": "DIRECT_ASCII_LAX",
    "scope": "streamed_calibration_resources",
    "site": "sorted-json:prismaquant/autoscale.py::streamed_calibration_resources",
-   "usage": "arg:encode;key-use;persist;return"
+   "usage": "arg:encode;key-use;persist;return",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 392,
+     "original_expression": "json.dumps(header, sort_keys=True,\n            separators=(',', ':'))",
+     "routed_expression": "DIRECT_ASCII_LAX.sha256(header)",
+     "profile": "DIRECT_ASCII_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/cluster_campaign.py",
    "linenos": [
@@ -3604,11 +3614,21 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "_StateStore.write",
    "site": "sorted-json:prismaquant/cluster_campaign.py::_StateStore.write",
-   "usage": "arg:encode;persist"
+   "usage": "arg:encode;persist",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 904,
+     "original_expression": "json.dumps(\n            validated,\n            indent=2,\n            sort_keys=True,\n            ensure_ascii=False,\n            allow_nan=False,\n        )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(validated)",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/cluster_campaign.py",
    "linenos": [
@@ -3618,7 +3638,17 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "_atomic_write_new_json",
    "site": "sorted-json:prismaquant/cluster_campaign.py::_atomic_write_new_json",
-   "usage": "arg:_atomic_write_new_bytes;arg:encode"
+   "usage": "arg:_atomic_write_new_bytes;arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 2099,
+     "original_expression": "json.dumps(\n        value,\n        indent=2,\n        sort_keys=True,\n        ensure_ascii=False,\n        allow_nan=False,\n    )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(value)",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
@@ -3693,7 +3723,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/cost_streaming.py",
    "linenos": [
@@ -3703,11 +3733,21 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "build_source_checkpoint_identity",
    "site": "sorted-json:prismaquant/cost_streaming.py::build_source_checkpoint_identity",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 6631,
+     "original_expression": "json.dumps(\n                    {\n                        \"schema\": SOURCE_CHECKPOINT_DIGEST_CACHE_SCHEMA,\n                        \"entries\": entries,\n                    },\n                    indent=2,\n                    sort_keys=True,\n                    ensure_ascii=False,\n                    allow_nan=False,\n                )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(\n                    {\n                        \"schema\": SOURCE_CHECKPOINT_DIGEST_CACHE_SCHEMA,\n                        \"entries\": entries,\n                    }\n                )",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/cost_streaming.py",
    "linenos": [
@@ -3717,7 +3757,17 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "build_streamed_model_identity",
    "site": "sorted-json:prismaquant/cost_streaming.py::build_streamed_model_identity",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 6984,
+     "original_expression": "json.dumps(\n                {\n                    \"schema\": STREAMED_MODEL_IDENTITY_CACHE_SCHEMA,\n                    \"source\": str(source_model),\n                    \"fingerprints\": fingerprints,\n                    \"identity\": identity,\n                },\n                indent=2,\n                sort_keys=True,\n                ensure_ascii=False,\n                allow_nan=False,\n            )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(\n                {\n                    \"schema\": STREAMED_MODEL_IDENTITY_CACHE_SCHEMA,\n                    \"source\": str(source_model),\n                    \"fingerprints\": fingerprints,\n                    \"identity\": identity,\n                }\n            )",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -3805,7 +3855,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/dsv4_campaign_completion.py",
    "linenos": [
@@ -3815,11 +3865,21 @@
    "route_verdict": "DIRECT_UTF8_STRICT",
    "scope": "_canonical_bytes",
    "site": "sorted-json:prismaquant/dsv4_campaign_completion.py::_canonical_bytes",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 98,
+     "original_expression": "json.dumps(\n            value,\n            sort_keys=True,\n            separators=(\",\", \":\"),\n            ensure_ascii=False,\n            allow_nan=False,\n        )",
+     "routed_expression": "DIRECT_UTF8_STRICT.encoded(value)",
+     "profile": "DIRECT_UTF8_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census. Authenticated full-snapshot no-package loading retains the existing same-tree stdlib file-spec owner binding, extended with the two UTF-8 profiles."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/dsv4_campaign_completion.py",
    "linenos": [
@@ -3829,11 +3889,21 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "publish_completion_receipt",
    "site": "sorted-json:prismaquant/dsv4_campaign_completion.py::publish_completion_receipt",
-   "usage": "arg:_atomic_publish_new;arg:encode"
+   "usage": "arg:_atomic_publish_new;arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 580,
+     "original_expression": "json.dumps(\n        dict(receipt), indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False\n    )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(dict(receipt))",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census. Authenticated full-snapshot no-package loading retains the existing same-tree stdlib file-spec owner binding, extended with the two UTF-8 profiles."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/emu_forward_kl.py",
    "linenos": [
@@ -3843,11 +3913,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "measure_emulated_kl",
    "site": "sorted-json:prismaquant/emu_forward_kl.py::measure_emulated_kl",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 441,
+     "original_expression": "json.dumps(assignment, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.sha256(assignment)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/export_gguf.py",
    "linenos": [
@@ -3858,11 +3938,28 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "export_gguf",
    "site": "sorted-json:prismaquant/export_gguf.py::export_gguf",
-   "usage": "arg:add_key_value"
+   "usage": "arg:add_key_value",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 439,
+     "original_expression": "json.dumps(tensor_formats, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(tensor_formats)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    },
+    {
+     "method": "text",
+     "base_line": 435,
+     "original_expression": "json.dumps(research_cost_selection, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(research_cost_selection)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/export_gguf_direct.py",
    "linenos": [
@@ -3872,11 +3969,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "export_gguf_direct",
    "site": "sorted-json:prismaquant/export_gguf_direct.py::export_gguf_direct",
-   "usage": "arg:add_key_value"
+   "usage": "arg:add_key_value",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 302,
+     "original_expression": "json.dumps(tensor_formats, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(tensor_formats)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/export_native_compressed.py",
    "linenos": [
@@ -3886,11 +3993,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "_export_resume_fingerprint",
    "site": "sorted-json:prismaquant/export_native_compressed.py::_export_resume_fingerprint",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 8413,
+     "original_expression": "json.dumps(assignment, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.sha256(assignment)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/export_native_compressed.py",
    "linenos": [
@@ -3900,11 +4017,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "_write_shipcard._hash",
    "site": "sorted-json:prismaquant/export_native_compressed.py::_write_shipcard._hash",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 8569,
+     "original_expression": "json.dumps(payload, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.sha256(payload)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/export_structure.py",
    "linenos": [
@@ -3914,11 +4041,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/export_structure.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 161,
+     "original_expression": "json.dumps(result, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(result)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/glm53_stock_harvest.py",
    "linenos": [
@@ -3928,7 +4065,17 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "run_harvest",
    "site": "sorted-json:prismaquant/glm53_stock_harvest.py::run_harvest",
-   "usage": "arg:write_text"
+   "usage": "arg:write_text",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 393,
+     "original_expression": "json.dumps({\n        \"schema\": HARVEST_SCHEMA,\n        \"output\": str(output),\n        \"plan_scope\": planned[\"plan_scope\"],\n        \"dense_units\": len(plan),\n        \"anchor_rows\": int(provenance.get(\"dw_production_anchor_rows\", 0)),\n        \"rtn_fallback_rows\": int(provenance.get(\"dw_rtn_fallback_rows\", 0)),\n        \"git_commit\": provenance.get(\"git_commit\"),\n        \"calib_hash\": observed_calib_hash,\n        \"n_probes\": int(args.n_probes),\n    }, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text({\n        \"schema\": HARVEST_SCHEMA,\n        \"output\": str(output),\n        \"plan_scope\": planned[\"plan_scope\"],\n        \"dense_units\": len(plan),\n        \"anchor_rows\": int(provenance.get(\"dw_production_anchor_rows\", 0)),\n        \"rtn_fallback_rows\": int(provenance.get(\"dw_rtn_fallback_rows\", 0)),\n        \"git_commit\": provenance.get(\"git_commit\"),\n        \"calib_hash\": observed_calib_hash,\n        \"n_probes\": int(args.n_probes),\n    })",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -3948,7 +4095,7 @@
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/glm_capture_compatibility.py",
    "linenos": [
@@ -3958,11 +4105,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_STRICT",
    "scope": "main",
    "site": "sorted-json:prismaquant/glm_capture_compatibility.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 386,
+     "original_expression": "json.dumps(result, sort_keys=True, allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_SPACED_STRICT.text(result)",
+     "profile": "DIRECT_ASCII_SPACED_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/glm_kda_capture_kernel.py",
    "linenos": [
@@ -3972,7 +4129,17 @@
    "route_verdict": "DIRECT_ASCII_LAX",
    "scope": "AdmittedKdaKernel.__init__",
    "site": "sorted-json:prismaquant/glm_kda_capture_kernel.py::AdmittedKdaKernel.__init__",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 230,
+     "original_expression": "json.dumps(\n            identity, sort_keys=True, separators=(\",\", \":\"))",
+     "routed_expression": "DIRECT_ASCII_LAX.sha256(identity)",
+     "profile": "DIRECT_ASCII_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4018,7 +4185,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/io_spans.py",
    "linenos": [
@@ -4028,11 +4195,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_STRICT",
    "scope": "ReadRateReporter._emit",
    "site": "sorted-json:prismaquant/io_spans.py::ReadRateReporter._emit",
-   "usage": "arg:_log"
+   "usage": "arg:_log",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 415,
+     "original_expression": "json.dumps(record, sort_keys=True, allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_SPACED_STRICT.text(record)",
+     "profile": "DIRECT_ASCII_SPACED_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_adjoint_band.py",
    "linenos": [
@@ -4042,11 +4219,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/joint_adjoint_band.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 713,
+     "original_expression": "json.dumps(band_summary(band, path=args.output, file_sha256=file_sha256),\n                     sort_keys=True, indent=2)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(\n        band_summary(band, path=args.output, file_sha256=file_sha256))",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_adjoint_checkpoints.py",
    "linenos": [
@@ -4056,11 +4243,21 @@
    "route_verdict": "DIRECT_ASCII_STRICT",
    "scope": "reference_from_record",
    "site": "sorted-json:prismaquant/joint_adjoint_checkpoints.py::reference_from_record",
-   "usage": "store"
+   "usage": "store",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 221,
+     "original_expression": "json.dumps(\n            metadata, sort_keys=True, separators=(\",\", \":\"), allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_STRICT.text(metadata)",
+     "profile": "DIRECT_ASCII_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_aura.py",
    "linenos": [
@@ -4070,11 +4267,21 @@
    "route_verdict": "DIRECT_ASCII_STRICT",
    "scope": "_joint_projection_requirements",
    "site": "sorted-json:prismaquant/joint_aura.py::_joint_projection_requirements",
-   "usage": "arg:setdefault"
+   "usage": "arg:setdefault",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 391,
+     "original_expression": "json.dumps(receipt, sort_keys=True,\n                separators=(\",\", \":\"), allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_STRICT.text(receipt)",
+     "profile": "DIRECT_ASCII_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_catalog_extension.py",
    "linenos": [
@@ -4085,7 +4292,24 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/joint_catalog_extension.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 1364,
+     "original_expression": "json.dumps(result, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(result)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    },
+    {
+     "method": "text",
+     "base_line": 1354,
+     "original_expression": "json.dumps({\"status\": \"proposed_catalog_validated\", \"capture_reuse_authority\": False,\n                          \"evidence\": verify_catalog_pair(inputs)}, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(\n            {\"status\": \"proposed_catalog_validated\", \"capture_reuse_authority\": False,\n             \"evidence\": verify_catalog_pair(inputs)})",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4119,7 +4343,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_cost_read_schedule.py",
    "linenos": [
@@ -4129,7 +4353,17 @@
    "route_verdict": "DIRECT_ASCII_LAX",
    "scope": "_bind_runtime",
    "site": "sorted-json:prismaquant/joint_cost_read_schedule.py::_bind_runtime",
-   "usage": "arg:encode;compare"
+   "usage": "arg:encode;compare",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 334,
+     "original_expression": "json.dumps(\n        binding, sort_keys=True, separators=(\",\", \":\"))",
+     "routed_expression": "DIRECT_ASCII_LAX.sha256(binding)",
+     "profile": "DIRECT_ASCII_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4161,7 +4395,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_cost_stage_a.py",
    "linenos": [
@@ -4171,11 +4405,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_write_split_digests",
    "site": "sorted-json:prismaquant/joint_cost_stage_a.py::_write_split_digests",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 2240,
+     "original_expression": "json.dumps(document, sort_keys=True, indent=2)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(document)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_forward_resume.py",
    "linenos": [
@@ -4185,11 +4429,21 @@
    "route_verdict": "DIRECT_ASCII_LAX",
    "scope": "build_forward_recovery",
    "site": "sorted-json:prismaquant/joint_forward_resume.py::build_forward_recovery",
-   "usage": "arg:encode;arg:sha256;persist"
+   "usage": "arg:encode;arg:sha256;persist",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 539,
+     "original_expression": "json.dumps(document, sort_keys=True, separators=(',', ':'))",
+     "routed_expression": "DIRECT_ASCII_LAX.encoded(document)",
+     "profile": "DIRECT_ASCII_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_layer_quanta.py",
    "linenos": [
@@ -4199,11 +4453,21 @@
    "route_verdict": "DIRECT_ASCII_LAX",
    "scope": "_canonical_partition_bytes",
    "site": "sorted-json:prismaquant/joint_layer_quanta.py::_canonical_partition_bytes",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 409,
+     "original_expression": "json.dumps(value, sort_keys=True, separators=(\",\", \":\"))",
+     "routed_expression": "DIRECT_ASCII_LAX.encoded(value)",
+     "profile": "DIRECT_ASCII_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_quanta_join.py",
    "linenos": [
@@ -4213,11 +4477,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/joint_quanta_join.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 969,
+     "original_expression": "json.dumps({\"status\": result[\"status\"],\n                      \"gaps\": result[\"gaps\"],\n                      \"coverage_sha256\": result[\"coverage_sha256\"],\n                      \"joint_cost_path\": result[\"joint_cost_path\"],\n                      \"results_path\": result[\"results_path\"]},\n                     sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(\n        {\"status\": result[\"status\"],\n         \"gaps\": result[\"gaps\"],\n         \"coverage_sha256\": result[\"coverage_sha256\"],\n         \"joint_cost_path\": result[\"joint_cost_path\"],\n         \"results_path\": result[\"results_path\"]})",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_served_activation.py",
    "linenos": [
@@ -4227,11 +4501,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/joint_served_activation.py::main",
-   "usage": "arg:encode;arg:publish_new_bytes"
+   "usage": "arg:encode;arg:publish_new_bytes",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 232,
+     "original_expression": "json.dumps(result, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.encoded(result)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_stageb_resources.py",
    "linenos": [
@@ -4242,11 +4526,28 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/joint_stageb_resources.py::main",
-   "usage": "arg:encode;arg:publish_new_bytes;arg:sha256;display"
+   "usage": "arg:encode;arg:publish_new_bytes;arg:sha256;display",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 503,
+     "original_expression": "json.dumps({\"status\": \"resource_geometry_derived\", \"out\": args.out,\n        \"sha256\": bytes_sha256hex(raw),\n        \"limits\": policy[\"limits\"], \"budget\": policy[\"budget\"],\n        \"capture\": policy[\"derivation\"].get(\"capture\"),\n        \"chain\": policy[\"derivation\"].get(\"chain\"),\n        \"peak_planned_bytes\": policy[\"derivation\"][\"peak_planned_bytes\"],\n        \"windows_by_layer\": policy[\"derivation\"][\"windows_by_layer\"]}, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text({\"status\": \"resource_geometry_derived\", \"out\": args.out,\n        \"sha256\": bytes_sha256hex(raw),\n        \"limits\": policy[\"limits\"], \"budget\": policy[\"budget\"],\n        \"capture\": policy[\"derivation\"].get(\"capture\"),\n        \"chain\": policy[\"derivation\"].get(\"chain\"),\n        \"peak_planned_bytes\": policy[\"derivation\"][\"peak_planned_bytes\"],\n        \"windows_by_layer\": policy[\"derivation\"][\"windows_by_layer\"]})",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    },
+    {
+     "method": "encoded",
+     "base_line": 501,
+     "original_expression": "json.dumps(policy, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.encoded(policy)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/joint_statistics_plan.py",
    "linenos": [
@@ -4256,11 +4557,21 @@
    "route_verdict": "DIRECT_ASCII_STRICT",
    "scope": "plan_joint_statistics_target_windows",
    "site": "sorted-json:prismaquant/joint_statistics_plan.py::plan_joint_statistics_target_windows",
-   "usage": "arg:JointStatisticsTargetPlan"
+   "usage": "arg:JointStatisticsTargetPlan",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 97,
+     "original_expression": "json.dumps(backend.identity, sort_keys=True, separators=(',', ':'), allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_STRICT.text(backend.identity)",
+     "profile": "DIRECT_ASCII_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/lane_shipcard.py",
    "linenos": [
@@ -4270,7 +4581,17 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/lane_shipcard.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 272,
+     "original_expression": "json.dumps(report, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(report)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4318,7 +4639,7 @@
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/native_receipt_table.py",
    "linenos": [
@@ -4328,11 +4649,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/native_receipt_table.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 779,
+     "original_expression": "json.dumps({\"table\": emission[\"table_path\"], \"table_sha256\": emission[\"table_sha256\"],\n                      \"rows\": len(emission[\"rows\"]), \"admission\": admission}, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(\n        {\"table\": emission[\"table_path\"], \"table_sha256\": emission[\"table_sha256\"],\n         \"rows\": len(emission[\"rows\"]), \"admission\": admission})",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/perturbed_x_cache.py",
    "linenos": [
@@ -4342,7 +4673,17 @@
    "route_verdict": "DIRECT_ASCII_LAX",
    "scope": "load_verified_activation_cache_entry",
    "site": "sorted-json:prismaquant/perturbed_x_cache.py::load_verified_activation_cache_entry",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 981,
+     "original_expression": "json.dumps(\n        {key: execution[key] for key in ('schema', 'policy', 'artifact_sha256', 'file_bytes',\n                                         'storage_cap_bytes')},\n        sort_keys=True, separators=(',', ':'))",
+     "routed_expression": "DIRECT_ASCII_LAX.sha256(\n        {key: execution[key] for key in ('schema', 'policy', 'artifact_sha256', 'file_bytes',\n                                         'storage_cap_bytes')})",
+     "profile": "DIRECT_ASCII_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4389,7 +4730,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/prefill_frontier.py",
    "linenos": [
@@ -4399,7 +4740,17 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_publish_assignment",
    "site": "sorted-json:prismaquant/prefill_frontier.py::_publish_assignment",
-   "usage": "arg:encode;arg:publish_new_bytes"
+   "usage": "arg:encode;arg:publish_new_bytes",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 400,
+     "original_expression": "json.dumps(payload, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(payload)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4417,7 +4768,7 @@
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/prepriced_cost.py",
    "linenos": [
@@ -4427,67 +4778,81 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/prepriced_cost.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 276,
+     "original_expression": "json.dumps(report, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(report)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "retained protected file-loader contract: reporter loaded by run_path without package context; raw sorted JSON stays",
    "family": "sorted-json",
    "file": "prismaquant/prismabuild_progress.py",
    "linenos": [
     145
    ],
    "n_calls": 1,
-   "route_verdict": "DIRECT_ASCII_SPACED_LAX",
+   "route_verdict": "retained:protected-file-loader",
    "scope": "commit",
    "site": "sorted-json:prismaquant/prismabuild_progress.py::commit",
-   "usage": "persist"
+   "usage": "persist",
+   "note": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context; no standalone owner loader exists in this file, and no bootstrap fallback was introduced."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "retained protected file-loader contract: reporter loaded by run_path without package context; raw sorted JSON stays",
    "family": "sorted-json",
    "file": "prismaquant/prismabuild_progress.py",
    "linenos": [
     235
    ],
    "n_calls": 1,
-   "route_verdict": "DIRECT_ASCII_SPACED_LAX",
+   "route_verdict": "retained:protected-file-loader",
    "scope": "declare_export_wait",
    "site": "sorted-json:prismaquant/prismabuild_progress.py::declare_export_wait",
-   "usage": "arg:write_text"
+   "usage": "arg:write_text",
+   "note": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context; no standalone owner loader exists in this file, and no bootstrap fallback was introduced."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "retained protected file-loader contract: reporter loaded by run_path without package context; raw sorted JSON stays",
    "family": "sorted-json",
    "file": "prismaquant/prismabuild_progress.py",
    "linenos": [
     179
    ],
    "n_calls": 1,
-   "route_verdict": "DIRECT_ASCII_SPACED_LAX",
+   "route_verdict": "retained:protected-file-loader",
    "scope": "declare_staged_wait",
    "site": "sorted-json:prismaquant/prismabuild_progress.py::declare_staged_wait",
-   "usage": "arg:write_text"
+   "usage": "arg:write_text",
+   "note": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context; no standalone owner loader exists in this file, and no bootstrap fallback was introduced."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "retained protected file-loader contract: reporter loaded by run_path without package context; raw sorted JSON stays",
    "family": "sorted-json",
    "file": "prismaquant/prismabuild_progress.py",
    "linenos": [
     69
    ],
    "n_calls": 1,
-   "route_verdict": "DIRECT_ASCII_SPACED_LAX",
+   "route_verdict": "retained:protected-file-loader",
    "scope": "report",
    "site": "sorted-json:prismaquant/prismabuild_progress.py::report",
-   "usage": "arg:write_text"
+   "usage": "arg:write_text",
+   "note": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context; no standalone owner loader exists in this file, and no bootstrap fallback was introduced."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/prismasnap_checkpoint.py",
    "linenos": [
@@ -4497,11 +4862,21 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "_atomic_json",
    "site": "sorted-json:prismaquant/prismasnap_checkpoint.py::_atomic_json",
-   "usage": "arg:encode;persist"
+   "usage": "arg:encode;persist",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 321,
+     "original_expression": "json.dumps(\n        payload,\n        sort_keys=True,\n        indent=2,\n        ensure_ascii=False,\n        allow_nan=False,\n    )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(payload)",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/prismasnap_validation.py",
    "linenos": [
@@ -4511,11 +4886,21 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "attest_fold_fidelity",
    "site": "sorted-json:prismaquant/prismasnap_validation.py::attest_fold_fidelity",
-   "usage": "arg:encode;persist"
+   "usage": "arg:encode;persist",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 1705,
+     "original_expression": "json.dumps(\n            provenance, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False\n        )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(provenance)",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/production_cache_stripes.py",
    "linenos": [
@@ -4525,11 +4910,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "write_plan",
    "site": "sorted-json:prismaquant/production_cache_stripes.py::write_plan",
-   "usage": "arg:write_text"
+   "usage": "arg:write_text",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 197,
+     "original_expression": "json.dumps(manifest, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(manifest)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/production_weight_cache.py",
    "linenos": [
@@ -4540,11 +4935,28 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_check_and_record_append_identity",
    "site": "sorted-json:prismaquant/production_weight_cache.py::_check_and_record_append_identity",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 5499,
+     "original_expression": "json.dumps(merged, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(merged)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    },
+    {
+     "method": "encoded",
+     "base_line": 5462,
+     "original_expression": "json.dumps(payload, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(payload)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/production_weight_cache.py",
    "linenos": [
@@ -4555,11 +4967,28 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_check_production_cache_render_identity",
    "site": "sorted-json:prismaquant/production_weight_cache.py::_check_production_cache_render_identity",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 5710,
+     "original_expression": "json.dumps(adopted, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(adopted)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    },
+    {
+     "method": "encoded",
+     "base_line": 5634,
+     "original_expression": "json.dumps(\n                current_identity, indent=2, sort_keys=True\n            )",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(current_identity)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/production_weight_cache.py",
    "linenos": [
@@ -4569,11 +4998,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_merge_packed_pair_map_or_refuse",
    "site": "sorted-json:prismaquant/production_weight_cache.py::_merge_packed_pair_map_or_refuse",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 5307,
+     "original_expression": "json.dumps(merged, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(merged)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/production_weight_cache.py",
    "linenos": [
@@ -4583,11 +5022,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_merge_streaming_layer_map_or_refuse",
    "site": "sorted-json:prismaquant/production_weight_cache.py::_merge_streaming_layer_map_or_refuse",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 5375,
+     "original_expression": "json.dumps(merged, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(merged)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/production_weight_cache.py",
    "linenos": [
@@ -4597,11 +5046,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_write_render_score_sidecar",
    "site": "sorted-json:prismaquant/production_weight_cache.py::_write_render_score_sidecar",
-   "usage": "arg:write_text"
+   "usage": "arg:write_text",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 2633,
+     "original_expression": "_json.dumps(payload, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(payload)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/release_receipts.py",
    "linenos": [
@@ -4611,7 +5070,17 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/release_receipts.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 148,
+     "original_expression": "json.dumps(report, sort_keys=True, indent=2)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(report)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4632,7 +5101,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/sample_parallel_probe.py",
    "linenos": [
@@ -4642,11 +5111,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "merge_importance_stats",
    "site": "sorted-json:prismaquant/sample_parallel_probe.py::merge_importance_stats",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 1228,
+     "original_expression": "json.dumps(receipt, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(receipt)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/sample_parallel_probe.py",
    "linenos": [
@@ -4656,11 +5135,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "prepare_global_calibration",
    "site": "sorted-json:prismaquant/sample_parallel_probe.py::prepare_global_calibration",
-   "usage": "arg:_atomic_write_bytes_no_clobber;arg:encode"
+   "usage": "arg:_atomic_write_bytes_no_clobber;arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 761,
+     "original_expression": "json.dumps(manifest, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(manifest)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/sample_parallel_probe.py",
    "linenos": [
@@ -4670,11 +5159,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "publish_sample_parallel_merge_bundle",
    "site": "sorted-json:prismaquant/sample_parallel_probe.py::publish_sample_parallel_merge_bundle",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 2728,
+     "original_expression": "json.dumps(commit, sort_keys=True, indent=2)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(commit)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/sample_parallel_probe.py",
    "linenos": [
@@ -4684,11 +5183,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "write_local_importance_stats",
    "site": "sorted-json:prismaquant/sample_parallel_probe.py::write_local_importance_stats",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 1035,
+     "original_expression": "json.dumps(payload, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(payload)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/sample_parallel_probe_merge.py",
    "linenos": [
@@ -4698,7 +5207,17 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "merge_sample_parallel_activation_caches",
    "site": "sorted-json:prismaquant/sample_parallel_probe_merge.py::merge_sample_parallel_activation_caches",
-   "usage": "arg:write_text"
+   "usage": "arg:write_text",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 1601,
+     "original_expression": "json.dumps(manifest, sort_keys=True, indent=2)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(manifest)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4719,7 +5238,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/sensitivity_card_build.py",
    "linenos": [
@@ -4729,11 +5248,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "_calib_hash",
    "site": "sorted-json:prismaquant/sensitivity_card_build.py::_calib_hash",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 143,
+     "original_expression": "json.dumps(\n        {k: str(meta.get(k)) for k in sorted(\n            (\"dataset\", \"nsamples\", \"seqlen\", \"seed\", \"model\"))},\n        sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(\n        {k: str(meta.get(k)) for k in sorted(\n            (\"dataset\", \"nsamples\", \"seqlen\", \"seed\", \"model\"))})",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/serving_profiles.py",
    "linenos": [
@@ -4743,11 +5272,21 @@
    "route_verdict": "DIRECT_ASCII_LAX",
    "scope": "ResolvedServingLane.route_key",
    "site": "sorted-json:prismaquant/serving_profiles.py::ResolvedServingLane.route_key",
-   "usage": "return"
+   "usage": "return",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 583,
+     "original_expression": "json.dumps(\n            payload,\n            separators=(\",\", \":\"),\n            sort_keys=True,\n        )",
+     "routed_expression": "DIRECT_ASCII_LAX.text(payload)",
+     "profile": "DIRECT_ASCII_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/shard_layout.py",
    "linenos": [
@@ -4757,7 +5296,17 @@
    "route_verdict": "DIRECT_UTF8_LAX",
    "scope": "tensor_payload_identity",
    "site": "sorted-json:prismaquant/shard_layout.py::tensor_payload_identity",
-   "usage": "arg:encode;key-use;return"
+   "usage": "arg:encode;key-use;return",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 97,
+     "original_expression": "json.dumps(\n            dict(sorted(rows.items())),\n            sort_keys=True,\n            separators=(\",\", \":\"),\n            ensure_ascii=False,\n        )",
+     "routed_expression": "DIRECT_UTF8_LAX.sha256(dict(sorted(rows.items())))",
+     "profile": "DIRECT_UTF8_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4775,7 +5324,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/stage_a_chain_resume.py",
    "linenos": [
@@ -4785,11 +5334,21 @@
    "route_verdict": "DIRECT_ASCII_STRICT",
    "scope": "write_chain_state",
    "site": "sorted-json:prismaquant/stage_a_chain_resume.py::write_chain_state",
-   "usage": "arg:encode;arg:publish_new_bytes;arg:sha256"
+   "usage": "arg:encode;arg:publish_new_bytes;arg:sha256",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 204,
+     "original_expression": "json.dumps(document, sort_keys=True, separators=(\",\", \":\"),\n                          allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_STRICT.encoded(document)",
+     "profile": "DIRECT_ASCII_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/stage_a_chain_split.py",
    "linenos": [
@@ -4799,7 +5358,17 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "join_split_checkpoint",
    "site": "sorted-json:prismaquant/stage_a_chain_split.py::join_split_checkpoint",
-   "usage": "arg:len;store"
+   "usage": "arg:len;store",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 431,
+     "original_expression": "json.dumps(record[\"session\"], sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(record[\"session\"])",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4861,7 +5430,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_calibration_cache.py",
    "linenos": [
@@ -4871,11 +5440,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_STRICT",
    "scope": "CaptureSourceAuthentication.__init__",
    "site": "sorted-json:prismaquant/tessera_calibration_cache.py::CaptureSourceAuthentication.__init__",
-   "usage": "manual: identity JSON stored on self._identity_json and persisted with the capture identity"
+   "usage": "manual: identity JSON stored on self._identity_json and persisted with the capture identity",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 384,
+     "original_expression": "json.dumps(identity, sort_keys=True, allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_SPACED_STRICT.text(identity)",
+     "profile": "DIRECT_ASCII_SPACED_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_campaign.py",
    "linenos": [
@@ -4885,7 +5464,17 @@
    "route_verdict": "DIRECT_ASCII_STRICT",
    "scope": "_campaign_identity_metadata_plan",
    "site": "sorted-json:prismaquant/tessera_campaign.py::_campaign_identity_metadata_plan",
-   "usage": "arg:encode;store"
+   "usage": "arg:encode;store",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 2877,
+     "original_expression": "json.dumps((projected_units or {}).get(name),\n            sort_keys=True, separators=(\",\", \":\"), allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_STRICT.encoded((projected_units or {}).get(name))",
+     "profile": "DIRECT_ASCII_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4906,7 +5495,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_campaign.py",
    "linenos": [
@@ -4916,7 +5505,17 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_main.finalize_row_stream",
    "site": "sorted-json:prismaquant/tessera_campaign.py::_main.finalize_row_stream",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 7947,
+     "original_expression": "json.dumps(record, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(record)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -4937,7 +5536,7 @@
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_campaign.py",
    "linenos": [
@@ -4947,11 +5546,21 @@
    "route_verdict": "DIRECT_ASCII_STRICT",
    "scope": "canonical_refusals",
    "site": "sorted-json:prismaquant/tessera_campaign.py::canonical_refusals",
-   "usage": "store"
+   "usage": "store",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 2023,
+     "original_expression": "json.dumps(entry, sort_keys=True, separators=(\",\", \":\"), allow_nan=False)",
+     "routed_expression": "DIRECT_ASCII_STRICT.text(entry)",
+     "profile": "DIRECT_ASCII_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_campaign.py",
    "linenos": [
@@ -4961,11 +5570,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "write_export_inputs",
    "site": "sorted-json:prismaquant/tessera_campaign.py::write_export_inputs",
-   "usage": "arg:write_text"
+   "usage": "arg:write_text",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 5881,
+     "original_expression": "json.dumps({\n            **capture_provenance,\n            \"capture_sha256\": capture_sha256,\n            \"capture_sha256_schema\": HESSIAN_CAPTURE_SHA256_SCHEMA,\n        }, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text({\n            **capture_provenance,\n            \"capture_sha256\": capture_sha256,\n            \"capture_sha256_schema\": HESSIAN_CAPTURE_SHA256_SCHEMA,\n        })",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_expert_projection.py",
    "linenos": [
@@ -4976,11 +5595,28 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "_allocation_expert_projection_block",
    "site": "sorted-json:prismaquant/tessera_expert_projection.py::_allocation_expert_projection_block",
-   "usage": "arg:loads"
+   "usage": "arg:loads",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 836,
+     "original_expression": "json.dumps(carried, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(carried)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    },
+    {
+     "method": "text",
+     "base_line": 744,
+     "original_expression": "json.dumps(population, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(population)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_expert_projection.py",
    "linenos": [
@@ -4990,7 +5626,17 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "carried_projection",
    "site": "sorted-json:prismaquant/tessera_expert_projection.py::carried_projection",
-   "usage": "arg:loads"
+   "usage": "arg:loads",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 426,
+     "original_expression": "json.dumps(projection, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(projection)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -5038,7 +5684,7 @@
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_export_lane.py",
    "linenos": [
@@ -5048,11 +5694,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "read_cached_unit_bundle",
    "site": "sorted-json:prismaquant/tessera_export_lane.py::read_cached_unit_bundle",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 2382,
+     "original_expression": "json.dumps(warning, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(warning)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_export_lane.py",
    "linenos": [
@@ -5063,11 +5719,28 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "require_platform_executes_derived_from_contract",
    "site": "sorted-json:prismaquant/tessera_export_lane.py::require_platform_executes_derived_from_contract",
-   "usage": "arg:TesseraExportLaneError"
+   "usage": "arg:TesseraExportLaneError",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 311,
+     "original_expression": "json.dumps(derived, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(derived)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    },
+    {
+     "method": "text",
+     "base_line": 309,
+     "original_expression": "json.dumps(stated, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(stated)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_formats.py",
    "linenos": [
@@ -5077,11 +5750,21 @@
    "route_verdict": "DIRECT_ASCII_LAX",
    "scope": "TesseraRateSurface.identity",
    "site": "sorted-json:prismaquant/tessera_formats.py::TesseraRateSurface.identity",
-   "usage": "return"
+   "usage": "return",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 1794,
+     "original_expression": "json.dumps(\n            {\n                \"family\": self.family,\n                \"mode\": self.mode,\n                \"bounds_q256\": list(self.bounds_q256),\n                \"step_q256\": self.step_q256,\n                \"anchor_q256\": list(self.anchor_q256),\n                \"proposed_q256\": list(self.proposed_q256),\n                \"source_identity_sha256\": self.source_identity_sha256,\n            },\n            sort_keys=True,\n            separators=(\",\", \":\"),\n        )",
+     "routed_expression": "DIRECT_ASCII_LAX.text(\n            {\n                \"family\": self.family,\n                \"mode\": self.mode,\n                \"bounds_q256\": list(self.bounds_q256),\n                \"step_q256\": self.step_q256,\n                \"anchor_q256\": list(self.anchor_q256),\n                \"proposed_q256\": list(self.proposed_q256),\n                \"source_identity_sha256\": self.source_identity_sha256,\n            }\n        )",
+     "profile": "DIRECT_ASCII_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_joint_allocation.py",
    "linenos": [
@@ -5091,11 +5774,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "handoff",
    "site": "sorted-json:prismaquant/tessera_joint_allocation.py::handoff",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 302,
+     "original_expression": "json.dumps(receipt, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(receipt)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_joint_eval_panel.py",
    "linenos": [
@@ -5105,7 +5798,17 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/tessera_joint_eval_panel.py::main",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 105,
+     "original_expression": "json.dumps(plan, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(plan)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -5123,7 +5826,7 @@
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_materialization.py",
    "linenos": [
@@ -5133,11 +5836,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/tessera_materialization.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 549,
+     "original_expression": "json.dumps(result, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(result)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_menu.py",
    "linenos": [
@@ -5147,11 +5860,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "_content_equal_hessian_identity",
    "site": "sorted-json:prismaquant/tessera_menu.py::_content_equal_hessian_identity",
-   "usage": "compare"
+   "usage": "compare",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 2064,
+     "original_expression": "json.dumps(\n            normalize_reference_binding(primary_binding), sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(\n            normalize_reference_binding(primary_binding))",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_menu.py",
    "linenos": [
@@ -5161,7 +5884,17 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "assert_uniform_hessian_identity",
    "site": "sorted-json:prismaquant/tessera_menu.py::assert_uniform_hessian_identity",
-   "usage": "arg:normalize_reference_binding;expression;store"
+   "usage": "arg:normalize_reference_binding;expression;store",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 1978,
+     "original_expression": "json.dumps(normalize_reference_binding(reference), sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(normalize_reference_binding(reference))",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -5180,7 +5913,7 @@
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_selected_scales.py",
    "linenos": [
@@ -5190,11 +5923,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/tessera_selected_scales.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 82,
+     "original_expression": "json.dumps(result, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(result)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_selected_scales.py",
    "linenos": [
@@ -5204,11 +5947,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "write_selected_scales",
    "site": "sorted-json:prismaquant/tessera_selected_scales.py::write_selected_scales",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 70,
+     "original_expression": "json.dumps(result, sort_keys=True, indent=2)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(result)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_source_digest_adoption.py",
    "linenos": [
@@ -5218,11 +5971,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "adopt_source_digests",
    "site": "sorted-json:prismaquant/tessera_source_digest_adoption.py::adopt_source_digests",
-   "usage": "arg:encode;arg:publish_new_bytes;compare"
+   "usage": "arg:encode;arg:publish_new_bytes;compare",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 68,
+     "original_expression": "json.dumps(result,sort_keys=True,indent=2)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(result)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/tessera_source_digest_adoption.py",
    "linenos": [
@@ -5232,11 +5995,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/tessera_source_digest_adoption.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 81,
+     "original_expression": "json.dumps(result,sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(result)",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/union_production_cache.py",
    "linenos": [
@@ -5246,11 +6019,21 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "create_shard_manifest",
    "site": "sorted-json:prismaquant/union_production_cache.py::create_shard_manifest",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 853,
+     "original_expression": "json.dumps(\n            envelope,\n            indent=2,\n            sort_keys=True,\n            ensure_ascii=False,\n            allow_nan=False,\n        )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(\n            envelope,\n        )",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/union_production_cache.py",
    "linenos": [
@@ -5260,11 +6043,21 @@
    "route_verdict": "DIRECT_UTF8_INDENT2_STRICT",
    "scope": "union_shard_manifests",
    "site": "sorted-json:prismaquant/union_production_cache.py::union_shard_manifests",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 1694,
+     "original_expression": "json.dumps(\n                envelope,\n                indent=2,\n                sort_keys=True,\n                ensure_ascii=False,\n                allow_nan=False,\n            )",
+     "routed_expression": "DIRECT_UTF8_INDENT2_STRICT.encoded(\n                envelope,\n            )",
+     "profile": "DIRECT_UTF8_INDENT2_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/unit_topology_restamp.py",
    "linenos": [
@@ -5274,11 +6067,21 @@
    "route_verdict": "DIRECT_ASCII_SPACED_LAX",
    "scope": "main",
    "site": "sorted-json:prismaquant/unit_topology_restamp.py::main",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 87,
+     "original_expression": "json.dumps(restamp_table(table=args.table, table_sha256=args.table_sha256,\n                                   output=args.output, model=args.model), sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_SPACED_LAX.text(restamp_table(\n        table=args.table, table_sha256=args.table_sha256,\n        output=args.output, model=args.model))",
+     "profile": "DIRECT_ASCII_SPACED_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/unit_topology_restamp.py",
    "linenos": [
@@ -5288,11 +6091,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "restamp_table",
    "site": "sorted-json:prismaquant/unit_topology_restamp.py::restamp_table",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "encoded",
+     "base_line": 74,
+     "original_expression": "json.dumps(receipt, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.encoded(receipt)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/validate_assignments_kl.py",
    "linenos": [
@@ -5302,11 +6115,21 @@
    "route_verdict": "DIRECT_UTF8_STRICT",
    "scope": "main",
    "site": "sorted-json:prismaquant/validate_assignments_kl.py::main",
-   "usage": "arg:encode"
+   "usage": "arg:encode",
+   "migrated_calls": [
+    {
+     "method": "sha256",
+     "base_line": 1742,
+     "original_expression": "json.dumps(\n                    resolved_assignment_payload,\n                    sort_keys=True,\n                    separators=(\",\", \":\"),\n                    ensure_ascii=False,\n                    allow_nan=False,\n                )",
+     "routed_expression": "DIRECT_UTF8_STRICT.sha256(\n                    resolved_assignment_payload)",
+     "profile": "DIRECT_UTF8_STRICT"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/validation_harness.py",
    "linenos": [
@@ -5316,11 +6139,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_main_compare",
    "site": "sorted-json:prismaquant/validation_harness.py::_main_compare",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 997,
+     "original_expression": "json.dumps(result, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(result)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/validation_harness.py",
    "linenos": [
@@ -5330,11 +6163,21 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_main_list",
    "site": "sorted-json:prismaquant/validation_harness.py::_main_list",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 1007,
+     "original_expression": "json.dumps(records, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(records)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "ephemeral",
-   "disposition": "eligible: mechanical byte-identical routing to the named owner",
+   "disposition": "migrated-by-pq2259-2026-10-05",
    "family": "sorted-json",
    "file": "prismaquant/validation_harness.py",
    "linenos": [
@@ -5344,7 +6187,17 @@
    "route_verdict": "DIRECT_ASCII_INDENT2_LAX",
    "scope": "_main_validate",
    "site": "sorted-json:prismaquant/validation_harness.py::_main_validate",
-   "usage": "display-only"
+   "usage": "display-only",
+   "migrated_calls": [
+    {
+     "method": "text",
+     "base_line": 986,
+     "original_expression": "json.dumps(output, indent=2, sort_keys=True)",
+     "routed_expression": "DIRECT_ASCII_INDENT2_LAX.text(output)",
+     "profile": "DIRECT_ASCII_INDENT2_LAX"
+    }
+   ],
+   "note": "Direct stdlib JsonProfile route: encoder options and original argument expression match fresh source 62fd01ad; no normalization or streamed hashing. Current line numbers belong to the final source-qualified runtime packet, not this historical census."
   },
   {
    "classification": "load-bearing",
@@ -7162,6 +8015,35 @@
   }
  ],
  "summary": {
+  "historical_gated_rows": 485,
+  "historical_owner_rows": 16,
+  "historical_census_rows": 501,
+  "migrated_by_byte_hash_slice": 72,
+  "migrated_by_json_profile_slice": 80,
+  "total_migrated_scopes": 152,
+  "remaining_gated_scopes": 333,
+  "remaining_by_family": {
+   "hashlib": 163,
+   "sorted-json": 170
+  },
+  "remaining_by_classification": {
+   "load-bearing": 299,
+   "ephemeral": 34
+  },
+  "remaining_gated_scopes_breakdown": {
+   "mixed scope: split per call; route each call individually": 40,
+   "retained protected single-file contract: the deployed module loads without a package context; raw hashlib stays (excluded from owner routing)": 2,
+   "distinct identity: not byte-identical to any owner route; keep or migrate only under an explicit identity migration": 57,
+   "retained protected direct-file contract: loaded by file path with no package via spec_from_file_location; raw hashlib stays (excluded from owner routing)": 1,
+   "retained protected packaged-source contract: qualified self-source binding; editing the file invalidates kernels/kda_chunk_qualification.json identity.source_sha256 (excluded from owner routing)": 1,
+   "eligible-byte-route: deferred from this slice (sibling-lane file; coordinate via parent)": 2,
+   "eligible-byte-route: needs the direct public-file digests bootstrap in stdlib-only tools": 88,
+   "load-bearing distinct JSON identity: needs a new named JsonProfile decision before migration": 46,
+   "eligible: mechanical byte-identical routing to the named owner": 92,
+   "retained protected file-loader contract: reporter loaded by run_path without package context; raw sorted JSON stays": 4
+  }
+ },
+ "historical_summary": {
   "by_classification": {
    "ephemeral": 51,
    "load-bearing": 434
@@ -7194,5 +8076,60 @@
    "mixed scope: split per call; route each call individually": 40,
    "retained protected contracts (excluded from owner routing; see per-row witnesses)": 4
   }
+ },
+ "json_profile_slice": {
+  "issue": "https://github.com/RobTand/prismaquant/issues/2259",
+  "base_commit": "62fd01ad964d55a23a2fdd8ae891c78dd9a691b6",
+  "selected_scope_rows": 84,
+  "migrated_scope_rows": 80,
+  "migrated_calls": 87,
+  "migrated_package_modules": 57,
+  "retained_scope_rows": 4,
+  "initial_audit_action": "92c652251f155a49dd67fa196d7b1c3d1186b2b5e1b751ed256cbe1bfc6c751a",
+  "initial_audit_source_snapshot": "fbbf7e34b09dbe8a7ce74a7d4c6870fc5e66cfab",
+  "exact_recipes_and_arguments_observed": true,
+  "standalone_reporter_exclusion": [
+   {
+    "current_lines": [
+     145
+    ],
+    "disposition": "retained:protected-file-loader",
+    "file": "prismaquant/prismabuild_progress.py",
+    "reason": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context",
+    "scope": "commit",
+    "site": "sorted-json:prismaquant/prismabuild_progress.py::commit"
+   },
+   {
+    "current_lines": [
+     235
+    ],
+    "disposition": "retained:protected-file-loader",
+    "file": "prismaquant/prismabuild_progress.py",
+    "reason": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context",
+    "scope": "declare_export_wait",
+    "site": "sorted-json:prismaquant/prismabuild_progress.py::declare_export_wait"
+   },
+   {
+    "current_lines": [
+     179
+    ],
+    "disposition": "retained:protected-file-loader",
+    "file": "prismaquant/prismabuild_progress.py",
+    "reason": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context",
+    "scope": "declare_staged_wait",
+    "site": "sorted-json:prismaquant/prismabuild_progress.py::declare_staged_wait"
+   },
+   {
+    "current_lines": [
+     69
+    ],
+    "disposition": "retained:protected-file-loader",
+    "file": "prismaquant/prismabuild_progress.py",
+    "reason": "tests/test_tessera_campaign_container.py:173-174 run_path loads reporter without package context",
+    "scope": "report",
+    "site": "sorted-json:prismaquant/prismabuild_progress.py::report"
+   }
+  ],
+  "scope": "Bounded package cohort only; #1301 remains open. Tools cohort, new-profile decisions, non-hexdigest identities and protected deployments are not collapsed."
  }
 }

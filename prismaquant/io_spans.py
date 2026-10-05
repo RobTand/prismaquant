@@ -52,7 +52,8 @@ failure without replacing it.
 of the process and host readers (``/proc/self/io``, ``/proc/meminfo``,
 ``/proc/self/status`` and ``nvidia-smi`` GPU power) and of the one sampler
 thread, :class:`PeriodicSampler`, which every periodic sampler is built on
-(PQ #1299). It imports nothing from PrismaQuant, so any stage can use it.
+(PQ #1299). Its only PrismaQuant import is the stdlib-only direct-JSON
+encoding owner in ``digests.py``, so any stage can use it.
 """
 from __future__ import annotations
 
@@ -64,6 +65,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Mapping
+
+from .digests import DIRECT_ASCII_SPACED_STRICT
 
 IO_SPAN_SCHEMA = "prismaquant.io_span.v1"
 READ_RATE_SCHEMA = "prismaquant.read_rate.v1"
@@ -412,7 +415,7 @@ class ReadRateReporter:
                 "proc_io": proc,
             }
             self._log(f"{READ_RATE_MARKER} "
-                      + json.dumps(record, sort_keys=True, allow_nan=False))
+                      + DIRECT_ASCII_SPACED_STRICT.text(record))
             self.lines += 1
         except Exception as exc:  # noqa: BLE001 -- instrumentation only
             try:

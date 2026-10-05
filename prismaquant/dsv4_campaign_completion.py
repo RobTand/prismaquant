@@ -27,7 +27,12 @@ import sys
 from typing import Any
 
 if __package__:
-    from .digests import bytes_sha256hex, text_sha256hex
+    from .digests import (
+        DIRECT_UTF8_INDENT2_STRICT,
+        DIRECT_UTF8_STRICT,
+        bytes_sha256hex,
+        text_sha256hex,
+    )
 else:
     # The campaign waiter loads this file by spec from a verified snapshot
     # without importing PrismaQuant, so it runs without a parent package; a
@@ -50,6 +55,8 @@ else:
         except BaseException:
             del sys.modules[_owner_name]
             raise
+    DIRECT_UTF8_INDENT2_STRICT = sys.modules[_owner_name].DIRECT_UTF8_INDENT2_STRICT
+    DIRECT_UTF8_STRICT = sys.modules[_owner_name].DIRECT_UTF8_STRICT
     bytes_sha256hex = sys.modules[_owner_name].bytes_sha256hex
     text_sha256hex = sys.modules[_owner_name].text_sha256hex
 
@@ -95,13 +102,7 @@ DSV4_COMPLETION_CONTRACT = CompletionContract(
 
 def _canonical_bytes(value: object) -> bytes:
     try:
-        return json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
+        return DIRECT_UTF8_STRICT.encoded(value)
     except (TypeError, ValueError) as exc:
         raise CampaignCompletionError("value is not canonical JSON data") from exc
 
@@ -577,9 +578,7 @@ def publish_completion_receipt(
     contract: CompletionContract = DSV4_COMPLETION_CONTRACT,
 ) -> Path:
     output = Path(path)
-    encoded = json.dumps(
-        dict(receipt), indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False
-    ).encode("utf-8") + b"\n"
+    encoded = DIRECT_UTF8_INDENT2_STRICT.encoded(dict(receipt)) + b"\n"
     _atomic_publish_new(output, encoded)
     loaded = load_completion_receipt(output, contract=contract)
     if loaded != dict(receipt):

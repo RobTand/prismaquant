@@ -40,6 +40,7 @@ from gguf import GGMLQuantizationType as QT
 from prismaquant.gguf_formats import GGUF_BLOCK_BYTES, gguf_pack
 from prismaquant.layer_config import load_assignment
 from prismaquant.moe_imatrix import build_imatrix_from_act_cache
+from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
 from prismaquant.export_output_safety import (
     prepare_fresh_export_file,
     transactional_file_output,
@@ -432,11 +433,11 @@ def export_gguf(
     if research_cost_selection is not None:
         writer.add_key_value(
             "prismaquant.research_cost_selection",
-            json.dumps(research_cost_selection, sort_keys=True),
+            DIRECT_ASCII_SPACED_LAX.text(research_cost_selection),
             gguf.GGUFValueType.STRING,
         )
     writer.add_key_value("prismaquant.tensor_formats",
-                         json.dumps(tensor_formats, sort_keys=True),
+                         DIRECT_ASCII_SPACED_LAX.text(tensor_formats),
                          gguf.GGUFValueType.STRING)
     # Calibration provenance: the imatrix is a deterministic function of the
     # calibration activations, so its digest identifies the calibration; the

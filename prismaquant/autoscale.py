@@ -33,7 +33,7 @@ import re
 from pathlib import Path
 from . import io_spans
 from prismaquant.source_read_plan import read_safetensors_header
-from .digests import text_sha256hex
+from .digests import DIRECT_ASCII_LAX
 
 
 DEFAULT_SAFETY_GB = 20.0     # slack above the committed estimate. NEVER rely on
@@ -389,8 +389,7 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         **_baseline_fields(process_baseline_bytes, process_baseline_policy),
         **({'source_tensor_keys': sorted(selected_keys)}
            if selected_keys is not None else {}),
-        source_header_sha256=text_sha256hex(json.dumps(header, sort_keys=True,
-            separators=(',', ':'))),
+        source_header_sha256=DIRECT_ASCII_LAX.sha256(header),
         terms=terms, memory_bytes=sum(terms.values()), disk_bytes=disk,
         full_hessian_bytes=total_h, full_prefix_bytes=total_x,
         unit_source_weight_bytes=unit_source_weight_bytes,

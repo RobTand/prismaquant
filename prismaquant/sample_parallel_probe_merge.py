@@ -57,6 +57,7 @@ from prismaquant.sample_parallel_probe_contract import (
     activation_row_priorities,
 )
 from prismaquant.sensitivity_probe import finalize_fisher_stats
+from .digests import DIRECT_ASCII_INDENT2_LAX
 from prismaquant.tensor_digests import tensor_identity as _tensor_identity
 
 
@@ -1598,7 +1599,7 @@ def merge_sample_parallel_activation_caches(
             manifest, where="sample-parallel activation-cache manifest"
         )
         (temp / ACTIVATION_CACHE_MANIFEST).write_text(
-            json.dumps(manifest, sort_keys=True, indent=2) + "\n"
+            DIRECT_ASCII_INDENT2_LAX.text(manifest) + "\n"
         )
         for published_file in temp.iterdir():
             if published_file.is_file():
