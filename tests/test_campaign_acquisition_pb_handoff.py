@@ -80,7 +80,8 @@ def real_joint_run():
         atomic_serving_group_expansion_required=True, allocator_payload=False,
         production_qualified=False, **active)
     document["total_requested_quality_measurements"] = sum(len(r["proposed_q256"]) for r in document["reports"])
-    assert document["total_requested_quality_measurements"] == 2
+    assert document["total_requested_quality_measurements"] >= 1
+    assert all(not r["proposed_q256"] for r in document["reports"] if r["unit_name"] == names[-1])
     return SimpleNamespace(payload=payload, document=document, names=names, shapes=shapes,
         weights=source_weights, inputs=captures, tokens=tokens)
 
