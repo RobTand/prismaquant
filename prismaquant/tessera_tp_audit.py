@@ -46,11 +46,11 @@ could not be run (no contract, unknown profile, unreadable input).
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
 from typing import Any
+from .digests import bytes_sha256hex
 
 #: Receipt schema. Bump when a consumer-visible field changes meaning.
 AUDIT_SCHEMA = "prismaquant.tessera_tp_audit.v1"
@@ -85,7 +85,7 @@ def _resolve_axes(contract_path: str | None) -> dict[str, Any]:
             raw = path.read_bytes()
         except OSError as exc:
             raise TesseraTpAuditError(f"--contract {contract_path}: {exc}") from exc
-        sha = hashlib.sha256(raw).hexdigest()
+        sha = bytes_sha256hex(raw)
         try:
             axes = published_tensor_parallel_axes(str(path), sha)
             world = published_tensor_parallel_limits(str(path), sha)

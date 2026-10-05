@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -25,6 +25,33 @@ import re
 import stat
 import sys
 from typing import Any
+
+if __package__:
+    from .digests import bytes_sha256hex, text_sha256hex
+else:
+    # The campaign waiter loads this file by spec from a verified snapshot
+    # without importing PrismaQuant, so it runs without a parent package; a
+    # package-mode import error propagates, and only no-package mode binds
+    # from the file. digests.py is stdlib-only: bind the same tree's owner
+    # by file path, registered under a name carrying that path's exact
+    # bytes (as the waiter names its own module per snapshot, two checkouts
+    # in one process never share a cache entry), popping the registration
+    # if execution fails.
+    _owner_path = Path(__file__).resolve().parent / "digests.py"
+    _owner_name = ("_prismaquant_standalone_digest_owner_"
+                   + os.fsencode(_owner_path).hex())
+    if _owner_name not in sys.modules:
+        _owner_spec = importlib.util.spec_from_file_location(
+            _owner_name, _owner_path)
+        _owner_module = importlib.util.module_from_spec(_owner_spec)
+        sys.modules[_owner_name] = _owner_module
+        try:
+            _owner_spec.loader.exec_module(_owner_module)
+        except BaseException:
+            del sys.modules[_owner_name]
+            raise
+    bytes_sha256hex = sys.modules[_owner_name].bytes_sha256hex
+    text_sha256hex = sys.modules[_owner_name].text_sha256hex
 
 
 RECEIPT_SCHEMA = "prismaquant.dsv4_aura_campaign_completion.v1"
@@ -80,7 +107,7 @@ def _canonical_bytes(value: object) -> bytes:
 
 
 def canonical_sha256(value: object) -> str:
-    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+    return bytes_sha256hex(_canonical_bytes(value))
 
 
 def _reject_duplicate_members(
@@ -118,7 +145,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
+    return bytes_sha256hex(value)
 
 
 def _file_bytes(path: Path) -> bytes:
@@ -194,7 +221,7 @@ def _manifest_scope(
             raise CampaignCompletionError("AURA manifest unit is not an object")
         qname = str(row.get("qname", ""))
         expected_file = (
-            "units/" + hashlib.sha256(qname.encode("utf-8")).hexdigest() + ".pkl"
+            "units/" + text_sha256hex(qname) + ".pkl"
         )
         if (
             not qname

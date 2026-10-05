@@ -19,6 +19,7 @@ import stat
 
 from .dev_mode import seal_check
 from .file_identity import file_stat_signature
+from .digests import bytes_sha256hex
 
 SCHEMA = 'prismaquant.joint_forward_recovery.v1'
 
@@ -104,7 +105,7 @@ def _checked_group(group, *, queue, instance, template, sdk):
     if set(record) != {'export_key', 'manifest_sha256', 'batch_id', 'action'}:
         raise ForwardRecoveryRefused('export record has an invalid shape')
     raw = group['manifest_raw'].encode()
-    if json.loads(raw) != manifest or hashlib.sha256(raw).hexdigest() != record['manifest_sha256']:
+    if json.loads(raw) != manifest or bytes_sha256hex(raw) != record['manifest_sha256']:
         raise ForwardRecoveryRefused('export manifest digest mismatch')
     batch = manifest['batch_id']
     if (manifest['owner'] != instance['owner_action_key'] or
@@ -546,6 +547,6 @@ continues the imported chain.
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
-    return {'path': str(output), 'sha256': hashlib.sha256(raw).hexdigest(),
+    return {'path': str(output), 'sha256': bytes_sha256hex(raw),
             'groups': len(groups), 'segments': len(chain_documents(document)),
             'entries': sum(len(rows) for rows in records.values())}

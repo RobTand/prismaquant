@@ -74,6 +74,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes, text_sha256hex
 
 if TYPE_CHECKING:
     from .lane_eligibility import ServingContext
@@ -85,7 +86,6 @@ from .nvfp4_activation_contract import (
 )
 from .tessera_expert_projection import EXPERT_WIRES_KEY, POPULATION_KEY, PROJECTION_KEY
 from .tessera_publication import PublicationJob
-from .digests import DIRECT_ASCII_INDENT2_LAX, bytes_sha256hex, indent2_json_file_bytes
 from .schemas import strict_json_loads
 
 __all__ = [
@@ -4095,8 +4095,6 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
     ``permutation``, ``start``, ``size``, ``size_sha256``, ``frame_size``,
     ``random_draws`` and ``method``.
     """
-    import hashlib
-
     names = sorted(weights)
     if not names:
         raise RuntimeError(f"stack {stack}: no unit to sample")
@@ -4105,9 +4103,7 @@ def draw_stack_sample(weights: "Mapping[str, float]", n: int, *,
         raise RuntimeError(f"stack {stack}: size weights must be finite")
     if any(value < 0.0 for value in sizes.values()):
         raise RuntimeError(f"stack {stack}: a size weight is negative")
-    digest = hashlib.sha256(
-        "|".join(f"{name}={sizes[name]!r}" for name in names).encode()
-    ).hexdigest()
+    digest = text_sha256hex("|".join(f"{name}={sizes[name]!r}" for name in names))
     want = int(n)
     if want < 1:
         raise RuntimeError(f"stack {stack}: --stack-sample must be at least 1")

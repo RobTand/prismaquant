@@ -30,7 +30,6 @@ stable public API that both sides share.
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import re
 import threading
@@ -42,6 +41,7 @@ from pathlib import Path
 
 import torch
 from safetensors import safe_open
+from .digests import bytes_sha256hex
 
 try:
     from accelerate import init_empty_weights
@@ -247,7 +247,7 @@ class _StreamingInitializationAudit:
                 if not torch.isfinite(tensor).all():
                     raise RuntimeError(f"streaming initialization has nonfinite buffer {name}")
                 raw = tensor.detach().cpu().contiguous().reshape(-1).view(torch.uint8).numpy().tobytes()
-                record["sha256"] = hashlib.sha256(raw).hexdigest()
+                record["sha256"] = bytes_sha256hex(raw)
             previous = self.records.get(name)
             if previous is not None and previous != record:
                 raise RuntimeError(f"streaming initialization state changed for {name}")

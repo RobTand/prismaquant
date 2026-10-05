@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 from pathlib import Path
+from .digests import bytes_sha256hex
 
 
 def write_selected_scales(assignment_binding, output_dir):
@@ -62,7 +62,7 @@ def write_selected_scales(assignment_binding, output_dir):
     _, path, _ = write_export_inputs(out, hessians=None, hessian_rows={}, hessian_identity={},
         static_scales=scales, static_scale_policy=formula)
     result = {'schema': 'prismaquant.selected_priced_scales.v1', 'assignment': dict(assignment_binding),
-        'input_scales': {'path': str(path.resolve()), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()},
+        'input_scales': {'path': str(path.resolve()), 'sha256': bytes_sha256hex(path.read_bytes())},
         'units': len(scales), 'input_global_scale_policy': formula,
         'served_activation_policy': block.get('served_activation_policy'),
         'activation_scale_grouping_declaration': block.get('activation_scale_grouping'),

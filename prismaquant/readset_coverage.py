@@ -50,7 +50,6 @@ through :func:`load_source_plan`.
 from __future__ import annotations
 
 import gzip
-import hashlib
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
@@ -66,6 +65,7 @@ from .source_read_plan import (
     roster_layers_prefix,
     uncovered_spans,
 )
+from .digests import bytes_sha256hex
 
 GAPS_SCHEMA = "prismaquant.readset_coverage.gaps.v1"
 HEAD_PHASE = "head"
@@ -202,7 +202,7 @@ def quantum_record_gaps(record: Mapping, manifest: Mapping,
 def _read_verified(path: str, sha256: str | None, *, where: str,
                    wire: bytes | None = None) -> bytes:
     raw = Path(path).read_bytes() if wire is None else bytes(wire)
-    if sha256 is not None and hashlib.sha256(raw).hexdigest() != sha256:
+    if sha256 is not None and bytes_sha256hex(raw) != sha256:
         raise ValueError(f"{where} at {path} does not hash to its sealed digest")
     return raw
 
@@ -221,7 +221,7 @@ def _read_declared(path: str, sealed_sha256: str | None, *, where: str) -> bytes
     if sealed_sha256 is not None:
         from .dev_mode import seal_check
 
-        seal_check(f"campaign {where}", sealed_sha256, hashlib.sha256(raw).hexdigest(),
+        seal_check(f"campaign {where}", sealed_sha256, bytes_sha256hex(raw),
                    where=f"readset coverage at {path}",
                    refusal=lambda: ValueError(
                        f"{where} at {path} does not hash to its sealed digest"))

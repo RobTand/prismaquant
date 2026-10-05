@@ -28,12 +28,12 @@ and clamped to [1, num_layers]. Explicit env overrides always win.
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import re
 from pathlib import Path
 from . import io_spans
 from prismaquant.source_read_plan import read_safetensors_header
+from .digests import text_sha256hex
 
 
 DEFAULT_SAFETY_GB = 20.0     # slack above the committed estimate. NEVER rely on
@@ -389,8 +389,8 @@ def streamed_calibration_resources(model_path, *, unit_shapes, counts,
         **_baseline_fields(process_baseline_bytes, process_baseline_policy),
         **({'source_tensor_keys': sorted(selected_keys)}
            if selected_keys is not None else {}),
-        source_header_sha256=hashlib.sha256(json.dumps(header, sort_keys=True,
-            separators=(',', ':')).encode()).hexdigest(),
+        source_header_sha256=text_sha256hex(json.dumps(header, sort_keys=True,
+            separators=(',', ':'))),
         terms=terms, memory_bytes=sum(terms.values()), disk_bytes=disk,
         full_hessian_bytes=total_h, full_prefix_bytes=total_x,
         unit_source_weight_bytes=unit_source_weight_bytes,

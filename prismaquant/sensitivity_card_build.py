@@ -20,7 +20,6 @@ downstream from whichever profile the author names.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import pickle
@@ -39,6 +38,7 @@ from .sensitivity_card import (
     SensitivityUnit,
     UnitTopology,
 )
+from .digests import text_sha256hex
 
 VECTOR_KEYS = ("fisher_row", "fisher_col", "g_sq_sum", "act_sq_sum", "act_absmax")
 
@@ -144,7 +144,7 @@ def _calib_hash(meta: Mapping[str, Any]) -> str:
         {k: str(meta.get(k)) for k in sorted(
             ("dataset", "nsamples", "seqlen", "seed", "model"))},
         sort_keys=True)
-    return "derived:" + hashlib.sha256(payload.encode()).hexdigest()[:56]
+    return "derived:" + text_sha256hex(payload)[:56]
 
 
 def card_from_probe(

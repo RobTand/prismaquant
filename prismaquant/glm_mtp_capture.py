@@ -32,7 +32,6 @@ the body capture carries.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from contextlib import closing
@@ -41,7 +40,7 @@ from pathlib import Path
 import torch
 
 from . import glm_mtp
-from .digests import DIRECT_ASCII_STRICT
+from .digests import DIRECT_ASCII_STRICT, bytes_sha256hex
 
 FINAL_HIDDEN_SCHEMA = "prismaquant.glm_mtp.final_hidden.v1"
 CENSUS_EXTENSION_SCHEMA = "prismaquant.glm_mtp.census_extension.v1"
@@ -151,7 +150,7 @@ _json_sha256 = DIRECT_ASCII_STRICT.sha256
 def read_bound_json(path, expected_sha256):
     """``(document, sha256)`` of a JSON file whose bytes must hash as expected."""
     raw = Path(path).read_bytes()
-    digest = hashlib.sha256(raw).hexdigest()
+    digest = bytes_sha256hex(raw)
     if digest != expected_sha256:
         raise RuntimeError(f"{path}: sha256 {digest} is not the bound {expected_sha256}")
     return json.loads(raw), digest
@@ -263,7 +262,7 @@ def publish_final_hidden(out_dir, *, session, records, layer, inputs, source_wit
     raw = (json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
     atomic_write_bytes(path, raw)
     return {"schema": FINAL_HIDDEN_SCHEMA, "path": str(path),
-            "sha256": hashlib.sha256(raw).hexdigest()}
+            "sha256": bytes_sha256hex(raw)}
 
 
 def final_hidden_session(run_identity):
@@ -453,7 +452,7 @@ def publish_mtp_capture(root, *, census, census_path, source_authentication, cal
 
     raw = (json.dumps(census, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
     atomic_write_bytes(Path(census_path), raw)
-    census_sha256 = hashlib.sha256(raw).hexdigest()
+    census_sha256 = bytes_sha256hex(raw)
     admitted = source_authentication.admit_derived_census(census_path)
     if admitted != census_sha256:
         raise RuntimeError("MTP census changed between its write and its admission")

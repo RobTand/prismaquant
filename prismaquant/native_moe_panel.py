@@ -7,14 +7,13 @@ separate Tessera producer; fixed/full-model resources remain unknown here.
 """
 from __future__ import annotations
 
-import hashlib
 import inspect
 import json
 import math
 from pathlib import Path
 import re
 
-from .digests import DIRECT_ASCII_SPACED_STRICT
+from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
 from .joint_aura import identity_sha256, require_native_source_execution, validate_joint_aura_entry
 from .measured_runtime_prices import RuntimeBinding
 from .native_operator_panel import (PHASES, ROUTE_FIELDS, ROUTE_OPTIONAL_FIELDS, RUNTIME_FIELDS,
@@ -1248,7 +1247,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
             raise ValueError("native A4 reference requires executed static scales")
         actual_members.append({**member, "source_weight": _cb_cache_tensor_identity(source),
             "rendered_weight": _cb_cache_tensor_identity(render), "activation": activation,
-            "wire": {"blob_sha256": hashlib.sha256(wire_blobs[name]).hexdigest(),
+            "wire": {"blob_sha256": bytes_sha256hex(wire_blobs[name]),
                      "blob_bytes": len(wire_blobs[name]), "record": wire_records[name]}})
         if rank_local:
             actual_members[-1]["quality_rendered_weight"] = _cb_cache_tensor_identity(full_render)
@@ -1315,7 +1314,7 @@ def prepare_moe_inputs(cache, source_weights, phase_tensors, *, unit, members, s
             "numerics": dict(numerics), "runtime_image": runtime_image, "serving_config_sha256": serving_config_sha256, "probe_request": probe_request,
             "reference": {"operation": "prismaquant.measure_quant_cost._packed_experts_forward_with_weights",
                           "module_class": f"{type(experts_module).__module__}.{type(experts_module).__qualname__}",
-                          "module_source_sha256": hashlib.sha256(reference_file.read_bytes()).hexdigest(),
+                          "module_source_sha256": bytes_sha256hex(reference_file.read_bytes()),
                           "profile": profile.name, "temporary_pack_bytes": packed_bytes,
                           "activation_preclip": False, "format": format_name},
             "prefetch": prefetch, "phases": phases}, tensors
@@ -1433,7 +1432,7 @@ def _qualified_source_execution(inputs, probe, path, expected_sha256):
     """Verify a fresh source replay of a retained boundary, never rewrite it."""
     import struct
     raw = Path(path).read_bytes()
-    _equal(hashlib.sha256(raw).hexdigest(), _sha(expected_sha256, "source qualification"), "source qualification file")
+    _equal(bytes_sha256hex(raw), _sha(expected_sha256, "source qualification"), "source qualification file")
     result = json.loads(raw)
     if (result.get("schema") != "prismaquant.packed_joint_screen.v1" or result.get("mode") != "source"
             or result.get("passed") is not True):
@@ -1470,7 +1469,7 @@ def _qualified_source_execution(inputs, probe, path, expected_sha256):
         "top_k_weights": prefill["transport"]["topk_weights"]["source"],
         "expert_bias": expert_bias,
         "coordinates": {"shape": [count, 2], "dtype": "torch.int64",
-            "content_sha256": hashlib.sha256(b"".join(struct.pack("<qq", 0, row) for row in range(count))).hexdigest()}}
+            "content_sha256": bytes_sha256hex(b"".join(struct.pack("<qq", 0, row) for row in range(count)))}}
     comparisons = proof["tensor_comparisons"]
     _equal(sorted(comparisons), sorted(expected_tensors), "qualified boundary tensor roster")
     for name, expected in expected_tensors.items():
@@ -1750,7 +1749,7 @@ def captured_moe_boundary(module, args, kwargs, coordinates, *, unit, source_mod
         "topk_ids_dtype": str(ids.dtype), "device": str(x.device),
         "weights_contract": "post_renormalization_and_routed_scaling",
         "source_protocol": {"router_class": f"{type(router).__module__}.{type(router).__qualname__}",
-            "router_source_sha256": hashlib.sha256(Path(inspect.getfile(type(router))).read_bytes()).hexdigest(),
+            "router_source_sha256": bytes_sha256hex(Path(inspect.getfile(type(router))).read_bytes()),
             "selection_bias": _cb_cache_tensor_identity(bias), "normalization_epsilon": 1e-6,
             "expert_bias_affects": "selection_only"}}
     validate_routing(routing)
@@ -1769,7 +1768,7 @@ def captured_moe_boundary(module, args, kwargs, coordinates, *, unit, source_mod
         "attention_implementation": source_model.config._attn_implementation,
         "capture_runtime": {"torch": str(torch.__version__), "cuda": torch.version.cuda,
                             "transformers": __import__("transformers").__version__},
-        "capture_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "capture_source_sha256": bytes_sha256hex(Path(__file__).read_bytes()),
         "tensors": {name: _cb_cache_tensor_identity(value) for name, value in tensors.items()}}}
 
 
@@ -1784,7 +1783,7 @@ def consume_moe_receipt(path, *, expected_sha256, expected_panel, memory_trace_p
     from .native_operator_panel import (native_operator_measurement, native_operator_scratch,
                                         validate_native_numerics)
     raw = Path(path).read_bytes()
-    _equal(hashlib.sha256(raw).hexdigest(), _sha(expected_sha256, "receipt"), "receipt file")
+    _equal(bytes_sha256hex(raw), _sha(expected_sha256, "receipt"), "receipt file")
     receipt = json.loads(raw)
     if receipt.get("schema") == "prismaquant.native_moe_late_binding.v1":
         from .native_moe_execution_binding import resolve_execution_binding

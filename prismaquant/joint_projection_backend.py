@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 from functools import lru_cache
-import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -23,7 +22,7 @@ import torch
 
 from .dev_mode import dev_mode_enabled, seal_check
 from .kernels import joint_projection_reduce as kernel
-from .digests import file_sha256hex
+from .digests import bytes_sha256hex, file_sha256hex
 
 SCHEMA = 'prismaquant.joint_projection_backend.v1'
 FUSED_NAME = 'fused_fp32_v1'
@@ -52,7 +51,7 @@ def _qualification():
     value = json.loads(data)
     if value.get('schema') != 'prismaquant.joint_projection_qualification.v1' or value.get('status') != 'qualified':
         raise RuntimeError('joint projection backend has no qualified packaged runtime')
-    return value, hashlib.sha256(data).hexdigest()
+    return value, bytes_sha256hex(data)
 
 
 def normalize_projection_backend(config=None):

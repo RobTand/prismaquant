@@ -38,7 +38,6 @@ RobTand/prismaquant#183.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -51,6 +50,7 @@ from typing import Any, Mapping, Sequence
 from .stage_inputs import (
     SOURCE_IDENTITY_KEYS, ExpertProjectionError, require_source_identity,
 )
+from .digests import bytes_sha256hex
 
 #: The producer's public projection schema (``tessera.export_serving.project_expert_plan``).
 PROJECTION_SCHEMA = "tessera.expert_projection.v1"
@@ -590,7 +590,7 @@ def verify_expert_wire_record(record: Any, *, name: str, unit: Mapping[str, Any]
     record = check_expert_wire_receipt(record, name=name, unit=unit, q256=q256, grid=grid)
     path = locate_expert_wire(record, name=name, wire_dir=wire_dir)
     blob = path.read_bytes()
-    if len(blob) != record["blob_bytes"] or hashlib.sha256(blob).hexdigest() != record["blob_sha256"]:
+    if len(blob) != record["blob_bytes"] or bytes_sha256hex(blob) != record["blob_sha256"]:
         raise ExpertProjectionError(f"{name}: priced wire {path} does not match its receipt")
     return record
 
