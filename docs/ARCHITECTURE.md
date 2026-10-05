@@ -2575,6 +2575,17 @@ PQ #1616's v44 pin, Tessera master's #687 merge: the writer is live against
 the pinned package; it stays fail-closed with a named refusal on any older
 pin whose package lacks `tessera.serving_plan` (§9.4, export arm).)
 
+Re-stamped 2026-10-05 (PQ #2319, `PerUnitRates967.pq2319-allocator-export`):
+`stack_plan` expresses a mixed-run routed stack per unit — the stack entry
+keeps the producer-planned `q256` from the carried projection's request and
+adds `unit_q256`, the canonical logical unit names (`.weight` stripped, the
+producer's own spelling) whose rung differs from that baseline, normalized
+away when no leaf differs so a stack-uniform plan is byte-identical to the
+spelling #1587 wrote. Mixed Tessera/BF16 leaves and mixed grids still refuse;
+a mixed stack without the carried request refuses (no baseline to normalize
+against), and the expressibility gate is the installed runtime's v57
+`producer_interface.routed_units` capability (§4.10).
+
 Re-stamped 2026-09-28 (PQ #1634, `claude/tr3-compiled-1634`): the GLM-5.3
 TR3 full-vocabulary scorer (`experiments/measure_glm_tr3_vllm.py`) gains an
 opt-in `--execution-mode compiled`. It builds the same isolated-prompt engine
@@ -16935,6 +16946,63 @@ it claims to hold. The census's own docstring names what it does not cover
 (aliased or dispatched calls, a swallow one frame up, computed exception
 classes, callers outside `prismaquant/`), since it is cited as future-proofing.
 
+Re-stamped (2026-10-05, `PerUnitRates967.pq2319-allocator-export`, PQ #2319)
+for **the allocator spending the byte budget at per-unit routed granularity**
+(§4.10; the D36 ruling that the corrected T-8 build's 188,331,767 B headroom
+must fill once the wire is expressible — RobTand/tessera#967). The price
+surface was per unit all along (11,232 routed rows for the 13 up-only layers,
+262,144 B per R1024→R1088 wire delta); the export path could only express
+picks whole per layer stack, so the corrected all-rates allocation under the
+EXL3 cap was arithmetically empty. Three owners move together:
+
+- `tessera_expert_projection.select_priced_unit_upgrades` consumes the
+  campaign table's exact per-unit rows (`predicted_dloss`, `wire_bytes`) and
+  a HARD price-row wire-delta byte cap: exactly one best-fitting marginal per
+  recompute, ordered by ascending predicted_dloss delta per added wire byte
+  (ties by unit then format; a total order, so row insertion order never
+  moves a pick), until no eligible single-unit upgrade fits. Same grid only
+  -- a stack's units keep their family/body/plane and differ only in rung;
+  downgrades, same-bytes moves, BF16/non-Tessera baselines and units priced only at stack
+  granularity stay grouped where they were. An explicit `reserve_bytes` comes
+  off the cap before any pick. The record states its currency
+  (`price_row_wire_delta_bytes`) and sets `whole_artifact_bytes_claimed`
+  false: the whole-artifact accounting is the export's own exact owner, and
+  body rows alone never claim it.
+- `require_unit_assignment` replaces `require_stack_uniform_assignment` as
+  the one owner of the executed-stack selection rule: a stack whose units
+  share one rung keeps the stack-uniform stamps byte for byte; a mixed stack
+  returns the complete per-unit member map and is expressible only when the
+  INSTALLED runtime publishes `producer_interface.routed_units`
+  (`tessera.routed-unit-assignment.v1`) at contract v57 — read straight from
+  the packaged table by
+  `tessera_runtime_contract.packaged_routed_unit_capability` (exact
+  five-field block, version and block both refusing by name; the dev pin, the
+  serving pin and every admission answer are untouched). Without it the mixed
+  stack refuses by unit, stack and required version. The allocation block
+  carries the mixed map as `tessera_expert_unit_rungs`
+  (`prismaquant.tessera_expert_unit_rungs.v1`) beside the stack formats, with
+  exactly the selected rungs' receipts; the export lane and the census close
+  verify their selection against that stamp the way they verify the
+  stack-uniform one.
+- `tessera_plan_writer.stack_plan` emits the plan's `unit_q256` overrides on
+  a mixed stack entry — the entry keeps the producer-planned `q256` (the
+  carried projection's request) and names only the leaves that differ, so a
+  stack-uniform plan is byte-identical to what it wrote before; mixed
+  Tessera/BF16 leaves and mixed grids still refuse.
+
+Unit source records, receipts, wire bytes and framing are unchanged:
+`check_expert_wire_receipt` / `verify_expert_wire_record` keep their
+correctness refusals, and the packed-serving-group DP route, production
+admission and every default are unchanged. Gate:
+`tests/test_tessera_per_unit_rates.py` (fixture = the byte-identical
+corrected-derivation price table, sha256 `43144ce9…`; the 718-pick fill of
+188,331,767 B at 262,144 B per upgrade is the derivation's own arithmetic)
+plus the migrated `tests/test_tessera_expert_projection.py` selection-rule
+test; pre-fix red through PB (key `137d610a…`, 21 failed, unchanged v56 SDK):
+missing `select_priced_unit_upgrades` / `require_unit_assignment` /
+`packaged_routed_unit_capability`, and the migrated owner test's
+`AttributeError`.
+
 Re-stamped (2026-09-05, `claude/pq-gates`) for **the export seal's
 capture-context roster read from Tessera rather than typed** (§5.7;
 RobTand/prismaquant#216, P2). `tessera_export_lane.CAPTURE_CONTEXT_FIELDS` was
@@ -24362,20 +24430,31 @@ Two properties make the numbers comparable with the rest of the menu:
   block verbatim, the producer's `tessera_expert_projection` it was priced
   under, `tessera_expert_wires` holding for every projected unit the receipt
   of exactly the rung selected (checked against that unit's projection and
-  rung), `tessera_expert_stack_formats` (one format per executed stack) and
-  `tessera_expert_wire_dir`. A projected unit the assignment does not place,
-  a stack given different rungs, or a selected rung with no priced wire is
-  refused by name before the layer config is written; a stock table adds
-  nothing.
+  rung), `tessera_expert_stack_formats` (one format per stack whose units
+  share one rung) and `tessera_expert_wire_dir`.  A stack whose units carry
+  different rungs of the producer's served E4M3 grid is carried per unit
+  under `tessera_expert_unit_rungs`
+  (`prismaquant.tessera_expert_unit_rungs.v1`, complete member map per mixed
+  stack) and only when the installed Tessera runtime publishes the per-unit
+  capability — `producer_interface.routed_units`
+  (`tessera.routed-unit-assignment.v1`) at contract v57 (PrismaQuant #2319);
+  a stack-uniform world emits no unit-rungs block and keeps every spelling it
+  had.  A projected unit the assignment does not place, a partly selected
+  stack, a mixed stack under a runtime without the capability, a mixed stack
+  off the served E4M3/BF16 families, a mixed stack whose rungs span more than
+  one grid, or a selected rung with no priced wire is refused by name before
+  the layer config is written; a stock table adds nothing.
 
 * **The export lane hands the exporter the priced bytes (PrismaQuant #183).**
   `require_assignment_scope` re-binds the selected routed expert units to the
   carried projection (`_carried_expert_projection`) before it resolves any
   route: a unit the producer did not project, a source tensor in a shard the
-  producer did not hash, a partly selected or split-rung stack, a
-  `tessera_expert_stack_formats` stamp that disagrees with the selection, a
-  selected rung with no receipt, or a priced blob whose bytes are not the
-  receipt's — each refused by name (`expert projection: ...`). The producer's
+  producer did not hash, a partly selected stack, a stack-uniform stamp that
+  disagrees with the selection, a mixed per-unit stack whose
+  `tessera_expert_unit_rungs` stamp is absent or disagrees (expressible only
+  under the installed v57 per-unit capability, PrismaQuant #2319), a selected
+  rung with no receipt, or a priced blob whose bytes are not the receipt's —
+  each refused by name (`expert projection: ...`). The producer's
   record is what attests the executed unit here, so a **predicated
   `routed_moe` cell resolves** on the producer's geometry rather than being
   refused for lacking one; dense units keep the source-member refusal, which

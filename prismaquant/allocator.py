@@ -983,6 +983,112 @@ def _validate_assignment_candidate_membership(
     )
 
 
+def _apply_routed_unit_rates(costs: Mapping[str, Mapping[str, object]],
+                             assignment_expanded: dict[str, str], *,
+                             cost_data: Mapping[str, object],
+                             per_linear_legal_formats: Mapping[str, set[str]] | None,
+                             budget_bytes: int, reserve_bytes: int,
+                             artifact_size_for) -> dict:
+    """Spend the serialized-byte headroom on exact per-unit routed rows.
+
+    ``--routed-unit-rates`` (PrismaQuant #2319): the DP priced and promoted
+    the body at stack granularity; this pass upgrades individual routed
+    expert units against the campaign's own per-unit price rows, inside the
+    headroom the whole-artifact cap leaves over the current assignment's
+    exact upper bound.  ``assignment_expanded`` is mutated in place and the
+    spend record is returned for the layer-config metadata.
+
+    Eligibility is fail-closed on two authorities.  Membership: only units
+    the campaign's carried producer projection attests
+    (``carried_units`` over ``cost_data``'s ``tessera_expert_projection``
+    block) may move -- dense, shared and off-projection names never do, and
+    a table carrying no projection refuses instead of silently buying
+    nothing.  Candidacy: a unit the allocator never admitted as a candidate
+    (absent from the pre-aggregation ``per_linear_legal_formats`` sets --
+    pinned, auxiliary or foreign to the DP) is never moved, and a target rung
+    outside the unit's admitted set drops out of its menu -- a priced row is
+    not proof the current profile and runtime serve it, so the pass reuses
+    the allocator's own applicability verdict instead of bypassing it.
+    Priced rows without exact ``predicted_dloss`` and ``wire_bytes`` fields
+    (sampled stack-only cells) stay grouped; present-but-corrupt rows still
+    refuse inside the selector.
+
+    The whole-artifact arithmetic is quoted, never computed, here: the cap
+    is ``budget_bytes`` less the current assignment's tensor payload, the
+    reserve is the caller's explicit ``--artifact-overhead-reserve-bytes``,
+    and both upper bounds travel on the record.  Anything this pass cannot
+    price refuses in the allocator's ``SystemExit`` idiom.
+    """
+    from . import tessera_expert_projection as tep
+
+    carried = (cost_data.get("provenance") or {}).get(tep.PROJECTION_KEY)
+    if carried is None:
+        raise SystemExit(
+            "[alloc] ERROR: --routed-unit-rates needs a cost table carrying "
+            "the producer projection (tessera_expert_projection); this table "
+            "prices no routed expert population")
+    try:
+        _source, units, _stack_of = tep.carried_units(carried)
+    except tep.ExpertProjectionError as exc:
+        raise SystemExit(f"[alloc] ERROR: routed unit rates: {exc}") from exc
+    menu: dict[str, dict] = {}
+    for unit in sorted(units):
+        rows = costs.get(unit)
+        if not isinstance(rows, Mapping):
+            continue
+        legal = (per_linear_legal_formats or {}).get(unit)
+        if legal is None:
+            # Not a priced DP candidate (pinned, auxiliary, foreign): never
+            # moved -- presence in the campaign table is not permission.
+            continue
+        allowed = {_canonical_candidate_format(fmt) for fmt in legal}
+        kept = {}
+        for fmt, row in rows.items():
+            try:
+                canonical = _canonical_candidate_format(fmt)
+            except (KeyError, ValueError):
+                continue
+            if fmt in legal or canonical in allowed:
+                kept[fmt] = row
+        if kept:
+            menu[unit] = kept
+    upper = artifact_size_for(assignment_expanded)
+    if not upper or upper.get("whole_artifact_upper_bound_bytes") is None:
+        raise SystemExit(
+            "[alloc] ERROR: --routed-unit-rates needs exact whole-artifact "
+            "pricing for the assignment it upgrades; the footprint owner "
+            "priced nothing")
+    payload_bytes = int(upper["artifact_tensor_payload_bytes"])
+    headroom_budget = int(budget_bytes) - payload_bytes
+    try:
+        picks, record = tep.select_priced_unit_upgrades(
+            menu, assignment_expanded,
+            byte_budget=headroom_budget, reserve_bytes=int(reserve_bytes))
+    except (tep.ExpertProjectionError, ValueError) as exc:
+        raise SystemExit(f"[alloc] ERROR: routed unit rates: {exc}") from exc
+    for unit, fmt in picks.items():
+        assignment_expanded[unit] = fmt
+    after = artifact_size_for(assignment_expanded)
+    record = {
+        **record,
+        "whole_artifact_upper_bound_bytes_before": int(
+            upper["whole_artifact_upper_bound_bytes"]),
+        "whole_artifact_upper_bound_bytes_after": (
+            int(after["whole_artifact_upper_bound_bytes"])
+            if after and after.get("whole_artifact_upper_bound_bytes") is not None
+            else None),
+    }
+    print(
+        f"[alloc] routed unit rates: {len(picks)} upgrade(s), "
+        f"+{record['spent_wire_delta_bytes']:,} wire-delta bytes of "
+        f"{record['spend_cap_bytes']:,} budgeted headroom "
+        f"(cap {record['byte_budget']:,} price-row bytes, reserve "
+        f"{record['reserve_bytes']:,})",
+        flush=True,
+    )
+    return record
+
+
 # Role tokens used to bucket the bit-attribution report. Best-effort: anything
 # unrecognized buckets as "unknown" rather than failing, so new architectures
 # degrade gracefully instead of crashing a read-only diagnostic.
@@ -1988,6 +2094,24 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         ),
     )
     ap.add_argument(
+        "--routed-unit-rates",
+        action="store_true",
+        help=(
+            "Research opt-in (PrismaQuant #2319): after the DP's stack-uniform "
+            "body assignment, spend the --target-disk-gb serialized-byte "
+            "headroom on exact per-unit routed-expert price rows "
+            "(tessera_expert_projection.select_priced_unit_upgrades: ascending "
+            "predicted-loss delta per added wire byte until no eligible "
+            "single-unit upgrade fits). Only units of the campaign's carried "
+            "producer projection with exact price rows and a serving-legal "
+            "rung are eligible; dense, shared, stack-only sampled and "
+            "profile-ineligible rows stay grouped. The mixed per-unit "
+            "assignment needs the installed Tessera v57 per-unit capability "
+            "and is carried with exact per-unit receipts. Default off: without "
+            "it the run is byte-identical to today. Requires --target-disk-gb."
+        ),
+    )
+    ap.add_argument(
         "--exclude-source-prefix",
         action="append",
         default=None,
@@ -2482,6 +2606,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         raise SystemExit(
             "[alloc] ERROR: --artifact-overhead-reserve-bytes is meaningful "
             "only with --target-disk-gb"
+        )
+    if args.routed_unit_rates and args.target_disk_gb is None:
+        raise SystemExit(
+            "[alloc] ERROR: --routed-unit-rates spends a serialized-byte "
+            "headroom and needs --target-disk-gb to name the whole-artifact "
+            "cap it is measured from"
         )
 
     # ---- Hard serving constraints, resolved once (ultraplan P5c) ----
@@ -4273,6 +4403,24 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             assignment_before_serving_promotion,
             assignment_expanded,
         )
+        # --routed-unit-rates (PQ #2319): spend the serialized-byte headroom
+        # left by the stack-uniform body assignment on exact per-unit routed
+        # rows.  This runs AFTER the packed expansion and the serving
+        # promotion above, so neither can collapse the per-unit entries back
+        # into a group format; the carried block and the receipts below close
+        # over exactly these entries.
+        routed_unit_rates_record = None
+        if args.routed_unit_rates:
+            from . import footprint as _fp_routed_rates
+            routed_unit_rates_record = _apply_routed_unit_rates(
+                cost_data.get("costs", {}), assignment_expanded,
+                cost_data=cost_data,
+                per_linear_legal_formats=per_linear_legal_formats,
+                budget_bytes=int(math.floor(
+                    float(args.target_disk_gb) * _fp_routed_rates.GB)),
+                reserve_bytes=int(args.artifact_overhead_reserve_bytes or 0),
+                artifact_size_for=_artifact_size_for,
+            )
 
         # Only unmeasured/explicit-uniform visual Linears are auxiliary.
         # Measured visual/merger units keep the solver's per-Linear decision.
@@ -4565,6 +4713,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             **({
                 "whole_artifact_budget": selected_whole_artifact_budget_stamp,
             } if selected_whole_artifact_budget_stamp is not None else {}),
+            # Only when --routed-unit-rates spent the serialized-byte headroom,
+            # so a default run writes byte-identical layer-config metadata.
+            **({
+                "tessera_routed_unit_rates": routed_unit_rates_record,
+            } if routed_unit_rates_record is not None else {}),
             # Only when the constraint axis actually ran, so an unconstrained run
             # writes byte-identical layer-config metadata (the "constraints were
             # absent" stamp lives in selection.json, which every byte-budget run
