@@ -259,6 +259,10 @@ ALLOWLIST = {
         1, INTEGRITY, "reference commitments bind the priced row they merge"),
     ("tools/dispatch_tessera_campaign.py", "merge_checkpoint"): (
         2, AMBIGUOUS, "rows merged into one checkpoint agree on identity and unit inputs"),
+    ("tools/dispatch_tessera_campaign.py", "_merge_acquisition_settings"): (
+        1, WALL, "each acquisition wire record names the checkpoint unit weight that produced it"),
+    ("tools/dispatch_tessera_campaign.py", "_plan_acquisition"): (
+        1, WALL, "the plan's acquisition rows project the same authenticated request identity"),
     # Opt-in #1986 namespace ownership only; no general source/calibration gate.
     ("tools/tessera_campaign_namespace.py", "prepare_namespace_requests"): (
         2, INTEGRITY, "the explicit original roster and container-content input bindings "
