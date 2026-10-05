@@ -1,5 +1,14 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-2231-campaign-wire-snapshots`,
+commit `8e591a9b169a6657e4de19f01e0d33eb638376dc`, PQ #2231,
+PR #2256 correction): campaign publication checks rendered and wire filenames
+against existing coordinates before writing; batch admission checks its whole
+scope. Packed expert appends include the dense manifest. Disk-backed weight
+sessions check their source snapshot roster before capture or adoption and
+retain the existing filename spelling. Serialization, format spellings and
+serving contracts are unchanged. CPU controls do not establish new GPU prices.
+
 Re-stamped 2026-10-04 (`issues/pq-2229-source-digest-cache`, PQ #2229, Refs
 RobTand/tessera#790): the census caller's expert-projection request hands the
 producer a stat-bound source-digest cache when the selected producer's CLI
