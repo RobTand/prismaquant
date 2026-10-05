@@ -164,6 +164,16 @@ def test_installed_v11_scoped_census_fill_and_replay(tmp_path, monkeypatch):
                 if c.id == "tessera_e4m3_k1_dense_sm121_decode")
     monkeypatch.setitem(globals(), "IMAGE", cell.runtime_image)
     data = fixture(tmp_path, monkeypatch, structure="dense")
+    # A valid census must name this installed cell's published launches,
+    # not the synthetic v10 fixture's torch_window stand-in.
+    for phase, regime in (("decode", "decode"), ("prefill", "batch")):
+        published = next(c for c in table.cells
+                         if c.family == FAMILY and c.structure == "dense"
+                         and c.regime == regime and c.runtime_image == IMAGE
+                         and 1024 in c.rungs_q256)
+        symbol, decoder = published.executes[0]
+        for observation in data[0]["records"][phase].values():
+            observation.update(symbol=symbol, decoder=decoder)
     # The fixture creates only artifact/census inputs. Restore the real
     # contract loader before exercising production fill and replay.
     monkeypatch.setattr(receipt, "_current_scoped_contract", loader)
