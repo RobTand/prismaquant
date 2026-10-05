@@ -1202,6 +1202,15 @@ SDK installation and source review do not establish fleet runtime activation;
 the published worker generation remains independent. This dependency move
 makes no numerical, wire, pipeline-default, serving or speed claim.
 
+Re-stamped 2026-10-05 (PQ #2265): test collection must not import PrismaBuild.
+The module and per-test restorers begin after collection, so they otherwise
+preserve the collected installed package while a sealed-source test resolves
+another root. Tests now import their installed CAS in their bodies and the
+optional prefill candidate in its module fixture. A syntax-tree regression
+checks direct imports across every test module, including conditional and
+class-body imports. Explicit source scopes still detach and restore the
+prior package graph; production source-origin refusals remain unchanged.
+
 Re-stamped 2026-10-03 (Refs PQ #2106, #1293): produced-output CPU
 fixtures explicitly supply SDK4 host capacity for their private queue claims,
 using the existing shared Stage A fixture capacity authority. Zero-window

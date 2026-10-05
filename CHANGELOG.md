@@ -80,9 +80,9 @@
   (#2265). The control-artifact tests import their installed CAS inside the
   two tests that use it; the optional prefill decomposer harness imports its
   candidate inside its module restore scope. A syntax-tree regression checks
-  every test module, including conditional and class-body imports, so a new
-  collection-time import cannot contaminate sealed-source tests. Existing
-  source-origin refusals and installed-module restoration are unchanged.
+  every test module, including conditional and class-body imports, for new
+  direct collection-time imports. Existing source-origin refusals and
+  installed-module restoration are unchanged.
 
 - **Required domain imports and malformed-header consumer refusals stay
   visible** (Refs #2260, bounded child of #1303).
