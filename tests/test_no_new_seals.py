@@ -512,7 +512,7 @@ def test_d32_consumers_add_no_run_identity_refusals():
         'prismaquant/tessera_calibration_cache.py': {
             'CaptureMetadataOwner.__init__': 1,
             'CaptureMetadataOwner._assert_unchanged': 0,
-            'prefetch_capture': 2,
+            'prefetch_capture': 3,  # manifest bytes, owned manifest binding, entry bytes
         },
         'prismaquant/joint_aura.py': {
             'paired_assignment_difference': 0,
