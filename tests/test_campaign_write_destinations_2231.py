@@ -119,6 +119,36 @@ def test_campaign_admits_dense_only_manifest_wire_alias(anchor_inputs, tmp_path)
     }
 
 
+@pytest.mark.parametrize("existing_wire", [False, True])
+def test_campaign_preserves_resume_wire_coordinates_without_render_manifest(
+        anchor_inputs, tmp_path, monkeypatch, existing_wire):
+    cache, wire_dir, weight, prepare = anchor_inputs
+    first, second = "layer.a", "layer__a"
+    # Resume and seed adoption read priced wires, but do not reconstruct the
+    # render manifest. Their explicit roster must survive that distinction.
+    cache._campaign_wire_coordinates = {(first, FORMAT)}
+    first_wire = campaign._wire_path(wire_dir, first, FORMAT)
+    if existing_wire:
+        first_wire.write_bytes(b"resumed wire")
+    monkeypatch.setattr(pwc, "_store_rendered_weight_entry",
+                        lambda **_kwargs: pytest.fail("wire collision reached a write"))
+
+    with pytest.raises(ValueError) as error:
+        campaign._finish_anchor(
+            qname=second, weight=weight, activations=weight, format_name=FORMAT,
+            cache=cache, wire_dir=wire_dir, prepared=prepare(format_name=FORMAT),
+            render=weight * 0.75, blob=b"new wire", elapsed=0.0,
+        )
+
+    assert_refusal(error, first, second, first_wire.name)
+    assert cache.weights == {}
+    if existing_wire:
+        assert first_wire.read_bytes() == b"resumed wire"
+        assert {path for path in tmp_path.rglob("*") if path.is_file()} == {first_wire}
+    else:
+        assert_no_files(tmp_path)
+
+
 
 @pytest.mark.parametrize("first,second,filename", [
     ("layer.a", "layer_a", f"layer_a__{FORMAT}.pt"),
