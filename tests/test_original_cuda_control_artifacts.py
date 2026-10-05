@@ -5,12 +5,13 @@ import subprocess
 import sys
 
 import pytest
-from prismabuild.core import PrismaBuildCAS
 
 from experiments.original_cuda_control import artifact_identity, publish_control_artifacts, retain_artifact
 
 
 def test_publication_binds_all_actual_node_sidecars(tmp_path, capsys):
+    from prismabuild.core import PrismaBuildCAS
+
     (tmp_path / 'controls').mkdir()
     roles = {
         'control': tmp_path / 'controls' / 'actual.json',
@@ -118,6 +119,8 @@ def test_publication_refuses_missing_or_ambiguous_control(tmp_path, capsys, coun
 
 
 def test_retained_artifact_refuses_replaced_granted_bytes(tmp_path):
+    from prismabuild.core import PrismaBuildCAS
+
     path = tmp_path / 'granted-trace'
     path.write_bytes(b'actual original granted bytes')
     identity = artifact_identity(path)

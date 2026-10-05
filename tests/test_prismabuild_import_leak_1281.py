@@ -11,6 +11,7 @@ exercise the existing authenticated shared PB pin and reviewed installed SDK.
 """
 from __future__ import annotations
 
+import ast
 import importlib
 from pathlib import Path
 import sys
@@ -79,6 +80,29 @@ def test_every_test_and_module_runs_inside_the_restore(request):
 
     assert "_no_prismabuild_import_carried_between_tests" in request.fixturenames
     assert "_no_prismabuild_import_carried_between_modules" in request.fixturenames
+
+
+def test_tests_do_not_import_prismabuild_during_collection():
+    """Collection precedes the restorers: SDK imports must be test-owned."""
+    tests_root = Path(__file__).parent
+    imports = []
+    for path in sorted(tests_root.rglob("*.py")):
+        pending = list(ast.parse(path.read_text(encoding="utf-8")).body)
+        while pending:
+            node = pending.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [node.module or ""]
+            else:
+                pending.extend(ast.iter_child_nodes(node))
+                continue
+            if any(name == "prismabuild" or name.startswith("prismabuild.")
+                   for name in names):
+                imports.append(f"{path.relative_to(tests_root)}:{node.lineno}")
+    assert not imports, "collection-time PrismaBuild imports: " + ", ".join(imports)
 
 
 def test_injection_refuses_a_prismabuild_it_did_not_install(tmp_path):

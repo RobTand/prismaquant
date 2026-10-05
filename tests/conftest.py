@@ -427,7 +427,9 @@ def _no_prismabuild_import_carried_between_modules():
     ``tests/test_fullstack_real_chain.py``'s ``pb`` fixtures import from a
     sealed generation that way. An autouse fixture is set up before the other
     fixtures of its scope, so this snapshot comes first and the module's
-    teardown puts the imports back.
+    teardown puts the imports back. Collection runs before either restorer:
+    tests must import PrismaBuild inside a test or fixture, never at module
+    scope (PQ #2265; test_prismabuild_import_leak_1281 checks that rule).
     """
     from fleet_sdk import prismabuild_imports_restored
     with prismabuild_imports_restored():
