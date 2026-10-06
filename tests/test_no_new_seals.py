@@ -282,8 +282,9 @@ ALLOWLIST = {
         2, AMBIGUOUS, "rows merged into one checkpoint agree on identity and unit inputs"),
     ("tools/dispatch_tessera_campaign.py", "_merge_acquisition_settings"): (
         1, WALL, "each acquisition wire record names the checkpoint unit weight that produced it"),
-    ("tools/dispatch_tessera_campaign.py", "_plan_acquisition"): (
-        1, WALL, "the plan's acquisition rows project the same authenticated request identity"),
+    ("tools/dispatch_tessera_campaign.py", "_check_acquisition_identity"): (
+        1, WALL, "authenticated locator-independent controls, cost/run/probe and current regime "
+        "agree across real rows and plan; only raw request provenance uses seal_check"),
     # Opt-in #1986 namespace ownership only; no general source/calibration gate.
     ("tools/tessera_campaign_namespace.py", "prepare_namespace_requests"): (
         2, INTEGRITY, "the explicit original roster and container-content input bindings "

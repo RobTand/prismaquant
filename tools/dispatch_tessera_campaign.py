@@ -3600,6 +3600,23 @@ def _hessian_identities(payload: dict) -> list[dict]:
             if "hessian_identity" in row]
 
 
+def _check_acquisition_identity(actual, expected, *, where):
+    """Authenticate control comparability before stamping only raw request provenance."""
+    from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_comparable_identity
+    from prismaquant.dev_mode import seal_check
+
+    try:
+        actual_control_identity = joint_campaign_acquisition_comparable_identity(actual)
+        expected_control_identity = joint_campaign_acquisition_comparable_identity(expected)
+    except ValueError as exc:
+        raise MergeRefused(f"{where}: acquisition global control identity malformed: {exc}") from exc
+    if actual_control_identity != expected_control_identity or set(actual) != set(expected):
+        raise MergeRefused(f"{where}: acquisition global authenticated control/cost/run/probe/regime identity differs")
+    seal_check("acquisition request byte identity", expected["request_sha256"],
+        actual["request_sha256"], where=where,
+        refusal=lambda: MergeRefused(f"{where}: acquisition request byte identity differs"))
+
+
 def _merge_acquisition_rows(records, *, acquisition, scope_groups):
     """Strict disjoint complete requested-work union; no exemption for settings.
 
@@ -3651,9 +3668,9 @@ def _merge_acquisition_rows(records, *, acquisition, scope_groups):
             raise MergeRefused(f"{row_id}: acquisition source weight proof differs")
         origin = record["origin"]
         if (not isinstance(origin, dict) or set(origin) != set(common) | {
-                "expanded_actual_work_count", "deferred_domain"}
-                or {key: origin[key] for key in common} != common):
+                "expanded_actual_work_count", "deferred_domain"}):
             raise MergeRefused(f"{row_id}: acquisition global request/cost/run/probe/regime identity differs")
+        _check_acquisition_identity({key: origin[key] for key in common}, common, where=row_id)
         count = sum(len(qs) for families in expected_schedule.values() for qs in families.values())
         domain = origin["deferred_domain"]
         if type(origin["expanded_actual_work_count"]) is not int or origin["expanded_actual_work_count"] != count:
@@ -3775,8 +3792,7 @@ def _plan_acquisition(plan, census):
         return None
     from prismaquant.tessera_full_domain_acquisition import load_joint_campaign_acquisition
     acquisition = load_joint_campaign_acquisition(declared["binding"])
-    if acquisition["identity"] != declared.get("identity"):
-        raise MergeRefused("plan acquisition global request/cost/run/probe identity drift")
+    _check_acquisition_identity(acquisition["identity"], declared.get("identity"), where="plan acquisition")
     _acquisition_plan_coverage(plan, census, acquisition)
     return acquisition
 

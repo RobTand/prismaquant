@@ -8,6 +8,7 @@ import pickle
 
 import pytest
 
+from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_control_sha256
 from prismaquant.cost_currency import CostCurrencyError
 from prismaquant.joint_aura import identity_sha256, make_joint_aura_entry
 from prismaquant.tessera_full_domain_acquisition import (
@@ -73,6 +74,7 @@ def test_authenticated_actual_rows_return_only_requested_units_and_bound_identit
     assert set(result["source_weights"]) == {report["unit_name"]}
     assert result["identity"] == {
         "request_sha256": binding["sha256"],
+        "request_control_sha256": joint_campaign_acquisition_control_sha256(document),
         "cost_sha256": document["cost_sha256"],
         "joint_aura_identity_sha256": report["joint_aura_identity_sha256"],
         "probe_identity_sha256": report["probe_identity_sha256"],

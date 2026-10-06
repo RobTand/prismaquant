@@ -202,6 +202,13 @@
 
 ### Fixed
 
+- **Authenticated locator aliases survive both real acquisition merges** (#2195,
+  PR #2253). The existing control owner derives one locator-independent request
+  control identity carried through actual row loading, rendering and journals.
+  Checkpoint and scalar-payload joins compare those controls and all real
+  scientific inputs before stamping only raw request provenance. Own-file SHA
+  reads, schedule/source/scope, calibration and numerical refusals stay strict.
+
 - **Acquisition input byte checks participate in the seal ratchet** (#2195,
   PR #2253). The torch-free input owner is scanned, with only its actual
   own-byte digest check allowlisted as integrity. Injecting a new recorded

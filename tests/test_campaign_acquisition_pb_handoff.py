@@ -283,7 +283,7 @@ def test_semantic_merge_refuses_wrong_global_identity_source_and_row_work(handof
     first, second = list(rows)
     name = next(iter(rows[first]["schedule"]))
     if change in ("request", "cost", "probe"):
-        field = {"request": "request_sha256", "cost": "cost_sha256", "probe": "probe_identity_sha256"}[change]
+        field = {"request": "request_control_sha256", "cost": "cost_sha256", "probe": "probe_identity_sha256"}[change]
         rows[first]["origin"][field] = "0" * 64
     elif change == "source":
         rows[first]["sources"][name]["content_sha256"] = "0" * 64
@@ -387,10 +387,23 @@ def test_no_acquisition_keeps_legacy_settings_and_manifest_shape():
         {"row": {}}, acquisition=None, scope_groups=None) is None
 
 
-def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
+def render_handoff(handoff, *, aliased=False):
+    """Actual admission, row loader, renderer, wire and journal artifacts."""
     pytest.importorskip("tessera.export")
     from prismaquant.tessera_menu import expand_tessera_menu
     planned, actions = plan(handoff)
+    if aliased:
+        alias_cost = handoff.root / "same-cost-alias.pkl"
+        alias_cost.write_bytes(handoff.raw_cost)
+        document = json.loads(handoff.raw_request)
+        document["cost_path"] = str(alias_cost)
+        raw = json.dumps(document, allow_nan=False).encode()
+        alias_request = handoff.root / "request-cost-alias.json"
+        alias_request.write_bytes(raw)
+        argv = actions[-1]["argv"]
+        argv[argv.index("--acquisition-request") + 1] = str(alias_request)
+        argv[argv.index("--acquisition-request-sha256") + 1] = sha(raw)
+        dispatch._check_acquisition_manifest(actions, planned, handoff.census, handoff.acquisition)
     hessians = {name: th.hessian_from_rows(rows) for name, rows in handoff.run.inputs.items()}
     calibration = th.calibration_identity("real joint PB handoff", [handoff.run.tokens], fit_tokens=4)
     source = th.activation_source(hessians, calibration)
@@ -405,7 +418,9 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
     row_identities, row_states = {}, {}
     for row, action in zip(planned["rows"], actions):
         members = campaign.selection_priced_units(campaign.load_unit_selection(row["units"]))[0]
-        projected, keys, _ = campaign._campaign_acquisition_row_scope(handoff.acquisition,
+        binding = dispatch._campaign_acquisition_argv(dispatch._inner_campaign_argv(action))
+        loaded = load_joint_campaign_acquisition(binding, units=sorted(members))
+        projected, keys, _ = campaign._campaign_acquisition_row_scope(loaded,
             handoff.census["anchor_groups"], selected=members)
         menus = {name: expand_tessera_menu(tuple(handoff.run.shapes[name]), mode="research") for name in members}
         weights = {name: handoff.run.weights[name] for name in members}
@@ -415,8 +430,8 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
                 rates[name].setdefault(rung.family, set()).add(rung.body_rate_q256)
         groups = {key: handoff.census["anchor_groups"][key] for key in keys}
         grids, _ = campaign.anchor_group_rate_grids(groups, rates, encode_structure=None, projected_units={})
-        args = arguments(acquisition_request=handoff.binding["path"],
-            acquisition_request_sha256=handoff.binding["sha256"])
+        args = arguments(acquisition_request=binding["path"],
+            acquisition_request_sha256=binding["sha256"])
         scheduled = campaign._campaign_round_one_schedule(groups, grids, args=args,
             audit_units=set(), snap=None, requests=projected["requests"], rates_by_unit=rates)
         schedules.update(scheduled)
@@ -498,6 +513,18 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
     _, _, merged_capture_digest = dispatch.merge_export_inputs(directories, payloads,
         out_cache=handoff.root / "merged-cache", identity=calibration, policy=static_policy,
         static_scales=static_scales, census=handoff.census)
+    return SimpleNamespace(planned=planned, payloads=payloads, directories=directories,
+        schedules=schedules, row_identities=row_identities, row_states=row_states,
+        coverage=coverage, capture_digest=merged_capture_digest,
+        unit_identities={name: unit for identity in row_identities.values()
+                         for name, unit in identity["units"].items()})
+
+
+def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
+    actual = render_handoff(handoff)
+    directories, payloads, schedules = actual.directories, actual.payloads, actual.schedules
+    row_identities, row_states = actual.row_identities, actual.row_states
+    coverage, merged_capture_digest = actual.coverage, actual.capture_digest
     checkpoint = dispatch.merge_checkpoint(directories, handoff.root / "merged.anchors.json",
         acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
     unit_identities = checkpoint["identity"]["units"]
@@ -547,3 +574,70 @@ def test_real_cpu_requested_renderer_journals_and_merges_two_rows(handoff):
         with pytest.raises(dispatch.MergeRefused, match="exact deferred families"):
             dispatch._merge_acquisition_settings(changed_identities, row_states,
                 acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
+
+
+def test_aliased_controls_reach_real_rows_and_both_merges(handoff, monkeypatch, capsys):
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    actual = render_handoff(handoff, aliased=True)
+    assert len({identity["settings"]["acquisition_origin"]["request_sha256"]
+                for identity in actual.row_identities.values()}) == 2
+    failures = []
+    try:
+        checkpoint = dispatch.merge_checkpoint(actual.directories, handoff.root / "alias-merged.anchors.json",
+            acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
+    except dispatch.MergeRefused as exc:
+        failures.append(f"checkpoint merge: {exc}")
+    try:
+        merged = dispatch.merge_payloads(actual.payloads, census=handoff.census,
+            capture_sha256=actual.capture_digest, plan_coverage=actual.coverage,
+            acquisition=handoff.acquisition, acquisition_unit_identities=actual.unit_identities)
+    except dispatch.MergeRefused as exc:
+        failures.append(f"scalar payload merge: {exc}")
+    assert not failures, "real admitted alias artifacts refused: " + "; ".join(failures)
+    assert checkpoint["identity"]["settings"]["acquisition_schedule"] == actual.schedules
+    assert merged["provenance"]["acquisition_schedule"] == actual.schedules
+    assert set(merged["costs"]) == set(handoff.run.active_names)
+    assert "[DEV-MODE]" in capsys.readouterr().out
+    assert handoff.request.read_bytes() == handoff.raw_request
+    assert handoff.cost.read_bytes() == handoff.raw_cost
+    first = next(iter(actual.payloads))
+    name = next(iter(actual.row_identities[first]["units"]))
+    for change in ("authenticated_content", "probe", "source", "scope"):
+        payloads = copy.deepcopy(actual.payloads)
+        identities = copy.deepcopy(actual.row_identities)
+        origin = identities[first]["settings"]["acquisition_origin"]
+        if change == "authenticated_content":
+            document = json.loads(handoff.raw_request)
+            document["reports"][0]["max_new_points"] += 1
+            raw = json.dumps(document, allow_nan=False).encode()
+            path = handoff.root / "changed-authenticated-controls.json"
+            path.write_bytes(raw)
+            changed = load_joint_campaign_acquisition({"path": str(path), "sha256": sha(raw)})
+            origin.update(changed["identity"])
+        elif change == "probe":
+            origin["probe_identity_sha256"] = "0" * 64
+        elif change == "source":
+            identities[first]["units"][name]["acquisition_source_weight"]["content_sha256"] = "0" * 64
+            payloads[first]["provenance"]["acquisition_source_weights"][name]["content_sha256"] = "0" * 64
+        else:
+            origin["deferred_domain"].pop(name)
+        payloads[first]["provenance"]["acquisition"] = copy.deepcopy(origin)
+        directories, units = {}, {}
+        for row_id, identity in identities.items():
+            directory = handoff.root / ("negative-" + change) / row_id
+            path = directory / "cost.anchors.json"
+            journal, identity_sha, _ = prepare_journal(path.with_name(path.name + ".parts"),
+                stage="Tessera campaign", resume=False, identity=identity,
+                qnames=sorted(identity["units"]), manifest_path=path)
+            for unit, state in actual.row_states[row_id].items():
+                write_unit(journal, stage="Tessera campaign", qname=unit,
+                    identity_sha256=identity_sha, state=state)
+            directories[row_id] = str(directory)
+            units.update(identity["units"])
+        with pytest.raises(dispatch.MergeRefused):
+            dispatch.merge_checkpoint(directories, handoff.root / (change + ".anchors.json"),
+                acquisition=handoff.acquisition, scope_groups=handoff.census["anchor_groups"])
+        with pytest.raises(dispatch.MergeRefused):
+            dispatch.merge_payloads(payloads, census=handoff.census,
+                capture_sha256=actual.capture_digest, plan_coverage=actual.coverage,
+                acquisition=handoff.acquisition, acquisition_unit_identities=units)

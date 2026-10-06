@@ -335,7 +335,8 @@ def load_joint_campaign_acquisition(binding: dict, *, units: Sequence[str] | Non
     import pickle
 
     from .cost_stage_checkpoint import canonical_json_sha256
-    from .tessera_acquisition_inputs import read_joint_campaign_acquisition_document
+    from .tessera_acquisition_inputs import (
+        read_joint_campaign_acquisition_document, joint_campaign_acquisition_control_sha256)
     from .joint_aura import identity_sha256
     from .stage_inputs import read_bound, require
     from .tessera_formats import get_tessera_family
@@ -453,7 +454,9 @@ def load_joint_campaign_acquisition(binding: dict, *, units: Sequence[str] | Non
     require(total > 0, "joint acquisition has no requested measurement work")
     same(document.get("total_requested_quality_measurements"), total, "total requested measurements")
     acquisition = {"requests": requests, "source_weights": source_weights,
-                   "identity": {"request_sha256": binding["sha256"], "cost_sha256": cost_binding["sha256"],
+                   "identity": {"request_sha256": binding["sha256"],
+                                "request_control_sha256": joint_campaign_acquisition_control_sha256(document),
+                                "cost_sha256": cost_binding["sha256"],
                                 "joint_aura_identity_sha256": provenance["joint_aura_identity_sha256"],
                                 "probe_identity_sha256": probe_digest}}
     return acquisition if units is None else project_joint_campaign_acquisition(acquisition, units=units)
