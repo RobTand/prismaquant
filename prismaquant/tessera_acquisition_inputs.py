@@ -113,3 +113,19 @@ def joint_campaign_acquisition_control_inputs(binding: dict, *, reader=None) -> 
                  "joint acquisition control inputs changed during declaration")
         _VERIFIED_CONTROL_INPUTS = ([dict(entry) for entry in entries], fences)
     return entries
+
+
+def joint_campaign_acquisition_controls(binding: dict) -> tuple[bytes, dict]:
+    """Separate authenticated control content from its request/cost locators.
+
+    Authenticate both owned files through the readset owner before comparing
+    content. The second strict request read verifies its same bound digest;
+    the bounded metadata memo still retains no request or cost payload bytes.
+    Only cost_path is a locator inside the producer document. Every other
+    field, including the authenticated cost SHA, remains control content.
+    """
+    entries = joint_campaign_acquisition_control_inputs(binding)
+    document, _ = read_joint_campaign_acquisition_document(binding)
+    content = {key: value for key, value in document.items() if key != "cost_path"}
+    return (_digests.canonical_json_bytes(content, where="joint acquisition controls"),
+            {"request": entries[0]["path"], "cost": entries[1]["path"]})
