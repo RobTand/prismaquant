@@ -323,8 +323,14 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     index_path = os.path.normpath(
         os.path.join(model_path, "model.safetensors.index.json"))
     if source_reads is None:
-        with open(index_path, "rb") as handle:
-            index_raw = handle.read()
+        from .staged_tier_policy import active_policy
+        if active_policy() is not None:
+            from .staged_whole_file import read_staged_source_metadata_bytes
+            index_raw = read_staged_source_metadata_bytes(
+                Path(index_path), label="streamed source JSON")
+        else:
+            with open(index_path, "rb") as handle:
+                index_raw = handle.read()
     else:
         index_raw = source_reads.whole(index_path, where="checkpoint index")
     raw = json.loads(index_raw.decode("utf-8"))["weight_map"]

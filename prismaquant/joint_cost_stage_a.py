@@ -2646,6 +2646,25 @@ def run_original_diagnostic_capture(authority_input, plan_input, session_prepara
     return result
 
 
+def load_stage_a_calibration(config):
+    """The capture and CPU input preflight share the actual draw reader."""
+    from .calibration_data import load_calibration_input
+    execution = config["execution"]
+    return load_calibration_input(
+        config["calibration_input"]["path"],
+        expected_sha256=config["calibration_input"]["sha256"],
+        n_samples=execution["n_calib_samples"], seqlen=execution["calib_seqlen"])
+
+
+def stage_a_source_profile(config, source_authentication=None):
+    """Use the same source profile owner before either kind of startup."""
+    if source_authentication is None:
+        from .model_profiles import detect_profile
+        return detect_profile(config["model"])
+    from .layer_streaming import _source_profile
+    return _source_profile(config["model"], source_authentication)
+
+
 @restores_activation_scale_env
 def run_adjoint_capture(
     config, *, plan_sha256, prepared, output_root, stride=None,
@@ -2692,13 +2711,11 @@ def run_adjoint_capture(
     work; the caller keeps close responsibility. No authority is constructed.
     """
     from .aura_cost import _aura_source_sha256
-    from .calibration_data import load_calibration_input
     from .cost_streaming import build_streamed_causal_lm
     from .glm_capture_compatibility import require_capture_compatibility
     from .gpu_guard import require_cuda_hot_path
     from .joint_projection_backend import executing_image, prewarm_projection_backend
     from .joint_run_progress import JointRunProgress
-    from .model_profiles import detect_profile
     from .residency_map import bind_residency_manifest, residency_report
     from .stage_a_head import prepared_head, stage_a_roster, walked_head
     from .prismabuild_progress import commit as _pb_commit
@@ -2865,11 +2882,7 @@ def run_adjoint_capture(
             _same(config["model"], data.census["model"], "requested source model")
             _same(data.census["attention_implementation"], "eager",
                   "qualified source attention")
-        ids, calibration = load_calibration_input(
-            config["calibration_input"]["path"],
-            expected_sha256=config["calibration_input"]["sha256"],
-            n_samples=execution["n_calib_samples"],
-            seqlen=execution["calib_seqlen"])
+        ids, calibration = load_stage_a_calibration(config)
         if data is not None:
             original_draw = data.payload["provenance"]["hessian"]["calibration_identity"]
             for name in ("fit_ids_sha256", "text_sha256", "nsamples", "seqlen", "seed"):
@@ -2903,11 +2916,7 @@ def run_adjoint_capture(
         # own answer to #737's single-worker pin. An explicitly recorded
         # override (#819) replaces the budget for this run only; the plan's
         # block is what the deviation stamp names as sealed.
-        if source_authentication is None:
-            source_profile = detect_profile(config["model"])
-        else:
-            from .layer_streaming import _source_profile
-            source_profile = _source_profile(config["model"], source_authentication)
+        source_profile = stage_a_source_profile(config, source_authentication)
         runner = build_streamed_causal_lm(
             config["model"], device=torch.device("cuda"), dtype=torch.bfloat16,
             offload_folder=str(space / "run" / "offload"),
@@ -3190,6 +3199,78 @@ def _chain_seed_argument(args):
         raise AdjointIdentityRefused(f"chain seed refused: {exc}") from exc
 
 
+def audit_stage_a_source_spans(config, manifest, *, profile=None, weight_map=None):
+    """The real streaming selection must fit the job's source phase ranges."""
+    from .layer_streaming import (
+        _build_weight_map, construction_multimodal, streaming_source_plan)
+    from .source_read_plan import roster_layers_prefix, uncovered_spans
+
+    profile = stage_a_source_profile(config) if profile is None else profile
+    if weight_map is None:
+        weight_map, _names = _build_weight_map(
+            config["model"], profile=profile,
+            multimodal=construction_multimodal(profile, False))
+    layers_prefix = roster_layers_prefix(weight_map)
+    phases = manifest["read_plan"]["phases"]
+    layers = sorted({int(phase["name"].rsplit("-", 1)[1]) for phase in phases
+                     if phase["name"].startswith(("forward-", "chain-"))})
+    source = streaming_source_plan(
+        config["model"], layers_prefix=layers_prefix, layers=layers)
+    checked = source_phases_checked = 0
+    for phase in phases:
+        name = phase["name"]
+        if name == "head":
+            spans = source["head_spans"]
+        elif name.startswith(("forward-", "chain-")):
+            spans = source["layer_spans"][int(name.rsplit("-", 1)[1])]
+        else:
+            continue
+        entries = [manifest["entries"][index] for index in phase["entry_indices"]]
+        missing = uncovered_spans(entries, spans)
+        if missing:
+            path, start, stop = missing[0]
+            tensor = source["span_tensors"].get(missing[0])
+            raise AdjointIdentityRefused(
+                f"CPU input preflight loader span not declared in {name}: "
+                f"{tensor} {path} [{start},{stop}); "
+                f"{len(missing)} spans uncovered in this phase")
+        checked += len(spans)
+        source_phases_checked += 1
+    return {"loader_selected_spans_checked": checked,
+            "source_phases_checked": source_phases_checked, "uncovered_spans": 0}
+
+
+def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None):
+    """Read the capture's CPU startup inputs without CUDA/model or output."""
+    from .layer_streaming import _build_weight_map, construction_multimodal
+    from .residency_map import bind_residency_manifest
+    from .stage_inputs import bound
+    from .streaming_model import load_streaming_auto_config
+
+    bind_residency_manifest(data_manifest_sha256)
+    bound(prepared, "prepared anchors")
+    ids, calibration = load_stage_a_calibration(config)
+    profile = stage_a_source_profile(config)
+    auto_config = load_streaming_auto_config(
+        config["model"], config["model"], local_files_only=True)
+    weight_map, _names = _build_weight_map(
+        config["model"], profile=profile,
+        multimodal=construction_multimodal(profile, False))
+    coverage = {}
+    if data_manifest_sha256 is not None:
+        from .staged_lease import load_sealed_manifest
+        coverage = audit_stage_a_source_spans(
+            config, load_sealed_manifest(data_manifest_sha256),
+            profile=profile, weight_map=weight_map)
+    return {"schema": "prismaquant.joint_adjoint_capture.cpu_input_preflight.v1",
+            "command": "cpu-input-preflight", "passed": True,
+            "capture_executed": False, "price_measured": False,
+            "calibration_shape": list(ids.shape),
+            "calibration_input": calibration, "source_profile": profile.name,
+            "config_class": type(auto_config).__name__,
+            "source_tensors_named": len(weight_map), **coverage}
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Run stage A of the distributed joint-AURA cost campaign: "
@@ -3200,6 +3281,10 @@ def main(argv=None) -> int:
     parser.add_argument("--prepared", type=Path, required=True)
     parser.add_argument("--prepared-sha256", required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--cpu-input-preflight", action="store_true",
+                        help="default-off CPU input/readset checks through the "
+                             "capture startup owners; no CUDA allocation, "
+                             "capture, checkpoint or price result")
     parser.add_argument("--stride", type=int, default=None,
                         help="cotangent checkpoint stride when the plan does "
                              "not declare distributed_campaign (S is a plan "
@@ -3325,7 +3410,9 @@ def main(argv=None) -> int:
         require_dev_mode("joint_cost_stage_a")
         from .tessera_joint_aura import load_joint_anchor_plan as _load_plan
 
-        config = _load_plan(args.plan, args.plan_sha256)
+        config = _load_plan(args.plan, args.plan_sha256,
+                            **({"projection_runtime": False}
+                               if args.cpu_input_preflight else {}))
         from .staged_tier_policy import activate_staged_tier_policy
         try:
             allowed = activate_staged_tier_policy(args.allowed_tiers)
@@ -3333,6 +3420,13 @@ def main(argv=None) -> int:
             parser.error(str(exc))
         print(f"[STAGED-TIER] bulk inputs serve from {','.join(sorted(allowed))}; "
               f"pool/HDD bulk opens refuse", flush=True)
+        if args.cpu_input_preflight:
+            report = preflight_adjoint_inputs(
+                config, prepared={"path": str(args.prepared),
+                                  "sha256": args.prepared_sha256},
+                data_manifest_sha256=args.data_manifest_sha256)
+            print(json.dumps(report))
+            return EXIT_OK
         result = run_adjoint_capture(
             config, plan_sha256=args.plan_sha256,
             prepared={"path": str(args.prepared), "sha256": args.prepared_sha256},

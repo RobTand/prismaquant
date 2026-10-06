@@ -30834,6 +30834,26 @@ also stages a later round from a joined checkpoint.
 `tests/test_dispatch_stage_a_split.py` seals a round of the fixture run and
 drives the ordering with a fake `pbrun` over the fixture's real receipts.
 
+### Stage A CPU input/readset preflight (#2325)
+
+The existing joint_adjoint_capture CLI accepts explicit, default-off
+--cpu-input-preflight. It shares the capture calibration reader, profile
+selection and streamed metadata owners. When the action binds a data manifest,
+the existing sealed-readset owner decodes it and the real streaming source plan
+selects each head and body tensor, including tensors in tail shards. Each
+selected tensor must fit one declared range in its consumption phase: global
+coverage or two ranges meeting inside a tensor are not coverage. This check
+covers the manifest's head, forward and reverse-chain source phases, including
+split jobs.
+
+The report explicitly says capture_executed=false and price_measured=false;
+success is only CPU input/readset evidence. No generation, checkpoint, model
+materialization or CUDA allocation is performed, and the GPU path's existing
+CUDA and staged-tier guards remain unchanged. Source-plan index metadata uses
+the loader's staged metadata owner; bounded safetensors headers retain the
+existing source-header allowance, not a bulk-weight pool fallback.
+Regression: tests/test_joint_adjoint_cpu_preflight.py.
+
 ### Stage A forward split (#738)
 
 The chain split (above) parallelizes the reverse chain of a resumed run. A
