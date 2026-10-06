@@ -850,7 +850,8 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
             f"fragment lengths sum to {int(offsets[-1])} bytes, the body plane "
             f"declares {body_bytes}"
         )
-    body_region = data[cursor:cursor + body_bytes]
+    body_region = np.frombuffer(data, dtype=np.uint8, count=body_bytes,
+                                offset=cursor)
 
     device = torch.device(device)
     out = torch.zeros(rows, cols, dtype=torch.float32, device=device)
@@ -883,10 +884,12 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
             if len(set(int(x) for x in lengths)) != 1:
                 _fail("fragments of one (parent, column block) group disagree in length")
             span_bytes = int(lengths[0])
-            packed = np.frombuffer(
-                body_region, dtype=np.uint8, count=span_bytes * rows_of.size,
-                offset=int(offsets[flat_blocks[0]]),
-            ).reshape(rows_of.size, span_bytes)
+            # fragments of one group sit num_col_blocks apart in the body
+            # plane; gather them by their own offsets, never as a run
+            packed = body_region[
+                np.add.outer(offsets[flat_blocks],
+                             np.arange(span_bytes, dtype=np.int64))
+            ]
             values = _unpack_group(packed, rates, block_rows)
             for k in range(block_cols):
                 rate = int(rates[k])
