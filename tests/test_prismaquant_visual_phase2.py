@@ -190,18 +190,6 @@ class TestCalibrationCompositionProvenance(unittest.TestCase):
     Whether blending should refuse outright stays the filed coordinator
     decision; this gate only makes the composition unmissable."""
 
-    def test_synthetic_dataset_reports_stub_composition(self):
-        triples, composition = load_multimodal_calibration(
-            processor=None, dataset_name="synthetic",
-            n_samples=3, max_text_len=12,
-        )
-        self.assertEqual(len(triples), 3)
-        self.assertEqual(
-            composition,
-            {"dataset": "synthetic", "requested": 3,
-             "real_loaded": 0, "synthetic_loaded": 3},
-        )
-
     def test_synthetic_shortfall_records_rows_returned(self):
         # The stub continues past rows whose processor calls fail, so the
         # pure-synthetic path can return fewer rows than requested. The
@@ -715,7 +703,7 @@ class TestMultimodalProbePassIntegration(unittest.TestCase):
             visual_module=model.visual, visual_prefix="visual.",
             layer_cache={}, schedule_prefetch=lambda index: None,
             install=lambda index: None, unload=lambda index: None,
-            shutdown=mock.Mock(),
+            shutdown=lambda: None,
         )
         with tempfile.TemporaryDirectory() as td, contextlib.ExitStack() as stack:
             root = Path(td)
@@ -753,8 +741,6 @@ class TestMultimodalProbePassIntegration(unittest.TestCase):
             "real_loaded": 1, "synthetic_loaded": 2,
         })
         self.assertEqual(payload["meta"]["execution_device"], "cpu")
-        if streaming:
-            ctx.shutdown.assert_called_once_with()
         if tracked:
             self.assertEqual(model.attempted_rows, [1, 2, 3])
             stat = payload["stats"]["visual.0"]

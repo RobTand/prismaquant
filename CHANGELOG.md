@@ -9,7 +9,9 @@
   back after the actual loader blends a partial real dataset with synthetic
   rows. Populated CPU forward/backward paths include a failed synthetic row
   and check nonzero visual Fisher; loaded-row composition stays independent
-  of successful forwards. No blend policy or numerical behavior changes.
+  of successful forwards. Duplicate synthetic-composition coverage and a
+  fixture-only shutdown-call assertion are removed; no blend policy or
+  numerical behavior changes.
 
 - **Default-off CPU input/readset preflight for joint adjoint capture**
   (#2325). `--cpu-input-preflight` shares the calibration and source metadata
