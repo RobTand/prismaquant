@@ -392,6 +392,24 @@ def quantum_range_requires_units(identity: Mapping, start: int, stop: int) -> bo
     return requires
 
 
+def require_prep_identity(prep, identity, *, n_batches, label):
+    """One comparability rule for fresh traversal and completed-result adoption."""
+    recorded = prep["identity"]
+    if (not isinstance(identity, dict) or identity.keys() != recorded.keys()
+            or any(value != identity[key] for key, value in recorded.items()
+                   if key != "capture_runtime")):
+        raise CaptureChainRefused("this quantum's capture identity differs from the prep's")
+    if n_batches != prep["n_batches"]:
+        raise CaptureChainRefused(
+            f"this quantum draws {n_batches} calibration batches; the prep sealed {prep['n_batches']}")
+    from .dev_mode import seal_check
+    seal_check("capture quantum runtime", recorded.get("capture_runtime"),
+               identity.get("capture_runtime"), where=label,
+               refusal=lambda: CaptureChainRefused(
+                   "this quantum's capture runtime differs from the prep's"))
+    return recorded
+
+
 class ChainQuantum:
     """One layer range's owner of the chain's boundary generation.
 
@@ -449,21 +467,8 @@ class ChainQuantum:
         return self.stop == self.num_layers
 
     def require_identity(self, identity, *, n_batches) -> dict:
-        recorded = self.prep["identity"]
-        if (not isinstance(identity, dict) or identity.keys() != recorded.keys()
-                or any(value != identity[key] for key, value in recorded.items()
-                       if key != "capture_runtime")):
-            raise CaptureChainRefused("this quantum's capture identity differs from the prep's")
-        if n_batches != self.prep["n_batches"]:
-            raise CaptureChainRefused(
-                f"this quantum draws {n_batches} calibration batches; the prep sealed "
-                f"{self.prep['n_batches']}")
-        from .dev_mode import seal_check
-        seal_check("capture quantum runtime", recorded.get("capture_runtime"),
-                   identity.get("capture_runtime"), where=range_label(self.start, self.stop),
-                   refusal=lambda: CaptureChainRefused(
-                       "this quantum's capture runtime differs from the prep's"))
-        return recorded
+        return require_prep_identity(self.prep, identity, n_batches=n_batches,
+                                     label=range_label(self.start, self.stop))
 
     def _remove_stale_outputs(self):
         """A failed attempt's boundary ``stop`` entries: this owner's, never its input."""
