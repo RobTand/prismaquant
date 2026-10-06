@@ -1647,6 +1647,14 @@ def _require_verified_entry(path, name, record, verified):
         raise RuntimeError(f'{name}: capture entry changed since its writer or quantum verified it')
 
 
+def _capture_scope_names(census, identity):
+    """The census coverage rule shared by fresh writers and publication."""
+    names = sorted(identity['units'])
+    if set(names) != set(census['counts']):
+        raise RuntimeError('calibration capture scope differs from the full census')
+    return names
+
+
 def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
                     counts=None, maxima=None, existing_entries=None,
                     release_file_pages=False, resource_check=None,
@@ -1678,11 +1686,9 @@ def publish_capture(root, *, census_path, identity, acts=None, hessians=None,
     else:
         sealed_identity = bind_capture_source(identity, source_files)
     execution = _load_execution(verified_load_policy, sealed_identity, load_execution)
-    names = sorted(identity['units'])
+    names = _capture_scope_names(census, identity)
     if len({activation_cache_filename(n) for n in names}) != len(names):
         raise RuntimeError('calibration unit filenames collide')
-    if set(names) != set(census['counts']):
-        raise RuntimeError('calibration capture must cover the full census scope')
     if existing_entries is None and any(set(values or {}) != set(names)
                                        for values in (acts,hessians,counts,maxima)):
         raise RuntimeError('calibration capture arrays must cover the complete census')
@@ -1766,9 +1772,7 @@ class CaptureWriter:
         self.resource_check = resource_check
         self.load_execution = _load_execution(verified_load_policy, identity)
         self.seal_load_execution = None
-        self.names = sorted(identity['units'])
-        if set(self.names) != set(self.census['counts']):
-            raise RuntimeError('calibration writer scope differs from census')
+        self.names = _capture_scope_names(self.census, identity)
         import shutil
         from .perturbed_x_cache import activation_cache_filename
         self.root.mkdir(parents=True, exist_ok=True)
