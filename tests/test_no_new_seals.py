@@ -75,6 +75,7 @@ MODULES = (
     "prismaquant/stage_a_chain_seed.py",
     "prismaquant/stage_a_chain_split.py",
     "prismaquant/stage_inputs.py",
+    "prismaquant/tessera_acquisition_inputs.py",
     "prismaquant/tessera_joint_aura.py",
     "prismaquant/tessera_joint_eval_panel.py",
     "tools/dispatch_joint_quanta.py",
@@ -399,6 +400,9 @@ ALLOWLIST = {
         1, STRUCTURE, "without a head slice, the plan's max_gpu_bytes against its own bound "
         "policy: one plan's internal agreement. The head slice's sealed limit is a "
         "seal_check"),
+    ("prismaquant/tessera_acquisition_inputs.py", "_metadata_input"): (
+        1, INTEGRITY, "request or cost bytes checked against their own supplied SHA256; "
+        "read and declaration race fences remain correctness checks"),
 }
 
 _NAMES = re.compile(r"sha256|identity|digest|max_\w*bytes|gpu_bytes|^limits?$|ceiling",
