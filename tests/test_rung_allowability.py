@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import os
 from pathlib import Path
 
 import pytest
@@ -15,9 +16,15 @@ BUILD = json.loads((FIXTURE / FAMILY / "fixture-t8" / "v0001.json").read_text())
 
 
 @pytest.fixture
-def publication(tmp_path):
+def publication(tmp_path, monkeypatch):
     root = tmp_path / "publication"
     shutil.copytree(FIXTURE, root)
+    if os.environ.get("TESSERA_RUNG_ALLOWABILITY_MODULE"):
+        from prismaquant import rung_allowability
+        from _rung_allowability_producer import ExternalProducer
+        assert os.environ.get("TESSERA_RUNG_ALLOWABILITY_MODULE_SHA256"), "pin canonical producer bytes"
+        producer = ExternalProducer()
+        monkeypatch.setattr(rung_allowability, "_producer_api", lambda: producer)
     return root
 
 
@@ -123,3 +130,19 @@ def test_table_cannot_bypass_existing_run_table_rule(publication):
     row["allowable_rungs"]["excluded_q256"] = [896]
     assert not load_rung_allowability(publication, format_entry=row,
                                      expected_kernel_build=BUILD).allows(896)
+
+
+def test_metadata_only_reader_keeps_the_v56_serving_pin(publication):
+    from prismaquant import tessera_runtime_contract as runtime
+    from prismaquant import tessera_serving_runtime_pin as pin
+    from prismaquant import rung_allowability
+    before = runtime.contract_path().read_bytes()
+    table = _load(publication)
+    assert table.allows(896)
+    assert runtime.contract_path().read_bytes() == before
+    assert json.loads(before)["contract_version"] == 56
+    assert pin.load_tessera_serving_runtime_pin().commit == runtime.TESSERA_DEV_PIN_COMMIT
+    producer = rung_allowability._producer_api()
+    if hasattr(producer, "evidence"):
+        assert producer.evidence["forbidden_imports"] == []
+        print("D41 metadata-only producer:", json.dumps(producer.evidence, sort_keys=True))
