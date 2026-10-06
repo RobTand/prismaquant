@@ -22,6 +22,7 @@ pytest.importorskip("torch")
 from tests.test_glm_mtp_selection import (  # noqa: E402
     CONSTANTS, E4M3_SHARED, R832, R1024, ROUTED, SHARED, _bytes, _payload, _row,
     _write_payload)
+from test_rung_allowability import allowability_cli_args, publication  # noqa: E402
 
 BF16_WIRE = "TESSERA_BF16_K1_R1024"
 R896 = "TESSERA_E4M3_K1_R896"
@@ -115,14 +116,14 @@ def test_a_group_left_without_a_complete_rung_refuses():
                          formats=[R832, R1024])
 
 
-def _allocator_argv(tmp_path, monkeypatch, *extra):
+def _allocator_argv(tmp_path, monkeypatch, publication, *extra):
     from tests.test_allocator_output_pin_1304 import _stock_inputs
 
     from prismaquant import format_registry
 
     monkeypatch.setattr(format_registry, "format_is_producer_eligible",
                         lambda name, **_: name != R832)
-    argv = _stock_inputs(tmp_path)
+    argv = [*_stock_inputs(tmp_path), *allowability_cli_args(publication)]
     payload, constants = _write_payload(tmp_path, _payload())
     out = tmp_path / "with-mtp.json"
     argv = [*argv[:argv.index("--layer-config")], "--layer-config", str(out),
@@ -133,10 +134,10 @@ def _allocator_argv(tmp_path, monkeypatch, *extra):
     return out
 
 
-def test_allocator_without_the_flag_stamps_the_prior_record_keys(tmp_path, monkeypatch):
+def test_allocator_without_the_flag_stamps_the_prior_record_keys(tmp_path, monkeypatch, publication):
     from prismaquant import allocator
 
-    out = _allocator_argv(tmp_path, monkeypatch)
+    out = _allocator_argv(tmp_path, monkeypatch, publication)
     allocator.main()
     record = json.loads(out.read_text())[allocator.LAYER_CONFIG_META_KEY]["mtp_selection"]
     assert not NEW_KEYS & set(record)
@@ -144,11 +145,11 @@ def test_allocator_without_the_flag_stamps_the_prior_record_keys(tmp_path, monke
     assert record["rung"] == "routed=BF16|shared=BF16"
 
 
-def test_allocator_flag_restricts_the_menu(tmp_path, monkeypatch):
+def test_allocator_flag_restricts_the_menu(tmp_path, monkeypatch, publication):
     from prismaquant import allocator
     from prismaquant import format_registry as fr
 
-    out = _allocator_argv(tmp_path, monkeypatch, "--mtp-formats", f" {R1024} ")
+    out = _allocator_argv(tmp_path, monkeypatch, publication, "--mtp-formats", f" {R1024} ")
     allocator.main()
     got = json.loads(out.read_text())
     record = got[allocator.LAYER_CONFIG_META_KEY]["mtp_selection"]
@@ -160,11 +161,11 @@ def test_allocator_flag_restricts_the_menu(tmp_path, monkeypatch):
         assert got[name] == fr.get_format(E4M3_SHARED).autoround_config()
 
 
-def test_allocator_refuses_an_empty_intersection_with_exit_2(tmp_path, monkeypatch, capsys):
+def test_allocator_refuses_an_empty_intersection_with_exit_2(tmp_path, monkeypatch, capsys, publication):
     from prismaquant import allocator
 
     # R832 is unattested in this fixture: the declared menu reaches no unit.
-    out = _allocator_argv(tmp_path, monkeypatch, "--mtp-formats", R832)
+    out = _allocator_argv(tmp_path, monkeypatch, publication, "--mtp-formats", R832)
     with pytest.raises(SystemExit) as exc:
         allocator.main()
     assert exc.value.code == 2

@@ -25,6 +25,7 @@ from prismaquant import joint_aura as joint  # noqa: E402
 from prismaquant import mtp_rung_selection as canon  # noqa: E402
 from prismaquant.cost_streaming import STREAMED_MODEL_IDENTITY_SCHEMA  # noqa: E402
 from prismaquant.glm_mtp import mtp_objective_identity, with_mtp_objective  # noqa: E402
+from test_rung_allowability import allowability_cli_args, publication  # noqa: E402
 
 PREFIX = "model.language_model.layers.45.mlp."
 ROUTED = tuple(f"{PREFIX}experts.{e}.{p}" for e in range(2) for p in ("gate_proj", "up_proj", "down_proj"))
@@ -249,7 +250,7 @@ def _write_payload(tmp_path, payload):
     return path, constants
 
 
-def test_allocator_stamps_the_mtp_selection_outside_body_bpp(tmp_path, monkeypatch):
+def test_allocator_stamps_the_mtp_selection_outside_body_bpp(tmp_path, monkeypatch, publication):
     from tests.test_allocator_output_pin_1304 import _stock_inputs
 
     from prismaquant import allocator
@@ -258,7 +259,7 @@ def test_allocator_stamps_the_mtp_selection_outside_body_bpp(tmp_path, monkeypat
 
     monkeypatch.setattr(format_registry, "format_is_producer_eligible",
                         lambda name, **_: name != R832)
-    argv = _stock_inputs(tmp_path)
+    argv = [*_stock_inputs(tmp_path), *allowability_cli_args(publication)]
     monkeypatch.setattr(sys, "argv", ["allocator", *argv])
     allocator.main()
     body = json.loads((tmp_path / "layer_config.json").read_text())

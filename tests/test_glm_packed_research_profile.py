@@ -153,7 +153,8 @@ def test_actual_candidate_filter_keeps_per_unit_context_gate(monkeypatch):
     accepted = _Context(structure='routed_moe')
     refused = replace(accepted, runtime_image='unqualified/image')
     calls = []
-    def admission(_fmt, *, serving_context=None):
+    def admission(_fmt, *, serving_context=None, allowability=None):
+        assert allowability is None  # This profile is explicitly emulation-only.
         calls.append(serving_context)
         return SimpleNamespace(requires_serving_context=True,
             admits=lambda _mode: serving_context == accepted,
