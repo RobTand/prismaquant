@@ -18,7 +18,7 @@ from test_stagea_readset_source_coverage import campaign  # noqa: F401
 pytestmark = pytest.mark.own_process
 
 
-def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None):
+def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=False):
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     root = tmp_path / 'source'
     root.mkdir()
@@ -36,6 +36,14 @@ def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None):
     prepared = tmp_path / 'prepared.json'
     prepared.write_text('{}')
     paths = [prepared, calibration, root / 'config.json', root / 'model.safetensors.index.json']
+    independent_draw = None
+    if evaluation:
+        from test_tessera_joint_eval_panel import _fresh_draw
+        _, encoding = load_calibration_input(calibration,
+            expected_sha256=hashlib.sha256(calibration.read_bytes()).hexdigest(),
+            n_samples=5, seqlen=4)
+        independent_draw, _ids = _fresh_draw(tmp_path, encoding)
+        paths.append(Path(independent_draw['calibration_input']['path']))
     manifest = {'entries': [{'path': str(path), 'offset': 0,
                              'bytes': path.stat().st_size,
                              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
@@ -56,6 +64,11 @@ def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None):
     draw = {'path': str(calibration), 'sha256': manifest['entries'][1]['sha256']}
     plan = {'model': str(root), 'calibration_input': draw,
             'execution': {'n_calib_samples': 5, 'calib_seqlen': 4}}
+    if independent_draw is not None:
+        from test_tessera_joint_eval_panel import _plan_config
+        plan['execution'].update(_plan_config(tmp_path, encoding)['execution'])
+        plan['execution'].update(n_calib_samples=5, calib_seqlen=4)
+        plan['joint_eval_draw'] = independent_draw
     # Plan admission has independent tests; here the real CLI receives these
     # already-admitted startup values and reads the actual staged inputs.
     monkeypatch.setattr('prismaquant.tessera_joint_aura.load_joint_anchor_plan',
@@ -120,7 +133,7 @@ def test_default_cli_still_invokes_the_gpu_wrapper(tmp_path, monkeypatch):
 @pytest.mark.parametrize('phase_name', ['forward-000', 'chain-000'])
 @pytest.mark.parametrize('defect', ['missing', 'short', 'wrong-phase'])
 def test_cpu_preflight_checks_each_selected_tensor_in_its_consumption_phase(
-        tmp_path, monkeypatch, phase_name, defect):
+        tmp_path, monkeypatch, capsys, phase_name, defect):
     _plan, args, output = _case(tmp_path, monkeypatch)
     from prismaquant.staged_lease import load_sealed_manifest
     manifest = load_sealed_manifest(MANIFEST)
@@ -134,8 +147,13 @@ def test_cpu_preflight_checks_each_selected_tensor_in_its_consumption_phase(
     else:
         phase['entry_indices'].clear()
         manifest['read_plan']['phases'][0]['entry_indices'].append(source_index)
+    # The fixture itself must contain a real loader hole before the CLI gate.
     with pytest.raises(stage_a.AdjointIdentityRefused, match=phase_name):
-        entry.main(args)
+        stage_a.audit_stage_a_source_spans(_plan, manifest)
+    assert entry.main(args) == stage_a.EXIT_IDENTITY_REFUSED
+    reason = capsys.readouterr().out
+    assert 'loader span not declared in ' + phase_name in reason
+    assert 'weights.safetensors' in reason
     assert not output.exists()
 
 
@@ -153,3 +171,21 @@ def test_production_gate_checks_the_shard_tail_in_forward_and_reverse_phases(
     else:
         with pytest.raises(stage_a.AdjointIdentityRefused, match='forward-001.*b.safetensors'):
             stage_a.audit_stage_a_source_spans(config, manifest)
+
+
+@pytest.mark.parametrize('bad_own_digest', [False, True])
+def test_preflight_reads_the_actual_independent_fisher_draw(
+        tmp_path, monkeypatch, capsys, bad_own_digest):
+    plan, args, output = _case(tmp_path, monkeypatch, evaluation=True)
+    if bad_own_digest:
+        plan['joint_eval_draw']['calibration_input']['sha256'] = '0' * 64
+        with pytest.raises(TierPolicyRefused, match='readset-not-staged'):
+            entry.main(args)
+    else:
+        assert entry.main(args) == 0
+        report = json.loads(capsys.readouterr().out.splitlines()[-1])
+        assert report['calibration_shape'] == [2, 2048]
+        assert report['encoding_calibration_shape'] == [5, 4]
+        assert report['calibration_input']['artifact_sha256'] == \
+            plan['joint_eval_draw']['calibration_input']['sha256']
+    assert not output.exists()

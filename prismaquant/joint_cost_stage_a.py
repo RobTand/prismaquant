@@ -3233,7 +3233,8 @@ def audit_stage_a_source_spans(config, manifest, *, profile=None, weight_map=Non
             raise AdjointIdentityRefused(
                 f"CPU input preflight loader span not declared in {name}: "
                 f"{tensor} {path} [{start},{stop}); "
-                f"{len(missing)} spans uncovered in this phase")
+                f"{len(missing)} spans uncovered in this phase; "
+                f"uncovered paths: {', '.join(sorted({row[0] for row in missing}))}")
         checked += len(spans)
         source_phases_checked += 1
     return {"loader_selected_spans_checked": checked,
@@ -3246,10 +3247,14 @@ def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None):
     from .residency_map import bind_residency_manifest
     from .stage_inputs import bound
     from .streaming_model import load_streaming_auto_config
+    from .tessera_joint_eval_panel import select_evaluation
 
     bind_residency_manifest(data_manifest_sha256)
     bound(prepared, "prepared anchors")
     ids, calibration = load_stage_a_calibration(config)
+    encoding_shape = list(ids.shape)
+    encoding_calibration = calibration
+    ids, calibration, _evaluation = select_evaluation(ids, calibration, config)
     profile = stage_a_source_profile(config)
     auto_config = load_streaming_auto_config(
         config["model"], config["model"], local_files_only=True)
@@ -3266,6 +3271,8 @@ def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None):
             "command": "cpu-input-preflight", "passed": True,
             "capture_executed": False, "price_measured": False,
             "calibration_shape": list(ids.shape),
+            "encoding_calibration_shape": encoding_shape,
+            "encoding_calibration_input": encoding_calibration,
             "calibration_input": calibration, "source_profile": profile.name,
             "config_class": type(auto_config).__name__,
             "source_tensors_named": len(weight_map), **coverage}
