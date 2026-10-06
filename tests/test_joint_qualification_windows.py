@@ -323,6 +323,8 @@ def test_replay_reads_only_completed_capture_entries_before_resume(tmp_path, mon
                                      'capture', 'wire', 'render', 'symlink_wire',
                                      'symlink_render'])
 def test_qualification_replay_refuses_changed_upstream(tmp_path, monkeypatch, changed):
+    if changed == 'implementation':
+        monkeypatch.setenv('PRISMAQUANT_DEV_MODE', '0')
     runner, data, capture, events, _live, _observed = fixture(
         tmp_path, monkeypatch, fail_unit='model.layers.0.b')
     options = dict(capture=capture, max_render_bytes=10000, file_load_workers=1,

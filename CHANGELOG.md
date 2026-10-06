@@ -48,6 +48,7 @@
 
 - **Caller-declared journal producer seals** (#687, CEO
   dec-1005-212354-dc9d, D32). `prepare_journal` defaults to no seal fields;
+  the joint qualification journal declares only `implementation_sha256`;
   the campaign checkpoint and stream journal declare only the PrismaQuant and
   encoder source hashes. Producer-only drift stamps one `[DEV-MODE]` line
   and reuses stored shards without rewriting their manifest or digest.
