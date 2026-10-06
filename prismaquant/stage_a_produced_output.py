@@ -623,14 +623,15 @@ def _residency_map_module() -> Any:
 def launch_queue_root(env: Mapping[str, str] | None = None) -> Path:
     """The admitted queue, discovered by PB independently of input residency.
 
-    The same-generation reader owner prefers PRISMABUILD_QUEUE_ROOT and
-    retains its own legacy residency-map path rule. No topology is guessed.
+    Discovery itself lives in the allowlisted :mod:`prismaquant.staged_lease`
+    seam, which applies PB's published queue-root rule after resolving the
+    same sealed generation. No topology is guessed.
     """
-    from .staged_lease import LeaseRefused, sdk_submodule
+    from .staged_lease import LeaseRefused, launch_queue_root as _discover
 
     source = dict(os.environ) if env is None else dict(env)
     try:
-        root = sdk_submodule("reader_lease").launch_queue_root(source)
+        root = _discover(source)
     except LeaseRefused as exc:
         raise BoundaryProducedBindingError(str(exc)) from exc
     if root is None:

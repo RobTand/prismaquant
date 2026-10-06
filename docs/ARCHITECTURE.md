@@ -1,9 +1,10 @@
 # PrismaQuant Architecture
 
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
-uses PB's authoritative same-generation `reader_lease.launch_queue_root`
-through the existing sealed-generation bridge. It prefers the launcher's
-`PRISMABUILD_QUEUE_ROOT`, independently of whether inputs have residency.
+lives in the allowlisted `staged_lease.launch_queue_root` seam, which
+applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,
+legacy residency-map path otherwise) after resolving the same sealed
+generation. Discovery is independent of whether inputs have residency.
 The campaign container forwards this launcher-owned value and refuses a
 spec that forges it; the older strict tuple remains accepted without it.
 Live-claim/nonce/scope, declared-template, own-byte and budget checks are
@@ -5975,7 +5976,7 @@ records, launch), writes them first-writer as before and commits them with
 `origin_batch_manifest`. Without the flag both tools write exactly as before,
 including inside a test shard. The preparation still declares staged input
 residency, but produced-output queue discovery does not depend on it:
-the same-generation PB reader owner prefers `PRISMABUILD_QUEUE_ROOT` and
+the allowlisted staged-lease seam prefers `PRISMABUILD_QUEUE_ROOT` and
 owns the legacy residency-map path rule. The preparation's reads remain plain
 file reads, so the staged copy is not yet what they read.
 Gates: `tests/test_stage_b_prep_io_1070.py` (an audit

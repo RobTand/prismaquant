@@ -61,6 +61,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
@@ -192,6 +193,34 @@ def lease_helper_root() -> str | None:
             return _HELPER_ROOT
     return os.environ.get(HELPER_ROOT_ENV_VAR)
 
+#: Launch env vars PrismaBuild publishes for queue discovery (PB #961).
+#: The queue root directly, else the residency map whose parent's parent
+#: is the root. Literal names follow the HELPER_ROOT_ENV_VAR pattern;
+#: the values are the launcher's, never topology guesses.
+QUEUE_ROOT_ENV_VAR = "PRISMABUILD_QUEUE_ROOT"
+RESIDENCY_MAP_ENV_VAR = "PRISMABUILD_RESIDENCY_MAP"
+
+
+def launch_queue_root(env: Mapping[str, str] | None = None) -> Path | None:
+    """The queue that launched this action, or ``None`` when unlaunched.
+
+    PB's own rule (PB #961): the launcher-published queue root first,
+    else the residency-map path's parent's parent, the layout pre-#961
+    generations wrote. The sealed generation resolves first through
+    :func:`_sdk`, so a caller without one refuses
+    ``lease-helper-unavailable`` exactly as a submodule load would;
+    discovery itself reads only the launch context, never topology.
+    """
+    _sdk()
+    source = dict(os.environ) if env is None else dict(env)
+    published = source.get(QUEUE_ROOT_ENV_VAR) or ""
+    if published:
+        return Path(published)
+    map_path = source.get(RESIDENCY_MAP_ENV_VAR) or ""
+    if map_path:
+        return Path(map_path).parent.parent
+    return None
+
 
 def _sdk_accepts_material_namespace(sdk) -> bool:
     """Does this pinned SDK take a produced batch's material namespace?
@@ -283,10 +312,10 @@ def _require_client_surface(module) -> None:
 def sdk_submodule(name: str):
     """One ``prismabuild.<name>`` from the SAME generation as the SDK.
 
-    LEGACY: an internal PrismaBuild module, not its public SDK. Names on
-    the public surface use :func:`client_sdk`; this bridge serves callers
-    that need unpublished owners, including residency-independent queue
-    discovery in ``stage_a_produced_output``. No unqualified import is used.
+    LEGACY: an internal PrismaBuild module, not its public SDK. New code calls
+    :func:`client_sdk`. This remains only for the callers that still need
+    names the SDK does not publish (``joint_forward_resume``,
+    ``produced_output_spool`` and four tools), and goes when they move.
 
     Every PrismaBuild module this package uses must come from ONE sealed
     generation. A bare ``import prismabuild.produced_output`` does not
