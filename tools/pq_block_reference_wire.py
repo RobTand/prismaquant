@@ -810,8 +810,7 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
 
     num_blocks = nrb * ncb
     tags = unpack_uniform(
-        torch.frombuffer(bytearray(data[cursor:cursor + tag_bytes]), dtype=torch.uint8),
-        num_blocks, tag_bits,
+        bytes(data[cursor:cursor + tag_bytes]), num_blocks, tag_bits
     ).numpy()
     if tags.size and (int(tags.min()) < 0 or int(tags.max()) >= num_parents):
         _fail(

@@ -86,7 +86,7 @@ def load_parent(key):
     if stream.dtype != torch.uint8 or stream.ndim != 1:
         raise SystemExit(f"{key}: baseline wire must be one byte stream")
     blob = stream.numpy().tobytes()
-    role = key.rsplit(".", 1)[1]
+    role = key.removesuffix(".wire").rsplit(".", 1)[1]
     members = [m for m in parse_fused(blob) if m.name == role]
     if len(members) != 1:
         raise SystemExit(f"{key}: expected one {role} member")
