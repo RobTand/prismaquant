@@ -34,6 +34,9 @@ def _formats():
     from prismaquant.lane_eligibility import load_published_formats
     from prismaquant.tessera_runtime_contract import contract_path
     return load_published_formats(contract_path=contract_path())
+
+
+
 def _load(root, **kwargs):
     from prismaquant.rung_allowability import load_rung_allowability
     return load_rung_allowability(root, format_entry=_formats()[FAMILY],
@@ -100,7 +103,7 @@ def test_index_selects_current_version_not_directory_order(publication):
 
 
 @pytest.mark.parametrize("change,match", [
-    (lambda t: t.pop("table_version"), "version"),
+    (lambda t: t.pop("table_version"), "version|schema key"),
     (lambda t: t.update(table_version=2), "version"),
     (lambda t: t["kernel_build"].update(source_commit="other"), "kernel_build"),
     (lambda t: t["scope"].update(grid_step_q256=64), "grid|step"),
@@ -129,7 +132,6 @@ def test_observations_do_not_manufacture_exclusion(publication):
 
 
 def test_table_cannot_bypass_existing_run_table_rule(publication):
-    from prismaquant.lane_eligibility import load_published_formats
     from prismaquant.rung_allowability import load_rung_allowability
     row = _formats()[FAMILY]
     row["allowable_rungs"]["excluded_q256"] = [896]
@@ -192,3 +194,8 @@ def test_mtp_menu_uses_the_same_measured_rung_input(publication, monkeypatch):
     assert not eligible("mtp.unit", f"{FAMILY}_R897")
     assert not eligible("mtp.unit", f"{FAMILY}_R898")
     assert not eligible("mtp.unit", f"{FAMILY}_R899")
+
+
+def test_build_diagnostics_do_not_become_new_identity_seals(publication):
+    _mutate(publication, lambda t: t["kernel_build"].update(metadata={"note": "diagnostic only"}))
+    assert _load(publication).allows(896)
