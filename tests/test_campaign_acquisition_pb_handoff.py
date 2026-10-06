@@ -100,6 +100,11 @@ def real_joint_run():
 
 @pytest.fixture
 def handoff(tmp_path, monkeypatch, real_joint_run):
+    return build_handoff(tmp_path, monkeypatch, real_joint_run)
+
+
+def build_handoff(tmp_path, monkeypatch, real_joint_run):
+    """Build genuine acquisition controls and safetensors inputs at the caller root."""
     save_file = pytest.importorskip("safetensors.torch").save_file
     monkeypatch.setattr(manifests, "SHARED_MOUNT", str(tmp_path))
     raw_cost = pickle.dumps(real_joint_run.payload)
