@@ -176,8 +176,47 @@ def single_round_trip():
     if decoded.dtype != torch.float32 or tuple(decoded.shape) != (ROWS, COLS):
         raise SystemExit("decode returned the wrong dtype/shape")
     if not torch.equal(decoded, REF0):
-        delta = (decoded - REF0).abs().max().item()
-        raise SystemExit(f"single-parent decode != stock_dequant, max |delta| {delta}")
+        bad = decoded != REF0
+        delta = (decoded - REF0).abs()
+        block_bad = bad.reshape(NRB, BR, NCB, BC)
+        row_block_bad = block_bad.any(dim=(1, 3))
+        col_block_bad = block_bad.any(dim=(0, 2))
+        rows_bad = bad.any(dim=1)
+        idx = bad.nonzero()
+        r, c = (int(x) for x in idx[0])
+        i, j = r // BR, c // BC
+        local_rows_bad = rows_bad.reshape(NRB, BR)
+        # stored state vs full-unit replay for the first wrong block
+        entry = {
+            "body": P0.unit.body_bits.numpy(),
+            "rates": np.asarray([int(x) for x in P0.unit.rates]),
+            "window_bits": int(P0.unit.window_bits),
+            "cols": COLS,
+        }
+        rate = int(P0.unit.rates[c])
+        which = [cc for cc in range(COLS) if int(P0.unit.rates[cc]) == rate]
+        full = replay_window(P0.unit.body_bits[:][:, which].long(),
+                             int(P0.unit.window_bits), rate)
+        stored = W._boundary_states(entry, BR, NRB)
+        entering_full = full[i * BR - 1] if i > 0 else None
+        stored_i = stored[i - 1][which] if i > 0 else None
+        states_agree = (
+            "row-block-0 (no state)"
+            if i == 0
+            else str(bool(torch.equal(entering_full, torch.from_numpy(stored_i))))
+        )
+        raise SystemExit(
+            "single-parent decode != stock_dequant: "
+            f"max |delta| {delta.max().item():.10g}, "
+            f"wrong positions {int(bad.sum())}/{bad.numel()}, "
+            f"first wrong (row {r}, col {c}) -> block (i {i}, j {j}, local row {r % BR}); "
+            f"row blocks with errors: {torch.nonzero(row_block_bad).flatten().tolist()}; "
+            f"col blocks with errors: {torch.nonzero(col_block_bad).flatten()[:8].tolist()} "
+            f"(of {int(col_block_bad.sum())}); "
+            f"per-row-block bad rows (first 4 blocks): "
+            f"{[int(local_rows_bad[b].sum()) for b in range(min(4, NRB))]}; "
+            f"stored state equals full-replay prefix state: {states_agree}"
+        )
     RESULTS["single_round_trip"] = "torch.equal against stock_dequant"
 
 
