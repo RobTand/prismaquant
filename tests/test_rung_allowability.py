@@ -272,3 +272,30 @@ def test_current_version_drift_keeps_the_stored_measured_selection(
     captured = capsys.readouterr()
     assert "[DEV-MODE]" in captured.out + captured.err
     assert "D41 publication identity" in captured.out + captured.err
+
+
+def test_widened_current_scope_never_borrows_stored_narrow_measurements(
+        publication, monkeypatch):
+    path = publication / FAMILY / "fixture-t8" / "v0001.json"
+    newer = json.loads(path.read_text())
+    newer["table_version"] = 2
+    newer["scope"]["required_cells"].append(
+        {"cell_id": "dense-16", "kernel_kind": "dense", "shape_id": "fixture-shape", "M": 16})
+    for row in newer["rungs"]:
+        row.update(measurement_status="pending", supported=None, anomaly_flags=[],
+                   measurements=[], quality={})
+    (path.parent / "v0002.json").write_text(json.dumps(newer))
+    original_index = (publication / "index.json").read_text()
+
+    def publish(index):
+        build = index["formats"][FAMILY]["kernel_builds"][BUILD["id"]]
+        build["current_version"] = 2
+        build["versions"]["2"] = {"path": f"{FAMILY}/fixture-t8/v0002.json",
+                                  "table_schema": newer["schema"], "table_status": "partial"}
+
+    for mode in ("1", "0"):
+        (publication / "index.json").write_text(original_index)
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", mode)
+        _drift_on_second_index_read(publication, monkeypatch, publish)
+        with pytest.raises(ValueError, match="scope"):
+            _load(publication)
