@@ -6,12 +6,14 @@
 
 - **Default-off CPU input/readset preflight for joint adjoint capture**
   (#2325). `--cpu-input-preflight` shares the calibration and source metadata
-  startup owners, compares real streaming-loader tensor spans with each
-  declared head/forward/chain phase, and reports no capture or price. It
-  creates no generation, checkpoint or GPU allocation; normal CUDA and staged
-  tier guards are unchanged. Missing shard tails and ranges in another phase
-  refuse before capture. Source-plan index reads use the same staged metadata
-  owner as the loader, rather than opening the pool under an active policy.
+  startup owners, derives expected source phases from the actual meta-model and
+  normalized job independently of the manifest, then checks every selected
+  tensor span. It reports no capture or price and creates no generation,
+  checkpoint or GPU allocation; normal CUDA and staged tier guards are unchanged.
+  Missing phases, shard tails and ranges in another phase refuse before capture.
+  The shared checkpoint-map and resident-head owners cover indexed/unindexed
+  sources and LFM2/DSv4 head extras without skipping tensors. Source metadata
+  reads use the same staged owner as the loader, not a pool fallback.
 
 - **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
   rows** (#1962). `make_joint_aura_entry` can publish a

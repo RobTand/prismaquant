@@ -54,7 +54,8 @@ def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=Fa
         'bytes': stop - start, 'sha256': None})
     manifest['read_plan'] = {'phases': [
         {'name': 'head', 'entry_indices': list(range(len(paths)))},
-        {'name': 'forward-000', 'entry_indices': [len(paths)]}]}
+        {'name': 'forward-000', 'entry_indices': [len(paths)]},
+        {'name': 'chain-000', 'entry_indices': [len(paths)]}]}
     _activate(tmp_path, monkeypatch, manifest, skip={str(root / name) for name in missing})
     # Only the claim identity boundary is doubled; source selection and
     # staged byte reads are real. The CAS decoder has separate byte tests.
@@ -137,13 +138,16 @@ def test_cpu_preflight_checks_each_selected_tensor_in_its_consumption_phase(
     _plan, args, output = _case(tmp_path, monkeypatch)
     from prismaquant.staged_lease import load_sealed_manifest
     manifest = load_sealed_manifest(MANIFEST)
-    phase = manifest['read_plan']['phases'][1]
-    phase['name'] = phase_name
+    phase = next(row for row in manifest['read_plan']['phases'] if row['name'] == phase_name)
     source_index = phase['entry_indices'][0]
     if defect == 'missing':
         phase['entry_indices'].clear()
     elif defect == 'short':
-        manifest['entries'][source_index]['bytes'] -= 1
+        short = dict(manifest['entries'][source_index])
+        short['offset'] += 1
+        short['bytes'] -= 1
+        manifest['entries'].append(short)
+        phase['entry_indices'] = [len(manifest['entries'])-1]
     else:
         phase['entry_indices'].clear()
         manifest['read_plan']['phases'][0]['entry_indices'].append(source_index)
@@ -163,14 +167,20 @@ def test_production_gate_checks_the_shard_tail_in_forward_and_reverse_phases(
     from test_stagea_readset_source_coverage import _build, _spans
     manifest = _build(campaign, _spans(campaign) if completed else None)
     config = {'model': campaign['model']}
+    from types import SimpleNamespace
+    import torch
+    source_model = torch.nn.Module()
+    source_model.config = SimpleNamespace(model_type='unknown', architectures=[])
+    source_model.model = torch.nn.Module()
+    source_model.model.layers = torch.nn.ModuleList([torch.nn.Module(), torch.nn.Module()])
     if completed:
-        report = stage_a.audit_stage_a_source_spans(config, manifest)
+        report = stage_a.audit_stage_a_source_spans(config, manifest, source_model=source_model)
         assert report['uncovered_spans'] == 0
         assert report['loader_selected_spans_checked'] == 10
         assert report['source_phases_checked'] == 5
     else:
         with pytest.raises(stage_a.AdjointIdentityRefused, match='forward-001.*b.safetensors'):
-            stage_a.audit_stage_a_source_spans(config, manifest)
+            stage_a.audit_stage_a_source_spans(config, manifest, source_model=source_model)
 
 
 @pytest.mark.parametrize('bad_own_digest', [False, True])
@@ -188,4 +198,16 @@ def test_preflight_reads_the_actual_independent_fisher_draw(
         assert report['encoding_calibration_shape'] == [5, 4]
         assert report['calibration_input']['artifact_sha256'] == \
             plan['joint_eval_draw']['calibration_input']['sha256']
+    assert not output.exists()
+
+
+@pytest.mark.parametrize('phase_name', ['head', 'forward-000', 'chain-000'])
+def test_cli_does_not_derive_its_schedule_from_the_claim(tmp_path, monkeypatch, capsys, phase_name):
+    _plan, args, output = _case(tmp_path, monkeypatch)
+    from prismaquant.staged_lease import load_sealed_manifest
+    manifest = load_sealed_manifest(MANIFEST)
+    manifest['read_plan']['phases'] = [row for row in manifest['read_plan']['phases']
+                                     if row['name'] != phase_name]
+    assert entry.main(args) == stage_a.EXIT_IDENTITY_REFUSED
+    assert 'missing source phase ' + phase_name in capsys.readouterr().out
     assert not output.exists()

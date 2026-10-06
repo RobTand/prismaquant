@@ -3199,33 +3199,84 @@ def _chain_seed_argument(args):
         raise AdjointIdentityRefused(f"chain seed refused: {exc}") from exc
 
 
-def audit_stage_a_source_spans(config, manifest, *, profile=None, weight_map=None):
-    """The real streaming selection must fit the job's source phase ranges."""
-    from .layer_streaming import (
-        _build_weight_map, construction_multimodal, streaming_source_plan)
-    from .source_read_plan import roster_layers_prefix, uncovered_spans
+def stage_a_loader_source_phases(num_layers, *, capture_layers=None, chain_top=None,
+                                chain_bottom=0, prep=False):
+    """The job's source schedule, independent of its manifest's claims."""
+    phases = {"head": None}
+    if prep:
+        return phases
+    if capture_layers is None:
+        capture_layers = range(num_layers)
+    phases.update((f"forward-{layer:03d}", layer) for layer in capture_layers)
+    top = num_layers if chain_top is None else chain_top
+    phases.update((f"chain-{layer:03d}", layer)
+                  for layer in range(top - 1, chain_bottom - 1, -1))
+    return phases
 
-    profile = stage_a_source_profile(config) if profile is None else profile
-    if weight_map is None:
-        weight_map, _names = _build_weight_map(
-            config["model"], profile=profile,
+
+def _preflight_job_source_phases(num_layers, *, output_root, forward_split=None,
+        chain_split=None, chain_resume=None, chain_seed=None, forward_recovery=None,
+        diagnostic=None):
+    if any(split is not None and split["role"] == "prep"
+           for split in (forward_split, chain_split)):
+        return stage_a_loader_source_phases(num_layers, prep=True)
+    capture_layers = range(num_layers)
+    top, bottom = num_layers, 0
+    if chain_resume is not None:
+        from .stage_a_chain_resume import _sealed_checkpoints, load_chain_state
+        space = adjoint_space(output_root)
+        state = load_chain_state(space, chain_resume["chain_state_sha256"])
+        checkpoints, _partials = _sealed_checkpoints(
+            space, state["boundary_storage"]["session"], state["stride"]["boundaries"])
+        top = min(checkpoints)
+        capture_layers = ()
+    if chain_seed is not None:
+        from .stage_a_chain_seed import load_pinned_checkpoint
+        top = int(load_pinned_checkpoint(chain_seed["checkpoint"])["boundary"])
+        bottom = chain_seed["through"]
+        capture_layers = ()
+    if chain_split is not None:
+        bottom = chain_split["through"]
+    if forward_split is not None:
+        bottom = num_layers
+    if forward_recovery is not None:
+        from .joint_forward_resume import _read
+        capsule, _digest = _read(forward_recovery["path"], forward_recovery["sha256"])
+        capture_layers = range(capsule["frontier"], num_layers)
+    if diagnostic is not None:
+        bottom = diagnostic["through"]
+    return stage_a_loader_source_phases(num_layers, capture_layers=capture_layers,
+                                       chain_top=top, chain_bottom=bottom)
+
+
+def audit_stage_a_source_spans(config, manifest, *, profile=None,
+                              source_model=None, source_phases=None):
+    """Compare the actual loader schedule and spans against the claimed readset."""
+    from .layer_streaming import (
+        _get_layer_list, _resolve_base_prefix, construction_multimodal, streaming_source_plan)
+    from .source_read_plan import uncovered_spans
+    if source_model is None:
+        from .streaming_model import build_streaming_skeleton, load_streaming_auto_config
+        profile = stage_a_source_profile(config) if profile is None else profile
+        auto_config = load_streaming_auto_config(
+            config["model"], config["model"], local_files_only=True)
+        source_model = build_streaming_skeleton(auto_config,
             multimodal=construction_multimodal(profile, False))
-    layers_prefix = roster_layers_prefix(weight_map)
-    phases = manifest["read_plan"]["phases"]
-    layers = sorted({int(phase["name"].rsplit("-", 1)[1]) for phase in phases
-                     if phase["name"].startswith(("forward-", "chain-"))})
-    source = streaming_source_plan(
-        config["model"], layers_prefix=layers_prefix, layers=layers)
-    checked = source_phases_checked = 0
-    for phase in phases:
-        name = phase["name"]
-        if name == "head":
-            spans = source["head_spans"]
-        elif name.startswith(("forward-", "chain-")):
-            spans = source["layer_spans"][int(name.rsplit("-", 1)[1])]
-        else:
-            continue
-        entries = [manifest["entries"][index] for index in phase["entry_indices"]]
+    base, layers = _get_layer_list(source_model)
+    prefix = _resolve_base_prefix(source_model, base)
+    layers_prefix = f"{prefix}.layers." if prefix else "layers."
+    if source_phases is None:
+        source_phases = stage_a_loader_source_phases(len(layers))
+    selected_layers = sorted({layer for layer in source_phases.values() if layer is not None})
+    source = streaming_source_plan(config["model"], layers_prefix=layers_prefix,
+                                   layers=selected_layers, root=source_model)
+    declared = {phase["name"]: phase for phase in manifest["read_plan"]["phases"]}
+    checked = 0
+    for name, layer in source_phases.items():
+        if name not in declared:
+            raise AdjointIdentityRefused(f"CPU input preflight missing source phase {name}")
+        spans = source["head_spans"] if layer is None else source["layer_spans"][layer]
+        entries = [manifest["entries"][index] for index in declared[name]["entry_indices"]]
         missing = uncovered_spans(entries, spans)
         if missing:
             path, start, stop = missing[0]
@@ -3236,17 +3287,17 @@ def audit_stage_a_source_spans(config, manifest, *, profile=None, weight_map=Non
                 f"{len(missing)} spans uncovered in this phase; "
                 f"uncovered paths: {', '.join(sorted({row[0] for row in missing}))}")
         checked += len(spans)
-        source_phases_checked += 1
     return {"loader_selected_spans_checked": checked,
-            "source_phases_checked": source_phases_checked, "uncovered_spans": 0}
+            "source_phases_checked": len(source_phases), "uncovered_spans": 0}
 
 
-def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None):
+def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None,
+                             output_root=None, capture_options=None):
     """Read the capture's CPU startup inputs without CUDA/model or output."""
     from .layer_streaming import _build_weight_map, construction_multimodal
     from .residency_map import bind_residency_manifest
     from .stage_inputs import bound
-    from .streaming_model import load_streaming_auto_config
+    from .streaming_model import build_streaming_skeleton, load_streaming_auto_config
     from .tessera_joint_eval_panel import select_evaluation
 
     bind_residency_manifest(data_manifest_sha256)
@@ -3264,9 +3315,16 @@ def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None):
     coverage = {}
     if data_manifest_sha256 is not None:
         from .staged_lease import load_sealed_manifest
+        from .layer_streaming import _get_layer_list
+        skeleton = build_streaming_skeleton(auto_config,
+            multimodal=construction_multimodal(profile, False),
+            attn_implementation=config.get("attn_implementation"))
+        _base, layers = _get_layer_list(skeleton)
+        source_phases = _preflight_job_source_phases(
+            len(layers), output_root=output_root, **(capture_options or {}))
         coverage = audit_stage_a_source_spans(
             config, load_sealed_manifest(data_manifest_sha256),
-            profile=profile, weight_map=weight_map)
+            source_model=skeleton, source_phases=source_phases)
     return {"schema": "prismaquant.joint_adjoint_capture.cpu_input_preflight.v1",
             "command": "cpu-input-preflight", "passed": True,
             "capture_executed": False, "price_measured": False,
@@ -3431,7 +3489,12 @@ def main(argv=None) -> int:
             report = preflight_adjoint_inputs(
                 config, prepared={"path": str(args.prepared),
                                   "sha256": args.prepared_sha256},
-                data_manifest_sha256=args.data_manifest_sha256)
+                data_manifest_sha256=args.data_manifest_sha256, output_root=args.output_root,
+                capture_options={"forward_split": forward_split, "chain_split": chain_split,
+                    "chain_resume": _chain_resume_argument(args),
+                    "chain_seed": _chain_seed_argument(args),
+                    "forward_recovery": (None if args.forward_recovery is None else
+                        {"path": str(args.forward_recovery), "sha256": args.forward_recovery_sha256})})
             print(json.dumps(report))
             return EXIT_OK
         result = run_adjoint_capture(
