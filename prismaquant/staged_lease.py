@@ -61,6 +61,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 from .digests import DIRECT_ASCII_SPACED_STRICT, bytes_sha256hex
@@ -191,6 +192,34 @@ def lease_helper_root() -> str | None:
         if _HELPER_ROOT is not None:
             return _HELPER_ROOT
     return os.environ.get(HELPER_ROOT_ENV_VAR)
+
+#: Launch env vars PrismaBuild publishes for queue discovery (PB #961).
+#: The queue root directly, else the residency map whose parent's parent
+#: is the root. Literal names follow the HELPER_ROOT_ENV_VAR pattern;
+#: the values are the launcher's, never topology guesses.
+QUEUE_ROOT_ENV_VAR = "PRISMABUILD_QUEUE_ROOT"
+RESIDENCY_MAP_ENV_VAR = "PRISMABUILD_RESIDENCY_MAP"
+
+
+def launch_queue_root(env: Mapping[str, str] | None = None) -> Path | None:
+    """The queue that launched this action, or ``None`` when unlaunched.
+
+    PB's own rule (PB #961): the launcher-published queue root first,
+    else the residency-map path's parent's parent, the layout pre-#961
+    generations wrote. The sealed generation resolves first through
+    :func:`_sdk`, so a caller without one refuses
+    ``lease-helper-unavailable`` exactly as a submodule load would;
+    discovery itself reads only the launch context, never topology.
+    """
+    _sdk()
+    source = dict(os.environ) if env is None else dict(env)
+    published = source.get(QUEUE_ROOT_ENV_VAR) or ""
+    if published:
+        return Path(published)
+    map_path = source.get(RESIDENCY_MAP_ENV_VAR) or ""
+    if map_path:
+        return Path(map_path).parent.parent
+    return None
 
 
 def _sdk_accepts_material_namespace(sdk) -> bool:

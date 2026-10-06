@@ -202,6 +202,14 @@
 
 ### Fixed
 
+- **Bind admitted produced output without input residency** (#2339). Queue
+  discovery lives in the allowlisted staged-lease seam over the same sealed
+  generation; the campaign container carries its launcher-owned
+  `PRISMABUILD_QUEUE_ROOT` and refuses spec forgeries. Legacy residency-map
+  discovery stays with PB.
+  Live-attempt, declared-template, own-byte and output-budget guards remain
+  unchanged; no fake map or input staging declaration is introduced.
+
 - **The RTN FP8 helper keeps finite FP16 zero and tiny rows finite**
   (#2352; `build_rtn_cache._fp8_round`, parent #1303). The 1e-8 max-abs
   floor and the resulting `/448` scale underflow FP16 to `0.0`: an

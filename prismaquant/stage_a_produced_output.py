@@ -621,27 +621,27 @@ def _residency_map_module() -> Any:
 
 
 def launch_queue_root(env: Mapping[str, str] | None = None) -> Path:
-    """The queue root PrismaBuild gave THIS action, or a named refusal.
+    """The admitted queue, discovered by PB independently of input residency.
 
-    Derived exactly as the reader SDK derives it, from the shape of the
-    launcher's own ``PRISMABUILD_RESIDENCY_MAP``
-    (``<queue>/residency/<key>.json`` -> ``parent.parent``). Never guessed
-    from topology and never ``None``: a missing launch context is a
-    refusal with the variable named, not a ``Path(None)`` that fails three
-    calls later as something else.
+    Discovery itself lives in the allowlisted :mod:`prismaquant.staged_lease`
+    seam, which applies PB's published queue-root rule after resolving the
+    same sealed generation. No topology is guessed.
     """
+    from .staged_lease import LeaseRefused, launch_queue_root as _discover
 
     source = dict(os.environ) if env is None else dict(env)
-    raw = source.get("PRISMABUILD_RESIDENCY_MAP", "")
-    if not raw:
+    try:
+        root = _discover(source)
+    except LeaseRefused as exc:
+        raise BoundaryProducedBindingError(str(exc)) from exc
+    if root is None:
         raise BoundaryProducedBindingError(
-            "no PrismaBuild launch context: PRISMABUILD_RESIDENCY_MAP is "
-            "unset, so there is no queue root to bind an owner on")
-    root = Path(raw).parent.parent
+            "no PrismaBuild launch context: PRISMABUILD_QUEUE_ROOT and "
+            "PRISMABUILD_RESIDENCY_MAP are unset, so there is no queue root "
+            "to bind an owner on")
     if not root.is_dir():
         raise BoundaryProducedBindingError(
-            f"the queue root derived from PRISMABUILD_RESIDENCY_MAP ({raw}) "
-            f"is not a directory: {root}")
+            f"the queue root supplied by PrismaBuild is not a directory: {root}")
     return root
 
 
@@ -750,10 +750,9 @@ class BoundaryProducedPublication:
         """Bind template + instance from the admitted owner's request.
 
         ``queue_root`` and ``tier`` are both normally omitted: the queue
-        root is derived from the launcher's own
-        ``PRISMABUILD_RESIDENCY_MAP`` and the tier from the declaration,
-        so a real action supplies neither and a caller that supplies one
-        is overriding, not configuring.
+        root is discovered by the same-generation PB reader owner from
+        the protected launch context, independently of input residency,
+        and the tier from the declaration. A supplied value overrides it.
 
         The launch environment names this attempt; the submission's own
         ``--produced-output-template`` declaration provides the template
