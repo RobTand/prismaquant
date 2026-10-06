@@ -6,6 +6,11 @@ extras. Update them together. Naming a dependency only in root metadata is not
 sufficient: the corresponding resolved package and transitive references must
 also exist.
 
+Adding an already-resolved base dependency to an optional extra still needs a
+lock refresh: the extra's root reference and its `requires-dist` marker must
+both be present. The Pillow test extra is covered by the same per-declaration
+checks as every other extra.
+
 The #1756 refresh uses **uv 0.10.10** for both generation and verification.
 The generator version is intentionally recorded here because `uv.lock` does not
 record it. Use the same version when reproducing this refresh. Do not use
