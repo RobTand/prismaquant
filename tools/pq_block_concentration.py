@@ -4,6 +4,9 @@ CPU-only research screen. No encoding, new rungs, allocation, capture or held-ou
 claim. The score is isolated baseline-residual output energy per existing body
 bit, not a measured rate-change marginal. Cross-input-block terms are omitted
 from the nonnegative concentration score and retained in the full output error.
+With --conditional-repair, also report the signed change from restoring one
+block to source precision while keeping every other block fixed. That oracle
+retains cross-block coupling; it is not an admitted rung or an equal-byte arm.
 """
 from __future__ import annotations
 
@@ -89,6 +92,52 @@ def check_prefix_blocks(scores: torch.Tensor, error: torch.Tensor,
     return max_relative
 
 
+def repair_gains(error: torch.Tensor, gradient: torch.Tensor, isolated: torch.Tensor,
+                 baseline: torch.Tensor, count: int, rb: int, cb: int):
+    rows, cols = error.shape
+    dot = (error * gradient).reshape(rows // rb, rb, cols // cb, cb).sum(dim=(1, 3))
+    gains = 2 * dot - isolated
+    if not bool(torch.isfinite(gains).all()):
+        raise ValueError("nonfinite conditional repair gain")
+    torch.testing.assert_close(gains.sum(), 2 * baseline - isolated.sum(),
+                               rtol=1e-10, atol=1e-9)
+    extra_bits = rb * cb * (16 - 4)
+    per_bit = gains / (count * extra_bits)
+    positive = per_bit > 0
+    summary = {
+        "blocks": gains.numel(), "positive_blocks": int(positive.sum()),
+        "negative_blocks": int((per_bit < 0).sum()),
+        "zero_blocks": int((per_bit == 0).sum()),
+        "positive_fraction": float(positive.double().mean()),
+        "ideal_added_precision_bits_per_block": extra_bits,
+        "baseline_mean_output_error": float(baseline / count),
+        "summed_single_block_gain_mean": float(gains.sum() / count),
+        "summed_positive_single_block_gains_mean": float(gains[gains > 0].sum() / count),
+        "sum_of_gains_is_not_joint_gain": True,
+        "not_a_rung_quote_or_equal_byte_arm": True,
+        "positive_gain_concentration": concentration(per_bit.clamp_min(0))
+            if bool(positive.any()) else None,
+        "concentration_population": "all blocks; only positive repair gains contribute",
+        "no_positive_gain_reason": None if bool(positive.any())
+            else "no single block improves this output objective when restored alone",
+    }
+    return gains, summary
+
+
+def check_repair_blocks(gains: torch.Tensor, error: torch.Tensor, x: torch.Tensor,
+                        output_error: torch.Tensor, rb: int, cb: int) -> float:
+    nr, nc = gains.shape
+    max_abs = 0.0
+    for ri, ci in ((0, 0), (nr // 2, nc // 2), (nr - 1, nc - 1)):
+        patch = error[ri * rb:(ri + 1) * rb, ci * cb:(ci + 1) * cb]
+        correction = x[:, ci * cb:(ci + 1) * cb] @ patch.t()
+        old = output_error[:, ri * rb:(ri + 1) * rb]
+        direct = (old.square() - (old - correction).square()).sum()
+        torch.testing.assert_close(gains[ri, ci], direct, rtol=1e-9, atol=1e-10)
+        max_abs = max(max_abs, float((gains[ri, ci] - direct).abs()))
+    return max_abs
+
+
 def decode_existing(export: Path, weight_map: dict, qname: str):
     if ".shared_experts." in qname:
         module = qname.rsplit(".", 1)[0] + ".gate_up_proj"
@@ -139,17 +188,28 @@ def measure(args, qname: str, captures: dict, source_map: dict, export_map: dict
     x = x.double()
     with safe_open(str(args.source / source_map[qname + ".weight"]),
                    framework="pt", device="cpu") as handle:
-        source = handle.get_tensor(qname + ".weight").float()
+        source_tensor = handle.get_tensor(qname + ".weight")
+        if source_tensor.dtype != torch.bfloat16:
+            raise ValueError("the source-precision repair oracle requires BF16 source weights")
+        source = source_tensor.float()
+        del source_tensor
     rendered, wire = decode_existing(args.export, export_map, qname)
     if rendered.shape != source.shape or source.shape[1] != x.shape[1]:
         raise ValueError("source, actual baseline and saved calibration shapes disagree")
     error = (rendered - source).double()
     del rendered
-    output_error = (x @ error.t()).square().sum()
+    prefix_output = x @ error.t()
+    output_error = prefix_output.square().sum()
     reference_energy = (x @ source.double().t()).square().sum()
     count = int(saved["count"])
     if count < x.shape[0] or count <= 0 or reference_energy <= 0:
         raise ValueError("invalid full count or zero reference output energy")
+    if args.conditional_repair:
+        prefix_gradient = prefix_output.t() @ x
+        full_gradient = error @ h.double()
+        full_error = (full_gradient * error).sum()
+        if not bool(torch.isfinite(full_error)) or full_error <= 0:
+            raise ValueError("full saved Hessian gives an invalid residual objective")
     geometries = {}
     raw = {}
     for geometry in args.geometry:
@@ -174,6 +234,17 @@ def measure(args, qname: str, captures: dict, source_map: dict, export_map: dict
             "sum_isolated_is_not_full_error": True}
         raw[geometry + "_prefix"] = prefix_per_bit.numpy()
         raw[geometry + "_full_H"] = full_per_bit.numpy()
+        if args.conditional_repair:
+            prefix_gains, prefix_repair = repair_gains(
+                error, prefix_gradient, prefix, output_error, x.shape[0], rb, cb)
+            full_gains, full_repair = repair_gains(
+                error, full_gradient, full_h, full_error, count, rb, cb)
+            prefix_repair["spotcheck_max_absolute_error"] = check_repair_blocks(
+                prefix_gains, error, x, prefix_output, rb, cb)
+            geometries[geometry]["conditional_repair_retained_rows"] = prefix_repair
+            geometries[geometry]["conditional_repair_full_H"] = full_repair
+            raw[geometry + "_repair_gain_prefix"] = prefix_gains.numpy()
+            raw[geometry + "_repair_gain_full_H"] = full_gains.numpy()
         del hprefix, prefix, full_h
     args.out_dir.mkdir(parents=True, exist_ok=True)
     scores_path = args.out_dir / (qname.replace(".", "__") + ".npz")
@@ -197,6 +268,7 @@ def main() -> None:
     parser.add_argument("--geometry", action="append", required=True)
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--conditional-repair", action="store_true")
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
     if torch.cuda.is_available():
@@ -211,6 +283,7 @@ def main() -> None:
               "in_domain": False, "held_out": False, "allocation_gain_measured": False,
               "score": "tr(E_block H_block E_block^T)/(calibration_count * existing_body_bits)",
               "scope": "existing canonical calibration; isolated A8S baseline residual blocks, not rate-change marginal; cross-input-block terms excluded from concentration",
+              "conditional_repair": args.conditional_repair,
               "capture_manifest_sha256": file_sha256(capture_manifest), "units": []}
     for qname in args.qname:
         row = measure(args, qname, captures, source_map, export_map)
