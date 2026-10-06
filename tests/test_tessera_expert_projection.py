@@ -5,8 +5,10 @@ per-expert units; Tessera executes them as one stack per MoE block.  The bridge
 module is the one reader of the producer's ``tessera.expert_projection.v1``
 answer.  These tests pin its vocabulary to the producer's, exercise the exact
 binding (schema, layout, selector, geometry, coverage), the carried block's
-round trip, the stack-uniform selection rule the export lane applies, and the
-priced-wire receipt check that precedes the producer's own verification.
+round trip, the per-unit selection rule the export lane applies (stack-uniform
+worlds keep their stamps; mixed rungs need the v57 per-unit capability,
+PrismaQuant #2319), and the priced-wire receipt check that precedes the
+producer's own verification.
 """
 from __future__ import annotations
 
@@ -25,7 +27,6 @@ from prismaquant.tessera_expert_projection import (
     carried_projection,
     carried_units,
     request_expert_projection,
-    require_stack_uniform_assignment,
     stack_plan_request,
     verify_expert_wire_record,
 )
@@ -512,25 +513,38 @@ def test_carried_projection_round_trips_and_refuses_edits():
 # ---------------------------------------------------------------------------
 # The export side
 # ---------------------------------------------------------------------------
-def test_stack_uniform_assignment_refuses_role_split_partial_and_unprojected():
+def test_unit_assignment_uniform_mixed_partial_and_unprojected():
+    """One home for the selection rule the export lane applies.
+
+    A stack-uniform world keeps the exact stack-uniform stamps (PrismaQuant
+    #183); a mixed stack is expressible only under the installed Tessera v57
+    per-unit capability, and is refused by unit, stack and required contract
+    version without it (PrismaQuant #2319).  The producer still executes a
+    stack whole: a partly selected stack and an unprojected unit refuse.
+    """
     _source, units, stack_of = carried_units(carried_projection(
         _projection(), bind_expert_projection(_projection(), declared=_declared()),
         request=stack_plan_request({STACK: ("E4M3", 1024)}), tool="t"))
     uniform = {name: "TESSERA_E4M3_K1_R1024" for name in units}
-    assert require_stack_uniform_assignment(uniform, stack_of, units) == {
-        STACK: "TESSERA_E4M3_K1_R1024"}
+    grant = {"schema": "tessera.routed-unit-assignment.v1"}
+    assert tep.require_unit_assignment(uniform, stack_of, units, capability=grant) == (
+        {STACK: "TESSERA_E4M3_K1_R1024"}, {})
     split = dict(uniform)
     split[f"{STACK}.0.w2"] = "TESSERA_E4M3_K1_R768"
-    with pytest.raises(ExpertProjectionError, match="rungs differ across the stack"):
-        require_stack_uniform_assignment(split, stack_of, units)
+    stack_formats, unit_rungs = tep.require_unit_assignment(
+        split, stack_of, units, capability=grant)
+    assert stack_formats == {}
+    assert unit_rungs == {STACK: {name: split[name] for name in units}}
+    with pytest.raises(ExpertProjectionError, match=rf"{STACK}.*0\.w2.*v57"):
+        tep.require_unit_assignment(split, stack_of, units, capability=None)
     partial = dict(uniform)
     partial.pop(f"{STACK}.1.w3")
     with pytest.raises(ExpertProjectionError, match=r"executes the stack whole.*1\.w3"):
-        require_stack_uniform_assignment(partial, stack_of, units)
+        tep.require_unit_assignment(partial, stack_of, units, capability=None)
     with pytest.raises(ExpertProjectionError, match="not in the carried producer projection"):
-        require_stack_uniform_assignment(
+        tep.require_unit_assignment(
             {**uniform, "model.layers.6.feed_forward.experts.0.w1": "TESSERA_E4M3_K1_R1024"},
-            stack_of, units)
+            stack_of, units, capability=None)
 
 
 def _record(tmp_path: Path, name: str, unit: dict, *, q256=1024, grid="E4M3") -> dict:
