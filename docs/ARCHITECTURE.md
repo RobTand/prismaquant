@@ -1,5 +1,27 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-06 (D41, PQ #2328): production allocations of Tessera
+rungs require a current measured allowability table.
+`--tessera-rung-allowability-root` names its publication root;
+`--tessera-rung-kernel-builds` names an independently observed
+format-to-`kernel_build` JSON map, never a build copied from the measurement
+table itself. `index.json` selects `formats[format].kernel_builds[build_id].
+current_version` and the corresponding `versions[str(version)]` safe relative
+path, schema and status. Missing, unreadable, unversioned or stale publications
+refuse. The pure producer `tessera.rung_allowability` validators and `admit_rung`
+own measured/supported/anomaly/quality and all-cell adjacent-higher dominance
+admission. PrismaQuant intersects that answer with its existing v11
+`formats[].allowable_rungs` run-table rule, then passes it through the existing
+`tessera_lane.rung_admission` → `tessera_menu.route_admission` seam. Unlisted or
+unmeasured rows wait; observations alone are not exclusions or seals.
+An explicitly supplied table also restricts an emulation-only allocation, so
+the next full campaign allocation can consume the measured input without
+changing a serving profile, default or pin. Production cannot opt out through
+a research menu mode. Existing wire/shape, serving, export and quality gates
+remain independent. The allocation records the selected table version and
+observed build in its menu provenance; fixture tables establish only reader
+mechanics, not measured or served qualification.
+
 Re-stamped 2026-10-05 (`issues/pq-687-journal-seal-fields`, base `7b02dafa602`,
 PQ #687, CEO dec-1005-212354-dc9d, D32): `prepare_journal` accepts an empty-by-default
 caller-declared set of top-level producer seal fields. The joint qualification

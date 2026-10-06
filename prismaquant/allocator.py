@@ -759,6 +759,11 @@ class _StockAllocationLane:
     def allocation_contexts(serving_target, stats, profile):
         return None
 
+
+    @staticmethod
+    def allocation_rung_allowability(args):
+        return None
+
     @staticmethod
     def allocation_unit_context(serving_target, unit, profile):
         raise LookupError("no lane provides a serving target, so no unit has a serving context")
@@ -2938,6 +2943,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     accounting_stats = dict(stats)
     tessera_context_by_unit = lane.allocation_contexts(
         tessera_serving_target, accounting_stats, model_profile)
+    rung_allowability = lane.allocation_rung_allowability(args)
 
     if args.formats:
         fmt_names = [s.strip() for s in args.formats.split(",") if s.strip()]
@@ -2951,6 +2957,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         context_by_unit=tessera_context_by_unit)
     fmt_names = menu.formats
     tessera_menu_widths = menu.widths
+    if rung_allowability is not None:
+        tessera_menu_widths["rung_allowability"] = {
+            family: table.provenance() for family, table in rung_allowability.items()}
     try:
         specs = fr.require_producer_formats(
             fmt_names, where="new allocator assignment menu",
@@ -3194,6 +3203,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         bit_precision=float(args.bit_precision),
         tessera_menu_report=tessera_menu_report,
         context_by_unit=tessera_context_by_unit,
+        rung_allowability=rung_allowability,
         defer_menu_reduction=packed_members_deferred | fused_members_deferred,
         **({"preserve_runtime_frontier": True}
            if runtime_frontier_candidates or cost_baseline_assignment is not None else {}),
@@ -3253,6 +3263,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # absence of body activation transfer explicit.
             activation_pricing=None,
             context_by_unit=tessera_context_by_unit,
+            rung_allowability=rung_allowability,
         )
         missing_head_candidates = [
             name for name in head_probe_names
@@ -3340,6 +3351,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             mask_records=candidate_mask_records,
             activation_pricing=activation_pricing,
             context_by_unit=tessera_context_by_unit,
+            rung_allowability=rung_allowability,
         )
         missing_mtp_candidates = [
             name for name in mtp_names

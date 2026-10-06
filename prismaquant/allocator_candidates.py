@@ -53,6 +53,7 @@ from .serving_profiles import (
     check_serving_shape,
     serving_runtime_version,
     serving_lane_route,
+    load_serving_profile,
 )
 
 # The provenance string a source-passthrough candidate carries in place of a
@@ -2375,6 +2376,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
                      tessera_menu_mode: str | None = None,
                      census_loo: Mapping | None = None,
                      census_loo_groups: Mapping[object, Collection[str]] | None = None,
+                     rung_allowability: Mapping | None = None,
                      ) -> dict[str, list[Candidate]]:
     """Build runtime-legal format candidates for every measured Linear.
 
@@ -2403,6 +2405,7 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
     The existing research menu may still price an unattested writable rung.
     """
     refuse_retired_trellis_surface()
+    production_allocation = not load_serving_profile(target_profile).emulation_only
     gains = calibrated_gains or {}
     out: dict[str, list[Candidate]] = {}
     masked: dict[tuple[str, str], list[str]] = {}
@@ -2500,11 +2503,16 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
 
                 cache_key = (spec.name, context_key)
                 if cache_key not in admission_cache:
+                    measurement_scope = (
+                        {"allowability": rung_allowability,
+                         "require_allowability": production_allocation}
+                        if rung_allowability is not None or production_allocation else {})
                     admission_cache[cache_key] = family_hook(
-                        family, "rung_admission")(spec.name, **scope_kwargs)
+                        family, "rung_admission")(spec.name, **scope_kwargs, **measurement_scope)
                 admission = admission_cache[cache_key]
                 if (
-                    (admission.requires_serving_context or serving_context is not None)
+                    (production_allocation or rung_allowability is not None
+                     or admission.requires_serving_context or serving_context is not None)
                     and not admission.admits(
                         family_hook(family, "menu_mode_in_force")(tessera_menu_mode))
                 ):
