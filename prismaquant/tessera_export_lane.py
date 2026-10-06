@@ -707,13 +707,17 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     When a projection IS carried, the producer's record is the only
     attestation of the executed unit: every selected routed unit must be a
     projected unit whose source tensor the producer hashed in the shard it
-    actually lives in, each executed stack must be selected whole at one rung
-    (the stamp the allocator wrote must agree), and every selected rung's
-    priced blob must sit in the campaign's wire directory at its receipt's
-    size.  The bytes are not read here: the bundle that comes back is what the
-    exporter's ``--cached-expert-units`` intake consumes, and that intake
-    hashes every blob against its receipt before framing it
-    (``locate_expert_wire``'s contract, PrismaQuant #1378).
+    actually lives in, each executed stack must be selected whole (every
+    projected unit placed), and the selected rungs must agree with the
+    allocation's stamps -- stack-uniform stacks against the allocator's
+    ``tessera_expert_stack_formats`` stamp, and a mixed per-unit stack against
+    the ``tessera_expert_unit_rungs`` stamp the v57 capability makes
+    expressible (PrismaQuant #2319).  Every selected rung's priced blob must
+    sit in the campaign's wire directory at its receipt's size.  The bytes are
+    not read here: the bundle that comes back is what the exporter's
+    ``--cached-expert-units`` intake consumes, and that intake hashes every
+    blob against its receipt before framing it (``locate_expert_wire``'s
+    contract, PrismaQuant #1378).
 
     Returned WITH the bundle, and not derived from it by the caller, is which
     of the two paths this run took (PrismaQuant #222).  The unlock is one
@@ -724,9 +728,10 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     one question, and would read a dense export as a re-encode.
     """
     from .tessera_expert_projection import (
-        EXPERT_WIRES_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, WIRE_DIR_KEY,
+        EXPERT_WIRES_KEY, PROJECTION_KEY, STACK_FORMATS_KEY, UNIT_RUNGS_KEY,
+        UNIT_RUNGS_SCHEMA, WIRE_DIR_KEY,
         ExpertProjectionError, carried_units, check_expert_wire_receipt,
-        locate_expert_wire, require_stack_uniform_assignment,
+        locate_expert_wire, require_unit_assignment,
     )
     from .tessera_formats import parse_tessera_format_name
 
@@ -769,13 +774,25 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
                 raise ExpertProjectionError(
                     f"{name}: the producer hashed {tensor} in shard {hashed!r}, the source "
                     f"checkpoint holds it in {shards.get(tensor)!r}")
-        stack_formats = require_stack_uniform_assignment(selected_routed, stack_of, units)
+        stack_formats, unit_rungs = require_unit_assignment(selected_routed, stack_of, units)
         stamped = meta.get(keys["stack_formats"])
         if stamped is not None and {k: v for k, v in stamped.items()
                 if k in stack_formats} != stack_formats:
             raise ExpertProjectionError(
                 f"the allocation's {keys['stack_formats']} stamp {stamped} disagrees with the "
                 f"selected stack formats {stack_formats}")
+        stamped_units = meta.get(UNIT_RUNGS_KEY)
+        expected_units = {"schema": UNIT_RUNGS_SCHEMA, "stacks": unit_rungs}
+        if unit_rungs and stamped_units != expected_units:
+            raise ExpertProjectionError(
+                f"the allocation carries mixed per-unit rungs but its "
+                f"{UNIT_RUNGS_KEY} stamp "
+                f"{stamped_units if stamped_units is not None else '<absent>'} "
+                "does not name them for the selected units")
+        if not unit_rungs and stamped_units is not None and stamped_units != expected_units:
+            raise ExpertProjectionError(
+                f"the allocation's {UNIT_RUNGS_KEY} stamp {stamped_units} "
+                "names mixed per-unit rungs the selection does not carry")
         wire_dir = meta.get(keys["wire_dir"])
         roots = meta.get(roots_key) if roots_key is not None else None
         if roots_key is not None and (not isinstance(roots, Mapping) or
@@ -815,6 +832,7 @@ def _carried_expert_projection(meta: Mapping[str, Any], selected_routed: Mapping
     # so ``fallback`` (``no_routed_units``) is the honest answer.
     return (ROUTED_EXPERT_BYTES_PRICED_WIRES if selected_routed else fallback), {
         "source": source, "units": records, "stacks": stack_formats,
+        **({"unit_rungs": unit_rungs} if unit_rungs else {}),
         "wire_dir": wire_dir,
         **({"wire_roots_by_unit": dict(roots)} if roots is not None else {}),
         "geometry": {name: (units[name]["rows"], units[name]["cols"])

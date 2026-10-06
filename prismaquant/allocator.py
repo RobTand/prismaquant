@@ -803,6 +803,13 @@ class _StockAllocationLane:
         raise LookupError("no lane writes a selection request")
 
     @staticmethod
+    def allocation_routed_unit_rates(costs, assignment, *, cost_data,
+                                     per_linear_legal_formats, budget_bytes,
+                                     reserve_bytes, artifact_size_for, canonical_format):
+        raise SystemExit("[alloc] ERROR: no declared allocation lane provides "
+                         "--routed-unit-rates")
+
+    @staticmethod
     def allocation_expert_projection(cost_data, assignment) -> dict:
         return {}
 
@@ -981,6 +988,7 @@ def _validate_assignment_candidate_membership(
         "repair to export and can recreate mixed serving units. Sample:\n"
         f"  {sample}"
     )
+
 
 
 # Role tokens used to bucket the bit-attribution report. Best-effort: anything
@@ -1988,6 +1996,24 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         ),
     )
     ap.add_argument(
+        "--routed-unit-rates",
+        action="store_true",
+        help=(
+            "Research opt-in (PrismaQuant #2319): after the DP's stack-uniform "
+            "body assignment, spend the --target-disk-gb serialized-byte "
+            "headroom on exact per-unit routed-expert price rows "
+            "(the declared allocation lane selector: ascending "
+            "predicted-loss delta per added wire byte until no eligible "
+            "single-unit upgrade fits). Only units of the campaign's carried "
+            "producer projection with exact price rows and a serving-legal "
+            "rung are eligible; dense, shared, stack-only sampled and "
+            "profile-ineligible rows stay grouped. The mixed per-unit "
+            "assignment needs the installed Tessera v57 per-unit capability "
+            "and is carried with exact per-unit receipts. Default off: without "
+            "it the run is byte-identical to today. Requires --target-disk-gb."
+        ),
+    )
+    ap.add_argument(
         "--exclude-source-prefix",
         action="append",
         default=None,
@@ -2482,6 +2508,12 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
         raise SystemExit(
             "[alloc] ERROR: --artifact-overhead-reserve-bytes is meaningful "
             "only with --target-disk-gb"
+        )
+    if args.routed_unit_rates and args.target_disk_gb is None:
+        raise SystemExit(
+            "[alloc] ERROR: --routed-unit-rates spends a serialized-byte "
+            "headroom and needs --target-disk-gb to name the whole-artifact "
+            "cap it is measured from"
         )
 
     # ---- Hard serving constraints, resolved once (ultraplan P5c) ----
@@ -4273,6 +4305,49 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             assignment_before_serving_promotion,
             assignment_expanded,
         )
+        # --routed-unit-rates (PQ #2319): spend the serialized-byte headroom
+        # left by the stack-uniform body assignment on exact per-unit routed
+        # rows.  This runs AFTER the packed expansion and the serving
+        # promotion above, so neither can collapse the per-unit entries back
+        # into a group format; the carried block and the receipts below close
+        # over exactly these entries.
+        def body_assignment_for_accounting(complete):
+            return {name: fmt for name, fmt in complete.items()
+                    if ((not _is_visual_linear(name, model_profile) or name in visual_decision_names)
+                        and not _is_mtp_linear(name) and name not in fixed_lm_head_names)}
+
+        routed_unit_rates_record = None
+        if args.routed_unit_rates:
+            from . import footprint as _fp_routed_rates
+            routed_unit_rates_record = _allocation_lane().allocation_routed_unit_rates(
+                cost_data.get("costs", {}), assignment_expanded,
+                cost_data=cost_data,
+                per_linear_legal_formats=per_linear_legal_formats,
+                budget_bytes=int(math.floor(
+                    float(args.target_disk_gb) * _fp_routed_rates.GB)),
+                reserve_bytes=int(args.artifact_overhead_reserve_bytes or 0),
+                artifact_size_for=_artifact_size_for,
+                canonical_format=_canonical_candidate_format,
+            )
+            achieved = float(_assignment_payload_totals(
+                body_assignment_for_accounting(assignment_expanded),
+                require_all_stats=True)["bits_per_param"])
+            try:
+                final_assignment = _stamped_assignment(assignment_expanded)
+                final_size = _artifact_size_for(final_assignment)
+                if final_size is None or selected_whole_artifact_budget_stamp is None:
+                    raise ValueError("routed unit rates require a final whole-artifact price and budget stamp")
+                selected_whole_artifact_budget_stamp = whole_artifact_budget_stamp(
+                    budget_bytes=int(selected_whole_artifact_budget_stamp["budget_bytes"]),
+                    selection_tensor_payload_bytes=int(final_size["artifact_tensor_payload_bytes"]),
+                    selection_non_tensor_reserve_bytes=int(
+                        selected_whole_artifact_budget_stamp["selection_non_tensor_reserve_bytes"]),
+                    selection_assignment=final_assignment,
+                    excluded_source_prefixes=selected_whole_artifact_budget_stamp.get(
+                        "excluded_source_prefixes", ()),
+                )
+            except (ValueError, TypeError) as exc:
+                raise SystemExit(f"[alloc] ERROR: routed unit rates final budget: {exc}") from exc
 
         # Only unmeasured/explicit-uniform visual Linears are auxiliary.
         # Measured visual/merger units keep the solver's per-Linear decision.
@@ -4393,15 +4468,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
                     "PASSTHROUGH_SOURCE_REQUIREMENTS deliberately."
                 )
 
-        final_body_assignment = {
-            name: fmt
-            for name, fmt in assignment_expanded.items()
-            if (
-                (not _is_visual_linear(name, model_profile) or name in visual_decision_names)
-                and not _is_mtp_linear(name)
-                and name not in fixed_lm_head_names
-            )
-        }
+        final_body_assignment = body_assignment_for_accounting(assignment_expanded)
         paired_trade = _paired_trade_for_assignment(final_body_assignment)
         if paired_trade is not None and paired_trade["refused"]:
             refusals = {layer: row for layer, row in paired_trade["routed_layers"].items()
@@ -4565,6 +4632,11 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             **({
                 "whole_artifact_budget": selected_whole_artifact_budget_stamp,
             } if selected_whole_artifact_budget_stamp is not None else {}),
+            # Only when --routed-unit-rates spent the serialized-byte headroom,
+            # so a default run writes byte-identical layer-config metadata.
+            **({
+                "tessera_routed_unit_rates": routed_unit_rates_record,
+            } if routed_unit_rates_record is not None else {}),
             # Only when the constraint axis actually ran, so an unconstrained run
             # writes byte-identical layer-config metadata (the "constraints were
             # absent" stamp lives in selection.json, which every byte-budget run

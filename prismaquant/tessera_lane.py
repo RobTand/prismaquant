@@ -18,7 +18,7 @@ Two rules keep the seam honest:
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 #: The family this lane declares in ``lane_specs/tessera.json``.
 FAMILY_ID = "tessera"
@@ -589,6 +589,114 @@ def allocation_expert_projection(cost_data, assignment) -> dict:
         return allocation_expert_projection_block(cost_data, assignment)
     except ExpertProjectionError as exc:
         raise SystemExit(f"[alloc] ERROR: expert projection: {exc}") from exc
+
+
+def allocation_routed_unit_rates(
+    costs: Mapping[str, Mapping[str, object]],
+    assignment_expanded: dict[str, str], *,
+    cost_data: Mapping[str, object],
+    per_linear_legal_formats: Mapping[str, set[str]] | None,
+    budget_bytes: int, reserve_bytes: int,
+    artifact_size_for, canonical_format,
+) -> dict:
+    """Spend the serialized-byte headroom on exact per-unit routed rows.
+
+    ``--routed-unit-rates`` (PrismaQuant #2319): the DP priced and promoted
+    the body at stack granularity; this pass upgrades individual routed
+    expert units against the campaign's own per-unit price rows, inside the
+    headroom the whole-artifact cap leaves over the current assignment's
+    exact upper bound.  ``assignment_expanded`` is mutated in place and the
+    spend record is returned for the layer-config metadata.
+
+    Eligibility is fail-closed on two authorities.  Membership: only units
+    the campaign's carried producer projection attests
+    (``carried_units`` over ``cost_data``'s ``tessera_expert_projection``
+    block) may move -- dense, shared and off-projection names never do, and
+    a table carrying no projection refuses instead of silently buying
+    nothing.  Candidacy: a unit the allocator never admitted as a candidate
+    (absent from the pre-aggregation ``per_linear_legal_formats`` sets --
+    pinned, auxiliary or foreign to the DP) is never moved, and a target rung
+    outside the unit's admitted set drops out of its menu -- a priced row is
+    not proof the current profile and runtime serve it, so the pass reuses
+    the allocator's own applicability verdict instead of bypassing it.
+    Priced rows without exact ``predicted_dloss`` and ``wire_bytes`` fields
+    (sampled stack-only cells) stay grouped; present-but-corrupt rows still
+    refuse inside the selector.
+
+    The whole-artifact arithmetic is quoted, never computed, here: the cap
+    is ``budget_bytes`` less the current assignment's tensor payload, the
+    reserve is the caller's explicit ``--artifact-overhead-reserve-bytes``,
+    and both upper bounds travel on the record.  Anything this pass cannot
+    price refuses in the allocator's ``SystemExit`` idiom.
+    """
+    from . import tessera_expert_projection as tep
+
+    carried = (cost_data.get("provenance") or {}).get(tep.PROJECTION_KEY)
+    if carried is None:
+        raise SystemExit(
+            "[alloc] ERROR: --routed-unit-rates needs a cost table carrying "
+            "the producer projection (tessera_expert_projection); this table "
+            "prices no routed expert population")
+    try:
+        _source, units, _stack_of = tep.carried_units(carried)
+    except tep.ExpertProjectionError as exc:
+        raise SystemExit(f"[alloc] ERROR: routed unit rates: {exc}") from exc
+    menu: dict[str, dict] = {}
+    for unit in sorted(units):
+        rows = costs.get(unit)
+        if not isinstance(rows, Mapping):
+            continue
+        legal = (per_linear_legal_formats or {}).get(unit)
+        if legal is None:
+            # Not a priced DP candidate (pinned, auxiliary, foreign): never
+            # moved -- presence in the campaign table is not permission.
+            continue
+        allowed = {canonical_format(fmt) for fmt in legal}
+        kept = {}
+        for fmt, row in rows.items():
+            try:
+                canonical = canonical_format(fmt)
+            except (KeyError, ValueError):
+                continue
+            if fmt in legal or canonical in allowed:
+                kept[fmt] = row
+        if kept:
+            menu[unit] = kept
+    upper = artifact_size_for(assignment_expanded)
+    if not upper or upper.get("whole_artifact_upper_bound_bytes") is None:
+        raise SystemExit(
+            "[alloc] ERROR: --routed-unit-rates needs exact whole-artifact "
+            "pricing for the assignment it upgrades; the footprint owner "
+            "priced nothing")
+    payload_bytes = int(upper["artifact_tensor_payload_bytes"])
+    headroom_budget = int(budget_bytes) - payload_bytes
+    try:
+        picks, record = tep.select_priced_unit_upgrades(
+            menu, assignment_expanded,
+            byte_budget=headroom_budget, reserve_bytes=int(reserve_bytes))
+    except (tep.ExpertProjectionError, ValueError) as exc:
+        raise SystemExit(f"[alloc] ERROR: routed unit rates: {exc}") from exc
+    for unit, fmt in picks.items():
+        assignment_expanded[unit] = fmt
+    after = artifact_size_for(assignment_expanded)
+    record = {
+        **record,
+        "whole_artifact_upper_bound_bytes_before": int(
+            upper["whole_artifact_upper_bound_bytes"]),
+        "whole_artifact_upper_bound_bytes_after": (
+            int(after["whole_artifact_upper_bound_bytes"])
+            if after and after.get("whole_artifact_upper_bound_bytes") is not None
+            else None),
+    }
+    print(
+        f"[alloc] routed unit rates: {len(picks)} upgrade(s), "
+        f"+{record['spent_wire_delta_bytes']:,} wire-delta bytes of "
+        f"{record['spend_cap_bytes']:,} budgeted headroom "
+        f"(cap {record['byte_budget']:,} price-row bytes, reserve "
+        f"{record['reserve_bytes']:,})",
+        flush=True,
+    )
+    return record
 
 
 # -- serving profile hooks (serving_profiles) --------------------------------
