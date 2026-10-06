@@ -202,6 +202,22 @@
 
 ### Fixed
 
+- **`file_sha256hex` refuses a zero read count instead of hashing no bytes**
+  (#2344). `read(0)` never advances, so a `block_size=0` caller — including
+  every zero spelling `read` coerces (`False`, any `__index__` zero) — got
+  the SHA-256 of no bytes: any **nonempty** file silently returned the
+  empty-input digest `e3b0c442…855` instead of a digest of its bytes (an
+  empty file already matched that digest, which is how the bug could hide).
+  The owner now
+  raises a `ValueError` naming `block_size` before the first read, whether
+  the file is empty or not. Everything else is unchanged: positive sizes
+  stream in that many bytes per read, `-1` and `None` read the whole file,
+  other negative sizes keep `read`'s own refusal, non-integer sizes keep
+  the `TypeError` from the integer coercion, and a missing path or
+  directory still raises what `open` raises before any read-count check.
+  Regression tests pin the refusal on real empty and nonempty files plus
+  the read-all and type-refusal boundaries.
+
 - **Forward-split relaunches reuse declared producer seals** (#2342). Full
   retained/running bind identities now use the existing chain-resume
   classifier before adopting the original identity for exact-session rebind.

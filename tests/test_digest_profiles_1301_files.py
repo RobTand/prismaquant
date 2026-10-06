@@ -152,3 +152,34 @@ def test_each_profile_pins_its_digest(tmp_path):
     for block_size in (1, 2, 3, digests.FILE_BLOCK_BYTES):
         assert digests.file_sha256hex(path, block_size=block_size) == _ABC
         assert digests.file_sha256hex(str(path), block_size=block_size) == _ABC
+
+
+class _IndexZero:
+    """An integer-index-like zero, the spelling ``read`` itself coerces."""
+
+    def __index__(self) -> int:
+        return 0
+
+
+def test_file_sha256hex_refuses_zero_read_count(tmp_path):
+    # A zero read count never advances, so the unguarded owner returned the
+    # empty-input digest for any file (PQ #2344). The refusal is
+    # content-independent -- an empty file must refuse too, not pass by
+    # coincidence -- and covers every zero spelling ``read`` coerces.
+    for name, payload in (("empty", b""), ("abc", b"abc")):
+        path = tmp_path / name
+        path.write_bytes(payload)
+        for size in (0, False, _IndexZero()):
+            with pytest.raises(ValueError, match="block_size"):
+                digests.file_sha256hex(path, block_size=size)
+            with pytest.raises(ValueError, match="block_size"):
+                digests.file_sha256hex(str(path), block_size=size)
+
+
+def test_file_sha256hex_keeps_read_all_and_type_refusals(tmp_path):
+    path = tmp_path / "abc"
+    path.write_bytes(b"abc")
+    assert digests.file_sha256hex(path, block_size=-1) == _ABC
+    assert digests.file_sha256hex(path, block_size=None) == _ABC
+    with pytest.raises(TypeError):
+        digests.file_sha256hex(path, block_size=0.0)
