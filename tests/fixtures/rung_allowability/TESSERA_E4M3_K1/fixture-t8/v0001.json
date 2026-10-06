@@ -116,6 +116,7 @@
       ],
       "quality": {
         "fixture": true,
+        "anomaly_flags": [],
         "measurement_status": "measured",
         "source_kind": "actual_sampled_expert_weights",
         "device": "cpu",
@@ -227,6 +228,7 @@
       ],
       "quality": {
         "fixture": true,
+        "anomaly_flags": ["quality_failure"],
         "measurement_status": "measured",
         "source_kind": "actual_sampled_expert_weights",
         "device": "cpu",
