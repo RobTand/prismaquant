@@ -593,7 +593,8 @@ def pack_projection(
     digest = hashlib.sha256(bytes(blob)).digest()
     blob += digest
     total = len(blob)
-    if total != content + pad_bytes + CHECKSUM_BYTES:
+    # content_bytes already carries the checksum: fixed_bytes includes it.
+    if total != content + pad_bytes:
         _fail("internal accounting error: assembled length disagrees with the plan")
 
     breakdown = {
