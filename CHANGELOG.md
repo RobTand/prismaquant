@@ -222,6 +222,16 @@
 
 ### Fixed
 
+- **Bound paired-rate-trade diagnostic retention to summaries outside the
+  emitted assignment** (#2286). Menu, applicability and diagnostic-trace
+  records keep a bounded summary per priced trade -- priced scalars, refusal
+  verdict, per-group and per-expert means without per-probe arrays, and the
+  canonical digest binding the exact full trade -- instead of storing every
+  complete trade. Only the emitted assignment carries the full paired arrays
+  and per-expert breakdown; refusal stdout prints the summarized rows.
+  Pricing arithmetic, UCB hedging, joint sample/currency/format validation,
+  expert-dominance refusal and reproduction diagnostics are unchanged.
+
 - **Bind admitted produced output without input residency** (#2339). Queue
   discovery lives in the allowlisted staged-lease seam over the same sealed
   generation; the campaign container carries its launcher-owned
