@@ -289,6 +289,7 @@ def allocation_rung_allowability(args):
     """Load all explicitly supplied D41 builds once, through producer admission."""
     from .rung_allowability import load_rung_allowability, read_allowability_json
     from .lane_eligibility import load_published_formats
+    from .tessera_runtime_contract import contract_path
 
     root = args.tessera_rung_allowability_root
     builds_path = args.tessera_rung_kernel_builds
@@ -296,7 +297,7 @@ def allocation_rung_allowability(args):
         return None
     if root is None or builds_path is None:
         raise ValueError("D41 allowability root and independent kernel builds are required together")
-    formats = load_published_formats()
+    formats = load_published_formats(contract_path=contract_path())
     return {family: load_rung_allowability(root, format_entry=formats[family],
                                          expected_kernel_build=build)
             for family, build in read_allowability_json(builds_path).items()}

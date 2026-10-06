@@ -28,10 +28,15 @@ def publication(tmp_path, monkeypatch):
     return root
 
 
+
+
+def _formats():
+    from prismaquant.lane_eligibility import load_published_formats
+    from prismaquant.tessera_runtime_contract import contract_path
+    return load_published_formats(contract_path=contract_path())
 def _load(root, **kwargs):
     from prismaquant.rung_allowability import load_rung_allowability
-    from prismaquant.lane_eligibility import load_published_formats
-    return load_rung_allowability(root, format_entry=load_published_formats()[FAMILY],
+    return load_rung_allowability(root, format_entry=_formats()[FAMILY],
                                  expected_kernel_build=kwargs.pop("build", BUILD), **kwargs)
 
 
@@ -126,7 +131,7 @@ def test_observations_do_not_manufacture_exclusion(publication):
 def test_table_cannot_bypass_existing_run_table_rule(publication):
     from prismaquant.lane_eligibility import load_published_formats
     from prismaquant.rung_allowability import load_rung_allowability
-    row = load_published_formats()[FAMILY]
+    row = _formats()[FAMILY]
     row["allowable_rungs"]["excluded_q256"] = [896]
     assert not load_rung_allowability(publication, format_entry=row,
                                      expected_kernel_build=BUILD).allows(896)
