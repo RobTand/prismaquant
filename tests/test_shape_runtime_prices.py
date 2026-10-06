@@ -5,11 +5,11 @@ Since the pin moved to contract v42 (PQ #1274) it carries Tessera #685's fused
 routed lanes itself: the routed E4M3 and BF16 cells name the fused launch
 beside the compact one, and each lane publishes its ``requires`` predicate on
 its own ``native_extensions`` row. The fixtures assert that instead of
-grafting it. Since the pin moved to contract v45 (PQ #1702) each fused lane
-reads column rates 1 to 8 and gates its routed-expert launch to rates 1 to 6
-(``column_rates_routed_moe``), so every rung the routed E4M3 cells list,
-q832 to q1088, admits the fused launch; the refusal legs rewind the lanes to
-v44's rate-4 predicate. The lane decision itself is Tessera's
+grafting it. Contract v56 (PQ #2264) publishes routed column rates 1 to 8
+for both fused lanes, E4M3 column rates 1 to 8 and BF16 column rates 1 to 14,
+and the E4M3 MMA launch beside compact and fused. The refusal legs still
+rewind the two original fused lanes to v44's rate-4 predicate. The lane
+decision itself is Tessera's
 (``decide_lane_requirements``) reached through
 ``lane_eligibility.cell_lane_admits``; nothing here restates its rule.
 """
@@ -28,6 +28,10 @@ from prismaquant import shape_runtime_prices as srp
 from prismaquant import tessera_runtime_contract as contract
 from prismaquant.allocator_solver import Candidate
 from prismaquant.measured_runtime_prices import RuntimePriceError, bootstrap_sum
+from prismaquant.tessera_serving_runtime_pin import (
+    TESSERA_SERVING_RUNTIME_PINNED_COMMIT as OBS_COMMIT,
+    TESSERA_SERVING_RUNTIME_PINNED_CONTRACT_SHA256 as OBS_CONTRACT,
+)
 
 SHA = "c" * 64
 COMMIT = "e" * 40
@@ -38,6 +42,7 @@ COMPACT = {"symbol": "tessera.native_window_moe.NativeWindowMoE.__call__",
            "decoder": "native_window_moe_compact"}
 FUSED = {"symbol": "tessera.routed_fused.FusedRoutedWindowMoE.__call__",
          "decoder": "native_routed_fused_window"}
+MMA = dict(FUSED, decoder="native_routed_fused_window_e4m3mma")
 DENSE_E4M3 = {"symbol": "tessera::window_gemm_dense", "decoder": "native_window_gemm"}
 DENSE_BF16 = {"symbol": "tessera::window_gemm_dense", "decoder": "native_window_gemm_folded"}
 SPAN2 = {"symbol": "tessera.kernel_a4.a4_span2_gemm", "decoder": "native_span2_gemm"}
@@ -45,8 +50,8 @@ SPAN2_GROUPED = {"symbol": "tessera.kernel_a4.a4_span2_grouped_gemm",
                  "decoder": "native_span2_grouped"}
 ROUTED = "E288:w13=2048x4096:w2=4096x1024"
 FUSED_LANE = {"decoder": "native_routed_fused_window",
-              "requires": {"column_rates": [1, 2, 3, 4, 5, 6, 7, 8],
-                           "column_rates_routed_moe": [1, 2, 3, 4, 5, 6],
+              "requires": {"column_rates": list(range(1, 9)),
+                           "column_rates_routed_moe": list(range(1, 9)),
                            "window_bits": [14], "body": "window",
                            "plane": "channel", "release_overrides": False, "diagonals": False,
                            "rotation": ["none"], "grid_arities": [1]}}
@@ -55,21 +60,24 @@ FUSED_LANE_PREFIXES = ("tessera_routed_fused_e4m3", "tessera_routed_fused_value"
 
 FOLDED_COMPACT = dict(COMPACT, decoder="native_window_moe_compact_folded")
 FOLDED_FUSED = dict(FUSED, decoder="native_routed_fused_window_folded")
+FOLDED_FUSED_LANE = {
+    "decoder": FOLDED_FUSED["decoder"],
+    "requires": dict(FUSED_LANE["requires"], column_rates=list(range(1, 15))),
+}
 
 
 def _payload():
     with as_file(contract.contract_path()) as path:
         payload = json.loads(path.read_bytes())
-    # The pinned contract (v42 on, with v45's rate sets) publishes both fused
-    # lanes and names each beside the compact launch in the routed cells; the
-    # fixtures below depend on exactly that, so a re-pin that moves it fails
-    # here.
+    # The v56 pin publishes distinct E4M3/BF16 rate sets and the E4M3 MMA
+    # extension. Each routed cell must name its family's published launches.
     lanes = {row["module_name_prefix"]: row.get("lane")
              for row in payload["native_extensions"]}
     assert lanes["tessera_routed_fused_e4m3"] == FUSED_LANE
-    assert lanes["tessera_routed_fused_value"] == dict(
-        FUSED_LANE, decoder="native_routed_fused_window_folded")
-    want = {E4M3: [COMPACT, FUSED], BF16: [FOLDED_COMPACT, FOLDED_FUSED]}
+    assert lanes["tessera_routed_fused_value"] == FOLDED_FUSED_LANE
+    assert lanes["tessera_routed_fused_mma_e4m3"] == dict(
+        FUSED_LANE, decoder=MMA["decoder"])
+    want = {E4M3: [COMPACT, FUSED, MMA], BF16: [FOLDED_COMPACT, FOLDED_FUSED]}
     routed = [cell for cell in payload["lane_eligibility"]["cells"]
               if cell["structure"] == "routed_moe" and cell["family"] in want]
     assert routed and all(
@@ -544,8 +552,6 @@ def test_the_kernel_lane_histogram_counts_units_per_priced_lane(glm_eligibility,
 
 OBS_IMAGE = ("localhost/prismaquant/spark-vllm-nccl230@sha256:"
              "f8dbe1a02e33ccb7416ab40b72a83e8c725dcb6fed3e90bae4a658cce5e1b7f5")
-OBS_COMMIT = "b40c93cb73745097e57a1ba4cf5b9eee166c759a"
-OBS_CONTRACT = "0869f326543374dbd26b75e1d736befed378280d9a5724c4f170bf398aefdbaa"
 OBS_PRODUCER_TOOL = "a" * 64
 OBS_REPLAY_TOOL = "b" * 64
 OBS_ROUTE = "TESSERA_FP8"

@@ -1,0 +1,88 @@
+{
+  "test_container_wrapper_emits_transformed_spec_and_preserves_input#0": {"returned":"(['python3', '-m', 'tools.tessera_campaign_container', '--spec', '{\"container\": {\"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"env\": {\"LABEL\": \"\\\\u00e9\"}}', '--', 'payload', 'é'], 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')"},
+  "test_campaign_row_embeds_the_resolved_container_spec#0": {
+    "returned": "{'argv': ['python3', '-m', 'tools.tessera_campaign_container', '--spec', '{\"container\": {\"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"env\": {\"LABEL\": \"\\\\u00e9\"}}', '--', 'python3', '-u', '-m', 'prismaquant.tessera_campaign', '--value', 'é'], 'cwd': '/work', 'demand': {'gpu': 1, 'cpu': 2, 'mem_gb': 16}, 'env': {'LABEL': 'é'}, 'tags': ['gb10'], 'retry_safe': True, 'container_images': ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'], 'progress_phases': ['startup=3600', 'pricing=900', 'finalize=1800'], 'timeout_s': 30}"
+  },
+  "test_campaign_submission_preserves_inline_spec_bytes_and_envelope#0": {
+    "returned": "['python3', '/published/pbrun.py', '--demand', 'gpu=1,mem_gb=16', '--cpus', '2', '--tag', 'gb10', '--priority', '0', '--container-image', 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '--data-manifest', '<tmp>/manifest.json', '--detach', '--', 'python3', '-m', 'tools.tessera_campaign_container', '--spec', '{\"container\": {\"image\": \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"env\": {\"LABEL\": \"\\\\u00e9\"}}', '--', 'payload', 'é']"
+  },
+  "test_chain_spec_removes_spool_environment_and_mounts[no-spy]#0": {
+    "returned": "0"
+  },
+  "test_chain_spec_removes_spool_environment_and_mounts[no-spy]#1": {
+    "returned": "'{\"container\": {\"mounts\": [{\"readonly\": true, \"source\": \"/model-\\\\u00e9\", \"target\": \"/model\"}, {\"readonly\": false, \"source\": \"/scratch-\\\\u00e9\", \"target\": \"/scratch-\\\\u00e9\"}]}, \"env\": {\"KEEP\": \"\\\\u00e9\"}}\\n'"
+  },
+  "test_chain_spec_removes_spool_environment_and_mounts[spy]#0": {
+    "returned": "0"
+  },
+  "test_chain_spec_removes_spool_environment_and_mounts[spy]#1": {
+    "returned": "'{\"container\": {\"mounts\": [{\"readonly\": true, \"source\": \"/model-\\\\u00e9\", \"target\": \"/model\"}, {\"readonly\": false, \"source\": \"/scratch-\\\\u00e9\", \"target\": \"/scratch-\\\\u00e9\"}, {\"readonly\": true, \"source\": \"/tools/spy-\\\\u00e9\", \"target\": \"/opt/bench/py-spy\"}]}, \"env\": {\"KEEP\": \"\\\\u00e9\"}}\\n'"
+  },
+  "test_checkpoint_parse_reads_identity_and_counts_interned_menu#0": {
+    "returned": "0"
+  },
+  "test_checkpoint_parse_reads_identity_and_counts_interned_menu#1": {
+    "returned": "'{\"byte_size\": 84, \"checkpoint\": \"<tmp>/checkpoint.json\", \"loader_plan\": false, \"peak_rss_gib\": 0.5, \"phase\": \"parse\", \"rss_gib\": 0.5, \"step\": \"start\"}\\n{\"elapsed_s\": 0.0, \"lists_memoized\": 1, \"peak_rss_gib\": 0.5, \"rss_gib\": 0.5, \"step\": \"parse\", \"strings_seen\": 7, \"strings_shared\": 1}\\n{\"distinct_menu_strings\": 2, \"objects_per_occurrence\": 0.666667, \"occurrences\": 3, \"step\": \"menu.sample\", \"units\": 2}\\n{\"elapsed_s\": 0.0, \"expected_sha256\": \"56a0dce69442f07ff4043294837c6328165bfd56846d7d07becacbd05d02032f\", \"identity_sha256\": \"56a0dce69442f07ff4043294837c6328165bfd56846d7d07becacbd05d02032f\", \"matches_recorded\": true, \"peak_rss_gib\": 0.5, \"rss_gib\": 0.5, \"step\": \"seal\"}\\n'"
+  },
+  "test_fence_finish_reports_calculated_median_and_removes_scratch[empty]#0": {
+    "cause": null,
+    "raised": "builtins.IndexError",
+    "text": "list index out of range"
+  },
+  "test_fence_finish_reports_calculated_median_and_removes_scratch[empty]#1": {
+    "returned": "''"
+  },
+  "test_fence_finish_reports_calculated_median_and_removes_scratch[empty]#2": {
+    "returned": "{'runs': [], 'label': 'é'}"
+  },
+  "test_fence_finish_reports_calculated_median_and_removes_scratch[median]#0": {
+    "returned": "0"
+  },
+  "test_fence_finish_reports_calculated_median_and_removes_scratch[median]#1": {
+    "returned": "'BENCH {\"label\": \"\\\\u00e9\", \"median_bytes_per_s\": 50.0, \"median_wall_s\": 2.0, \"runs\": [{\"wall_s\": 3.0}, {\"wall_s\": 1.0}, {\"wall_s\": 2.0}]}\\n'"
+  },
+  "test_fence_finish_reports_calculated_median_and_removes_scratch[median]#2": {
+    "returned": "{'runs': [{'wall_s': 3.0}, {'wall_s': 1.0}, {'wall_s': 2.0}], 'label': 'é', 'median_wall_s': 2.0, 'median_bytes_per_s': 50.0}"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[different]#0": {
+    "returned": "3"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[different]#1": {
+    "returned": "'RENDER-WINDOW-BENCH analysis {\"arms\": {\"arm-\\\\u00e9\": {\"projection_digests\": [\"left\", \"right\"], \"py_spy_main_s_per_window\": {}, \"runs\": 2, \"timers_s_per_window\": {\"gpu_power_mean_w\": {\"mean\": NaN, \"values\": [NaN, NaN]}, \"loader.archive_scan\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.archive_scan_pool_wait\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.backward_gpu\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.hash\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.prefetch_wait\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.preflight\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.archive_scan\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.archive_scan_pool_wait\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.backward_gpu\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.hash\": {\"mean\": 2.0, \"values\": [2.0, 2.0]}, \"main.prefetch_wait\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.preflight\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"window_wall\": {\"mean\": 3.0, \"values\": [3.0, 3.0]}}}}, \"identical_projections\": false}\\n'"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[different]#2": {
+    "returned": "b'{\\n \"arms\": {\\n  \"arm-\\\\u00e9\": {\\n   \"projection_digests\": [\\n    \"left\",\\n    \"right\"\\n   ],\\n   \"py_spy_main_s_per_window\": {},\\n   \"runs\": 2,\\n   \"timers_s_per_window\": {\\n    \"gpu_power_mean_w\": {\\n     \"mean\": NaN,\\n     \"values\": [\\n      NaN,\\n      NaN\\n     ]\\n    },\\n    \"loader.archive_scan\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.archive_scan_pool_wait\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.backward_gpu\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.hash\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.prefetch_wait\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.preflight\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.archive_scan\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.archive_scan_pool_wait\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.backward_gpu\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.hash\": {\\n     \"mean\": 2.0,\\n     \"values\": [\\n      2.0,\\n      2.0\\n     ]\\n    },\\n    \"main.prefetch_wait\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.preflight\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"window_wall\": {\\n     \"mean\": 3.0,\\n     \"values\": [\\n      3.0,\\n      3.0\\n     ]\\n    }\\n   }\\n  }\\n },\\n \"identical_projections\": false\\n}'"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[empty]#0": {
+    "returned": "3"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[empty]#1": {
+    "returned": "'RENDER-WINDOW-BENCH analysis {\"arms\": {}, \"identical_projections\": false}\\n'"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[empty]#2": {
+    "returned": "b'{\\n \"arms\": {},\\n \"identical_projections\": false\\n}'"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[equal]#0": {
+    "returned": "0"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[equal]#1": {
+    "returned": "'RENDER-WINDOW-BENCH analysis {\"arms\": {\"arm-\\\\u00e9\": {\"projection_digests\": [\"same\"], \"py_spy_main_s_per_window\": {}, \"runs\": 2, \"timers_s_per_window\": {\"gpu_power_mean_w\": {\"mean\": NaN, \"values\": [NaN, NaN]}, \"loader.archive_scan\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.archive_scan_pool_wait\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.backward_gpu\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.hash\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.prefetch_wait\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"loader.preflight\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.archive_scan\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.archive_scan_pool_wait\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.backward_gpu\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.hash\": {\"mean\": 2.0, \"values\": [2.0, 2.0]}, \"main.prefetch_wait\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"main.preflight\": {\"mean\": 0.0, \"values\": [0.0, 0.0]}, \"window_wall\": {\"mean\": 3.0, \"values\": [3.0, 3.0]}}}}, \"identical_projections\": true}\\n'"
+  },
+  "test_render_analysis_publishes_reductions_and_exit_status[equal]#2": {
+    "returned": "b'{\\n \"arms\": {\\n  \"arm-\\\\u00e9\": {\\n   \"projection_digests\": [\\n    \"same\"\\n   ],\\n   \"py_spy_main_s_per_window\": {},\\n   \"runs\": 2,\\n   \"timers_s_per_window\": {\\n    \"gpu_power_mean_w\": {\\n     \"mean\": NaN,\\n     \"values\": [\\n      NaN,\\n      NaN\\n     ]\\n    },\\n    \"loader.archive_scan\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.archive_scan_pool_wait\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.backward_gpu\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.hash\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.prefetch_wait\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"loader.preflight\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.archive_scan\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.archive_scan_pool_wait\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.backward_gpu\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.hash\": {\\n     \"mean\": 2.0,\\n     \"values\": [\\n      2.0,\\n      2.0\\n     ]\\n    },\\n    \"main.prefetch_wait\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"main.preflight\": {\\n     \"mean\": 0.0,\\n     \"values\": [\\n      0.0,\\n      0.0\\n     ]\\n    },\\n    \"window_wall\": {\\n     \"mean\": 3.0,\\n     \"values\": [\\n      3.0,\\n      3.0\\n     ]\\n    }\\n   }\\n  }\\n },\\n \"identical_projections\": true\\n}'"
+  },
+  "test_standalone_worker_atomic_publication_keeps_ascii_and_final_newline#0": {
+    "returned": "None"
+  },
+  "test_standalone_worker_atomic_publication_keeps_ascii_and_final_newline#1": {
+    "returned": "b'{\"a\": \"\\\\u00e9\", \"b\": []}\\n'"
+  },
+  "test_state_append_preserves_existing_bytes_and_nonfinite_event#0": {
+    "returned": "b'previous event\\n{\"quantum_id\": \"q-\\\\u00e9\", \"unix\": 1234.5, \"values\": [NaN, {}, []]}\\n'"
+  },
+  "test_state_encoding_failure_does_not_append_a_partial_event#0": {
+    "cause": null,
+    "raised": "builtins.TypeError",
+    "text": "Object of type object is not JSON serializable"
+  }
+}

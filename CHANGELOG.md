@@ -46,6 +46,34 @@
 
 ### Changed
 
+- **Caller-declared journal producer seals** (#687, CEO
+  dec-1005-212354-dc9d, D32). `prepare_journal` defaults to no seal fields;
+  the joint qualification journal declares only `implementation_sha256`;
+  the campaign checkpoint and stream journal declare only the PrismaQuant and
+  encoder source hashes. Producer-only drift stamps one `[DEV-MODE]` line
+  and reuses stored shards without rewriting their manifest or digest.
+  The campaign wire-reader wrapper defers only `encoder_source_sha256` and
+  still calls the real cached-unit verifier with that stored field; wire bytes,
+  every other identity field, filename and measured length remain checked.
+  Mixed mismatches, every comparability field and byte-integrity checks still
+  refuse, as does certified mode (`PRISMAQUANT_DEV_MODE=0`). This retires
+  the freeze-the-tree / `--seed-checkpoint` workaround for producer-hash moves
+  only; `--seed-checkpoint` stays the path for real correctness changes,
+  and every comparability field still refuses.
+
+- **Stage the exact public Tessera master D13 pin** (#2262): serving JSON,
+  all serving/development constants and the complete reviewed answer bind
+  `2dbac1910c88254d9c6391f02a34c4b07e516803` / contract v56
+  (`47f180ef…d0aed78`), v11 run-table coverage and four extension rows.
+  Root graph-receipt v2 retains all nine scope fields. The existing
+  fingerprint, provisioning, lane, export and release refusals remain enforced.
+  Route-census scope checks use the existing authoritative scoped-schema set
+  at both entry points, preserving flat-row refusal and valid scoped replay
+  under v11 rather than comparing with the legacy v10 label.
+  Isolated installed-package evidence is not performance, compiled-cell
+  or ship-card qualification; D13 landing still needs the fresh public-source
+  packet and CEO review. No private `608bb` result is transferred.
+
 - **D32 dev-mode metadata stamp-and-continue** (#2302). The existing central
   default (anything except exact PRISMAQUANT_DEV_MODE=0) now also governs
   capture metadata owners, source provenance consumers and paired-trade
@@ -101,6 +129,21 @@
   committed per-scope census in
   `docs/audits/digest_site_census_pq1301_2026-10-04.json` retains all 501
   historical rows and names the 334 remaining gated scopes; #1301 stays open.
+
+- **The tools serializer correction retains only proved routes** (Refs #1301,
+  correction #2320). The original selection was 58 calls in 45 scopes across
+  36 files. The CEO-authorized cutoff retains 40 proved profile calls in 32
+  scopes across 24 files and restores 18 individual unproved expressions to
+  their exact original recipes as explicit #1301 residuals. Proved mixed-scope
+  neighbors and all eight actual lightweight bootstrap repairs remain.
+  Source-routing/profile-echo assertions were removed in favor of actual
+  consumer outcomes and the supported-context launch matrix. Version-three
+  evidence distinguishes boundary and unqualified CPU-fixture behavior from
+  whole-producer/native qualification; all old red runs and late diagnostics
+  remain preserved. The owner-generated gated-scope baseline is 309, a net
+  reduction of 25 from the original 334, with residuals explicitly restored.
+  The staged standard-library worker and unrelated recipe families stay
+  unchanged. #1301 remains open; no speed, serving or full-suite claim.
 
 - **Raw byte-hash constructors route to the digest owners** (Refs #1301).
   83 raw `hashlib.sha256(...).hexdigest()` constructor sites across 47

@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 from pathlib import Path
 import shutil
@@ -184,11 +183,12 @@ def main(argv=None):
 
 
 def _finish(report, root, total):
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     shutil.rmtree(root, ignore_errors=True)
     walls = sorted(r["wall_s"] for r in report["runs"])
     report["median_wall_s"] = walls[len(walls) // 2]
     report["median_bytes_per_s"] = total / report["median_wall_s"]
-    print("BENCH " + json.dumps(report, sort_keys=True))
+    print("BENCH " + DIRECT_ASCII_SPACED_LAX.text(report))
     return 0
 
 

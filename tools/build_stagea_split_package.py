@@ -64,6 +64,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from prismaquant.digests import (  # noqa: E402
+    DIRECT_ASCII_SPACED_LAX,
     bytes_sha256hex,
     indent2_json_file_bytes,
 )
@@ -465,8 +466,8 @@ def main(argv=None) -> int:
         output_root=args.output_root, chain_state_sha256=args.chain_state_sha256,
         checkpoint_sha256=args.checkpoint_sha256, through=args.through, ranges=ranges,
         output=args.output, validate=_pb_validate())
-    print(json.dumps({key: value for key, value in package.items()
-                      if key not in ("prep", "quanta")}, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text({key: value for key, value in package.items()
+                      if key not in ("prep", "quanta")}))
     return 0
 
 

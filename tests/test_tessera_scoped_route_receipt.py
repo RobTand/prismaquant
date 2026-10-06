@@ -109,26 +109,17 @@ def fixture(tmp_path, monkeypatch, *, structure="routed_moe"):
               "executes": [{"symbol": symbol.split(":", 1)[0], "decoder": decoder}],
               "runtime": {"image": IMAGE, "execution_modes": ["eager"],
                           "vllm": "0.0.0+fixture", "torch": "0.0.0+fixture"},
-              # The smallest evidence block the CURRENT lane grammar (v9)
-              # reads; this fixture is about the census binding, not the
-              # evidence, and a not_recorded smoke with no record, no control
-              # and no artifact is the honest empty value of each field.
-              # It tracks the constant above deliberately, so a schema bump
-              # lands here as "add the new field's empty value", which is the
-              # review this fixture is supposed to force.
+              # Minimal v10 evidence for this synthetic binding fixture.
+              # The installed-v11 regression below restores the real loader.
               "evidence": {"grade": "route_only", "kl": [],
                            "smoke": {"status": "not_recorded", "receipt": None,
                                      "attribution": "unattributed",
                                      "control": None, "record": None},
                            "artifact": None}}
              for regime in ("decode", "batch")]
-    # The platform entry tracks the CURRENT grammar for the same reason the
-    # evidence block above does: a schema bump has to land here as "state the
-    # new field", not as a document that names v10 and carries a v9 platform.
-    # Under v10 a platform is an object, and its `executes` value for a family
-    # must be the activation contract that family's own `formats[]` row
-    # publishes -- which is why the row above states one.
-    block = {"schema": lane.LANE_ELIGIBILITY_SCHEMA_TESSERA,
+    # This synthetic fixture deliberately stays v10; scoped membership
+    # must preserve it while admitting the independently installed v11 table.
+    block = {"schema": lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V10,
              "platforms": {"sm_121": {"backend": "cuda", "compute_capability": [12, 1],
                                       "serve_image": IMAGE,
                                       "executes": {FAMILY: "fp8_per_token_dynamic"}}},
@@ -162,6 +153,37 @@ def test_raw_v2_positive_retains_runtime_phase_owner_and_exact_price(tmp_path, m
         assert ":TRITON" in next(iter(record["route_census"]["records"]["decode"].values()))["symbol"]
     assert tessera_shipcard.verify_route_census_record("route.census", record,
         card={"build": data[2]}, model_dir=data[3]) == []
+
+
+def test_installed_v11_scoped_census_fill_and_replay(tmp_path, monkeypatch):
+    """Use the exact installed table, not a v10 stand-in, for the v2 policy."""
+    loader = receipt._current_scoped_contract
+    table, _formats = loader()
+    assert table.schema == lane.LANE_ELIGIBILITY_SCHEMA_TESSERA_V11
+    cell = next(c for c in table.cells
+                if c.id == "tessera_e4m3_k1_dense_sm121_decode")
+    monkeypatch.setitem(globals(), "IMAGE", cell.runtime_image)
+    data = fixture(tmp_path, monkeypatch, structure="dense")
+    # A valid census must name this installed cell's published launches,
+    # not the synthetic v10 fixture's torch_window stand-in.
+    for phase, regime in (("decode", "decode"), ("prefill", "batch")):
+        published = next(c for c in table.cells
+                         if c.family == FAMILY and c.structure == "dense"
+                         and c.regime == regime and c.runtime_image == IMAGE
+                         and 1024 in c.rungs_q256)
+        symbol, decoder = published.executes[0]
+        for observation in data[0]["records"][phase].values():
+            observation.update(symbol=symbol, decoder=decoder)
+    # The fixture creates only artifact/census inputs. Restore the real
+    # contract loader before exercising production fill and replay.
+    monkeypatch.setattr(receipt, "_current_scoped_contract", loader)
+    record = make(data)
+    assert record["passed"] is True
+    assert record["route_census"] == data[0]
+    assert record["scoped_verdict"]["target"] == data[2]["tessera_serving_scope"]["target"]
+    assert tessera_shipcard.verify_route_census_record(
+        "route.census", record, card={"build": data[2]}, model_dir=data[3]) == []
+
 
 
 @pytest.mark.parametrize("operation", ["fill", "replay"])

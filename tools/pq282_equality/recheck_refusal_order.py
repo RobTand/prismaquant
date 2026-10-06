@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from dispatch_tessera_campaign import cmd_merge
 from prismaquant.tessera_campaign import canonical_refusals
 
+
 ap = argparse.ArgumentParser(description=__doc__)
 ap.add_argument("--recorded", type=Path, required=True)
 ap.add_argument("--out", type=Path, required=True)

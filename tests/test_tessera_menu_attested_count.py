@@ -152,10 +152,8 @@ def test_the_fatal_refusal_carries_the_cause_too():
     assert "no Tessera serving scope supplied" in cause
     assert "--tessera-platform" in cause
     assert "the pinned contract attests TESSERA_E4M3_K1_R1024" in cause
-    # It names the scope gap without promising a scope would close it: on the
-    # only real table a scope moves 0 of 16 attested rungs to 1 of 16, so
-    # "unattested only because no scope was supplied" would be false for
-    # fifteen of them.
+    # Missing scope must not promise admission: image, structure, lane and
+    # evidence can still refuse a rung independently.
     assert "which may or may not attest them" in cause
     assert "only because" not in cause
     # No Tessera rungs refused -> nothing appended, so a non-Tessera menu

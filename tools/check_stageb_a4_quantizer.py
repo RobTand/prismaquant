@@ -10,6 +10,7 @@ from prismaquant.joint_cost_quantum import bind_joint_served_quantizer
 from prismaquant.nvfp4_activation_contract import ServedQuantizerUnboundError
 from prismaquant.perturbed_x_cache import _activation_qdq
 
+
 fmt = "TESSERA_E2M1_K2_R896"
 spec = format_registry.get_format(fmt)
 name = "qualification.a4"

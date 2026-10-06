@@ -186,6 +186,12 @@ def cmd_manifest(args) -> int:
 # -- spec (host) -------------------------------------------------------------------
 
 def cmd_spec(args) -> int:
+    # Host-side spec generation does not initialize the scientific package.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "prismaquant"))
+    try:
+        from digests import DIRECT_ASCII_SPACED_LAX
+    finally:
+        sys.path.pop(0)
     spec = json.loads(Path(args.base_spec).read_text())
     spool = spec["env"].get("PRISMABUILD_PRODUCED_SPOOL_ROOT")
     spec["env"] = {key: value for key, value in spec["env"].items()
@@ -196,7 +202,7 @@ def cmd_spec(args) -> int:
         mounts.append({"source": args.py_spy, "target": "/opt/bench/py-spy",
                        "readonly": True})
     spec["container"]["mounts"] = mounts
-    print(json.dumps(spec, sort_keys=True))
+    print(DIRECT_ASCII_SPACED_LAX.text(spec))
     return 0
 
 
@@ -331,6 +337,7 @@ def _drop_client_cache(resolver, paths) -> int:
 
 
 def cmd_child(args) -> int:
+    from prismaquant.digests import DIRECT_ASCII_SPACED_LAX
     import inspect
 
     import torch
@@ -459,8 +466,7 @@ def cmd_child(args) -> int:
                 storage.retire(reference)
                 grad_outs[probe][batch] = None
         result["payload_sha256"] = digests
-        result["plane_sha256"] = hashlib.sha256(json.dumps(
-            digests, sort_keys=True).encode()).hexdigest()
+        result["plane_sha256"] = DIRECT_ASCII_SPACED_LAX.sha256(digests)
         result["storage_telemetry"] = {key: value for key, value in storage.telemetry.items()
                                        if isinstance(value, (int, float))}
         mark("digested")

@@ -1947,7 +1947,7 @@ def prepare_cache(runner, data, *, capture, max_render_bytes, reader=None, file_
         journal, journal_sha, completed = prepare_journal(
             qualification_journal, stage=QUALIFICATION_STAGE,
             resume=qualification_resume, identity=identity,
-            qnames=sorted(data.formats_by_qname))
+            qnames=sorted(data.formats_by_qname), seal_fields={'implementation_sha256'})
         if sealed_replay is not None:
             from .joint_replay_frontier import ROSTER_KEY, require_replay_matches
             _require(prewarm_phase_starts is not None,

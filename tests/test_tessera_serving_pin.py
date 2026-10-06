@@ -202,3 +202,36 @@ def test_the_pin_transcribes_the_installed_contracts_native_extensions():
     pinned = {ext.module_name_prefix
               for ext in load_tessera_serving_runtime_pin().serving_native_extensions}
     assert pinned == {ext.module_name_prefix for ext in contract.native_extensions}
+
+
+def test_pinned_root_graph_receipt_api_retains_all_nine_scope_fields():
+    """Import the installed root package in isolation, never a sibling checkout."""
+    import subprocess
+    import sys
+
+    code = (
+        "import inspect,json,sys,tessera.graph_receipt as g; "
+        "print(json.dumps({'schema':g.SCHEMA,'fields':g.SCOPE_FIELDS,"
+        "'parameters':list(inspect.signature(g.verify).parameters),"
+        "'socket':g.fabric_refusal('socket',2),"
+        "'none':g.fabric_refusal('none',1),"
+        "'invalid_socket':g.fabric_refusal('socket',1),"
+        "'invalid_none':g.fabric_refusal('none',2),"
+        "'v1':g.verify({'schema':g.SCHEMA_V1},{}),"
+        "'serving_imported':any(m=='tessera.serving' or "
+        "m.startswith('tessera.serving.') for m in sys.modules)}))"
+    )
+    result = subprocess.run([sys.executable, "-I", "-c", code],
+                            check=True, capture_output=True, text=True)
+    observed = json.loads(result.stdout)
+    assert observed["schema"] == "tessera.graph_equals_eager.v2"
+    assert observed["fields"] == [
+        "image", "model_config_sha256", "tessera_src_sha256",
+        "compilation_config", "speculative_tokens", "max_model_len",
+        "max_num_seqs", "tensor_parallel_size", "fabric",
+    ]
+    assert observed["parameters"] == ["receipt", "serve"]
+    assert observed["socket"] is None and observed["none"] is None
+    assert observed["invalid_socket"] and observed["invalid_none"]
+    assert "names no fabric" in observed["v1"]
+    assert observed["serving_imported"] is False
