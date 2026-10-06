@@ -960,9 +960,9 @@ def mode_preflight(args, guard) -> dict:
     """Real metadata reads with no GPU, then the tiny CPU control."""
     guard("research preflight startup")
     result = {"metadata": None, "toy": None}
-    from prismaquant.tessera_expert_projection import PRODUCER_PYTHON_ENV
+    from prismaquant.tessera_expert_projection import PRODUCER_PYTHON_ENV, producer_plan_tool
     if os.environ.get(PRODUCER_PYTHON_ENV):
-        tool = campaign.producer_plan_tool()
+        tool = producer_plan_tool()
         print(json.dumps({"research_producer_preflight": {
             "python": os.environ[PRODUCER_PYTHON_ENV], "module": tool}}), flush=True)
     if all((args.calibration_census, args.units, args.calibration_tokens,
