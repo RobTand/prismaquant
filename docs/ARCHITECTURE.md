@@ -1,5 +1,54 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-06 (D41, PQ #2328): production allocations of Tessera
+rungs require a current measured allowability table.
+`--tessera-rung-allowability-root` names its publication root;
+`--tessera-rung-kernel-builds` names an independently observed
+format-to-`kernel_build` JSON map, never a build copied from the measurement
+table itself. `index.json` selects the format/build `current_version` in
+`formats[format].kernel_builds[build_id]` and its `versions[str(version)]` safe relative
+path, schema and status. Absent, unreadable or invalid index/table evidence
+refuses in both modes; kernel and measurement-scope comparability stay hard.
+Present publication identity drift goes through `dev_mode.seal_check`: dev mode
+stamps and continues with the stored validated selection, while certified mode
+retains the refusal. A version move with a changed required-cell scope is not
+identity-only: canonical `admit_rung(scope=current_selected_scope)` refuses
+carrying narrow measurements into the widened scope. The pure producer
+`tessera.rung_allowability` validators and `admit_rung`
+own measured/supported/anomaly/quality and all-cell adjacent-higher dominance
+admission. PrismaQuant intersects that answer with its existing v11
+`formats[].allowable_rungs` run-table rule, then passes it through the existing
+`tessera_lane.rung_admission` → `tessera_menu.route_admission` seam. Unlisted or
+unmeasured rows wait; observations alone are not exclusions or seals.
+
+Versioned intake delegates table/index schema dispatch to the canonical producer:
+`fleet.rung_allowability.v1`/`.v2` and versioned index contracts are not
+revalidated through a consumer-owned schema roster. The selected descriptor
+must still match the actual payload schema/version/status, and provenance records
+that payload schema. V2 body/decoder/owner/execution-scope and explicit word-ring
+applicability facts are required where its producer grammar requires them; TCQ
+non-WINDOW fields are explicitly non-applicable, never fabricated positive WINDOW
+geometry. WINDOW width zero remains a producer refusal. No v1 behavior, serving
+pin, allocation default or shared-index rollout changes as part of this intake.
+
+Body candidate menus, independent MTP menus and the final expanded assignment
+(including fixed auxiliary units) use the same lane admission seam.
+Binding checks the observed build id, library variant, architecture and
+activation contract; source-commit stamps and extra diagnostic metadata are
+provenance, not new identity seals. Producer decisions are cached per queried
+rung within one loaded table, never across allocations or index versions.
+An explicitly supplied table also restricts an emulation-only allocation, so
+the next full campaign allocation can consume the measured input without
+changing a serving profile, default or pin. Production cannot opt out through
+a research menu mode. Existing wire/shape, serving, export and quality gates
+remain independent. The allocation records the selected table version and
+observed build in its menu provenance; fixture tables establish only reader
+mechanics, not measured or served qualification.
+The current shared root is `/mnt/shared/fleet-ceo/rung-allowability`. Its v0003
+20-cell scope is distinct from historical v0002 16-cell mechanics; v2 measurements
+are never a narrowed production substitute for v3. Cost-only geometry observations
+do not change pending measurement status or admit an allocated rung.
+
 Re-stamped 2026-10-06 (PQ #2342): forward-split quanta compare the full
 retained and running bind identities through the chain-resume owner. Only
 its declared producer/source seals stamp in dev mode; all calibration,
