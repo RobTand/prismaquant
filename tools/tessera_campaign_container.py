@@ -73,9 +73,10 @@ ACTION_KEY_ENV = "PRISMABUILD_ACTION_KEY"
 ACTION_NONCE_ENV = "PRISMABUILD_ACTION_NONCE"
 ACTION_SCOPE_ENV = "PRISMABUILD_ACTION_SCOPE"
 READER_HELPER_ROOT_ENV = "PRISMABUILD_READER_HELPER_ROOT"
+QUEUE_ROOT_ENV = "PRISMABUILD_QUEUE_ROOT"
 #: Every name the launcher -- never the spec -- may supply for reader context.
 READER_CONTEXT_ENV = (ACTION_KEY_ENV, ACTION_NONCE_ENV, ACTION_SCOPE_ENV,
-                      READER_HELPER_ROOT_ENV)
+                      READER_HELPER_ROOT_ENV, QUEUE_ROOT_ENV)
 
 
 #: Python's safe-path mode, which drops the implicit ``sys.path[0]`` entry that
@@ -822,7 +823,9 @@ def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]"
     if not any(present[name] for name in
                (ACTION_NONCE_ENV, ACTION_SCOPE_ENV, READER_HELPER_ROOT_ENV)):
         return {}, []
-    missing = sorted(name for name, value in present.items() if not value)
+    # Older staged launches may carry only the original strict identity tuple.
+    missing = sorted(name for name, value in present.items()
+                     if name != QUEUE_ROOT_ENV and not value)
     if missing:
         raise RuntimeError(
             f"the launcher holds a partial reader-context bundle (missing "
@@ -878,7 +881,7 @@ def reader_context_environment(spec: dict, environ) -> "tuple[dict, list[dict]]"
     # This proves both the source bytes and read-only access independently
     # of the spec's ancestor mappings.
     extra.append({"source": root, "target": root, "readonly": True})
-    return ({name: present[name] for name in READER_CONTEXT_ENV}, extra)
+    return ({name: value for name, value in present.items() if value}, extra)
 
 
 def host_path(container_path: str, *, cwd: str, mounts: list) -> "Path | None":

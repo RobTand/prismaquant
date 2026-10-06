@@ -211,6 +211,7 @@ def _isolated_launch_context(monkeypatch):
     # action's.
     for name in ("PRISMABUILD_ACTION_NONCE", "PRISMABUILD_ACTION_SCOPE",
                  "PRISMABUILD_READER_HELPER_ROOT", "PRISMABUILD_ACTION_KEY",
+                 "PRISMABUILD_QUEUE_ROOT",
                  "PRISMABUILD_ACTION_PROGRESS_PATH",
                  "PRISMABUILD_ACTION_PROGRESS_TOKEN"):
         monkeypatch.delenv(name, raising=False)
@@ -2422,3 +2423,36 @@ def test_a_referenced_checkpoint_refuses_a_consumed_origin_batch(tmp_path, lifet
             storage.await_checkpoint_references(references)
     else:
         storage.await_checkpoint_references(references)
+
+
+@pytest.mark.parametrize("with_residency_map", [False, True])
+def test_admitted_output_binds_the_published_queue_without_input_residency(
+        tmp_path, with_residency_map):
+    from prismaquant.stage_a_produced_output import BoundaryProducedPublication
+
+    storage, publication, queue, env, _pb = _bound_owner(tmp_path)
+    with storage:
+        launch = {**env, "PRISMABUILD_QUEUE_ROOT": str(queue.root)}
+        if with_residency_map:
+            launch["PRISMABUILD_RESIDENCY_MAP"] = str(
+                queue.root / "residency" / "inputs.json")
+        rebound = BoundaryProducedPublication.bind_from_admitted_owner(env=launch)
+        assert rebound.queue.root == queue.root
+        assert rebound.instance == publication.instance
+        assert rebound.template == publication.template
+
+
+def test_published_output_queue_wins_over_a_foreign_residency_hint(tmp_path):
+    from prismaquant.stage_a_produced_output import BoundaryProducedPublication
+
+    storage, publication, queue, env, _pb = _bound_owner(tmp_path)
+    with storage:
+        foreign = tmp_path / "foreign-queue"
+        foreign.mkdir()
+        launch = {**env, "PRISMABUILD_QUEUE_ROOT": str(queue.root),
+                  "PRISMABUILD_RESIDENCY_MAP": str(
+                      foreign / "residency" / "inputs.json")}
+        rebound = BoundaryProducedPublication.bind_from_admitted_owner(env=launch)
+        assert rebound.queue.root == queue.root
+        assert rebound.instance == publication.instance
+
