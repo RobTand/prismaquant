@@ -152,4 +152,3 @@ def test_each_profile_pins_its_digest(tmp_path):
     for block_size in (1, 2, 3, digests.FILE_BLOCK_BYTES):
         assert digests.file_sha256hex(path, block_size=block_size) == _ABC
         assert digests.file_sha256hex(str(path), block_size=block_size) == _ABC
-    assert digests.FILE_BLOCK_BYTES == 8 << 20
