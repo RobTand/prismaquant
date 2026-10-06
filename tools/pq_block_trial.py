@@ -4,7 +4,7 @@ eng-pq-fine-grained (#2329) driver for Rob's opt-in per-block trial. One entry
 over the SAME actual arguments; encode and score share one persistent
 ``--output`` directory (score consumes the bank encode wrote there).
 
-* ``--mode encode`` verifies the shared split capture's receipts, then encodes
+* ``--mode encode`` verifies the FIT capture receipt and encodes
   the five-rung parent bank (R768/R896/R960/R1024/R1152) from the FIT role
   only through the existing ``encode_parent_bank`` producer recipe. Canonical
   rung admission runs through the producer's public PURE metadata API
@@ -19,10 +19,10 @@ over the SAME actual arguments; encode and score share one persistent
   block replacements at both the primary 128x2 and the current 128x32
   geometry.
 * ``--preflight`` turns either mode into a real-input census on ``--device
-  cpu``: imports, true argument parsing, small actual slices of every
-  available input, shapes, counts and admissions recorded. It is not final
-  encoding, not a GPU qualification and never claims D38; missing
-  prerequisites are named exactly and nothing is manufactured.
+  cpu``: imports, true argument parsing, actual source/FIT slices, shapes,
+  counts and admissions recorded. Score preflight also reads HELDOUT; encode
+  preflight reads only its receipt metadata. Neither encodes or qualifies a
+  GPU; missing prerequisites are named and nothing is manufactured.
 
 Research only. FIT alone shapes encoding and prices; HELDOUT enters only the
 final assembled error and never selects geometry or rungs. No serving
@@ -56,6 +56,9 @@ if str(ROOT) not in sys.path:
 
 from prismaquant.digests import canonical_json_sha256  # noqa: E402
 from prismaquant.qnames import DOTTED_LAYER_QNAME  # noqa: E402
+from prismaquant.io_engine import load_file  # noqa: E402
+from prismaquant.residency_map import bind_residency_manifest, residency_report  # noqa: E402
+from prismaquant.staged_tier_policy import activate_staged_tier_policy  # noqa: E402
 from tools.pq_block_concentration import (  # noqa: E402
     block_scores,
     concentration,
@@ -332,13 +335,11 @@ def _check_receipt(receipt: dict, role_key: str) -> None:
 def load_role_payload(capture_root: Path, qname: str, layer_manifest: dict,
                       role_key: str, sample_range: list[int],
                       load_tensors: bool) -> dict:
-    """Verify one role's receipt and, when allowed, its actual tensors.
+    """Read verified tensors, or metadata only when the role is excluded.
 
-    With ``load_tensors`` the PT is loaded and re-verified field by field
-    (name, role, dtype, geometry, count, prefix ids).  Without it only the
-    file's own bytes and the publisher's verified receipt are checked, and
-    the receipt's count stands in; which source a count came from is always
-    recorded.  HELDOUT tensors are never loaded in encode mode.
+    Encode mode never opens the HELDOUT payload, including during preflight.
+    Its count/digest remain publisher receipt metadata until CPU scoring
+    verifies the actual bytes and loads the complete HELDOUT moment.
     """
     units = layer_manifest["manifest"]["units"]
     if qname not in units or role_key not in units[qname]:
@@ -347,28 +348,34 @@ def load_role_payload(capture_root: Path, qname: str, layer_manifest: dict,
     _check_receipt(receipt, role_key)
     dimension = int(receipt["hessian_shape"][1])
     path = _receipt_path(capture_root, receipt)
+    record = {
+        "role": role_key, "file": receipt["file"], "path": str(path),
+        "bytes": int(receipt["bytes"]), "sha256": receipt["sha256"],
+        "receipt_count": int(receipt["count"]),
+        "hessian_shape": [int(v) for v in receipt["hessian_shape"]],
+        "inputs_shape": receipt.get("inputs_shape"),
+        "prefix_sample_ids_shape": receipt.get("prefix_sample_ids_shape"),
+        "sample_range": list(sample_range),
+        "tensors_loaded": False, "file_bytes_read": False,
+    }
+    if not load_tensors:
+        return record
     if not path.is_file():
         _fail(f"{role_key} role file {path} is missing")
     actual_bytes = path.stat().st_size
     if actual_bytes != receipt["bytes"]:
         _fail(f"{path}: {actual_bytes} bytes, receipt stamps "
               f"{receipt['bytes']}")
-    actual_sha = file_sha256(path)
+
+    def decode_role(raw, observed, staged):
+        return torch.load(raw.path, map_location="cpu", weights_only=True, mmap=True), None
+
+    payload, load_observed = load_file(path, receipt["bytes"],
+        binding=receipt["sha256"], decode=decode_role, sealed=True)
+    actual_sha = load_observed[0]["sha256"]
     if actual_sha != receipt["sha256"]:
-        _fail(f"{path}: own-byte digest {actual_sha} does not match receipt")
-    record = {
-        "role": role_key, "file": receipt["file"], "path": str(path),
-        "bytes": actual_bytes, "sha256": actual_sha,
-        "receipt_count": int(receipt["count"]),
-        "hessian_shape": [int(v) for v in receipt["hessian_shape"]],
-        "inputs_shape": receipt.get("inputs_shape"),
-        "prefix_sample_ids_shape": receipt.get("prefix_sample_ids_shape"),
-        "sample_range": list(sample_range),
-        "tensors_loaded": False,
-    }
-    if not load_tensors:
-        return record
-    payload = torch.load(path, map_location="cpu", weights_only=True)
+        _fail(f"{path}: own-byte digest does not match receipt")
+    record.update({"bytes": actual_bytes, "sha256": actual_sha, "file_bytes_read": True})
     if payload["name"] != qname or payload["role"] != role_key:
         _fail(f"{path}: payload names {payload['name']}/{payload['role']}, "
               f"not {qname}/{role_key}")
@@ -503,6 +510,9 @@ def load_layer_roles(capture_root: Path, qname: str, split: dict,
     }
 
 
+INPUT_DIGESTS = {}  # explicit readset configuration, not a byte cache
+
+
 def load_source_weight(source_root: Path, qname: str) -> dict:
     """Read the BF16 source weight named by the safetensors index."""
     index_path = source_root / "model.safetensors.index.json"
@@ -514,9 +524,12 @@ def load_source_weight(source_root: Path, qname: str) -> dict:
     if shard is None:
         _fail(f"{index_path}: no {key} entry; the trial needs an existing "
               "source key")
-    with safe_open(str(source_root / shard), framework="pt",
-                   device="cpu") as handle:
-        tensor = handle.get_tensor(key)
+    shard_path = source_root / shard
+    def decode_source(raw, observed, staged):
+        with safe_open(raw.path, framework="pt", device="cpu") as handle:
+            return handle.get_tensor(key), None
+    tensor, observed = load_file(shard_path, shard_path.stat().st_size,
+        binding=INPUT_DIGESTS.get(str(shard_path)), decode=decode_source, sealed=True)
     if tensor.dtype != torch.bfloat16 or tensor.ndim != 2:
         _fail(f"{key}: source weight is {tensor.dtype}/{tensor.ndim}D, "
               "the trial encodes a 2-D BF16 projection")
@@ -525,6 +538,9 @@ def load_source_weight(source_root: Path, qname: str) -> dict:
         "source_root": str(source_root),
         "index_sha256": file_sha256(index_path),
         "shape": [int(v) for v in tensor.shape],
+        "small_actual_values": tensor[:2, :8].float().tolist(),
+        "source_file_bytes": observed[0]["bytes"],
+        "source_file_sha256": observed[0]["sha256"],
         "dtype": str(tensor.dtype),
     }
 
@@ -667,7 +683,7 @@ def preflight_census(args) -> tuple[dict, list[str]]:
             _fail("the layer census depends on the split manifest")
         return load_layer_roles(
             Path(args.capture_root), args.qname, split,
-            load_tensors={"fit": True, "heldout": True})
+            load_tensors={"fit": True, "heldout": args.mode == "score"})
 
     step("layer_roles", do_roles)
     return findings, missing
@@ -854,7 +870,8 @@ def run_encode(args) -> int:
         },
         "heldout_handling": {
             "heldout_tensors_loaded_in_encode": False,
-            "heldout_file_bytes_verified_against_receipt": True,
+            "heldout_file_bytes_verified_against_receipt": False,
+            "heldout_payload_opened_in_encode": False,
             "heldout_count_from_publisher_verified_receipt": True,
             "heldout_used_for_encoding": False,
         },
@@ -1282,6 +1299,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "for the parent's Blackwell entry, while "
                              "preflight and score stay CPU research entries")
     parser.add_argument("--threads", type=int, default=2)
+    parser.add_argument("--data-manifest", type=Path, default=None,
+                        help="actual PB readset; binds the existing staged I/O engine")
     parser.add_argument("--extra-geometry", action="append", default=None,
                         metavar="ROWSxCOLS",
                         help="optional extra UNIFORM geometry arms reported "
@@ -1291,6 +1310,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.data_manifest is not None:
+        readset_bytes = args.data_manifest.read_bytes()
+        bind_residency_manifest(hashlib.sha256(readset_bytes).hexdigest())
+        readset = json.loads(readset_bytes)
+        INPUT_DIGESTS.update({e["path"]: e.get("sha256") for e in readset["entries"] if e.get("offset", 0) == 0})
+    if args.device == "cuda":
+        if args.data_manifest is None:
+            _fail("CUDA encode requires a declared PB data manifest")
+        activate_staged_tier_policy("ram,ssd")
     if args.threads < 1:
         _fail("--threads must be positive")
     if args.device == "cuda" and (args.preflight or args.mode == "score"):

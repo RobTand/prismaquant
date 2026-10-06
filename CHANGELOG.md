@@ -15,6 +15,23 @@
   real-A8S CPU proof covers exact mixed-fragment reconstruction and boundary
   refusals, not in-domain held-out gain or a serving qualification. No
   production menu, pipeline default, serving pin or kernel changes.
+  The research CLI binds declared inputs through the existing I/O engine
+  and validates actual source/FIT shapes, row counts and current canonical
+  producer admission. Encode and encode preflight never open HELDOUT
+  payloads; CPU scoring verifies their own bytes and complete moments.
+  Real L0 source/FIT preflight is recorded by action `fad7fa64ee59`. The
+  later complete dense L0 gate `6b5288acd80c` matches the native control
+  exactly at 25,191,435 bytes but has 3.475059 times its HELDOUT output-error
+  loss. The routed L3 expert0-up contrast `509251c3242d` also matches exactly
+  at 4,215,563 bytes, with 2.044249 times the control HELDOUT loss. Both
+  measured contrasts are negative; unmeasured middle/late scope remains
+  explicit. Neither result is a sampling interval or a G3 qualification.
+  `pq_block_schedule_cost.py` consumes the real driver's flat row-major
+  selection, candidate-order mapping and own-byte stamps, while retaining
+  raw source-order input. CPU proof `63a5fc616b98` exercises both CLI forms
+  and malformed order, digest, geometry and tag refusals. Stored bytes are
+  exact; run, launch and shared-memory estimates remain conditional models,
+  not measured traffic, occupancy or speed.
 
 - **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
   rows** (#1962). `make_joint_aura_entry` can publish a
