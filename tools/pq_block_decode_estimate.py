@@ -61,21 +61,41 @@ def main() -> None:
         observed.append({key: cell.get(key) for key in (
             "cell_id", "kernel_kind", "shape_id", "M", "measurement_status",
             "kernel_time_us", "kernel_path")})
+    # V5 adds recorded prefill cells; never sum them into the synthetic pair.
+    workloads = (("synthetic", "", (1, 16, 2048, 4096)),
+                 ("recorded", ":recorded", (2048, 4096)))
     for estimate in estimates:
         estimate["split_launch_proxy_by_M"] = []
-        for m in (1, 16, 2048, 4096):
-            cells = [cell for cell in observed
-                     if cell["kernel_kind"] == "routed" and cell["M"] == m]
-            if len(cells) != 2 or any(cell["kernel_time_us"] is None for cell in cells):
-                raise ValueError(f"missing routed gate/up and down observations for M{m}")
-            uniform_us = sum(cell["kernel_time_us"] for cell in cells)
-            proxy_us = estimate["split_class_launch_proxy_ms"] * 1000
-            estimate["split_launch_proxy_by_M"].append({
-                "M": m, "stored_uniform_pair_us": uniform_us,
-                "extra_launch_proxy_us": proxy_us,
-                "extra_launch_proxy_percent": 100 * proxy_us / uniform_us,
-                "total_mixed_decoder_time_measured": False,
-                "M256_average_launch_proxy_assumed_to_transfer": True})
+        for workload, suffix, ms in workloads:
+            for m in ms:
+                ids = {f"routed:gate_up:M{m}{suffix}", f"routed:down:M{m}{suffix}"}
+                cells = [cell for cell in observed if cell["cell_id"] in ids]
+                if len(cells) != 2 or {cell["cell_id"] for cell in cells} != ids \
+                        or any(cell["kernel_time_us"] is None for cell in cells):
+                    raise ValueError(f"missing exact {workload} gate/up/down pair for M{m}")
+                uniform_us = sum(cell["kernel_time_us"] for cell in cells)
+                proxy_us = estimate["split_class_launch_proxy_ms"] * 1000
+                estimate["split_launch_proxy_by_M"].append({
+                    "M": m, "routing_workload": workload, "cell_ids": sorted(ids),
+                    "stored_uniform_pair_us": uniform_us,
+                    "extra_launch_proxy_us": proxy_us,
+                    "extra_launch_proxy_percent": 100 * proxy_us / uniform_us,
+                    "total_mixed_decoder_time_measured": False,
+                    "M256_average_launch_proxy_assumed_to_transfer": True})
+    # Source b7e62b6: unpaired E4M3 MMA8, R4 slot8, A_RING off.
+    # This stages a DISTINCT 16-KiB byte LUT for every class/projection.
+    lut_cases = []
+    lut_bytes, dynamic_cap = 1 << 14, 101_376
+    for bm in (64, 128):
+        for kind, projections, fixed in (("gate_up", 2, 47_312), ("down", 1, 30_736)):
+            base = fixed + 3 * 2 * bk * 8 * 4 + 2 * (bm - 64) * bk
+            for classes in (2, 3):
+                added = (classes - 1) * projections * lut_bytes
+                lut_cases.append({"kernel": kind, "BM": bm, "classes": classes,
+                    "uniform_dynamic_smem_bytes": base, "extra_lut_bytes": added,
+                    "modeled_dynamic_smem_bytes": base + added,
+                    "published_dynamic_cap_bytes": dynamic_cap,
+                    "fits_cap_in_model": base + added <= dynamic_cap})
     result = {
         "schema": "prismaquant.block_decode_estimate.v1",
         "intake_path": str(args.intake_json),
@@ -112,6 +132,11 @@ def main() -> None:
             "condition": "equal stored width, one prepared instruction stream, table selection hoisted out of decode loop",
             "different_width_rungs_satisfy_condition": False,
             "table_bandwidth_and_smem_penalty_measured": False},
+        "distinct_LUT_residency_model": {
+            "byte_lut_entries": 1 << 14, "cases": lut_cases,
+            "assumptions": "unpaired R4 E4M3 MMA8, A_RING off, same A/word stages; all distinct class LUTs staged simultaneously",
+            "same_table_rung_mix_needs_extra_luts": False,
+            "mixed_kernel_or_runtime_penalty_measured": False},
         "permutation": {
             "ideal_added_forward_launches_if_fully_folded": 0,
             "constraints": ["one consistent permutation at every consumer of a shared activation",
