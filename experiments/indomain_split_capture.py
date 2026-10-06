@@ -569,7 +569,7 @@ def persist_split_records(capture_root, census, census_path, records, seen,
     return verified
 
 
-def mode_quantum(args, guard) -> dict:
+def _run_prepared_quantum(args, guard) -> dict:
     """One layer-range quantum: same-pass split moments over the chain owner."""
     guard("research quantum startup")
     capture_root = Path(args.capture_root).resolve()
@@ -705,6 +705,10 @@ def mode_quantum(args, guard) -> dict:
     return {"fragment": str(fragment), "units": len(verified)}
 
 
+def mode_quantum(args, guard) -> dict:
+    return _run_prepared_quantum(args, guard)
+
+
 # -- join ------------------------------------------------------------------------
 
 def mode_join(args, guard) -> dict:
@@ -829,7 +833,7 @@ def verified_roles_carry_counts(fragment) -> bool:
         for record in units.values())
 
 
-def _toy_control_preflight(directory: Path, guard) -> dict:
+def _toy_control_preflight(directory: Path, guard, *, layers=1) -> dict:
     """The actual tiny one-layer GLM CPU control: census, prep, quantum, join."""
     import pytest
     tests = ROOT / "tests"
@@ -844,11 +848,11 @@ def _toy_control_preflight(directory: Path, guard) -> dict:
     text = config.text_config
     text.hidden_size = 64
     text.intermediate_size = 128
-    text.num_hidden_layers = 1
-    text.layer_types = ["linear_attention"]
-    text.mlp_layer_types = ["dense"]
-    text.indexer_types = ["full"]
-    text.first_k_dense_replace = 1
+    text.num_hidden_layers = layers
+    text.layer_types = ["linear_attention"] * layers
+    text.mlp_layer_types = ["dense"] * layers
+    text.indexer_types = ["full"] * layers
+    text.first_k_dense_replace = layers
     config.vision_config.out_hidden_size = 64
     toy_config = type(config).from_dict(config.to_dict())
     model = _build_model(toy_config).to(torch.bfloat16)
@@ -923,9 +927,9 @@ def _toy_control_preflight(directory: Path, guard) -> dict:
                 streaming_cache_slots=2, streaming_prefetch_workers=1,
                 streaming_cache_headroom_gb=0.0, **extra)
 
-        mode_prep(toy_args(capture_chain_ranges="0:1",
+        mode_prep(toy_args(capture_chain_ranges=",".join(f"{i}:{i+1}" for i in range(layers)),
                            boundary_storage=json.dumps(storage)), guard)
-        mode_quantum(toy_args(capture_layer_range="0:1"), guard)
+        mode_quantum(toy_args(capture_layer_range=f"0:{layers}"), guard)
         document = mode_join(toy_args(), guard)
         prep = chain.read_prep(root)
         for start, stop in chain.require_layer_tiling(prep["ranges"]):
@@ -934,23 +938,25 @@ def _toy_control_preflight(directory: Path, guard) -> dict:
             if not verified_roles_carry_counts(fragment):
                 raise ResearchRefused("the toy fragment carries no role counts")
         manifests = sorted((research_dir(root) / "layers").glob("L*/manifest.json"))
-        if len(manifests) != 1:
-            raise ResearchRefused("the toy split wrote one layer manifest, and one only")
-        manifest = json.loads(manifests[0].read_text())
-        if set(manifest["units"]) != set(census["counts"]):
+        if len(manifests) != layers:
+            raise ResearchRefused("the toy split did not publish every layer manifest")
+        published = {}
+        for path in manifests:
+            manifest = json.loads(path.read_text())
+            published.update(manifest["units"])
+        if set(published) != set(census["counts"]):
             raise ResearchRefused("the toy split did not cover the toy census scope")
-        for qname, roles in manifest["units"].items():
+        for qname, roles in published.items():
             total = sum(int(roles[role]["count"]) for role in (FIT, HELDOUT))
             if total != int(census["counts"][qname]):
-                raise ResearchRefused(
-                    f"{qname}: toy fit+heldout {total} != census {census['counts'][qname]}")
+                raise ResearchRefused(f"{qname}: toy split rows differ from census")
             if roles[FIT]["count"] == 0 or roles[HELDOUT]["count"] == 0:
                 raise ResearchRefused(f"{qname}: a toy role observed no rows")
         print(json.dumps({"research_preflight_toy": {
-            "units": len(manifest["units"]),
+            "units": len(published),
             "join": str(join_document_path(root)),
             "boundary_forward": True}}), flush=True)
-        return {"schema": document["schema"], "units": len(manifest["units"])}
+        return {"schema": document["schema"], "units": len(published)}
     finally:
         campaign._calibration_tokens = original_tokens
         kernels.undo()
