@@ -623,8 +623,13 @@ def preflight_census(args) -> tuple[dict, list[str]]:
     step("rung_admission", do_admission)
     step("split_manifest",
          lambda: verify_split_manifest(Path(args.capture_root)))
-    step("source_weight",
-         lambda: load_source_weight(Path(args.source), args.qname))
+
+    def do_source():
+        record = load_source_weight(Path(args.source), args.qname)
+        record.pop("tensor")
+        return record
+
+    step("source_weight", do_source)
 
     def do_roles():
         split = findings["split_manifest"]
@@ -642,14 +647,16 @@ def _json_safe_census(findings: dict) -> dict:
     """Census copy without torch tensors; every loaded tensor stays a stamp."""
     safe = {}
     for name, record in findings.items():
+        if isinstance(record, dict):
+            record = {key: value for key, value in record.items()
+                      if not torch.is_tensor(value)}
         if name == "layer_roles" and isinstance(record, dict) \
                 and "roles" in record:
             stripped = {key: value for key, value in record.items()
                         if key != "roles"}
             stripped["roles"] = {
                 role: {key: value for key, value in role_record.items()
-                       if key not in ("hessian", "inputs",
-                                      "prefix_sample_ids")}
+                       if not torch.is_tensor(value)}
                 for role, role_record in record["roles"].items()}
             safe[name] = stripped
         else:
