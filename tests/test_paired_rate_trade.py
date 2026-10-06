@@ -428,10 +428,11 @@ def test_real_cli_refuses_dominant_packed_layer_trade_before_selection(tmp_path,
 def test_real_cli_measured_runtime_rejects_a_runtime_feasible_dominated_trade(tmp_path, monkeypatch):
     """The measured-runtime proposal loop ANDs the serving verdict with the paired guard.
 
-    The proposal with the lowest predicted loss moves every unit from its baseline rate
-    and is byte- and runtime-feasible, but all of its benefit sits in one expert. Without a
-    baseline the run emits that proposal; with one the guard must reject it inside the
-    measured-runtime proposal filter and the emitted assignment must stay at the baseline.
+    The only proposal on the runtime frontier (every unit at the faster, lower-loss rate)
+    is byte- and runtime-feasible, but all of its benefit over the baseline sits in one
+    expert. Without a baseline the run emits it, which shows it is feasible on its own;
+    with a baseline the paired guard must reject it inside the measured-runtime proposal
+    filter, so the run refuses and no layer config is emitted.
     """
     import hashlib
     import json
@@ -469,14 +470,6 @@ def test_real_cli_measured_runtime_rejects_a_runtime_feasible_dominated_trade(tm
     baseline = tmp_path / "baseline.json"
     baseline.write_text(json.dumps(dict.fromkeys(names, HIGH)))
     (tmp_path / "layer.json").unlink()
-    allocator.main([*argv[1:], *flags, "--cost-baseline-assignment", str(baseline)])
-    assert load_assignment(tmp_path / "layer.json") == dict.fromkeys(names, HIGH)
-    meta = json.loads((tmp_path / "layer.json").read_text())["__prismaquant__"]
-    trace = meta["measured_runtime_search"]["target_diagnostics"]["exact_filter_trace"]
-    rejected = [row for row in trace if row["paired_rate_trade"]["refused"]]
-    assert rejected, trace
-    for row in rejected:
-        assert row["exact_assignment_payload_bpp"] <= 9.0
-        assert row["serve_constraints"]["feasible"] is True
-        assert row["feasible"] is False
-        assert row["paired_rate_trade"]["routed_layers"]["5"]["refused"] is True
+    with pytest.raises(SystemExit, match="no_runtime_frontier_assignment_passed_exact_checks"):
+        allocator.main([*argv[1:], *flags, "--cost-baseline-assignment", str(baseline)])
+    assert not (tmp_path / "layer.json").exists()
