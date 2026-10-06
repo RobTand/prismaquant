@@ -423,3 +423,53 @@ def test_real_cli_refuses_dominant_packed_layer_trade_before_selection(tmp_path,
                         "--no-packed-aggregation", "--no-fused-aggregation"])
     assert not (tmp_path / "layer.json").exists()
 
+
+
+def test_real_cli_measured_runtime_rejects_a_runtime_feasible_dominated_trade(tmp_path, monkeypatch):
+    """The measured-runtime proposal loop ANDs the serving verdict with the paired guard.
+
+    The only proposal on the runtime frontier (every unit at the faster, lower-loss rate)
+    is byte- and runtime-feasible, but all of its benefit over the baseline sits in one
+    expert. Without a baseline the run emits it, which shows it is feasible on its own;
+    with a baseline the paired guard must reject it inside the measured-runtime proposal
+    filter, so the run refuses and no layer config is emitted.
+    """
+    import hashlib
+    import json
+    import pickle
+    from prismaquant import allocator
+    from prismaquant.joint_aura import make_joint_aura_entry
+    from prismaquant.layer_config import load_assignment
+    from test_allocator_measured_runtime_cli import _main_fixture, admit_synthetic_table
+    admit_synthetic_table(monkeypatch)  # producer attestation only; parse and hash checks still run
+    names = [f"model.layers.5.mlp.experts.{e}.{p}_proj" for e in (0, 1)
+             for p in ("gate", "up", "down")]
+    _name, argv = _main_fixture(tmp_path, units=names, menu={LOW: (0.5, 1), HIGH: (8.5, 2)})
+    # Room for every proposal: the paired guard, not the prefill budget, is under test.
+    argv[argv.index("--slo-prefill-p95-ttft-ms") + 1] = "100"
+    payload = pickle.loads((tmp_path / "costs.pkl").read_bytes())
+    for name in names:
+        if ".experts.1." in name:
+            # Expert 1 keeps its own operator identity for the other rate but prices the
+            # same samples, so no expert-1 benefit finances the move off the baseline.
+            row = payload["costs"][name][HIGH]
+            payload["costs"][name][HIGH] = make_joint_aura_entry(
+                operator_identity=row["joint_operator_identity"], probe_identity=row["probe_identity"],
+                signed_components=payload["costs"][name][LOW]["signed_components_per_probe"])
+    (tmp_path / "costs.pkl").write_bytes(pickle.dumps(payload))
+    table_path = tmp_path / "runtime.json"
+    table = json.loads(table_path.read_text())
+    table["cost_sha256"] = hashlib.sha256((tmp_path / "costs.pkl").read_bytes()).hexdigest()
+    table_path.write_text(json.dumps(table))
+    monkeypatch.setenv("PRISMAQUANT_COST_UCB_Z", "0")
+    flags = ["--no-packed-aggregation", "--no-fused-aggregation"]
+
+    allocator.main([*argv[1:], *flags])
+    assert load_assignment(tmp_path / "layer.json") == dict.fromkeys(names, LOW)
+
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(dict.fromkeys(names, HIGH)))
+    (tmp_path / "layer.json").unlink()
+    with pytest.raises(SystemExit, match="no_runtime_frontier_assignment_passed_exact_checks"):
+        allocator.main([*argv[1:], *flags, "--cost-baseline-assignment", str(baseline)])
+    assert not (tmp_path / "layer.json").exists()
