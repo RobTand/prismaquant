@@ -843,10 +843,12 @@ def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, ta
             serving_target, unit, profile)
         from .allocator_candidates import candidate_rung_admission
         from .lane_spec import family_hook
-        admission = candidate_rung_admission(rung, target_profile=target_profile,
-            serving_context=context, rung_allowability=rung_allowability)
-        if not admission.admits(family_hook(family, "menu_mode_in_force")(None)):
-            return False
+        from .serving_profiles import load_serving_profile
+        if rung_allowability is not None or not load_serving_profile(target_profile).emulation_only:
+            admission = candidate_rung_admission(rung, target_profile=target_profile,
+                serving_context=context, rung_allowability=rung_allowability)
+            if not admission.admits(family_hook(family, "menu_mode_in_force")(None)):
+                return False
         if context is None:
             return fr.format_is_producer_eligible(rung)
         return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
