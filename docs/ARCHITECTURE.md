@@ -30834,6 +30834,35 @@ also stages a later round from a joined checkpoint.
 `tests/test_dispatch_stage_a_split.py` seals a round of the fixture run and
 drives the ordering with a fake `pbrun` over the fixture's real receipts.
 
+### Stage A CPU input/readset preflight (#2325)
+
+The existing joint_adjoint_capture CLI accepts explicit, default-off
+--cpu-input-preflight. It shares the capture calibration reader, profile
+selection and streamed metadata owners. When the action binds a data manifest,
+the existing sealed-readset owner decodes it. Expected source phases come from
+the actual loader's meta-model geometry and the normalized job's forward,
+reverse, split, seed or recovery schedule, independently of the manifest. Every
+expected phase must exist, then every loader-selected tensor must fit one
+declared range in its consumption phase. Global coverage, a wholly omitted
+phase, or two ranges meeting inside a tensor cannot satisfy that rule. The
+shared indexed/single-file checkpoint owner also handles unindexed sources;
+live-tree head extras (including LFM2 and DSv4) use the same resident-head
+selection as the actual loader, never an empty-head fallback.
+Resume phases use the same adjoint-checkpoint kind/session as the executing
+resume. Recovery frontiers replace only an actual forward walk, never restore
+one in a resumed chain. The CLI reads and authenticates selected-row diagnostic
+specs through the existing owner, binds them to the real draw, and uses their
+through boundary; unconsumed lower-chain phases are not required.
+
+The report explicitly says capture_executed=false and price_measured=false;
+success is only CPU input/readset evidence. No generation, checkpoint, model
+materialization or CUDA allocation is performed, and the GPU path's existing
+CUDA and staged-tier guards remain unchanged. Source-plan index metadata uses
+the loader's staged metadata owner; bounded safetensors headers retain the
+existing source-header allowance, not a bulk-weight pool fallback.
+Regressions: tests/test_joint_adjoint_cpu_preflight.py and
+tests/test_joint_adjoint_source_schedule.py.
+
 ### Stage A forward split (#738)
 
 The chain split (above) parallelizes the reverse chain of a resumed run. A
