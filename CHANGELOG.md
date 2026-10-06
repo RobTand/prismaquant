@@ -233,6 +233,19 @@
   unrequested families and refusing fabricated extras. The original raw joint evidence,
   normal opt-out paths and production/scientific qualification gates remain;
   no Fisher price, pin/default change or served artifact is inferred.
+
+- **The RTN FP8 helper keeps finite FP16 zero and tiny rows finite**
+  (#2352; `build_rtn_cache._fp8_round`, parent #1303). The 1e-8 max-abs
+  floor and the resulting `/448` scale underflow FP16 to `0.0`: an
+  all-zero row divides `0/0` to NaN, and a nonzero tiny row divides to
+  ±Inf, which the finite-only E4M3FN cast turns into NaN — every
+  element of the row comes back NaN either way. FP16 inputs now
+  round-trip through FP32 with the dequantized result cast back at the
+  output boundary; FP32 and BF16 keep the original arithmetic and
+  byte-identical outputs (pinned by
+  `test_fp8_round_preserves_fp32_bf16_recipe_bytes`), and the default
+  BF16 cache recipe is unchanged.
+
 - **`file_sha256hex` refuses a zero read count instead of hashing no bytes**
   (#2344). `read(0)` never advances, so a `block_size=0` caller — including
   every zero spelling `read` coerces (`False`, any `__index__` zero) — got
