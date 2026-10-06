@@ -61,8 +61,7 @@ def test_v2_window_zero_width_remains_a_producer_refusal(publication):
         _load(publication)
 
 
-def test_v2_native_tcq_uses_explicit_non_window_facts(publication):
-    from prismaquant.rung_allowability import load_rung_allowability
+def _native_tcq_publication(publication):
 
     _path, table = _versioned_publication(publication)
     family = "TESSERA_E2M1_K2"
@@ -104,6 +103,12 @@ def test_v2_native_tcq_uses_explicit_non_window_facts(publication):
         "excluded_run_tables": [], "excluded_q256": [],
         "wire": {key: value for key, value in stamp.items() if key != "q256"},
         "evidence": ["docs/measurements/fixture.json"]}
+    return target, table, entry
+
+
+def test_v2_native_tcq_uses_explicit_non_window_facts(publication):
+    from prismaquant.rung_allowability import load_rung_allowability
+    _path, _table, entry = _native_tcq_publication(publication)
     admitted = load_rung_allowability(publication, format_entry=entry, expected_kernel_build=BUILD)
     assert admitted.allows(896)
     assert admitted.provenance()["schema"] == "fleet.rung_allowability.v2"
