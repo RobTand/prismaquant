@@ -4,6 +4,15 @@
 
 ### Added
 
+- **Behavioral coverage of persisted multimodal calibration provenance**
+  (#2237, #2244, Refs #1921). All three visual-probe pickle writes are read
+  back after the actual loader blends a partial real dataset with synthetic
+  rows. Populated CPU forward/backward paths include a failed synthetic row
+  and check nonzero visual Fisher; loaded-row composition stays independent
+  of successful forwards. Duplicate synthetic-composition coverage and a
+  fixture-only shutdown-call assertion are removed; no blend policy or
+  numerical behavior changes.
+
 - **Default-off CPU input/readset preflight for joint adjoint capture**
   (#2325). `--cpu-input-preflight` shares the calibration and source metadata
   startup owners, derives expected source phases from the actual meta-model and

@@ -2816,6 +2816,7 @@ serve = [
     { name = "vllm" },
 ]
 test = [
+    { name = "pillow" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
@@ -2830,6 +2831,7 @@ requires-dist = [
     { name = "gguf", specifier = ">=0.17" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pillow", specifier = ">=10.0" },
+    { name = "pillow", marker = "extra == 'test'", specifier = ">=10.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=5" },
     { name = "pytest-timeout", marker = "extra == 'test'", specifier = ">=2.3" },
