@@ -423,3 +423,76 @@ def test_seed_refuses_changed_scoring_rows_before_linking_wire(
             assert pickle.load(handle)['costs'] == _payload['costs']
         assert list((new_cache/'wire').glob('*.tessera'))
     assert checkpoint.read_bytes() == original_manifest
+
+
+
+@pytest.mark.parametrize("changed", ["producer", "encoder", "mixed", "certified",
+                                     "tampered_wire", "other_wire_identity"])
+def test_main_producer_identity_resume_policy(monkeypatch, tmp_path, priced_campaign, capsys, changed):
+    from prismaquant import production_weight_cache as pwc
+    from prismaquant.cost_stage_checkpoint import prepare_journal, unit_path, write_unit
+    monkeypatch.delenv("PRISMAQUANT_DEV_MODE", raising=False)
+    (campaign, checkpoint, argv, _model, inputs), initial = priced_campaign()
+    original_manifest = checkpoint.read_bytes()
+    root = checkpoint.with_name(checkpoint.name + ".parts")
+    stored_manifest = json.loads(original_manifest)
+    stored = stored_manifest["identity"]
+    if changed == "other_wire_identity":
+        state = prepare_journal(root, stage="Tessera campaign", resume=True,
+            identity=stored, qnames=[UNIT], manifest_path=checkpoint)[2][UNIT]
+        state["wire_records"]["TESSERA_E4M3_K1_R1024"]["identity"]["encoder_fixture_id"] = "other fixture"
+        write_unit(root, stage="Tessera campaign", qname=UNIT,
+                   identity_sha256=stored_manifest["identity_sha256"], state=state)
+    original_shard = unit_path(root, UNIT).read_bytes()
+    if changed == "tampered_wire":
+        wire = next((tmp_path / "cache" / "wire").glob("*.tessera"))
+        blob = bytearray(wire.read_bytes())
+        blob[-1] ^= 1
+        wire.write_bytes(blob)
+    api = campaign._checkpoint_identity_api()
+    verifications = []
+    original_verify = api.verify_cached_unit
+
+    def verify(blob, record, expected):
+        verifications.append((record["identity"], expected))
+        return original_verify(blob, record, expected)
+
+    monkeypatch.setattr(api, "verify_cached_unit", verify)
+    if changed != "encoder":
+        monkeypatch.setattr(pwc, "_production_cache_source_sha256", lambda: "a" * 64)
+    monkeypatch.setattr(api, "encoder_source_sha256", lambda: "b" * 64)
+    _forbid_reencode(monkeypatch, campaign)
+    capsys.readouterr()
+    if changed == "mixed":
+        inputs["rows"][0, 0] += 1
+    elif changed == "certified":
+        monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    if changed in ("producer", "encoder"):
+        assert campaign.main(argv) == 0
+        assert _priced_cost_payload(tmp_path)["costs"] == initial["costs"]
+        assert verifications and all(observed["encoder_source_sha256"] == expected["encoder_source_sha256"]
+                                     for observed, expected in verifications)
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[DEV-MODE]")]
+        journal_lines = [line for line in lines if "Tessera campaign checkpoint" in line]
+        assert len(journal_lines) == 1
+        fields = [("encoder_source_sha256", "b" * 64)]
+        if changed == "producer":
+            fields.append(("prismaquant_source_sha256", "a" * 64))
+        for field, current in fields:
+            assert field in journal_lines[0] and stored[field] in journal_lines[0] and current in journal_lines[0]
+        wire_lines = [line for line in lines if "campaign wire" in line]
+        assert len(wire_lines) == 1
+        assert all(text in wire_lines[0] for text in ("encoder_source_sha256", stored["encoder_source_sha256"], "b" * 64))
+    else:
+        message = {"tampered_wire": "blob size/sha256 mismatch",
+                   "other_wire_identity": "encoder_fixture_id identity mismatch"}.get(changed, "checkpoint identity mismatch")
+        with pytest.raises(RuntimeError, match=message):
+            campaign.main(argv)
+        if changed in ("tampered_wire", "other_wire_identity"):
+            assert verifications, "wire verifier was skipped"
+        else:
+            assert "[DEV-MODE]" not in capsys.readouterr().out
+    assert checkpoint.read_bytes() == original_manifest
+    assert unit_path(root, UNIT).read_bytes() == original_shard
+
+

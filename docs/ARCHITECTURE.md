@@ -1,5 +1,90 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-05 (`issues/pq-687-journal-seal-fields`, base `7b02dafa602`,
+PQ #687, CEO dec-1005-212354-dc9d, D32): `prepare_journal` accepts an empty-by-default
+caller-declared set of top-level producer seal fields. The joint qualification
+journal declares only `implementation_sha256`; its plan, source, calibration,
+reader, projection backend, capture, cells and qualification policy remain
+comparability fields, including every nested or unknown field. The campaign checkpoint
+and stream journal declare only `prismaquant_source_sha256` and
+`encoder_source_sha256`. The existing campaign wire-reader wrapper also defers
+only that encoder source seal, supplying its stored value to the real
+`verify_cached_unit` call. The verifier still checks wire bytes and every other
+identity field; filename and measured-length checks run before the stamp.
+A producer-only mismatch goes through `seal_check`,
+prints one `[DEV-MODE]` line naming all moved fields and both values, and reuses
+stored shards. The manifest stays byte-unchanged, and its original digest binds
+reused and newly published shards; later resumes compare against that same
+stored identity, so no stamp rewrites or diverges the journal. Every undeclared
+field, a mixed mismatch and every byte-integrity refusal remain enforced.
+Certified mode (`PRISMAQUANT_DEV_MODE=0`) retains the existing refusal.
+This retires the freeze-the-tree / `--seed-checkpoint` workaround for producer-hash
+moves only; `--seed-checkpoint` stays the path for real correctness changes,
+and every comparability field still refuses.
+
+### Journal identity classification (PQ #687)
+
+All nested fields in composite rows remain comparability; unknown fields refuse
+by default. Source citations are to this rebased branch.
+
+## Joint qualification journal (producer declaration enabled after source integration through PR 2324)
+
+| Identity field | Classification | Reason and source |
+|---|---|---|
+| plan_sha256 | Comparability: refuse | Plan content selects measurement and population. tessera_joint_aura.py:3055 |
+| source_model_identity | Comparability: refuse | Model weights/configuration determine numbers. tessera_joint_aura.py:3056 |
+| source_execution | Comparability: refuse | Selects source execution and capture arithmetic. tessera_joint_aura.py:3057 |
+| implementation_sha256 | Producer provenance: seal | Whole-package producer identity, separate from explicit inputs. tessera_joint_aura.py:3058 |
+| calibration_input | Comparability: refuse | Draw and tokens affect scores. tessera_joint_aura.py:3059 |
+| reader_identity, including nested fields | Comparability: refuse | Decoder/runtime composite can change decoded values. tessera_joint_aura.py:3060 |
+| projection_backend, including nested fields | Comparability: refuse | Selects the numerical projection operator. tessera_joint_aura.py:3061 |
+| schema | Comparability: refuse | Journal state grammar must remain compatible. tessera_joint_aura.py:1939 |
+| inputs, including nested fields | Comparability: refuse | Binds census, plan and measured inputs. tessera_joint_aura.py:1940 |
+| campaign_checkpoint_sha256 | Comparability: refuse | Binds the exact measured parent checkpoint. tessera_joint_aura.py:1940 |
+| capture.path and capture.sha256 | Comparability: refuse | Selects canonical X/H bytes. tessera_joint_aura.py:1941 |
+| capture_identity, including nested fields | Comparability: refuse | Contains draw, shapes, initialization, runtime and source data. tessera_joint_aura.py:1941 |
+| cells_digest_schema | Comparability: refuse | Defines digest framing/interpretation. tessera_joint_aura.py:1942 |
+| cell_count | Comparability: refuse | Defines the complete qualified population. tessera_joint_aura.py:1943 |
+| cells_sha256 | Comparability: refuse | Commits cell records, paths and origin fields. tessera_joint_aura.py:1943 |
+| qualification_window, including nested fields | Comparability: refuse | Bound qualification policy is not producer-only provenance. tessera_joint_aura.py:1944 |
+| capture_load_policy, including nested fields | Comparability: refuse | Selects capture loading/verification behavior. tessera_joint_aura.py:1944 |
+| source_capture_compatibility, including nested fields | Comparability: refuse | Carries the source/capture compatibility contract. tessera_joint_aura.py:1945 |
+| max_render_bytes | Comparability: refuse | Explicit qualification resource configuration remains bound. tessera_joint_aura.py:1946 |
+
+## Campaign checkpoint, stream journal and wire reader
+
+| Identity field | Classification | Reason and source |
+|---|---|---|
+| family_restriction.policy and structure_by_unit | Comparability: refuse | Restricts legal families and dense/routed structure. tessera_campaign.py:2471–2473 |
+| stack_sampling_identity, including nested fields | Comparability: refuse | Coordinates, inclusion probabilities and audit draw affect estimates. tessera_campaign.py:2474–2475 |
+| campaign_schema | Comparability: refuse | Defines checkpoint state grammar. tessera_campaign.py:2476 |
+| currency | Comparability: refuse | Defines score meaning. tessera_campaign.py:2477 |
+| settings.*, every retained setting | Comparability: refuse | Encoding/scoring/acquisition settings remain bound; none declared a seal. tessera_campaign.py:2397–2466,2478 |
+| calibration, including nested fields | Comparability: refuse | Binds tokens and calibration draw/input. tessera_campaign.py:2479 |
+| serving_scope, including nested fields | Comparability: refuse | Defines eligible measurement/serving population. tessera_campaign.py:2480 |
+| encoder_recipe, including nested fields | Comparability: refuse | Encoding configuration determines wires and errors. tessera_campaign.py:2481 |
+| prismaquant_source_sha256 | Producer provenance: seal | Whole-package producer digest, separate from explicit inputs/recipe. tessera_campaign.py:2482 |
+| encoder_source_sha256 | Producer provenance: seal | Encoder producer digest, separate from recipe/tensor contents. tessera_campaign.py:2483 |
+| input_global_scale_policy | Comparability: refuse | Changes activation quantization/scoring. tessera_campaign.py:2484 |
+| expert_projection.source and stacks, including nested fields | Comparability: refuse | Identifies source weights and routed members. tessera_campaign.py:2489–2496 |
+| units roster | Comparability: refuse | Binds exactly the priced population. tessera_campaign.py:2497,2520 |
+| units.*.weight, all receipt fields | Comparability: refuse | Weight shape, dtype and bytes determine results. tessera_campaign.py:2503–2505 |
+| units.*.scoring_rows, all receipt fields | Comparability: refuse | Actual scoring rows affect errors even with Hessian off. tessera_campaign.py:2506–2508 |
+| units.*.hessian, all receipt fields | Comparability: refuse | Hessian values affect encoding/scoring. tessera_campaign.py:2509–2514 |
+| units.*.input_global_scale | Comparability: refuse | Calibration maximum affects the activation quantizer. tessera_campaign.py:2515–2517 |
+| units.*.menu | Comparability: refuse | Defines legal measured rungs. tessera_campaign.py:2518 |
+| Wire-reader record.identity.encoder_source_sha256, second site | Producer provenance: seal | Only this stored field is supplied to the real verifier before stamp-and-continue. tessera_campaign.py:3207–3229 |
+| Wire-reader record.identity.* except encoder_source_sha256 | Comparability: refuse | Recipe, source/H identities and encoder fixture remain exact; grammar, filename and own-byte checks remain. tessera_campaign.py:3196–3234 |
+| settings.acquisition_origin, including every nested field | Comparability: refuse | Authenticated request identity, deferred domains and work count affect the measured scope; retained in settings. tessera_campaign.py:996–1002,2397,7550–7551 |
+| settings.acquisition_schedule, including every atomic unit/family/rate | Comparability: refuse | Exact admitted acquisition work remains bound in settings. tessera_campaign.py:2397,7550 |
+| calibration optional intake receipt, including every nested field | Comparability: refuse | Intake binds actual draw/input; duplicate path settings are excluded, never declared producer seals. tessera_campaign.py:2450–2455,2479 |
+
+## Adjacent acquisition and readset correctness
+
+The current main has no separate `units.*.acquisition_source_weight` journal field. Actual acquisition weight shape, dtype, logical bytes and content digest are checked against authenticated requests (`tessera_campaign.py:1005–1022,7694–7707`); all remain correctness refusals. Any later such identity field stays undeclared comparability. Source/capture authentication and replay readset/frontier agreement remain unchanged (`tessera_joint_aura.py:1911–1928,1951–1979`): they bind actual capture bytes, roster and execution reads, not producer-only hashes.
+
+PR 2313 is closed because its exact approved production head `b987bff97244397e04f14b7a54727d58a43d45fc` landed through merged PR 2324 (`7b02dafa602a09fc5ed14d0aae746d98a9e4ee96`); no literal PR 2313 merged-state gate exists. Every field added by future callers is comparability unless explicitly classified and declared; this deliverable declares no other caller.
+
 Re-stamped 2026-10-05 (PR #2317 correction, PQ #2320, Refs #1301):
 the CEO-authorized cutoff retains 40 proved serializer calls in 32 scopes
 across 24 files and restores 18 individual unproved calls to their exact
@@ -51,7 +136,6 @@ package/native qualification. Any post-window source or package move needs
 its own applicable evidence. Artifact allocation, exact EXL3 client/protocol,
 own v2 graph receipt, compiled admission, quality and publication gates
 remain the responsibilities of their existing owners.
-
 Re-stamped 2026-10-05 (`issues/pq-2273-2299`, base `a1f852f6ee3`, PQ #2273):
 seed wire filenames must match their priced unit/rung before linking in campaign
 adoption or selected-wire materialization; a real campaign resume regression pins
@@ -2426,8 +2510,11 @@ dispatcher's demand could not cover the head the row then chose.
   (`tessera_row_stream.RECEIPT_FIELDS`), which the stream head can only
   re-derive one entry at a time. The row takes them from the manifest
   (`cost_stage_checkpoint.stored_manifest_identity`,
-  `_manifest_unit_receipts`), and `prepare_journal` compares every other field
-  of the run identity by name before the first entry is read. A receipt that
+  `_manifest_unit_receipts`), and `prepare_journal` compares every undeclared
+  field of the run identity by name before the first entry is read. Campaign
+  producer hashes are caller-declared seals: only those moves stamp and reuse
+  stored shards in dev mode; mixed or comparability changes still refuse.
+  A receipt that
   the manifest does not record reads as `CHECKPOINT_RECEIPT_ABSENT` and is
   refused by field.
 - `RowStream.expect_identities` then requires each entry's first read to

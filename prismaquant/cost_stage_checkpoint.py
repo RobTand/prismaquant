@@ -396,6 +396,7 @@ def prepare_journal(
     resume: bool,
     identity: Mapping[str, object],
     qnames: Sequence[str],
+    seal_fields: set[str] | frozenset[str] = frozenset(),
     manifest_path: str | Path | None = None,
     unit_workers: int = 1,
     unit_io_workers: int | None = None,
@@ -411,6 +412,11 @@ def prepare_journal(
     ``unit_io_workers`` instead selects 1-16 I/O threads independently of that
     core count; every thread inherits the same assigned CPU mask. Combining
     the two worker policies refuses. Other callers remain serial by default.
+    Only caller-declared top-level producer fields are seals. A seal-only move
+    stamps through dev_mode.seal_check and retains the original manifest and
+    digest, including for new shards. Repeated resumes compare against that
+    same stored identity; they never rewrite or diverge its shard binding.
+    Undeclared fields and each manifest/shard's own byte integrity still refuse.
     """
     if type(unit_workers) is not int or unit_workers < 1:
         raise ValueError("journal unit_workers must be a positive integer")
@@ -475,12 +481,46 @@ def prepare_journal(
                 or manifest.get("identity") != canonical_identity):
             from prismaquant.production_weight_cache import first_identity_difference
 
-            difference = first_identity_difference(
-                manifest.get("identity"), canonical_identity
-            )
-            if difference is not None:
-                field, stored, expected = difference
-                _mismatch(stage, field=field, stored=stored, expected=expected)
+            stored_identity = manifest.get("identity")
+            original_difference = first_identity_difference(stored_identity, canonical_identity)
+            if seal_fields and isinstance(stored_identity, Mapping):
+                difference = first_identity_difference(
+                    {key: value for key, value in stored_identity.items()
+                     if key not in seal_fields},
+                    {key: value for key, value in canonical_identity.items()
+                     if key not in seal_fields},
+                )
+                if difference is not None:
+                    # A mixed mismatch keeps the original first-field refusal.
+                    field, stored, expected = original_difference
+                    _mismatch(stage, field=field, stored=stored, expected=expected)
+                stored_sha256 = canonical_json_sha256(
+                    stored_identity, where=f"{stage} stored identity")
+                if manifest.get("identity_sha256") != stored_sha256:
+                    _mismatch(stage, field="manifest.identity_sha256",
+                              stored=manifest.get("identity_sha256"), expected=stored_sha256)
+                moved = sorted(key for key in seal_fields
+                               if ((key in stored_identity) != (key in canonical_identity)
+                                   or stored_identity.get(key) != canonical_identity.get(key)))
+                if moved:
+                    from .dev_mode import seal_check
+                    from .production_weight_cache import identity_value_for_error
+
+                    changes = "; ".join(
+                        f"{key}: stored={identity_value_for_error(stored_identity.get(key, '<absent>'))} "
+                        f"current={identity_value_for_error(canonical_identity.get(key, '<absent>'))}"
+                        for key in moved)
+                    field, stored, expected = original_difference
+                    seal_check(f"producer identity [{changes}]", stored_sha256, identity_sha256,
+                               where=f"{stage} checkpoint",
+                               refusal=lambda: _mismatch(stage, field=field, stored=stored, expected=expected))
+                    # Keep the stored binding for both reused and newly written
+                    # envelopes, rather than silently re-identifying the run.
+                    identity_sha256 = stored_sha256
+            else:
+                if original_difference is not None:
+                    field, stored, expected = original_difference
+                    _mismatch(stage, field=field, stored=stored, expected=expected)
         if manifest.get("identity_sha256") != identity_sha256:
             _mismatch(
                 stage,

@@ -46,6 +46,21 @@
 
 ### Changed
 
+- **Caller-declared journal producer seals** (#687, CEO
+  dec-1005-212354-dc9d, D32). `prepare_journal` defaults to no seal fields;
+  the joint qualification journal declares only `implementation_sha256`;
+  the campaign checkpoint and stream journal declare only the PrismaQuant and
+  encoder source hashes. Producer-only drift stamps one `[DEV-MODE]` line
+  and reuses stored shards without rewriting their manifest or digest.
+  The campaign wire-reader wrapper defers only `encoder_source_sha256` and
+  still calls the real cached-unit verifier with that stored field; wire bytes,
+  every other identity field, filename and measured length remain checked.
+  Mixed mismatches, every comparability field and byte-integrity checks still
+  refuse, as does certified mode (`PRISMAQUANT_DEV_MODE=0`). This retires
+  the freeze-the-tree / `--seed-checkpoint` workaround for producer-hash moves
+  only; `--seed-checkpoint` stays the path for real correctness changes,
+  and every comparability field still refuses.
+
 - **Stage the exact public Tessera master D13 pin** (#2262): serving JSON,
   all serving/development constants and the complete reviewed answer bind
   `2dbac1910c88254d9c6391f02a34c4b07e516803` / contract v56
