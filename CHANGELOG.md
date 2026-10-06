@@ -214,6 +214,14 @@
 
 ### Fixed
 
+- **Bind admitted produced output without input residency** (#2339). Queue
+  discovery lives in the allowlisted staged-lease seam over the same sealed
+  generation; the campaign container carries its launcher-owned
+  `PRISMABUILD_QUEUE_ROOT` and refuses spec forgeries. Legacy residency-map
+  discovery stays with PB.
+  Live-attempt, declared-template, own-byte and output-budget guards remain
+  unchanged; no fake map or input staging declaration is introduced.
+
 - **Sealed io buffers open where this interpreter's os lacks
   `memfd_create`** (#1896). A portable CPU venv (`pq-cpu312` on dl380g10)
   has no `os.memfd_create`, and every io engine stream entry died on the

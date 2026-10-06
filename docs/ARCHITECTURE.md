@@ -1,5 +1,16 @@
 # PrismaQuant Architecture
 
+Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
+lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
+applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,
+legacy residency-map path otherwise) after resolving the same sealed
+generation. Discovery is independent of whether inputs have residency.
+The campaign container forwards this launcher-owned value and refuses a
+spec that forges it; the older strict tuple remains accepted without it.
+Live-claim/nonce/scope, declared-template, own-byte and budget checks are
+unchanged. Unstaged D38 must bind the actual admitted produced-output owner
+on CPU before any subsequent GPU capture, not just sample its input files.
+
 Re-stamped 2026-10-06 (D41, PQ #2328): production allocations of Tessera
 rungs require a current measured allowability table.
 `--tessera-rung-allowability-root` names its publication root;
@@ -6033,11 +6044,12 @@ prewrite per group of files it creates (extension, inputs, manifests,
 records, launch), writes them first-writer as before and commits them with
 `produced_output.commit_origin_batch`; a later action can declare them with
 `origin_batch_manifest`. Without the flag both tools write exactly as before,
-including inside a test shard. `--residency stage` is required, not a tuning
-choice: PrismaBuild sets `PRISMABUILD_RESIDENCY_MAP` only for an action with a
-residency plan, and the produced-output binding derives the queue root from
-it. The preparation's reads are plain file reads, so the staged copy is not
-yet what they read. Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
+including inside a test shard. The preparation still declares staged input
+residency, but produced-output queue discovery does not depend on it:
+the allowlisted staged-lease seam prefers `PRISMABUILD_QUEUE_ROOT` and
+owns the legacy residency-map path rule. The preparation's reads remain plain
+file reads, so the staged copy is not yet what they read.
+Gates: `tests/test_stage_b_prep_io_1070.py` (an audit
 hook shows every file the generator opens is in its manifest),
 `tests/test_stage_b_prep_produced_1070.py` (a real admitted owner on the
 published generation pinned in `tests/pb_runtime_generation_pin.json`: every file
