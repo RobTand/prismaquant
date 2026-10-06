@@ -362,8 +362,6 @@ def test_seal_constants_resolve_without_cpython_build_time_names():
         import os
         import sys
 
-        import prismaquant.io_engine as io_engine
-
         names = ['F_SEAL_SEAL', 'F_SEAL_SHRINK', 'F_SEAL_GROW', 'F_SEAL_WRITE',
                  'F_ADD_SEALS', 'F_GET_SEALS']
         for name in names:
@@ -372,6 +370,8 @@ def test_seal_constants_resolve_without_cpython_build_time_names():
         for name in ('memfd_create', 'MFD_CLOEXEC', 'MFD_ALLOW_SEALING'):
             if hasattr(os, name):
                 delattr(os, name)
+
+        import prismaquant.io_engine as io_engine
 
         assert io_engine._SEALS == 0b1111
         assert io_engine._F_ADD_SEALS == 1033
