@@ -169,10 +169,11 @@ def test_fp8_round_fp16_ordinary_row_reconstruction_contract():
     # scale s = 2/448; E4M3FN quotients x/s round to
     # [80, -256, 112, -56, 448, -28, 14, 224]; dequantizing (q_hat * s,
     # in FP32) and casting to FP16 gives [0.357177734375, -1.142578125,
-    # 0.5, -0.25, 2, -0.125, 0.0625, 1]: 80*s = 0.3571428... sits just
-    # below the FP16 midpoint 1463.5*2**-12, so it casts up to
-    # 1464*2**-12 = 0.357177734375, and -256*s = -1.142857... casts to
-    # -1170*2**-10 = -1.142578125. The q=448 row max returns bit-exact.
+    # 0.5, -0.25, 2, -0.125, 0.0625, 1]: 80*s = 0.3571428... lies
+    # between FP16 midpoints 1462.5*2**-12 and 1463.5*2**-12,
+    # so it rounds to 1463*2**-12 = 0.357177734375. Likewise,
+    # -256*s = -1.142857... rounds to -1170*2**-10 = -1.142578125.
+    # The q=448 row max returns bit-exact.
     expected = torch.tensor(
         [[0.357177734375, -1.142578125, 0.5, -0.25, 2.0, -0.125, 0.0625, 1.0]],
         dtype=torch.float16,
