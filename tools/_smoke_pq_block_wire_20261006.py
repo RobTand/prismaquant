@@ -313,7 +313,7 @@ def refusals():
                    + BD0["meta_bytes"]["lut_index_bytes"]
                    + BD0["meta_bytes"]["scale_global_bytes"]
                    + BD0["meta_bytes"]["scale_rows_bytes"] + 3)
-    bad_rate[rate_offset] = 9
+    bad_rate[rate_offset] = 15  # above the units' window_bits of 14
     cases["rate_above_window_bits"] = reseal(bad_rate)
     dirty_pad = bytearray(PADBLOB)
     dirty_pad[len(dirty_pad) - 32 - 1] = 0x01  # last pad byte, then reseal

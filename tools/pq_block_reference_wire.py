@@ -269,6 +269,7 @@ def _plan(
     lut_table_bytes = sum(2 + len(t) for t in tables)
     meta = {
         "distinct_luts": len(tables),
+        "lut_count_bytes": 2,
         "lut_table_bytes": lut_table_bytes,
         "lut_index_bytes": 2 * num_parents,
         "scale_global_bytes": 4 * num_parents,
