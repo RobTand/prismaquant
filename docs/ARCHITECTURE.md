@@ -876,6 +876,21 @@ source-header rank/non-Linear exclusions and independent export/serving gates,
 formats, numerical methods, pins, caches and production defaults are unchanged.
 CPU fixture choices supply no multimodal quality, wire, runtime or performance
 qualification. The representative GPU/serving acceptance remains in #1921.
+
+Re-stamped 2026-10-06 (Refs #1921, #2244, persisted calibration provenance):
+both multimodal visual probe passes persist `meta.calibration_source` with
+`dataset`, `requested`, `real_loaded` and `synthetic_loaded`. These are rows
+actually loaded, not the real/synthetic composition of successful forwards.
+The streaming final write counts successes in `nsamples`; the non-streaming
+pass and streaming no-match exit retain the loaded-row budget there. Blend
+policy and Fisher normalization are unchanged.
+`TestMultimodalProbePassIntegration` in `tests/test_prismaquant_visual_phase2.py`
+reads all three emitted pickle paths using the actual loader, a partial real
+dataset, its synthetic fallback and a populated CPU model. A failed synthetic
+forward leaves the loaded composition intact; successful paths also require
+nonzero visual Fisher. This proves persistence, not a consumer refusal policy,
+real-checkpoint calibration, GPU arithmetic or served qualification.
+
 Re-stamped 2026-10-02 (Refs #1271, MTP source parameter binding): the shared
 MTP probe-identity admission compares each unit's exact positive integer
 parameter count with the product of its validated joint-AURA source-weight

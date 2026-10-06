@@ -480,7 +480,9 @@ def load_multimodal_calibration(
     (`calibration_source`) so provenance cannot misread a blended capture
     as a real one. The counts describe rows *loaded* — dataset rows
     accepted plus stub rows built — not forwards that succeeded; the
-    passes' own `nsamples` reports forward successes separately.
+    streaming final-write `nsamples` reports forward successes separately.
+    The non-streaming pass and streaming no-match exit retain their loaded-row
+    `nsamples` budget; neither is a count of successful visual forwards.
     """
     triples: list[dict] = []
     if dataset_name == "synthetic":
