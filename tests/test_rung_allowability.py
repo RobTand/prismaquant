@@ -28,6 +28,11 @@ def publication(tmp_path, monkeypatch):
     return root
 
 
+def allowability_cli_args(publication):
+    builds = publication / "observed-builds.json"
+    builds.write_text(json.dumps({FAMILY: BUILD}))
+    return ["--tessera-rung-allowability-root", str(publication),
+            "--tessera-rung-kernel-builds", str(builds)]
 
 
 def _formats():
@@ -172,11 +177,8 @@ def test_allocator_cli_consumes_fixture_and_excludes_cheaper_unmeasured_rows(
     payload["formats"] = names
     cost_path.write_bytes(pickle.dumps(payload))
     argv[argv.index("--formats") + 1] = ",".join(names)
-    builds = tmp_path / "observed-builds.json"
-    builds.write_text(json.dumps({FAMILY: BUILD}))
     allocator.main([*argv, *_cli_scope(), "--no-fused-aggregation", "--no-packed-aggregation",
-                    "--tessera-rung-allowability-root", str(publication),
-                    "--tessera-rung-kernel-builds", str(builds)])
+                    *allowability_cli_args(publication)])
     layer = json.loads((tmp_path / "layer.json").read_text())
     from prismaquant.layer_config import load_assignment
     assert set(load_assignment(tmp_path / "layer.json").values()) == {names[0]}
