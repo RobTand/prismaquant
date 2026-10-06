@@ -23692,7 +23692,7 @@ draw or scope, checks every observed unit against it, and only then stamps the
 scope's values.
 
 An optional dependent `capture` action (`--capture-calibration-out`) computes
-all uncapped Hessians and first-row float32 scoring inputs once using the same
+the requested uncapped Hessians and first-row float32 scoring inputs once using the same
 census and exits before encoding. The existing activation-cache writer and
 cost-stage journal seal a complete `prismaquant.tessera_calibration_cache.v2`
 manifest. The shared cache API also accepts explicit
@@ -23703,7 +23703,31 @@ preserve each unit's full-draw Hessian/count/maxima and retained float32 prefix,
 and reject missing, unknown or shape-incompatible units. Omitting the selection
 retains the existing full-census identity and completeness rule; merely deleting
 units from an implicit full identity is not a selected capture. This scope
-metadata changes neither the encoded wire nor serving kernels.
+metadata changes neither the encoded wire nor serving kernels. Fresh capture
+also accepts the existing `--units` whole-group selection grammar: the prep
+resolves names from census anchor groups without loading a model, and model
+rows confirm those memberships before collection. Sampled, audited, partitioned
+and exact-member pricing selections are not whole-group capture requests. The
+selected capture still forwards every source layer and keeps the full draw;
+quanta with no requested units may record an empty unit map only for an explicit
+selected identity whose unit layers are unambiguous. The join still requires
+full layer tiling, the complete initialization witness and every requested unit.
+Completed-capture reuse refuses a different requested coverage instead of silently
+returning the stored scope. Automatic fresh recording remains refused until an
+enforced immutable-source provider is qualified (`require_automatic_capture_source_recording`,
+Refs #2010/#2008); selected-unit support does not bypass that safety admission.
+The optional `_collect_activations(..., row_consumer=...)` seam receives each
+canonical shared input group once per batch, before prefix capping and
+independently of built-in Hessian collection. Its default is off; consumers
+must own retained bytes because the passed rows may alias source activations.
+`experiments/indomain_split_capture.py` uses the seam for the explicitly
+authorized D42 Stage 1 research route: fixed whole-sample fit and held-out
+coordinates accumulate separate unnormalized moments in one forward pass,
+and their per-unit counts must sum to the full-draw census. Stable publication
+is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
+files relative to the capture root. This research publication is not an
+ordinary production capture manifest and confers no immutable-provider
+qualification. The automatic admission guard remains unchanged.
 `plan --calibration-cache` binds that manifest path and SHA256 into
 each anchor action. The action verifies its actual initializer, backend,
 runtime, complete source bytes, calibration and geometry. By default
@@ -31538,7 +31562,9 @@ retried in parts. `prismaquant/capture_layer_chain.py` cuts it into rows
 that each run a contiguous layer range `[a, b)` and pass the hidden states
 on through the boundary storage. `tessera_campaign --capture-chain` runs
 each row; all three kinds require `--streaming` and
-`--capture-calibration-out`.
+`--capture-calibration-out`. A selected fresh capture uses the same full layer
+chain and boundary format. Only collection and published unit coverage narrow;
+an empty selected range still forwards its batches and contributes its witness.
 
 **Prep** (`--capture-chain prep --capture-chain-ranges 0:a,a:b,...
 --capture-chain-boundary-storage JSON`). Loads no model and reads no source

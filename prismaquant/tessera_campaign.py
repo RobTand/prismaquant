@@ -3536,7 +3536,7 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
                          *, want_hessian: bool = False, profile=None,
                          boundary_consumer=None, forward_batch=None, resource_check=None,
                          shared_packed_inputs: bool = False, on_forwards_complete=None,
-                         expected_shared_input_groups=None):
+                         expected_shared_input_groups=None, row_consumer=None):
     """One model forward per batch, for dense and declared packed projections.
 
     Returns ``(rows, hessians, token_counts, max_abs)``. Counts describe every
@@ -3557,6 +3557,15 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
     share internal accumulation. The existing store retains private, bounded
     FP32 device prefixes until output materialization; returned CPU H/X tensors
     remain independent for every qname. This is not a new activation cache.
+
+    ``row_consumer(unit_names, flat_rows)`` is an optional, default-off research
+    seam. When given, it is called on the UNCAPPED flat rows of every unique
+    input group -- dense pre-hook or routed derivation, both feed ``accumulate``
+    -- once per group per batch, with the tuple of exact unit names sharing that
+    input (``group_members``). The call happens before the scoring-prefix cap
+    and independently of ``want_hessian``; zero-row calls never reach it. The
+    consumer owns its own copies; the collector retains no consumer state and
+    the default ``None`` keeps the historical behavior bit-identical.
 
     Three different things come out of the same hook, and they have different
     row budgets on purpose:
@@ -3631,6 +3640,12 @@ def _collect_activations(model, targets, tokens, max_rows: int, device,
         # Python max(previous, NaN) preserves previous. fmax keeps that exact
         # policy while avoiding a device-to-host scalar read on every batch.
         amax[name] = torch.fmax(previous_max, batch_max)
+        if row_consumer is not None:
+            # Research seam: the full uncapped rows, once per unique input
+            # group, before any scoring-prefix cap and regardless of
+            # ``want_hessian``.  The consumer must own its bytes; the flat
+            # tensor may still alias a source/derived activation plane.
+            row_consumer(tuple(group_members[name]), flat)
         if want_hessian:
             # Every row, before any cap: see the docstring.
             f32 = flat.to(dtype=torch.float32)
@@ -7291,10 +7306,17 @@ def _main(argv, *, source_scope, waits) -> int:
                              for member in population.members})
         if census["unit_shapes"] != scope_shapes:
             raise RuntimeError("calibration census geometry differs from the loaded model")
-    if runner is not None and not selected_source:
+    completed_capture_reuse = bool(args.capture_calibration_out and args.capture_chain is None
+        and (Path(args.capture_calibration_out) / "capture_manifest.json").is_file())
+    if completed_capture_reuse and runner is not None:
+        # Reuse expects the recorded full witness; no new traversal is claimed.
+        model_load_contract = census["model_load_contract"]
+        runner.shutdown()
+        runner = None
+    if runner is not None and not selected_source and not completed_capture_reuse:
         try:
             return _run_streamed_calibration(args, runner, profile, mode=mode, population=population,
-                dense_targets=census_dense_targets, expert_targets=census_expert_targets,
+                dense_targets=dense_targets, expert_targets=expert_targets,
                 scope_groups=scope_groups, tokens=tokens, corpus_text=corpus_text, census=census,
                 context_by_unit=context_by_unit, attention_implementation=attention_implementation,
                 capture_runtime=capture_runtime, structure_by_unit=structure_by_unit,

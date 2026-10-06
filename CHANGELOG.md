@@ -9,7 +9,18 @@
   and publication retain full-draw H/counts while requiring exactly the
   requested entries. Empty or unknown selections, missing requested units and
   implicit partial full-census captures refuse. Existing full capture identities,
-  wire formats and serving kernels stay unchanged.
+  wire formats and serving kernels stay unchanged. The existing `--units`
+  whole-group grammar flows through prep, selected collection, empty-range
+  forwarding, join and coverage-checked reuse. Full source-layer traversal and
+  full-draw row counts remain required. The immutable-provider safety refusal
+  remains enforced; this is not admission of real automatic model capture.
+
+- **Default-off uncapped calibration-row consumer**. The activation collector
+  can hand each canonical shared input group to an owner before prefix capping,
+  independently of built-in Hessian collection. The D42 Stage 1 research entry
+  uses this seam for same-pass disjoint fit/held-out moments and checks their
+  row-count sum against the saved full-draw census. It does not publish an
+  ordinary production capture or qualify immutable source delivery.
 
 - **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
   rows** (#1962). `make_joint_aura_entry` can publish a

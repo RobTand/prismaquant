@@ -376,16 +376,17 @@ def quantum_range_requires_units(identity: Mapping, start: int, stop: int) -> bo
     selected = identity.get("unit_scope") == "selected"
     requires = bool(not selected and identity.get("units"))
     for name in identity.get("units", {}):
-        components = DOTTED_LAYER_QNAME.findall(name)
-        if len(components) != 1:
+        first = DOTTED_LAYER_QNAME.search(name)
+        # Components can share a separator: .layers.0.layers.1. has two.
+        second = None if first is None else DOTTED_LAYER_QNAME.search(name, first.start() + 1)
+        if first is None or second is not None:
             if selected:
                 raise CaptureChainRefused(
-                    f"selected unit {name!r} names {len(components)} decoder "
-                    "layers, not exactly one; the chain cannot tell which "
-                    "quantum records it")
+                    f"selected unit {name!r} names no unambiguous decoder layer; "
+                    "the chain cannot tell which quantum records it")
             requires = True
             continue
-        if start <= int(components[0]) < stop:
+        if start <= int(first.group(1)) < stop:
             requires = True
     return requires
 
