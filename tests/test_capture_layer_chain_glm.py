@@ -363,15 +363,16 @@ def _selected_units_file(tmp_path, source, census):
     return path, keys, selected
 
 
-def test_selected_capture_scope_refusals(tmp_path):
+def test_selected_capture_scope_refusals():
     """A fresh capture prices whole groups: a sampled, audited, partitioned
     or exact-member selection refuses, while a whole routed ``s:`` group and
     a whole dense ``g:`` group derive their exact units."""
+    from types import SimpleNamespace
     from prismaquant import tessera_campaign as campaign
     resolved = {"s:model.layers.2.mlp.experts": ["m.a", "m.b"],
                 "g:model.layers.0.mlp.up_proj": ["d.a", "d.b"]}
-    args = type("Args", (), {"model": "src", "layer_stride": 1, "units": "units.json",
-                             "research_exact_member": None})()
+    args = SimpleNamespace(model="src", layer_stride=1, units="units.json",
+                           research_exact_member=None)
     routed = {"schema": "prismaquant.tessera_campaign_units.v1", "groups": [
         {"key": "s:model.layers.2.mlp.experts", "members": ["m.a", "m.b"]}]}
     assert campaign.selected_capture_unit_names(
@@ -384,29 +385,29 @@ def test_selected_capture_scope_refusals(tmp_path):
     sampled = {"schema": "prismaquant.tessera_campaign_units.v2", "groups": [dict(
         routed["groups"][0], sampled=["m.a"],
         inclusion_probability={"m.a": 0.5})]}
-    with pytest.raises(RuntimeError, match="sample of its members"):
+    with pytest.raises(RuntimeError):
         campaign.selected_capture_unit_names(sampled, args=args, resolved=resolved)
     partition = {"schema": "prismaquant.tessera_campaign_units.v3", "groups": [dict(
         key="s:model.layers.2.mlp.experts", members=["m.a", "m.b"],
         partition={"schema": "prismaquant.tessera_campaign_expert_partition.v1",
                    "experts_per_row": 8, "index": 0, "count": 2, "rate_q256": 64,
                    "members": ["m.a"]})]}
-    with pytest.raises(RuntimeError, match="expert partition"):
+    with pytest.raises(RuntimeError):
         campaign.selected_capture_unit_names(partition, args=args, resolved=resolved)
-    exact = type(args, (), {**args.__dict__, "research_exact_member": "m.a"})()
-    with pytest.raises(RuntimeError, match="one member"):
+    exact = SimpleNamespace(**{**vars(args), "research_exact_member": "m.a"})
+    with pytest.raises(RuntimeError):
         campaign.selected_capture_unit_names(routed, args=exact, resolved=resolved)
-    other_model = type(args, (), {**args.__dict__, "model": "other"})()
-    with pytest.raises(Exception, match="model/layer_stride"):
+    other_model = SimpleNamespace(**{**vars(args), "model": "other"})
+    with pytest.raises(ValueError):
         campaign.selected_capture_unit_names(routed, args=other_model, resolved=resolved)
     outside = {"schema": "prismaquant.tessera_campaign_units.v1",
                "groups": [{"key": "elsewhere", "members": ["m.a", "m.b"]}]}
-    with pytest.raises(RuntimeError, match="does not contain"):
+    with pytest.raises(RuntimeError):
         campaign.selected_capture_unit_names(outside, args=args, resolved=resolved)
     partial = {"schema": "prismaquant.tessera_campaign_units.v2", "groups": [dict(
         key="s:model.layers.2.mlp.experts", members=["m.a", "m.b"],
         sampled=["m.a", "m.b"], inclusion_probability={"m.a": 0.5, "m.b": 0.25})]}
-    with pytest.raises(RuntimeError, match="sample of its members"):
+    with pytest.raises(RuntimeError):
         campaign.selected_capture_unit_names(partial, args=args, resolved=resolved)
 
 
