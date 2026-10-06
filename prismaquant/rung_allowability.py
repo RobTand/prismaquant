@@ -6,7 +6,7 @@ Missing evidence waits; this input is not an identity seal or a serving claim.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
@@ -50,10 +50,27 @@ class RungAllowability:
     kernel_build: Mapping
     table_version: int
     source_path: str
-    dispositions: Mapping[int, str]
+    _table: dict = field(repr=False)
+    _producer: object = field(repr=False)
+    _rule: Mapping = field(repr=False)
+    _rungs: frozenset[int] = field(repr=False)
+    _refusals: dict[int, str] = field(default_factory=dict, repr=False, compare=False)
 
     def refusal(self, rung: int) -> str:
-        return self.dispositions.get(rung, "unlisted rung; measurement waits")
+        if rung not in self._refusals:
+            decision = self._producer.admit_rung(self._table, format=self.format,
+                kernel_build_id=self.kernel_build["id"], rung=rung)
+            status = decision["status"]
+            if status not in {"allow", "wait", "hold", "excluded", "unsupported", "failed"}:
+                raise RungAllowabilityError("unrecognized canonical producer admission decision")
+            if status != "allow":
+                reason = decision["reason"]
+                if rung not in self._rungs:
+                    reason = "unlisted rung; " + reason
+            else:
+                reason = "" if rung in self._rule else "excluded by the published allowable_rungs rule"
+            self._refusals[rung] = reason
+        return self._refusals[rung]
 
     def allows(self, rung: int) -> bool:
         return self.refusal(rung) == ""
@@ -100,24 +117,19 @@ def load_rung_allowability(root: str | Path, *, format_entry: Mapping,
             or table["table_version"] != version
             or table["table_status"] != selected["table_status"]):
         raise RungAllowabilityError("selected table version/schema/status differs from index.json")
-    if table["format"] != family or table["kernel_build"] != dict(expected_kernel_build):
+    # Source commits and diagnostic metadata are provenance, not new D32 seals.
+    context_fields = ("id", "library_variant", "architecture", "activation_contract")
+    if table["format"] != family or any(
+            not isinstance(expected_kernel_build.get(key), str)
+            or table["kernel_build"][key] != expected_kernel_build[key] for key in context_fields):
         raise RungAllowabilityError("selected table format/kernel_build is stale for this allocation")
     rule = _allowable_rung_tables(format_entry, f"formats[{family}]")
     if not rule:
         raise RungAllowabilityError(f"{family}: existing v11 allowable_rungs rule required")
     if table["scope"]["grid_step_q256"] != format_entry["allowable_rungs"]["step_q256"]:
         raise RungAllowabilityError("table step differs from the published true q256 grid step")
-    dispositions = {}
-    for row in table["rungs"]:
-        rung = row["rung"]
-        decision = producer.admit_rung(table, format=family,
-                                       kernel_build_id=expected_kernel_build["id"], rung=rung)
-        status = decision["status"]
-        if status not in {"allow", "wait", "hold", "excluded", "unsupported", "failed"}:
-            raise RungAllowabilityError("unrecognized canonical producer admission decision")
-        dispositions[rung] = decision["reason"] if status != "allow" else (
-            "" if rung in rule else "excluded by the published allowable_rungs rule")
     if read_allowability_json(root / "index.json") != index:
         raise RungAllowabilityError("index.json changed during admission; selected version is stale")
     return RungAllowability(family, MappingProxyType(dict(expected_kernel_build)), version,
-                           str(path), MappingProxyType(dispositions))
+                           str(path), table, producer, MappingProxyType(rule),
+                           frozenset(row["rung"] for row in table["rungs"]))

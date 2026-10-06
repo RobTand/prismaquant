@@ -105,7 +105,7 @@ def test_index_selects_current_version_not_directory_order(publication):
 @pytest.mark.parametrize("change,match", [
     (lambda t: t.pop("table_version"), "version|schema key"),
     (lambda t: t.update(table_version=2), "version"),
-    (lambda t: t["kernel_build"].update(source_commit="other"), "kernel_build"),
+    (lambda t: t["kernel_build"].update(architecture="other"), "kernel_build"),
     (lambda t: t["scope"].update(grid_step_q256=64), "grid|step"),
     (lambda t: t["rungs"].append(t["rungs"][0]), "duplicate"),
     (lambda t: t["rungs"][0]["measurements"][0].update(kernel_time_us=None), "measured|missing"),
@@ -197,5 +197,6 @@ def test_mtp_menu_uses_the_same_measured_rung_input(publication, monkeypatch):
 
 
 def test_build_diagnostics_do_not_become_new_identity_seals(publication):
-    _mutate(publication, lambda t: t["kernel_build"].update(metadata={"note": "diagnostic only"}))
+    _mutate(publication, lambda t: t["kernel_build"].update(
+        source_commit="another producer stamp", metadata={"note": "diagnostic only"}))
     assert _load(publication).allows(896)

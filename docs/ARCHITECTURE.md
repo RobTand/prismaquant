@@ -16,6 +16,10 @@ admission. PrismaQuant intersects that answer with its existing v11
 unmeasured rows wait; observations alone are not exclusions or seals.
 Body candidate menus, independent MTP menus and the final expanded assignment
 (including fixed auxiliary units) use the same lane admission seam.
+Binding checks the observed build id, library variant, architecture and
+activation contract; source-commit stamps and extra diagnostic metadata are
+provenance, not new identity seals. Producer decisions are cached per queried
+rung within one loaded table, never across allocations or index versions.
 An explicitly supplied table also restricts an emulation-only allocation, so
 the next full campaign allocation can consume the measured input without
 changing a serving profile, default or pin. Production cannot opt out through
