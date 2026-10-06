@@ -66,8 +66,10 @@ def test_v2_native_tcq_uses_explicit_non_window_facts(publication):
 
     _path, table = _versioned_publication(publication)
     family = "TESSERA_E2M1_K2"
+    entry = copy.deepcopy(_formats()[family])
+    step = entry["reader_rate_step_q256"]
     table["format"] = family
-    table["scope"].update(rung_min=896, rung_max=896)
+    table["scope"].update(rung_min=896, rung_max=896, grid_step_q256=step)
     table["rungs"] = table["rungs"][:1]
     table["rungs"][0]["rung"] = 896
     geometry = table["rungs"][0]["measurements"][0]["geometry"]
@@ -96,10 +98,9 @@ def test_v2_native_tcq_uses_explicit_non_window_facts(publication):
     (publication / "index.json").write_text(json.dumps(index))
     # A test-only v11 rule over this already published census rung. It does not
     # widen the production pin or assert a new serving cell or wire.
-    entry = copy.deepcopy(_formats()[family])
     stamp = next(stamp for stamp in entry["attested_wire"] if stamp["q256"] == 896)
     entry["allowable_rungs"] = {"rule": "window_rate_set", "code_arity": 2,
-        "range_q256": [896, 896], "step_q256": 1, "run_tables": [[7]],
+        "range_q256": [896, 896], "step_q256": step, "run_tables": [[7]],
         "excluded_run_tables": [], "excluded_q256": [],
         "wire": {key: value for key, value in stamp.items() if key != "q256"},
         "evidence": ["docs/measurements/fixture.json"]}
