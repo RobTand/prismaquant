@@ -202,6 +202,13 @@
 
 ### Fixed
 
+- **Forward-split relaunches reuse declared producer seals** (#2342). Full
+  retained/running bind identities now use the existing chain-resume
+  classifier before adopting the original identity for exact-session rebind.
+  Calibration/draw/probe/seed/temperature/partition and unknown fields still
+  refuse, including an unknown null field; certified mode still refuses
+  seal drift. Session hashes and prep/entry bytes are never re-keyed.
+
 - **Restore the shared owned-byte digest comparison after the #2283 port.**
   `read_bound` again routes the acquired-byte hash through the hard `same`
   comparison before memoizing, preserving `owned bytes: identity mismatch`.

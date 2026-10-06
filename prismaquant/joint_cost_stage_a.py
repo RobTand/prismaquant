@@ -1046,6 +1046,38 @@ def _chain_at_checkpoint(runner, storage, *, rows, plane, shared_adjoint, shared
     return batches, cotangents, grad_outs
 
 
+def build_adjoint_bind_identity(calib_ids, *, source_model_identity,
+                                implementation_sha256, n_probes, seed_base,
+                                token_scope, temperature, execution_partition,
+                                diagnostic=None, defer_source=False):
+    """One CPU/GPU construction owner for the capture session identity."""
+    from .cost_streaming import validate_streamed_model_identity
+    return {
+        "source_model": (NOT_COMPUTED if defer_source and source_model_identity == NOT_COMPUTED
+                         else validate_streamed_model_identity(
+                             source_model_identity, where="adjoint capture")),
+        "producer_source_sha256": implementation_sha256,
+        "calibration_sha256": bytes_sha256hex(
+            calib_ids.detach().cpu().contiguous().numpy().tobytes()),
+        "calibration_shape": list(calib_ids.shape),
+        "calibration_dtype": str(calib_ids.dtype),
+        "n_probes": n_probes, "seed_base": seed_base,
+        "token_scope": token_scope, "temperature": temperature,
+        "execution_partition": execution_partition,
+        "campaign_stage": "joint_adjoint_capture",
+        **({"selected_row_diagnostic": diagnostic} if diagnostic is not None else {}),
+    }
+
+def build_adjoint_execution_partition(*, probe_microbatch, batch_rows, partition_count):
+    """The capture/CPU-preflight partition grammar, independent of the device."""
+    if not probe_microbatch:
+        return None
+    return {"schema": "prismaquant.aura.streamed_microbatch.v1",
+            "requested_rows": probe_microbatch, "effective_rows": batch_rows,
+            "partition_count": partition_count,
+            "row_order": "contiguous_complete_sequences",
+            "gradient_diagnostics": "sum_output_operators_fp32_before_norm"}
+
 def run_adjoint_capture_core(
     runner, calib_ids, *, execution, output_root, stride,
     source_model_identity, unit_roster_sha256, plan_sha256, prepared_sha256,
@@ -1150,7 +1182,6 @@ def run_adjoint_capture_core(
         StreamedBoundaryArtifacts,
         normalize_boundary_storage,
         prefetched_boundary_batches,
-        validate_streamed_model_identity,
     )
     from .kl_fisher import ROW_PROBE_LAYOUT, fisher_probe_scalar
     from .matmul_arithmetic import bf16_reduction_stamp
@@ -1341,14 +1372,9 @@ def run_adjoint_capture_core(
             "token_scope": token_scope,
             "global_token_count": len(calib_ids) * sequence_length,
         }
-        execution_partition = {
-            "schema": "prismaquant.aura.streamed_microbatch.v1",
-            "requested_rows": probe_microbatch,
-            "effective_rows": batch_rows,
-            "partition_count": len(row_offsets),
-            "row_order": "contiguous_complete_sequences",
-            "gradient_diagnostics": "sum_output_operators_fp32_before_norm",
-        }
+        execution_partition = build_adjoint_execution_partition(
+            probe_microbatch=probe_microbatch, batch_rows=batch_rows,
+            partition_count=len(row_offsets))
 
     # Under a chain resume the run header keeps the implementation the chain
     # state sealed; the running one is only compared (PQ #1001).
@@ -1371,24 +1397,12 @@ def run_adjoint_capture_core(
                 "that run with --resume-chain-state-sha256, or rename them aside")
     header_implementation = (implementation_sha256 if chain_state is None
                              else chain_state["run_identity"]["implementation_sha256"])
-    bind_identity = {
-        # A dev-mode chain resume does not compute the source identity it
-        # would only compare (PQ #1147); the stored one is adopted below.
-        "source_model": (
-            NOT_COMPUTED if chain_state is not None and source_model_identity == NOT_COMPUTED
-            else validate_streamed_model_identity(
-                source_model_identity, where="adjoint capture")),
-        "producer_source_sha256": header_implementation,
-        "calibration_sha256": bytes_sha256hex(
-            calib_ids.detach().cpu().contiguous().numpy().tobytes()),
-        "calibration_shape": list(calib_ids.shape),
-        "calibration_dtype": str(calib_ids.dtype),
-        "n_probes": n_probes, "seed_base": seed_base,
-        "token_scope": token_scope, "temperature": temperature,
-        "execution_partition": execution_partition,
-        "campaign_stage": "joint_adjoint_capture",
-        **({"selected_row_diagnostic": diagnostic} if diagnostic is not None else {}),
-    }
+    bind_identity = build_adjoint_bind_identity(
+        calib_ids, source_model_identity=source_model_identity,
+        implementation_sha256=header_implementation, n_probes=n_probes,
+        seed_base=seed_base, token_scope=token_scope, temperature=temperature,
+        execution_partition=execution_partition, diagnostic=diagnostic,
+        defer_source=chain_state is not None)
     if original_context is not None:
         bind_identity = original_context["session_identity"]
     run_identity = {
@@ -1492,9 +1506,11 @@ def run_adjoint_capture_core(
         except ChainSplitRefused as exc:
             raise AdjointIdentityRefused(f"forward split refused: {exc}") from exc
         if forward_quantum:
-            from .stage_a_forward_split import ForwardSplitRefused, read_prep_record
+            from .stage_a_forward_split import (
+                ForwardSplitRefused, read_prep_record, adopt_forward_bind_identity)
             try:
                 forward_prep = read_prep_record(space)
+                bind_identity = adopt_forward_bind_identity(forward_prep, bind_identity)
             except ForwardSplitRefused as exc:
                 raise AdjointIdentityRefused(f"forward split refused: {exc}") from exc
             if list(samples) not in forward_prep["ranges"]:
