@@ -4,6 +4,18 @@
 
 ### Added
 
+- **Research-only finer-grained FIT pricing and packed reference wire**
+  (#2329). Conditional single-block prices retain the complete baseline
+  gradient; group residual shrinkage and a deterministic integer-byte solver
+  select existing whole-projection parent fragments. The standalone wire
+  preserves actual column rates, tables, scales and incoming window states,
+  charging tags, framing, checksum and padding exactly. Its reader rejects
+  invalid rates, noncanonical planes and nonfinite scales before allocating
+  decoded weights; offset scratch is linear in block count. The recorded
+  real-A8S CPU proof covers exact mixed-fragment reconstruction and boundary
+  refusals, not in-domain held-out gain or a serving qualification. No
+  production menu, pipeline default, serving pin or kernel changes.
+
 - **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
   rows** (#1962). `make_joint_aura_entry` can publish a
   `sequence_attribution` block decomposing each projection over whole

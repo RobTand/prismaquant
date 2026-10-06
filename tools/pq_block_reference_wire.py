@@ -27,7 +27,7 @@ Byte accounting contract (what the solver in the parent lane consumes):
   selection-independent overhead: fixed header, grid alphabet plane, per-parent
   metadata (native LUT tables deduplicated by identical bytes, fp16 row scales,
   fp32 global scales, per-column rate vectors -- shared once per parent), the
-  selection tag plane and the incoming-state plane.  The tag plane's and the
+  selection tag plane, incoming-state plane and checksum. The tag plane's and the
   state plane's SIZES depend only on the geometry and the parent count, never
   on which parent each block selects, so a solver under ``target_bytes`` has
   body budget ``target_bytes - fixed_bytes(...)`` and charges each selected
@@ -46,20 +46,18 @@ Format (v1, little-endian scalars, MSB-first bit planes)::
              scale_global, fp16 scale_rows, u8 per-column rates
     tags     num_row_blocks*num_col_blocks tags at tag_bits each, MSB-first
     states   (num_row_blocks-1)*num_col_blocks entries, each block_cols fields
-             of window_bits bits (the incoming state, column-major over blocks
-             with i >= 1, then column blocks), MSB-first
+             of window_bits bits, byte-padded per entry; entries are row-major
+             over interior row blocks and then column blocks, MSB-first
     bodies   num_blocks fragments in row-major block order, each the
              pack_body-format stream of the fragment at the parent's own rates
     pad      explicit all-zero padding to target_bytes (only when given)
     checksum 32 bytes, SHA-256 of everything before it
 
 Every bit plane is canonical: slack after the last content bit must be zero.
-``decode_projection`` verifies the exact total length, the checksum, the
-declared geometry, the tag range and the padding BEFORE expanding any plane,
-so truncated, corrupt or misdeclared blobs are refused without unbounded
-allocation.
+``decode_projection`` checks total length, geometry, checksum, canonical planes
+and finite numeric metadata before allocating decoded weights. Positive rates
+bound output geometry by body bytes; offset scratch is linear in block count.
 """
-
 from __future__ import annotations
 
 import hashlib
@@ -93,7 +91,7 @@ _HEADER_FIELDS = (
 )
 
 # Allocation guards on the read path, applied before any plane is expanded.
-_MAX_WINDOW_BITS = 16  # one deduplicated table is 2^L bytes
+_MAX_WINDOW_BITS = 15  # 2^L must fit the v1 u16 LUT-length field
 _MAX_TAG_BITS = 32
 
 
@@ -160,22 +158,26 @@ def _validate_parents(parents: Sequence[Any]) -> List[Dict[str, Any]]:
         rows, cols = (int(s) for s in unit.body_bits.shape)
         if len(rates) != cols:
             _fail(f"parent {index} carries {len(rates)} rates for {cols} columns")
-        bad = [r for r in rates if not 0 <= r <= window_bits]
+        bad = [r for r in rates if not 1 <= r <= window_bits]
         if bad:
-            _fail(f"parent {index} has rates {sorted(set(bad))} outside 0..{window_bits}")
+            _fail(f"parent {index} has rates {sorted(set(bad))} outside 1..{window_bits}")
         scale_rows = getattr(unit, "scale_rows", None)
         if scale_rows is None or scale_rows.numel() != rows:
             _fail(f"parent {index} CHANNEL plane needs {rows} fp16 row scales")
         if scale_rows.dtype != torch.float16:
             _fail(f"parent {index} row scales are {scale_rows.dtype}, expected float16")
+        if not bool(torch.isfinite(scale_rows).all()) or bool((scale_rows <= 0).any()):
+            _fail(f"parent {index} row scales must be finite and positive")
         if unit.body_bits.dtype != torch.uint8:
             _fail(f"parent {index} body bits are {unit.body_bits.dtype}, expected uint8")
         scale_global = float(unit.scale_global)
-        if not np.isfinite(scale_global) or float(np.float32(scale_global)) != scale_global:
+        if scale_global <= 0 or not np.isfinite(scale_global) or float(np.float32(scale_global)) != scale_global:
             _fail(
-                f"parent {index} scale_global {scale_global!r} is not finite fp32-exact; "
+                f"parent {index} scale_global {scale_global!r} is not positive finite fp32-exact; "
                 "the wire refuses a global that would not decode to the parent's own weights"
             )
+        if not bool(torch.isfinite(scale_rows.float() * scale_global).all()):
+            _fail(f"parent {index} effective row scales overflow fp32")
         native = np.asarray(grid.native, dtype=np.uint8)
         if ref_grid is None:
             ref_grid = (str(grid.name), native.tobytes())
@@ -338,18 +340,9 @@ def _pack_group(values: np.ndarray, widths: np.ndarray) -> np.ndarray:
     for k in range(block_cols):
         width = int(widths[k])
         column = values[:, :, k]
-        if width == 0:
-            if column.size and bool((column != 0).any()):
-                _fail(
-                    "nonzero body bits in a zero-rate column: the fragment stores "
-                    "no bits there, so the bytes could not be canonical"
-                )
-            continue
-        bits = _expand_bits(column, width).reshape(n, -1)
+        bits = _expand_bits(column, width).reshape(n, block_rows * width)
         streams.append(bits)
         total += block_rows * width
-    if total == 0:
-        return np.zeros((n, 0), dtype=np.uint8)
     stream = np.concatenate(streams, axis=1)
     pad = (-total) % 8
     if pad:
@@ -372,8 +365,6 @@ def _unpack_group(packed: np.ndarray, widths: np.ndarray, block_rows: int) -> np
     cursor = 0
     for k in range(block_cols):
         width = int(widths[k])
-        if width == 0:
-            continue
         take = block_rows * width
         out[:, :, k] = _collapse_bits(bits[:, cursor:cursor + take].reshape(n, block_rows, width), width)
         cursor += take
@@ -397,8 +388,6 @@ def _boundary_states(entry: Dict[str, Any], block_rows: int, num_row_blocks: int
     mask = (1 << window_bits) - 1
     for rate in sorted(set(int(r) for r in rates)):
         columns = np.flatnonzero(rates == rate)
-        if rate == 0:
-            continue  # a zero-rate column stores no bits; its state stays zero
         taps = -(-window_bits // rate)
         offsets = np.arange(taps, dtype=np.int64)
         rows = np.clip(bounds[:, None, None] - 1 - offsets[None, :, None], 0, None)
@@ -641,7 +630,7 @@ def pack_projection(
 # ---------------------------------------------------------------------------
 
 def _meta_plane(data: bytes, start: int, length: int, window_bits: int,
-                num_parents: int, rows: int, cols: int) -> List[Dict[str, Any]]:
+                num_parents: int, rows: int, cols: int, expected_distinct: int) -> List[Dict[str, Any]]:
     """Parse the meta plane with bounds checks at every step."""
     table_bytes = 1 << window_bits
     cursor = start
@@ -652,6 +641,8 @@ def _meta_plane(data: bytes, start: int, length: int, window_bits: int,
     cursor += 2
     if distinct < 1 or distinct > num_parents:
         _fail(f"meta declares {distinct} distinct LUTs for {num_parents} parents")
+    if distinct != expected_distinct:
+        _fail("header LUT count disagrees with the metadata plane")
     tables: List[bytes] = []
     for _ in range(distinct):
         if cursor + 2 > end:
@@ -687,16 +678,22 @@ def _meta_plane(data: bytes, start: int, length: int, window_bits: int,
         _fail("meta plane truncated inside the rate vectors")
     for p_index in range(num_parents):
         rates = np.frombuffer(data, dtype=np.uint8, count=cols, offset=cursor + p_index * cols)
-        if rates.size and int(rates.max()) > window_bits:
-            _fail(f"parent {p_index} declares rate {int(rates.max())} above window_bits")
+        if rates.size and (int(rates.min()) < 1 or int(rates.max()) > window_bits):
+            _fail(f"parent {p_index} declares rates outside 1..{window_bits}")
         parents.append({
             "table": tables[indices[p_index]],
             "scale_global": globals_[p_index],
             "scale_rows": scales[p_index * rows:(p_index + 1) * rows].astype(np.float16),
             "rates": rates.astype(np.int64),
         })
-        if not np.isfinite(parents[p_index]["scale_global"]):
-            _fail(f"parent {p_index} carries a non-finite global scale")
+        scale = globals_[p_index]
+        row_scales = parents[p_index]["scale_rows"]
+        if not np.isfinite(scale) or scale <= 0 or not np.isfinite(row_scales).all() or np.any(row_scales <= 0):
+            _fail(f"parent {p_index} scales must be finite and positive")
+        with np.errstate(over="ignore", invalid="ignore"):
+            effective = row_scales.astype(np.float32) * np.float32(scale)
+        if not np.isfinite(effective).all():
+            _fail(f"parent {p_index} effective row scales overflow fp32")
     cursor += cols * num_parents
     if cursor != end:
         _fail(f"meta plane has {end - cursor} trailing bytes")
@@ -710,20 +707,20 @@ def _fragment_offsets(
     block_cols = geometry["block_cols"]
     ncb = geometry["num_col_blocks"]
     block_rows = geometry["block_rows"]
-    cumsums = [
-        np.concatenate([np.zeros(1, dtype=np.int64), np.cumsum(p["rates"])])
-        for p in parents
-    ]
     flat = tags.reshape(-1)
-    j_index = np.arange(flat.size, dtype=np.int64) % ncb
-    starts = j_index * block_cols
-    sums = np.stack(
-        [cumsums[p][starts + block_cols] - cumsums[p][starts] for p in range(len(parents))]
-    )
-    bits = block_rows * sums[flat, np.arange(flat.size, dtype=np.int64)]
-    return np.concatenate(
-        [np.zeros(1, dtype=np.int64), np.cumsum((bits + 7) // 8)]
-    )
+    lengths = np.empty(flat.size, dtype=np.int64)
+    # Only selected (block,parent) pairs: never parents x all blocks.
+    for p_index in np.unique(flat):
+        selected = np.flatnonzero(flat == p_index)
+        starts = (selected % ncb) * block_cols
+        running = np.concatenate([np.zeros(1, dtype=np.int64),
+                                  np.cumsum(parents[int(p_index)]["rates"])])
+        bits = block_rows * (running[starts + block_cols] - running[starts])
+        lengths[selected] = (bits + 7) // 8
+    offsets = np.empty(flat.size + 1, dtype=np.int64)
+    offsets[0] = 0
+    np.cumsum(lengths, out=offsets[1:])
+    return offsets
 
 
 def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
@@ -780,7 +777,7 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
         _fail("the format packs span-1 window bodies with state_bits == window_bits")
     if not 1 <= window_bits <= _MAX_WINDOW_BITS:
         _fail(f"window_bits {window_bits} outside 1..{_MAX_WINDOW_BITS}")
-    if num_parents > 1 and tag_bits != _tag_bits(num_parents):
+    if tag_bits != _tag_bits(num_parents):
         _fail(f"tag_bits {tag_bits} disagrees with {num_parents} parents")
 
     alphabet_bytes = int(named["alphabet_bytes"])
@@ -799,11 +796,19 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
             f"declared planes need {needed} bytes, the blob holds {len(data)}; "
             "refusing a truncated or misdeclared blob before any allocation"
         )
+    if tag_bytes != (nrb * ncb * tag_bits + 7) // 8:
+        _fail("declared tag plane length is not canonical")
+    if body_bytes < (rows * cols + 7) // 8:
+        _fail("body plane is smaller than the positive-rate geometry minimum")
     if hashlib.sha256(data[:-CHECKSUM_BYTES]).digest() != data[-CHECKSUM_BYTES:]:
         _fail("checksum mismatch: the blob is corrupt")
 
+    alphabet_native = np.frombuffer(data, dtype=np.uint8, count=256, offset=HEADER_BYTES)
+    if bool(((alphabet_native & 0x7f) == 0x7f).any()):
+        _fail("the alphabet plane holds an E4M3FN NaN byte")
     cursor = HEADER_BYTES + alphabet_bytes
-    parents = _meta_plane(data, cursor, meta_bytes, window_bits, num_parents, rows, cols)
+    parents = _meta_plane(data, cursor, meta_bytes, window_bits, num_parents, rows, cols,
+                          int(named["num_distinct_luts"]))
     cursor += meta_bytes
 
     pad_start = cursor + tag_bytes + state_bytes + body_bytes
@@ -859,8 +864,6 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
         np.frombuffer(data, dtype=np.uint8, count=256, offset=HEADER_BYTES).copy()
     ).to(device)
     alphabet = alphabet.view(torch.float8_e4m3fn).float()
-    if bool(torch.isnan(alphabet).any()):
-        _fail("the alphabet plane holds an E4M3FN NaN byte")
 
     widths_all = [p["rates"] for p in parents]
     luts = [
@@ -894,24 +897,14 @@ def decode_projection(blob: bytes, device: str = "cpu") -> torch.Tensor:
             for k in range(block_cols):
                 rate = int(rates[k])
                 column = c0 + k
-                if rate == 0:
-                    states = torch.zeros(
-                        block_rows, rows_of.size, dtype=torch.int64, device=device
-                    )
-                else:
-                    bits = torch.from_numpy(
-                        np.ascontiguousarray(values[:, :, k].T)
-                    ).to(device)
-                    # zero at original row 0, the stored parent state at every
-                    # interior boundary, per block and per column
-                    initial = np.zeros(rows_of.size, dtype=np.int64)
-                    interior = rows_of > 0
-                    if interior.any():
-                        initial[interior] = state_grid[rows_of[interior] - 1, j, k]
-                    states = replay_window(
-                        bits, window_bits, rate,
-                        torch.from_numpy(initial).to(device),
-                    ).T
+                bits = torch.from_numpy(np.ascontiguousarray(values[:, :, k].T)).to(device)
+                # Zero at original row 0; stored parent state at interior boundaries.
+                initial = np.zeros(rows_of.size, dtype=np.int64)
+                interior = rows_of > 0
+                if interior.any():
+                    initial[interior] = state_grid[rows_of[interior] - 1, j, k]
+                states = replay_window(bits, window_bits, rate,
+                    torch.from_numpy(initial).to(device)).T
                 codes = luts[p_index][states].long()
                 global_rows = torch.from_numpy(
                     rows_of[:, None] * block_rows + local_rows[None, :]
