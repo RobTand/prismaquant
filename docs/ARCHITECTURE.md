@@ -30848,6 +30848,11 @@ phase, or two ranges meeting inside a tensor cannot satisfy that rule. The
 shared indexed/single-file checkpoint owner also handles unindexed sources;
 live-tree head extras (including LFM2 and DSv4) use the same resident-head
 selection as the actual loader, never an empty-head fallback.
+Resume phases use the same adjoint-checkpoint kind/session as the executing
+resume. Recovery frontiers replace only an actual forward walk, never restore
+one in a resumed chain. The CLI reads and authenticates selected-row diagnostic
+specs through the existing owner, binds them to the real draw, and uses their
+through boundary; unconsumed lower-chain phases are not required.
 
 The report explicitly says capture_executed=false and price_measured=false;
 success is only CPU input/readset evidence. No generation, checkpoint, model

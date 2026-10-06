@@ -3227,7 +3227,8 @@ def _preflight_job_source_phases(num_layers, *, output_root, forward_split=None,
         space = adjoint_space(output_root)
         state = load_chain_state(space, chain_resume["chain_state_sha256"])
         checkpoints, _partials = _sealed_checkpoints(
-            space, state["boundary_storage"]["session"], state["stride"]["boundaries"])
+            space, {**state["boundary_storage"]["session"], "kind": "adjoint_checkpoint"},
+            state["stride"]["boundaries"])
         top = min(checkpoints)
         capture_layers = ()
     if chain_seed is not None:
@@ -3242,7 +3243,8 @@ def _preflight_job_source_phases(num_layers, *, output_root, forward_split=None,
     if forward_recovery is not None:
         from .joint_forward_resume import _read
         capsule, _digest = _read(forward_recovery["path"], forward_recovery["sha256"])
-        capture_layers = range(capsule["frontier"], num_layers)
+        if chain_resume is None and chain_seed is None:
+            capture_layers = range(capsule["frontier"], num_layers)
     if diagnostic is not None:
         bottom = diagnostic["through"]
     return stage_a_loader_source_phases(num_layers, capture_layers=capture_layers,
@@ -3320,6 +3322,10 @@ def preflight_adjoint_inputs(config, *, prepared, data_manifest_sha256=None,
             multimodal=construction_multimodal(profile, False),
             attn_implementation=config.get("attn_implementation"))
         _base, layers = _get_layer_list(skeleton)
+        if capture_options is not None and capture_options.get("diagnostic") is not None:
+            from .tessera_joint_eval_panel import evaluation_execution
+            bind_diagnostic_draw(capture_options["diagnostic"], ids,
+                execution=evaluation_execution(config), num_layers=len(layers))
         source_phases = _preflight_job_source_phases(
             len(layers), output_root=output_root, **(capture_options or {}))
         coverage = audit_stage_a_source_spans(
@@ -3494,7 +3500,10 @@ def main(argv=None) -> int:
                     "chain_resume": _chain_resume_argument(args),
                     "chain_seed": _chain_seed_argument(args),
                     "forward_recovery": (None if args.forward_recovery is None else
-                        {"path": str(args.forward_recovery), "sha256": args.forward_recovery_sha256})})
+                        {"path": str(args.forward_recovery), "sha256": args.forward_recovery_sha256}),
+                    "diagnostic": (None if args.selected_row_diagnostic is None else
+                        load_diagnostic_spec(args.selected_row_diagnostic,
+                                             args.selected_row_diagnostic_sha256))})
             print(json.dumps(report))
             return EXIT_OK
         result = run_adjoint_capture(

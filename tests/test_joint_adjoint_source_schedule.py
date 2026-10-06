@@ -118,3 +118,30 @@ def test_the_actual_loader_schedule_catches_an_entire_omitted_phase(tmp_path, mi
             missing == 'all-forward' and phase['name'].startswith('forward-'))]
     with pytest.raises(stage_a.AdjointIdentityRefused, match='missing.*phase'):
         stage_a.audit_stage_a_source_spans(config, manifest, source_model=root)
+
+
+@pytest.mark.parametrize('with_recovery', [False, True])
+def test_resume_variant_uses_genuine_checkpoint_marker_and_never_recaptures(
+        tmp_path, monkeypatch, with_recovery):
+    from test_stage_a_chain_resume import _at, _interrupted, _resume
+    from prismaquant import stage_a_chain_resume as resume_owner
+    root = tmp_path / 'run'
+    _interrupted(root, monkeypatch, interrupt=_at(1, 0, 4))
+    resume = _resume(root, resume_from=2)
+    recovery = None
+    if with_recovery:
+        # Isolate the second finding from the first; the real checkpoint
+        # reader still verifies every byte and session. No check is mocked.
+        reader = resume_owner._sealed_checkpoints
+        def correct_marker(space, marker, boundaries):
+            return reader(space, {**marker, 'kind': 'adjoint_checkpoint'}, boundaries)
+        monkeypatch.setattr(resume_owner, '_sealed_checkpoints', correct_marker)
+        from test_joint_forward_resume import identity_document
+        capsule, _identity = identity_document()
+        capsule['groups'] = []
+        path = tmp_path / 'recovery.json'
+        path.write_text(json.dumps(capsule))
+        recovery = {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+    phases = stage_a._preflight_job_source_phases(5, output_root=root,
+        chain_resume=resume, forward_recovery=recovery)
+    assert phases == {'head': None, 'chain-001': 1, 'chain-000': 0}

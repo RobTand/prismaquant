@@ -14,6 +14,10 @@
   The shared checkpoint-map and resident-head owners cover indexed/unindexed
   sources and LFM2/DSv4 head extras without skipping tensors. Source metadata
   reads use the same staged owner as the loader, not a pool fallback.
+  Resume selection uses the actual adjoint-checkpoint session marker; a stored
+  recovery capsule cannot re-enable a resumed forward pass. Bounded diagnostic
+  specs are read under their own byte pin and bound to the actual draw before
+  their lower-chain stopping boundary selects the source schedule.
 
 - **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
   rows** (#1962). `make_joint_aura_entry` can publish a

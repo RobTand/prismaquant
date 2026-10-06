@@ -18,20 +18,21 @@ from test_stagea_readset_source_coverage import campaign  # noqa: F401
 pytestmark = pytest.mark.own_process
 
 
-def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=False):
+def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=False,
+          layer_count=1, diagnostic_through=None):
     monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
     root = tmp_path / 'source'
     root.mkdir()
     config = {'model_type': 'llama', 'architectures': ['LlamaForCausalLM'],
-              'hidden_size': 8, 'num_hidden_layers': 1, 'num_attention_heads': 1,
+              'hidden_size': 8, 'num_hidden_layers': layer_count, 'num_attention_heads': 1,
               'num_key_value_heads': 1, 'intermediate_size': 16, 'vocab_size': 8}
     config.update(extra_config or {})
     (root / 'config.json').write_text(json.dumps(config))
+    names = [f'model.layers.{layer}.proj.weight' for layer in range(layer_count)]
     (root / 'model.safetensors.index.json').write_text(json.dumps({
-        'weight_map': {'model.layers.0.proj.weight': 'weights.safetensors'}}))
+        'weight_map': {name: 'weights.safetensors' for name in names}}))
     from test_stagea_readset_source_coverage import _write_shard
-    spans = _write_shard(root / 'weights.safetensors', [
-        ('model.layers.0.proj.weight', 16)])
+    spans = _write_shard(root / 'weights.safetensors', [(name, 16) for name in names])
     calibration = _calibration(tmp_path)
     prepared = tmp_path / 'prepared.json'
     prepared.write_text('{}')
@@ -44,18 +45,31 @@ def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=Fa
             n_samples=5, seqlen=4)
         independent_draw, _ids = _fresh_draw(tmp_path, encoding)
         paths.append(Path(independent_draw['calibration_input']['path']))
+    diagnostic_path = None
+    if diagnostic_through is not None:
+        from test_stage_a_selected_row_diagnostic import _spec
+        ids, _encoding = load_calibration_input(calibration,
+            expected_sha256=hashlib.sha256(calibration.read_bytes()).hexdigest(),
+            n_samples=5, seqlen=4)
+        diagnostic_path = tmp_path / 'diagnostic.json'
+        spec = _spec(ids, {'seed_base': 17000}, row=0)
+        spec.update(through=diagnostic_through, vocab_size=8)
+        diagnostic_path.write_text(json.dumps(spec))
+        paths.append(diagnostic_path)
     manifest = {'entries': [{'path': str(path), 'offset': 0,
                              'bytes': path.stat().st_size,
                              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
                             for path in paths]}
-    start, stop = spans['model.layers.0.proj.weight']
-    manifest['entries'].append({
-        'path': str(root / 'weights.safetensors'), 'offset': start,
-        'bytes': stop - start, 'sha256': None})
+    source_indices = []
+    for name in names:
+        start, stop = spans[name]
+        source_indices.append(len(manifest['entries']))
+        manifest['entries'].append({'path': str(root / 'weights.safetensors'),
+            'offset': start, 'bytes': stop-start, 'sha256': None})
     manifest['read_plan'] = {'phases': [
         {'name': 'head', 'entry_indices': list(range(len(paths)))},
-        {'name': 'forward-000', 'entry_indices': [len(paths)]},
-        {'name': 'chain-000', 'entry_indices': [len(paths)]}]}
+        *[{'name': f'{walk}-{layer:03d}', 'entry_indices': [source_indices[layer]]}
+          for walk in ('forward', 'chain') for layer in range(layer_count)]]}
     _activate(tmp_path, monkeypatch, manifest, skip={str(root / name) for name in missing})
     # Only the claim identity boundary is doubled; source selection and
     # staged byte reads are real. The CAS decoder has separate byte tests.
@@ -70,6 +84,8 @@ def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=Fa
         plan['execution'].update(_plan_config(tmp_path, encoding)['execution'])
         plan['execution'].update(n_calib_samples=5, calib_seqlen=4)
         plan['joint_eval_draw'] = independent_draw
+    if diagnostic_path is not None:
+        plan['execution'].update(n_probes=1, seed_base=17000, probe_microbatch=1)
     # Plan admission has independent tests; here the real CLI receives these
     # already-admitted startup values and reads the actual staged inputs.
     monkeypatch.setattr('prismaquant.tessera_joint_aura.load_joint_anchor_plan',
@@ -79,6 +95,9 @@ def _case(tmp_path, monkeypatch, *, missing=(), extra_config=None, evaluation=Fa
             '--prepared', str(prepared), '--prepared-sha256', manifest['entries'][0]['sha256'],
             '--data-manifest-sha256', MANIFEST, '--output-root', str(output),
             '--cpu-input-preflight']
+    if diagnostic_path is not None:
+        args += ['--selected-row-diagnostic', str(diagnostic_path),
+                 '--selected-row-diagnostic-sha256', hashlib.sha256(diagnostic_path.read_bytes()).hexdigest()]
     return plan, args, output
 
 
@@ -210,4 +229,24 @@ def test_cli_does_not_derive_its_schedule_from_the_claim(tmp_path, monkeypatch, 
                                      if row['name'] != phase_name]
     assert entry.main(args) == stage_a.EXIT_IDENTITY_REFUSED
     assert 'missing source phase ' + phase_name in capsys.readouterr().out
+    assert not output.exists()
+
+
+@pytest.mark.parametrize('corrupt', [False, True])
+def test_cli_reads_and_honors_the_bound_diagnostic_variant(tmp_path, monkeypatch, capsys, corrupt):
+    _plan, args, output = _case(tmp_path, monkeypatch, layer_count=2, diagnostic_through=1)
+    if corrupt:
+        args[args.index('--selected-row-diagnostic-sha256')+1] = '0'*64
+        assert entry.main(args) == stage_a.EXIT_IDENTITY_REFUSED
+        reason = capsys.readouterr().out
+        assert 'selected-row diagnostic spec refused' in reason
+        assert 'owned bytes' in reason
+    else:
+        from prismaquant.staged_lease import load_sealed_manifest
+        manifest = load_sealed_manifest(MANIFEST)
+        manifest['read_plan']['phases'] = [row for row in manifest['read_plan']['phases']
+                                         if row['name'] != 'chain-000']
+        assert entry.main(args) == 0
+        report = json.loads(capsys.readouterr().out.splitlines()[-1])
+        assert report['source_phases_checked'] == 4
     assert not output.exists()
