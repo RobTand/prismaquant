@@ -14,7 +14,7 @@ One runnable experiment entry with four modes over ONE capture root:
   roles accumulate in the SAME forward pass. Every source layer in the
   range forwards, even a layer with no selected unit. Both roles are
   persisted once per layer and verified (file bytes/sha, tensor geometry,
-  counts, fit+heldout == census) before ``ChainQuantum.complete`` carries
+  counts, fit+heldout == observed forward) before ``ChainQuantum.complete`` carries
   the role receipts in its verified unit map.
 * ``join``     -- research metadata verification only: the existing ranges /
   owner / fragment checks, the witness merge against the census contract,
@@ -67,8 +67,11 @@ from prismaquant.cost_streaming import (  # noqa: E402
 )
 from prismaquant.routed_experts import (  # noqa: E402
     declared_shared_capture_groups,
+    ProfileRoutedExpertClassifier,
     refresh_packed_expert_projections,
 )
+from prismaquant.dev_mode import seal_check  # noqa: E402
+from prismaquant.read_traffic import resolve_routing_factor  # noqa: E402
 from experiments.indomain_split_stats import HELDOUT, FIT, DisjointRowMoments  # noqa: E402
 
 
@@ -499,12 +502,75 @@ def _role_file_records(receipt: dict) -> dict:
     }
 
 
+def require_observed_routing(rows, records, profile, config, *, fit_tokens, heldout_tokens, census):
+    """Current-forward conservation is correctness; historical routing is planning."""
+    classifier = ProfileRoutedExpertClassifier(profile)
+    routed = {}
+    projections = {name for param in profile.packed_expert_param_names()
+                   for name in profile.packed_expert_projection_names(param)}
+    for name, count in rows.items():
+        match = classifier.classify(name)
+        if match is None:
+            if count != fit_tokens + heldout_tokens:
+                raise ResearchRefused(f"{name}: dense rows do not cover this forward")
+            for role, expected in ((FIT, fit_tokens), (HELDOUT, heldout_tokens)):
+                if records[role][name]["count"] != expected:
+                    raise ResearchRefused(f"{name}.{role}: rows do not cover its sample partition")
+            continue
+        parts = name.rsplit(".", 2)
+        if len(parts) != 3 or not parts[1].isdigit() or not match.regex_declared:
+            raise ResearchRefused(f"{name}: routed expert has no declared numeric identity")
+        routed.setdefault(parts[0], {}).setdefault(int(parts[1]), {})[match.projection_name] = name
+    if not routed:
+        return
+    factor = resolve_routing_factor(config, context="research split capture")
+    for group, experts in routed.items():
+        if set(experts) != set(range(factor.n_routed_experts)):
+            raise ResearchRefused(f"{group}: current routing does not cover the declared expert population")
+        totals = {FIT: 0, HELDOUT: 0}
+        for expert, names in experts.items():
+            if set(names) != projections:
+                raise ResearchRefused(f"{group}.{expert}: current routing omits an expert projection")
+            observed = {int(rows[name]) for name in names.values()}
+            if len(observed) != 1:
+                raise ResearchRefused(f"{group}.{expert}: gate/up/down current routed counts differ")
+            actual = observed.pop()
+            for role in totals:
+                role_counts = {int(records[role][name]["count"]) for name in names.values()}
+                if len(role_counts) != 1:
+                    raise ResearchRefused(f"{group}.{expert}.{role}: gate/up/down sample partition counts differ")
+                totals[role] += role_counts.pop()
+            planned = int(census["counts"][next(iter(names.values()))])
+            if (planned == 0) != (actual == 0) or abs(actual - planned) * 100 > planned:
+                raise ResearchRefused(
+                    f"{group}.{expert}: routing requires CEO review: census {planned}, observed {actual}; "
+                    "expert appeared/vanished or changed by more than 1 percent")
+        for role, tokens in ((FIT, fit_tokens), (HELDOUT, heldout_tokens)):
+            expected = tokens * factor.num_experts_per_tok
+            if totals[role] != expected:
+                raise ResearchRefused(f"{group}.{role}: routed rows {totals[role]} != tokens times top-k {expected}")
+
+
+def _census_comparison(census, name, observed, maximum):
+    planned = int(census["counts"][name])
+    planned_max = float(census["max_abs"][name])
+    comparison = {
+        "count": {"census": planned, "observed": observed, "delta": observed - planned,
+                  "relative_delta": (observed - planned) / planned if planned else None},
+        "max_abs": {"census": planned_max, "observed": maximum, "delta": maximum - planned_max},
+        "mean": {"census": None, "observed": None, "status": "not recorded by the census"}}
+    agree = seal_check("research_census_statistics",
+                       {"count": planned, "max_abs": planned_max},
+                       {"count": observed, "max_abs": maximum}, where=name,
+                       refusal=ResearchRefused)
+    comparison["stamp"] = "matching" if agree else "[DEV-MODE]"
+    return comparison
+
+
 def persist_split_records(capture_root, census, census_path, records, seen,
                           split_sha256, guard) -> dict:
     """Persist both roles once per layer; verify every file and every count."""
     counts = census["counts"]
-    maxima = census["max_abs"]
-    maxima_observed = {}
     by_layer = {}
     for role in (FIT, HELDOUT):
         if role not in records:
@@ -528,14 +594,13 @@ def persist_split_records(capture_root, census, census_path, records, seen,
                 "model_load_contract_sha256":
                     _canonical_sha256(census["model_load_contract"]),
                 "census_sha256": _sha256_file(census_path)},
-            "full_counts": {}, "units": {}}
+            "full_counts": {}, "units": {}, "census_comparison": {}}
         for qname in sorted(by_layer[layer], key=lambda name: (name not in PRIORITY_UNITS, name)):
             census_count = int(counts[qname])
-            layer_manifest["full_counts"][qname] = census_count
             observed = int(seen.get(qname, 0))
-            if observed != census_count:
-                raise ResearchRefused(
-                    f"{qname}: observed {observed} rows, the census counts {census_count}")
+            if observed <= 0:
+                raise ResearchRefused(f"{qname}: this forward observed no rows")
+            layer_manifest["full_counts"][qname] = observed
             split_total = 0
             units_entry = {}
             unit_maximum = float("-inf")
@@ -546,23 +611,23 @@ def persist_split_records(capture_root, census, census_path, records, seen,
                 if record is None:
                     raise ResearchRefused(f"{qname}: the split left no {role} record")
                 receipt = _write_and_verify_role_file(
-                    directory, qname, role, record, census_count,
+                    directory, qname, role, record, observed,
                     census["unit_shapes"][qname])
                 split_total += receipt["count"]
                 units_entry[role] = _role_file_records(receipt)
                 units_entry[role]["file"] = str((directory / receipt["file"]).relative_to(research_dir(capture_root)))
                 unit_maximum = max(unit_maximum, float(record["max_abs"]))
-            if split_total != census_count:
+            if split_total != observed:
                 raise ResearchRefused(
-                    f"{qname}: fit + heldout rows {split_total} != census {census_count}; "
+                    f"{qname}: fit + heldout rows {split_total} != observed {observed}; "
                     "the split dropped or duplicated rows")
-            maxima_observed[qname] = unit_maximum
+            comparison = _census_comparison(census, qname, observed, unit_maximum)
+            layer_manifest["census_comparison"][qname] = comparison
             verified[qname] = {
                 "schema": ROLE_RECEIPT_SCHEMA, "name": qname, "layer": layer,
                 FIT: units_entry[FIT], HELDOUT: units_entry[HELDOUT],
                 "census_count": census_count, "observed_rows": observed,
-                "max_abs": unit_maximum}
-            campaign.census_max_abs(census, {qname: unit_maximum})
+                "max_abs": unit_maximum, "census_comparison": comparison}
             layer_manifest["units"][qname] = units_entry
             if qname in PRIORITY_UNITS:
                 guard(f"research priority unit {qname}")
@@ -572,7 +637,6 @@ def persist_split_records(capture_root, census, census_path, records, seen,
                     "roles": units_entry}}), flush=True)
         guard(f"research layer manifest {layer}")
         _write_atomic_json(directory / "manifest.json", layer_manifest)
-    campaign.census_max_abs(census, maxima_observed)
     return verified
 
 
@@ -583,7 +647,12 @@ def _new_layer_moments(args, census, guard):
         max_prefix_rows=int(args.max_prefix_rows), resource_check=guard)
 
 
-def _run_prepared_quantum(args, guard) -> dict:
+def _capture_request_binding(args, unit_names):
+    return {"selection_sha256": _sha256_file(args.units), "units": sorted(unit_names),
+            "max_act_rows": int(args.max_act_rows), "max_prefix_rows": int(args.max_prefix_rows)}
+
+
+def _run_prepared_quantum(args, guard, *, recompute=False) -> dict:
     """One layer-range quantum: same-pass split moments over the chain owner."""
     guard("research quantum startup")
     capture_root = Path(args.capture_root).resolve()
@@ -598,14 +667,14 @@ def _run_prepared_quantum(args, guard) -> dict:
     if num_layers <= 0:
         raise ResearchRefused("the census names no source layer depth")
 
-    moments = _new_layer_moments(args, census, guard)
+
     with ExitStack() as scope:
-        scope.callback(moments.close)
+
         source = scope.enter_context(chain.authenticate_quantum_source(
             capture_root, census_path=census_path, model=namespace.model,
             resource_check=guard))
         quantum = chain.ChainQuantum(capture_root, (start, stop),
-                                     num_layers=num_layers, source_authentication=source)
+                                     num_layers=num_layers, source_authentication=source, recompute=recompute)
         identity = campaign._streamed_capture_identity(
             namespace, census, tokens, corpus_text,
             attention_implementation=args.attention_implementation,
@@ -659,9 +728,9 @@ def _run_prepared_quantum(args, guard) -> dict:
         for name in unit_names:
             names_by_layer.setdefault(runner.layer_index_for_qname(name), []).append(name)
         shapes = {name: list(census["unit_shapes"][name]) for name in unit_names}
-        indexer = SampleIndexer(moments, total_samples=args.total_samples,
+        indexer = SampleIndexer(None, total_samples=args.total_samples,
                                 seqlen=int(census["seqlen"]), guard=guard)
-        seen, telemetry = {}, []
+        seen, verified, telemetry = {}, {}, []
 
         def visit(layer, forward_batch):
             names = names_by_layer.get(layer, [])
@@ -676,16 +745,34 @@ def _run_prepared_quantum(args, guard) -> dict:
             del live
             expected = declared_shared_capture_groups(
                 {name: shapes[name] for name in names}, profile)
-            checked = indexer.wrapper(layer, forward_batch)
-            _acts, _hessians, rows, _amax = campaign._collect_activations(
-                runner.model, names, tokens, 0, runner.device,
-                want_hessian=False, profile=runner.profile, forward_batch=checked,
-                shared_packed_inputs=True, expected_shared_input_groups=expected,
-                resource_check=guard, row_consumer=moments.consume)
-            seen.update(rows)
-            telemetry.append({"layer": layer, "units": len(names)})
-            if runner.device.type == "cuda":
-                torch.cuda.empty_cache()
+            moments = _new_layer_moments(args, census, guard)
+            indexer.moments = moments
+            records = None
+            try:
+                checked = indexer.wrapper(layer, forward_batch)
+                _acts, _hessians, rows, _amax = campaign._collect_activations(
+                    runner.model, names, tokens, 0, runner.device,
+                    want_hessian=False, profile=runner.profile, forward_batch=checked,
+                    shared_packed_inputs=True, expected_shared_input_groups=expected,
+                    resource_check=guard, row_consumer=moments.consume)
+                if set(rows) != set(names) or any(value <= 0 for value in rows.values()):
+                    raise ResearchRefused(f"layer {layer}: selected row coverage is incomplete")
+                records = moments.finish()
+                require_observed_routing(
+                    rows, records, profile, runner.model.config.to_dict(),
+                    fit_tokens=args.fit_stop * int(census["seqlen"]),
+                    heldout_tokens=(args.total_samples - args.fit_stop) * int(census["seqlen"]),
+                    census=census)
+                verified.update(persist_split_records(
+                    capture_root, census, census_path, records, rows, split_sha256, guard))
+                seen.update(rows)
+                telemetry.append({"layer": layer, "units": len(names)})
+            finally:
+                records = None
+                moments.close()
+                indexer.moments = None
+                if runner.device.type == "cuda":
+                    torch.cuda.empty_cache()
 
         try:
             with quantum.owner():
@@ -697,14 +784,11 @@ def _run_prepared_quantum(args, guard) -> dict:
                 if set(seen) != set(targets) or any(v <= 0 for v in seen.values()):
                     raise ResearchRefused(
                         "the research quantum did not observe every selected unit of its layers")
-                campaign.census_token_counts(census, seen)
-                records = moments.finish()
-                verified = persist_split_records(
-                    capture_root, census, census_path, records, seen, split_sha256, guard)
+
                 fragment = quantum.complete(
                     witness=runner.context.source_selected_initialization_witness(
                         range(quantum.start, quantum.stop)),
-                    verified=verified)
+                    verified=verified, capture_binding=_capture_request_binding(args, unit_names))
         except BaseException:
             if runner.device.type == "cuda":
                 torch.cuda.empty_cache()
@@ -735,10 +819,11 @@ def _verified_layer_publication(root, manifest_path, manifest, verified, census,
         raise ResearchRefused(f"{manifest_path}: verified unit coverage differs")
     for name, roles in manifest["units"].items():
         receipt = expected[name]
-        count = int(census["counts"][name])
-        if (manifest["full_counts"][name] != count or receipt["census_count"] != count
-                or receipt["observed_rows"] != count or set(roles) != {FIT, HELDOUT}):
-            raise ResearchRefused(f"{name}: verified census counts or roles differ")
+        count = int(receipt["observed_rows"])
+        if (manifest["full_counts"][name] != count or set(roles) != {FIT, HELDOUT}):
+            raise ResearchRefused(f"{name}: verified forward counts or roles differ")
+        if "census_comparison" in receipt and manifest.get("census_comparison", {}).get(name) != receipt["census_comparison"]:
+            raise ResearchRefused(f"{name}: verified census comparison differs")
         for role in (FIT, HELDOUT):
             if roles[role] != receipt[role]:
                 raise ResearchRefused(f"{name}.{role}: published data differs from verified receipt")
@@ -748,7 +833,7 @@ def _verified_layer_publication(root, manifest_path, manifest, verified, census,
             if _sha256_file(path) != receipt[role]["sha256"]:
                 raise ResearchRefused(f"{path}: own bytes differ from verified digest")
         if sum(receipt[role]["count"] for role in (FIT, HELDOUT)) != count:
-            raise ResearchRefused(f"{name}: verified role counts do not cover census")
+            raise ResearchRefused(f"{name}: verified role counts do not cover this forward")
     return set(expected)
 
 
@@ -761,10 +846,18 @@ def mode_quantum(args, guard) -> dict:
     if not ranges or ranges[0][0] != start or ranges[-1][1] != stop:
         raise ResearchRefused("batch range must cover whole adjacent prepared quanta")
     chain.require_layer_tiling([(lo-start, hi-start) for lo, hi in ranges], num_layers=stop-start)
-    _, census, _ = load_census(args, root)
-    ids, tokens, _ = load_draw(args, census)
+    census_path, census, namespace = load_census(args, root)
+    ids, tokens, corpus_text = load_draw(args, census)
     require_split_geometry(args, tokens, census)
+    unit_names = selected_units(args, census, namespace)
     split_sha256 = require_persisted_split(root, args, census, ids)
+    binding = _capture_request_binding(args, unit_names)
+    with chain.authenticate_quantum_source(
+            root, census_path=census_path, model=namespace.model, resource_check=guard) as source:
+        requested = campaign._streamed_capture_identity(
+            namespace, census, tokens, corpus_text, attention_implementation=args.attention_implementation,
+            source_authentication=source, unit_names=unit_names)
+        chain.require_prep_identity(prep, requested, n_batches=len(tokens), label=f"capture-batch-{start}:{stop}")
     results = []
     from prismaquant.prismabuild_progress import commit
     for completed, (lo, hi) in enumerate(ranges, 1):
@@ -773,14 +866,18 @@ def mode_quantum(args, guard) -> dict:
         if owner is not None and owner.get("status") == "complete":
             chain.require_owner_complete(prep, lo, hi)
             fragment = chain.read_fragment(root, prep, lo, hi)
-            for layer in range(lo, hi):
-                names = {name for name, row in fragment["units"].items() if row["layer"] == layer}
-                if names:
-                    path = root / "layers" / f"L{layer:03d}" / "manifest.json"
-                    _verified_layer_publication(root, path, json.loads(path.read_text()),
-                                                fragment["units"], census, split_sha256)
-            result = {"fragment": str(chain.fragment_path(root, lo, hi)),
-                      "units": len(fragment["units"])}
+            if fragment.get("capture_binding") != binding:
+                options = SimpleNamespace(**{**vars(args), "capture_layer_range": f"{lo}:{hi}"})
+                result = _run_prepared_quantum(options, guard, recompute=True)
+            else:
+                for layer in range(lo, hi):
+                    names = {name for name, row in fragment["units"].items() if row["layer"] == layer}
+                    if names:
+                        path = root / "layers" / f"L{layer:03d}" / "manifest.json"
+                        _verified_layer_publication(root, path, json.loads(path.read_text()),
+                                                    fragment["units"], census, split_sha256)
+                result = {"fragment": str(chain.fragment_path(root, lo, hi)),
+                          "units": len(fragment["units"])}
         else:
             options = SimpleNamespace(**{**vars(args), "capture_layer_range": f"{lo}:{hi}"})
             result = _run_prepared_quantum(options, guard)

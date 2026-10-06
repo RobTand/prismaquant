@@ -31,8 +31,8 @@ moments.  :meth:`finish` returns, per role and exact unit name, the full
 unnormalized float32 ``XᵀX``, the bounded float32 prefix, the routed-row
 count, the max|x| and one int64 sample index PER retained prefix row (so
 ``len(prefix_sample_ids) == inputs.shape[0]`` always).  The parent verifies
-per-unit fit+heldout counts against its own full census before writing each
-unit+role ``.pt``.
+per-unit fit+heldout counts against this forward's actual routed counts before
+writing each unit+role ".pt".
 """
 
 from __future__ import annotations
@@ -194,6 +194,7 @@ class DisjointRowMoments:
             if self.resource_check is not None:
                 self.resource_check(f"split_moments:before_hessian_transfer:{role}:{names[0]}")
             h = state["hessian"]
+            released_cuda = bool(h is not None and h.is_cuda)
             cpu_h = None if h is None else h.to(device="cpu", dtype=torch.float32)
             if cpu_h is h:
                 # Already-CPU moments must still publish read-only.
@@ -203,9 +204,16 @@ class DisjointRowMoments:
             max_abs = state["max_abs"]
             max_abs = 0.0 if max_abs is None else float(
                 max_abs.to(device="cpu", dtype=torch.float32))
-            inputs = (torch.cat(state["inputs"], dim=0)
+            if self.resource_check is not None:
+                self.resource_check(f"split_moments:before_prefix_transfer:{role}:{names[0]}")
+            inputs = (torch.cat(state["inputs"], dim=0).to(device="cpu")
                       if state["inputs"] else None)
             ids = torch.tensor(state["prefix_sample_ids"], dtype=torch.int64)
+            state["inputs"].clear()
+            state["prefix_sample_ids"].clear()
+            state["max_abs"] = None
+            if released_cuda:
+                torch.cuda.empty_cache()
             if inputs is not None:
                 assert ids.shape[0] == inputs.shape[0]
             for name in names:

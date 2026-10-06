@@ -420,7 +420,7 @@ class ChainQuantum:
     through a recording descriptor owner bound to this prep.
     """
 
-    def __init__(self, capture_root, layers, *, num_layers, source_authentication):
+    def __init__(self, capture_root, layers, *, num_layers, source_authentication, recompute=False):
         self.root = Path(capture_root).resolve()
         self.prep = read_prep(self.root)
         if (not getattr(source_authentication, "is_recording", False) or
@@ -437,7 +437,7 @@ class ChainQuantum:
                 f"capture layers {self.start}:{self.stop} are not a range of this chain")
         self.label = range_label(self.start, self.stop)
         status = _owner_status(self.prep, self.start, self.stop)
-        if status is not None and status.get("status") == "complete":
+        if status is not None and status.get("status") == "complete" and not recompute:
             raise CaptureChainRefused(
                 f"capture layers {self.start}:{self.stop} are already complete; a quantum runs once")
         self.inputs = None
@@ -516,7 +516,7 @@ class ChainQuantum:
                                                    boundary_index=self.stop))
         return consume
 
-    def complete(self, *, witness, verified) -> Path:
+    def complete(self, *, witness, verified, capture_binding=None) -> Path:
         """Record this range's fragment; call inside :meth:`owner`."""
         from .joint_adjoint_checkpoints import exact_entry_record
         if self.storage is None:
@@ -530,14 +530,16 @@ class ChainQuantum:
         if not verified and quantum_range_requires_units(
                 self.prep["identity"], self.start, self.stop):
             raise CaptureChainRefused(f"capture layers {self.start}:{self.stop} verified no unit")
-        document = _seal({"schema": FRAGMENT_SCHEMA, "prep_sha256": self.prep["prep_sha256"],
+        payload = {"schema": FRAGMENT_SCHEMA, "prep_sha256": self.prep["prep_sha256"],
                           "session": self.prep["session"], "layers": [self.start, self.stop],
                           "num_layers": self.num_layers, "n_batches": self.prep["n_batches"],
                           "boundary": None if self.last else
                               [exact_entry_record(reference) for reference in self.outputs],
                           "witness": witness, "units": verified,
-                          "source_authentication": self.source_authentication.receipt()},
-                         where="capture chain fragment", field="fragment_sha256")
+                   "source_authentication": self.source_authentication.receipt()}
+        if capture_binding is not None:
+            payload["capture_binding"] = capture_binding
+        document = _seal(payload, where="capture chain fragment", field="fragment_sha256")
         path = fragment_path(self.root, self.start, self.stop)
         atomic_write_bytes(path, canonical_json_bytes(document, where="capture chain fragment") + b"\n")
         return path

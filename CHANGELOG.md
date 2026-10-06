@@ -19,7 +19,7 @@
   can hand each canonical shared input group to an owner before prefix capping,
   independently of built-in Hessian collection. The D42 Stage 1 research entry
   uses this seam for same-pass disjoint fit/held-out moments and checks their
-  row-count sum against the saved full-draw census. It does not publish an
+  row-count sum against this forward's observed routing. It does not publish an
   ordinary production capture or qualify immutable source delivery.
 
 - **Receipt-bound shared research publication and multi-layer actions**. Joins
@@ -27,6 +27,11 @@
   receipts, preventing count redistribution or payload substitution. Adjacent
   prepared layers run in one GPU action with bounded per-layer moments and
   durable progress; explicit priority units publish first in the same capture.
+  Moments drain after every layer even inside a multi-layer prepared range.
+  Completed adoption rechecks scope, persisted split and scoring geometry;
+  changed selection hashes or retained-prefix budgets replay instead of reuse.
+  Historical census counts/maxima use D32 stamps with explicit deltas; actual
+  routing, per-role projection agreement and tokens-times-top-k stay hard checks.
 
 - **CPU-prep/GPU-quantum capture runtime stamps**. In default dev mode, runtime
   version metadata does not reapply an identity seal after source admission.

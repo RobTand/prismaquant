@@ -23728,18 +23728,28 @@ authorized D42 Stage 1 research route: fixed whole-sample fit and held-out
 coordinates accumulate separate unnormalized moments in one forward pass. Each
 quantum verifies the actual draw bytes, role token identities and running split
 boundary against the persisted manifest before model load; these are data
-comparability refusals even in dev mode. Their per-unit counts must sum to the
-full-draw census. Stable publication
+comparability refusals even in dev mode. Their per-unit counts must sum to this
+forward's observed routing, not historical census counts. Gate/up/down counts
+must agree per expert and sample role; each role's expert sum equals its tokens
+times the config-declared top-k. Dense units cover every token in that role.
+Historical counts and max-abs are planning metadata: the existing D32 helper
+stamps drift, and both values and deltas enter the trusted layer/quantum receipt.
+The census has no mean statistic; the manifest explicitly records that absence.
+An expert appearing/vanishing or changing by more than 1 percent stops for CEO
+review. Hessians and prefixes contain only the actual routed rows. Stable publication
 is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
 files relative to the capture root. The research join compares each role
 record (path, own digest, length, count, Hessian/input/prefix geometry) with
 the completed quantum's verified receipt before checking its actual file.
 Count redistribution or a substituted payload cannot be accepted merely
 because the layer totals still match. A single GPU action may run adjacent
-prepared quanta; each layer publishes and verifies its own files, frees its
-moments, and commits durable progress before the next layer. Completed
-quanta are adopted only after their publications match the verified receipts,
-so retries do not duplicate source forwards. The three explicitly prioritized
+prepared quanta; each layer publishes and verifies its own files and frees its
+moments before the next layer, including within a multi-layer prepared range.
+Completed quanta are adopted only after requested scope, scoring geometry and
+actual split still match prep, request binding matches and publications match
+the verified receipts. A compatible changed selection hash or retained-prefix
+budget replays its owner instead of silently reusing old results. Matching
+retries do not duplicate source forwards. The three explicitly prioritized
 L3 expert0 up, L28 shared up and L44 expert0 up units publish their verified
 role pairs before the remainder of their layer is serialized. This research
 publication is not an
