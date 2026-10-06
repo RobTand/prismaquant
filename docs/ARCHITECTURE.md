@@ -151,7 +151,9 @@ by default. Source citations are to this rebased branch.
 
 ## Adjacent acquisition and readset correctness
 
-The current main has no separate `units.*.acquisition_source_weight` journal field. Actual acquisition weight shape, dtype, logical bytes and content digest are checked against authenticated requests (`tessera_campaign.py:1005–1022,7694–7707`); all remain correctness refusals. Any later such identity field stays undeclared comparability. Source/capture authentication and replay readset/frontier agreement remain unchanged (`tessera_joint_aura.py:1911–1928,1951–1979`): they bind actual capture bytes, roster and execution reads, not producer-only hashes.
+Acquisition checkpoints retain `units.*.acquisition_source_weight`, checked against the authenticated request and the measured unit weight. Shape, dtype, logical bytes, content digest, raw request/cost bytes, exact atomic coverage, legal rates, calibration and probe comparability remain correctness refusals. Source/capture authentication and replay readset/frontier agreement likewise bind actual capture bytes, roster and execution reads, not producer-only hashes.
+
+`load_joint_campaign_acquisition` treats recorded live domain pins and export/grammar producer source digests as identities: the existing `dev_mode.seal_check` stamps their mismatch and continues with stored data by default. Producer source-state schema remains a protocol refusal. Dispatcher planning and manifest validation authenticate both request and cost bytes through their existing input owners before comparing controls, stamping only locator spelling. The same control owner supplies canonical request content excluding only `cost_path`; the loader carries its `request_control_sha256` through projected runtime origins, journals and scalar payloads. Both merges and plan reload require that authenticated control identity, actual cost/run/probe identity and regime to agree before stamping only raw `request_sha256` provenance differences. The raw request/cost SHA checks still authenticate each file read, never the canonical control digest alone. Absence, changed content, shape/rate/source/calibration, schedule, atomic coverage, deferred-domain and numerical disagreement refuse in every mode. The producer document schema and raw joint evidence remain unchanged; no archive, re-seal, recapture, domain reduction or qualification follows from a development stamp.
 
 PR 2313 is closed because its exact approved production head `b987bff97244397e04f14b7a54727d58a43d45fc` landed through merged PR 2324 (`7b02dafa602a09fc5ed14d0aae746d98a9e4ee96`); no literal PR 2313 merged-state gate exists. Every field added by future callers is comparability unless explicitly classified and declared; this deliverable declares no other caller.
 
@@ -15723,6 +15725,12 @@ from completed measured Tessera anchors** (#322). The explicit
 its fleet receipts, merged scalar payload/journal, full census and canonical
 token/capture artifacts. Only journaled measured wire cells enter the exact
 per-Linear format plan; interpolated MSE rows never become joint prices.
+Admission requires the campaign `inputs` mapping and a shape-only
+`canonical_capture` path/SHA256 pair for every plan command, including
+`synthesize`, which loads neither model nor capture payloads. Bound head-walk
+inputs are shape-checked without reading their files; a Stage B subset remains
+legal at plan load, while the anchor walk names every missing chain binding.
+The synthesis census read also refuses a missing binding by name before work.
 Preparation derives the producer's encoding identity from actual streamed source
 weights and original prefetched Hessians, verifies original wire bytes, and
 requires their decoded BF16 values to equal original PWC shards (see the

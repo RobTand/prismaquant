@@ -65,7 +65,7 @@ def packet(domain):
     return dict(requests=domain.requests,
         source_weights={name: _cb_cache_tensor_identity(weight) for name, weight in domain.weights.items()},
         identity={key: str(i) * 64 for i, key in enumerate(("request_sha256", "cost_sha256",
-            "joint_aura_identity_sha256", "probe_identity_sha256"), 1)})
+            "joint_aura_identity_sha256", "probe_identity_sha256", "request_control_sha256"), 1)})
 
 
 def test_nonuniform_requests_union_only_inside_actual_atomic_group(domain):
