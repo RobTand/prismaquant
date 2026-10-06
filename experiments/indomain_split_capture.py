@@ -700,12 +700,13 @@ def mode_join(args, guard) -> dict:
     chain.require_source_fingerprints(prep["source_fingerprints"], prep["source_root"],
                                       where="research split join")
     from prismaquant.streaming_model import merge_selected_initialization_witnesses
-    from prismaquant import validate_source_initialization_contract
+
     merged = merge_selected_initialization_witnesses(
         [fragment["witness"] for fragment in fragments])
-    if merged != validate_source_initialization_contract(identity["model_load_contract"]):
-        raise ResearchRefused(
-            "the quanta's merged initialization witness differs from the census contract")
+    try:
+        store.require_capture_initialization_contract(identity["model_load_contract"], merged)
+    except RuntimeError as error:
+        raise ResearchRefused(str(error)) from error
     recorded = chain.recorded_source_digests(prep, fragments)
     verified = {}
     for fragment in fragments:

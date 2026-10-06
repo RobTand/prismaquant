@@ -565,9 +565,10 @@ def join(capture_root, *, census_path) -> dict:
     only after the manifest is published, so a failed join leaves every input
     of a retry.
     """
-    from prismaquant import validate_source_initialization_contract
+
     from .streaming_model import merge_selected_initialization_witnesses
-    from .tessera_calibration_cache import CaptureWriter, record_capture_source, sha256
+    from .tessera_calibration_cache import (
+        CaptureWriter, record_capture_source, require_capture_initialization_contract, sha256)
     root = Path(capture_root).resolve()
     prep = read_prep(root)
     identity = prep["identity"]
@@ -585,9 +586,10 @@ def join(capture_root, *, census_path) -> dict:
                                 where="capture chain join")
     merged = merge_selected_initialization_witnesses(
         [fragment["witness"] for fragment in fragments])
-    if merged != validate_source_initialization_contract(identity["model_load_contract"]):
-        raise CaptureChainRefused(
-            "the quanta's merged initialization witness differs from the census contract")
+    try:
+        require_capture_initialization_contract(identity["model_load_contract"], merged)
+    except RuntimeError as error:
+        raise CaptureChainRefused(str(error)) from error
     verified = {}
     for fragment in fragments:
         repeated = sorted(set(verified) & set(fragment["units"]))

@@ -149,6 +149,15 @@ def capture_source_files(root):
                   if path.is_file())
 
 
+def require_capture_initialization_contract(expected, actual):
+    """Validate the completed capture witness against its census contract."""
+    from prismaquant import validate_source_initialization_contract
+    expected = validate_source_initialization_contract(expected)
+    actual = validate_source_initialization_contract(actual)
+    if actual != expected:
+        raise RuntimeError("actual capture initialization differs from the census")
+
+
 def capture_identity(census_path, *, calibration, max_act_rows,
                      model_load_contract, attention_implementation,
                      resource_check=None, release_read_pages=False,
@@ -1909,10 +1918,8 @@ class CaptureWriter:
 
     def finish(self, *, model_load_contract, verified=None, source_files=None):
         """Seal the capture; a traversal identity binds ``source_files`` here (PQ #1896)."""
-        from prismaquant import validate_source_initialization_contract
-        actual = validate_source_initialization_contract(model_load_contract)
-        if actual != self.identity['model_load_contract']:
-            raise RuntimeError('actual capture initialization differs from the census')
+        require_capture_initialization_contract(
+            self.identity['model_load_contract'], model_load_contract)
         held = dict(verified or {})
         for name, record in self.verified.items():
             if held.setdefault(name, record) != record:
