@@ -127,7 +127,67 @@ class EntryError(RuntimeError):
 # One file, read once
 # --------------------------------------------------------------------------
 
-_SEALS = fcntl.F_SEAL_SEAL | fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
+# The memfd seal numbers are Linux UAPI and ABI-fixed since kernel 3.11
+# (uapi/asm-generic/fcntl.h, uapi/linux/memfd.h). CPython defines the
+# ``fcntl`` names only when its build headers had them, so a portable
+# interpreter built against pre-glibc-2.27 headers lacks them and the module
+# must not read them at import (PB be3dd1332259: the capture qualification set
+# failed collection there with ``AttributeError: module 'fcntl' has no
+# attribute 'F_SEAL_SEAL'``). The kernel stays the authority: the seal is
+# attempted through fcntl and read back with ``F_GET_SEALS`` (tests/
+# test_io_engine.py::test_seal_constants_resolve_without_cpython_build_time_names).
+_F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
+_F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
+_SEALS = (
+    getattr(fcntl, "F_SEAL_SEAL", 0x0001)
+    | getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
+    | getattr(fcntl, "F_SEAL_GROW", 0x0004)
+    | getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+)
+_MFD_CLOEXEC = getattr(os, "MFD_CLOEXEC", 0x0001)
+_MFD_ALLOW_SEALING = getattr(os, "MFD_ALLOW_SEALING", 0x0002)
+
+#: The runtime libc's ``memfd_create``, bound once with explicit ctypes
+#: signatures (D5 review of b601b76b9b5: rebuilding the ``CDLL`` handle per
+#: call re-dlopened and re-resolved on every sealed buffer). ``None`` until
+#: the first portable call needs it.
+_LIBC_MEMFD_CREATE = None
+
+
+def _create_memfd(name: str, flags: int) -> int:
+    """One anon_inode memfd, sealing-capable, this process owns.
+
+    ``os.memfd_create`` exists only in interpreters whose build headers had
+    the syscall; a portable build (pq-cpu312, PB ded8698fa4d6) lacks it and
+    every stream read died on the missing attribute. The runtime libc on the
+    same box still wraps the syscall (glibc 2.27+, musl 1.1.20+), so fall
+    through to it. The MFD flag numbers are Linux UAPI, ABI-fixed.
+    """
+    global _LIBC_MEMFD_CREATE
+    if hasattr(os, "memfd_create"):
+        return os.memfd_create(name, flags)
+    import ctypes
+
+    if _LIBC_MEMFD_CREATE is None:
+        libc = ctypes.CDLL(None, use_errno=True)
+        try:
+            call = libc.memfd_create
+        except AttributeError:
+            raise OSError(
+                f"this runtime libc exposes no memfd_create; sealed io "
+                f"buffers cannot hold {name!r} here") from None
+        call.argtypes = (ctypes.c_char_p, ctypes.c_int)
+        call.restype = ctypes.c_int
+        _LIBC_MEMFD_CREATE = call
+    fd = _LIBC_MEMFD_CREATE(name.encode(), flags)
+    if fd == -1:
+        raise OSError(ctypes.get_errno(), f"memfd_create({name!r}) failed")
+    return fd
+
+
+def kernel_seal_bits(fd: int) -> int:
+    """The kernel's actual seal bits on an open memfd (``F_GET_SEALS``)."""
+    return fcntl.fcntl(fd, _F_GET_SEALS)
 
 
 class SealedBuffer:
@@ -160,7 +220,7 @@ class SealedBuffer:
     def __init__(self, size: int):
         self.size = int(size)
         self._map = None
-        self._fd = os.memfd_create("pq-io", os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        self._fd = _create_memfd("pq-io", _MFD_CLOEXEC | _MFD_ALLOW_SEALING)
         try:
             os.ftruncate(self._fd, self.size)
             if self.size:
@@ -207,12 +267,12 @@ class SealedBuffer:
                 view.release()
             self._map.close()
             self._map = None
-        fcntl.fcntl(self._fd, fcntl.F_ADD_SEALS, _SEALS)
+        fcntl.fcntl(self._fd, _F_ADD_SEALS, _SEALS)
         return digest.hexdigest()
 
     def require_sealed(self) -> None:
         """Require actual kernel write/grow/shrink/seal protection, not a flag."""
-        if self._fd is None or fcntl.fcntl(self._fd, fcntl.F_GET_SEALS) & _SEALS != _SEALS:
+        if self._fd is None or kernel_seal_bits(self._fd) & _SEALS != _SEALS:
             raise RuntimeError("original material lacks required kernel seals")
 
     @property
