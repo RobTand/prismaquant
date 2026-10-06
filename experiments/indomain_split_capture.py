@@ -572,7 +572,7 @@ def mode_quantum(args, guard) -> dict:
             namespace, census, tokens, corpus_text,
             attention_implementation=args.attention_implementation,
             source_authentication=source, unit_names=unit_names)
-        quantum.require_identity(identity, n_batches=len(tokens))
+        identity = quantum.require_identity(identity, n_batches=len(tokens))
         split_sha256 = split_stamp(
             json.loads(split_manifest_path(capture_root).read_text()))
 

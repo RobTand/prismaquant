@@ -134,7 +134,7 @@ class _Chain:
             quantum = chain.ChainQuantum(self.root, layers, num_layers=2,
                                          source_authentication=owner)
             identity = self.identity(owner)
-            quantum.require_identity(identity, n_batches=self.n_batches)
+            identity = quantum.require_identity(identity, n_batches=self.n_batches)
             writer = self.cache.CaptureWriter(self.root, census_path=self.census, identity=identity)
             units = self.UNITS[layers]
             with quantum.owner():

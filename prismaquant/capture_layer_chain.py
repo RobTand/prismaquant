@@ -447,13 +447,14 @@ class ChainQuantum:
     def last(self) -> bool:
         return self.stop == self.num_layers
 
-    def require_identity(self, identity, *, n_batches) -> None:
+    def require_identity(self, identity, *, n_batches) -> dict:
         if identity != self.prep["identity"]:
             raise CaptureChainRefused("this quantum's capture identity differs from the prep's")
         if n_batches != self.prep["n_batches"]:
             raise CaptureChainRefused(
                 f"this quantum draws {n_batches} calibration batches; the prep sealed "
                 f"{self.prep['n_batches']}")
+        return self.prep["identity"]
 
     def _remove_stale_outputs(self):
         """A failed attempt's boundary ``stop`` entries: this owner's, never its input."""

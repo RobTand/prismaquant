@@ -6346,7 +6346,7 @@ def _run_streamed_calibration(args, runner, profile, *, mode, population,
             attention_implementation=attention_implementation, source_authentication=source,
             unit_names=capture_unit_names)
         if quantum is not None:
-            quantum.require_identity(identity, n_batches=len(tokens))
+            identity = quantum.require_identity(identity, n_batches=len(tokens))
         writer = store.CaptureWriter(args.capture_calibration_out,
             census_path=args.calibration_census, identity=identity,
             release_file_pages=bounded_capture,
