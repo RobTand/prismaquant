@@ -13,7 +13,7 @@ another, each retryable on its own:
   generation the quanta share, and seals the prep record
   (``<capture>/chain/prep.json``): the identity, the layer ranges, the
   calibration batch count, the boundary storage policy and session, and the
-  source fingerprints. It runs no forward and hashes nothing.
+  source fingerprints. It runs no forward and hashes no source payload.
 * **Quanta, one per layer range ``[a, b)``, in order.** Each rebinds the
   generation as its own owner (``owners/capture-AAA-BBB.json``) and reads its
   source through a recording
@@ -24,7 +24,8 @@ another, each retryable on its own:
   reaches the capture, and held to the prep's stat fingerprint. A census
   that declares producer digests is compared there. Nothing it does not read
   is hashed, and no stat or path record stands in for a digest; the prep's
-  fingerprints only refuse. It starts from boundary ``a`` (the predecessor's
+    fingerprints refuse in certified mode; dev mode stamps their drift. It starts
+    from boundary ``a`` (the predecessor's
   hidden states, read through the generation's verified windows) and runs
   ``[a, b)`` with the unchanged capture visitor, so its units are written by
   the same writer and journal as a monolithic capture's, each hashed as it
@@ -448,13 +449,21 @@ class ChainQuantum:
         return self.stop == self.num_layers
 
     def require_identity(self, identity, *, n_batches) -> dict:
-        if identity != self.prep["identity"]:
+        recorded = self.prep["identity"]
+        if (not isinstance(identity, dict) or identity.keys() != recorded.keys()
+                or any(value != identity[key] for key, value in recorded.items()
+                       if key != "capture_runtime")):
             raise CaptureChainRefused("this quantum's capture identity differs from the prep's")
         if n_batches != self.prep["n_batches"]:
             raise CaptureChainRefused(
                 f"this quantum draws {n_batches} calibration batches; the prep sealed "
                 f"{self.prep['n_batches']}")
-        return self.prep["identity"]
+        from .dev_mode import seal_check
+        seal_check("capture quantum runtime", recorded.get("capture_runtime"),
+                   identity.get("capture_runtime"), where=range_label(self.start, self.stop),
+                   refusal=lambda: CaptureChainRefused(
+                       "this quantum's capture runtime differs from the prep's"))
+        return recorded
 
     def _remove_stale_outputs(self):
         """A failed attempt's boundary ``stop`` entries: this owner's, never its input."""

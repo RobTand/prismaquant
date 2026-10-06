@@ -439,3 +439,68 @@ def test_capture_chain_arguments_refuse(tmp_path, capsys, extra, match):
     with pytest.raises(SystemExit):
         campaign.main(argv)
     assert match in capsys.readouterr().err
+
+
+def test_runtime_drift_keeps_the_prep_identity_and_readable_capture(tmp_path, monkeypatch):
+    fixture = _Chain(tmp_path)
+    original_identity = fixture.identity
+
+    def current_identity(owner=None):
+        identity = original_identity(owner)
+        identity["capture_runtime"] = {
+            "torch": "2.11.0+cu130", "cuda": "13.0", "transformers": "5.16.1"}
+        return identity
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    monkeypatch.setattr(fixture, "identity", current_identity)
+    for witness in fixture.witnesses.values():
+        witness["transformers_version"] = "5.16.1"
+    fixture.quantum((0, 1))
+    fixture.quantum((1, 2))
+    record = chain.join(fixture.root, census_path=fixture.census)
+    manifest = cc.require_capture_contract(record["manifest"]["path"],
+                                           record["manifest"]["sha256"])
+    assert manifest["identity"] == cc.bind_capture_source(
+        fixture.prep["identity"], manifest["identity"]["source_files"])
+    for name, entry in manifest["entries"].items():
+        actual = torch.load(fixture.root / entry["path"], weights_only=True)
+        torch.testing.assert_close(actual["inputs"], fixture.acts[name], rtol=0, atol=0)
+        torch.testing.assert_close(actual["hessian"], fixture.hessians[name], rtol=0, atol=0)
+        assert actual["count"] == fixture.counts[name]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("calibration", {"fit_ids_sha256": "foreign-draw"}),
+    ("units", {"a": [3, 4], "b": [3, 2]}),
+    ("unit_scope", "selected"),
+    ("max_act_rows", 1),
+])
+def test_runtime_stamp_does_not_admit_incomparable_capture(tmp_path, monkeypatch, field, value):
+    fixture = _Chain(tmp_path)
+    original_identity = fixture.identity
+
+    def incomparable(owner=None):
+        identity = original_identity(owner)
+        identity["capture_runtime"]["cuda"] = "13.0"
+        identity[field] = value
+        return identity
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "1")
+    monkeypatch.setattr(fixture, "identity", incomparable)
+    with pytest.raises(CaptureChainRefused):
+        fixture.quantum((0, 1))
+
+
+def test_certified_capture_still_refuses_runtime_drift(tmp_path, monkeypatch):
+    fixture = _Chain(tmp_path)
+    original_identity = fixture.identity
+
+    def changed_runtime(owner=None):
+        identity = original_identity(owner)
+        identity["capture_runtime"]["cuda"] = "13.0"
+        return identity
+
+    monkeypatch.setenv("PRISMAQUANT_DEV_MODE", "0")
+    monkeypatch.setattr(fixture, "identity", changed_runtime)
+    with pytest.raises(CaptureChainRefused):
+        fixture.quantum((0, 1))

@@ -23727,7 +23727,13 @@ and their per-unit counts must sum to the full-draw census. Stable publication
 is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
 files relative to the capture root. This research publication is not an
 ordinary production capture manifest and confers no immutable-provider
-qualification. The automatic admission guard remains unchanged.
+qualification. The automatic admission guard remains unchanged. Chain quanta
+retain the canonical prep identity after the existing dev-mode runtime stamp:
+CPU-prep/GPU-quantum version metadata is not a second admission seal. Calibration,
+unit scope/shapes, prefix and batch counts still compare strictly. The shared
+capture initialization checker also stamps only the loader version; the
+remaining observed initialization fields remain comparable-data refusals.
+Certified mode retains runtime refusals.
 `plan --calibration-cache` binds that manifest path and SHA256 into
 each anchor action. The action verifies its actual initializer, backend,
 runtime, complete source bytes, calibration and geometry. By default

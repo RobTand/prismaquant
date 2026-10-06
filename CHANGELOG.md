@@ -22,6 +22,13 @@
   row-count sum against the saved full-draw census. It does not publish an
   ordinary production capture or qualify immutable source delivery.
 
+- **CPU-prep/GPU-quantum capture runtime stamps**. In default dev mode, runtime
+  version metadata does not reapply an identity seal after source admission.
+  Chain writers keep the canonical prep identity; initialization-witness loader
+  versions use the same stamp policy at join and finish. Calibration, unit
+  scope/geometry, batch counts and own-byte integrity remain refusals; certified
+  mode still refuses runtime drift. The automatic source safety guard is unchanged.
+
 - **Default-off CPU input/readset preflight for joint adjoint capture**
   (#2325). `--cpu-input-preflight` shares the calibration and source metadata
   startup owners, derives expected source phases from the actual meta-model and

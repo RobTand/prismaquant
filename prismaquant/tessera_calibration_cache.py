@@ -150,12 +150,18 @@ def capture_source_files(root):
 
 
 def require_capture_initialization_contract(expected, actual):
-    """Validate the completed capture witness against its census contract."""
+    """Require comparable initialization geometry; stamp loader-version metadata."""
     from prismaquant import validate_source_initialization_contract
     expected = validate_source_initialization_contract(expected)
     actual = validate_source_initialization_contract(actual)
-    if actual != expected:
+    if (expected.keys() != actual.keys()
+            or any(value != actual[key] for key, value in expected.items()
+                   if key != "transformers_version")):
         raise RuntimeError("actual capture initialization differs from the census")
+    seal_check("capture initialization loader version",
+               expected.get("transformers_version"), actual.get("transformers_version"),
+               where="capture initialization", refusal=lambda: RuntimeError(
+                   "actual capture initialization runtime differs from the census"))
 
 
 def capture_identity(census_path, *, calibration, max_act_rows,
