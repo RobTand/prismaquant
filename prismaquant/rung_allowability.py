@@ -80,22 +80,7 @@ class RungAllowability:
                 "table_version": self.table_version, "source_path": self.source_path}
 
 
-def load_rung_allowability(root: str | Path, *, format_entry: Mapping,
-                           expected_kernel_build: Mapping) -> RungAllowability:
-    """Validate through the producer, then select the current version only.
-
-    The CEO's index contract selects formats[format].kernel_builds[build_id].
-    current_version, not the highest filename or a caller-selected stale version.
-    """
-    root = Path(root).resolve()
-    family = format_entry["family"]
-    if not isinstance(expected_kernel_build, Mapping) or not expected_kernel_build.get("id"):
-        raise RungAllowabilityError("independently observed kernel_build is required")
-    index = read_allowability_json(root / "index.json")
-    producer = _producer_api()
-    producer.validate_index(index)
-    if index.get("schema") != INDEX_SCHEMA:
-        raise RungAllowabilityError("index.json: versioned allowability index required")
+def _selected_table(root, index, family, expected_kernel_build, producer):
     try:
         build_entry = index["formats"][family]["kernel_builds"][expected_kernel_build["id"]]
         version = build_entry["current_version"]
@@ -123,6 +108,26 @@ def load_rung_allowability(root: str | Path, *, format_entry: Mapping,
             not isinstance(expected_kernel_build.get(key), str)
             or table["kernel_build"][key] != expected_kernel_build[key] for key in context_fields):
         raise RungAllowabilityError("selected table format/kernel_build is stale for this allocation")
+    return version, path, table
+
+
+def load_rung_allowability(root: str | Path, *, format_entry: Mapping,
+                           expected_kernel_build: Mapping) -> RungAllowability:
+    """Validate through the producer, then select the current version only.
+
+    The CEO's index contract selects formats[format].kernel_builds[build_id].
+    current_version, not the highest filename or a caller-selected stale version.
+    """
+    root = Path(root).resolve()
+    family = format_entry["family"]
+    if not isinstance(expected_kernel_build, Mapping) or not expected_kernel_build.get("id"):
+        raise RungAllowabilityError("independently observed kernel_build is required")
+    index = read_allowability_json(root / "index.json")
+    producer = _producer_api()
+    producer.validate_index(index)
+    if index.get("schema") != INDEX_SCHEMA:
+        raise RungAllowabilityError("index.json: versioned allowability index required")
+    version, path, table = _selected_table(root, index, family, expected_kernel_build, producer)
     rule = _allowable_rung_tables(format_entry, f"formats[{family}]")
     if not rule:
         raise RungAllowabilityError(f"{family}: existing v11 allowable_rungs rule required")
