@@ -34,9 +34,9 @@ row that any free GPU can run:
 From there the run is a chain resume at the tail checkpoint, and the chain
 split (``stage_a_chain_split``) rolls it by sample range from the top.
 
-Nothing here compares a run's source, implementation or plan with a
-recorded one. What it checks is that the records it reads are the records
-that were written, and that the plane it publishes is whole.
+The forward relaunch compares full bind identities through the existing
+chain-resume seal/comparability owner; it never changes the session hash.
+The join checks immutable records and whole-plane coverage as before.
 """
 from __future__ import annotations
 
@@ -171,6 +171,19 @@ def read_prep_record(space) -> dict:
         raise ForwardSplitRefused(f"{path} does not seal its own content")
     return document
 
+
+def adopt_forward_bind_identity(prep, running_identity):
+    """Compare full retained/run identities, then reuse the original session identity."""
+    from .stage_a_chain_resume import ChainResumeRefused, require_chain_fields_equal
+
+    retained = prep["chain_state"]["bind_identity"]
+    try:
+        require_chain_fields_equal(
+            {"bind_identity": retained}, {"bind_identity": running_identity},
+            fields=("bind_identity",), where="Stage A forward split")
+    except ChainResumeRefused as exc:
+        raise ForwardSplitRefused(str(exc)) from exc
+    return retained
 
 def generation_directory(prep: dict) -> Path:
     storage = prep["chain_state"]["boundary_storage"]

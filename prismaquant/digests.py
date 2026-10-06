@@ -52,8 +52,9 @@ Byte profiles, lowercase-hex SHA-256 except the native Git SHA-1 profile:
   profile validates names or removes duplicates.
 - ``file_sha256hex``: a file's bytes, read in ``block_size`` pieces
   (``FILE_BLOCK_BYTES`` unless the site keeps its own). The block size changes
-  only how the file is read, never the digest. The path may be a ``str`` or a
-  ``PathLike``; a missing path or a directory raises what ``open`` raises.
+  only how the file is read, never the digest; a zero read count is refused.
+  The path may be a ``str`` or a ``PathLike``; a missing path or a directory
+  raises what ``open`` raises.
 
 - ``length_framed_bytes_sha256``: caller-owned prefix followed by caller-ordered
   raw byte frames, each preceded by its eight-byte big-endian byte length.
@@ -98,6 +99,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import math
+import operator
 import os
 import re
 from typing import BinaryIO, Protocol
@@ -530,9 +532,27 @@ def sorted_newline_utf8_sha256(names: Iterable[str]) -> str:
 
 
 def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTES) -> str:
+    """A file's SHA-256 hex digest, streamed in ``block_size`` reads.
+
+    The block size changes only how the file is read, never the digest. A
+    zero read count is refused with a ``ValueError`` naming ``block_size``:
+    ``read(0)`` never advances, so an unrefused zero silently returned the
+    empty-input digest for any file (PQ #2344). The refusal is
+    content-independent and applies to every zero spelling ``read`` coerces
+    (``0``, ``False``, any ``__index__`` zero). A size of ``-1`` or ``None``
+    reads the whole file in one call; any other negative count propagates
+    ``read``'s own refusal. The path may be a ``str`` or a
+    ``PathLike``; a missing path or a directory raises what ``open`` raises,
+    before any read-count check, as before.
+    """
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
-        while block := handle.read(block_size):
+        read_size = block_size if block_size is None else operator.index(block_size)
+        if read_size == 0:
+            raise ValueError(
+                "block_size must not be 0: read(0) returns b'' without "
+                "advancing, so the file's bytes would never be read")
+        while block := handle.read(read_size):
             digest.update(block)
     return digest.hexdigest()
 
