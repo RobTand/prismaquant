@@ -14,6 +14,8 @@ def _versioned_publication(root, table_schema="fleet.rung_allowability.v2"):
     table = json.loads(path.read_text())
     table["schema"] = table_schema
     if table_schema.endswith(".v2"):
+        entry = _formats()[FAMILY]
+        recipe = copy.deepcopy(entry["allowable_rungs"]["wire"])
         for row in table["rungs"]:
             if row["measurement_status"] != "measured":
                 row["measurements"] = []
@@ -25,6 +27,12 @@ def _versioned_publication(root, table_schema="fleet.rung_allowability.v2"):
                     word_ring={"kind": "staged", "owner": "tessera.routed_fused"})
                 geometry["shared_memory"]["kind"] = "used"
                 geometry["register_pressure"]["compiler"] = "cuda_cuobjdump"
+                geometry["recipe"] = copy.deepcopy(recipe)
+            row["quality"]["scope"] = {"owner": "tessera.export.encode_linear",
+                "format": FAMILY, "grid": entry["grid"],
+                "arity": entry["allowable_rungs"]["code_arity"], "rung": row["rung"],
+                "recipe": copy.deepcopy(recipe),
+                "kernel_kinds": sorted({m["kernel_kind"] for m in row["measurements"]})}
     index_path = root / "index.json"
     index = json.loads(index_path.read_text())
     index["schema"] = "fleet.rung_allowability.index.v2"
@@ -67,6 +75,8 @@ def _native_tcq_publication(publication):
     family = "TESSERA_E2M1_K2"
     entry = copy.deepcopy(_formats()[family])
     step = entry["reader_rate_step_q256"]
+    stamp = next(stamp for stamp in entry["attested_wire"] if stamp["q256"] == 896)
+    recipe = {key: value for key, value in stamp.items() if key != "q256"}
     table["format"] = family
     table["scope"].update(rung_min=896, rung_max=896, grid_step_q256=step)
     table["rungs"] = table["rungs"][:1]
@@ -79,14 +89,26 @@ def _native_tcq_publication(publication):
         "arity": 2, "run_widths": [7], "memory": 6, "span": 2,
         "history_lookup_bits": 7, "label_lut_entries": 128,
         "block_m": 64, "block_n": 64, "block_k": 128, "mma_k": 64, "scale_group": 16}
+    # Actual seven-plane native o_proj census retained by the corrected
+    # producer fixture from cff24a0e7d05; not the former two-plane proxy.
     geometry["alignment"] = {"kind": "tcq_planes",
         "owner": "tessera.compact_prep.prepare_span2_compact", "slot_words": None,
-        "plane_shapes": {"codes": [256], "labels": [128]},
-        "plane_bytes": {"codes": 256, "labels": 512}}
+        "plane_shapes": {"select": [528392], "label": [1048576], "point": [6291456],
+            "nibbles": [524288], "lut_bytes": [16], "label_lut": [128], "code_nibbles": [256]},
+        "plane_bytes": {"select": 528392, "label": 1048576, "point": 6291456,
+            "nibbles": 524288, "lut_bytes": 16, "label_lut": 512, "code_nibbles": 256},
+        "plane_element_bytes": {"select": 1, "label": 1, "point": 1, "nibbles": 1,
+            "lut_bytes": 1, "label_lut": 4, "code_nibbles": 1}}
+    geometry["shared_memory"] = {"kind": "used", "requested_bytes": 12800,
+        "available_bytes": 101376, "fits": True}
     geometry["register_pressure"] = {"compiler": "triton_compiled_kernel", "REG": 196,
         "SPILLS": 0, "STACK": None, "LOCAL": None,
         "SHARED": geometry["shared_memory"]["requested_bytes"],
         "compiler_symbol": "_a4_span2_gemm_kernel"}
+    geometry["recipe"] = copy.deepcopy(recipe)
+    table["rungs"][0]["quality"]["scope"] = {"owner": "tessera.export.encode_linear",
+        "format": family, "grid": entry["grid"], "arity": 2, "rung": 896,
+        "recipe": copy.deepcopy(recipe), "kernel_kinds": ["dense"]}
     target = publication / family / BUILD["id"] / "v0001.json"
     target.parent.mkdir(parents=True)
     target.write_text(json.dumps(table))
@@ -97,7 +119,6 @@ def _native_tcq_publication(publication):
     (publication / "index.json").write_text(json.dumps(index))
     # A test-only v11 rule over this already published census rung. It does not
     # widen the production pin or assert a new serving cell or wire.
-    stamp = next(stamp for stamp in entry["attested_wire"] if stamp["q256"] == 896)
     entry["allowable_rungs"] = {"rule": "window_rate_set", "code_arity": 2,
         "range_q256": [896, 896], "step_q256": step, "run_tables": [[7]],
         "excluded_run_tables": [], "excluded_q256": [],
@@ -112,3 +133,84 @@ def test_v2_native_tcq_uses_explicit_non_window_facts(publication):
     admitted = load_rung_allowability(publication, format_entry=entry, expected_kernel_build=BUILD)
     assert admitted.allows(896)
     assert admitted.provenance()["schema"] == "fleet.rung_allowability.v2"
+
+
+@pytest.mark.parametrize("plane", ["select", "label", "point", "nibbles", "lut_bytes",
+                                  "label_lut", "code_nibbles"])
+def test_v2_native_plane_census_is_owned_and_mandatory(publication, plane):
+    from prismaquant.rung_allowability import load_rung_allowability
+    path, table, entry = _native_tcq_publication(publication)
+    alignment = table["rungs"][0]["measurements"][0]["geometry"]["alignment"]
+    for field in ("plane_shapes", "plane_bytes", "plane_element_bytes"):
+        del alignment[field][plane]
+    path.write_text(json.dumps(table))
+    with pytest.raises(ValueError, match="plane census|plane"):
+        load_rung_allowability(publication, format_entry=entry, expected_kernel_build=BUILD)
+
+
+@pytest.mark.parametrize("mutation", ["bytes", "element_width"])
+def test_v2_native_plane_bytes_are_refused_by_producer_when_inconsistent(publication, mutation):
+    from prismaquant.rung_allowability import load_rung_allowability
+    path, table, entry = _native_tcq_publication(publication)
+    alignment = table["rungs"][0]["measurements"][0]["geometry"]["alignment"]
+    if mutation == "bytes":
+        alignment["plane_bytes"]["label_lut"] += 1
+    else:
+        alignment["plane_element_bytes"]["label_lut"] = 1
+    path.write_text(json.dumps(table))
+    with pytest.raises(ValueError, match="byte|width"):
+        load_rung_allowability(publication, format_entry=entry, expected_kernel_build=BUILD)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "format", "grid", "arity", "rung",
+                                    "recipe", "structure"])
+def test_v2_quality_scope_refusal_is_delegated_to_producer(publication, mutation):
+    path, table = _versioned_publication(publication)
+    quality = table["rungs"][0]["quality"]
+    if mutation == "missing":
+        del quality["scope"]
+    elif mutation == "format":
+        quality["scope"]["format"] = "TESSERA_BF16_K1"
+    elif mutation == "grid":
+        quality["scope"]["grid"] = "BF16"
+    elif mutation == "arity":
+        quality["scope"]["arity"] = 2
+    elif mutation == "rung":
+        quality["scope"]["rung"] = 1025
+    elif mutation == "recipe":
+        quality["scope"]["recipe"]["body"] = "tcq"
+    else:
+        quality["scope"]["kernel_kinds"] = ["routed"]
+    path.write_text(json.dumps(table))
+    with pytest.raises(ValueError, match="quality|recipe|scope|arity"):
+        _load(publication)
+
+
+def test_v2_zero_width_point_is_explicit_not_a_positive_placeholder(publication):
+    from prismaquant import rung_allowability as reader
+    _path, table, _entry = _native_tcq_publication(publication)
+    row = table["rungs"][0]
+    row["rung"] = 128
+    table["scope"].update(rung_min=128, rung_max=128)
+    measurement = row["measurements"][0]
+    identity = {"cell_id": "fixture:routed:gate_up:M1", "kernel_kind": "routed",
+                "shape_id": "gate_up", "M": 1}
+    measurement.update(identity)
+    table["scope"]["required_cells"] = [identity]
+    row["quality"]["scope"].update(rung=128, kernel_kinds=["routed"])
+    geometry = measurement["geometry"]
+    geometry["decode_width"]["run_widths"] = [1]
+    geometry["alignment"]["plane_shapes"]["point"] = [0]
+    geometry["alignment"]["plane_bytes"]["point"] = 0
+    geometry["alignment"]["plane_shapes"]["code_nibbles"] = [4]
+    geometry["alignment"]["plane_bytes"]["code_nibbles"] = 4
+    api = reader._producer_api()
+    api.validate_table(table)
+    assert api.admit_rung(table, format=table["format"], kernel_build_id=BUILD["id"],
+                          rung=128)["status"] == "allow"
+    # Metadata-only owner control, not a new serving/reader-grid admission.
+    geometry["decode_width"]["run_widths"] = [7]
+    geometry["alignment"]["plane_shapes"]["code_nibbles"] = [256]
+    geometry["alignment"]["plane_bytes"]["code_nibbles"] = 256
+    with pytest.raises(ValueError, match="POINT|zero-width"):
+        api.validate_table(table)
