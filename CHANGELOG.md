@@ -61,6 +61,14 @@
 
 ### Changed
 
+- **Share the two GLM MTP capture file-byte recipes** (#2359, Refs #1301).
+  Final-hidden manifests and MTP censuses use the existing
+  `digests.indent2_json_file_bytes` owner: sorted keys, two-space indentation,
+  ASCII escapes, strict non-finite handling, UTF-8 and one final line feed.
+  Atomic publication, publish-once checks, native encoding errors, returned
+  byte digests and census admission ordering are unchanged. The projection
+  tool and its text summaries retain their own recipes.
+
 - **Reuse the shared forward-KL owner in final-vocabulary scoring** (#2334,
   Refs #1303). The final `_student` scoring path of
   `tools/measure_vllm_full_kl.py` now calls

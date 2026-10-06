@@ -604,6 +604,51 @@ def _phase_one(env, owner):
         runner.shutdown()
 
 
+def test_final_hidden_publication_preserves_pretty_file_bytes(tmp_path):
+    reference = glm_mtp_capture.publish_final_hidden(
+        tmp_path, session={"generation": "golden", "run_identity_sha256": "a" * 64},
+        records=[{"name": "final-hidden-0", "shape": [1, 2, 3]}], layer="44",
+        inputs={"unicode": "雪 café", "nested": [None, True, -0.0]},
+        source_witness={"observed_layers": [44]},
+        source_authentication={"verified_files": []},
+        head_check=[{"sequence": 0, "top1": 0.5, "nll": 1.25}])
+    raw = Path(reference["path"]).read_bytes()
+    assert raw == (json.dumps(json.loads(raw), indent=2, sort_keys=True,
+                              allow_nan=False) + "\n").encode()
+    assert b"\\u96ea" in raw and raw.endswith(b"}\n")
+    assert reference["sha256"] == hashlib.sha256(raw).hexdigest()
+    # Captured from this consumer before the recipe cutover on fd1d907.
+    assert reference["sha256"] == "921b7f9d6e5744ec2116275b2481c4b96a30a977f23cfd9429053d5f56cfde18"
+    assert glm_mtp_capture.read_bound_json(reference["path"], reference["sha256"])[0][
+        "inputs"]["unicode"] == "雪 café"
+
+
+@pytest.mark.parametrize("value,error", [
+    (float("nan"), ValueError),
+    ({"text": 1, 2: 3}, TypeError),
+    (object(), TypeError),
+])
+@pytest.mark.parametrize("publisher", ["final-hidden", "census"])
+def test_capture_publication_keeps_native_encoding_errors(tmp_path, value, error, publisher):
+    if publisher == "final-hidden":
+        path = tmp_path / "manifest.json"
+        kwargs = dict(session={}, records=[], layer=44, inputs=value,
+                      source_witness={}, source_authentication={}, head_check=[])
+        publish = glm_mtp_capture.publish_final_hidden
+        args = (tmp_path,)
+    else:
+        path = tmp_path / "census.json"
+        kwargs = dict(census=value, census_path=path, source_authentication=None,
+                      calibration={}, max_act_rows=1, rows={}, hessians={}, counts={},
+                      max_abs={}, completed_contract={})
+        publish = glm_mtp_capture.publish_mtp_capture
+        args = (tmp_path / "capture",)
+    with pytest.raises(error):
+        publish(*args, **kwargs)
+    assert not path.exists()
+    assert not (tmp_path / "capture").exists()
+
+
 def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
     from prismaquant import tessera_calibration_cache as cc
     from prismaquant.streaming_model import validate_streaming_selected_initialization_witness
@@ -631,6 +676,9 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
         assert witness["observed_layers"] == [LAST]
         assert witness["source_map_sha256"] == full_contract["source_map_sha256"]
         final_manifest, _ = glm_mtp_capture.read_bound_json(final_ref["path"], final_ref["sha256"])
+        final_bytes = Path(final_ref["path"]).read_bytes()
+        assert final_bytes == (json.dumps(final_manifest, indent=2, sort_keys=True,
+                                         allow_nan=False) + "\n").encode()
         assert len(final_manifest["head_check"]) == N_SEQUENCES
         assert all(0.0 <= row["top1"] <= 1.0 for row in final_manifest["head_check"])
 
@@ -689,6 +737,8 @@ def test_both_phases_publish_a_capture_a_selected_consumer_accepts(mtp_source):
             completed_contract=glm_mtp.mtp_layer_initialization_contract(
                 layer, receipt, input_manifest=final_ref))
         authentication = owner.receipt()
+        assert census_path.read_bytes() == (json.dumps(census, indent=2, sort_keys=True,
+                                                       allow_nan=False) + "\n").encode()
     finally:
         owner.close()
 
