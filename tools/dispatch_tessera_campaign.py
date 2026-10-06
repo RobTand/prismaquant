@@ -2230,8 +2230,11 @@ def _check_acquisition_binding(binding, expected, *, refusal, where):
     from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_controls
     from prismaquant.dev_mode import seal_check
 
-    expected_content, expected_locators = joint_campaign_acquisition_controls(expected)
-    actual_content, actual_locators = joint_campaign_acquisition_controls(binding)
+    try:
+        expected_content, expected_locators = joint_campaign_acquisition_controls(expected)
+        actual_content, actual_locators = joint_campaign_acquisition_controls(binding)
+    except (OSError, ValueError) as exc:
+        raise refusal(f"{where}: acquisition binding cannot authenticate controls: {exc}") from exc
     if actual_content != expected_content:
         raise refusal(f"{where}: authenticated acquisition control content differs from plan")
     seal_check("acquisition locators", expected_locators, actual_locators, where=where,
