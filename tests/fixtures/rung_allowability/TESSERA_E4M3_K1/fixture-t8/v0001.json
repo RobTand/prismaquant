@@ -1,0 +1,201 @@
+{
+  "schema": "fleet.rung_allowability.v1",
+  "table_version": 1,
+  "table_status": "partial",
+  "format": "TESSERA_E4M3_K1",
+  "kernel_build": {
+    "id": "fixture-t8",
+    "source_commit": "fixture-only",
+    "library_variant": "fixture",
+    "architecture": "sm_121",
+    "activation_contract": "W8A8"
+  },
+  "generated_at": "2026-10-06T02:40:00Z",
+  "scope": {
+    "rung_min": 896,
+    "rung_max": 898,
+    "grid_step_q256": 1,
+    "grid_owner": "prismaquant.tessera_formats.realisable_rungs",
+    "required_cells": [
+      {
+        "cell_id": "dense-1",
+        "kernel_kind": "dense",
+        "shape_id": "fixture-shape",
+        "M": 1
+      }
+    ]
+  },
+  "rungs": [
+    {
+      "rung": 896,
+      "measurement_status": "measured",
+      "supported": true,
+      "anomaly_flags": [],
+      "observations": [],
+      "excluded": false,
+      "dominating_rung": null,
+      "measurements": [
+        {
+          "cell_id": "dense-1",
+          "kernel_kind": "dense",
+          "shape_id": "fixture-shape",
+          "M": 1,
+          "measurement_status": "measured",
+          "kernel_time_us": 10,
+          "kernel_path": "fixture",
+          "geometry": {
+            "bits_per_256_weight_tile": {
+              "numerator": 1024,
+              "denominator": 1
+            },
+            "alignment": {
+              "bytes": 16
+            },
+            "shared_memory": {
+              "requested_bytes": 1,
+              "available_bytes": 2,
+              "fits": true
+            },
+            "register_pressure": {
+              "REG": 32,
+              "STACK": 0,
+              "LOCAL": 0,
+              "SHARED": 0
+            },
+            "decode_width": {
+              "window_bits": 16
+            }
+          },
+          "evidence": {
+            "fixture": true,
+            "comparison_id": "synthetic-pair",
+            "paired_seed_contract": "synthetic-only",
+            "timing_statistic": "fixture-mean",
+            "timer": "fixture"
+          },
+          "measurement_build_id": "fixture-t8",
+          "pass_times_us": [
+            10,
+            10
+          ]
+        }
+      ],
+      "quality": {
+        "fixture": true,
+        "measurement_status": "measured",
+        "source_kind": "actual_sampled_expert_weights",
+        "device": "cpu",
+        "samples": [
+          {
+            "source_sha256": "synthetic-not-real-weight-evidence",
+            "source_squared_norm": 2,
+            "relative_sse": 0.1,
+            "exact_bytes": 3
+          }
+        ]
+      },
+      "dominance_evidence": []
+    },
+    {
+      "rung": 897,
+      "measurement_status": "measured",
+      "supported": true,
+      "anomaly_flags": [
+        "quality_failure"
+      ],
+      "observations": [],
+      "excluded": false,
+      "dominating_rung": null,
+      "measurements": [
+        {
+          "cell_id": "dense-1",
+          "kernel_kind": "dense",
+          "shape_id": "fixture-shape",
+          "M": 1,
+          "measurement_status": "measured",
+          "kernel_time_us": 10,
+          "kernel_path": "fixture",
+          "geometry": {
+            "bits_per_256_weight_tile": {
+              "numerator": 1024,
+              "denominator": 1
+            },
+            "alignment": {
+              "bytes": 16
+            },
+            "shared_memory": {
+              "requested_bytes": 1,
+              "available_bytes": 2,
+              "fits": true
+            },
+            "register_pressure": {
+              "REG": 32,
+              "STACK": 0,
+              "LOCAL": 0,
+              "SHARED": 0
+            },
+            "decode_width": {
+              "window_bits": 16
+            }
+          },
+          "evidence": {
+            "fixture": true,
+            "comparison_id": "synthetic-pair",
+            "paired_seed_contract": "synthetic-only",
+            "timing_statistic": "fixture-mean",
+            "timer": "fixture"
+          },
+          "measurement_build_id": "fixture-t8",
+          "pass_times_us": [
+            10,
+            10
+          ]
+        }
+      ],
+      "quality": {
+        "fixture": true,
+        "measurement_status": "measured",
+        "source_kind": "actual_sampled_expert_weights",
+        "device": "cpu",
+        "samples": [
+          {
+            "source_sha256": "synthetic-not-real-weight-evidence",
+            "source_squared_norm": 2,
+            "relative_sse": 0.1,
+            "exact_bytes": 3
+          }
+        ]
+      },
+      "dominance_evidence": []
+    },
+    {
+      "rung": 898,
+      "measurement_status": "pending",
+      "supported": null,
+      "anomaly_flags": [],
+      "observations": [],
+      "excluded": false,
+      "dominating_rung": null,
+      "measurements": [
+        {
+          "cell_id": "dense-1",
+          "kernel_kind": "dense",
+          "shape_id": "fixture-shape",
+          "M": 1,
+          "measurement_status": "pending",
+          "kernel_time_us": null,
+          "kernel_path": null,
+          "geometry": null,
+          "evidence": {}
+        }
+      ],
+      "quality": {
+        "status": "pending"
+      },
+      "dominance_evidence": []
+    }
+  ],
+  "evidence": {
+    "fixture": true
+  }
+}
