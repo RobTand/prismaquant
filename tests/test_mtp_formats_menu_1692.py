@@ -119,8 +119,6 @@ def test_a_group_left_without_a_complete_rung_refuses():
 def _allocator_argv(tmp_path, monkeypatch, publication, *extra):
     from tests.test_allocator_output_pin_1304 import _stock_inputs
 
-    from prismaquant import format_registry
-
     _allocator_attestation_fixture(monkeypatch)
     argv = [*_stock_inputs(tmp_path), *allowability_cli_args(publication)]
     payload, constants = _write_payload(tmp_path, _payload())

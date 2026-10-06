@@ -271,8 +271,6 @@ def test_allocator_stamps_the_mtp_selection_outside_body_bpp(tmp_path, monkeypat
 
     from prismaquant import allocator
 
-    from prismaquant import format_registry
-
     _allocator_attestation_fixture(monkeypatch)
     argv = [*_stock_inputs(tmp_path), *allowability_cli_args(publication)]
     monkeypatch.setattr(sys, "argv", ["allocator", *argv])
