@@ -126,6 +126,23 @@ def joint_campaign_acquisition_controls(binding: dict) -> tuple[bytes, dict]:
     """
     entries = joint_campaign_acquisition_control_inputs(binding)
     document, _ = read_joint_campaign_acquisition_document(binding)
-    content = {key: value for key, value in document.items() if key != "cost_path"}
-    return (_digests.canonical_json_bytes(content, where="joint acquisition controls"),
+    return (joint_campaign_acquisition_control_bytes(document),
             {"request": entries[0]["path"], "cost": entries[1]["path"]})
+
+
+def joint_campaign_acquisition_control_bytes(document: dict) -> bytes:
+    """One locator-independent representation of already authenticated controls."""
+    content = {key: value for key, value in document.items() if key != "cost_path"}
+    return _digests.canonical_json_bytes(content, where="joint acquisition controls")
+
+
+def joint_campaign_acquisition_control_sha256(document: dict) -> str:
+    return _digests.bytes_sha256hex(joint_campaign_acquisition_control_bytes(document))
+
+
+def joint_campaign_acquisition_comparable_identity(identity: dict) -> bytes:
+    """Raw request SHA records read bytes; authenticated controls decide comparability."""
+    _require(isinstance(identity, dict) and "request_control_sha256" in identity,
+             "authenticated acquisition control identity required")
+    controls = {key: value for key, value in identity.items() if key != "request_sha256"}
+    return _digests.canonical_json_bytes(controls, where="joint acquisition comparable identity")
