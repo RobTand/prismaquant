@@ -3288,9 +3288,11 @@ def synthesize_renders(config, *, plan_sha256, units=None, device="cpu", log_eve
     reservation it does not use: measured, 125,144 shards at 2.6 cells/s on
     one core while the reserved GB10 sat at 5 W of 140 W (#549).
 
-    This is the same function, addressable on its own: a unit range, no
-    model, no capture, no GPU required, and idempotent -- a cell whose shard
-    exists is skipped, the origin marker is published before the shard, and
+    This is the same function, addressable on its own: a unit range, no model
+    or capture payload is loaded, and no GPU is required. The command still
+    takes a complete admitted campaign plan, including the shape-only
+    canonical capture binding. It is idempotent: a cell whose shard exists
+    is skipped, the origin marker is published before the shard, and
     staging names are unique per writer. PrismaBuild owns the fan-out; rows
     carry disjoint ``sorted(names)[lo:hi]`` ranges cut from the census, so no
     two rows ever address the same cell and a retried row re-reads rather

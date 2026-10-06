@@ -15696,6 +15696,12 @@ from completed measured Tessera anchors** (#322). The explicit
 its fleet receipts, merged scalar payload/journal, full census and canonical
 token/capture artifacts. Only journaled measured wire cells enter the exact
 per-Linear format plan; interpolated MSE rows never become joint prices.
+Admission requires the campaign `inputs` mapping and a shape-only
+`canonical_capture` path/SHA256 pair for every plan command, including
+`synthesize`, which loads neither model nor capture payloads. Bound head-walk
+inputs are shape-checked without reading their files; a Stage B subset remains
+legal at plan load, while the anchor walk names every missing chain binding.
+The synthesis census read also refuses a missing binding by name before work.
 Preparation derives the producer's encoding identity from actual streamed source
 weights and original prefetched Hessians, verifies original wire bytes, and
 requires their decoded BF16 values to equal original PWC shards (see the

@@ -238,6 +238,7 @@
   `io_engine.kernel_seal_bits`, so one home owns the seal grammar. No guard
   moved: a buffer still refuses unless the kernel reports all four seals; no
   default, pin, wire, GPU or serving claim.
+
 - **A joint plan that cannot name its campaign chain is refused by name, at
   admission, before any device** (#1293). `load_joint_anchor_plan` admitted a
   plan with no `inputs` block, and the `prepare` GPU action then died on a
@@ -251,6 +252,11 @@
   loads in both modes. No gate weakened, no wire, codec, numerical or GPU
   claim; the named refusal moves the run-01 S3 failure from minutes into a
   GPU action to a plan-load ValueError naming the absent key.
+  Policy-refusal tests start from the canonical shape-only plan and name each
+  probe, token-scope, temperature and activation-clipping refusal, so an
+  earlier missing-input error cannot hide those guards. The standalone
+  `synthesize` command also takes this complete plan and its canonical capture
+  binding, although it loads neither model nor capture payloads.
 
 - **Real codec CPU fixtures retain their full acceptance at bounded geometry**
 

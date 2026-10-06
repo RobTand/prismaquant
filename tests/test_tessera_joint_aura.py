@@ -312,21 +312,20 @@ def test_bounded_wire_read_fences_symlinks_size_and_actual_bytes(tmp_path):
         _read_verified_wire_blob({**cell, "wire": str(alias)})
 
 
-@pytest.mark.parametrize("field,value", [("probe_microbatch", 0), ("n_probes", 1),
-    ("token_scope", "last"), ("production_act_scales", "1"), ("temperature", 2.0)])
-def test_plan_refuses_unqualified_probe_or_activation_policies(tmp_path, field, value):
-    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan, SCHEMA
-    config = {"schema": SCHEMA, "execution": {"n_calib_samples": 512,
-        "calib_seqlen": 512, "probe_microbatch": 1, "n_probes": 4,
-        "seed_base": 7000, "token_scope": "all", "temperature": 1.0,
-        "production_act_scales": "0"}, "profile_tool": "cprofile",
-        "max_render_bytes": 1024, "max_gpu_bytes": 2048, "min_free_gib": 0}
-    config["source_prefetch"] = dict(max_cache_slots=24, prefetch_workers=4,
-        prefetch_lookahead=4, cache_headroom_gb=4.0,
-        prefetch_min_available_gb=2.0, require_prefetched_residency=True)
+@pytest.mark.parametrize("field,value,refusal", [
+    ("probe_microbatch", 0, "probe_microbatch"),
+    ("n_probes", 1, "n_probes"),
+    ("token_scope", "last", "full-draw joint token scope"),
+    ("production_act_scales", "1", "campaign optional activation clipping"),
+    ("temperature", 2.0, "joint probe temperature")])
+def test_plan_refuses_unqualified_probe_or_activation_policies(tmp_path, field, value, refusal):
+    from prismaquant.tessera_joint_aura import load_joint_anchor_plan as _load_plan
+    from test_joint_projection_backend import _plan
+
+    config = _plan(tmp_path)
     config["execution"][field] = value
     path = tmp_path / "plan.json"; path.write_text(json.dumps(config))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=refusal):
         _load_plan(path, sha(path))
 
 
