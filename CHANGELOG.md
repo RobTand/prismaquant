@@ -202,6 +202,13 @@
 
 ### Fixed
 
+- **Bind admitted produced output without input residency** (#2339). Queue
+  discovery now calls PB's authoritative same-generation reader owner; the
+  campaign container carries its launcher-owned `PRISMABUILD_QUEUE_ROOT`
+  and refuses spec forgeries. Legacy residency-map discovery stays with PB.
+  Live-attempt, declared-template, own-byte and output-budget guards remain
+  unchanged; no fake map or input staging declaration is introduced.
+
 - **Restore the shared owned-byte digest comparison after the #2283 port.**
   `read_bound` again routes the acquired-byte hash through the hard `same`
   comparison before memoizing, preserving `owned bytes: identity mismatch`.

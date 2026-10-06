@@ -283,10 +283,10 @@ def _require_client_surface(module) -> None:
 def sdk_submodule(name: str):
     """One ``prismabuild.<name>`` from the SAME generation as the SDK.
 
-    LEGACY: an internal PrismaBuild module, not its public SDK. New code calls
-    :func:`client_sdk`. This remains only for the callers that still need
-    names the SDK does not publish (``joint_forward_resume``,
-    ``produced_output_spool`` and four tools), and goes when they move.
+    LEGACY: an internal PrismaBuild module, not its public SDK. Names on
+    the public surface use :func:`client_sdk`; this bridge serves callers
+    that need unpublished owners, including residency-independent queue
+    discovery in ``stage_a_produced_output``. No unqualified import is used.
 
     Every PrismaBuild module this package uses must come from ONE sealed
     generation. A bare ``import prismabuild.produced_output`` does not
