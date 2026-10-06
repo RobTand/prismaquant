@@ -190,6 +190,24 @@ def _safe_open_kwargs(device: torch.device) -> dict:
     return {"framework": "pt"}
 
 
+def _checkpoint_weight_map(model_path, *, source_authentication=None, source_reads=None):
+    """Checkpoint names from the loader's indexed or single-file source owner."""
+    index = os.path.join(model_path, "model.safetensors.index.json")
+    if getattr(source_authentication, 'is_qualified_original_material', False) or os.path.exists(index):
+        if source_reads is not None:
+            return json.loads(source_reads.whole(index, where="checkpoint index"))["weight_map"]
+        return _source_json(index, source_authentication)["weight_map"]
+    single = os.path.join(model_path, "model.safetensors")
+    if not os.path.exists(single):
+        raise FileNotFoundError(f"no safetensors under {model_path}")
+    if source_reads is not None:
+        from .source_read_plan import read_safetensors_header
+        header, _base, _size = read_safetensors_header(single, source_reads=source_reads)
+        return {name: single for name in header if name != "__metadata__"}
+    with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as handle:
+        return {name: single for name in handle.keys()}
+
+
 def _build_weight_map(model_path: str, *,
                       multimodal: bool = False, source_authentication=None,
                       live_name=None, profile=None,
@@ -225,15 +243,7 @@ def _build_weight_map(model_path: str, *,
     if profile is None:
         profile = _source_profile(model_path, source_authentication)
 
-    index_file = os.path.join(model_path, "model.safetensors.index.json")
-    if getattr(source_authentication, 'is_qualified_original_material', False) or os.path.exists(index_file):
-        raw = _source_json(index_file, source_authentication)["weight_map"]
-    else:
-        single = os.path.join(model_path, "model.safetensors")
-        if not os.path.exists(single):
-            raise FileNotFoundError(f"no safetensors under {model_path}")
-        with _source_safe_open(single, framework="pt", source_authentication=source_authentication) as f:
-            raw = {k: single for k in f.keys()}
+    raw = _checkpoint_weight_map(model_path, source_authentication=source_authentication)
     return live_weight_map(
         raw, model_path,
         live_name if live_name is not None else
@@ -259,7 +269,7 @@ def _live_tree_head_extras(profile) -> bool:
 
 
 def streaming_source_plan(model_path: str, *, layers_prefix: str,
-                          layers, source_reads=None) -> dict:
+                          layers, source_reads=None, root=None) -> dict:
     """The streaming loader's source reads, enumerated without a GPU (PQ #1095).
 
     The same selection the loader reads: the checkpoint index mapped to live
@@ -296,9 +306,9 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
     (profile detection opens it), the index whole, then each shard's length
     prefix and header.
 
-    A profile whose head extras come from the live module tree (its
-    ``head_resident_extra_prefixes`` reads ``root``) cannot be enumerated
-    without a skeleton, and refuses.
+    Profiles with live-tree head extras use the caller's actual meta skeleton
+    in root, or construct the loader's meta skeleton when it is omitted.
+    Indexed and unindexed sources share the loader's checkpoint-map owner.
     """
     from .model_profiles import detect_profile
     from .source_read_plan import (
@@ -314,29 +324,24 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
         profile = detect_profile(model_path, config=staged_config)
     else:
         profile = detect_profile(model_path)
-    if _live_tree_head_extras(profile):
-        raise ValueError(
-            f"profile {profile.name} derives its resident head from the live "
-            "module tree; its source reads cannot be enumerated without a "
-            "skeleton: refusing")
+    if root is None and _live_tree_head_extras(profile):
+        from .streaming_model import build_streaming_skeleton, load_streaming_auto_config
+        config = load_streaming_auto_config(model_path, model_path, local_files_only=True)
+        root = build_streaming_skeleton(config,
+            multimodal=construction_multimodal(profile, False))
     multimodal = construction_multimodal(profile, False)
     index_path = os.path.normpath(
         os.path.join(model_path, "model.safetensors.index.json"))
-    if source_reads is None:
-        with open(index_path, "rb") as handle:
-            index_raw = handle.read()
-    else:
-        index_raw = source_reads.whole(index_path, where="checkpoint index")
-    raw = json.loads(index_raw.decode("utf-8"))["weight_map"]
+    raw = _checkpoint_weight_map(model_path, source_reads=source_reads)
     model_to_shard, model_to_ckpt = live_weight_map(
         raw, model_path,
         lambda ck: profile.checkpoint_to_live_name(ck, multimodal=multimodal))
     fp8 = _build_fp8_scale_inv_map(model_path, multimodal=multimodal,
                                    raw_weight_map=raw, profile=profile,
                                    config=staged_config)
-    head_prefixes = resident_head_prefixes(
-        base_prefix_of_layers(layers_prefix),
-        profile.head_resident_extra_prefixes(None))
+    base_prefix = base_prefix_of_layers(layers_prefix)
+    head_prefixes = (_head_prefixes(root, base_prefix) if root is not None
+                     else resident_head_prefixes(base_prefix))
     selections = {"head": select_source_tensors(
         model_to_shard, model_to_ckpt, head_prefixes)}
     for layer in layers:
@@ -376,7 +381,8 @@ def streaming_source_plan(model_path: str, *, layers_prefix: str,
                    for layer, selection in selections.items() if layer != "head"}
     metadata_reads = ([(config_path, 0, os.path.getsize(config_path))]
                       if os.path.isfile(config_path) else [])
-    metadata_reads.append((index_path, 0, len(index_raw)))
+    if os.path.exists(index_path):
+        metadata_reads.append((index_path, 0, os.path.getsize(index_path)))
     header_reads = [*metadata_reads,
                     *((path, 0, base) for path, (_h, base, _s)
                       in sorted(headers.items()))]
