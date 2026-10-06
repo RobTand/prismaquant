@@ -507,19 +507,22 @@ def _case_forced_below_baseline(report: list) -> None:
 
 
 def _case_nonmonotone(report: list) -> None:
-    # Chain 0 -> -0.5 -> -2.0 -> -2.5 over bytes 10..13 has slopes 0.5, 1.5,
-    # 0.5: bytes 12 sits in a non-convex pocket (inside the hull chord), so
-    # only a narrow lambda window selects it and byte-11 never does.
-    prices = np.array([[0.0, -0.5, -2.0, -2.5]])
-    byte = np.array([[10, 11, 12, 13]])
+    # Chain 0 -> -2.0 -> -2.5 over bytes 10 -> 12 -> 13 has slopes 1.0 then
+    # 0.5: byte 12 sits in a non-convex pocket, so only a narrow lambda window
+    # selects it and the byte-11 rung never exists at all.
+    prices = np.array([[0.0, -2.0, -2.5]])
+    byte = np.array([[10, 12, 13]])
     out = allocate_body_budget(prices, byte, 13, 0)
-    assert out["selection"].tolist() == [3] and out["predicted_loss"] == -2.5
+    assert out["selection"].tolist() == [2] and out["predicted_loss"] == -2.5
+    assert out["used_body_bytes"] == 13 and out["unused_body_bytes"] == 0
     out = allocate_body_budget(prices, byte, 12, 0)
-    assert out["selection"].tolist() == [2] and out["predicted_loss"] == -2.0
+    assert out["selection"].tolist() == [1] and out["predicted_loss"] == -2.0
     assert out["used_body_bytes"] == 12 and out["unused_body_bytes"] == 0
-    # Cap 11 sits inside the pocket: bytes(lambda) jumps 12 -> 10, the 11-byte
-    # rung is never on the lambda envelope, so the plan honestly falls back to
-    # the baseline rung and reports the one byte it leaves unused.
+    # Cap 11 sits inside the pocket: bytes(lambda) jumps 12 -> 10 at the
+    # boundary, so the plan falls back to the baseline rung. The skipped rungs
+    # need 2 and 3 bytes while only 1 remains, the greedy repair cannot cross
+    # the pocket, and the one unused byte is reported honestly (the exhaustive
+    # oracle confirms no feasible plan beats 0.0 here).
     out = allocate_body_budget(prices, byte, 11, 0)
     assert out["selection"].tolist() == [0] and out["predicted_loss"] == 0.0
     assert out["used_body_bytes"] == 10 and out["unused_body_bytes"] == 1
