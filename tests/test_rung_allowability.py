@@ -146,3 +146,31 @@ def test_metadata_only_reader_keeps_the_v56_serving_pin(publication):
     if hasattr(producer, "evidence"):
         assert producer.evidence["forbidden_imports"] == []
         print("D41 metadata-only producer:", json.dumps(producer.evidence, sort_keys=True))
+
+
+def test_allocator_cli_consumes_fixture_and_excludes_cheaper_unmeasured_rows(
+        publication, tmp_path, monkeypatch):
+    import pickle
+    from prismaquant import allocator
+    from test_tessera_scope_endpoints import _allocator_inputs, _cli_scope, _v5_contract
+    _v5_contract(monkeypatch)
+    monkeypatch.setenv("PRISMAQUANT_TESSERA_MENU", "research")
+    argv = _allocator_inputs(tmp_path, f"{FAMILY}_R896")
+    cost_path = Path(argv[argv.index("--costs") + 1])
+    payload = pickle.loads(cost_path.read_bytes())
+    names = [f"{FAMILY}_R{rung}" for rung in (896, 897, 898, 899)]
+    for rows in payload["costs"].values():
+        for name in names[1:]:
+            rows[name] = {**rows[names[0]], "weight_mse": 0.0, "output_mse": 0.0}
+    payload["formats"] = names
+    cost_path.write_bytes(pickle.dumps(payload))
+    argv[argv.index("--formats") + 1] = ",".join(names)
+    builds = tmp_path / "observed-builds.json"
+    builds.write_text(json.dumps({FAMILY: BUILD}))
+    allocator.main([*argv, *_cli_scope(), "--no-fused-aggregation", "--no-packed-aggregation",
+                    "--tessera-rung-allowability-root", str(publication),
+                    "--tessera-rung-kernel-builds", str(builds)])
+    layer = json.loads((tmp_path / "layer.json").read_text())
+    from prismaquant.layer_config import load_assignment
+    assert set(load_assignment(tmp_path / "layer.json").values()) == {names[0]}
+    assert layer["__prismaquant__"]["tessera_menu"]["rung_allowability"][FAMILY]["table_version"] == 1
