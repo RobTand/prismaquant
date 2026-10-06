@@ -539,8 +539,9 @@ def file_sha256hex(path: str | os.PathLike, *, block_size: int = FILE_BLOCK_BYTE
     ``read(0)`` never advances, so an unrefused zero silently returned the
     empty-input digest for any file (PQ #2344). The refusal is
     content-independent and applies to every zero spelling ``read`` coerces
-    (``0``, ``False``, any ``__index__`` zero). A negative size or ``None``
-    reads the whole file in one call. The path may be a ``str`` or a
+    (``0``, ``False``, any ``__index__`` zero). A size of ``-1`` or ``None``
+    reads the whole file in one call; any other negative count propagates
+    ``read``'s own refusal. The path may be a ``str`` or a
     ``PathLike``; a missing path or a directory raises what ``open`` raises,
     before any read-count check, as before.
     """
