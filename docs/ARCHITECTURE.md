@@ -7,8 +7,14 @@ rungs require a current measured allowability table.
 format-to-`kernel_build` JSON map, never a build copied from the measurement
 table itself. `index.json` selects the format/build `current_version` in
 `formats[format].kernel_builds[build_id]` and its `versions[str(version)]` safe relative
-path, schema and status. Missing, unreadable, unversioned or stale publications
-refuse. The pure producer `tessera.rung_allowability` validators and `admit_rung`
+path, schema and status. Absent, unreadable or invalid index/table evidence
+refuses in both modes; kernel and measurement-scope comparability stay hard.
+Present publication identity drift goes through `dev_mode.seal_check`: dev mode
+stamps and continues with the stored validated selection, while certified mode
+retains the refusal. A version move with a changed required-cell scope is not
+identity-only: canonical `admit_rung(scope=current_selected_scope)` refuses
+carrying narrow measurements into the widened scope. The pure producer
+`tessera.rung_allowability` validators and `admit_rung`
 own measured/supported/anomaly/quality and all-cell adjacent-higher dominance
 admission. PrismaQuant intersects that answer with its existing v11
 `formats[].allowable_rungs` run-table rule, then passes it through the existing
@@ -27,6 +33,10 @@ a research menu mode. Existing wire/shape, serving, export and quality gates
 remain independent. The allocation records the selected table version and
 observed build in its menu provenance; fixture tables establish only reader
 mechanics, not measured or served qualification.
+The current shared root is `/mnt/shared/fleet-ceo/rung-allowability`. Its v0003
+20-cell scope is distinct from historical v0002 16-cell mechanics; v2 measurements
+are never a narrowed production substitute for v3. Cost-only geometry observations
+do not change pending measurement status or admit an allocated rung.
 
 Re-stamped 2026-10-05 (`issues/pq-687-journal-seal-fields`, base `7b02dafa602`,
 PQ #687, CEO dec-1005-212354-dc9d, D32): `prepare_journal` accepts an empty-by-default

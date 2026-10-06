@@ -12,6 +12,7 @@ from types import MappingProxyType
 
 from .lane_eligibility import _allowable_rung_tables
 from .schemas import strict_json_loads
+from .dev_mode import seal_check
 
 SCHEMA = "fleet.rung_allowability.v1"
 INDEX_SCHEMA = "fleet.rung_allowability.index.v1"
@@ -133,8 +134,18 @@ def load_rung_allowability(root: str | Path, *, format_entry: Mapping,
         raise RungAllowabilityError(f"{family}: existing v11 allowable_rungs rule required")
     if table["scope"]["grid_step_q256"] != format_entry["allowable_rungs"]["step_q256"]:
         raise RungAllowabilityError("table step differs from the published true q256 grid step")
-    if read_allowability_json(root / "index.json") != index:
-        raise RungAllowabilityError("index.json changed during admission; selected version is stale")
+    current_index = read_allowability_json(root / "index.json")
+    producer.validate_index(current_index)
+    if current_index != index:
+        _, _, current_table = _selected_table(
+            root, current_index, family, expected_kernel_build, producer)
+        scoped = producer.admit_rung(table, format=family,
+            kernel_build_id=expected_kernel_build["id"], rung=table["scope"]["rung_min"],
+            scope=current_table["scope"])
+        if scoped["reason"] == "unmeasured_scope":
+            raise RungAllowabilityError("stored measurement scope differs from the current selected scope")
+        seal_check("D41 publication identity", index, current_index,
+                   where=str(root / "index.json"), refusal=RungAllowabilityError)
     return RungAllowability(family, MappingProxyType(dict(expected_kernel_build)), version,
                            str(path), table, producer, MappingProxyType(rule),
                            frozenset(row["rung"] for row in table["rungs"]))
