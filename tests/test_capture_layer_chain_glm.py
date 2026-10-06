@@ -422,8 +422,11 @@ def test_chain_quantum_empty_range_scope_rules():
     assert chain.quantum_range_requires_units(selected, 2, 3)
     assert not chain.quantum_range_requires_units(selected, 0, 1)
     unparsable = {"unit_scope": "selected", "units": {"a": [4, 4]}}
-    with pytest.raises(chain.CaptureChainRefused, match="names no decoder layer"):
+    with pytest.raises(chain.CaptureChainRefused, match="not exactly one"):
         chain.quantum_range_requires_units(unparsable, 0, 1)
+    ambiguous = {"unit_scope": "selected", "units": {"m.layers.0.layers.1.w": [4, 4]}}
+    with pytest.raises(chain.CaptureChainRefused, match="not exactly one"):
+        chain.quantum_range_requires_units(ambiguous, 0, 1)
     unknown = {"unit_scope": "selected",
                "units": {"model.layers.7.mlp.experts.0.gate_proj.weight": [4, 4]}}
     assert chain.quantum_range_requires_units(unknown, 7, 8)
@@ -506,6 +509,11 @@ def test_glm_selected_capture_chain_equals_the_monolith_on_its_units(
     with pytest.raises(RuntimeError, match="scope mismatch"):
         campaign.main([*capture, '--units', str(other_units),
                        '--cache-dir', str(tmp_path / 'monolith-outside-cache'),
+                       '--capture-calibration-out', str(monolith)])
+    # The whole census scope is likewise not the stored selected scope.
+    with pytest.raises(RuntimeError, match="scope mismatch"):
+        campaign.main([*common, '--calibration-census', str(census_path),
+                       '--cache-dir', str(tmp_path / 'monolith-fullreuse-cache'),
                        '--capture-calibration-out', str(monolith)])
     # The chain rows forward for real again.
     monkeypatch.setattr(campaign, '_collect_activations', counting_collect)

@@ -368,24 +368,25 @@ def quantum_range_requires_units(identity: Mapping, start: int, stop: int) -> bo
     layer, so every range must verify units. A selected capture's quanta
     still tile every source layer, but a range none of its declared units
     live in verifies an empty unit map and that is its complete record --
-    only when every declared unit names exactly one decoder layer; a
-    selected unit whose layer cannot be read back is never assumed absent,
-    and any declared unit inside the range demands its record.
+    only when every declared unit names exactly one decoder layer: a unit
+    with no ``.layers.N.`` component, or more than one, names no single
+    layer a quantum could own, so the chain refuses rather than assume one;
+    any declared unit inside the range demands its record.
     """
     selected = identity.get("unit_scope") == "selected"
-    requires = False
+    requires = bool(not selected and identity.get("units"))
     for name in identity.get("units", {}):
-        match = DOTTED_LAYER_QNAME.search(name)
-        if match is None:
+        components = DOTTED_LAYER_QNAME.findall(name)
+        if len(components) != 1:
             if selected:
                 raise CaptureChainRefused(
-                    f"selected unit {name!r} names no decoder layer; the "
-                    "chain cannot tell which quantum records it")
+                    f"selected unit {name!r} names {len(components)} decoder "
+                    "layers, not exactly one; the chain cannot tell which "
+                    "quantum records it")
             requires = True
-        elif start <= int(match.group(1)) < stop:
+            continue
+        if start <= int(components[0]) < stop:
             requires = True
-    if not selected and identity.get("units"):
-        requires = True
     return requires
 
 

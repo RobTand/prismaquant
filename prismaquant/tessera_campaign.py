@@ -6843,8 +6843,16 @@ def _main(argv, *, source_scope, waits) -> int:
         except (ImportError, ValueError) as error:
             ap.error(f'canonical H references need a compatible producer and valid load policy: {error}')
     if args.streaming and not selected_source and (
-            not (args.census_out or args.capture_calibration_out) or args.units):
-        ap.error("--streaming requires full-scope census/capture or --units with a hash-bound complete calibration cache")
+            not (args.census_out or args.capture_calibration_out) or
+            (args.units and not (args.capture_calibration_out or args.calibration_cache))):
+        # Streaming prices a whole scope, or an explicit scope that is
+        # itself a whole priced object: a --units fresh capture (validated
+        # full-group before the model loads) or a --units reuse of a
+        # hash-bound complete capture. A census-out run is never narrowed,
+        # and unsupported streaming pricing without one of those refuses.
+        ap.error("--streaming requires full-scope census/capture, a --units "
+                 "full-group fresh capture, or --units with a hash-bound "
+                 "complete calibration cache")
     if args.streaming and (args.streaming_cache_slots < 2 or args.streaming_prefetch_workers < 1):
         ap.error("streaming calibration requires at least two cache slots and one prefetch worker")
     if (args.census_out or args.capture_calibration_out or args.calibration_cache) and not args.attention_implementation:
@@ -7392,11 +7400,22 @@ def _main(argv, *, source_scope, waits) -> int:
             capture_manifest = calibration_store.require_capture_contract(
                 args.calibration_cache, expected_sha256=args.calibration_cache_sha256)
         expected_unit_names = fresh_unit_names
-        if capture_manifest is not None and \
-                capture_manifest['identity'].get('unit_scope') == 'selected':
-            expected_unit_names = sorted(capture_manifest['identity']['units'])
-            if not expected_unit_names:
-                raise RuntimeError('selected capture manifest declares no unit scope')
+        if capture_manifest is not None:
+            stored_units = (sorted(capture_manifest['identity']['units'])
+                            if capture_manifest['identity'].get('unit_scope') == 'selected'
+                            else None)
+            # A completed capture is reused only for the scope it actually
+            # published: a run requesting units the stored capture does not
+            # cover -- a different selection, or the full scope over a
+            # selected capture -- refuses here, before any forward.
+            if fresh_unit_names != stored_units:
+                raise RuntimeError(
+                    f"scope mismatch: the completed capture at "
+                    f"{completed_capture} published "
+                    f"{'the whole census scope' if stored_units is None else sorted(stored_units)} "
+                    f"and this run requests "
+                    f"{'the whole census scope' if fresh_unit_names is None else sorted(fresh_unit_names)}")
+            expected_unit_names = stored_units
         reuse_source = (None if capture_manifest is not None else source_authentication)
         capture_identity = _capture_identity(
             expected_unit_names,
