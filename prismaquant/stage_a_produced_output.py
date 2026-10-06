@@ -627,7 +627,7 @@ def launch_queue_root(env: Mapping[str, str] | None = None) -> Path:
     seam, which applies PB's published queue-root rule after resolving the
     same sealed generation. No topology is guessed.
     """
-    from .staged_lease import LeaseRefused, launch_queue_root as _discover
+    from .staged_lease import LeaseRefused, discover_launch_queue_root as _discover
 
     source = dict(os.environ) if env is None else dict(env)
     try:

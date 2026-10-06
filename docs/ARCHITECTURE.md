@@ -1,7 +1,7 @@
 # PrismaQuant Architecture
 
 Re-stamped 2026-10-06 (PQ #2339): admitted produced-output queue discovery
-lives in the allowlisted `staged_lease.launch_queue_root` seam, which
+lives in the allowlisted `staged_lease.discover_launch_queue_root` seam, which
 applies PB's published queue-root rule (`PRISMABUILD_QUEUE_ROOT` first,
 legacy residency-map path otherwise) after resolving the same sealed
 generation. Discovery is independent of whether inputs have residency.

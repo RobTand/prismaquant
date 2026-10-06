@@ -201,10 +201,14 @@ QUEUE_ROOT_ENV_VAR = "PRISMABUILD_QUEUE_ROOT"
 RESIDENCY_MAP_ENV_VAR = "PRISMABUILD_RESIDENCY_MAP"
 
 
-def launch_queue_root(env: Mapping[str, str] | None = None) -> Path | None:
+def discover_launch_queue_root(env: Mapping[str, str] | None = None) -> Path | None:
     """The queue that launched this action, or ``None`` when unlaunched.
 
-    PB's own rule (PB #961): the launcher-published queue root first,
+    Distinctly named so the produced-output wrapper that owns the raising
+    contract (:func:`prismaquant.stage_a_produced_output.launch_queue_root`)
+    stays the one ``launch_queue_root`` (PQ #1295: same-name helpers only
+    shrink). PB's own rule (PB #961): the launcher-published queue root
+    first,
     else the residency-map path's parent's parent, the layout pre-#961
     generations wrote. The sealed generation resolves first through
     :func:`_sdk`, so a caller without one refuses
