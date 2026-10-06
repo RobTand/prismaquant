@@ -201,7 +201,12 @@
   this slice.
 
 ### Fixed
-
+- **Acquisition producer identities and locator spelling follow development mode**
+  (#2195, PR #2253). Only recorded live pins and export/grammar source digests
+  stamp and continue; source-state schema and actual request/cost, rate, shape,
+  atomic scope and calibration correctness still refuse. Planning and manifest
+  validation authenticate controls through the existing input owners before
+  separating locator spelling, without trusting a declared digest alone.
 - **Authenticated acquisition requests reach complete per-row execution and
   strict merge through the existing planner** (#2195). Each active atomic
   cohort keeps the original request/cost/run/probe identity; deferred cohorts

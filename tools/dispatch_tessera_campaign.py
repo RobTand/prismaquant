@@ -2221,6 +2221,23 @@ def _campaign_acquisition_argv(argv):
     return {"path": binding[0], "sha256": binding[1]}
 
 
+def _check_acquisition_binding(binding, expected, *, refusal, where):
+    """Actual presence/content agree; only authenticated locator spelling stamps."""
+    if binding is None or expected is None:
+        if binding is not expected:
+            raise refusal(f"{where}: acquisition binding presence differs from authenticated plan")
+        return
+    from prismaquant.tessera_acquisition_inputs import joint_campaign_acquisition_controls
+    from prismaquant.dev_mode import seal_check
+
+    expected_content, expected_locators = joint_campaign_acquisition_controls(expected)
+    actual_content, actual_locators = joint_campaign_acquisition_controls(binding)
+    if actual_content != expected_content:
+        raise refusal(f"{where}: authenticated acquisition control content differs from plan")
+    seal_check("acquisition locators", expected_locators, actual_locators, where=where,
+        refusal=lambda: refusal(f"{where}: acquisition locator binding differs from authenticated plan"))
+
+
 def _planned_campaign_acquisition(spec, args, census):
     binding = _campaign_acquisition_argv(spec["campaign_argv"])
     if binding is None:
@@ -2420,8 +2437,9 @@ def cmd_plan(args) -> int:
                 max_rounds=campaign_argv_argument(effective_argv, "--max-rounds", 0, int),
                 seeded=any(flag in effective_argv for flag in (
                     "--seed-checkpoint", "--seed-wire-dir", "--research-exact-member")))
-        if acquisition is not None and _campaign_acquisition_argv(_inner_campaign_argv(row)) != acquisition_binding:
-            raise RuntimeError("acquisition row argv differs from the original authenticated request binding")
+        if acquisition is not None:
+            _check_acquisition_binding(_campaign_acquisition_argv(_inner_campaign_argv(row)),
+                acquisition_binding, refusal=RuntimeError, where="acquisition row argv")
         rows.append(row)
         predicted_work = {}
         if work_profile is not None and not bundle[0].startswith('s:'):
@@ -3785,8 +3803,8 @@ def _check_acquisition_manifest(rows, plan, census, acquisition):
     for index, row in enumerate(rows):
         argv = _inner_campaign_argv(row)
         binding = _campaign_acquisition_argv(argv)
-        if binding != expected:
-            raise DemandRefused("manifest acquisition binding differs from authenticated plan")
+        _check_acquisition_binding(binding, expected, refusal=DemandRefused,
+            where=f"manifest acquisition row {index}")
         if acquisition is None:
             continue
         members = _units_members(argv, census=census, where=f"acquisition row {index}")

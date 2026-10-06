@@ -170,7 +170,7 @@ def test_illegal_proposals_fail_closed(joint_payload, request_document, tmp_path
 
 @pytest.mark.parametrize("change", [
     "duplicate_report", "shape", "boolean_shape", "source", "rawrecords", "probe_digest", "run_digest",
-    "legal_roster", "measured_roster", "domain_pins", "producer_source", "cost_currency",
+    "legal_roster", "measured_roster", "producer_schema", "cost_currency",
     "total", "boolean_total", "empty", "scalar_bindings", "cap_boolean", "cap_negative",
 ])
 def test_authenticated_report_cannot_replace_actual_evidence(
@@ -198,10 +198,8 @@ def test_authenticated_report_cannot_replace_actual_evidence(
         report["missing_legal_rate_count"] -= 1
     elif change == "measured_roster":
         report["measured_q256"] = []
-    elif change == "domain_pins":
-        document["domain_pins"] = {}
-    elif change == "producer_source":
-        document["producer_source_state"]["export_sha256"] = "f" * 64
+    elif change == "producer_schema":
+        document["producer_source_state"]["schema"] = "unsupported-source-protocol"
     elif change == "cost_currency":
         document["cost_currency"] = {"cost_currency": "joint_aura_predicted_dloss"}
     elif change == "total":

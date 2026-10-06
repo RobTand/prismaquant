@@ -340,6 +340,14 @@ def load_joint_campaign_acquisition(binding: dict, *, units: Sequence[str] | Non
     from .stage_inputs import read_bound, require
     from .tessera_formats import get_tessera_family
     from .tessera_legal_domain import live_pins as current_domain_pins, tessera_source_state
+    from .dev_mode import seal_check
+
+    def recorded_same(actual, expected, label):
+        seal_check(f"joint acquisition {label}", actual, expected, where=binding["path"],
+            same=(canonical_json_sha256(actual, where=label) ==
+                  canonical_json_sha256(expected, where=label)),
+            refusal=lambda: ValueError(
+                f"joint acquisition {label} differs from actual cost/domain evidence"))
 
     def same(actual, expected, label):
         # Digests distinguish bools from integers and preserve raw signed samples.
@@ -364,12 +372,13 @@ def load_joint_campaign_acquisition(binding: dict, *, units: Sequence[str] | Non
     require(document.get("journal_bindings") == {} and
             document.get("active_encoder_source_sha256") is None,
             "joint acquisition refuses scalar anchor/encoder bindings")
-    same(document.get("domain_pins"), current_domain_pins().as_dict(), "domain_pins")
+    recorded_same(document.get("domain_pins"), current_domain_pins().as_dict(), "domain_pins")
     state = tessera_source_state()
     claimed_state = document.get("producer_source_state")
     require(isinstance(claimed_state, dict), "joint acquisition requires producer source state")
-    for field in ("schema", "export_sha256", "grammar_sha256"):
-        same(claimed_state.get(field), state[field], f"producer_source_state.{field}")
+    same(claimed_state.get("schema"), state["schema"], "producer_source_state.schema")
+    for field in ("export_sha256", "grammar_sha256"):
+        recorded_same(claimed_state.get(field), state[field], f"producer_source_state.{field}")
 
     reports = document.get("reports")
     require(isinstance(reports, list) and bool(reports), "joint acquisition requires reports")
