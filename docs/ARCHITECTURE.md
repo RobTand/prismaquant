@@ -23730,7 +23730,6 @@ quantum verifies the actual draw bytes, role token identities and running split
 boundary against the persisted manifest before model load; these are data
 comparability refusals even in dev mode. Their per-unit counts must sum to the
 full-draw census. Stable publication
-and their per-unit counts must sum to the full-draw census. Stable publication
 is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
 files relative to the capture root. This research publication is not an
 ordinary production capture manifest and confers no immutable-provider
