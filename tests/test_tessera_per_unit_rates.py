@@ -724,8 +724,17 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     from prismaquant import allocator
     from prismaquant.layer_config import load_assignment
     _alloc_v5_contract(monkeypatch)
-    # The PB box's installed SDK predates v57: the capability gate is pinned
-    # by its own tests; this test pins the entrypoint wiring.
+    allocation_lane = allocator._allocation_lane()
+    apply_rates = allocation_lane.allocation_routed_unit_rates
+    dispatched = []
+
+    def record_dispatch(*args, **kwargs):
+        dispatched.append(args[1])
+        return apply_rates(*args, **kwargs)
+
+    monkeypatch.setattr(allocation_lane, "allocation_routed_unit_rates", record_dispatch)
+    # Capability validation has its own tests; fix the accepted capability
+    # here to exercise real CLI dispatch through the allocation lane.
     monkeypatch.setattr(trc, "packaged_routed_unit_capability",
                         lambda: ("d" * 64, dict(trc.ROUTED_UNIT_ASSIGNMENT_BLOCK)))
 
@@ -853,6 +862,7 @@ def test_allocator_cli_routed_unit_rates_entrypoint(tmp_path, monkeypatch):
     expected = {k: v for k, v in json.loads((noop / "layer.json").read_text())["__prismaquant__"].items()
                 if k != "tessera_routed_unit_rates"}
     assert stable(plain, off) == stable(expected, noop)
+    assert len(dispatched) == 2
     assert tep.UNIT_RUNGS_KEY not in plain
     assert "tessera_routed_unit_rates" not in plain
 

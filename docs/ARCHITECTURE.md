@@ -16990,6 +16990,12 @@ EXL3 cap was arithmetically empty. Three owners move together:
   stack-uniform plan is byte-identical to what it wrote before; mixed
   Tessera/BF16 leaves and mixed grids still refuse.
 
+The post-selection application belongs to
+`tessera_lane.allocation_routed_unit_rates`, reached through the existing
+`_allocation_lane()` / `lane_spec` plugin seam. Core passes its canonical
+format and artifact-pricing callbacks and never imports the Tessera lane;
+the final whole-artifact stamp remains owned by the existing footprint rule.
+
 Unit source records, receipts, wire bytes and framing are unchanged:
 `check_expert_wire_receipt` / `verify_expert_wire_record` keep their
 correctness refusals, and the packed-serving-group DP route, production
