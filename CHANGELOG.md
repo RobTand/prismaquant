@@ -22,6 +22,21 @@
   row-count sum against the saved full-draw census. It does not publish an
   ordinary production capture or qualify immutable source delivery.
 
+- **Default-off CPU input/readset preflight for joint adjoint capture**
+  (#2325). `--cpu-input-preflight` shares the calibration and source metadata
+  startup owners, derives expected source phases from the actual meta-model and
+  normalized job independently of the manifest, then checks every selected
+  tensor span. It reports no capture or price and creates no generation,
+  checkpoint or GPU allocation; normal CUDA and staged tier guards are unchanged.
+  Missing phases, shard tails and ranges in another phase refuse before capture.
+  The shared checkpoint-map and resident-head owners cover indexed/unindexed
+  sources and LFM2/DSv4 head extras without skipping tensors. Source metadata
+  reads use the same staged owner as the loader, not a pool fallback.
+  Resume selection uses the actual adjoint-checkpoint session marker; a stored
+  recovery capsule cannot re-enable a resumed forward pass. Bounded diagnostic
+  specs are read under their own byte pin and bound to the actual draw before
+  their lower-chain stopping boundary selects the source schedule.
+
 - **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
   rows** (#1962). `make_joint_aura_entry` can publish a
   `sequence_attribution` block decomposing each projection over whole
@@ -63,6 +78,18 @@
   sidecar tests of `tests/test_stageb_one_pass_spill.py`.
 
 ### Changed
+
+- **Reuse the shared forward-KL owner in final-vocabulary scoring** (#2334,
+  Refs #1303). The final `_student` scoring path of
+  `tools/measure_vllm_full_kl.py` now calls
+  `prismaquant.kl_fisher.forward_kl_per_token` instead of inlining the
+  `teacher.exp() * (teacher - student)` sum over the vocabulary axis.
+  Operand order, dtypes, broadcasting, the last-axis reduction, the
+  non-finite refusal and every published field are unchanged, as are script
+  and module bootstrap. The all-position estimator keeps its own convention
+  (`_position_kl` / `_student_all_positions`: top-K support plus one tail
+  bucket); final-position full vocabulary is not all-position top-K plus
+  tail.
 
 - **Caller-declared journal producer seals** (#687, CEO
   dec-1005-212354-dc9d, D32). `prepare_journal` defaults to no seal fields;

@@ -13,9 +13,9 @@ opened the checkpoint index there. These tests use a real FP8 checkpoint
 * the source plan built under a stage double opens neither the config nor the
   index at its pool path, and its FP8 map takes the block size and the MXFP4
   declaration from the staged bytes;
-* DeepSeek-V4's ``.scale`` pairing scans the caller's index, not its own open
-  (the source plan refuses DeepSeek-V4 before it builds the map, since its
-  head extras come from the live tree, so this is checked on the map itself);
+* DeepSeek-V4's ``.scale`` pairing scans the caller's index, not its own open;
+  its loader-owned live-head enumeration constructs a real meta skeleton
+  without opening checkpoint payloads (D5 coverage in #2325);
 * the generator, run with ``--data-manifest-sha256`` and a spill replay over
   the FP8 source, seals the bounds the plain run seals and opens no source
   file at its pool path, for a Qwen3 source and for a Qwen3.5-MoE one (whose
@@ -213,18 +213,43 @@ def _dsv4_model(root: Path) -> tuple[Path, dict, dict]:
     return model, raw, config
 
 
-def test_deepseek_v4_pairs_its_scales_from_the_callers_index(tmp_path):
+def test_deepseek_v4_pairs_its_scales_from_the_callers_index(tmp_path, monkeypatch):
     from prismaquant.model_profiles import detect_profile
+    from prismaquant import streaming_model as sm
+    from prismaquant.source_read_plan import base_prefix_of_layers
 
     model, raw, config = _dsv4_model(tmp_path)
     profile = detect_profile(str(model), config=config)
     assert profile.name == "deepseek_v4"
-    # The source plan never reaches the map for DeepSeek-V4: its head extras
-    # come from the live module tree, and it refuses before any FP8 read.
-    with pytest.raises(ValueError, match="live"):
-        ls.streaming_source_plan(str(model), layers_prefix="model.layers.",
-                                 layers=[0], source_reads=_StageReads(
-                                     model, tmp_path / "stage"))
+    real_builder = sm.build_streaming_skeleton
+    skeletons = []
+
+    def observe_real_meta_construction(*args, **kwargs):
+        def refuse_payload(*args, **kwargs):
+            raise AssertionError("meta enumeration must not open tensor payloads")
+        with monkeypatch.context() as scope:
+            scope.setattr(ls, "_source_safe_open", refuse_payload)
+            scope.setattr(sm, "safe_open", refuse_payload)
+            root, opened = _recorded_reads(lambda: real_builder(*args, **kwargs))
+        parameters = list(root.parameters())
+        assert parameters and all(parameter.is_meta for parameter in parameters)
+        assert not any(path.endswith(".safetensors") for path in _opened(opened))
+        skeletons.append(root)
+        return root
+
+    # D5-mandated live-head coverage supersedes the old blanket refusal. The
+    # actual loader constructs only a meta tree; its verified payload readers
+    # are untouched, and this tripwire refuses a constructor that uses them.
+    monkeypatch.setattr(sm, "build_streaming_skeleton", observe_real_meta_construction)
+    plan = ls.streaming_source_plan(str(model), layers_prefix="model.layers.",
+                                    layers=[0], source_reads=_StageReads(
+                                        model, tmp_path / "stage"))
+    (root,) = skeletons
+    assert profile.head_resident_extra_prefixes(root), "exercise the live-head rule"
+    assert plan["head_prefixes"] == ls._head_prefixes(
+        root, base_prefix_of_layers(plan["layers_prefix"]))
+    assert {"layers.0.attn.wq.scale", "layers.0.ffn.experts.0.w1.scale"} <= set(
+        plan["span_tensors"].values())
     fp8, opened = _recorded_reads(lambda: ls._build_fp8_scale_inv_map(
         str(model), raw_weight_map=raw, profile=profile, config=config))
     opened = _opened(opened)
@@ -234,7 +259,6 @@ def test_deepseek_v4_pairs_its_scales_from_the_callers_index(tmp_path):
     assert fp8["model.layers.0.self_attn.wq.weight"] == (
         str(model / "model-0.safetensors"), "layers.0.attn.wq.scale")
     assert "model.layers.0.mlp.experts.0.gate_proj.weight" in fp8.mxfp4_names
-
 
 # -- the generator, strict, over an FP8 source -------------------------------
 
