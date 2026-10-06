@@ -14,8 +14,6 @@ from .lane_eligibility import _allowable_rung_tables
 from .schemas import strict_json_loads
 from .dev_mode import seal_check
 
-SCHEMA = "fleet.rung_allowability.v1"
-INDEX_SCHEMA = "fleet.rung_allowability.index.v1"
 
 
 class RungAllowabilityError(ValueError):
@@ -77,7 +75,7 @@ class RungAllowability:
         return self.refusal(rung) == ""
 
     def provenance(self) -> dict:
-        return {"schema": SCHEMA, "format": self.format, "kernel_build": dict(self.kernel_build),
+        return {"schema": self._table["schema"], "format": self.format, "kernel_build": dict(self.kernel_build),
                 "table_version": self.table_version, "source_path": self.source_path}
 
 
@@ -99,7 +97,7 @@ def _selected_table(root, index, family, expected_kernel_build, producer):
         raise RungAllowabilityError("index.json: table path escapes publication root")
     table = read_allowability_json(path)
     producer.validate_table(table)
-    if (selected["table_schema"] != SCHEMA or table["schema"] != SCHEMA
+    if (selected["table_schema"] != table["schema"]
             or table["table_version"] != version
             or table["table_status"] != selected["table_status"]):
         raise RungAllowabilityError("selected table version/schema/status differs from index.json")
@@ -126,8 +124,6 @@ def load_rung_allowability(root: str | Path, *, format_entry: Mapping,
     index = read_allowability_json(root / "index.json")
     producer = _producer_api()
     producer.validate_index(index)
-    if index.get("schema") != INDEX_SCHEMA:
-        raise RungAllowabilityError("index.json: versioned allowability index required")
     version, path, table = _selected_table(root, index, family, expected_kernel_build, producer)
     rule = _allowable_rung_tables(format_entry, f"formats[{family}]")
     if not rule:

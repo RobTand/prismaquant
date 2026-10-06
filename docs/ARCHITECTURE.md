@@ -17,6 +17,15 @@ carrying narrow measurements into the widened scope. The pure producer
 `tessera.rung_allowability` validators and `admit_rung`
 own measured/supported/anomaly/quality and all-cell adjacent-higher dominance
 admission. PrismaQuant intersects that answer with its existing v11
+Versioned intake delegates table/index schema dispatch to the canonical producer:
+`fleet.rung_allowability.v1`/`.v2` and matching versioned index contracts are
+not revalidated through a consumer-owned schema roster. The selected descriptor
+must still match the actual payload schema/version/status, and provenance records
+that payload schema. V2 body/decoder/owner/execution-scope and explicit word-ring
+applicability facts are required where its producer grammar requires them; TCQ
+non-WINDOW fields are explicitly non-applicable, never fabricated positive WINDOW
+geometry. WINDOW width zero remains a producer refusal. No v1 behavior, serving
+pin, allocation default or shared-index rollout changes as part of this intake.
 `formats[].allowable_rungs` run-table rule, then passes it through the existing
 `tessera_lane.rung_admission` → `tessera_menu.route_admission` seam. Unlisted or
 unmeasured rows wait; observations alone are not exclusions or seals.
