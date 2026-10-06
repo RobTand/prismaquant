@@ -109,6 +109,28 @@ def test_complete_bundle_is_forwarded_with_its_generation_mounted_read_only(tmp_
             in _mounts(argv))
 
 
+
+
+def test_launch_queue_root_is_forwarded_without_input_residency(tmp_path):
+    helper = _helper_root(tmp_path)
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    launch = {**_bundle(helper), "PRISMABUILD_QUEUE_ROOT": str(queue)}
+    assert "PRISMABUILD_RESIDENCY_MAP" not in launch
+    argv = _argv(_spec(tmp_path), launch)
+    forwarded = _forwarded_env(argv)
+    assert forwarded["PRISMABUILD_QUEUE_ROOT"] == str(queue)
+    assert "PRISMABUILD_RESIDENCY_MAP" not in forwarded
+
+
+def test_a_spec_cannot_forge_the_launch_queue_root(tmp_path):
+    helper = _helper_root(tmp_path)
+    forged = _spec(tmp_path, env={"PRISMABUILD_QUEUE_ROOT": "/forged"})
+    with pytest.raises(RuntimeError, match="PRISMABUILD_QUEUE_ROOT"):
+        _argv(forged, _bundle(helper))
+    with pytest.raises(RuntimeError, match="PRISMABUILD_QUEUE_ROOT"):
+        runner.reader_context_environment(forged, _bundle(helper))
+
 def test_legacy_absence_keeps_a_byte_identical_argv(tmp_path):
     """No strict signal in the launcher env: no identity, no helper mount."""
     spec = _spec(tmp_path)
@@ -129,24 +151,13 @@ def test_key_only_launcher_env_is_the_legacy_shape_not_a_partial_bundle(tmp_path
 
 
 def test_module_names_match_the_pb_producer_contract():
-    """The four forwarded names are PB's protected residency names exactly.
-
-    Cross-checked read-only against candidate PB730
-    (``core.ACTION_{KEY,NONCE,SCOPE}_ENV``,
-    ``core.READER_HELPER_ROOT_ENV``, ``resource_exec.payload_identity_env``):
-    the literals below equal those spellings, and the helper-root value is
-    the bare generation directory in both (the ``/src`` suffix PB730
-    injected is the shape root asked that author to fix; the SDK appends
-    ``/src`` itself). Where the published PB core is importable its
-    existing key name must agree; the newer names postdate it.
-    """
+    """The protected launch tuple includes PB's residency-independent root."""
     assert runner.ACTION_KEY_ENV == "PRISMABUILD_ACTION_KEY"
     assert runner.ACTION_NONCE_ENV == "PRISMABUILD_ACTION_NONCE"
     assert runner.ACTION_SCOPE_ENV == "PRISMABUILD_ACTION_SCOPE"
     assert runner.READER_HELPER_ROOT_ENV == "PRISMABUILD_READER_HELPER_ROOT"
-    assert runner.READER_CONTEXT_ENV == (
-        "PRISMABUILD_ACTION_KEY", "PRISMABUILD_ACTION_NONCE",
-        "PRISMABUILD_ACTION_SCOPE", "PRISMABUILD_READER_HELPER_ROOT")
+    assert runner.QUEUE_ROOT_ENV == "PRISMABUILD_QUEUE_ROOT"
+    assert runner.READER_CONTEXT_ENV == (*NAMES, "PRISMABUILD_QUEUE_ROOT")
     core = None
     try:
         found = importlib.util.find_spec("prismabuild.core")
