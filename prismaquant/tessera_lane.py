@@ -109,11 +109,16 @@ def parse_format_name(fmt: object):
 
 # -- candidate admission (allocator_candidates) ------------------------------
 
-def rung_admission(name: str, **scope):
-    """The pinned runtime's verdict on one rung, under an optional serving scope."""
+def rung_admission(name: str, *, allowability=None, require_allowability=False, **scope):
+    """The pinned runtime and measured geometry share one admission seam."""
     from .tessera_menu import route_admission as admission
+    from .tessera_formats import parse_tessera_format_name
 
-    return admission(name, **scope)
+    table = None
+    if allowability is not None:
+        parsed = parse_tessera_format_name(name)
+        table = None if parsed is None else allowability.get(parsed[0].name)
+    return admission(name, allowability=table, require_allowability=require_allowability, **scope)
 
 
 def menu_mode_in_force(value: "str | None" = None) -> str:
@@ -246,6 +251,10 @@ def allocation_arguments(parser) -> None:
     parser.add_argument("--tessera-materialization-plan", default=None,
                         help="Write a non-exportable selected-wire request here instead of layer-config; "
                              "finalize through prismaquant.tessera_materialization after selected wires exist")
+    parser.add_argument("--tessera-rung-allowability-root", default=None,
+                        help="D41 publication root containing the current index.json")
+    parser.add_argument("--tessera-rung-kernel-builds", default=None,
+                        help="Independent observed format-to-kernel_build JSON; required with D41 root")
 
 
 def allocation_serving_target(args, *, target_platform):
@@ -274,6 +283,24 @@ def allocation_scope_meta(serving_target, context_by_unit) -> dict:
     from .tessera_serving_scope import scope_provenance
 
     return {"tessera_serving_scope": scope_provenance(serving_target, context_by_unit)}
+
+
+def allocation_rung_allowability(args):
+    """Load all explicitly supplied D41 builds once, through producer admission."""
+    from .rung_allowability import load_rung_allowability, read_allowability_json
+    from .lane_eligibility import load_published_formats
+    from .tessera_runtime_contract import contract_path
+
+    root = args.tessera_rung_allowability_root
+    builds_path = args.tessera_rung_kernel_builds
+    if root is None and builds_path is None:
+        return None
+    if root is None or builds_path is None:
+        raise ValueError("D41 allowability root and independent kernel builds are required together")
+    formats = load_published_formats(contract_path=contract_path())
+    return {family: load_rung_allowability(root, format_entry=formats[family],
+                                         expected_kernel_build=build)
+            for family, build in read_allowability_json(builds_path).items()}
 
 
 def allocation_hessian_identity(costs, cost_data) -> dict:
