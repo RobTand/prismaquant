@@ -136,6 +136,7 @@ from .allocator_candidates import (
 from .digests import (
     DIRECT_ASCII_SPACED_LAX,
     DIRECT_UTF8_STRICT,
+    bytes_sha256hex,
     file_digest_sha256hex,
     file_sha256hex,
 )
@@ -2629,7 +2630,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             raise SystemExit(
                 f"[alloc] ERROR: rank partition: cannot read {partition_path}: {exc}") from None
         reference = {"path": str(partition_path),
-                     "sha256": hashlib.sha256(partition_bytes).hexdigest()}
+                     "sha256": bytes_sha256hex(partition_bytes)}
         try:
             # The rank reports must name the bytes this table was priced
             # against: its own source model and runtime manifest. The remaining
@@ -2821,7 +2822,7 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             # Authenticate the exact owned bytes parsed below. A later hash
             # read of the mutable file could authenticate a different payload.
             cost_bytes = f.read()
-            if hashlib.sha256(cost_bytes).hexdigest() != expected_cost_sha256:
+            if bytes_sha256hex(cost_bytes) != expected_cost_sha256:
                 raise SystemExit("[alloc] ERROR: cost payload changed after measured runtime admission")
             cost_data = pickle.loads(cost_bytes)
             del cost_bytes
