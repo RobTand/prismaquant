@@ -635,6 +635,43 @@ def _profile_allows_format(
     )
 
 
+def candidate_rung_admission(name, *, target_profile=None, serving_context=None,
+                             rung_allowability=None):
+    """One lane seam for body, auxiliary and final-assignment allowance."""
+    family = fr.format_family_of(fr.canonical_format_name(name))
+    if family is None or not name.startswith(family.name_prefix):
+        return None
+    from .lane_spec import family_hook
+    scope = {} if serving_context is None else {"serving_context": serving_context}
+    production = not load_serving_profile(target_profile).emulation_only
+    if rung_allowability is not None or production:
+        scope.update(allowability=rung_allowability, require_allowability=production)
+    return family_hook(family, "rung_admission")(name, **scope)
+
+
+def require_assignment_rung_allowability(assignment, *, target_profile,
+                                        context_by_unit=None, rung_allowability=None):
+    """Fixed units and serving promotion cannot introduce a withheld rung."""
+    if rung_allowability is None and load_serving_profile(target_profile).emulation_only:
+        return
+    from .lane_spec import family_hook
+    checked = set()
+    for name, fmt in assignment.items():
+        context = None if context_by_unit is None else context_by_unit.get(name)
+        key = (fmt, None if context is None else context.key())
+        if key in checked:
+            continue
+        checked.add(key)
+        admission = candidate_rung_admission(fmt, target_profile=target_profile,
+            serving_context=context, rung_allowability=rung_allowability)
+        if admission is None:
+            continue
+        family = fr.format_family_of(fr.canonical_format_name(fmt))
+        mode = family_hook(family, "menu_mode_in_force")(None)
+        if not admission.admits(mode):
+            raise ValueError(f"{name}: {fmt} is not allocation-eligible: {admission.detail}")
+
+
 def _format_kernel_supports_shape(fmt_name: str, in_features: int,
                                   out_features: int) -> bool:
     """Return True if the runtime kernel can handle this Linear shape."""
@@ -2503,12 +2540,9 @@ def build_candidates(stats: dict, costs: dict, formats: list[fr.FormatSpec],
 
                 cache_key = (spec.name, context_key)
                 if cache_key not in admission_cache:
-                    measurement_scope = (
-                        {"allowability": rung_allowability,
-                         "require_allowability": production_allocation}
-                        if rung_allowability is not None or production_allocation else {})
-                    admission_cache[cache_key] = family_hook(
-                        family, "rung_admission")(spec.name, **scope_kwargs, **measurement_scope)
+                    admission_cache[cache_key] = candidate_rung_admission(
+                        spec.name, target_profile=target_profile, serving_context=serving_context,
+                        rung_allowability=rung_allowability)
                 admission = admission_cache[cache_key]
                 if (
                     (production_allocation or rung_allowability is not None
