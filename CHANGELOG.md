@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Explicit selected-unit fresh calibration capture**. The shared cache
+  identity accepts `unit_names` and declares `unit_scope="selected"`; writers
+  and publication retain full-draw H/counts while requiring exactly the
+  requested entries. Empty or unknown selections, missing requested units and
+  implicit partial full-census captures refuse. Existing full capture identities,
+  wire formats and serving kernels stay unchanged.
+
 - **Opt-in per-sequence/per-block signed attribution sidecar on joint AURA
   rows** (#1962). `make_joint_aura_entry` can publish a
   `sequence_attribution` block decomposing each projection over whole

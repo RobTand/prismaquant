@@ -23695,7 +23695,16 @@ An optional dependent `capture` action (`--capture-calibration-out`) computes
 all uncapped Hessians and first-row float32 scoring inputs once using the same
 census and exits before encoding. The existing activation-cache writer and
 cost-stage journal seal a complete `prismaquant.tessera_calibration_cache.v2`
-manifest. `plan --calibration-cache` binds that manifest path and SHA256 into
+manifest. The shared cache API also accepts explicit
+`capture_identity(..., unit_names=...)`: its identity declares
+`unit_scope="selected"` and maps exactly the requested census units to their
+shapes. `CaptureWriter` and `publish_capture` require every requested entry,
+preserve each unit's full-draw Hessian/count/maxima and retained float32 prefix,
+and reject missing, unknown or shape-incompatible units. Omitting the selection
+retains the existing full-census identity and completeness rule; merely deleting
+units from an implicit full identity is not a selected capture. This scope
+metadata changes neither the encoded wire nor serving kernels.
+`plan --calibration-cache` binds that manifest path and SHA256 into
 each anchor action. The action verifies its actual initializer, backend,
 runtime, complete source bytes, calibration and geometry. By default
 (`--row-head stream`, `tessera_row_stream.RowStream`) it then reads only its
