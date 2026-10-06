@@ -826,7 +826,7 @@ def _allocation_lane():
     return single_lane_plugin("allocation_menu") or _StockAllocationLane
 
 
-def _mtp_rung_attestation(serving_target, profile):
+def _mtp_rung_attestation(serving_target, profile, *, rung_allowability=None, target_profile=None):
     """``eligible(unit, rung)`` from the pinned runtime's contract (principle 14).
 
     The same reader the body menu uses (``format_is_producer_eligible``), asked
@@ -836,16 +836,25 @@ def _mtp_rung_attestation(serving_target, profile):
     lane = _allocation_lane()
 
     def eligible(unit, rung):
-        if fr.format_family_of(fr.canonical_format_name(rung)) is None:
+        family = fr.format_family_of(fr.canonical_format_name(rung))
+        if family is None:
             return True
-        if serving_target is None:
+        context = None if serving_target is None else lane.allocation_unit_context(
+            serving_target, unit, profile)
+        from .allocator_candidates import candidate_rung_admission
+        from .lane_spec import family_hook
+        admission = candidate_rung_admission(rung, target_profile=target_profile,
+            serving_context=context, rung_allowability=rung_allowability)
+        if not admission.admits(family_hook(family, "menu_mode_in_force")(None)):
+            return False
+        if context is None:
             return fr.format_is_producer_eligible(rung)
-        context = lane.allocation_unit_context(serving_target, unit, profile)
         return fr.format_is_producer_eligible(rung, context_by_unit={context.key(): context})
     return eligible
 
 
-def _select_mtp(args, *, serving_target=None, profile=None) -> tuple[dict, dict]:
+def _select_mtp(args, *, serving_target=None, profile=None, rung_allowability=None,
+                target_profile=None) -> tuple[dict, dict]:
     """The MTP payload and its selection record under ``--mtp-byte-budget`` (PQ #1346).
 
     Runs BEFORE any whole-artifact card is priced (PQ #1610): the card must
@@ -872,7 +881,8 @@ def _select_mtp(args, *, serving_target=None, profile=None) -> tuple[dict, dict]
                  if getattr(args, "mtp_fixed_formats", None) else None)
         record = select_mtp_rungs(payload, byte_budget=args.mtp_byte_budget,
                                   constants=constants, acceptance_points=points,
-                                  eligible=_mtp_rung_attestation(serving_target, profile),
+                                  eligible=_mtp_rung_attestation(serving_target, profile,
+                                      rung_allowability=rung_allowability, target_profile=target_profile),
                                   fixed_formats=fixed,
                                   formats=(None if declared is None
                                            else declared.split(",")))
@@ -2746,13 +2756,15 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     from .serving_profiles import load_serving_profile
     tessera_serving_target = lane.allocation_serving_target(
         args, target_platform=load_serving_profile(target_profile).target_platform)
+    rung_allowability = lane.allocation_rung_allowability(args)
     _mtp_selection_memo: list = []
 
     def _mtp_selection():
         """``(payload, record)``, selected once: the card and the stamp read one choice."""
         if not _mtp_selection_memo:
             _mtp_selection_memo.append(_select_mtp(
-                args, serving_target=tessera_serving_target, profile=model_profile))
+                args, serving_target=tessera_serving_target, profile=model_profile,
+                rung_allowability=rung_allowability, target_profile=target_profile))
         return _mtp_selection_memo[0]
 
     def _stamped_assignment(body: Mapping[str, str]) -> dict[str, str]:
@@ -2943,7 +2955,6 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
     accounting_stats = dict(stats)
     tessera_context_by_unit = lane.allocation_contexts(
         tessera_serving_target, accounting_stats, model_profile)
-    rung_allowability = lane.allocation_rung_allowability(args)
 
     if args.formats:
         fmt_names = [s.strip() for s in args.formats.split(",") if s.strip()]
@@ -4281,6 +4292,9 @@ def main(argv: list[str] | None = None, *, measured_runtime_sweep=None):
             profile=model_profile,
             legal_formats=per_linear_legal_formats,
         )
+        from .allocator_candidates import require_assignment_rung_allowability
+        require_assignment_rung_allowability(assignment_expanded, target_profile=target_profile,
+            context_by_unit=tessera_context_by_unit, rung_allowability=rung_allowability)
         validate_final_serving_promotion_noop(
             assignment_before_serving_promotion,
             assignment_expanded,
