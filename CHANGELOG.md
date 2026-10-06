@@ -202,6 +202,33 @@
 
 ### Fixed
 
+- **Sealed io buffers open where this interpreter's os lacks
+  `memfd_create`** (#1896). A portable CPU venv (`pq-cpu312` on dl380g10)
+  has no `os.memfd_create`, and every io engine stream entry died on the
+  missing attribute (PrismaBuild action `ded8698fa4d6`). `SealedBuffer` now
+  opens through `io_engine._create_memfd`: `os.memfd_create` when present,
+  otherwise the runtime libc's `memfd_create` wrapper (glibc 2.27+,
+  musl 1.1.20+), with the MFD flags resolved from their ABI-fixed Linux
+  UAPI numbers and a named `OSError` when the runtime libc has no wrapper.
+  The seal-and-verify guard is unchanged; no default, pin, wire, GPU or
+  serving claim.
+
+- **The io engine resolves memfd seal constants without CPython build-time
+  fcntl names** (#1896). Portable interpreters whose build headers predate
+  glibc 2.27 expose only part of the fcntl seal surface, and reading
+  `fcntl.F_SEAL_*` at import crashed the engine there, failing collection of
+  every capture and calibration test file that imports it (qualified CPU venv
+  `pq-cpu312` on dl380g10; PrismaBuild actions `be3dd1332259`, `5e848d8252be`).
+  The numbers now resolve from the Linux UAPI values they denote, ABI-fixed
+  since kernel 3.11, and the kernel stays the authority: each seal is
+  attempted through fcntl and read back through `F_GET_SEALS`. The
+  original-material delivery witness reads seals through
+  `io_engine.kernel_seal_bits`, so one home owns the seal grammar. No guard
+  moved: a buffer still refuses unless the kernel reports all four seals; no
+  default, pin, wire, GPU or serving claim.
+
+- **Real codec CPU fixtures retain their full acceptance at bounded geometry**
+
 - **Bind admitted produced output without input residency** (#2339). Queue
   discovery lives in the allowlisted staged-lease seam over the same sealed
   generation; the campaign container carries its launcher-owned
