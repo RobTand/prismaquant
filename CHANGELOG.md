@@ -46,6 +46,18 @@
 
 ### Changed
 
+- **Reuse the shared forward-KL owner in final-vocabulary scoring** (#2334,
+  Refs #1303). The final `_student` scoring path of
+  `tools/measure_vllm_full_kl.py` now calls
+  `prismaquant.kl_fisher.forward_kl_per_token` instead of inlining the
+  `teacher.exp() * (teacher - student)` sum over the vocabulary axis.
+  Operand order, dtypes, broadcasting, the last-axis reduction, the
+  non-finite refusal and every published field are unchanged, as are script
+  and module bootstrap. The all-position estimator keeps its own convention
+  (`_position_kl` / `_student_all_positions`: top-K support plus one tail
+  bucket); final-position full vocabulary is not all-position top-K plus
+  tail.
+
 - **Caller-declared journal producer seals** (#687, CEO
   dec-1005-212354-dc9d, D32). `prepare_journal` defaults to no seal fields;
   the joint qualification journal declares only `implementation_sha256`;
