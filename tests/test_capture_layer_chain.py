@@ -441,7 +441,11 @@ def test_capture_chain_arguments_refuse(tmp_path, capsys, extra, match):
     assert match in capsys.readouterr().err
 
 
-def test_runtime_drift_keeps_the_prep_identity_and_readable_capture(tmp_path, monkeypatch):
+@pytest.mark.parametrize("witness_field,value", [
+    ("transformers_version", "5.16.1"), ("source_map_sha256", "1" * 64),
+])
+def test_runtime_drift_keeps_the_prep_identity_and_readable_capture(
+        tmp_path, monkeypatch, witness_field, value):
     fixture = _Chain(tmp_path)
     original_identity = fixture.identity
 
@@ -455,6 +459,7 @@ def test_runtime_drift_keeps_the_prep_identity_and_readable_capture(tmp_path, mo
     monkeypatch.setattr(fixture, "identity", current_identity)
     for witness in fixture.witnesses.values():
         witness["transformers_version"] = "5.16.1"
+        witness[witness_field] = value
     fixture.quantum((0, 1))
     fixture.quantum((1, 2))
     record = chain.join(fixture.root, census_path=fixture.census)

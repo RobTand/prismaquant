@@ -24,10 +24,13 @@
 
 - **CPU-prep/GPU-quantum capture runtime stamps**. In default dev mode, runtime
   version metadata does not reapply an identity seal after source admission.
-  Chain writers keep the canonical prep identity; initialization-witness loader
-  versions use the same stamp policy at join and finish. Calibration, unit
-  scope/geometry, batch counts and own-byte integrity remain refusals; certified
-  mode still refuses runtime drift. The automatic source safety guard is unchanged.
+  Chain writers keep the canonical prep identity; completed initialization
+  witnesses retain valid grammar and use the same identity stamp at join and
+  finish. Calibration, unit scope/geometry, batch counts and own-byte integrity
+  remain refusals; certified mode still refuses identity drift. Selected cache
+  readers require coverage rather than output-scope equality, and every research
+  quantum binds its actual fit/held-out coordinates before model load. The
+  automatic source safety guard is unchanged.
 
 - **Default-off CPU input/readset preflight for joint adjoint capture**
   (#2325). `--cpu-input-preflight` shares the calibration and source metadata

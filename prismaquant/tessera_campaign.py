@@ -7418,7 +7418,7 @@ def _main(argv, *, source_scope, waits) -> int:
                              if args.capture_calibration_out else None)
         if completed_capture is not None and completed_capture.exists():
             capture_manifest = calibration_store.require_capture_contract(completed_capture)
-        elif args.units and args.calibration_cache:
+        elif args.calibration_cache:
             capture_manifest = calibration_store.require_capture_contract(
                 args.calibration_cache, expected_sha256=args.calibration_cache_sha256)
         expected_unit_names = fresh_unit_names
@@ -7430,13 +7430,18 @@ def _main(argv, *, source_scope, waits) -> int:
             # published: a run requesting units the stored capture does not
             # cover -- a different selection, or the full scope over a
             # selected capture -- refuses here, before any forward.
-            if fresh_unit_names != stored_units:
+            if completed_capture is not None and fresh_unit_names != stored_units:
                 raise RuntimeError(
                     f"scope mismatch: the completed capture at "
                     f"{completed_capture} published "
                     f"{'the whole census scope' if stored_units is None else sorted(stored_units)} "
                     f"and this run requests "
                     f"{'the whole census scope' if fresh_unit_names is None else sorted(fresh_unit_names)}")
+            if args.calibration_cache:
+                missing = sorted(set(targets) - set(capture_manifest['entries']))
+                if missing:
+                    raise RuntimeError(
+                        f"calibration cache does not cover requested units: {missing}")
             expected_unit_names = stored_units
         reuse_source = (None if capture_manifest is not None else source_authentication)
         capture_identity = _capture_identity(

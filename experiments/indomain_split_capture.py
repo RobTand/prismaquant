@@ -43,7 +43,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-
+import os
 import sys
 import tempfile
 from contextlib import ExitStack
@@ -328,6 +328,32 @@ def build_split_manifest(args, census, ids) -> dict:
     }
 
 
+def require_persisted_split(capture_root, args, census, ids) -> str:
+    """Bind running row coordinates to the saved split before any forward."""
+    recorded = json.loads(split_manifest_path(capture_root).read_text())
+    actual = build_split_manifest(args, census, ids)
+    for field in ("schema", "seed", "sample_count", "tokens_per_sample",
+                  "same_forward_pass", "fit_stop"):
+        if recorded.get(field) != actual[field]:
+            raise ResearchRefused(f"split {field} differs from the actual running draw")
+    for field in ("sha256", "shape", "dtype"):
+        if recorded["source_draw"].get(field) != actual["source_draw"][field]:
+            raise ResearchRefused(f"split source_draw.{field} differs from actual draw bytes")
+    if set(recorded["roles"]) != {FIT, HELDOUT}:
+        raise ResearchRefused("split roles must cover fit and heldout exactly")
+    for role in (FIT, HELDOUT):
+        expected, observed = recorded["roles"][role], actual["roles"][role]
+        for field in ("sample_range", "token_ids_sha256", "token_count", "hessian_role"):
+            if expected.get(field) != observed[field]:
+                raise ResearchRefused(f"split {role}.{field} differs from actual row coordinates")
+        for field in ("fit_ids_sha256", "fit_tokens", "text_sha256", "hessian_role"):
+            if expected["provenance"].get(field) != observed["provenance"][field]:
+                raise ResearchRefused(f"split {role}.provenance.{field} is not the running role")
+    digest = split_stamp(recorded)
+    if recorded.get("split_sha256") != digest:
+        raise ResearchRefused("split manifest body digest does not match its own data")
+    return digest
+
 def mode_prep(args, guard) -> dict:
     """The prep row: fixed-split stamps plus the existing v2 chain prep."""
     guard("research prep startup")
@@ -551,6 +577,7 @@ def mode_quantum(args, guard) -> dict:
     ids, tokens, corpus_text = load_draw(args, census)
     require_split_geometry(args, tokens, census)
     unit_names = selected_units(args, census, namespace)
+    split_sha256 = require_persisted_split(capture_root, args, census, ids)
     start, stop = chain.parse_layer_range(args.capture_layer_range)
     contract = census.get("model_load_contract") or {}
     num_layers = int(contract.get("num_layers", 0))
@@ -573,8 +600,7 @@ def mode_quantum(args, guard) -> dict:
             attention_implementation=args.attention_implementation,
             source_authentication=source, unit_names=unit_names)
         identity = quantum.require_identity(identity, n_batches=len(tokens))
-        split_sha256 = split_stamp(
-            json.loads(split_manifest_path(capture_root).read_text()))
+
 
         from prismaquant.model_profiles import detect_profile
         profile = detect_profile(namespace.model)
@@ -934,6 +960,11 @@ def mode_preflight(args, guard) -> dict:
     """Real metadata reads with no GPU, then the tiny CPU control."""
     guard("research preflight startup")
     result = {"metadata": None, "toy": None}
+    from prismaquant.tessera_expert_projection import PRODUCER_PYTHON_ENV
+    if os.environ.get(PRODUCER_PYTHON_ENV):
+        tool = campaign.producer_plan_tool()
+        print(json.dumps({"research_producer_preflight": {
+            "python": os.environ[PRODUCER_PYTHON_ENV], "module": tool}}), flush=True)
     if all((args.calibration_census, args.units, args.calibration_tokens,
             args.corpus_text)):
         result["metadata"] = _real_metadata_preflight(args, guard)
@@ -956,6 +987,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--mode", choices=MODES, required=True)
     parser.add_argument("--capture-root")
+    parser.add_argument("--data-manifest", default=None,
+                        help="the actual PB read-set file whose own digest binds staged reads")
     parser.add_argument("--calibration-census")
     parser.add_argument("--units")
     parser.add_argument("--calibration-tokens")
@@ -981,6 +1014,9 @@ def main(argv=None) -> int:
     parser.add_argument("--attention-implementation", default="eager")
     parser.add_argument("--memfloor-gib", type=float, default=2.0)
     args = parser.parse_args(argv)
+    if args.data_manifest is not None:
+        from prismaquant.residency_map import bind_residency_manifest
+        bind_residency_manifest(_sha256_file(args.data_manifest))
     guard = make_memory_guard(int(args.memfloor_gib * (1 << 30)))
     if args.mode == "preflight":
         mode_preflight(args, guard)

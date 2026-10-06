@@ -23713,7 +23713,10 @@ quanta with no requested units may record an empty unit map only for an explicit
 selected identity whose unit layers are unambiguous. The join still requires
 full layer tiling, the complete initialization witness and every requested unit.
 Completed-capture reuse refuses a different requested coverage instead of silently
-returning the stored scope. Automatic fresh recording remains refused until an
+returning the stored scope. A normal `--calibration-cache` reader may consume
+any requested subset covered by the stored selected or full capture; requested
+units outside that coverage refuse before cached rows reach pricing. Automatic
+fresh recording remains refused until an
 enforced immutable-source provider is qualified (`require_automatic_capture_source_recording`,
 Refs #2010/#2008); selected-unit support does not bypass that safety admission.
 The optional `_collect_activations(..., row_consumer=...)` seam receives each
@@ -23722,7 +23725,11 @@ independently of built-in Hessian collection. Its default is off; consumers
 must own retained bytes because the passed rows may alias source activations.
 `experiments/indomain_split_capture.py` uses the seam for the explicitly
 authorized D42 Stage 1 research route: fixed whole-sample fit and held-out
-coordinates accumulate separate unnormalized moments in one forward pass,
+coordinates accumulate separate unnormalized moments in one forward pass. Each
+quantum verifies the actual draw bytes, role token identities and running split
+boundary against the persisted manifest before model load; these are data
+comparability refusals even in dev mode. Their per-unit counts must sum to the
+full-draw census. Stable publication
 and their per-unit counts must sum to the full-draw census. Stable publication
 is `split-manifest.json` plus `layers/L###/manifest.json` and role-specific
 files relative to the capture root. This research publication is not an
@@ -23730,10 +23737,11 @@ ordinary production capture manifest and confers no immutable-provider
 qualification. The automatic admission guard remains unchanged. Chain quanta
 retain the canonical prep identity after the existing dev-mode runtime stamp:
 CPU-prep/GPU-quantum version metadata is not a second admission seal. Calibration,
-unit scope/shapes, prefix and batch counts still compare strictly. The shared
-capture initialization checker also stamps only the loader version; the
-remaining observed initialization fields remain comparable-data refusals.
-Certified mode retains runtime refusals.
+unit scope/shapes, prefix and batch counts still compare strictly. Completed
+initialization witnesses must retain valid observed grammar and coverage; their
+recorded-versus-running identity uses the existing dev-mode stamp at join and
+finish. Actual unit tensor geometry, counts and own-byte checks remain hard.
+Certified mode retains identity refusals.
 `plan --calibration-cache` binds that manifest path and SHA256 into
 each anchor action. The action verifies its actual initializer, backend,
 runtime, complete source bytes, calibration and geometry. By default
