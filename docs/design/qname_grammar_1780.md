@@ -28,11 +28,11 @@ post-argparse import boundary, which keeps `--help` stdlib-only. Only
 ownership moved: selection, filters, refusals, grouping and outputs are
 unchanged, and the original and candidate CLI bodies were run
 parity-identical on shared tiny journals and a real retained-budget
-fixture through PrismaBuild. Outputs compare exactly except the genuinely
-volatile fields — `measure_seconds`, the per-run resolved `--out` path and
-the output digest of bytes embedding those seconds — which are normalized
-and labeled, not silently dropped; this is not raw complete-output byte
-equality.
+fixture through PrismaBuild. The per-run resolved `--out` path, its output
+digest and the stdout `measure_seconds` field were normalized and labeled;
+the nested `derived_from.measure_seconds` was compared unchanged and
+happened to match in this observed run — stricter than normalization, not
+masked volatility. This is not raw complete-output byte equality.
 
 This slice changes no pipeline defaults, serving metrics, bytes, or ship gate.
 It does not close the broader #1303 domain-numerics census. No performance,
