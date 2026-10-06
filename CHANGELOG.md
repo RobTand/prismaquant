@@ -24,8 +24,11 @@
   exactly at 25,191,435 bytes but has 3.475059 times its HELDOUT output-error
   loss. The routed L3 expert0-up contrast `509251c3242d` also matches exactly
   at 4,215,563 bytes, with 2.044249 times the control HELDOUT loss. Both
-  measured contrasts are negative; unmeasured middle/late scope remains
-  explicit. Neither result is a sampling interval or a G3 qualification.
+  early-site contrasts reject this recipe, not fine-grained allocation in
+  general. FIT loss is already 4.13x/3.67x control: surrogate additivity fails
+  before held-out generalization. L28/L44 are cancelled and unmeasured under
+  CEO `dec-1006-223431-2bf3`, not deferred. No sampling interval or G3
+  qualification is claimed.
   `pq_block_schedule_cost.py` consumes the real driver's flat row-major
   selection, candidate-order mapping and own-byte stamps, while retaining
   raw source-order input. CPU proof `63a5fc616b98` exercises both CLI forms
